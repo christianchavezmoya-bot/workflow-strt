@@ -1,0 +1,150 @@
+using Commtrac.Api.Data;
+using Commtrac.Api.Models;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace Commtrac.Api.Controllers;
+
+[ApiController]
+[Route("api/documents")]
+[Authorize]
+public class DocumentsController : ControllerBase
+{
+    private readonly AppDbContext _db;
+    private readonly IWebHostEnvironment _env;
+
+    public DocumentsController(AppDbContext db, IWebHostEnvironment env)
+    {
+        _db = db;
+        _env = env;
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<DocumentDto>>> GetAll()
+    {
+        var docs = await _db.Documents.OrderByDescending(d => d.UploadedAt).ToListAsync();
+        return Ok(docs.Select(doc => ToDto(doc, Request)));
+    }
+
+    [HttpPost]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<ActionResult<DocumentDto>> Create([FromBody] DocumentDto request)
+    {
+        var doc = new DocumentEntity
+        {
+            Id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString() : request.Id,
+            Name = request.Name,
+            Type = request.Type,
+            LinkedTo = request.LinkedTo,
+            UploadedAt = request.UploadedAt,
+            ContentType = request.ContentType,
+            FileSize = request.FileSize
+        };
+
+        _db.Documents.Add(doc);
+        await _db.SaveChangesAsync();
+        return CreatedAtAction(nameof(GetAll), new { id = doc.Id }, ToDto(doc, Request));
+    }
+
+    [HttpPost("upload")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    [RequestSizeLimit(50_000_000)]
+    public async Task<ActionResult<DocumentDto>> Upload([FromForm] UploadDocumentRequest request)
+    {
+        if (request.File == null || request.File.Length == 0)
+        {
+            return BadRequest("File is required.");
+        }
+
+        var storageRoot = Path.Combine(_env.ContentRootPath, "Storage", "Documents");
+        Directory.CreateDirectory(storageRoot);
+
+        var extension = Path.GetExtension(request.File.FileName);
+        var storedName = $"{Guid.NewGuid()}{extension}";
+        var storedPath = Path.Combine(storageRoot, storedName);
+
+        await using (var stream = System.IO.File.Create(storedPath))
+        {
+            await request.File.CopyToAsync(stream);
+        }
+
+        var doc = new DocumentEntity
+        {
+            Name = request.File.FileName,
+            Type = request.Type ?? string.Empty,
+            LinkedTo = request.LinkedTo ?? string.Empty,
+            UploadedAt = DateTime.UtcNow.ToString("s"),
+            FilePath = Path.Combine("Storage", "Documents", storedName),
+            ContentType = request.File.ContentType,
+            FileSize = request.File.Length
+        };
+
+        _db.Documents.Add(doc);
+        await _db.SaveChangesAsync();
+        return CreatedAtAction(nameof(GetAll), new { id = doc.Id }, ToDto(doc, Request));
+    }
+
+    [HttpGet("{id}/download")]
+    public async Task<IActionResult> Download(string id)
+    {
+        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null || string.IsNullOrWhiteSpace(doc.FilePath))
+        {
+            return NotFound();
+        }
+
+        var fullPath = Path.Combine(_env.ContentRootPath, doc.FilePath);
+        if (!System.IO.File.Exists(fullPath))
+        {
+            return NotFound();
+        }
+
+        var contentType = string.IsNullOrWhiteSpace(doc.ContentType) ? "application/octet-stream" : doc.ContentType;
+        return PhysicalFile(fullPath, contentType, doc.Name);
+    }
+
+    [HttpPut("{id}")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<ActionResult<DocumentDto>> Update(string id, [FromBody] DocumentDto request)
+    {
+        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null)
+        {
+            return NotFound();
+        }
+
+        doc.Name = request.Name;
+        doc.Type = request.Type;
+        doc.LinkedTo = request.LinkedTo;
+        doc.UploadedAt = request.UploadedAt;
+        doc.ContentType = request.ContentType;
+        doc.FileSize = request.FileSize;
+
+        await _db.SaveChangesAsync();
+        return Ok(ToDto(doc, Request));
+    }
+
+    private static DocumentDto ToDto(DocumentEntity doc, HttpRequest request)
+        => new(
+            doc.Id,
+            doc.Name,
+            doc.Type,
+            doc.LinkedTo,
+            doc.UploadedAt,
+            doc.ContentType,
+            doc.FileSize,
+            string.IsNullOrWhiteSpace(doc.FilePath) ? null : $"{request.Scheme}://{request.Host}/api/documents/{doc.Id}/download"
+        );
+}
+
+public class UploadDocumentRequest
+{
+    [FromForm(Name = "file")]
+    public IFormFile? File { get; set; }
+    [FromForm(Name = "type")]
+    public string? Type { get; set; }
+    [FromForm(Name = "linkedTo")]
+    public string? LinkedTo { get; set; }
+}

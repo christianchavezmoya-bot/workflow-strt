@@ -1,0 +1,43 @@
+using System.Text.Json;
+using Commtrac.Api.Data;
+using Commtrac.Api.Models;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace Commtrac.Api.Controllers;
+
+[ApiController]
+[Route("api/settings")]
+[Authorize(Roles = "Admin")]
+public class SettingsController : ControllerBase
+{
+    private readonly AppDbContext _db;
+
+    public SettingsController(AppDbContext db)
+    {
+        _db = db;
+    }
+
+    [HttpPost("quickbase")]
+    public async Task<ActionResult<QuickbaseSettingsDto>> SaveQuickbase([FromBody] QuickbaseSettingsDto request)
+    {
+        var settings = await _db.QuickbaseSettings.FirstOrDefaultAsync(s => s.Id == 1);
+        if (settings is null)
+        {
+            settings = new QuickbaseSettingsEntity { Id = 1 };
+            _db.QuickbaseSettings.Add(settings);
+        }
+
+        settings.Enabled = request.Enabled;
+        settings.RealmHostname = request.RealmHostname;
+        settings.UserToken = request.UserToken;
+        settings.ProjectsTableId = request.ProjectsTableId;
+        settings.InstallationsTableId = request.InstallationsTableId;
+        settings.ProjectsFieldMapJson = JsonSerializer.Serialize(request.ProjectsFieldMap ?? new Dictionary<string, int>());
+        settings.InstallationsFieldMapJson = JsonSerializer.Serialize(request.InstallationsFieldMap ?? new Dictionary<string, int>());
+
+        await _db.SaveChangesAsync();
+        return Ok(request);
+    }
+}

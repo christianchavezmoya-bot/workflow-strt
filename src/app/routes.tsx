@@ -1,0 +1,35 @@
+﻿import { Navigate, Route, Routes } from "react-router-dom";
+import AppShell from "../components/layout/AppShell";
+import Dashboard from "../features/dashboard/Dashboard";
+import ProjectList from "../features/projects/ProjectList";
+import ProjectForm from "../features/projects/ProjectForm";
+import ProjectDetail from "../features/projects/ProjectDetail";
+import InstallationList from "../features/installations/InstallationList";
+import UserManagement from "../features/admin/UserManagement";
+import ProfileWizard from "../features/profile/ProfileWizard";
+import Settings from "../features/settings/Settings";
+import Login from "../features/auth/Login";
+import ResetPassword from "../features/auth/ResetPassword";
+
+const AppRoutes = () => {
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+      <Route element={<AppShell />}>
+        <Route index element={<Dashboard />} />
+        <Route path="/projects" element={<ProjectList />} />
+        <Route path="/projects/new" element={<ProjectForm />} />
+        <Route path="/projects/:id" element={<ProjectDetail />} />
+        <Route path="/projects/:id/edit" element={<ProjectForm />} />
+        <Route path="/installations" element={<InstallationList />} />
+        <Route path="/admin" element={<UserManagement />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/profile" element={<ProfileWizard />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+};
+
+export default AppRoutes;
