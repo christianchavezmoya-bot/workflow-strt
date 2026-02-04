@@ -458,6 +458,7 @@ export const UserManagement: React.FC = () => {
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
   const [adminSettingsMenu, setAdminSettingsMenu] = useState<HTMLElement | null>(null);
   const [adminSettingsMenuOpen, setAdminSettingsMenuOpen] = useState(false);
+  const [adminTabManagerOpen, setAdminTabManagerOpen] = useState(false);
   const adminSettingsAnchorRef = useRef<HTMLDivElement | null>(null);
   const [adminTabDraftName, setAdminTabDraftName] = useState("");
   const [adminTabRows, setAdminTabRows] = useState<Record<string, Array<Record<string, string>>>>({});
@@ -1069,40 +1070,34 @@ export const UserManagement: React.FC = () => {
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" sx={{ mb: 2 }}>Administration</Typography>
-        
-        <Tabs value={tab} onChange={(e, newValue) => setTab(newValue)}>
-          <Tab label="Users" />
-          <Tab label="Roles" />
-          <Tab label="Clientes" />
-        </Tabs>
+        <Typography variant="h4" sx={{ mb: 2 }}>Admin</Typography>
+
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Tabs value={tab} onChange={(e, newValue) => setTab(newValue)}>
+            {adminTabsConfig.map((tabConfig) => (
+              <Tab key={tabConfig.id} label={tabConfig.label} />
+            ))}
+          </Tabs>
+
+          <IconButton
+            size="small"
+            onClick={(event) => {
+              setAdminSettingsMenu(event.currentTarget);
+              setAdminSettingsMenuOpen(true);
+            }}
+          >
+            <SettingsOutlined fontSize="small" />
+          </IconButton>
+        </Stack>
       </Box>
 
       {/* Users Tab */}
-      {tab === 0 && (
+      {adminTabsConfig[tab]?.type === "users" && (
         <Box>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+          <Stack direction="row" sx={{ mb: 2 }}>
             <Button variant="contained" onClick={() => setInviteOpen(true)}>
               Invite user
             </Button>
-            <Box
-              ref={adminSettingsAnchorRef}
-              onMouseEnter={(event) => {
-                setAdminSettingsMenu(adminSettingsAnchorRef.current);
-                setAdminSettingsMenuOpen(true);
-              }}
-              sx={{ display: "flex", alignItems: "center" }}
-            >
-              <IconButton
-                size="small"
-                onClick={() => {
-                  setAdminSettingsMenu(adminSettingsAnchorRef.current);
-                  setAdminSettingsMenuOpen(true);
-                }}
-              >
-                <SettingsOutlined fontSize="small" />
-              </IconButton>
-            </Box>
           </Stack>
 
           {actionError && <Alert severity="error">{actionError}</Alert>}
@@ -1327,30 +1322,12 @@ export const UserManagement: React.FC = () => {
       )}
 
       {/* Roles Tab */}
-      {tab === 1 && (
+      {adminTabsConfig[tab]?.type === "roles" && (
         <Box>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+          <Stack direction="row" sx={{ mb: 2 }}>
             <Button variant="contained" onClick={() => openRoleDialog()}>
               New role
             </Button>
-            <Box
-              ref={adminSettingsAnchorRef}
-              onMouseEnter={(event) => {
-                setAdminSettingsMenu(adminSettingsAnchorRef.current);
-                setAdminSettingsMenuOpen(true);
-              }}
-              sx={{ display: "flex", alignItems: "center" }}
-            >
-              <IconButton
-                size="small"
-                onClick={() => {
-                  setAdminSettingsMenu(adminSettingsAnchorRef.current);
-                  setAdminSettingsMenuOpen(true);
-                }}
-              >
-                <SettingsOutlined fontSize="small" />
-              </IconButton>
-            </Box>
           </Stack>
 
           {actionError && <Alert severity="error">{actionError}</Alert>}
@@ -1525,8 +1502,8 @@ export const UserManagement: React.FC = () => {
         </Box>
       )}
 
-      {/* Clientes Tab */}
-      {tab === 2 && (
+      {/* Customers Tab */}
+      {adminTabsConfig[tab]?.type === "customers" && (
         <Box>
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
             <Button variant="contained" startIcon={<AddOutlined />}>
@@ -1609,6 +1586,95 @@ export const UserManagement: React.FC = () => {
           </Box>
         </Box>
       )}
+
+      {/* Custom Tabs - Dynamically Rendered */}
+      {adminTabsConfig
+        .filter((tabConfig) => tabConfig.type === "custom")
+        .map((tabConfig) => {
+          // Calculate tab index
+          const tabIndex = adminTabsConfig.findIndex((t) => t.id === tabConfig.id);
+          if (tab !== tabIndex) return null;
+
+          const rows = adminTabRows[tabConfig.id] || [];
+
+          return (
+            <Box key={tabConfig.id}>
+              {/* Table */}
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>#</TableCell>
+                    <TableCell>ID</TableCell>
+                    <TableCell>Name</TableCell>
+                    <TableCell>Created Date</TableCell>
+                    <TableCell>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center">
+                        <Typography variant="body2" color="text.secondary">
+                          No data yet. Click "Add Row" to create the first entry.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.map((row, index) => (
+                      <TableRow key={row.ID || index} hover>
+                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{row.ID || ""}</TableCell>
+                        <TableCell>{row.Name || ""}</TableCell>
+                        <TableCell>{row["Created Date"] || ""}</TableCell>
+                        <TableCell>
+                          <Stack direction="row" spacing={1}>
+                            <Tooltip title="Edit row">
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  const tabItem = tabConfig;
+                                  const columns =
+                                    tabItem.columns && tabItem.columns.length > 0 ? tabItem.columns : ["ID", "Name", "Created Date"];
+                                  const tabFieldIds = tabItem.fieldIds || [];
+                                  const nextForm: Record<string, string> = {};
+                                  columns.forEach((name) => {
+                                    nextForm[`default:${name}`] = row[name] ?? "";
+                                  });
+                                  tabFieldIds.forEach((fieldId) => {
+                                    nextForm[fieldId] = row[fieldId] ?? "";
+                                  });
+                                  setCustomRowForm(nextForm);
+                                  setCustomRowDialogTabId(tabItem.id);
+                                  setCustomRowDialogIndex(index);
+                                  setCustomRowDialogOpen(true);
+                                }}
+                              >
+                                <EditOutlined fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Delete row">
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  setAdminTabRows((prev) => ({
+                                    ...prev,
+                                    [tabConfig.id]: prev[tabConfig.id].filter((_, i) => i !== index)
+                                  }));
+                                }}
+                              >
+                                <DeleteOutline fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </Box>
+          );
+        })}
 
       <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Invite new user</DialogTitle>
@@ -1723,117 +1789,6 @@ export const UserManagement: React.FC = () => {
             }}
           >
             Save
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={adminSettingsOpen} onClose={() => setAdminSettingsOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Admin tabs</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ marginTop: 1 }}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Order</TableCell>
-                  <TableCell>Tab name</TableCell>
-                  <TableCell>Type</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {adminTabsConfig.map((item, index) => (
-                  <TableRow
-                    key={item.id}
-                    draggable
-                    onDragStart={() => setAdminTabDragIndex(index)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => {
-                      if (adminTabDragIndex === null || adminTabDragIndex === index) return;
-                      setAdminTabsConfig((prev) => {
-                        const next = [...prev];
-                        const [moved] = next.splice(adminTabDragIndex, 1);
-                        next.splice(index, 0, moved);
-                        return next.map((item, position) => ({ ...item, position }));
-                      });
-                      setAdminTabDragIndex(null);
-                    }}
-                  >
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">
-                        &#x2630;
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <TextField
-                        size="small"
-                        value={item.label}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setAdminTabsConfig((prev) =>
-                            prev.map((tabItem) => (tabItem.id === item.id ? { ...tabItem, label: value } : tabItem))
-                          );
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">
-                        {item.type === "custom" ? "Custom" : "Default"}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <IconButton
-                        size="small"
-                        onClick={() => setAdminTabsConfig((prev) => prev.filter((tabItem) => tabItem.id !== item.id))}
-                      >
-                        <DeleteOutline fontSize="small" />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <TextField
-                label="New tab name"
-                size="small"
-                value={adminTabDraftName}
-                onChange={(event) => setAdminTabDraftName(event.target.value)}
-              />
-              <Button
-                variant="contained"
-                onClick={() => {
-                  const label = adminTabDraftName.trim() || "New Tab";
-                    const newTab = {
-                      id: `admin-tab-${Date.now()}`,
-                      label,
-                      type: "custom",
-                      columns: defaultCustomColumns,
-                      fieldIds: [],
-                      config: { order: [], hidden: [] }
-                    };
-                    setAdminTabsConfig((prev) => {
-                      const next = [
-                        ...prev,
-                        { ...newTab, position: prev.length }
-                      ];
-                      setTab(next.length - 1);
-                      return next;
-                    });
-                    setAdminTabRows((prev) => ({
-                      ...prev,
-                      [newTab.id]: [createDefaultCustomRow(1)]
-                    }));
-                    setAdminTabDraftName("");
-                }}
-              >
-                Create tab
-              </Button>
-            </Stack>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setAdminSettingsOpen(false)}>
-            Close
           </Button>
         </DialogActions>
       </Dialog>
@@ -2511,18 +2466,6 @@ export const UserManagement: React.FC = () => {
           // Delete field implementation would go here
         }}
       />
-
-      <Dialog open={adminSettingsOpen} onClose={() => setAdminSettingsOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Admin Settings</DialogTitle>
-        <DialogContent>
-          {/* Admin settings content */}
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setAdminSettingsOpen(false)}>
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <TableConfigDialog
         open={tableConfigOpen}
@@ -3202,14 +3145,6 @@ export const UserManagement: React.FC = () => {
         <MenuItem
           onClick={() => {
             setAdminSettingsMenuOpen(false);
-            setAdminSettingsOpen(true);
-          }}
-        >
-          Admin Tabs Manager
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setAdminSettingsMenuOpen(false);
             const selected = adminTabsConfig[tab];
             if (!selected) return;
             if (selected.type === "custom") {
@@ -3282,8 +3217,132 @@ export const UserManagement: React.FC = () => {
         >
           Add/Create/Invite
         </MenuItem>
-        <MenuItem onClick={() => setAdminSettingsMenuOpen(false)}>Option 4</MenuItem>
+        <MenuItem
+          onClick={() => {
+            setAdminSettingsMenuOpen(false);
+            setAdminTabManagerOpen(true);
+          }}
+        >
+          Admin Tabs Manager
+        </MenuItem>
       </Menu>
+
+      <Dialog
+        open={adminTabManagerOpen}
+        onClose={() => setAdminTabManagerOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Admin tabs</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ marginTop: 1 }}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Order</TableCell>
+                  <TableCell>Tab name</TableCell>
+                  <TableCell>Type</TableCell>
+                  <TableCell>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {adminTabsConfig.map((item, index) => (
+                  <TableRow
+                    key={item.id}
+                    draggable
+                    onDragStart={() => setAdminTabDragIndex(index)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => {
+                      if (adminTabDragIndex === null || adminTabDragIndex === index) return;
+                      setAdminTabsConfig((prev) => {
+                        const next = [...prev];
+                        const [moved] = next.splice(adminTabDragIndex, 1);
+                        next.splice(index, 0, moved);
+                        return next.map((item, position) => ({ ...item, position }));
+                      });
+                      setAdminTabDragIndex(null);
+                    }}
+                  >
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        &#x2630;
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <TextField
+                        size="small"
+                        value={item.label}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setAdminTabsConfig((prev) =>
+                            prev.map((tabItem) => (tabItem.id === item.id ? { ...tabItem, label: value } : tabItem))
+                          );
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "customers" ? "Customers" : item.type === "products" ? "Products" : item.type === "assets" ? "Assets" : "Default"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <IconButton
+                        size="small"
+                        onClick={() => setAdminTabsConfig((prev) => prev.filter((tabItem) => tabItem.id !== item.id))}
+                      >
+                        <DeleteOutline fontSize="small" />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField
+                label="New tab name"
+                size="small"
+                value={adminTabDraftName}
+                onChange={(event) => setAdminTabDraftName(event.target.value)}
+              />
+              <Button
+                variant="contained"
+                onClick={() => {
+                  const label = adminTabDraftName.trim() || "New Tab";
+                  const newTab = {
+                    id: `admin-tab-${Date.now()}`,
+                    label,
+                    type: "custom",
+                    position: adminTabsConfig.length,
+                    columns: ["ID", "Name", "Created Date"],
+                    fieldIds: [],
+                    config: { order: [], hidden: [] }
+                  };
+                  setAdminTabsConfig((prev) => {
+                    const next = [
+                      ...prev,
+                      { ...newTab, position: prev.length }
+                    ];
+                    setTab(next.length - 1);
+                    return next;
+                  });
+                  setAdminTabRows((prev) => ({
+                    ...prev,
+                    [newTab.id]: []
+                  }));
+                  setAdminTabDraftName("");
+                }}
+              >
+                Create tab
+              </Button>
+            </Stack>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => setAdminTabManagerOpen(false)}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog
         open={customRowDialogOpen}
