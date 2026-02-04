@@ -39,6 +39,7 @@ import {
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
+import GlobalOfficeMap, { Office } from "../../components/GlobalOfficeMap";
 import { demoCustomers, demoProducts, demoUsers } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
@@ -47,6 +48,7 @@ import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { adminTabsService, AdminTab, AdminTabRow } from "../../services/adminTabsService";
 import { fieldService } from "../../services/fieldService";
+import { officesService } from "../../services/officesService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer } from "../../store/customersSlice";
 import { createProduct, deleteProduct, fetchProducts, updateProduct } from "../../store/productsSlice";
@@ -478,6 +480,11 @@ export const UserManagement: React.FC = () => {
   const [customTableConfigOpen, setCustomTableConfigOpen] = useState(false);
   const [customTableConfigTabId, setCustomTableConfigTabId] = useState<string | null>(null);
   const [adminTabsLoaded, setAdminTabsLoaded] = useState(false);
+  const [offices, setOffices] = useState<Office[]>([]);
+
+  useEffect(() => {
+    officesService.getAll().then(setOffices).catch(console.error);
+  }, []);
 
   useEffect(() => {
     const loadTabs = async () => {
@@ -1014,6 +1021,33 @@ export const UserManagement: React.FC = () => {
       setActionError(resolveErrorMessage(error, "Failed to update product."));
     }
     setEditProductOpen(false);
+  };
+
+  const handleAddOffice = async (office: Omit<Office, "id">) => {
+    try {
+      const created = await officesService.create(office);
+      setOffices((prev) => [...prev, created]);
+    } catch (error) {
+      console.error("Failed to add office:", error);
+    }
+  };
+
+  const handleUpdateOffice = async (id: string, office: Omit<Office, "id">) => {
+    try {
+      const updated = await officesService.update(id, office);
+      setOffices((prev) => prev.map((o) => (o.id === id ? updated : o)));
+    } catch (error) {
+      console.error("Failed to update office:", error);
+    }
+  };
+
+  const handleDeleteOffice = async (id: string) => {
+    try {
+      await officesService.delete(id);
+      setOffices((prev) => prev.filter((o) => o.id !== id));
+    } catch (error) {
+      console.error("Failed to delete office:", error);
+    }
   };
 
   const handleConfirmDelete = () => {
@@ -1597,8 +1631,20 @@ export const UserManagement: React.FC = () => {
 
           const rows = adminTabRows[tabConfig.id] || [];
 
+          // Check if this is an office map tab
+          const isOfficeTab = tabConfig.label.toLowerCase().includes("office");
+
           return (
             <Box key={tabConfig.id}>
+              {isOfficeTab ? (
+                <GlobalOfficeMap
+                  offices={offices}
+                  onAddOffice={handleAddOffice}
+                  onUpdateOffice={handleUpdateOffice}
+                  onDeleteOffice={handleDeleteOffice}
+                />
+              ) : (
+                <>
               {/* Table */}
               <Table>
                 <TableHead>
@@ -1672,6 +1718,8 @@ export const UserManagement: React.FC = () => {
                   )}
                 </TableBody>
               </Table>
+              </>
+              )}
             </Box>
           );
         })}
