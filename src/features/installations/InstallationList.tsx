@@ -367,7 +367,6 @@ const InstallationList = () => {
   const allFieldDefinitions = useFieldDefinitions();
   const installationsTableConfig = useTableConfig(
     "installations",
-    user?.id || "anonymous",
     installationsDynamic.definitions.map((field) => ({
       id: field.id,
       name: field.name,
@@ -378,7 +377,6 @@ const InstallationList = () => {
   );
   const inspectionsTableConfig = useTableConfig(
     "inspections",
-    user?.id || "anonymous",
     inspectionsDynamic.definitions.map((field) => ({
       id: field.id,
       name: field.name,
@@ -389,7 +387,6 @@ const InstallationList = () => {
   );
   const issuesTableConfig = useTableConfig(
     "issues",
-    user?.id || "anonymous",
     issuesDynamic.definitions.map((field) => ({
       id: field.id,
       name: field.name,
@@ -400,7 +397,6 @@ const InstallationList = () => {
   );
   const documentsTableConfig = useTableConfig(
     "documents",
-    user?.id || "anonymous",
     documentsDynamic.definitions.map((field) => ({
       id: field.id,
       name: field.name,

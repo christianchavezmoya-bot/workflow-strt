@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd admin tab manager and dynamic tab rendering\n\n- Implemented admin tab manager dialog with drag-and-drop reordering\n- Made tab panels render dynamically based on tab type instead of fixed index\n- Enabled delete functionality for all tabs including built-in ones\n- Changed settings menu from hover to click-based\n- Moved settings widget to header level next to tabs\n- Removed title and Add Row button from custom tabs\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   }
 }

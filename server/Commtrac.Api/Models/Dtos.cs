@@ -72,6 +72,32 @@ public record UpdateProductRequest(
     string? Description
 );
 
+public record AssetDto(
+    string Id,
+    int Seq,
+    string MachineType,
+    string MachineId,
+    string SerialNumber,
+    string PmCount,
+    string Comments
+);
+
+public record CreateAssetRequest(
+    string MachineType,
+    string MachineId,
+    string SerialNumber,
+    string PmCount,
+    string Comments
+);
+
+public record UpdateAssetRequest(
+    string? MachineType,
+    string? MachineId,
+    string? SerialNumber,
+    string? PmCount,
+    string? Comments
+);
+
 public record ProjectDto(
     string Id,
     string CustomerName,
@@ -200,6 +226,13 @@ public record AdminTabRowDto(
     int Position
 );
 
+public record GlobalTableConfigDto(
+    string TableName,
+    List<string> Order,
+    List<string> Hidden,
+    Dictionary<string, string> BaseFieldNames
+);
+
 public record InstallationTabDto(
     string Id,
     string Label,
@@ -244,4 +277,17 @@ public record CustomFieldDefinitionDto(
     int SortOrder,
     List<string> Options,
     bool IsActive
+);
+
+public record RolePermissions(
+    bool ViewOnly,
+    bool CreateDeleteTables,
+    bool CreateUsers,
+    bool EditFields,
+    bool ModifyData,
+    bool EditForms
+);
+
+public record RoleConfigDto(
+    Dictionary<string, RolePermissions> Roles
 );

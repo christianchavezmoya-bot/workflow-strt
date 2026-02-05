@@ -264,9 +264,17 @@ const TableConfigDialog = ({
                   display: "flex",
                   alignItems: "center",
                   gap: 1,
-                  border: "1px solid rgba(255,255,255,0.08)",
+                  border: dragFieldId === field.id ? "2px solid" : "1px solid rgba(255,255,255,0.08)",
+                  borderColor: dragFieldId === field.id ? "primary.main" : "rgba(255,255,255,0.08)",
                   borderRadius: 1,
-                  padding: 1
+                  padding: 1,
+                  cursor: "grab",
+                  transition: "all 0.2s",
+                  backgroundColor: dragFieldId === field.id ? "rgba(45, 212, 191, 0.1)" : "transparent",
+                  "&:hover": {
+                    borderColor: "rgba(255,255,255,0.2)",
+                    backgroundColor: "rgba(255,255,255,0.04)"
+                  }
                 }}
                 draggable
                 onDragStart={() => setDragFieldId(field.id)}
@@ -327,7 +335,10 @@ const TableConfigDialog = ({
       </DialogContent>
       <DialogActions>
         <Button variant="outlined" onClick={onClose}>
-          Close
+          Cancel
+        </Button>
+        <Button variant="contained" onClick={onClose}>
+          Save & Close
         </Button>
       </DialogActions>
 

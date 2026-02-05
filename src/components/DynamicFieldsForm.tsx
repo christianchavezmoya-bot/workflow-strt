@@ -30,7 +30,9 @@ const DynamicFieldsForm = ({ definitions, values, onChange }: Props) => {
   return (
     <Grid container spacing={2}>
       {definitions.map((field) => {
-        const value = values[field.id] ?? "";
+        const rawValue = values[field.id];
+        // Ensure value is a string, not an error object
+        const value = typeof rawValue === "string" ? rawValue : "";
         if (field.fieldType === "checkbox") {
           return (
             <Grid item xs={12} md={6} key={field.id}>

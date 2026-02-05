@@ -50,7 +50,8 @@ export const useDynamicFields = (table: string) => {
         fieldDefinitionId,
         tableName: table,
         entityId,
-        value,
+        // Ensure value is always a string, never an object
+        value: typeof value === "string" ? value : String(value ?? ""),
         updatedAt: new Date().toISOString()
       }));
       if (payload.length === 0) return [];

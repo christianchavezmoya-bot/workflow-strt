@@ -1,6 +1,16 @@
 import { Office } from "../components/GlobalOfficeMap";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:4000/api";
+// Automatically determine API base URL based on current hostname
+const getApiBaseUrl = () => {
+  if (import.meta.env.VITE_API_BASE) {
+    return import.meta.env.VITE_API_BASE;
+  }
+  const hostname = window.location.hostname;
+  const protocol = window.location.protocol;
+  return `${protocol}//${hostname}:4000/api`;
+};
+
+const API_BASE = getApiBaseUrl();
 
 // In-memory cache for offices (shared across all users in same session)
 let officesCache: Office[] | null = null;
@@ -21,7 +31,7 @@ export const officesService = {
           console.warn("Backend /offices endpoint not found. Using localStorage fallback.");
           const stored = localStorage.getItem("globalOffices");
           officesCache = stored ? JSON.parse(stored) : [];
-          return officesCache;
+          return officesCache ?? [];
         }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -40,7 +50,7 @@ export const officesService = {
 
       const stored = localStorage.getItem("globalOffices");
       officesCache = stored ? JSON.parse(stored) : [];
-      return officesCache;
+      return officesCache ?? [];
     }
   },
 

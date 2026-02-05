@@ -3,6 +3,8 @@
   Button,
   FormControl,
   FormControlLabel,
+  IconButton,
+  InputAdornment,
   MenuItem,
   Select,
   Stack,
@@ -10,6 +12,7 @@
   TextField,
   Typography
 } from "@mui/material";
+import { Visibility, VisibilityOff } from "@mui/icons-material";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authService } from "../../services/authService";
@@ -26,6 +29,7 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async () => {
     setLoading(true);
@@ -143,10 +147,23 @@ const Login = () => {
             <>
               <TextField
                 label="Password"
-                type="password"
+                type={showPassword ? "text" : "password"}
                 fullWidth
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        onClick={() => setShowPassword(!showPassword)}
+                        edge="end"
+                        aria-label="toggle password visibility"
+                      >
+                        {showPassword ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  )
+                }}
               />
               <Button variant="text" onClick={handleForgotPassword} sx={{ alignSelf: "flex-start" }}>
                 Forgot password?

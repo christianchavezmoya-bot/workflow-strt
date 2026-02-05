@@ -28,6 +28,7 @@ import {
   Menu,
   Tooltip,
   Chip,
+  ListItemText,
 } from "@mui/material";
 import {
   AddOutlined,
@@ -76,8 +77,41 @@ const normalize = (value: string | number | boolean | undefined | null) => Strin
 const resolveErrorMessage = (error: unknown, fallback: string) => {
   if (typeof error === "string") return error;
   if (error && typeof error === "object") {
-    const anyError = error as { message?: string; response?: { data?: string } };
-    return anyError.response?.data || anyError.message || fallback;
+    const anyError = error as {
+      message?: string;
+      response?: {
+        data?: string | {
+          title?: string;
+          detail?: string;
+          message?: string;
+          errors?: Record<string, string[]>;
+        }
+      }
+    };
+
+    // Handle .NET ProblemDetails response
+    if (anyError.response?.data && typeof anyError.response.data === "object") {
+      const data = anyError.response.data;
+
+      // If there are validation errors, format them nicely
+      if (data.errors && typeof data.errors === "object") {
+        const errorMessages = Object.entries(data.errors)
+          .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(", ") : messages}`)
+          .join("; ");
+        if (errorMessages) {
+          return `${data.title || "Validation error"} - ${errorMessages}`;
+        }
+      }
+
+      return data.title || data.detail || data.message || fallback;
+    }
+
+    // Handle string response data
+    if (anyError.response?.data && typeof anyError.response.data === "string") {
+      return anyError.response.data;
+    }
+
+    return anyError.message || fallback;
   }
   return fallback;
 };
@@ -144,6 +178,32 @@ export const UserManagement: React.FC = () => {
     customerId: "",
     office: activeOffice === "All" ? "" : activeOffice
   });
+  const [customersList, setCustomersList] = useState([
+    { id: 101, name: "Apex Industries", type: "Manufacturing", state: "CA", sites: 2, logo: null as string | null },
+    { id: 102, name: "BeeHealthy Foods", type: "Retail", state: "NY", sites: 2, logo: null as string | null },
+    { id: 103, name: "SolarTech Energy", type: "Energy", state: "TX", sites: 2, logo: null as string | null },
+    { id: 104, name: "Zenith Data Systems", type: "Technology", state: "WA", sites: 2, logo: null as string | null },
+    { id: 105, name: "Kappa Telecoms", type: "Technology", state: "CA", sites: 1, logo: null as string | null },
+    { id: 106, name: "Omega Softworks", type: "Technology", state: "MA", sites: 2, logo: null as string | null },
+    { id: 107, name: "Delta Dental", type: "Healthcare", state: "FL", sites: 1, logo: null as string | null },
+    { id: 108, name: "Pi Pharmaceuticals", type: "Healthcare", state: "NJ", sites: 2, logo: null as string | null },
+    { id: 109, name: "Theta Care", type: "Healthcare", state: "IL", sites: 1, logo: null as string | null },
+    { id: 110, name: "Lambda Financial", type: "Finance", state: "NY", sites: 2, logo: null as string | null },
+    { id: 111, name: "Sigma Capital", type: "Finance", state: "CT", sites: 1, logo: null as string | null },
+    { id: 112, name: "Phi Bank", type: "Finance", state: "DE", sites: 1, logo: null as string | null },
+    { id: 113, name: "Alpha Logistics", type: "Transport", state: "GA", sites: 2, logo: null as string | null },
+    { id: 114, name: "Beta Shipping", type: "Transport", state: "TX", sites: 1, logo: null as string | null },
+    { id: 115, name: "Mu Freight", type: "Transport", state: "OH", sites: 1, logo: null as string | null },
+    { id: 116, name: "Gamma Agritech", type: "Manufacturing", state: "IA", sites: 2, logo: null as string | null },
+    { id: 117, name: "Rho Education", type: "Education", state: "NC", sites: 2, logo: null as string | null },
+    { id: 118, name: "Xi Hospitality", type: "Retail", state: "NV", sites: 2, logo: null as string | null },
+  ]);
+  const [editingCustomerId, setEditingCustomerId] = useState<number | null>(null);
+  const [editCustomerName, setEditCustomerName] = useState("");
+  const [editCustomerIndustry, setEditCustomerIndustry] = useState("");
+  const [editCustomerState, setEditCustomerState] = useState("");
+  const [editCustomerLogo, setEditCustomerLogo] = useState<string | null>(null);
+  const [logoUploadDialogOpen, setLogoUploadDialogOpen] = useState(false);
   const [productForm, setProductForm] = useState({
     name: "",
     description: ""
@@ -191,7 +251,6 @@ export const UserManagement: React.FC = () => {
   const allFieldDefinitions = useFieldDefinitions();
   const usersTableConfig = useTableConfig(
     "users",
-    user?.id || "anonymous",
     usersDynamic.definitions.map((field) => ({
       id: field.id,
       name: field.name,
@@ -202,7 +261,6 @@ export const UserManagement: React.FC = () => {
   );
   const customersTableConfig = useTableConfig(
     "customers",
-    user?.id || "anonymous",
     customersDynamic.definitions.map((field) => ({
       id: field.id,
       name: field.name,
@@ -211,27 +269,54 @@ export const UserManagement: React.FC = () => {
       actionType: field.actionType
     }))
   );
+  // Base field name customizations stored in localStorage
+  const [baseFieldNames, setBaseFieldNames] = useState<Record<string, Record<string, string>>>(() => {
+    const stored = localStorage.getItem(`base_field_names:${user?.id || "anonymous"}`);
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  });
+
+  // Save base field names to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem(`base_field_names:${user?.id || "anonymous"}`, JSON.stringify(baseFieldNames));
+  }, [baseFieldNames, user?.id]);
+
   const productsTableConfig = useTableConfig(
     "products",
-    user?.id || "anonymous",
-    productsDynamic.definitions.map((field) => ({
-      id: field.id,
-      name: field.name,
-      type: field.fieldType,
-      linkToFieldId: field.linkToFieldId,
-      actionType: field.actionType
-    }))
+    useMemo(() => [
+      { id: "base-name", name: baseFieldNames.products?.["base-name"] || "Name", type: "text" },
+      { id: "base-description", name: baseFieldNames.products?.["base-description"] || "Description", type: "text" },
+      ...productsDynamic.definitions.map((field) => ({
+        id: field.id,
+        name: field.name,
+        type: field.fieldType,
+        linkToFieldId: field.linkToFieldId,
+        actionType: field.actionType
+      }))
+    ], [baseFieldNames, productsDynamic.definitions])
   );
   const assetsTableConfig = useTableConfig(
     "assets",
-    user?.id || "anonymous",
-    assetsDynamic.definitions.map((field) => ({
-      id: field.id,
-      name: field.name,
-      type: field.fieldType,
-      linkToFieldId: field.linkToFieldId,
-      actionType: field.actionType
-    }))
+    useMemo(() => [
+      { id: "base-machineType", name: baseFieldNames.assets?.["base-machineType"] || "Machine Type", type: "text" },
+      { id: "base-machineId", name: baseFieldNames.assets?.["base-machineId"] || "Machine ID", type: "text" },
+      { id: "base-serialNumber", name: baseFieldNames.assets?.["base-serialNumber"] || "Serial Number", type: "text" },
+      { id: "base-pmCount", name: baseFieldNames.assets?.["base-pmCount"] || "PM Count", type: "text" },
+      { id: "base-comments", name: baseFieldNames.assets?.["base-comments"] || "Comments", type: "text" },
+      ...assetsDynamic.definitions.map((field) => ({
+        id: field.id,
+        name: field.name,
+        type: field.fieldType,
+        linkToFieldId: field.linkToFieldId,
+        actionType: field.actionType
+      }))
+    ], [baseFieldNames, assetsDynamic.definitions])
   );
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
   const [tableConfigTarget, setTableConfigTarget] = useState<"users" | "customers" | "products" | "assets">("users");
@@ -240,6 +325,40 @@ export const UserManagement: React.FC = () => {
     const tableName = tableConfigTarget;
     return allFieldDefinitions.definitions.filter((field) => !field.tables.includes(tableName));
   }, [allFieldDefinitions.definitions, tableConfigTarget]);
+
+  // Helper function to get field definitions ordered by table config
+  const getOrderedDefinitions = (definitions: FieldDefinition[], config: { order: string[] }) => {
+    if (!config.order || config.order.length === 0) return definitions;
+
+    const byId = new Map(definitions.map((def) => [def.id, def]));
+    const ordered = config.order
+      .map((id) => byId.get(id))
+      .filter((def): def is FieldDefinition => def !== undefined);
+    const remaining = definitions.filter((def) => !config.order.includes(def.id));
+
+    return [...ordered, ...remaining];
+  };
+
+  // Get ordered field definitions for each table
+  const orderedProductsDefinitions = useMemo(
+    () => getOrderedDefinitions(productsDynamic.definitions, productsTableConfig.config),
+    [productsDynamic.definitions, productsTableConfig.config]
+  );
+
+  const orderedAssetsDefinitions = useMemo(
+    () => getOrderedDefinitions(assetsDynamic.definitions, assetsTableConfig.config),
+    [assetsDynamic.definitions, assetsTableConfig.config]
+  );
+
+  const orderedUsersDefinitions = useMemo(
+    () => getOrderedDefinitions(usersDynamic.definitions, usersTableConfig.config),
+    [usersDynamic.definitions, usersTableConfig.config]
+  );
+
+  const orderedCustomersDefinitions = useMemo(
+    () => getOrderedDefinitions(customersDynamic.definitions, customersTableConfig.config),
+    [customersDynamic.definitions, customersTableConfig.config]
+  );
   const [userDynamicValues, setUserDynamicValues] = useState<Record<string, string>>({});
   const [editUserDynamicValues, setEditUserDynamicValues] = useState<Record<string, string>>({});
   const [customerDynamicValues, setCustomerDynamicValues] = useState<Record<string, string>>({});
@@ -259,6 +378,7 @@ export const UserManagement: React.FC = () => {
     anchorEl: null,
     key: ""
   });
+  const [customerSearch, setCustomerSearch] = useState("");
   const [productSort, setProductSort] = useState({ key: "", dir: "asc" as "asc" | "desc" });
   const [productFilters, setProductFilters] = useState<Record<string, Set<string>>>({});
   const [productMenu, setProductMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({
@@ -480,10 +600,10 @@ export const UserManagement: React.FC = () => {
   const [customTableConfigOpen, setCustomTableConfigOpen] = useState(false);
   const [customTableConfigTabId, setCustomTableConfigTabId] = useState<string | null>(null);
   const [adminTabsLoaded, setAdminTabsLoaded] = useState(false);
-  const [offices, setOffices] = useState<Office[]>([]);
+  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
 
   useEffect(() => {
-    officesService.getAll().then(setOffices).catch(console.error);
+    officesService.getAll().then(setGlobalOffices).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -509,10 +629,28 @@ export const UserManagement: React.FC = () => {
           config: { order: [], hidden: [] }
         },
         {
+          id: "admin-customers",
+          label: "Customers",
+          type: "customers",
+          position: 1,
+          columns: [],
+          fieldIds: [],
+          config: { order: [], hidden: [] }
+        },
+        {
+          id: "admin-global-offices",
+          label: "Global Offices",
+          type: "offices",
+          position: 2,
+          columns: [],
+          fieldIds: [],
+          config: { order: [], hidden: [] }
+        },
+        {
           id: "admin-products",
           label: "Products",
           type: "products",
-          position: 2,
+          position: 3,
           columns: [],
           fieldIds: [],
           config: { order: [], hidden: [] }
@@ -521,7 +659,7 @@ export const UserManagement: React.FC = () => {
           id: "admin-assets",
           label: "Assets",
           type: "assets",
-          position: 3,
+          position: 4,
           columns: [],
           fieldIds: [],
           config: { order: [], hidden: [] }
@@ -530,7 +668,7 @@ export const UserManagement: React.FC = () => {
           id: "admin-roles",
           label: "Roles",
           type: "roles",
-          position: 4,
+          position: 5,
           columns: [],
           fieldIds: [],
           config: { order: [], hidden: [] }
@@ -674,40 +812,57 @@ export const UserManagement: React.FC = () => {
     }),
     []
   );
-  const productFilterOptions = useMemo(
-    () => ({
-      name: Array.from(new Set(numberedProducts.map((row) => productAccessors.name(row)))).sort(),
-      description: Array.from(new Set(numberedProducts.map((row) => productAccessors.description(row)))).sort()
-    }),
-    [numberedProducts, productAccessors]
-  );
+  const productFilterOptions = useMemo(() => {
+    const options: Record<string, string[]> = {};
 
-  const assetAccessors = useMemo(() => {
-    const base = {
-      machineType: (asset: typeof assets[number]) => normalize(asset.machineType),
-      machineId: (asset: typeof assets[number]) => normalize(asset.machineId),
-      serialNumber: (asset: typeof assets[number]) => normalize(asset.serialNumber),
-      pmCount: (asset: typeof assets[number]) => normalize(asset.pmCount),
-      comments: (asset: typeof assets[number]) => normalize(asset.comments)
-    } as Record<string, (asset: typeof assets[number]) => string>;
-    customAssetColumns.forEach((col) => {
-      base[`custom:${col}`] = () => "-";
+    productsTableConfig.visibleFields.forEach((field) => {
+      const values = new Set<string>();
+
+      products.forEach((product) => {
+        let value = "";
+        if (field.id === "base-name") {
+          value = normalize(product.name);
+        } else if (field.id === "base-description") {
+          value = normalize(product.description ?? "");
+        } else {
+          value = normalize(productsDynamic.valuesByEntity[product.id]?.[field.id]?.value ?? "");
+        }
+        values.add(value);
+      });
+
+      options[field.id] = Array.from(values).sort();
     });
-    return base;
-  }, [assets, customAssetColumns]);
+
+    return options;
+  }, [products, productsTableConfig.visibleFields, productsDynamic.valuesByEntity]);
+
   const assetFilterOptions = useMemo(() => {
-    const base = {
-      machineType: Array.from(new Set(assets.map((row) => assetAccessors.machineType(row)))).sort(),
-      machineId: Array.from(new Set(assets.map((row) => assetAccessors.machineId(row)))).sort(),
-      serialNumber: Array.from(new Set(assets.map((row) => assetAccessors.serialNumber(row)))).sort(),
-      pmCount: Array.from(new Set(assets.map((row) => assetAccessors.pmCount(row)))).sort(),
-      comments: Array.from(new Set(assets.map((row) => assetAccessors.comments(row)))).sort()
-    } as Record<string, string[]>;
-    customAssetColumns.forEach((col) => {
-      base[`custom:${col}`] = ["-"];
+    const options: Record<string, string[]> = {};
+
+    assetsTableConfig.visibleFields.forEach((field) => {
+      const values = new Set<string>();
+      assets.forEach((asset) => {
+        let value = "";
+        if (field.id === "base-machineType") {
+          value = normalize(asset.machineType);
+        } else if (field.id === "base-machineId") {
+          value = normalize(asset.machineId);
+        } else if (field.id === "base-serialNumber") {
+          value = normalize(asset.serialNumber);
+        } else if (field.id === "base-pmCount") {
+          value = normalize(asset.pmCount);
+        } else if (field.id === "base-comments") {
+          value = normalize(asset.comments ?? "");
+        } else {
+          value = normalize(assetsDynamic.valuesByEntity[asset.id]?.[field.id]?.value ?? "");
+        }
+        values.add(value);
+      });
+      options[field.id] = Array.from(values).sort();
     });
-    return base;
-  }, [assets, assetAccessors, customAssetColumns]);
+
+    return options;
+  }, [assets, assetsTableConfig.visibleFields, assetsDynamic.valuesByEntity]);
 
   const roleLabels = useMemo(() => Object.keys(rolesConfig), [rolesConfig]);
 
@@ -761,10 +916,107 @@ export const UserManagement: React.FC = () => {
     return applyAutoSort(filtered, productSort, productAccessors);
   }, [numberedProducts, productFilters, productSort, productAccessors]);
 
-  const filteredAssetRows = useMemo(() => {
-    const filtered = applyAutoFilter(assets, assetFilters, assetAccessors);
-    return applyAutoSort(filtered, assetSort, assetAccessors);
-  }, [assets, assetFilters, assetSort, assetAccessors]);
+  // Comprehensive products filtering including dynamic fields
+  const filteredProducts = useMemo(() => {
+    let result = [...products];
+
+    // Apply filters for each field
+    Object.entries(productFilters).forEach(([fieldId, valueSet]) => {
+      if (valueSet.size === 0) return;
+      result = result.filter((product) => {
+        let fieldValue = "";
+        if (fieldId === "base-name") fieldValue = normalize(product.name);
+        else if (fieldId === "base-description") fieldValue = normalize(product.description ?? "");
+        else fieldValue = normalize(productsDynamic.valuesByEntity[product.id]?.[fieldId]?.value ?? "");
+
+        return valueSet.has(fieldValue);
+      });
+    });
+
+    // Apply sorting
+    if (productSort.key) {
+      result.sort((a, b) => {
+        let aVal = "";
+        let bVal = "";
+
+        if (productSort.key === "base-name") {
+          aVal = normalize(a.name);
+          bVal = normalize(b.name);
+        } else if (productSort.key === "base-description") {
+          aVal = normalize(a.description ?? "");
+          bVal = normalize(b.description ?? "");
+        } else {
+          aVal = normalize(productsDynamic.valuesByEntity[a.id]?.[productSort.key]?.value ?? "");
+          bVal = normalize(productsDynamic.valuesByEntity[b.id]?.[productSort.key]?.value ?? "");
+        }
+
+        if (productSort.dir === "asc") {
+          return aVal.localeCompare(bVal);
+        } else {
+          return bVal.localeCompare(aVal);
+        }
+      });
+    }
+
+    return result;
+  }, [products, productFilters, productSort, productsDynamic.valuesByEntity]);
+
+  // Comprehensive assets filtering including dynamic fields
+  const filteredAssets = useMemo(() => {
+    let result = [...assets];
+
+    // Apply filters for each field
+    Object.entries(assetFilters).forEach(([fieldId, valueSet]) => {
+      if (valueSet.size === 0) return;
+      result = result.filter((asset) => {
+        let fieldValue = "";
+        if (fieldId === "base-machineType") fieldValue = normalize(asset.machineType);
+        else if (fieldId === "base-machineId") fieldValue = normalize(asset.machineId);
+        else if (fieldId === "base-serialNumber") fieldValue = normalize(asset.serialNumber);
+        else if (fieldId === "base-pmCount") fieldValue = normalize(asset.pmCount);
+        else if (fieldId === "base-comments") fieldValue = normalize(asset.comments ?? "");
+        else fieldValue = normalize(assetsDynamic.valuesByEntity[asset.id]?.[fieldId]?.value ?? "");
+
+        return valueSet.has(fieldValue);
+      });
+    });
+
+    // Apply sorting
+    if (assetSort.key) {
+      result.sort((a, b) => {
+        let aVal = "";
+        let bVal = "";
+
+        if (assetSort.key === "base-machineType") {
+          aVal = normalize(a.machineType);
+          bVal = normalize(b.machineType);
+        } else if (assetSort.key === "base-machineId") {
+          aVal = normalize(a.machineId);
+          bVal = normalize(b.machineId);
+        } else if (assetSort.key === "base-serialNumber") {
+          aVal = normalize(a.serialNumber);
+          bVal = normalize(b.serialNumber);
+        } else if (assetSort.key === "base-pmCount") {
+          aVal = normalize(a.pmCount);
+          bVal = normalize(b.pmCount);
+        } else if (assetSort.key === "base-comments") {
+          aVal = normalize(a.comments ?? "");
+          bVal = normalize(b.comments ?? "");
+        } else {
+          aVal = normalize(assetsDynamic.valuesByEntity[a.id]?.[assetSort.key]?.value ?? "");
+          bVal = normalize(assetsDynamic.valuesByEntity[b.id]?.[assetSort.key]?.value ?? "");
+        }
+
+        if (assetSort.dir === "asc") {
+          return aVal.localeCompare(bVal);
+        } else {
+          return bVal.localeCompare(aVal);
+        }
+      });
+    }
+
+    return result;
+  }, [assets, assetFilters, assetSort, assetsDynamic.valuesByEntity]);
 
   const filteredRoles = useMemo(() => {
     const rows = roleLabels.map((role, index) => ({ role, seq: index + 1 }));
@@ -1026,7 +1278,7 @@ export const UserManagement: React.FC = () => {
   const handleAddOffice = async (office: Omit<Office, "id">) => {
     try {
       const created = await officesService.create(office);
-      setOffices((prev) => [...prev, created]);
+      setGlobalOffices((prev) => [...prev, created]);
     } catch (error) {
       console.error("Failed to add office:", error);
     }
@@ -1035,7 +1287,7 @@ export const UserManagement: React.FC = () => {
   const handleUpdateOffice = async (id: string, office: Omit<Office, "id">) => {
     try {
       const updated = await officesService.update(id, office);
-      setOffices((prev) => prev.map((o) => (o.id === id ? updated : o)));
+      setGlobalOffices((prev) => prev.map((o) => (o.id === id ? updated : o)));
     } catch (error) {
       console.error("Failed to update office:", error);
     }
@@ -1044,7 +1296,7 @@ export const UserManagement: React.FC = () => {
   const handleDeleteOffice = async (id: string) => {
     try {
       await officesService.delete(id);
-      setOffices((prev) => prev.filter((o) => o.id !== id));
+      setGlobalOffices((prev) => prev.filter((o) => o.id !== id));
     } catch (error) {
       console.error("Failed to delete office:", error);
     }
@@ -1310,24 +1562,35 @@ export const UserManagement: React.FC = () => {
             anchorEl={userMenu.anchorEl}
             open={Boolean(userMenu.anchorEl)}
             onClose={() => setUserMenu({ anchorEl: null, key: "" })}
+            slotProps={{
+              paper: {
+                sx: { maxHeight: 400 }
+              }
+            }}
           >
             <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
               onClick={() => {
                 if (userMenu.key) setUserSort({ key: userMenu.key, dir: "asc" });
                 setUserMenu({ anchorEl: null, key: "" });
               }}
             >
-              Sort A ? Z
+              Sort A → Z
             </MenuItem>
             <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
               onClick={() => {
                 if (userMenu.key) setUserSort({ key: userMenu.key, dir: "desc" });
                 setUserMenu({ anchorEl: null, key: "" });
               }}
             >
-              Sort Z ? A
+              Sort Z → A
             </MenuItem>
             <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
               onClick={() => {
                 setUserSort({ key: "", dir: "asc" });
                 setUserMenu({ anchorEl: null, key: "" });
@@ -1340,14 +1603,19 @@ export const UserManagement: React.FC = () => {
               const selected = !!userFilters[userMenu.key]?.has(option);
               return (
                 <MenuItem
+                  dense
                   key={`${userMenu.key}-${option}`}
+                  sx={{ py: 0.25, minHeight: "unset" }}
                   onClick={() => {
                     if (!userMenu.key) return;
                     toggleFilterValue(setUserFilters, userMenu.key, option);
                   }}
                 >
-                  <Checkbox checked={selected} />
-                  <ListItemText primary={label} />
+                  <Checkbox checked={selected} size="small" sx={{ py: 0 }} />
+                  <ListItemText
+                    primary={label}
+                    primaryTypographyProps={{ fontSize: "0.8125rem" }}
+                  />
                 </MenuItem>
               );
             })}
@@ -1491,24 +1759,35 @@ export const UserManagement: React.FC = () => {
             anchorEl={roleMenu.anchorEl}
             open={Boolean(roleMenu.anchorEl)}
             onClose={() => setRoleMenu({ anchorEl: null, key: "" })}
+            slotProps={{
+              paper: {
+                sx: { maxHeight: 400 }
+              }
+            }}
           >
             <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
               onClick={() => {
                 if (roleMenu.key) setRoleSort({ key: roleMenu.key, dir: "asc" });
                 setRoleMenu({ anchorEl: null, key: "" });
               }}
             >
-              Sort A ? Z
+              Sort A → Z
             </MenuItem>
             <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
               onClick={() => {
                 if (roleMenu.key) setRoleSort({ key: roleMenu.key, dir: "desc" });
                 setRoleMenu({ anchorEl: null, key: "" });
               }}
             >
-              Sort Z ? A
+              Sort Z → A
             </MenuItem>
             <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
               onClick={() => {
                 setRoleSort({ key: "", dir: "asc" });
                 setRoleMenu({ anchorEl: null, key: "" });
@@ -1521,14 +1800,19 @@ export const UserManagement: React.FC = () => {
               const selected = !!roleFilters[roleMenu.key]?.has(option);
               return (
                 <MenuItem
+                  dense
                   key={`${roleMenu.key}-${option}`}
+                  sx={{ py: 0.25, minHeight: "unset" }}
                   onClick={() => {
                     if (!roleMenu.key) return;
                     toggleFilterValue(setRoleFilters, roleMenu.key, option);
                   }}
                 >
-                  <Checkbox checked={selected} />
-                  <ListItemText primary={label} />
+                  <Checkbox checked={selected} size="small" sx={{ py: 0 }} />
+                  <ListItemText
+                    primary={label}
+                    primaryTypographyProps={{ fontSize: "0.8125rem" }}
+                  />
                 </MenuItem>
               );
             })}
@@ -1539,10 +1823,17 @@ export const UserManagement: React.FC = () => {
       {/* Customers Tab */}
       {adminTabsConfig[tab]?.type === "customers" && (
         <Box>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2} sx={{ mb: 2 }}>
             <Button variant="contained" startIcon={<AddOutlined />}>
               New Client
             </Button>
+            <TextField
+              size="small"
+              placeholder="Search customers..."
+              value={customerSearch}
+              onChange={(e) => setCustomerSearch(e.target.value)}
+              sx={{ minWidth: 250 }}
+            />
           </Stack>
 
           <Box
@@ -1552,72 +1843,585 @@ export const UserManagement: React.FC = () => {
               gap: 2,
             }}
           >
-            {[
-              { id: 101, name: "Apex Industries", type: "Manufacturing", sites: 2 },
-              { id: 102, name: "BeeHealthy Foods", type: "Retail", sites: 2 },
-              { id: 103, name: "SolarTech Energy", type: "Energy", sites: 2 },
-              { id: 104, name: "Zenith Data Systems", type: "Technology", sites: 2 },
-              { id: 105, name: "Kappa Telecoms", type: "Technology", sites: 1 },
-              { id: 106, name: "Omega Softworks", type: "Technology", sites: 2 },
-              { id: 107, name: "Delta Dental", type: "Healthcare", sites: 1 },
-              { id: 108, name: "Pi Pharmaceuticals", type: "Healthcare", sites: 2 },
-              { id: 109, name: "Theta Care", type: "Healthcare", sites: 1 },
-              { id: 110, name: "Lambda Financial", type: "Finance", sites: 2 },
-              { id: 111, name: "Sigma Capital", type: "Finance", sites: 1 },
-              { id: 112, name: "Phi Bank", type: "Finance", sites: 1 },
-              { id: 113, name: "Alpha Logistics", type: "Transport", sites: 2 },
-              { id: 114, name: "Beta Shipping", type: "Transport", sites: 1 },
-              { id: 115, name: "Mu Freight", type: "Transport", sites: 1 },
-              { id: 116, name: "Gamma Agritech", type: "Manufacturing", sites: 2 },
-              { id: 117, name: "Rho Education", type: "Education", sites: 2 },
-              { id: 118, name: "Xi Hospitality", type: "Retail", sites: 2 },
-            ].map((customer) => (
-              <Paper
-                key={customer.id}
-                sx={{
-                  p: 2,
-                  textAlign: 'center',
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  borderBottom: '4px solid',
-                  borderBottomColor: 'primary.main',
-                  cursor: 'pointer',
-                  transition: 'transform 0.2s, boxShadow 0.2s',
-                  '&:hover': {
-                    transform: 'translateY(-4px)',
-                    boxShadow: 3,
-                  },
-                }}
-              >
-                <Box
-                  sx={{
-                    width: 70,
-                    height: 70,
-                    borderRadius: '50%',
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    margin: '0 auto 12px',
-                    color: 'white',
-                    fontWeight: 'bold',
-                    fontSize: '1.5rem',
+            {customersList
+              .filter((customer) => {
+                // Search only customer names that start with the search term
+                if (!customerSearch) return true;
+                const searchLower = customerSearch.toLowerCase();
+                return customer.name.toLowerCase().startsWith(searchLower);
+              })
+              .map((customer) => {
+                const isFlipped = editingCustomerId === customer.id;
+                return (
+                  <Box
+                    key={customer.id}
+                    sx={{
+                      perspective: '1000px',
+                      height: '220px',
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        position: 'relative',
+                        width: '100%',
+                        height: '100%',
+                        transition: 'transform 0.6s',
+                        transformStyle: 'preserve-3d',
+                        transform: isFlipped ? 'rotateX(180deg)' : 'rotateX(0deg)',
+                      }}
+                    >
+                      {/* Front Face */}
+                      <Paper
+                        sx={{
+                          position: 'absolute',
+                          width: '100%',
+                          height: '100%',
+                          backfaceVisibility: 'hidden',
+                          p: 2,
+                          textAlign: 'center',
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          borderBottom: '4px solid',
+                          borderBottomColor: 'primary.main',
+                          cursor: 'pointer',
+                          transition: 'boxShadow 0.2s',
+                          '&:hover': {
+                            boxShadow: 3,
+                          },
+                        }}
+                      >
+                        <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                          <Tooltip title="Delete customer">
+                            <IconButton
+                              size="small"
+                              sx={{ padding: 0.25 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCustomersList((prev) => prev.filter((c) => c.id !== customer.id));
+                              }}
+                            >
+                              <DeleteOutline sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Edit customer">
+                            <IconButton
+                              size="small"
+                              sx={{ padding: 0.25 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCustomerId(customer.id);
+                                setEditCustomerName(customer.name);
+                                setEditCustomerIndustry(customer.type);
+                                setEditCustomerState(customer.state);
+                                setEditCustomerLogo(customer.logo);
+                              }}
+                            >
+                              <EditOutlined sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                        <Box
+                          sx={{
+                            width: 70,
+                            height: 70,
+                            borderRadius: '50%',
+                            background: customer.logo ? 'transparent' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                            backgroundImage: customer.logo ? `url(${customer.logo})` : 'none',
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            margin: '0 auto 12px',
+                            color: 'white',
+                            fontWeight: 'bold',
+                            fontSize: '1.5rem',
+                          }}
+                        >
+                          {!customer.logo && customer.name.charAt(0)}
+                        </Box>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+                          {customer.name}
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
+                          {customer.type} • {customer.state}
+                        </Typography>
+                        <Button size="small" variant="contained" fullWidth>
+                          View Sites ({customer.sites})
+                        </Button>
+                      </Paper>
+
+                      {/* Back Face */}
+                      <Paper
+                        sx={{
+                          position: 'absolute',
+                          width: '100%',
+                          height: '100%',
+                          backfaceVisibility: 'hidden',
+                          transform: 'rotateX(180deg)',
+                          p: 2,
+                          textAlign: 'center',
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          borderBottom: '4px solid',
+                          borderBottomColor: 'secondary.main',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'center',
+                          gap: 1,
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            width: 60,
+                            height: 60,
+                            borderRadius: '50%',
+                            background: editCustomerLogo ? 'transparent' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                            backgroundImage: editCustomerLogo ? `url(${editCustomerLogo})` : 'none',
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            margin: '0 auto 8px',
+                            color: 'white',
+                            fontWeight: 'bold',
+                            fontSize: '1.3rem',
+                            position: 'relative',
+                            cursor: 'pointer',
+                            '&:hover::after': {
+                              content: '"Upload"',
+                              position: 'absolute',
+                              inset: 0,
+                              background: 'rgba(0,0,0,0.7)',
+                              borderRadius: '50%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '0.65rem',
+                            },
+                          }}
+                          onClick={() => setLogoUploadDialogOpen(true)}
+                        >
+                          {!editCustomerLogo && editCustomerName.charAt(0)}
+                        </Box>
+                        <TextField
+                          size="small"
+                          value={editCustomerName}
+                          onChange={(e) => setEditCustomerName(e.target.value)}
+                          placeholder="Customer Name"
+                          fullWidth
+                          sx={{
+                            '& .MuiInputBase-root': {
+                              height: 32,
+                              fontSize: '1rem',
+                              fontWeight: 600
+                            }
+                          }}
+                        />
+                        <Stack direction="row" spacing={0.5}>
+                          <TextField
+                            size="small"
+                            value={editCustomerIndustry}
+                            onChange={(e) => setEditCustomerIndustry(e.target.value)}
+                            placeholder="Industry"
+                            fullWidth
+                            sx={{
+                              '& .MuiInputBase-root': {
+                                height: 26,
+                                fontSize: '0.75rem'
+                              }
+                            }}
+                          />
+                          <TextField
+                            size="small"
+                            value={editCustomerState}
+                            onChange={(e) => setEditCustomerState(e.target.value)}
+                            placeholder="State"
+                            fullWidth
+                            sx={{
+                              '& .MuiInputBase-root': {
+                                height: 26,
+                                fontSize: '0.75rem'
+                              }
+                            }}
+                          />
+                        </Stack>
+                        <Button
+                          variant="contained"
+                          size="small"
+                          onClick={() => {
+                            setCustomersList((prev) =>
+                              prev.map((c) =>
+                                c.id === customer.id
+                                  ? { ...c, name: editCustomerName, type: editCustomerIndustry, state: editCustomerState, sites: 0, logo: editCustomerLogo }
+                                  : c
+                              )
+                            );
+                            setEditingCustomerId(null);
+                            setEditCustomerName("");
+                            setEditCustomerIndustry("");
+                            setEditCustomerState("");
+                            setEditCustomerLogo(null);
+                          }}
+                        >
+                          Save
+                        </Button>
+                      </Paper>
+                    </Box>
+                  </Box>
+                );
+              })}
+          </Box>
+        </Box>
+      )}
+
+      {/* Global Offices Tab */}
+      {adminTabsConfig[tab]?.type === "offices" && (
+        <Box>
+          <GlobalOfficeMap
+            offices={globalOffices}
+            onAddOffice={handleAddOffice}
+            onUpdateOffice={handleUpdateOffice}
+            onDeleteOffice={handleDeleteOffice}
+          />
+        </Box>
+      )}
+
+      {/* Products Tab */}
+      {adminTabsConfig[tab]?.type === "products" && (
+        <Box>
+          <Stack direction="row" sx={{ mb: 2 }}>
+            <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setProductOpen(true)}>
+              New Product
+            </Button>
+          </Stack>
+
+          {actionError && <Alert severity="error">{actionError}</Alert>}
+
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>#</TableCell>
+                {productsTableConfig.visibleFields.map((field) => (
+                  <TableCell key={`products-header-${field.id}`}>
+                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                      <span>{field.name}</span>
+                      <IconButton
+                        size="small"
+                        onClick={(event) => setProductMenu({ anchorEl: event.currentTarget, key: field.id })}
+                      >
+                        <ArrowDropDown fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </TableCell>
+                ))}
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filteredProducts.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={2 + productsTableConfig.visibleFields.length} align="center">
+                    <Typography variant="body2" color="text.secondary">
+                      {products.length === 0 ? "No products yet" : "No products match the current filters"}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredProducts.map((product, index) => {
+                  const getProductFieldValue = (fieldId: string) => {
+                    if (fieldId === "base-name") return product.name;
+                    if (fieldId === "base-description") return product.description || "-";
+                    return productsDynamic.valuesByEntity[product.id]?.[fieldId]?.value || "-";
+                  };
+
+                  return (
+                    <TableRow key={product.id} hover>
+                      <TableCell>{index + 1}</TableCell>
+                      {productsTableConfig.visibleFields.map((field) => (
+                        <TableCell key={`${product.id}-${field.id}`}>
+                          {getProductFieldValue(field.id)}
+                        </TableCell>
+                      ))}
+                      <TableCell>
+                        <Stack direction="row" spacing={1}>
+                          <Tooltip title="Edit product">
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setEditProductForm({
+                                  id: product.id,
+                                  name: product.name,
+                                  description: product.description || ""
+                                });
+                                const dynamicVals = productsDynamic.valuesByEntity[product.id] || {};
+                                setEditProductDynamicValues(dynamicVals);
+                                setEditProductOpen(true);
+                              }}
+                            >
+                              <EditOutlined fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete product">
+                            <IconButton
+                              size="small"
+                              onClick={() =>
+                                setDeleteTarget({ type: "product", id: product.id, label: product.name })
+                              }
+                            >
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+          <Menu
+            anchorEl={productMenu.anchorEl}
+            open={Boolean(productMenu.anchorEl)}
+            onClose={() => setProductMenu({ anchorEl: null, key: "" })}
+            slotProps={{
+              paper: {
+                sx: { maxHeight: 400 }
+              }
+            }}
+          >
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                if (productMenu.key) setProductSort({ key: productMenu.key, dir: "asc" });
+                setProductMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Sort A → Z
+            </MenuItem>
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                if (productMenu.key) setProductSort({ key: productMenu.key, dir: "desc" });
+                setProductMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Sort Z → A
+            </MenuItem>
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                setProductSort({ key: "", dir: "asc" });
+                setProductMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Clear sort
+            </MenuItem>
+            {(productFilterOptions[productMenu.key as keyof typeof productFilterOptions] || []).map((option) => {
+              const label = option || "(Blank)";
+              const selected = !!productFilters[productMenu.key]?.has(option);
+              return (
+                <MenuItem
+                  dense
+                  key={`${productMenu.key}-${option}`}
+                  sx={{ py: 0.25, minHeight: "unset" }}
+                  onClick={() => {
+                    if (!productMenu.key) return;
+                    toggleFilterValue(setProductFilters, productMenu.key, option);
                   }}
                 >
-                  {customer.name.charAt(0)}
-                </Box>
-                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
-                  {customer.name}
-                </Typography>
-                <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
-                  {customer.type} • {customer.sites} Sites
-                </Typography>
-                <Button size="small" variant="contained" fullWidth>
-                  View Sites
-                </Button>
-              </Paper>
-            ))}
-          </Box>
+                  <Checkbox checked={selected} size="small" sx={{ py: 0 }} />
+                  <ListItemText
+                    primary={label}
+                    primaryTypographyProps={{ fontSize: "0.8125rem" }}
+                  />
+                </MenuItem>
+              );
+            })}
+          </Menu>
+        </Box>
+      )}
+
+      {/* Assets Tab */}
+      {adminTabsConfig[tab]?.type === "assets" && (
+        <Box>
+          <Stack direction="row" sx={{ mb: 2 }}>
+            <Button variant="contained" startIcon={<AddOutlined />} onClick={() => {
+              setEditingAssetId(null);
+              setAssetForm({
+                machineType: "",
+                machineId: "",
+                serialNumber: "",
+                pmCount: "1",
+                comments: ""
+              });
+              setAssetDynamicValues({});
+              setAssetOpen(true);
+            }}>
+              New Asset
+            </Button>
+          </Stack>
+
+          {actionError && <Alert severity="error">{actionError}</Alert>}
+
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>#</TableCell>
+                {assetsTableConfig.visibleFields.map((field) => (
+                  <TableCell key={`assets-header-${field.id}`}>
+                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                      <span>{field.name}</span>
+                      <IconButton
+                        size="small"
+                        onClick={(event) => setAssetMenu({ anchorEl: event.currentTarget, key: field.id })}
+                      >
+                        <ArrowDropDown fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </TableCell>
+                ))}
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filteredAssets.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={2 + assetsTableConfig.visibleFields.length} align="center">
+                    <Typography variant="body2" color="text.secondary">
+                      No assets yet
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredAssets.map((asset, index) => {
+                  const getAssetFieldValue = (fieldId: string) => {
+                    if (fieldId === "base-machineType") return asset.machineType;
+                    if (fieldId === "base-machineId") return asset.machineId;
+                    if (fieldId === "base-serialNumber") return asset.serialNumber;
+                    if (fieldId === "base-pmCount") return asset.pmCount;
+                    if (fieldId === "base-comments") return asset.comments || "-";
+                    return assetsDynamic.valuesByEntity[asset.id]?.[fieldId]?.value || "-";
+                  };
+
+                  return (
+                    <TableRow key={asset.id} hover>
+                      <TableCell>{index + 1}</TableCell>
+                      {assetsTableConfig.visibleFields.map((field) => (
+                        <TableCell key={`${asset.id}-${field.id}`}>
+                          {getAssetFieldValue(field.id)}
+                        </TableCell>
+                      ))}
+                      <TableCell>
+                        <Stack direction="row" spacing={1}>
+                          <Tooltip title="Edit asset">
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setAssetForm({
+                                  machineType: asset.machineType,
+                                  machineId: asset.machineId,
+                                  serialNumber: asset.serialNumber,
+                                  pmCount: asset.pmCount,
+                                  comments: asset.comments
+                                });
+                                const dynamicVals = assetsDynamic.valuesByEntity[asset.id] || {};
+                                const next: Record<string, string> = {};
+                                assetsDynamic.definitions.forEach((field) => {
+                                  next[field.id] = dynamicVals[field.id]?.value || "";
+                                });
+                                setAssetDynamicValues(next);
+                                setEditingAssetId(asset.id);
+                                setAssetOpen(true);
+                              }}
+                            >
+                              <EditOutlined fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete asset">
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setAssets((prev) => prev.filter((a) => a.id !== asset.id));
+                              }}
+                            >
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+          <Menu
+            anchorEl={assetMenu.anchorEl}
+            open={Boolean(assetMenu.anchorEl)}
+            onClose={() => setAssetMenu({ anchorEl: null, key: "" })}
+            slotProps={{
+              paper: {
+                sx: { maxHeight: 400 }
+              }
+            }}
+          >
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                if (assetMenu.key) setAssetSort({ key: assetMenu.key, dir: "asc" });
+                setAssetMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Sort A → Z
+            </MenuItem>
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                if (assetMenu.key) setAssetSort({ key: assetMenu.key, dir: "desc" });
+                setAssetMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Sort Z → A
+            </MenuItem>
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                setAssetSort({ key: "", dir: "asc" });
+                setAssetMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Clear sort
+            </MenuItem>
+            {(assetFilterOptions[assetMenu.key as keyof typeof assetFilterOptions] || []).map((option) => {
+              const label = option || "(Blank)";
+              const selected = !!assetFilters[assetMenu.key]?.has(option);
+              return (
+                <MenuItem
+                  dense
+                  key={`${assetMenu.key}-${option}`}
+                  sx={{ py: 0.25, minHeight: "unset" }}
+                  onClick={() => {
+                    if (!assetMenu.key) return;
+                    toggleFilterValue(setAssetFilters, assetMenu.key, option);
+                  }}
+                >
+                  <Checkbox checked={selected} size="small" sx={{ py: 0 }} />
+                  <ListItemText
+                    primary={label}
+                    primaryTypographyProps={{ fontSize: "0.8125rem" }}
+                  />
+                </MenuItem>
+              );
+            })}
+          </Menu>
         </Box>
       )}
 
@@ -1630,48 +2434,79 @@ export const UserManagement: React.FC = () => {
           if (tab !== tabIndex) return null;
 
           const rows = adminTabRows[tabConfig.id] || [];
+          const columns = tabConfig.columns && tabConfig.columns.length > 0 ? tabConfig.columns : ["ID", "Name", "Created Date"];
 
-          // Check if this is an office map tab
-          const isOfficeTab = tabConfig.label.toLowerCase().includes("office");
+          // Compute filter options for this tab
+          const filterOptions: Record<string, string[]> = {};
+          columns.forEach((col) => {
+            const values = new Set<string>();
+            rows.forEach((row) => {
+              values.add(normalize(row[col] ?? ""));
+            });
+            filterOptions[col] = Array.from(values).sort();
+          });
+
+          // Apply filters and sorting
+          let filteredRows = [...rows];
+          const tabFilters = customTabFilters[tabConfig.id] || {};
+          Object.entries(tabFilters).forEach(([colKey, valueSet]) => {
+            if (valueSet.size === 0) return;
+            filteredRows = filteredRows.filter((row) => {
+              const cellValue = normalize(row[colKey] ?? "");
+              return valueSet.has(cellValue);
+            });
+          });
+
+          const tabSort = customTabSorts[tabConfig.id];
+          if (tabSort && tabSort.key) {
+            filteredRows.sort((a, b) => {
+              const aVal = normalize(a[tabSort.key] ?? "");
+              const bVal = normalize(b[tabSort.key] ?? "");
+              return tabSort.dir === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            });
+          }
 
           return (
             <Box key={tabConfig.id}>
-              {isOfficeTab ? (
-                <GlobalOfficeMap
-                  offices={offices}
-                  onAddOffice={handleAddOffice}
-                  onUpdateOffice={handleUpdateOffice}
-                  onDeleteOffice={handleDeleteOffice}
-                />
-              ) : (
-                <>
               {/* Table */}
               <Table>
                 <TableHead>
                   <TableRow>
                     <TableCell>#</TableCell>
-                    <TableCell>ID</TableCell>
-                    <TableCell>Name</TableCell>
-                    <TableCell>Created Date</TableCell>
+                    {columns.map((col) => (
+                      <TableCell key={col}>
+                        <Stack direction="row" alignItems="center" spacing={0.5}>
+                          <span>{col}</span>
+                          <IconButton
+                            size="small"
+                            onClick={(event) =>
+                              setCustomTabMenu({ tabId: tabConfig.id, anchorEl: event.currentTarget, key: col })
+                            }
+                          >
+                            <ArrowDropDown fontSize="small" />
+                          </IconButton>
+                        </Stack>
+                      </TableCell>
+                    ))}
                     <TableCell>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {rows.length === 0 ? (
+                  {filteredRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} align="center">
+                      <TableCell colSpan={columns.length + 2} align="center">
                         <Typography variant="body2" color="text.secondary">
                           No data yet. Click "Add Row" to create the first entry.
                         </Typography>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    rows.map((row, index) => (
+                    filteredRows.map((row, index) => (
                       <TableRow key={row.ID || index} hover>
                         <TableCell>{index + 1}</TableCell>
-                        <TableCell>{row.ID || ""}</TableCell>
-                        <TableCell>{row.Name || ""}</TableCell>
-                        <TableCell>{row["Created Date"] || ""}</TableCell>
+                        {columns.map((col) => (
+                          <TableCell key={col}>{row[col] || ""}</TableCell>
+                        ))}
                         <TableCell>
                           <Stack direction="row" spacing={1}>
                             <Tooltip title="Edit row">
@@ -1718,8 +2553,97 @@ export const UserManagement: React.FC = () => {
                   )}
                 </TableBody>
               </Table>
-              </>
-              )}
+              <Menu
+                anchorEl={customTabMenu.tabId === tabConfig.id ? customTabMenu.anchorEl : null}
+                open={Boolean(customTabMenu.tabId === tabConfig.id && customTabMenu.anchorEl)}
+                onClose={() => setCustomTabMenu({ tabId: "", anchorEl: null, key: "" })}
+                slotProps={{
+                  paper: {
+                    sx: { maxHeight: 400 }
+                  }
+                }}
+              >
+                <MenuItem
+                  dense
+                  sx={{ fontSize: "0.875rem", py: 0.5 }}
+                  onClick={() => {
+                    if (customTabMenu.key) {
+                      setCustomTabSorts((prev) => ({
+                        ...prev,
+                        [tabConfig.id]: { key: customTabMenu.key, dir: "asc" }
+                      }));
+                    }
+                    setCustomTabMenu({ tabId: "", anchorEl: null, key: "" });
+                  }}
+                >
+                  Sort A → Z
+                </MenuItem>
+                <MenuItem
+                  dense
+                  sx={{ fontSize: "0.875rem", py: 0.5 }}
+                  onClick={() => {
+                    if (customTabMenu.key) {
+                      setCustomTabSorts((prev) => ({
+                        ...prev,
+                        [tabConfig.id]: { key: customTabMenu.key, dir: "desc" }
+                      }));
+                    }
+                    setCustomTabMenu({ tabId: "", anchorEl: null, key: "" });
+                  }}
+                >
+                  Sort Z → A
+                </MenuItem>
+                <MenuItem
+                  dense
+                  sx={{ fontSize: "0.875rem", py: 0.5 }}
+                  onClick={() => {
+                    setCustomTabSorts((prev) => ({
+                      ...prev,
+                      [tabConfig.id]: { key: "", dir: "asc" }
+                    }));
+                    setCustomTabMenu({ tabId: "", anchorEl: null, key: "" });
+                  }}
+                >
+                  Clear sort
+                </MenuItem>
+                {(filterOptions[customTabMenu.key] || []).map((option) => {
+                  const label = option || "(Blank)";
+                  const selected = !!(customTabFilters[tabConfig.id]?.[customTabMenu.key]?.has(option));
+                  return (
+                    <MenuItem
+                      dense
+                      key={`${customTabMenu.key}-${option}`}
+                      sx={{ py: 0.25, minHeight: "unset" }}
+                      onClick={() => {
+                        if (!customTabMenu.key) return;
+                        setCustomTabFilters((prev) => {
+                          const tabFilters = prev[tabConfig.id] || {};
+                          const currentSet = tabFilters[customTabMenu.key] || new Set<string>();
+                          const newSet = new Set(currentSet);
+                          if (newSet.has(option)) {
+                            newSet.delete(option);
+                          } else {
+                            newSet.add(option);
+                          }
+                          return {
+                            ...prev,
+                            [tabConfig.id]: {
+                              ...tabFilters,
+                              [customTabMenu.key]: newSet
+                            }
+                          };
+                        });
+                      }}
+                    >
+                      <Checkbox checked={selected} size="small" sx={{ py: 0 }} />
+                      <ListItemText
+                        primary={label}
+                        primaryTypographyProps={{ fontSize: "0.8125rem" }}
+                      />
+                    </MenuItem>
+                  );
+                })}
+              </Menu>
             </Box>
           );
         })}
@@ -1766,7 +2690,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <DynamicFieldsForm
-              definitions={usersDynamic.definitions}
+              definitions={orderedUsersDefinitions}
               values={userDynamicValues}
               onChange={setUserDynamicValues}
             />
@@ -1890,57 +2814,85 @@ export const UserManagement: React.FC = () => {
           if (tableConfigTarget === "assets") await assetsDynamic.reload();
         }}
         onCreateField={async (name, type, linkToFieldId, actionType) => {
-          await fieldService.createDefinition({
-            id: "",
-            name,
-            fieldType: type,
-            linkToFieldId: linkToFieldId || null,
-            actionType: actionType || null,
-            tables: [tableConfigTarget],
-            sortOrder: allFieldDefinitions.definitions.length + 1,
-            isActive: true
-          });
-          await allFieldDefinitions.reload();
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "customers") await customersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
-          if (type === "lookup field" && actionType === "create linked table") {
-            openOrCreateAdminLinkedTab(name);
+          try {
+            await fieldService.createDefinition({
+              id: "",
+              name,
+              fieldType: type,
+              linkToFieldId: linkToFieldId || null,
+              actionType: actionType || null,
+              tables: [tableConfigTarget],
+              sortOrder: allFieldDefinitions.definitions.length + 1,
+              isActive: true
+            });
+            await allFieldDefinitions.reload();
+            if (tableConfigTarget === "users") await usersDynamic.reload();
+            if (tableConfigTarget === "customers") await customersDynamic.reload();
+            if (tableConfigTarget === "products") await productsDynamic.reload();
+            if (tableConfigTarget === "assets") await assetsDynamic.reload();
+            if (type === "lookup field" && actionType === "create linked table") {
+              openOrCreateAdminLinkedTab(name);
+            }
+          } catch (error) {
+            console.error("Error creating field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to create field. Please try again."));
           }
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
-          const defs =
-            tableConfigTarget === "users"
-              ? usersDynamic.definitions
-              : tableConfigTarget === "customers"
-                ? customersDynamic.definitions
-                : tableConfigTarget === "products"
-                  ? productsDynamic.definitions
-                  : assetsDynamic.definitions;
-          const existing = defs.find((item) => item.id === fieldId);
-          if (!existing) return;
-          await fieldService.updateDefinition(fieldId, {
-            ...existing,
-            name,
-            fieldType: type,
-            linkToFieldId: linkToFieldId || null,
-            actionType: actionType || null
-          });
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "customers") await customersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
-          if (type === "lookup field" && actionType === "create linked table") {
-            openOrCreateAdminLinkedTab(name);
+          try {
+            // Handle base fields - update local config only, no API call
+            if (fieldId.startsWith("base-")) {
+              setBaseFieldNames((prev) => ({
+                ...prev,
+                [tableConfigTarget]: {
+                  ...(prev[tableConfigTarget] || {}),
+                  [fieldId]: name
+                }
+              }));
+              return;
+            }
+            const defs =
+              tableConfigTarget === "users"
+                ? usersDynamic.definitions
+                : tableConfigTarget === "customers"
+                  ? customersDynamic.definitions
+                  : tableConfigTarget === "products"
+                    ? productsDynamic.definitions
+                    : assetsDynamic.definitions;
+            const existing = defs.find((item) => item.id === fieldId);
+            if (!existing) return;
+            await fieldService.updateDefinition(fieldId, {
+              ...existing,
+              name,
+              fieldType: type,
+              linkToFieldId: linkToFieldId || null,
+              actionType: actionType || null
+            });
+            if (tableConfigTarget === "users") await usersDynamic.reload();
+            if (tableConfigTarget === "customers") await customersDynamic.reload();
+            if (tableConfigTarget === "products") await productsDynamic.reload();
+            if (tableConfigTarget === "assets") await assetsDynamic.reload();
+            if (type === "lookup field" && actionType === "create linked table") {
+              openOrCreateAdminLinkedTab(name);
+            }
+          } catch (error) {
+            console.error("Error editing field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to edit field. Please try again."));
           }
         }}
         onDeleteField={async (fieldId) => {
-          await fieldService.deleteDefinition(fieldId);
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "customers") await customersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
+          try {
+            // Skip API calls for base fields - they can't be deleted
+            if (fieldId.startsWith("base-")) return;
+            await fieldService.deleteDefinition(fieldId);
+            if (tableConfigTarget === "users") await usersDynamic.reload();
+            if (tableConfigTarget === "customers") await customersDynamic.reload();
+            if (tableConfigTarget === "products") await productsDynamic.reload();
+            if (tableConfigTarget === "assets") await assetsDynamic.reload();
+          } catch (error) {
+            console.error("Error deleting field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
+          }
         }}
       />
 
@@ -2065,83 +3017,112 @@ export const UserManagement: React.FC = () => {
           }
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
-          if (!customTableConfigTabId) return;
-          if (fieldId.startsWith("default:")) {
-            const oldName = fieldId.replace("default:", "");
-            const nextName = name.trim() || oldName;
+          try {
+            if (!customTableConfigTabId) return;
+            if (fieldId.startsWith("default:")) {
+              const oldName = fieldId.replace("default:", "");
+              const nextName = name.trim() || oldName;
+              setAdminTabsConfig((prev) =>
+                prev.map((tabItem) =>
+                  tabItem.id === customTableConfigTabId
+                    ? {
+                        ...tabItem,
+                        columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
+                        config: {
+                          order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
+                            id === fieldId ? `default:${nextName}` : id
+                          ),
+                          hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
+                            id === fieldId ? `default:${nextName}` : id
+                          )
+                        }
+                      }
+                    : tabItem
+                )
+              );
+              setAdminTabRows((prev) => ({
+                ...prev,
+                [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
+                  const nextRow = { ...row };
+                  nextRow[nextName] = nextRow[oldName] ?? "";
+                  delete nextRow[oldName];
+                  return nextRow;
+                })
+              }));
+              setCustomTabConfigs((prev) => ({
+                ...prev,
+                [customTableConfigTabId]: {
+                  order: (prev[customTableConfigTabId]?.order || []).map((id) =>
+                    id === fieldId ? `default:${nextName}` : id
+                  ),
+                  hidden: (prev[customTableConfigTabId]?.hidden || []).map((id) =>
+                    id === fieldId ? `default:${nextName}` : id
+                  )
+                }
+              }));
+              return;
+            }
+            const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
+            if (!existing) return;
+            await fieldService.updateDefinition(fieldId, {
+              ...existing,
+              name,
+              fieldType: type,
+              linkToFieldId: linkToFieldId || null,
+              actionType: actionType || null
+            });
+            await allFieldDefinitions.reload();
+            if (type === "lookup field" && actionType === "create linked table") {
+              openOrCreateAdminLinkedTab(name);
+            }
+          } catch (error) {
+            console.error("Error editing field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to edit field. Please try again."));
+          }
+        }}
+        onDeleteField={async (fieldId) => {
+          try {
+            if (!customTableConfigTabId) return;
+            if (fieldId.startsWith("default:")) {
+              const name = fieldId.replace("default:", "");
+              setAdminTabsConfig((prev) =>
+                prev.map((tabItem) =>
+                  tabItem.id === customTableConfigTabId
+                    ? { ...tabItem, columns: (tabItem.columns || []).filter((col) => col !== name) }
+                    : tabItem
+                )
+              );
+              setAdminTabRows((prev) => ({
+                ...prev,
+                [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
+                  const nextRow = { ...row };
+                  delete nextRow[name];
+                  return nextRow;
+                })
+              }));
+              setCustomTabConfigs((prev) => ({
+                ...prev,
+                [customTableConfigTabId]: {
+                  order: (prev[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
+                  hidden: (prev[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
+                }
+              }));
+              return;
+            }
             setAdminTabsConfig((prev) =>
               prev.map((tabItem) =>
                 tabItem.id === customTableConfigTabId
                   ? {
                       ...tabItem,
-                      columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
+                      fieldIds: (tabItem.fieldIds || []).filter((id) => id !== fieldId),
                       config: {
-                        order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
-                          id === fieldId ? `default:${nextName}` : id
-                        ),
-                        hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
-                          id === fieldId ? `default:${nextName}` : id
-                        )
+                        order: (customTabConfigs[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
+                        hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
                       }
                     }
                   : tabItem
               )
             );
-            setAdminTabRows((prev) => ({
-              ...prev,
-              [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
-                const nextRow = { ...row };
-                nextRow[nextName] = nextRow[oldName] ?? "";
-                delete nextRow[oldName];
-                return nextRow;
-              })
-            }));
-            setCustomTabConfigs((prev) => ({
-              ...prev,
-              [customTableConfigTabId]: {
-                order: (prev[customTableConfigTabId]?.order || []).map((id) =>
-                  id === fieldId ? `default:${nextName}` : id
-                ),
-                hidden: (prev[customTableConfigTabId]?.hidden || []).map((id) =>
-                  id === fieldId ? `default:${nextName}` : id
-                )
-              }
-            }));
-            return;
-          }
-          const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
-          if (!existing) return;
-          await fieldService.updateDefinition(fieldId, {
-            ...existing,
-            name,
-            fieldType: type,
-            linkToFieldId: linkToFieldId || null,
-            actionType: actionType || null
-          });
-          await allFieldDefinitions.reload();
-          if (type === "lookup field" && actionType === "create linked table") {
-            openOrCreateAdminLinkedTab(name);
-          }
-        }}
-        onDeleteField={async (fieldId) => {
-          if (!customTableConfigTabId) return;
-          if (fieldId.startsWith("default:")) {
-            const name = fieldId.replace("default:", "");
-            setAdminTabsConfig((prev) =>
-              prev.map((tabItem) =>
-                tabItem.id === customTableConfigTabId
-                  ? { ...tabItem, columns: (tabItem.columns || []).filter((col) => col !== name) }
-                  : tabItem
-              )
-            );
-            setAdminTabRows((prev) => ({
-              ...prev,
-              [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
-                const nextRow = { ...row };
-                delete nextRow[name];
-                return nextRow;
-              })
-            }));
             setCustomTabConfigs((prev) => ({
               ...prev,
               [customTableConfigTabId]: {
@@ -2149,37 +3130,18 @@ export const UserManagement: React.FC = () => {
                 hidden: (prev[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
               }
             }));
-            return;
+            setAdminTabRows((prev) => ({
+              ...prev,
+              [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
+                const nextRow = { ...row };
+                delete nextRow[fieldId];
+                return nextRow;
+              })
+            }));
+          } catch (error) {
+            console.error("Error deleting field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
           }
-          setAdminTabsConfig((prev) =>
-            prev.map((tabItem) =>
-              tabItem.id === customTableConfigTabId
-                ? {
-                    ...tabItem,
-                    fieldIds: (tabItem.fieldIds || []).filter((id) => id !== fieldId),
-                    config: {
-                      order: (customTabConfigs[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
-                      hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
-                    }
-                  }
-                : tabItem
-            )
-          );
-          setCustomTabConfigs((prev) => ({
-            ...prev,
-            [customTableConfigTabId]: {
-              order: (prev[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
-              hidden: (prev[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
-            }
-          }));
-          setAdminTabRows((prev) => ({
-            ...prev,
-            [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
-              const nextRow = { ...row };
-              delete nextRow[fieldId];
-              return nextRow;
-            })
-          }));
         }}
       />
 
@@ -2225,7 +3187,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <DynamicFieldsForm
-              definitions={customersDynamic.definitions}
+              definitions={orderedCustomersDefinitions}
               values={customerDynamicValues}
               onChange={setCustomerDynamicValues}
             />
@@ -2328,33 +3290,56 @@ export const UserManagement: React.FC = () => {
           }
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
-          const defs =
-            tableConfigTarget === "users"
-              ? usersDynamic.definitions
-              : tableConfigTarget === "products"
-                ? productsDynamic.definitions
-                : assetsDynamic.definitions;
-          const existing = defs.find((item) => item.id === fieldId);
-          if (!existing) return;
-          await fieldService.updateDefinition(fieldId, {
-            ...existing,
-            name,
-            fieldType: type,
-            linkToFieldId: linkToFieldId || null,
-            actionType: actionType || null
-          });
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
-          if (type === "lookup field" && actionType === "create linked table") {
-            openOrCreateAdminLinkedTab(name);
+          try {
+            // Handle base fields - update local config only, no API call
+            if (fieldId.startsWith("base-")) {
+              setBaseFieldNames((prev) => ({
+                ...prev,
+                [tableConfigTarget]: {
+                  ...(prev[tableConfigTarget] || {}),
+                  [fieldId]: name
+                }
+              }));
+              return;
+            }
+            const defs =
+              tableConfigTarget === "users"
+                ? usersDynamic.definitions
+                : tableConfigTarget === "products"
+                  ? productsDynamic.definitions
+                  : assetsDynamic.definitions;
+            const existing = defs.find((item) => item.id === fieldId);
+            if (!existing) return;
+            await fieldService.updateDefinition(fieldId, {
+              ...existing,
+              name,
+              fieldType: type,
+              linkToFieldId: linkToFieldId || null,
+              actionType: actionType || null
+            });
+            if (tableConfigTarget === "users") await usersDynamic.reload();
+            if (tableConfigTarget === "products") await productsDynamic.reload();
+            if (tableConfigTarget === "assets") await assetsDynamic.reload();
+            if (type === "lookup field" && actionType === "create linked table") {
+              openOrCreateAdminLinkedTab(name);
+            }
+          } catch (error) {
+            console.error("Error editing field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to edit field. Please try again."));
           }
         }}
         onDeleteField={async (fieldId) => {
-          await fieldService.deleteDefinition(fieldId);
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
+          try {
+            // Skip API calls for base fields - they can't be deleted
+            if (fieldId.startsWith("base-")) return;
+            await fieldService.deleteDefinition(fieldId);
+            if (tableConfigTarget === "users") await usersDynamic.reload();
+            if (tableConfigTarget === "products") await productsDynamic.reload();
+            if (tableConfigTarget === "assets") await assetsDynamic.reload();
+          } catch (error) {
+            console.error("Error deleting field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
+          }
         }}
       />
 
@@ -2564,57 +3549,85 @@ export const UserManagement: React.FC = () => {
           if (tableConfigTarget === "assets") await assetsDynamic.reload();
         }}
         onCreateField={async (name, type, linkToFieldId, actionType) => {
-          await fieldService.createDefinition({
-            id: "",
-            name,
-            fieldType: type,
-            linkToFieldId: linkToFieldId || null,
-            actionType: actionType || null,
-            tables: [tableConfigTarget],
-            sortOrder: allFieldDefinitions.definitions.length + 1,
-            isActive: true
-          });
-          await allFieldDefinitions.reload();
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "customers") await customersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
-          if (type === "lookup field" && actionType === "create linked table") {
-            openOrCreateAdminLinkedTab(name);
+          try {
+            await fieldService.createDefinition({
+              id: "",
+              name,
+              fieldType: type,
+              linkToFieldId: linkToFieldId || null,
+              actionType: actionType || null,
+              tables: [tableConfigTarget],
+              sortOrder: allFieldDefinitions.definitions.length + 1,
+              isActive: true
+            });
+            await allFieldDefinitions.reload();
+            if (tableConfigTarget === "users") await usersDynamic.reload();
+            if (tableConfigTarget === "customers") await customersDynamic.reload();
+            if (tableConfigTarget === "products") await productsDynamic.reload();
+            if (tableConfigTarget === "assets") await assetsDynamic.reload();
+            if (type === "lookup field" && actionType === "create linked table") {
+              openOrCreateAdminLinkedTab(name);
+            }
+          } catch (error) {
+            console.error("Error creating field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to create field. Please try again."));
           }
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
-          const defs =
-            tableConfigTarget === "users"
-              ? usersDynamic.definitions
-              : tableConfigTarget === "customers"
-                ? customersDynamic.definitions
-                : tableConfigTarget === "products"
-                  ? productsDynamic.definitions
-                  : assetsDynamic.definitions;
-          const existing = defs.find((item) => item.id === fieldId);
-          if (!existing) return;
-          await fieldService.updateDefinition(fieldId, {
-            ...existing,
-            name,
-            fieldType: type,
-            linkToFieldId: linkToFieldId || null,
-            actionType: actionType || null
-          });
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "customers") await customersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
-          if (type === "lookup field" && actionType === "create linked table") {
-            openOrCreateAdminLinkedTab(name);
+          try {
+            // Handle base fields - update local config only, no API call
+            if (fieldId.startsWith("base-")) {
+              setBaseFieldNames((prev) => ({
+                ...prev,
+                [tableConfigTarget]: {
+                  ...(prev[tableConfigTarget] || {}),
+                  [fieldId]: name
+                }
+              }));
+              return;
+            }
+            const defs =
+              tableConfigTarget === "users"
+                ? usersDynamic.definitions
+                : tableConfigTarget === "customers"
+                  ? customersDynamic.definitions
+                  : tableConfigTarget === "products"
+                    ? productsDynamic.definitions
+                    : assetsDynamic.definitions;
+            const existing = defs.find((item) => item.id === fieldId);
+            if (!existing) return;
+            await fieldService.updateDefinition(fieldId, {
+              ...existing,
+              name,
+              fieldType: type,
+              linkToFieldId: linkToFieldId || null,
+              actionType: actionType || null
+            });
+            if (tableConfigTarget === "users") await usersDynamic.reload();
+            if (tableConfigTarget === "customers") await customersDynamic.reload();
+            if (tableConfigTarget === "products") await productsDynamic.reload();
+            if (tableConfigTarget === "assets") await assetsDynamic.reload();
+            if (type === "lookup field" && actionType === "create linked table") {
+              openOrCreateAdminLinkedTab(name);
+            }
+          } catch (error) {
+            console.error("Error editing field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to edit field. Please try again."));
           }
         }}
         onDeleteField={async (fieldId) => {
-          await fieldService.deleteDefinition(fieldId);
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "customers") await customersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
+          try {
+            // Skip API calls for base fields - they can't be deleted
+            if (fieldId.startsWith("base-")) return;
+            await fieldService.deleteDefinition(fieldId);
+            if (tableConfigTarget === "users") await usersDynamic.reload();
+            if (tableConfigTarget === "customers") await customersDynamic.reload();
+            if (tableConfigTarget === "products") await productsDynamic.reload();
+            if (tableConfigTarget === "assets") await assetsDynamic.reload();
+          } catch (error) {
+            console.error("Error deleting field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
+          }
         }}
       />
 
@@ -2739,83 +3752,112 @@ export const UserManagement: React.FC = () => {
           }
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
-          if (!customTableConfigTabId) return;
-          if (fieldId.startsWith("default:")) {
-            const oldName = fieldId.replace("default:", "");
-            const nextName = name.trim() || oldName;
+          try {
+            if (!customTableConfigTabId) return;
+            if (fieldId.startsWith("default:")) {
+              const oldName = fieldId.replace("default:", "");
+              const nextName = name.trim() || oldName;
+              setAdminTabsConfig((prev) =>
+                prev.map((tabItem) =>
+                  tabItem.id === customTableConfigTabId
+                    ? {
+                        ...tabItem,
+                        columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
+                        config: {
+                          order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
+                            id === fieldId ? `default:${nextName}` : id
+                          ),
+                          hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
+                            id === fieldId ? `default:${nextName}` : id
+                          )
+                        }
+                      }
+                    : tabItem
+                )
+              );
+              setAdminTabRows((prev) => ({
+                ...prev,
+                [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
+                  const nextRow = { ...row };
+                  nextRow[nextName] = nextRow[oldName] ?? "";
+                  delete nextRow[oldName];
+                  return nextRow;
+                })
+              }));
+              setCustomTabConfigs((prev) => ({
+                ...prev,
+                [customTableConfigTabId]: {
+                  order: (prev[customTableConfigTabId]?.order || []).map((id) =>
+                    id === fieldId ? `default:${nextName}` : id
+                  ),
+                  hidden: (prev[customTableConfigTabId]?.hidden || []).map((id) =>
+                    id === fieldId ? `default:${nextName}` : id
+                  )
+                }
+              }));
+              return;
+            }
+            const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
+            if (!existing) return;
+            await fieldService.updateDefinition(fieldId, {
+              ...existing,
+              name,
+              fieldType: type,
+              linkToFieldId: linkToFieldId || null,
+              actionType: actionType || null
+            });
+            await allFieldDefinitions.reload();
+            if (type === "lookup field" && actionType === "create linked table") {
+              openOrCreateAdminLinkedTab(name);
+            }
+          } catch (error) {
+            console.error("Error editing field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to edit field. Please try again."));
+          }
+        }}
+        onDeleteField={async (fieldId) => {
+          try {
+            if (!customTableConfigTabId) return;
+            if (fieldId.startsWith("default:")) {
+              const name = fieldId.replace("default:", "");
+              setAdminTabsConfig((prev) =>
+                prev.map((tabItem) =>
+                  tabItem.id === customTableConfigTabId
+                    ? { ...tabItem, columns: (tabItem.columns || []).filter((col) => col !== name) }
+                    : tabItem
+                )
+              );
+              setAdminTabRows((prev) => ({
+                ...prev,
+                [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
+                  const nextRow = { ...row };
+                  delete nextRow[name];
+                  return nextRow;
+                })
+              }));
+              setCustomTabConfigs((prev) => ({
+                ...prev,
+                [customTableConfigTabId]: {
+                  order: (prev[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
+                  hidden: (prev[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
+                }
+              }));
+              return;
+            }
             setAdminTabsConfig((prev) =>
               prev.map((tabItem) =>
                 tabItem.id === customTableConfigTabId
                   ? {
                       ...tabItem,
-                      columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
+                      fieldIds: (tabItem.fieldIds || []).filter((id) => id !== fieldId),
                       config: {
-                        order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
-                          id === fieldId ? `default:${nextName}` : id
-                        ),
-                        hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
-                          id === fieldId ? `default:${nextName}` : id
-                        )
+                        order: (customTabConfigs[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
+                        hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
                       }
                     }
                   : tabItem
               )
             );
-            setAdminTabRows((prev) => ({
-              ...prev,
-              [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
-                const nextRow = { ...row };
-                nextRow[nextName] = nextRow[oldName] ?? "";
-                delete nextRow[oldName];
-                return nextRow;
-              })
-            }));
-            setCustomTabConfigs((prev) => ({
-              ...prev,
-              [customTableConfigTabId]: {
-                order: (prev[customTableConfigTabId]?.order || []).map((id) =>
-                  id === fieldId ? `default:${nextName}` : id
-                ),
-                hidden: (prev[customTableConfigTabId]?.hidden || []).map((id) =>
-                  id === fieldId ? `default:${nextName}` : id
-                )
-              }
-            }));
-            return;
-          }
-          const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
-          if (!existing) return;
-          await fieldService.updateDefinition(fieldId, {
-            ...existing,
-            name,
-            fieldType: type,
-            linkToFieldId: linkToFieldId || null,
-            actionType: actionType || null
-          });
-          await allFieldDefinitions.reload();
-          if (type === "lookup field" && actionType === "create linked table") {
-            openOrCreateAdminLinkedTab(name);
-          }
-        }}
-        onDeleteField={async (fieldId) => {
-          if (!customTableConfigTabId) return;
-          if (fieldId.startsWith("default:")) {
-            const name = fieldId.replace("default:", "");
-            setAdminTabsConfig((prev) =>
-              prev.map((tabItem) =>
-                tabItem.id === customTableConfigTabId
-                  ? { ...tabItem, columns: (tabItem.columns || []).filter((col) => col !== name) }
-                  : tabItem
-              )
-            );
-            setAdminTabRows((prev) => ({
-              ...prev,
-              [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
-                const nextRow = { ...row };
-                delete nextRow[name];
-                return nextRow;
-              })
-            }));
             setCustomTabConfigs((prev) => ({
               ...prev,
               [customTableConfigTabId]: {
@@ -2823,37 +3865,18 @@ export const UserManagement: React.FC = () => {
                 hidden: (prev[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
               }
             }));
-            return;
+            setAdminTabRows((prev) => ({
+              ...prev,
+              [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
+                const nextRow = { ...row };
+                delete nextRow[fieldId];
+                return nextRow;
+              })
+            }));
+          } catch (error) {
+            console.error("Error deleting field:", error);
+            setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
           }
-          setAdminTabsConfig((prev) =>
-            prev.map((tabItem) =>
-              tabItem.id === customTableConfigTabId
-                ? {
-                    ...tabItem,
-                    fieldIds: (tabItem.fieldIds || []).filter((id) => id !== fieldId),
-                    config: {
-                      order: (customTabConfigs[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
-                      hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
-                    }
-                  }
-                : tabItem
-            )
-          );
-          setCustomTabConfigs((prev) => ({
-            ...prev,
-            [customTableConfigTabId]: {
-              order: (prev[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
-              hidden: (prev[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
-            }
-          }));
-          setAdminTabRows((prev) => ({
-            ...prev,
-            [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
-              const nextRow = { ...row };
-              delete nextRow[fieldId];
-              return nextRow;
-            })
-          }));
         }}
       />
 
@@ -2899,7 +3922,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <DynamicFieldsForm
-              definitions={customersDynamic.definitions}
+              definitions={orderedCustomersDefinitions}
               values={customerDynamicValues}
               onChange={setCustomerDynamicValues}
             />
@@ -2920,19 +3943,19 @@ export const UserManagement: React.FC = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ marginTop: 1 }}>
             <TextField
-              label="Product name"
+              label={baseFieldNames.products?.["base-name"] || "Product name"}
               value={productForm.name}
               onChange={(event) => setProductForm((prev) => ({ ...prev, name: event.target.value }))}
             />
             <TextField
-              label="Description (optional)"
+              label={`${baseFieldNames.products?.["base-description"] || "Description"} (optional)`}
               value={productForm.description}
               onChange={(event) => setProductForm((prev) => ({ ...prev, description: event.target.value }))}
               multiline
               rows={2}
             />
             <DynamicFieldsForm
-              definitions={productsDynamic.definitions}
+              definitions={orderedProductsDefinitions}
               values={productDynamicValues}
               onChange={setProductDynamicValues}
             />
@@ -2992,7 +4015,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <DynamicFieldsForm
-              definitions={usersDynamic.definitions}
+              definitions={orderedUsersDefinitions}
               values={editUserDynamicValues}
               onChange={setEditUserDynamicValues}
             />
@@ -3037,7 +4060,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <DynamicFieldsForm
-              definitions={customersDynamic.definitions}
+              definitions={orderedCustomersDefinitions}
               values={editCustomerDynamicValues}
               onChange={setEditCustomerDynamicValues}
             />
@@ -3058,19 +4081,19 @@ export const UserManagement: React.FC = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ marginTop: 1 }}>
             <TextField
-              label="Product name"
+              label={baseFieldNames.products?.["base-name"] || "Product name"}
               value={editProductForm.name}
               onChange={(event) => setEditProductForm((prev) => ({ ...prev, name: event.target.value }))}
             />
             <TextField
-              label="Description (optional)"
+              label={`${baseFieldNames.products?.["base-description"] || "Description"} (optional)`}
               value={editProductForm.description}
               onChange={(event) => setEditProductForm((prev) => ({ ...prev, description: event.target.value }))}
               multiline
               rows={2}
             />
             <DynamicFieldsForm
-              definitions={productsDynamic.definitions}
+              definitions={orderedProductsDefinitions}
               values={editProductDynamicValues}
               onChange={setEditProductDynamicValues}
             />
@@ -3099,22 +4122,24 @@ export const UserManagement: React.FC = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ marginTop: 1 }}>
             <TextField
-              label="Machine Type"
+              label={baseFieldNames.assets?.["base-machineType"] || "Machine Type"}
               value={assetForm.machineType}
               onChange={(event) => setAssetForm((prev) => ({ ...prev, machineType: event.target.value }))}
             />
             <TextField
-              label="Machine ID"
+              label={baseFieldNames.assets?.["base-machineId"] || "Machine ID"}
               value={assetForm.machineId}
               onChange={(event) => setAssetForm((prev) => ({ ...prev, machineId: event.target.value }))}
             />
             <TextField
-              label="Serial Number"
+              label={baseFieldNames.assets?.["base-serialNumber"] || "Serial Number"}
               value={assetForm.serialNumber}
               onChange={(event) => setAssetForm((prev) => ({ ...prev, serialNumber: event.target.value }))}
             />
-            <FormControl>
+            <FormControl fullWidth>
+              <InputLabel>{baseFieldNames.assets?.["base-pmCount"] || "PM Count"}</InputLabel>
               <Select
+                label={baseFieldNames.assets?.["base-pmCount"] || "PM Count"}
                 value={assetForm.pmCount}
                 onChange={(event) => setAssetForm((prev) => ({ ...prev, pmCount: event.target.value }))}
               >
@@ -3126,14 +4151,14 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <TextField
-              label="Comments"
+              label={baseFieldNames.assets?.["base-comments"] || "Comments"}
               value={assetForm.comments}
               onChange={(event) => setAssetForm((prev) => ({ ...prev, comments: event.target.value }))}
               multiline
               rows={2}
             />
             <DynamicFieldsForm
-              definitions={assetsDynamic.definitions}
+              definitions={orderedAssetsDefinitions}
               values={assetDynamicValues}
               onChange={setAssetDynamicValues}
             />
@@ -3190,25 +4215,26 @@ export const UserManagement: React.FC = () => {
           open={adminSettingsMenuOpen}
           onClose={() => setAdminSettingsMenuOpen(false)}
         >
-        <MenuItem
-          onClick={() => {
-            setAdminSettingsMenuOpen(false);
-            const selected = adminTabsConfig[tab];
-            if (!selected) return;
-            if (selected.type === "custom") {
-              setCustomTableConfigTabId(selected.id);
-              setCustomTableConfigOpen(true);
-              return;
-            }
-            if (selected.type === "users") setTableConfigTarget("users");
-            if (selected.type === "customers") setTableConfigTarget("customers");
-            if (selected.type === "products") setTableConfigTarget("products");
-            if (selected.type === "assets") setTableConfigTarget("assets");
-            setTableConfigOpen(true);
-          }}
-        >
-          Table configuration
-        </MenuItem>
+        {adminTabsConfig[tab]?.type !== "customers" && (
+          <MenuItem
+            onClick={() => {
+              setAdminSettingsMenuOpen(false);
+              const selected = adminTabsConfig[tab];
+              if (!selected) return;
+              if (selected.type === "custom") {
+                setCustomTableConfigTabId(selected.id);
+                setCustomTableConfigOpen(true);
+                return;
+              }
+              if (selected.type === "users") setTableConfigTarget("users");
+              if (selected.type === "products") setTableConfigTarget("products");
+              if (selected.type === "assets") setTableConfigTarget("assets");
+              setTableConfigOpen(true);
+            }}
+          >
+            Table configuration
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             setAdminSettingsMenuOpen(false);
@@ -3495,6 +4521,54 @@ export const UserManagement: React.FC = () => {
           <Button variant="contained" color="error" onClick={handleConfirmDelete}>
             Delete
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Logo Upload Dialog */}
+      <Dialog
+        open={logoUploadDialogOpen}
+        onClose={() => setLogoUploadDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Upload Customer Logo</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Accepted file types:
+          </Typography>
+          <Box sx={{ mb: 2 }}>
+            <Chip label="PNG" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+            <Chip label="JPG" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+            <Chip label="JPEG" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+            <Chip label="GIF" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+            <Chip label="SVG" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+          </Box>
+          <Button
+            variant="contained"
+            component="label"
+            fullWidth
+          >
+            Choose File
+            <input
+              type="file"
+              hidden
+              accept="image/png,image/jpeg,image/jpg,image/gif,image/svg+xml"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                    setEditCustomerLogo(reader.result as string);
+                    setLogoUploadDialogOpen(false);
+                  };
+                  reader.readAsDataURL(file);
+                }
+              }}
+            />
+          </Button>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLogoUploadDialogOpen(false)}>Cancel</Button>
         </DialogActions>
       </Dialog>
     </Container>

@@ -45,6 +45,23 @@ public class ProductEntity
     public string? Description { get; set; }
 }
 
+public class AssetEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public int Seq { get; set; }
+    [MaxLength(200)]
+    public string MachineType { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string MachineId { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string SerialNumber { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string PmCount { get; set; } = string.Empty;
+    [MaxLength(800)]
+    public string Comments { get; set; } = string.Empty;
+}
+
 public class ProjectEntity
 {
     [Key]
@@ -303,6 +320,13 @@ public class InstallationTabRowEntity
     public string TabId { get; set; } = string.Empty;
     public string DataJson { get; set; } = "{}";
     public int Position { get; set; }
+}
+
+public class RoleConfigEntity
+{
+    [Key]
+    public int Id { get; set; } = 1;
+    public string ConfigJson { get; set; } = "{}";
 }
 
 public class QuickbaseSettingsEntity

@@ -3,6 +3,7 @@ using System;
 using Commtrac.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Commtrac.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260205011009_AddTableConfigs")]
+    partial class AddTableConfigs
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.23");
@@ -112,44 +115,6 @@ namespace Commtrac.Api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("AdminTabRows");
-                });
-
-            modelBuilder.Entity("Commtrac.Api.Models.AssetEntity", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Comments")
-                        .IsRequired()
-                        .HasMaxLength(800)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MachineId")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MachineType")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PmCount")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Seq")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("SerialNumber")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Assets");
                 });
 
             modelBuilder.Entity("Commtrac.Api.Models.CustomFieldDefinitionEntity", b =>
@@ -1067,21 +1032,6 @@ namespace Commtrac.Api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("QuickbaseSettings");
-                });
-
-            modelBuilder.Entity("Commtrac.Api.Models.RoleConfigEntity", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ConfigJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("RoleConfigs");
                 });
 
             modelBuilder.Entity("Commtrac.Api.Models.UserEntity", b =>

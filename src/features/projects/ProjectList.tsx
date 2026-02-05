@@ -76,7 +76,6 @@ const ProjectList = () => {
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
   const projectsTableConfig = useTableConfig(
     "projects",
-    user?.id || "anonymous",
     projectsDynamic.definitions.map((field) => ({
       id: field.id,
       name: field.name,

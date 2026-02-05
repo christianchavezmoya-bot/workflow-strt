@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<UserEntity> Users => Set<UserEntity>();
     public DbSet<CustomerEntity> Customers => Set<CustomerEntity>();
     public DbSet<ProductEntity> Products => Set<ProductEntity>();
+    public DbSet<AssetEntity> Assets => Set<AssetEntity>();
     public DbSet<ProjectEntity> Projects => Set<ProjectEntity>();
     public DbSet<InstallationEntity> Installations => Set<InstallationEntity>();
     public DbSet<CustomFieldDefinitionEntity> CustomFieldDefinitions => Set<CustomFieldDefinitionEntity>();
@@ -29,6 +30,8 @@ public class AppDbContext : DbContext
     public DbSet<AdminTabRowEntity> AdminTabRows => Set<AdminTabRowEntity>();
     public DbSet<InstallationTabEntity> InstallationTabs => Set<InstallationTabEntity>();
     public DbSet<InstallationTabRowEntity> InstallationTabRows => Set<InstallationTabRowEntity>();
+    public DbSet<TableConfigEntity> TableConfigs => Set<TableConfigEntity>();
+    public DbSet<RoleConfigEntity> RoleConfigs => Set<RoleConfigEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -66,6 +69,22 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<QuickbaseSettingsEntity>()
             .Property(s => s.InstallationsFieldMapJson)
+            .HasDefaultValue("{}");
+
+        modelBuilder.Entity<TableConfigEntity>()
+            .HasIndex(t => t.TableName)
+            .IsUnique();
+
+        modelBuilder.Entity<TableConfigEntity>()
+            .Property(t => t.OrderJson)
+            .HasDefaultValue("[]");
+
+        modelBuilder.Entity<TableConfigEntity>()
+            .Property(t => t.HiddenJson)
+            .HasDefaultValue("[]");
+
+        modelBuilder.Entity<TableConfigEntity>()
+            .Property(t => t.BaseFieldNamesJson)
             .HasDefaultValue("{}");
 
         modelBuilder.Entity<FieldDefinitionEntity>()
