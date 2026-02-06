@@ -1997,26 +1997,31 @@ export const UserManagement: React.FC = () => {
               <Button
                 variant="contained"
                 startIcon={<AddOutlined />}
-                onClick={() => {
-                  const newId = Math.max(...customersList.map(c => typeof c.id === 'number' ? c.id : 0), 0) + 1;
-                  const newCustomer = {
-                    id: newId,
-                    name: `New Customer ${newId}`,
-                    type: 'Industry',
-                    sites: 0,
-                    logo: null as string | null,
-                    logoShape: 'round' as 'none' | 'round' | 'rectangular',
-                    logoSize: 70,
-                    photoScale: 100
+                onClick={async () => {
+                  const newCustomerPayload = {
+                    name: `New Customer`,
+                    customerId: `CUST-${Date.now()}`,
+                    office: activeOffice === "All" ? "USA" : activeOffice,
+                    logo: null,
+                    logoShape: 'round',
+                    photoScale: 100,
+                    logoSize: 70
                   };
-                  setCustomersList(prev => [...prev, newCustomer]);
-                  setEditingCustomerId(newCustomer.id);
-                  setEditCustomerName(newCustomer.name);
-                  setEditCustomerIndustry(newCustomer.type);
-                  setEditCustomerLogo(null);
-                  setEditCustomerLogoShape('round');
-                  setEditCustomerLogoSize(70);
-                  setEditCustomerPhotoScale(100);
+
+                  try {
+                    const response = await api.post('/customers', newCustomerPayload);
+                    await dispatch(fetchCustomers());
+                    setEditingCustomerId(response.data.id);
+                    setEditCustomerName(response.data.name);
+                    setEditCustomerIndustry('');
+                    setEditCustomerLogo(response.data.logo);
+                    setEditCustomerLogoShape(response.data.logoShape || 'round');
+                    setEditCustomerLogoSize(response.data.logoSize || 70);
+                    setEditCustomerPhotoScale(response.data.photoScale || 100);
+                  } catch (err) {
+                    console.error("Failed to create customer", err);
+                    alert("Failed to create customer");
+                  }
                 }}
               >
                 New Client
@@ -2101,7 +2106,7 @@ export const UserManagement: React.FC = () => {
                 gap: 2,
               }}
             >
-            {customersList
+            {filteredCustomers
               .filter((customer) => {
                 // Search only customer names that start with the search term
                 if (!customerSearch) return true;
@@ -2157,9 +2162,16 @@ export const UserManagement: React.FC = () => {
                             <IconButton
                               size="small"
                               sx={{ padding: 0.25 }}
-                              onClick={(e) => {
+                              onClick={async (e) => {
                                 e.stopPropagation();
-                                setCustomersList((prev) => prev.filter((c) => c.id !== customer.id));
+                                if (!confirm(`Delete customer "${customer.name}"?`)) return;
+                                try {
+                                  await api.delete(`/customers/${customer.id}`);
+                                  await dispatch(fetchCustomers());
+                                } catch (err) {
+                                  console.error("Failed to delete customer", err);
+                                  alert("Failed to delete customer");
+                                }
                               }}
                             >
                               <DeleteOutline sx={{ fontSize: 18 }} />
@@ -2236,7 +2248,7 @@ export const UserManagement: React.FC = () => {
                             {customer.name}
                           </Typography>
                           <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
-                            {customer.type}
+                            {customer.customerId}
                           </Typography>
                           <Box sx={{ mt: 'auto' }}>
                             <Button
@@ -2248,7 +2260,7 @@ export const UserManagement: React.FC = () => {
                                 navigate(`/admin/customers/${customer.id}/sites`);
                               }}
                             >
-                              View Sites ({customer.sites})
+                              View Sites ({sitesList.filter(s => s.customerId === customer.id).length})
                             </Button>
                           </Box>
                         </Box>
@@ -2380,42 +2392,22 @@ export const UserManagement: React.FC = () => {
                           size="small"
                           onClick={async () => {
                             try {
-                              // Save to API
+                              // Save to API with logo fields
                               const customerPayload = {
                                 name: editCustomerName,
                                 customerId: `CUST-${customer.id}`,
                                 office: activeOffice === "All" ? "USA" : activeOffice,
+                                logo: editCustomerLogo,
+                                logoShape: editCustomerLogoShape,
+                                photoScale: editCustomerPhotoScale,
+                                logoSize: editCustomerLogoSize
                               };
 
-                              let savedCustomerId = customer.id;
+                              // Update existing customer
+                              await api.put(`/customers/${customer.id}`, customerPayload);
 
-                              // Try to update if it's an existing customer with a GUID-like ID
-                              if (typeof customer.id === 'string' && customer.id.includes('-')) {
-                                await api.put(`/customers/${customer.id}`, customerPayload);
-                              } else {
-                                // Create new customer if it's a temp ID (number)
-                                const response = await api.post('/customers', customerPayload);
-                                savedCustomerId = response.data.id;
-                              }
-
-                              // Update local state
-                              setCustomersList((prev) =>
-                                prev.map((c) =>
-                                  c.id === customer.id
-                                    ? {
-                                        ...c,
-                                        id: savedCustomerId,
-                                        name: editCustomerName,
-                                        type: editCustomerIndustry,
-                                        sites: c.sites,
-                                        logo: editCustomerLogo,
-                                        logoShape: editCustomerLogoShape,
-                                        logoSize: editCustomerLogoSize,
-                                        photoScale: editCustomerPhotoScale
-                                      }
-                                    : c
-                                )
-                              );
+                              // Refresh from API
+                              await dispatch(fetchCustomers());
                             } catch (err) {
                               console.error("Failed to save customer", err);
                               alert("Failed to save customer");
