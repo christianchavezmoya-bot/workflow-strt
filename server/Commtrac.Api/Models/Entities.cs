@@ -33,6 +33,8 @@ public class CustomerEntity
     public string CustomerId { get; set; } = string.Empty;
     [MaxLength(40)]
     public string Office { get; set; } = "All";
+    [MaxLength(100)]
+    public string? Industry { get; set; }
     [MaxLength(1000)]
     public string? Logo { get; set; }
     [MaxLength(40)]

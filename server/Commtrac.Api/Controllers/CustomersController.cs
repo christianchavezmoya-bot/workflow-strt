@@ -34,6 +34,7 @@ public class CustomersController : ControllerBase
             Name = request.Name,
             CustomerId = request.CustomerId,
             Office = request.Office,
+            Industry = request.Industry,
             Logo = request.Logo,
             LogoShape = request.LogoShape ?? "round",
             PhotoScale = request.PhotoScale ?? 100,
@@ -58,6 +59,7 @@ public class CustomersController : ControllerBase
         if (!string.IsNullOrWhiteSpace(request.Name)) customer.Name = request.Name;
         if (!string.IsNullOrWhiteSpace(request.CustomerId)) customer.CustomerId = request.CustomerId;
         if (!string.IsNullOrWhiteSpace(request.Office)) customer.Office = request.Office;
+        if (request.Industry != null) customer.Industry = request.Industry;
         if (request.Logo != null) customer.Logo = request.Logo;
         if (!string.IsNullOrWhiteSpace(request.LogoShape)) customer.LogoShape = request.LogoShape;
         if (request.PhotoScale.HasValue) customer.PhotoScale = request.PhotoScale.Value;
@@ -83,5 +85,5 @@ public class CustomersController : ControllerBase
     }
 
     private static CustomerDto ToDto(CustomerEntity customer)
-        => new(customer.Id, customer.Name, customer.CustomerId, customer.Office, customer.Logo, customer.LogoShape, customer.PhotoScale, customer.LogoSize);
+        => new(customer.Id, customer.Name, customer.CustomerId, customer.Office, customer.Industry, customer.Logo, customer.LogoShape, customer.PhotoScale, customer.LogoSize);
 }

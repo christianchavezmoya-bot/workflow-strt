@@ -2002,6 +2002,7 @@ export const UserManagement: React.FC = () => {
                     name: `New Customer`,
                     customerId: `CUST-${Date.now()}`,
                     office: activeOffice === "All" ? "USA" : activeOffice,
+                    industry: 'General',
                     logo: null,
                     logoShape: 'round',
                     photoScale: 100,
@@ -2013,7 +2014,7 @@ export const UserManagement: React.FC = () => {
                     await dispatch(fetchCustomers());
                     setEditingCustomerId(response.data.id);
                     setEditCustomerName(response.data.name);
-                    setEditCustomerIndustry('');
+                    setEditCustomerIndustry(response.data.industry || 'General');
                     setEditCustomerLogo(response.data.logo);
                     setEditCustomerLogoShape(response.data.logoShape || 'round');
                     setEditCustomerLogoSize(response.data.logoSize || 70);
@@ -2248,7 +2249,7 @@ export const UserManagement: React.FC = () => {
                             {customer.name}
                           </Typography>
                           <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
-                            {customer.customerId}
+                            {customer.industry || 'General'}
                           </Typography>
                           <Box sx={{ mt: 'auto' }}>
                             <Button
@@ -2392,11 +2393,12 @@ export const UserManagement: React.FC = () => {
                           size="small"
                           onClick={async () => {
                             try {
-                              // Save to API with logo fields
+                              // Save to API with all fields including industry
                               const customerPayload = {
                                 name: editCustomerName,
                                 customerId: `CUST-${customer.id}`,
                                 office: activeOffice === "All" ? "USA" : activeOffice,
+                                industry: editCustomerIndustry,
                                 logo: editCustomerLogo,
                                 logoShape: editCustomerLogoShape,
                                 photoScale: editCustomerPhotoScale,

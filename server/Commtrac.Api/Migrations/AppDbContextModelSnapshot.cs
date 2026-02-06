@@ -203,6 +203,10 @@ namespace Commtrac.Api.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Industry")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Logo")
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");

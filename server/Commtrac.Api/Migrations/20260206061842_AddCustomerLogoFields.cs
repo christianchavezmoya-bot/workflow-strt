@@ -11,6 +11,13 @@ namespace Commtrac.Api.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<string>(
+                name: "Industry",
+                table: "Customers",
+                type: "TEXT",
+                maxLength: 100,
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
                 name: "Logo",
                 table: "Customers",
                 type: "TEXT",
@@ -43,6 +50,10 @@ namespace Commtrac.Api.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropColumn(
+                name: "Industry",
+                table: "Customers");
+
             migrationBuilder.DropColumn(
                 name: "Logo",
                 table: "Customers");
