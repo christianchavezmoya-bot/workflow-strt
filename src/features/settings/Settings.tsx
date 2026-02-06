@@ -27,6 +27,7 @@ import { fieldService, FieldDefinition } from "../../services/fieldService";
 import api from "../../services/api";
 import { settingsService } from "../../services/settingsService";
 import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/settings";
+import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
 
 const defaultSettings: QuickbaseSettingsForm = {
   enabled: false,
@@ -63,6 +64,7 @@ const parseJsonMap = (value: string) => {
 };
 
 const Settings = () => {
+  const { addNotification } = useFieldNotifications();
   const [tab, setTab] = useState(0);
   const [settings, setSettings] = useState<QuickbaseSettingsForm>(() => loadSettings());
   const [status, setStatus] = useState<"" | "saved" | "sent" | "error">("");
@@ -76,6 +78,9 @@ const Settings = () => {
   const [editField, setEditField] = useState<null | { id: string; name: string; type: string }>(null);
   const [fieldDefinitions, setFieldDefinitions] = useState<FieldDefinition[]>([]);
   const [lookupFieldId, setLookupFieldId] = useState<string | null>(null);
+  const [fieldSearch, setFieldSearch] = useState("");
+  const [seedLoading, setSeedLoading] = useState(false);
+  const [seedSuccess, setSeedSuccess] = useState(false);
   const [lookupRows, setLookupRows] = useState<Record<string, Array<{ id: string; label: string }>>>({});
   const [notifySettings, setNotifySettings] = useState(() => {
     try {
@@ -521,12 +526,14 @@ const Settings = () => {
                           sortOrder: fieldDefinitions.length + 1,
                           isActive: true
                         })
-                        .then((created) =>
+                        .then((created) => {
                           setFieldDefinitions((prev) => {
                             if (prev.some((item) => item.id === created.id)) return prev;
                             return [...prev, created];
-                          })
-                        )
+                          });
+                          // Trigger notification
+                          addNotification(trimmed);
+                        })
                         .catch(() => reloadFieldDefinitions())
                         .finally(() => {
                           setFieldName("");
@@ -540,20 +547,49 @@ const Settings = () => {
             </Box>
 
             <Box className="glass-card" sx={{ padding: 2 }}>
-              <Typography variant="subtitle1">Assigned fields</Typography>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                <Typography variant="subtitle1">Assigned fields</Typography>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={seedLoading}
+                  onClick={async () => {
+                    setSeedLoading(true);
+                    setSeedSuccess(false);
+                    try {
+                      const data = await fieldService.seedDefaults();
+                      setFieldDefinitions(data);
+                      setSeedSuccess(true);
+                      setTimeout(() => setSeedSuccess(false), 3000);
+                    } catch (error) {
+                      console.error("Failed to seed fields:", error);
+                      alert("Failed to seed default fields. Check console for details.");
+                    } finally {
+                      setSeedLoading(false);
+                    }
+                  }}
+                >
+                  {seedLoading ? "Loading..." : "Seed/Refresh Default Fields"}
+                </Button>
+              </Stack>
+              {seedSuccess && (
+                <Alert severity="success" sx={{ mb: 2 }}>
+                  Default fields loaded successfully! ({fieldDefinitions.length} fields)
+                </Alert>
+              )}
+              <TextField
+                size="small"
+                placeholder="Search fields..."
+                value={fieldSearch}
+                onChange={(e) => setFieldSearch(e.target.value)}
+                fullWidth
+                sx={{ mb: 2 }}
+              />
               {fieldDefinitions.length === 0 ? (
                 <Stack spacing={1} sx={{ marginTop: 1 }}>
                   <Typography variant="body2" color="text.secondary">
-                    No fields yet. Add one above or load the defaults.
+                    No fields yet. Click "Seed/Refresh Default Fields" above to load defaults.
                   </Typography>
-                  <Button
-                    variant="outlined"
-                    onClick={() =>
-                      fieldService.seedDefaults().then((data) => setFieldDefinitions(data))
-                    }
-                  >
-                    Load default fields
-                  </Button>
                 </Stack>
               ) : (
                 <Table sx={{ marginTop: 1 }}>
@@ -567,7 +603,16 @@ const Settings = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {fieldDefinitions.map((field) => {
+                    {fieldDefinitions
+                      .filter((field) =>
+                        field.name.toLowerCase().includes(fieldSearch.toLowerCase()) ||
+                        field.fieldType.toLowerCase().includes(fieldSearch.toLowerCase())
+                      )
+                      .sort((a, b) => {
+                        // Sort alphabetically by field name
+                        return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+                      })
+                      .map((field) => {
                       const tables = field.tables ?? [];
                       const slots = Array.from({ length: tableColumnSlots }).map((_, index) => tables[index] || "");
                       return (
@@ -589,7 +634,14 @@ const Settings = () => {
                                   onChange={(event) => {
                                     const nextValue = event.target.value;
                                     const nextTables = [...slots];
+                                    const previousValue = nextTables[index];
                                     nextTables[index] = nextValue;
+
+                                    // Trigger notification if assigning to a new table (not removing or changing)
+                                    if (nextValue && nextValue !== previousValue) {
+                                      addNotification(field.name);
+                                    }
+
                                     fieldService
                                       .updateDefinition(field.id, {
                                         ...field,
@@ -643,6 +695,18 @@ const Settings = () => {
                         </TableRow>
                       );
                     })}
+                    {fieldDefinitions.filter((field) =>
+                      field.name.toLowerCase().includes(fieldSearch.toLowerCase()) ||
+                      field.fieldType.toLowerCase().includes(fieldSearch.toLowerCase())
+                    ).length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={tableColumnSlots + 2} align="center">
+                          <Typography variant="body2" color="text.secondary">
+                            No fields match your search "{fieldSearch}"
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               )}

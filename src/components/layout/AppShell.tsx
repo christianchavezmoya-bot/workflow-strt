@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 import DebugPanel from "./DebugPanel";
+import FieldNotificationBar from "../FieldNotificationBar";
 
 const AppShell = () => {
   return (
@@ -10,6 +11,7 @@ const AppShell = () => {
       <Sidebar />
       <Box className="app-main">
         <Topbar />
+        <FieldNotificationBar />
         <Box component="main" className="app-content">
           <Outlet />
         </Box>

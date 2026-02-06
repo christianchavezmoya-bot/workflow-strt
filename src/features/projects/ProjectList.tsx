@@ -88,7 +88,7 @@ const ProjectList = () => {
   const projectFixedColumns = useMemo(
     () =>
       new Set(
-        ["Job Number", "Customer", "Products", "Type", "Status", "Office"].map((value) => value.toLowerCase())
+        ["Job Number", "Customer", "Products", "Project Type", "Status", "Office"].map((value) => value.toLowerCase())
       ),
     []
   );
@@ -115,7 +115,7 @@ const ProjectList = () => {
   });
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   useEffect(() => {
     dispatch(
@@ -322,7 +322,7 @@ const ProjectList = () => {
               </TableCell>
               <TableCell>
                 <Stack direction="row" alignItems="center" spacing={0.5}>
-                  <span>Type</span>
+                  <span>Project Type</span>
                   <IconButton size="small" onClick={(event) => setAutoMenu({ anchorEl: event.currentTarget, key: "projectType" })}>
                     <ArrowDropDown fontSize="small" />
                   </IconButton>
@@ -499,7 +499,7 @@ const ProjectList = () => {
             setRowsPerPage(Number(event.target.value));
             setPage(0);
           }}
-          rowsPerPageOptions={[5, 10, 25]}
+          rowsPerPageOptions={[25, 50, 100, 500]}
         />
       </Box>
       {loading && (

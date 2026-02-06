@@ -41,19 +41,71 @@ public record CustomerDto(
     string Id,
     string Name,
     string CustomerId,
-    string Office
+    string Office,
+    string? Logo,
+    string LogoShape,
+    int PhotoScale,
+    int LogoSize
 );
 
 public record CreateCustomerRequest(
     string Name,
     string CustomerId,
-    string Office
+    string Office,
+    string? Logo,
+    string? LogoShape,
+    int? PhotoScale,
+    int? LogoSize
 );
 
 public record UpdateCustomerRequest(
     string? Name,
     string? CustomerId,
-    string? Office
+    string? Office,
+    string? Logo,
+    string? LogoShape,
+    int? PhotoScale,
+    int? LogoSize
+);
+
+public record SiteDto(
+    string Id,
+    string CustomerId,
+    string Name,
+    string? Address,
+    string? City,
+    string? State,
+    string? ZipCode,
+    string? ContactName,
+    string? ContactPhone,
+    string? ContactEmail,
+    string? Notes,
+    DateTime CreatedAt
+);
+
+public record CreateSiteRequest(
+    string CustomerId,
+    string Name,
+    string? Address,
+    string? City,
+    string? State,
+    string? ZipCode,
+    string? ContactName,
+    string? ContactPhone,
+    string? ContactEmail,
+    string? Notes
+);
+
+public record UpdateSiteRequest(
+    string? Name,
+    string? Address,
+    string? City,
+    string? State,
+    string? ZipCode,
+    string? ContactName,
+    string? ContactPhone,
+    string? ContactEmail,
+    string? Notes
 );
 
 public record ProductDto(

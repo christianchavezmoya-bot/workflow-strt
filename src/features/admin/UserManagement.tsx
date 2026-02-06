@@ -29,15 +29,20 @@ import {
   Tooltip,
   Chip,
   ListItemText,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
 import {
   AddOutlined,
   DeleteOutline,
   EditOutlined,
   ArrowDropDown,
-  SettingsOutlined
+  SettingsOutlined,
+  GridView,
+  TableRows,
 } from "@mui/icons-material";
-import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from "react";
+import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
 import GlobalOfficeMap, { Office } from "../../components/GlobalOfficeMap";
@@ -50,6 +55,7 @@ import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { adminTabsService, AdminTab, AdminTabRow } from "../../services/adminTabsService";
 import { fieldService } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
+import api from "../../services/api";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer } from "../../store/customersSlice";
 import { createProduct, deleteProduct, fetchProducts, updateProduct } from "../../store/productsSlice";
@@ -146,10 +152,70 @@ const applyAutoFilter = <T,>(
   );
 };
 
+// Draggable Paper component for Dialog
+function DraggablePaper(props: any) {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
+  const handleMouseDown = (e: ReactMouseEvent) => {
+    // Only allow dragging from the title area
+    const target = e.target as HTMLElement;
+    if (target.closest('.MuiDialogTitle-root')) {
+      setIsDragging(true);
+      setDragStart({
+        x: e.clientX - position.x,
+        y: e.clientY - position.y,
+      });
+    }
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDragging) {
+        setPosition({
+          x: e.clientX - dragStart.x,
+          y: e.clientY - dragStart.y,
+        });
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isDragging, dragStart.x, dragStart.y, position.x, position.y]);
+
+  return (
+    <Paper
+      {...props}
+      onMouseDown={handleMouseDown}
+      sx={{
+        ...props.sx,
+        transform: `translate(${position.x}px, ${position.y}px)`,
+        cursor: isDragging ? 'grabbing' : 'default',
+        '& .MuiDialogTitle-root': {
+          cursor: 'grab',
+          userSelect: 'none',
+        },
+      }}
+    />
+  );
+}
+
 export const UserManagement: React.FC = () => {
   const { user } = useAuth();
   const { activeOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
+  const navigate = useNavigate();
   const usersState = useAppSelector((state) => state.users);
   const customersState = useAppSelector((state) => state.customers);
   const productsState = useAppSelector((state) => state.products);
@@ -179,31 +245,57 @@ export const UserManagement: React.FC = () => {
     office: activeOffice === "All" ? "" : activeOffice
   });
   const [customersList, setCustomersList] = useState([
-    { id: 101, name: "Apex Industries", type: "Manufacturing", state: "CA", sites: 2, logo: null as string | null },
-    { id: 102, name: "BeeHealthy Foods", type: "Retail", state: "NY", sites: 2, logo: null as string | null },
-    { id: 103, name: "SolarTech Energy", type: "Energy", state: "TX", sites: 2, logo: null as string | null },
-    { id: 104, name: "Zenith Data Systems", type: "Technology", state: "WA", sites: 2, logo: null as string | null },
-    { id: 105, name: "Kappa Telecoms", type: "Technology", state: "CA", sites: 1, logo: null as string | null },
-    { id: 106, name: "Omega Softworks", type: "Technology", state: "MA", sites: 2, logo: null as string | null },
-    { id: 107, name: "Delta Dental", type: "Healthcare", state: "FL", sites: 1, logo: null as string | null },
-    { id: 108, name: "Pi Pharmaceuticals", type: "Healthcare", state: "NJ", sites: 2, logo: null as string | null },
-    { id: 109, name: "Theta Care", type: "Healthcare", state: "IL", sites: 1, logo: null as string | null },
-    { id: 110, name: "Lambda Financial", type: "Finance", state: "NY", sites: 2, logo: null as string | null },
-    { id: 111, name: "Sigma Capital", type: "Finance", state: "CT", sites: 1, logo: null as string | null },
-    { id: 112, name: "Phi Bank", type: "Finance", state: "DE", sites: 1, logo: null as string | null },
-    { id: 113, name: "Alpha Logistics", type: "Transport", state: "GA", sites: 2, logo: null as string | null },
-    { id: 114, name: "Beta Shipping", type: "Transport", state: "TX", sites: 1, logo: null as string | null },
-    { id: 115, name: "Mu Freight", type: "Transport", state: "OH", sites: 1, logo: null as string | null },
-    { id: 116, name: "Gamma Agritech", type: "Manufacturing", state: "IA", sites: 2, logo: null as string | null },
-    { id: 117, name: "Rho Education", type: "Education", state: "NC", sites: 2, logo: null as string | null },
-    { id: 118, name: "Xi Hospitality", type: "Retail", state: "NV", sites: 2, logo: null as string | null },
+    { id: 101, name: "Apex Industries", type: "Manufacturing", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 102, name: "BeeHealthy Foods", type: "Retail", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 103, name: "SolarTech Energy", type: "Energy", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 104, name: "Zenith Data Systems", type: "Technology", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 105, name: "Kappa Telecoms", type: "Technology", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 106, name: "Omega Softworks", type: "Technology", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 107, name: "Delta Dental", type: "Healthcare", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 108, name: "Pi Pharmaceuticals", type: "Healthcare", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 109, name: "Theta Care", type: "Healthcare", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 110, name: "Lambda Financial", type: "Finance", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 111, name: "Sigma Capital", type: "Finance", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 112, name: "Phi Bank", type: "Finance", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 113, name: "Alpha Logistics", type: "Transport", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 114, name: "Beta Shipping", type: "Transport", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 115, name: "Mu Freight", type: "Transport", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 116, name: "Gamma Agritech", type: "Manufacturing", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 117, name: "Rho Education", type: "Education", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
+    { id: 118, name: "Xi Hospitality", type: "Retail", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
   ]);
   const [editingCustomerId, setEditingCustomerId] = useState<number | null>(null);
   const [editCustomerName, setEditCustomerName] = useState("");
   const [editCustomerIndustry, setEditCustomerIndustry] = useState("");
-  const [editCustomerState, setEditCustomerState] = useState("");
   const [editCustomerLogo, setEditCustomerLogo] = useState<string | null>(null);
+  const [editCustomerLogoShape, setEditCustomerLogoShape] = useState<'none' | 'round' | 'rectangular'>('round');
+  const [editCustomerLogoSize, setEditCustomerLogoSize] = useState<number>(70);
+  const [editCustomerPhotoScale, setEditCustomerPhotoScale] = useState<number>(100);
   const [logoUploadDialogOpen, setLogoUploadDialogOpen] = useState(false);
+
+  // Sites Management State
+  const [customerViewMode, setCustomerViewMode] = useState<'cards' | 'table'>('cards');
+  const [sitesList, setSitesList] = useState<Array<{
+    id: string;
+    customerId: string | number;
+    name: string;
+    address?: string;
+    city?: string;
+    state?: string;
+    contactName?: string;
+    contactPhone?: string;
+    notes?: string;
+    createdAt: string;
+  }>>([]);
+  const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
+  const [editSiteFormData, setEditSiteFormData] = useState<{
+    name?: string;
+    city?: string;
+    state?: string;
+    notes?: string;
+    customerId?: string | number;
+  }>({});
+
   const [productForm, setProductForm] = useState({
     name: "",
     description: ""
@@ -455,6 +547,19 @@ export const UserManagement: React.FC = () => {
     dispatch(fetchProducts());
   }, [dispatch]);
 
+  // Fetch sites from API
+  useEffect(() => {
+    const fetchSites = async () => {
+      try {
+        const response = await api.get('/sites');
+        setSitesList(response.data);
+      } catch (err) {
+        console.error('Failed to fetch sites', err);
+      }
+    };
+    fetchSites();
+  }, []);
+
   useEffect(() => {
     const storedAssets = localStorage.getItem("admin_assets");
     if (storedAssets) {
@@ -492,6 +597,70 @@ export const UserManagement: React.FC = () => {
   useEffect(() => {
     localStorage.setItem("admin_roles_config", JSON.stringify(rolesConfig));
   }, [rolesConfig]);
+
+  // Site Management Helper Functions
+  const getCustomerName = (customerId: string | number) => {
+    const customer = customersList.find(c => c.id === customerId);
+    return customer?.name || 'Unknown Customer';
+  };
+
+  const getCustomerData = (customerId: string | number) => {
+    return customersList.find(c => c.id === customerId);
+  };
+
+  const handleEditSite = (site: typeof sitesList[0]) => {
+    setEditingSiteId(site.id);
+    setEditSiteFormData({
+      name: site.name,
+      city: site.city,
+      state: site.state,
+      notes: site.notes,
+      customerId: site.customerId,
+    });
+  };
+
+  const handleSaveSite = async () => {
+    if (!editingSiteId) return;
+
+    try {
+      const response = await api.put(`/sites/${editingSiteId}`, {
+        name: editSiteFormData.name,
+        address: '',
+        city: editSiteFormData.city,
+        state: editSiteFormData.state,
+        zipCode: null,
+        contactName: '',
+        contactPhone: '',
+        contactEmail: null,
+        notes: editSiteFormData.notes,
+        customerId: editSiteFormData.customerId,
+      });
+
+      setSitesList(prev => prev.map(s => s.id === editingSiteId ? { ...s, ...response.data } : s));
+      setEditingSiteId(null);
+      setEditSiteFormData({});
+    } catch (err) {
+      console.error('Failed to save site', err);
+      alert('Failed to save site');
+    }
+  };
+
+  const handleDeleteSite = async (siteId: string) => {
+    if (!confirm('Are you sure you want to delete this site?')) return;
+
+    try {
+      await api.delete(`/sites/${siteId}`);
+      setSitesList(prev => prev.filter(s => s.id !== siteId));
+    } catch (err) {
+      console.error('Failed to delete site', err);
+      alert('Failed to delete site');
+    }
+  };
+
+  const handleCancelSiteEdit = () => {
+    setEditingSiteId(null);
+    setEditSiteFormData({});
+  };
 
   const openRoleDialog = (roleName?: string) => {
     if (roleName && rolesConfig[roleName]) {
@@ -1824,25 +1993,114 @@ export const UserManagement: React.FC = () => {
       {adminTabsConfig[tab]?.type === "customers" && (
         <Box>
           <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2} sx={{ mb: 2 }}>
-            <Button variant="contained" startIcon={<AddOutlined />}>
-              New Client
-            </Button>
-            <TextField
-              size="small"
-              placeholder="Search customers..."
-              value={customerSearch}
-              onChange={(e) => setCustomerSearch(e.target.value)}
-              sx={{ minWidth: 250 }}
-            />
+            {customerViewMode === 'cards' ? (
+              <Button
+                variant="contained"
+                startIcon={<AddOutlined />}
+                onClick={() => {
+                  const newId = Math.max(...customersList.map(c => typeof c.id === 'number' ? c.id : 0), 0) + 1;
+                  const newCustomer = {
+                    id: newId,
+                    name: `New Customer ${newId}`,
+                    type: 'Industry',
+                    sites: 0,
+                    logo: null as string | null,
+                    logoShape: 'round' as 'none' | 'round' | 'rectangular',
+                    logoSize: 70,
+                    photoScale: 100
+                  };
+                  setCustomersList(prev => [...prev, newCustomer]);
+                  setEditingCustomerId(newCustomer.id);
+                  setEditCustomerName(newCustomer.name);
+                  setEditCustomerIndustry(newCustomer.type);
+                  setEditCustomerLogo(null);
+                  setEditCustomerLogoShape('round');
+                  setEditCustomerLogoSize(70);
+                  setEditCustomerPhotoScale(100);
+                }}
+              >
+                New Client
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                startIcon={<AddOutlined />}
+                onClick={async () => {
+                  // First check if we have any customers
+                  if (customersList.length === 0) {
+                    alert('Please create a customer first by switching to Cards view');
+                    return;
+                  }
+
+                  // Create a new site with the first customer as default
+                  const defaultCustomer = customersList[0];
+                  const newSite = {
+                    name: 'New Site',
+                    address: '',
+                    city: '',
+                    state: '',
+                    zipCode: null,
+                    contactName: '',
+                    contactPhone: '',
+                    contactEmail: null,
+                    notes: '',
+                    customerId: defaultCustomer.id
+                  };
+
+                  try {
+                    const response = await api.post('/sites', newSite);
+                    setSitesList(prev => [...prev, response.data]);
+                    setEditingSiteId(response.data.id);
+                    setEditSiteFormData({
+                      name: response.data.name,
+                      city: response.data.city,
+                      state: response.data.state,
+                      notes: response.data.notes,
+                    });
+                  } catch (err) {
+                    console.error('Failed to create site', err);
+                    alert('Failed to create site. Make sure the customer exists in the database.');
+                  }
+                }}
+              >
+                New Site
+              </Button>
+            )}
+            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+              <TextField
+                size="small"
+                placeholder={customerViewMode === 'cards' ? 'Search customers...' : 'Search sites...'}
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+                sx={{ minWidth: 250 }}
+              />
+              <ToggleButtonGroup
+                value={customerViewMode}
+                exclusive
+                onChange={(_, value) => value && setCustomerViewMode(value)}
+                size="small"
+              >
+                <ToggleButton value="cards">
+                  <GridView sx={{ mr: 0.5, fontSize: 18 }} />
+                  Cards
+                </ToggleButton>
+                <ToggleButton value="table">
+                  <TableRows sx={{ mr: 0.5, fontSize: 18 }} />
+                  Table
+                </ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
           </Stack>
 
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-              gap: 2,
-            }}
-          >
+          {/* Cards View */}
+          {customerViewMode === 'cards' && (
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                gap: 2,
+              }}
+            >
             {customersList
               .filter((customer) => {
                 // Search only customer names that start with the search term
@@ -1850,6 +2108,7 @@ export const UserManagement: React.FC = () => {
                 const searchLower = customerSearch.toLowerCase();
                 return customer.name.toLowerCase().startsWith(searchLower);
               })
+              .sort((a, b) => a.name.localeCompare(b.name))
               .map((customer) => {
                 const isFlipped = editingCustomerId === customer.id;
                 return (
@@ -1884,9 +2143,12 @@ export const UserManagement: React.FC = () => {
                           borderBottom: '4px solid',
                           borderBottomColor: 'primary.main',
                           cursor: 'pointer',
-                          transition: 'boxShadow 0.2s',
+                          transition: 'all 0.3s ease',
+                          display: 'flex',
+                          flexDirection: 'column',
                           '&:hover': {
-                            boxShadow: 3,
+                            boxShadow: 6,
+                            transform: 'translateY(-8px)',
                           },
                         }}
                       >
@@ -1912,43 +2174,84 @@ export const UserManagement: React.FC = () => {
                                 setEditingCustomerId(customer.id);
                                 setEditCustomerName(customer.name);
                                 setEditCustomerIndustry(customer.type);
-                                setEditCustomerState(customer.state);
                                 setEditCustomerLogo(customer.logo);
+                                setEditCustomerLogoShape(customer.logoShape || 'round');
+                                setEditCustomerLogoSize(customer.logoSize || 70);
+                                setEditCustomerPhotoScale(customer.photoScale || 100);
                               }}
                             >
                               <EditOutlined sx={{ fontSize: 18 }} />
                             </IconButton>
                           </Tooltip>
                         </Box>
+                        {/* Logo Area - Fixed height */}
                         <Box
                           sx={{
-                            width: 70,
-                            height: 70,
-                            borderRadius: '50%',
-                            background: customer.logo ? 'transparent' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                            backgroundImage: customer.logo ? `url(${customer.logo})` : 'none',
-                            backgroundSize: 'cover',
-                            backgroundPosition: 'center',
+                            height: 100,
                             display: 'flex',
-                            alignItems: 'center',
                             justifyContent: 'center',
-                            margin: '0 auto 12px',
-                            color: 'white',
-                            fontWeight: 'bold',
-                            fontSize: '1.5rem',
+                            alignItems: 'center',
+                            mb: 1,
                           }}
                         >
-                          {!customer.logo && customer.name.charAt(0)}
+                          {(customer.logoShape || 'round') === 'none' && customer.logo ? (
+                            <img
+                              src={customer.logo}
+                              alt={customer.name}
+                              style={{
+                                maxWidth: '100%',
+                                maxHeight: `${100 * (customer.photoScale || 100) / 100}px`,
+                                height: 'auto',
+                                width: 'auto',
+                                objectFit: 'contain',
+                              }}
+                            />
+                          ) : (
+                            <Box
+                              sx={{
+                                width: (customer.logoShape || 'round') === 'rectangular' ? 140 : (customer.logoSize || 70),
+                                height: customer.logoSize || 70,
+                                borderRadius: (customer.logoShape || 'round') === 'none' ? '0px' : (customer.logoShape || 'round') === 'round' ? '50%' : '8px',
+                                background: customer.logo ? 'transparent' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                backgroundImage: customer.logo ? `url(${customer.logo})` : 'none',
+                                backgroundSize: `${customer.photoScale || 100}%`,
+                                backgroundPosition: 'center',
+                                backgroundRepeat: 'no-repeat',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'white',
+                                fontWeight: 'bold',
+                                fontSize: '1.5rem',
+                              }}
+                            >
+                              {!customer.logo && customer.name.charAt(0)}
+                            </Box>
+                          )}
                         </Box>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
-                          {customer.name}
-                        </Typography>
-                        <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
-                          {customer.type} • {customer.state}
-                        </Typography>
-                        <Button size="small" variant="contained" fullWidth>
-                          View Sites ({customer.sites})
-                        </Button>
+
+                        {/* Text Area - Fixed position */}
+                        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+                            {customer.name}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
+                            {customer.type}
+                          </Typography>
+                          <Box sx={{ mt: 'auto' }}>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              fullWidth
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/admin/customers/${customer.id}/sites`);
+                              }}
+                            >
+                              View Sites ({customer.sites})
+                            </Button>
+                          </Box>
+                        </Box>
                       </Paper>
 
                       {/* Back Face */}
@@ -1971,40 +2274,80 @@ export const UserManagement: React.FC = () => {
                           gap: 1,
                         }}
                       >
-                        <Box
-                          sx={{
-                            width: 60,
-                            height: 60,
-                            borderRadius: '50%',
-                            background: editCustomerLogo ? 'transparent' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                            backgroundImage: editCustomerLogo ? `url(${editCustomerLogo})` : 'none',
-                            backgroundSize: 'cover',
-                            backgroundPosition: 'center',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            margin: '0 auto 8px',
-                            color: 'white',
-                            fontWeight: 'bold',
-                            fontSize: '1.3rem',
-                            position: 'relative',
-                            cursor: 'pointer',
-                            '&:hover::after': {
-                              content: '"Upload"',
-                              position: 'absolute',
-                              inset: 0,
-                              background: 'rgba(0,0,0,0.7)',
-                              borderRadius: '50%',
+                        {editCustomerLogoShape === 'none' && editCustomerLogo ? (
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                              margin: '0 auto 8px',
+                              maxWidth: '100%',
+                              maxHeight: '120px',
+                              position: 'relative',
+                              cursor: 'pointer',
+                              '&:hover::after': {
+                                content: '"Upload"',
+                                position: 'absolute',
+                                inset: 0,
+                                background: 'rgba(0,0,0,0.7)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '0.75rem',
+                                color: 'white',
+                              },
+                            }}
+                            onClick={() => setLogoUploadDialogOpen(true)}
+                          >
+                            <img
+                              src={editCustomerLogo}
+                              alt={editCustomerName}
+                              style={{
+                                maxWidth: '100%',
+                                maxHeight: '120px',
+                                height: 'auto',
+                                width: 'auto',
+                                objectFit: 'contain',
+                              }}
+                            />
+                          </Box>
+                        ) : (
+                          <Box
+                            sx={{
+                              width: editCustomerLogoShape === 'rectangular' ? 140 - 10 : editCustomerLogoSize - 10,
+                              height: editCustomerLogoSize - 10,
+                              borderRadius: editCustomerLogoShape === 'none' ? '0px' : editCustomerLogoShape === 'round' ? '50%' : '8px',
+                              background: editCustomerLogo ? 'transparent' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                              backgroundImage: editCustomerLogo ? `url(${editCustomerLogo})` : 'none',
+                              backgroundSize: `${editCustomerPhotoScale}%`,
+                              backgroundPosition: 'center',
+                              backgroundRepeat: 'no-repeat',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              fontSize: '0.65rem',
-                            },
-                          }}
-                          onClick={() => setLogoUploadDialogOpen(true)}
-                        >
-                          {!editCustomerLogo && editCustomerName.charAt(0)}
-                        </Box>
+                              margin: '0 auto 8px',
+                              color: 'white',
+                              fontWeight: 'bold',
+                              fontSize: '1.3rem',
+                              position: 'relative',
+                              cursor: 'pointer',
+                              '&:hover::after': {
+                                content: '"Upload"',
+                                position: 'absolute',
+                                inset: 0,
+                                background: 'rgba(0,0,0,0.7)',
+                                borderRadius: editCustomerLogoShape === 'none' ? '0px' : editCustomerLogoShape === 'round' ? '50%' : '8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '0.65rem',
+                              },
+                            }}
+                            onClick={() => setLogoUploadDialogOpen(true)}
+                          >
+                            {!editCustomerLogo && editCustomerName.charAt(0)}
+                          </Box>
+                        )}
                         <TextField
                           size="small"
                           value={editCustomerName}
@@ -2019,50 +2362,72 @@ export const UserManagement: React.FC = () => {
                             }
                           }}
                         />
-                        <Stack direction="row" spacing={0.5}>
-                          <TextField
-                            size="small"
-                            value={editCustomerIndustry}
-                            onChange={(e) => setEditCustomerIndustry(e.target.value)}
-                            placeholder="Industry"
-                            fullWidth
-                            sx={{
-                              '& .MuiInputBase-root': {
-                                height: 26,
-                                fontSize: '0.75rem'
-                              }
-                            }}
-                          />
-                          <TextField
-                            size="small"
-                            value={editCustomerState}
-                            onChange={(e) => setEditCustomerState(e.target.value)}
-                            placeholder="State"
-                            fullWidth
-                            sx={{
-                              '& .MuiInputBase-root': {
-                                height: 26,
-                                fontSize: '0.75rem'
-                              }
-                            }}
-                          />
-                        </Stack>
+                        <TextField
+                          size="small"
+                          value={editCustomerIndustry}
+                          onChange={(e) => setEditCustomerIndustry(e.target.value)}
+                          placeholder="Industry"
+                          fullWidth
+                          sx={{
+                            '& .MuiInputBase-root': {
+                              height: 26,
+                              fontSize: '0.75rem'
+                            }
+                          }}
+                        />
                         <Button
                           variant="contained"
                           size="small"
-                          onClick={() => {
-                            setCustomersList((prev) =>
-                              prev.map((c) =>
-                                c.id === customer.id
-                                  ? { ...c, name: editCustomerName, type: editCustomerIndustry, state: editCustomerState, sites: 0, logo: editCustomerLogo }
-                                  : c
-                              )
-                            );
+                          onClick={async () => {
+                            try {
+                              // Save to API
+                              const customerPayload = {
+                                name: editCustomerName,
+                                customerId: `CUST-${customer.id}`,
+                                office: activeOffice === "All" ? "USA" : activeOffice,
+                              };
+
+                              let savedCustomerId = customer.id;
+
+                              // Try to update if it's an existing customer with a GUID-like ID
+                              if (typeof customer.id === 'string' && customer.id.includes('-')) {
+                                await api.put(`/customers/${customer.id}`, customerPayload);
+                              } else {
+                                // Create new customer if it's a temp ID (number)
+                                const response = await api.post('/customers', customerPayload);
+                                savedCustomerId = response.data.id;
+                              }
+
+                              // Update local state
+                              setCustomersList((prev) =>
+                                prev.map((c) =>
+                                  c.id === customer.id
+                                    ? {
+                                        ...c,
+                                        id: savedCustomerId,
+                                        name: editCustomerName,
+                                        type: editCustomerIndustry,
+                                        sites: c.sites,
+                                        logo: editCustomerLogo,
+                                        logoShape: editCustomerLogoShape,
+                                        logoSize: editCustomerLogoSize,
+                                        photoScale: editCustomerPhotoScale
+                                      }
+                                    : c
+                                )
+                              );
+                            } catch (err) {
+                              console.error("Failed to save customer", err);
+                              alert("Failed to save customer");
+                            }
+
                             setEditingCustomerId(null);
                             setEditCustomerName("");
                             setEditCustomerIndustry("");
-                            setEditCustomerState("");
                             setEditCustomerLogo(null);
+                            setEditCustomerLogoShape('round');
+                            setEditCustomerLogoSize(70);
+                            setEditCustomerPhotoScale(100);
                           }}
                         >
                           Save
@@ -2072,7 +2437,257 @@ export const UserManagement: React.FC = () => {
                   </Box>
                 );
               })}
-          </Box>
+            </Box>
+          )}
+
+          {/* Table View */}
+          {customerViewMode === 'table' && (
+            <TableContainer component={Paper}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell width="60">#</TableCell>
+                    <TableCell>Customer</TableCell>
+                    <TableCell>Site Name</TableCell>
+                    <TableCell>City</TableCell>
+                    <TableCell>State/Country</TableCell>
+                    <TableCell>Comments</TableCell>
+                    <TableCell width="120" align="center">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {sitesList.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center">
+                        <Typography variant="body2" color="text.secondary">
+                          No sites found
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    sitesList
+                      .filter((site) => {
+                        if (!customerSearch) return true;
+                        const searchLower = customerSearch.toLowerCase();
+                        const customerName = getCustomerName(site.customerId).toLowerCase();
+                        const siteName = site.name.toLowerCase();
+                        const city = (site.city || '').toLowerCase();
+                        const state = (site.state || '').toLowerCase();
+                        return customerName.includes(searchLower) ||
+                               siteName.includes(searchLower) ||
+                               city.includes(searchLower) ||
+                               state.includes(searchLower);
+                      })
+                      .map((site, index) => {
+                      const isEditing = editingSiteId === site.id;
+                      const customer = getCustomerData(site.customerId);
+
+                      return (
+                        <TableRow key={site.id} hover={!isEditing}>
+                          <TableCell>{index + 1}</TableCell>
+
+                          {/* Customer */}
+                          <TableCell>
+                            {isEditing ? (
+                              <FormControl fullWidth size="small">
+                                <Select
+                                  value={editSiteFormData.customerId || ''}
+                                  onChange={(e) => setEditSiteFormData(prev => ({ ...prev, customerId: e.target.value }))}
+                                >
+                                  {customersList.map((cust) => (
+                                    <MenuItem key={cust.id} value={cust.id}>
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        {cust.logo ? (
+                                          cust.logoShape === 'none' ? (
+                                            <img
+                                              src={cust.logo}
+                                              alt={cust.name}
+                                              style={{
+                                                maxHeight: '20px',
+                                                maxWidth: '40px',
+                                                objectFit: 'contain',
+                                              }}
+                                            />
+                                          ) : (
+                                            <Box
+                                              sx={{
+                                                width: cust.logoShape === 'rectangular' ? 40 : 20,
+                                                height: 20,
+                                                borderRadius: cust.logoShape === 'round' ? '50%' : '4px',
+                                                backgroundImage: `url(${cust.logo})`,
+                                                backgroundSize: `${cust.photoScale || 100}%`,
+                                                backgroundPosition: 'center',
+                                                backgroundRepeat: 'no-repeat',
+                                              }}
+                                            />
+                                          )
+                                        ) : (
+                                          <Box
+                                            sx={{
+                                              width: 20,
+                                              height: 20,
+                                              borderRadius: '50%',
+                                              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              color: 'white',
+                                              fontSize: '0.625rem',
+                                              fontWeight: 'bold',
+                                            }}
+                                          >
+                                            {cust.name.charAt(0)}
+                                          </Box>
+                                        )}
+                                        <Typography variant="body2">{cust.name}</Typography>
+                                      </Box>
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                            ) : (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                {customer?.logo ? (
+                                  customer.logoShape === 'none' ? (
+                                    <img
+                                      src={customer.logo}
+                                      alt={customer.name}
+                                      style={{
+                                        maxHeight: '30px',
+                                        maxWidth: '60px',
+                                        objectFit: 'contain',
+                                      }}
+                                    />
+                                  ) : (
+                                    <Box
+                                      sx={{
+                                        width: customer.logoShape === 'rectangular' ? 60 : 30,
+                                        height: 30,
+                                        borderRadius: customer.logoShape === 'round' ? '50%' : '4px',
+                                        backgroundImage: `url(${customer.logo})`,
+                                        backgroundSize: `${customer.photoScale || 100}%`,
+                                        backgroundPosition: 'center',
+                                        backgroundRepeat: 'no-repeat',
+                                      }}
+                                    />
+                                  )
+                                ) : (
+                                  <Box
+                                    sx={{
+                                      width: 30,
+                                      height: 30,
+                                      borderRadius: '50%',
+                                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      color: 'white',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 'bold',
+                                    }}
+                                  >
+                                    {getCustomerName(site.customerId).charAt(0)}
+                                  </Box>
+                                )}
+                                <Typography variant="body2">
+                                  {getCustomerName(site.customerId)}
+                                </Typography>
+                              </Box>
+                            )}
+                          </TableCell>
+
+                          {/* Site Name */}
+                          <TableCell>
+                            {isEditing ? (
+                              <TextField
+                                size="small"
+                                value={editSiteFormData.name || ''}
+                                onChange={(e) => setEditSiteFormData(prev => ({ ...prev, name: e.target.value }))}
+                                fullWidth
+                              />
+                            ) : (
+                              site.name
+                            )}
+                          </TableCell>
+
+                          {/* City */}
+                          <TableCell>
+                            {isEditing ? (
+                              <TextField
+                                size="small"
+                                value={editSiteFormData.city || ''}
+                                onChange={(e) => setEditSiteFormData(prev => ({ ...prev, city: e.target.value }))}
+                                fullWidth
+                              />
+                            ) : (
+                              site.city || '-'
+                            )}
+                          </TableCell>
+
+                          {/* State/Country */}
+                          <TableCell>
+                            {isEditing ? (
+                              <TextField
+                                size="small"
+                                value={editSiteFormData.state || ''}
+                                onChange={(e) => setEditSiteFormData(prev => ({ ...prev, state: e.target.value }))}
+                                fullWidth
+                              />
+                            ) : (
+                              site.state || '-'
+                            )}
+                          </TableCell>
+
+                          {/* Comments */}
+                          <TableCell>
+                            {isEditing ? (
+                              <TextField
+                                size="small"
+                                value={editSiteFormData.notes || ''}
+                                onChange={(e) => setEditSiteFormData(prev => ({ ...prev, notes: e.target.value }))}
+                                fullWidth
+                                multiline
+                                rows={2}
+                              />
+                            ) : (
+                              site.notes || '-'
+                            )}
+                          </TableCell>
+
+                          {/* Actions */}
+                          <TableCell align="center">
+                            {isEditing ? (
+                              <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+                                <Button size="small" variant="contained" onClick={handleSaveSite}>
+                                  Save
+                                </Button>
+                                <Button size="small" variant="outlined" onClick={handleCancelSiteEdit}>
+                                  Cancel
+                                </Button>
+                              </Box>
+                            ) : (
+                              <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+                                <Tooltip title="Edit">
+                                  <IconButton size="small" onClick={() => handleEditSite(site)}>
+                                    <EditOutlined fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Delete">
+                                  <IconButton size="small" onClick={() => handleDeleteSite(site.id)} color="error">
+                                    <DeleteOutline fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              </Box>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
         </Box>
       )}
 
@@ -4528,47 +5143,209 @@ export const UserManagement: React.FC = () => {
       <Dialog
         open={logoUploadDialogOpen}
         onClose={() => setLogoUploadDialogOpen(false)}
-        maxWidth="xs"
+        maxWidth="sm"
         fullWidth
+        PaperComponent={DraggablePaper}
       >
         <DialogTitle>Upload Customer Logo</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            Accepted file types:
-          </Typography>
-          <Box sx={{ mb: 2 }}>
-            <Chip label="PNG" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-            <Chip label="JPG" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-            <Chip label="JPEG" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-            <Chip label="GIF" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-            <Chip label="SVG" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-          </Box>
-          <Button
-            variant="contained"
-            component="label"
-            fullWidth
-          >
-            Choose File
-            <input
-              type="file"
-              hidden
-              accept="image/png,image/jpeg,image/jpg,image/gif,image/svg+xml"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  const reader = new FileReader();
-                  reader.onloadend = () => {
-                    setEditCustomerLogo(reader.result as string);
-                    setLogoUploadDialogOpen(false);
-                  };
-                  reader.readAsDataURL(file);
-                }
-              }}
-            />
-          </Button>
+          <Stack spacing={3} sx={{ mt: 1 }}>
+            {/* Preview - Dynamic size based on settings */}
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 2, minHeight: 160 }}>
+              {editCustomerLogoShape === 'none' && editCustomerLogo ? (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    maxWidth: '100%',
+                    border: '2px dashed',
+                    borderColor: 'divider',
+                    p: 1,
+                  }}
+                >
+                  <img
+                    src={editCustomerLogo}
+                    alt="Preview"
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: `${150 * (editCustomerPhotoScale / 100)}px`,
+                      height: 'auto',
+                      width: 'auto',
+                      objectFit: 'contain',
+                    }}
+                  />
+                </Box>
+              ) : (
+                <Box
+                  sx={{
+                    width: editCustomerLogoShape === 'rectangular' ? editCustomerLogoSize * 2 : editCustomerLogoSize,
+                    height: editCustomerLogoSize,
+                    borderRadius: editCustomerLogoShape === 'none' ? '0px' : editCustomerLogoShape === 'round' ? '50%' : '8px',
+                    background: editCustomerLogo ? 'transparent' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    backgroundImage: editCustomerLogo ? `url(${editCustomerLogo})` : 'none',
+                    backgroundSize: `${editCustomerPhotoScale}%`,
+                    backgroundPosition: 'center',
+                    backgroundRepeat: 'no-repeat',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    fontWeight: 'bold',
+                    fontSize: '2rem',
+                    border: '2px dashed',
+                    borderColor: 'divider',
+                  }}
+                >
+                  {!editCustomerLogo && editCustomerName.charAt(0)}
+                </Box>
+              )}
+            </Box>
+
+            {/* Shape Selector */}
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Logo Shape</Typography>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant={editCustomerLogoShape === 'none' ? 'contained' : 'outlined'}
+                  onClick={() => setEditCustomerLogoShape('none')}
+                  fullWidth
+                  size="small"
+                >
+                  No Shape
+                </Button>
+                <Button
+                  variant={editCustomerLogoShape === 'round' ? 'contained' : 'outlined'}
+                  onClick={() => setEditCustomerLogoShape('round')}
+                  fullWidth
+                  size="small"
+                >
+                  Round
+                </Button>
+                <Button
+                  variant={editCustomerLogoShape === 'rectangular' ? 'contained' : 'outlined'}
+                  onClick={() => setEditCustomerLogoShape('rectangular')}
+                  fullWidth
+                  size="small"
+                >
+                  Rectangular
+                </Button>
+              </Stack>
+              {editCustomerLogoShape === 'rectangular' && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, textAlign: 'center' }}>
+                  140w × 70h pixels
+                </Typography>
+              )}
+              {editCustomerLogoShape === 'none' && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, textAlign: 'center' }}>
+                  Photo will display at full size (max 150px height on card)
+                </Typography>
+              )}
+            </Box>
+
+            {/* Logo Size Slider - Only show for round and rectangular */}
+            {editCustomerLogoShape !== 'none' && (
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Logo Size: {editCustomerLogoSize}px {editCustomerLogoShape === 'rectangular' ? '(height)' : ''}
+                </Typography>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Typography variant="caption">40</Typography>
+                  <input
+                    type="range"
+                    min="40"
+                    max="120"
+                    value={editCustomerLogoSize}
+                    onChange={(e) => setEditCustomerLogoSize(Number(e.target.value))}
+                    style={{ flex: 1, cursor: 'pointer' }}
+                  />
+                  <Typography variant="caption">120</Typography>
+                </Stack>
+              </Box>
+            )}
+
+            {/* Photo Scale Slider - Available for all shapes when logo is uploaded */}
+            {editCustomerLogo && (
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Photo Scale: {editCustomerPhotoScale}%
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  {editCustomerLogoShape === 'none'
+                    ? 'Adjust photo display size'
+                    : 'Adjust to fit photo inside logo area'}
+                </Typography>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Typography variant="caption">50</Typography>
+                  <input
+                    type="range"
+                    min="50"
+                    max="200"
+                    value={editCustomerPhotoScale}
+                    onChange={(e) => setEditCustomerPhotoScale(Number(e.target.value))}
+                    style={{ flex: 1, cursor: 'pointer' }}
+                  />
+                  <Typography variant="caption">200</Typography>
+                </Stack>
+              </Box>
+            )}
+
+            {/* File Upload */}
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                Upload Image
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Accepted: PNG, JPG, JPEG, GIF, SVG
+              </Typography>
+              <Button
+                variant="contained"
+                component="label"
+                fullWidth
+              >
+                Choose File
+                <input
+                  type="file"
+                  hidden
+                  accept="image/png,image/jpeg,image/jpg,image/gif,image/svg+xml"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                        setEditCustomerLogo(reader.result as string);
+                        setEditCustomerPhotoScale(100);
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                />
+              </Button>
+            </Box>
+
+            {editCustomerLogo && (
+              <Button
+                variant="outlined"
+                color="error"
+                onClick={() => {
+                  setEditCustomerLogo(null);
+                  setEditCustomerPhotoScale(100);
+                }}
+                fullWidth
+              >
+                Remove Logo
+              </Button>
+            )}
+          </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setLogoUploadDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => setLogoUploadDialogOpen(false)}
+          >
+            Apply
+          </Button>
         </DialogActions>
       </Dialog>
     </Container>

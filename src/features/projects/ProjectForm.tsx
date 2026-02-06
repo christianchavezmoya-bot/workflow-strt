@@ -608,6 +608,9 @@ const ProjectForm = () => {
             </Typography>
           )}
           <Stack direction="row" spacing={2} sx={{ marginTop: 3 }}>
+            <Button variant="outlined" onClick={() => navigate("/projects")}>
+              Cancel
+            </Button>
             <Button variant="outlined">Save draft</Button>
             <Button variant="contained" type="submit">
               {id ? "Save changes" : "Submit project"}

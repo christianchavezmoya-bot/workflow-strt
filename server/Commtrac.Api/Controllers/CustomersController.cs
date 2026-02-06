@@ -33,7 +33,11 @@ public class CustomersController : ControllerBase
         {
             Name = request.Name,
             CustomerId = request.CustomerId,
-            Office = request.Office
+            Office = request.Office,
+            Logo = request.Logo,
+            LogoShape = request.LogoShape ?? "round",
+            PhotoScale = request.PhotoScale ?? 100,
+            LogoSize = request.LogoSize ?? 70
         };
 
         _db.Customers.Add(customer);
@@ -54,6 +58,10 @@ public class CustomersController : ControllerBase
         if (!string.IsNullOrWhiteSpace(request.Name)) customer.Name = request.Name;
         if (!string.IsNullOrWhiteSpace(request.CustomerId)) customer.CustomerId = request.CustomerId;
         if (!string.IsNullOrWhiteSpace(request.Office)) customer.Office = request.Office;
+        if (request.Logo != null) customer.Logo = request.Logo;
+        if (!string.IsNullOrWhiteSpace(request.LogoShape)) customer.LogoShape = request.LogoShape;
+        if (request.PhotoScale.HasValue) customer.PhotoScale = request.PhotoScale.Value;
+        if (request.LogoSize.HasValue) customer.LogoSize = request.LogoSize.Value;
 
         await _db.SaveChangesAsync();
         return Ok(ToDto(customer));
@@ -75,5 +83,5 @@ public class CustomersController : ControllerBase
     }
 
     private static CustomerDto ToDto(CustomerEntity customer)
-        => new(customer.Id, customer.Name, customer.CustomerId, customer.Office);
+        => new(customer.Id, customer.Name, customer.CustomerId, customer.Office, customer.Logo, customer.LogoShape, customer.PhotoScale, customer.LogoSize);
 }

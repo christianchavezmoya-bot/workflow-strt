@@ -33,6 +33,39 @@ public class CustomerEntity
     public string CustomerId { get; set; } = string.Empty;
     [MaxLength(40)]
     public string Office { get; set; } = "All";
+    [MaxLength(1000)]
+    public string? Logo { get; set; }
+    [MaxLength(40)]
+    public string LogoShape { get; set; } = "round";
+    public int PhotoScale { get; set; } = 100;
+    public int LogoSize { get; set; } = 70;
+}
+
+public class SiteEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string CustomerId { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(500)]
+    public string? Address { get; set; }
+    [MaxLength(100)]
+    public string? City { get; set; }
+    [MaxLength(40)]
+    public string? State { get; set; }
+    [MaxLength(20)]
+    public string? ZipCode { get; set; }
+    [MaxLength(200)]
+    public string? ContactName { get; set; }
+    [MaxLength(80)]
+    public string? ContactPhone { get; set; }
+    [MaxLength(200)]
+    public string? ContactEmail { get; set; }
+    [MaxLength(800)]
+    public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
 public class ProductEntity

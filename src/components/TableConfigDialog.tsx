@@ -52,7 +52,7 @@ const TableConfigDialog = ({
   const [newFieldLinkTo, setNewFieldLinkTo] = useState<string>("");
   const [newFieldAction, setNewFieldAction] = useState<string>("");
   const [dragFieldId, setDragFieldId] = useState<string | null>(null);
-  const linkableTypes = new Set(["lookup field", "composite key", "dropdown", "multi-select"]);
+  const linkableTypes = new Set(["reference", "lookup field", "composite key", "dropdown", "multi-select"]);
   const linkTargetOptions = Array.from(
     new Map(
       [...(availableFields || []), ...fields.map((field) => ({ id: field.id, name: field.name, fieldType: field.type || "text" }))]
@@ -63,6 +63,7 @@ const TableConfigDialog = ({
   const getActionOptions = (type: string) => {
     if (type === "image") return ["upload image"];
     if (type === "file") return ["upload file"];
+    if (type === "reference") return ["open referenced record", "filter by reference", "navigate to reference"];
     if (type === "lookup field") return ["open linked table", "create linked table"];
     return [];
   };
@@ -83,6 +84,7 @@ const TableConfigDialog = ({
     "checkbox",
     "primary key",
     "composite key",
+    "reference",
     "lookup field",
     "rollup",
     "formula",

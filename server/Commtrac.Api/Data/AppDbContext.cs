@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
 
     public DbSet<UserEntity> Users => Set<UserEntity>();
     public DbSet<CustomerEntity> Customers => Set<CustomerEntity>();
+    public DbSet<SiteEntity> Sites => Set<SiteEntity>();
     public DbSet<ProductEntity> Products => Set<ProductEntity>();
     public DbSet<AssetEntity> Assets => Set<AssetEntity>();
     public DbSet<ProjectEntity> Projects => Set<ProjectEntity>();
@@ -86,6 +87,9 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<TableConfigEntity>()
             .Property(t => t.BaseFieldNamesJson)
             .HasDefaultValue("{}");
+
+        modelBuilder.Entity<SiteEntity>()
+            .HasIndex(s => s.CustomerId);
 
         modelBuilder.Entity<FieldDefinitionEntity>()
             .HasData(new[]

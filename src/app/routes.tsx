@@ -6,6 +6,7 @@ import ProjectForm from "../features/projects/ProjectForm";
 import ProjectDetail from "../features/projects/ProjectDetail";
 import InstallationList from "../features/installations/InstallationList";
 import UserManagement from "../features/admin/UserManagement";
+import CustomerSites from "../features/admin/CustomerSites";
 import ProfileWizard from "../features/profile/ProfileWizard";
 import Settings from "../features/settings/Settings";
 import Login from "../features/auth/Login";
@@ -24,6 +25,7 @@ const AppRoutes = () => {
         <Route path="/projects/:id/edit" element={<ProjectForm />} />
         <Route path="/installations" element={<InstallationList />} />
         <Route path="/admin" element={<UserManagement />} />
+        <Route path="/admin/customers/:customerId/sites" element={<CustomerSites />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile" element={<ProfileWizard />} />
       </Route>
