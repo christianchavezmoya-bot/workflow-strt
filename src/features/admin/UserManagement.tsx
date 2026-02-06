@@ -244,26 +244,6 @@ export const UserManagement: React.FC = () => {
     customerId: "",
     office: activeOffice === "All" ? "" : activeOffice
   });
-  const [customersList, setCustomersList] = useState([
-    { id: 101, name: "Apex Industries", type: "Manufacturing", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 102, name: "BeeHealthy Foods", type: "Retail", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 103, name: "SolarTech Energy", type: "Energy", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 104, name: "Zenith Data Systems", type: "Technology", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 105, name: "Kappa Telecoms", type: "Technology", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 106, name: "Omega Softworks", type: "Technology", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 107, name: "Delta Dental", type: "Healthcare", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 108, name: "Pi Pharmaceuticals", type: "Healthcare", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 109, name: "Theta Care", type: "Healthcare", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 110, name: "Lambda Financial", type: "Finance", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 111, name: "Sigma Capital", type: "Finance", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 112, name: "Phi Bank", type: "Finance", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 113, name: "Alpha Logistics", type: "Transport", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 114, name: "Beta Shipping", type: "Transport", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 115, name: "Mu Freight", type: "Transport", sites: 1, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 116, name: "Gamma Agritech", type: "Manufacturing", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 117, name: "Rho Education", type: "Education", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-    { id: 118, name: "Xi Hospitality", type: "Retail", sites: 2, logo: null as string | null, logoShape: 'round' as 'none' | 'round' | 'rectangular', logoSize: 70, photoScale: 100 },
-  ]);
   const [editingCustomerId, setEditingCustomerId] = useState<number | null>(null);
   const [editCustomerName, setEditCustomerName] = useState("");
   const [editCustomerIndustry, setEditCustomerIndustry] = useState("");
@@ -600,12 +580,12 @@ export const UserManagement: React.FC = () => {
 
   // Site Management Helper Functions
   const getCustomerName = (customerId: string | number) => {
-    const customer = customersList.find(c => c.id === customerId);
+    const customer = customersState.items.find(c => c.id === customerId);
     return customer?.name || 'Unknown Customer';
   };
 
   const getCustomerData = (customerId: string | number) => {
-    return customersList.find(c => c.id === customerId);
+    return customersState.items.find(c => c.id === customerId);
   };
 
   const handleEditSite = (site: typeof sitesList[0]) => {
@@ -2033,13 +2013,13 @@ export const UserManagement: React.FC = () => {
                 startIcon={<AddOutlined />}
                 onClick={async () => {
                   // First check if we have any customers
-                  if (customersList.length === 0) {
+                  if (filteredCustomers.length === 0) {
                     alert('Please create a customer first by switching to Cards view');
                     return;
                   }
 
                   // Create a new site with the first customer as default
-                  const defaultCustomer = customersList[0];
+                  const defaultCustomer = filteredCustomers[0];
                   const newSite = {
                     name: 'New Site',
                     address: '',
@@ -2488,7 +2468,7 @@ export const UserManagement: React.FC = () => {
                                   value={editSiteFormData.customerId || ''}
                                   onChange={(e) => setEditSiteFormData(prev => ({ ...prev, customerId: e.target.value }))}
                                 >
-                                  {customersList.map((cust) => (
+                                  {customersState.items.map((cust) => (
                                     <MenuItem key={cust.id} value={cust.id}>
                                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                         {cust.logo ? (
