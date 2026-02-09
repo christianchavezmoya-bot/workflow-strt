@@ -9,22 +9,30 @@ const OfficesPage = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadOffices();
-  }, []);
+    let mounted = true;
 
-  const loadOffices = async () => {
-    try {
-      setLoading(true);
-      const data = await officesService.getAll();
-      setOffices(data);
-      setError(null);
-    } catch (err) {
-      setError("Failed to load offices");
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const loadOffices = async () => {
+      try {
+        setLoading(true);
+        const data = await officesService.getAll();
+        if (!mounted) return;
+        setOffices(data);
+        setError(null);
+      } catch (err) {
+        if (!mounted) return;
+        setError("Failed to load offices");
+        console.error(err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    loadOffices();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleAddOffice = async (office: Omit<Office, "id">) => {
     try {
