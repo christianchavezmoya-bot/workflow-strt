@@ -45,6 +45,12 @@ let DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
+// Style for field labels (yellow bold)
+const fieldLabelStyle = {
+  color: '#FFD700',
+  fontWeight: 'bold'
+};
+
 export interface Office {
   id: string;
   country: string;
@@ -398,9 +404,9 @@ export default function GlobalOfficeMap({
             <TableHead>
               <TableRow>
                 <TableCell>#</TableCell>
-                <TableCell>Country</TableCell>
-                <TableCell>State/Region</TableCell>
-                <TableCell>City</TableCell>
+                <TableCell sx={fieldLabelStyle}>Country</TableCell>
+                <TableCell sx={fieldLabelStyle}>State/Region</TableCell>
+                <TableCell sx={fieldLabelStyle}>City</TableCell>
                 <TableCell>Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -475,7 +481,7 @@ export default function GlobalOfficeMap({
               freeSolo
               disabled={isGeocoding}
               renderInput={(params) => (
-                <TextField {...params} label="Country *" fullWidth />
+                <TextField {...params} label="Country *" fullWidth InputLabelProps={{ sx: fieldLabelStyle }} />
               )}
             />
 
@@ -496,12 +502,13 @@ export default function GlobalOfficeMap({
                   {...params}
                   label="State/Region"
                   fullWidth
+                  InputLabelProps={{ sx: fieldLabelStyle }}
                   helperText={availableStates.length > 0 ? `${availableStates.length} states available` : "Type to enter state manually"}
                 />
               )}
             />
 
-            <Autocomplete
+            <Autocomplete<{ city: string; state: string; country: string; displayName: string; lat: number; lng: number }, false, false, true>
               value={null}
               onChange={(_, newValue) => {
                 if (newValue && typeof newValue === 'object') {
@@ -524,15 +531,15 @@ export default function GlobalOfficeMap({
                 }
               }}
               options={citySuggestions}
-              getOptionLabel={(option) => option.city}
+              getOptionLabel={(option) => typeof option === 'string' ? option : option.city}
               renderOption={(props, option) => {
                 const { key, ...otherProps } = props as any;
                 return (
                   <li key={key} {...otherProps}>
                     <Box>
-                      <Typography variant="body2"><strong>{option.city}</strong></Typography>
+                      <Typography variant="body2"><strong>{(option as { city: string }).city}</strong></Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {[option.state, option.country].filter(Boolean).join(", ")}
+                        {[(option as any).state, (option as any).country].filter(Boolean).join(", ")}
                       </Typography>
                     </Box>
                   </li>
@@ -550,6 +557,7 @@ export default function GlobalOfficeMap({
                   {...params}
                   label="City *"
                   fullWidth
+                  InputLabelProps={{ sx: fieldLabelStyle }}
                   placeholder="Start typing city name..."
                   helperText={citySuggestions.length > 0 ? `${citySuggestions.length} cities found - select one to auto-populate` : "Type at least 2 characters to search cities"}
                   InputProps={{

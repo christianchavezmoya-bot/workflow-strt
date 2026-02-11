@@ -1,5 +1,6 @@
 import { Box, Grid, Stack, Typography } from "@mui/material";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import SummaryCard from "../../components/ui/SummaryCard";
 import StatusStepper from "../../components/ui/StatusStepper";
 import { demoProducts } from "../../data/demo";
@@ -8,9 +9,12 @@ import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchInstallations } from "../../store/installationSlice";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
+import { officesService } from "../../services/officesService";
+import type { Office } from "../../components/GlobalOfficeMap";
 
 const Dashboard = () => {
-  const { activeOffice } = useActiveOffice();
+  const navigate = useNavigate();
+  const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const projectsState = useAppSelector((state) => state.projects);
   const installationsState = useAppSelector((state) => state.installations);
@@ -18,16 +22,43 @@ const Dashboard = () => {
   const products = productsState.items.length ? productsState.items : demoProducts;
   const projects = projectsState.items;
   const installations = installationsState.items;
+  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
+  const [availableCountries, setAvailableCountries] = useState<string[]>([]);
+
+  useEffect(() => {
+    officesService.getAll().then((offices) => {
+      setGlobalOffices(offices);
+      const countries = Array.from(new Set(offices.map((office) => office.country).filter(Boolean)));
+      setAvailableCountries(countries.sort());
+    });
+  }, []);
+
+  // Map office cities to countries
+  const getCountryForOffice = useMemo(() => {
+    const map = new Map<string, string>();
+    globalOffices.forEach((office) => {
+      if (office.city && office.country) {
+        map.set(office.city, office.country);
+      }
+    });
+    return (officeCity: string) => map.get(officeCity) || officeCity;
+  }, [globalOffices]);
 
   const filteredProjects = useMemo(() => {
     if (activeOffice === "All") return projects;
-    return projects.filter((project) => project.office === activeOffice);
-  }, [activeOffice, projects]);
+    return projects.filter((project) => {
+      const projectCountry = getCountryForOffice(project.office);
+      return projectCountry === activeOffice || project.office === activeOffice;
+    });
+  }, [activeOffice, projects, getCountryForOffice]);
 
   const filteredInstallations = useMemo(() => {
     if (activeOffice === "All") return installations;
-    return installations.filter((installation) => installation.office === activeOffice);
-  }, [activeOffice, installations]);
+    return installations.filter((installation) => {
+      const installationCountry = getCountryForOffice(installation.office);
+      return installationCountry === activeOffice || installation.office === activeOffice;
+    });
+  }, [activeOffice, installations, getCountryForOffice]);
 
   const productCount = products.length;
   const projectCount = filteredProjects.length;
@@ -59,22 +90,39 @@ const Dashboard = () => {
         </Typography>
         <Grid container spacing={2}>
           {(activeOffice === "All"
-            ? ["USA", "Australia", "South Africa"]
+            ? availableCountries
             : [activeOffice]
           ).map((region) => {
-            const regionProjects = projects.filter((project) => project.office === region);
-            const regionInstallations = installations.filter((installation) => installation.office === region);
+            const regionProjects = projects.filter((project) => {
+              const projectCountry = getCountryForOffice(project.office);
+              return projectCountry === region || project.office === region;
+            });
+            const regionInstallations = installations.filter((installation) => {
+              const installationCountry = getCountryForOffice(installation.office);
+              return installationCountry === region || installation.office === region;
+            });
             const regionActiveInstalls = regionInstallations.filter((installation) =>
               ["Scheduled", "In Progress"].includes(installation.status)
             ).length;
             return (
               <Grid key={region} item xs={12} md={4}>
                 <Box
+                  onClick={() => {
+                    updateActiveOffice(region);
+                    navigate("/projects");
+                  }}
                   sx={{
                     padding: 2,
                     borderRadius: 2,
                     border: "1px solid rgba(255,255,255,0.08)",
-                    background: "rgba(255,255,255,0.04)"
+                    background: "rgba(255,255,255,0.04)",
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                    "&:hover": {
+                      background: "rgba(45, 212, 191, 0.1)",
+                      borderColor: "rgba(45, 212, 191, 0.3)",
+                      transform: "translateY(-2px)"
+                    }
                   }}
                 >
                   <Typography variant="subtitle1" sx={{ fontFamily: "Sora" }}>

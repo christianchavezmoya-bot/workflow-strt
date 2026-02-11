@@ -40,6 +40,10 @@ export const fieldService = {
     const response = await api.post<FieldDefinition[]>("/field-definitions/seed");
     return response.data;
   },
+  async getAvailableTables() {
+    const response = await api.get<string[]>("/field-definitions/tables");
+    return response.data;
+  },
   async getValues(table: string, entityId: string) {
     const response = await api.get<FieldValue[]>("/field-values", {
       params: { table, entityId }

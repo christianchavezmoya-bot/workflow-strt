@@ -1,4 +1,5 @@
-﻿import {
+﻿import React, { useEffect, useMemo, useState } from "react";
+import {
   Box,
   Button,
   Chip,
@@ -18,7 +19,6 @@
   Typography
 } from "@mui/material";
 import { ArrowDropDown, DeleteOutline, EditOutlined } from "@mui/icons-material";
-import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
 import TableConfigDialog from "../../components/TableConfigDialog";
@@ -29,10 +29,18 @@ import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { fieldService } from "../../services/fieldService";
+import { officesService } from "../../services/officesService";
+import type { Office } from "../../components/GlobalOfficeMap";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { deleteProject, fetchProjects, updateProjectStatus } from "../../store/projectSlice";
 import { Project } from "../../types/project";
+
+// Style for field definition labels (yellow bold)
+const fieldLabelStyle = {
+  color: '#FFD700',
+  fontWeight: 'bold'
+};
 
 const normalize = (value: string | number | undefined | null) => String(value ?? "");
 
@@ -51,6 +59,129 @@ const applyAutoSort = <T,>(
     return 0;
   });
 };
+
+type ColumnConfig = {
+  id: string;
+  name: string;
+  required: boolean;
+  minWidth?: number;
+  maxWidth?: number;
+  renderCell: (project: Project, products: any[]) => React.ReactNode;
+};
+
+const builtInColumnConfigs: ColumnConfig[] = [
+  {
+    id: "jobNumber",
+    name: "Job Number",
+    required: true,
+    minWidth: 120,
+    renderCell: (project: Project) => (
+      <Box
+        component="span"
+        sx={{
+          display: "inline-flex",
+          alignItems: "center",
+          borderRadius: 999,
+          px: 0.5,
+          py: 0.25,
+          background: "linear-gradient(135deg, rgba(45,212,191,0.2), rgba(45,212,191,0.1))",
+          border: "1px solid rgba(45,212,191,0.3)"
+        }}
+      >
+        <Button
+          component={Link}
+          to={`/installations?job=${encodeURIComponent(project.jobNumber)}`}
+          sx={{ minWidth: "auto", padding: 0 }}
+        >
+          {project.jobNumber}
+        </Button>
+      </Box>
+    )
+  },
+  {
+    id: "customerName",
+    name: "Customer",
+    required: false,
+    minWidth: 150,
+    renderCell: (project: Project) => project.customerName || "-"
+  },
+  {
+    id: "customerId",
+    name: "Customer ID",
+    required: true,
+    minWidth: 120,
+    renderCell: (project: Project) => project.customerId || "-"
+  },
+  {
+    id: "products",
+    name: "Products",
+    required: true,
+    minWidth: 150,
+    renderCell: (project: Project, products: any[]) =>
+      project.productIds?.length
+        ? project.productIds
+            .map((productId) => products.find((product) => product.id === productId)?.name || productId)
+            .join(", ")
+        : "-"
+  },
+  {
+    id: "office",
+    name: "Office",
+    required: true,
+    minWidth: 120,
+    renderCell: (project: Project) => project.office || "-"
+  },
+  {
+    id: "region",
+    name: "Country/State",
+    required: false,
+    minWidth: 120,
+    renderCell: (project: Project) => project.region || "-"
+  },
+  {
+    id: "projectManager",
+    name: "Project Manager",
+    required: false,
+    minWidth: 130,
+    renderCell: (project: Project) => project.projectManager || "-"
+  },
+  {
+    id: "description",
+    name: "Description",
+    required: true,
+    minWidth: 200,
+    maxWidth: 300,
+    renderCell: (project: Project) => project.description || "-"
+  },
+  {
+    id: "startDate",
+    name: "Start Date",
+    required: true,
+    minWidth: 110,
+    renderCell: (project: Project) => project.startDate || "-"
+  },
+  {
+    id: "finishDate",
+    name: "Finish Date",
+    required: true,
+    minWidth: 110,
+    renderCell: (project: Project) => project.finishDate || "-"
+  },
+  {
+    id: "status",
+    name: "Status",
+    required: true,
+    minWidth: 120,
+    renderCell: (project: Project) => <StatusChip status={project.status} />
+  },
+  {
+    id: "projectType",
+    name: "Project Type",
+    required: true,
+    minWidth: 120,
+    renderCell: (project: Project) => project.projectType || "-"
+  }
+];
 
 const applyAutoFilter = <T,>(
   rows: T[],
@@ -74,6 +205,11 @@ const ProjectList = () => {
   const productsState = useAppSelector((state) => state.products);
   const projectsDynamic = useDynamicFields("projects");
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
+  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
+
+  useEffect(() => {
+    officesService.getAll().then(setGlobalOffices);
+  }, []);
   const projectsTableConfig = useTableConfig(
     "projects",
     projectsDynamic.definitions.map((field) => ({
@@ -117,15 +253,21 @@ const ProjectList = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
 
+  // Clear column filters when active office changes
+  useEffect(() => {
+    setAutoFilters({});
+    setPage(0);
+  }, [activeOffice]);
+
   useEffect(() => {
     dispatch(
       fetchProjects({
-        office: activeOffice !== "All" ? activeOffice : undefined,
+        // Don't filter by office on server-side - we'll filter client-side to support country-based filtering
         page: page + 1,
         pageSize: rowsPerPage
       })
     );
-  }, [dispatch, activeOffice, page, rowsPerPage]);
+  }, [dispatch, page, rowsPerPage]);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -134,10 +276,22 @@ const ProjectList = () => {
   const sourceProjects = items;
   const products = productsState.items.length ? productsState.items : demoProducts;
 
+  // Map office cities to countries
+  const getCountryForOffice = useMemo(() => {
+    const map = new Map<string, string>();
+    globalOffices.forEach((office) => {
+      if (office.city && office.country) {
+        map.set(office.city, office.country);
+      }
+    });
+    return (officeCity: string) => map.get(officeCity) || officeCity;
+  }, [globalOffices]);
+
   const projectAccessors = useMemo(
     () => ({
       jobNumber: (project: Project) => normalize(project.jobNumber),
       customerName: (project: Project) => normalize(project.customerName),
+      customerId: (project: Project) => normalize(project.customerId),
       products: (project: Project) =>
         normalize(
           project.productIds?.length
@@ -146,20 +300,30 @@ const ProjectList = () => {
                 .join(", ")
             : ""
         ),
-      projectType: (project: Project) => normalize(project.projectType),
+      office: (project: Project) => normalize(project.office),
+      region: (project: Project) => normalize(project.region),
+      projectManager: (project: Project) => normalize(project.projectManager),
+      description: (project: Project) => normalize(project.description),
+      startDate: (project: Project) => normalize(project.startDate),
+      finishDate: (project: Project) => normalize(project.finishDate),
       status: (project: Project) => normalize(project.status),
-      office: (project: Project) => normalize(project.office)
+      projectType: (project: Project) => normalize(project.projectType)
     }),
     [products]
   );
 
   const filteredProjects = useMemo(() => {
     const officeFiltered = sourceProjects.filter(
-      (project) => activeOffice === "All" || project.office === activeOffice
+      (project) => {
+        if (activeOffice === "All") return true;
+        const projectCountry = getCountryForOffice(project.office);
+        return projectCountry === activeOffice || project.office === activeOffice;
+      }
     );
+
     const filtered = applyAutoFilter(officeFiltered, autoFilters, projectAccessors);
     return applyAutoSort(filtered, autoSort, projectAccessors);
-  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors]);
+  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, getCountryForOffice]);
 
   const numberedProjects = useMemo(
     () => filteredProjects.map((project, index) => ({ ...project, seq: index + 1 })),
@@ -177,13 +341,58 @@ const ProjectList = () => {
     () => ({
       jobNumber: Array.from(new Set(sourceProjects.map((project) => projectAccessors.jobNumber(project)))).sort(),
       customerName: Array.from(new Set(sourceProjects.map((project) => projectAccessors.customerName(project)))).sort(),
+      customerId: Array.from(new Set(sourceProjects.map((project) => projectAccessors.customerId(project)))).sort(),
       products: Array.from(new Set(sourceProjects.map((project) => projectAccessors.products(project)))).sort(),
-      projectType: Array.from(new Set(sourceProjects.map((project) => projectAccessors.projectType(project)))).sort(),
+      office: Array.from(new Set(sourceProjects.map((project) => projectAccessors.office(project)))).sort(),
+      region: Array.from(new Set(sourceProjects.map((project) => projectAccessors.region(project)))).sort(),
+      projectManager: Array.from(new Set(sourceProjects.map((project) => projectAccessors.projectManager(project)))).sort(),
+      description: Array.from(new Set(sourceProjects.map((project) => projectAccessors.description(project)))).sort(),
+      startDate: Array.from(new Set(sourceProjects.map((project) => projectAccessors.startDate(project)))).sort(),
+      finishDate: Array.from(new Set(sourceProjects.map((project) => projectAccessors.finishDate(project)))).sort(),
       status: Array.from(new Set(sourceProjects.map((project) => projectAccessors.status(project)))).sort(),
-      office: Array.from(new Set(sourceProjects.map((project) => projectAccessors.office(project)))).sort()
+      projectType: Array.from(new Set(sourceProjects.map((project) => projectAccessors.projectType(project)))).sort()
     }),
     [sourceProjects, projectAccessors]
   );
+
+  const orderedColumns = useMemo(() => {
+    const builtInIds = builtInColumnConfigs.map((col) => col.id);
+    const dynamicIds = projectDynamicColumns.map((field) => field.id);
+    const allIds = [...builtInIds, ...dynamicIds];
+
+    let order: string[];
+    if (projectsTableConfig.config.order.length > 0) {
+      order = [...projectsTableConfig.config.order];
+      const remaining = allIds.filter((id) => !order.includes(id));
+      order = [...order, ...remaining];
+    } else {
+      order = allIds;
+    }
+
+    const hiddenSet = new Set(projectsTableConfig.config.hidden);
+
+    return order
+      .filter((id) => !hiddenSet.has(id))
+      .map((id) => {
+        const builtIn = builtInColumnConfigs.find((col) => col.id === id);
+        if (builtIn) {
+          return { ...builtIn, isBuiltIn: true };
+        }
+        const dynamic = projectDynamicColumns.find((field) => field.id === id);
+        if (dynamic) {
+          return {
+            id: dynamic.id,
+            name: dynamic.name,
+            required: false,
+            isBuiltIn: false,
+            renderCell: (project: Project) =>
+              projectsDynamic.valuesByEntity[project.id]?.[dynamic.id]?.value || "-"
+          };
+        }
+        return null;
+      })
+      .filter((col): col is NonNullable<typeof col> => col !== null);
+  }, [projectsTableConfig.config.order, projectsTableConfig.config.hidden, projectDynamicColumns, projectsDynamic.valuesByEntity]);
 
   const handleAction = (project: Project, label: string) => {
     if (!project.id) {
@@ -291,112 +500,65 @@ const ProjectList = () => {
         </Typography>
       )}
 
-      <Box className="glass-card" sx={{ padding: 2 }}>
-        <Table>
+      <Box
+        className="glass-card"
+        sx={{
+          padding: 2,
+          paddingBottom: 0,
+          marginBottom: '80px',
+          minHeight: 'calc(100vh - 280px)',
+          display: 'flex',
+          flexDirection: 'column'
+        }}
+      >
+        <Box sx={{ overflowX: 'auto', width: '100%', flex: 1 }}>
+          <Table sx={{ minWidth: 2000 }} size="small">
           <TableHead>
             <TableRow>
-              <TableCell>#</TableCell>
-              <TableCell>
-                <Stack direction="row" alignItems="center" spacing={0.5}>
-                  <span>Job Number</span>
-                  <IconButton size="small" onClick={(event) => setAutoMenu({ anchorEl: event.currentTarget, key: "jobNumber" })}>
-                    <ArrowDropDown fontSize="small" />
-                  </IconButton>
-                </Stack>
-              </TableCell>
-              <TableCell>
-                <Stack direction="row" alignItems="center" spacing={0.5}>
-                  <span>Customer</span>
-                  <IconButton size="small" onClick={(event) => setAutoMenu({ anchorEl: event.currentTarget, key: "customerName" })}>
-                    <ArrowDropDown fontSize="small" />
-                  </IconButton>
-                </Stack>
-              </TableCell>
-              <TableCell>
-                <Stack direction="row" alignItems="center" spacing={0.5}>
-                  <span>Products</span>
-                  <IconButton size="small" onClick={(event) => setAutoMenu({ anchorEl: event.currentTarget, key: "products" })}>
-                    <ArrowDropDown fontSize="small" />
-                  </IconButton>
-                </Stack>
-              </TableCell>
-              <TableCell>
-                <Stack direction="row" alignItems="center" spacing={0.5}>
-                  <span>Project Type</span>
-                  <IconButton size="small" onClick={(event) => setAutoMenu({ anchorEl: event.currentTarget, key: "projectType" })}>
-                    <ArrowDropDown fontSize="small" />
-                  </IconButton>
-                </Stack>
-              </TableCell>
-              <TableCell>
-                <Stack direction="row" alignItems="center" spacing={0.5}>
-                  <span>Status</span>
-                  <IconButton size="small" onClick={(event) => setAutoMenu({ anchorEl: event.currentTarget, key: "status" })}>
-                    <ArrowDropDown fontSize="small" />
-                  </IconButton>
-                </Stack>
-              </TableCell>
-              <TableCell>
-                <Stack direction="row" alignItems="center" spacing={0.5}>
-                  <span>Office</span>
-                  <IconButton size="small" onClick={(event) => setAutoMenu({ anchorEl: event.currentTarget, key: "office" })}>
-                    <ArrowDropDown fontSize="small" />
-                  </IconButton>
-                </Stack>
-              </TableCell>
-              {projectDynamicColumns.map((field) => (
-                <TableCell key={`projects-field-${field.id}`}>{field.name}</TableCell>
+              <TableCell sx={{ minWidth: 50, padding: '8px 12px' }}>#</TableCell>
+              {orderedColumns.map((column) => (
+                <TableCell
+                  key={column.id}
+                  sx={{
+                    minWidth: column.minWidth || 100,
+                    maxWidth: column.maxWidth,
+                    whiteSpace: column.maxWidth ? 'normal' : 'nowrap',
+                    padding: '8px 12px'
+                  }}
+                >
+                  <Stack direction="row" alignItems="center" spacing={0.5}>
+                    <span style={fieldLabelStyle}>{column.name}{column.required ? " *" : ""}</span>
+                    <IconButton
+                      size="small"
+                      onClick={(event) => setAutoMenu({ anchorEl: event.currentTarget, key: column.id })}
+                    >
+                      <ArrowDropDown fontSize="small" />
+                    </IconButton>
+                  </Stack>
+                </TableCell>
               ))}
-              <TableCell>Actions</TableCell>
+              <TableCell sx={{ padding: '8px 12px' }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {pagedProjects.map((project) => (
               <TableRow key={project.id} hover>
-                <TableCell>{project.seq}</TableCell>
-                <TableCell>
-                  <Box
-                    component="span"
+                <TableCell sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>{project.seq}</TableCell>
+                {orderedColumns.map((column) => (
+                  <TableCell
+                    key={`${project.id}-${column.id}`}
                     sx={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      borderRadius: 999,
-                      px: 0.5,
-                      py: 0.25,
-                      backgroundColor: "rgba(255, 193, 7, 0.2)",
-                      fontWeight: 600
+                      maxWidth: column.maxWidth,
+                      whiteSpace: column.maxWidth ? 'normal' : 'nowrap',
+                      overflow: column.maxWidth ? 'hidden' : 'visible',
+                      textOverflow: column.maxWidth ? 'ellipsis' : 'clip',
+                      padding: '8px 12px'
                     }}
                   >
-                    <Button
-                      variant="text"
-                      size="small"
-                      component={Link}
-                      to={`/installations?job=${encodeURIComponent(project.jobNumber)}`}
-                      sx={{ minWidth: "auto", padding: 0 }}
-                    >
-                      {project.jobNumber}
-                    </Button>
-                  </Box>
-                </TableCell>
-                <TableCell>{project.customerName}</TableCell>
-                <TableCell>
-                  {project.productIds?.length
-                    ? project.productIds
-                        .map((productId) => products.find((product) => product.id === productId)?.name || productId)
-                        .join(", ")
-                    : "-"}
-                </TableCell>
-                <TableCell>{project.projectType}</TableCell>
-                <TableCell>
-                  <StatusChip status={project.status} />
-                </TableCell>
-                <TableCell>{project.office}</TableCell>
-                {projectDynamicColumns.map((field) => (
-                  <TableCell key={`${project.id}-${field.id}`}>
-                    {projectsDynamic.valuesByEntity[project.id]?.[field.id]?.value || "-"}
+                    {column.renderCell(project, products)}
                   </TableCell>
                 ))}
-                <TableCell>
+                <TableCell sx={{ padding: '8px 12px' }}>
                   <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                     {renderActions(project)}
                     <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
@@ -410,7 +572,37 @@ const ProjectList = () => {
             </TableRow>
           ))}
         </TableBody>
-      </Table>
+          </Table>
+        </Box>
+      </Box>
+
+      <Box
+        sx={{
+          position: 'fixed',
+          bottom: 0,
+          left: '264px',
+          right: 0,
+          backgroundColor: 'var(--panel)',
+          borderTop: '1px solid var(--stroke)',
+          zIndex: 1000,
+          transition: 'left 0.3s ease'
+        }}
+        className="pagination-bar"
+      >
+        <TablePagination
+          component="div"
+          count={totalCount}
+          page={page}
+          onPageChange={(_, nextPage) => setPage(nextPage)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(event) => {
+            setRowsPerPage(Number(event.target.value));
+            setPage(0);
+          }}
+          rowsPerPageOptions={[25, 50, 100, 500]}
+        />
+      </Box>
+
       {deleteTarget && (
         <Box className="glass-card" sx={{ padding: 2, marginTop: 2 }}>
           <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
@@ -435,73 +627,61 @@ const ProjectList = () => {
           </Stack>
         </Box>
       )}
+
       <Menu
         anchorEl={autoMenu.anchorEl}
-          open={Boolean(autoMenu.anchorEl)}
-          onClose={() => setAutoMenu({ anchorEl: null, key: "" })}
-        >
-          <MenuItem
-            onClick={() => {
-              if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "asc" });
-              setAutoMenu({ anchorEl: null, key: "" });
-            }}
-          >
-            Sort A → Z
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "desc" });
-              setAutoMenu({ anchorEl: null, key: "" });
-            }}
-          >
-            Sort Z → A
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setAutoSort({ key: "", dir: "asc" });
-              setAutoMenu({ anchorEl: null, key: "" });
-            }}
-          >
-            Clear sort
-          </MenuItem>
-          {(projectFilterOptions[autoMenu.key as keyof typeof projectFilterOptions] || []).map((option) => {
-            const label = option || "(Blank)";
-            const selected = !!autoFilters[autoMenu.key]?.has(option);
-            return (
-              <MenuItem
-                key={`${autoMenu.key}-${option}`}
-                onClick={() => {
-                  if (!autoMenu.key) return;
-                  setAutoFilters((prev) => {
-                    const current = new Set(prev[autoMenu.key] ?? []);
-                    if (current.has(option)) {
-                      current.delete(option);
-                    } else {
-                      current.add(option);
-                    }
-                    return { ...prev, [autoMenu.key]: current };
-                  });
-                }}
-              >
-                <Checkbox checked={selected} />
-                <ListItemText primary={label} />
-              </MenuItem>
-            );
-          })}
-        </Menu>
-        <TablePagination
-          component="div"
-          count={totalCount}
-          page={page}
-          onPageChange={(_, nextPage) => setPage(nextPage)}
-          rowsPerPage={rowsPerPage}
-          onRowsPerPageChange={(event) => {
-            setRowsPerPage(Number(event.target.value));
-            setPage(0);
+        open={Boolean(autoMenu.anchorEl)}
+        onClose={() => setAutoMenu({ anchorEl: null, key: "" })}
+      >
+        <MenuItem
+          onClick={() => {
+            if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "asc" });
+            setAutoMenu({ anchorEl: null, key: "" });
           }}
-          rowsPerPageOptions={[25, 50, 100, 500]}
-        />
-      </Box>
+        >
+          Sort A → Z
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "desc" });
+            setAutoMenu({ anchorEl: null, key: "" });
+          }}
+        >
+          Sort Z → A
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setAutoSort({ key: "", dir: "asc" });
+            setAutoMenu({ anchorEl: null, key: "" });
+          }}
+        >
+          Clear sort
+        </MenuItem>
+        {(projectFilterOptions[autoMenu.key as keyof typeof projectFilterOptions] || []).map((option) => {
+          const label = option || "(Blank)";
+          const selected = !!autoFilters[autoMenu.key]?.has(option);
+          return (
+            <MenuItem
+              key={`${autoMenu.key}-${option}`}
+              onClick={() => {
+                if (!autoMenu.key) return;
+                setAutoFilters((prev) => {
+                  const current = new Set(prev[autoMenu.key] ?? []);
+                  if (current.has(option)) {
+                    current.delete(option);
+                  } else {
+                    current.add(option);
+                  }
+                  return { ...prev, [autoMenu.key]: current };
+                });
+              }}
+            >
+              <Checkbox checked={selected} />
+              <ListItemText primary={label} />
+            </MenuItem>
+          );
+        })}
+      </Menu>
       {loading && (
         <Typography variant="caption" color="text.secondary">
           Loading projects...
@@ -522,6 +702,20 @@ const ProjectList = () => {
         fields={projectsTableConfig.orderedFields}
         config={projectsTableConfig.config}
         onChange={projectsTableConfig.setConfig}
+        builtInColumns={[
+          { id: "jobNumber", name: "Job Number", type: "text", required: true },
+          { id: "customerName", name: "Customer", type: "text", required: false },
+          { id: "customerId", name: "Customer ID", type: "text", required: true },
+          { id: "products", name: "Products", type: "multi-select", required: true },
+          { id: "office", name: "Office", type: "text", required: true },
+          { id: "region", name: "Country/State", type: "text", required: false },
+          { id: "projectManager", name: "Project Manager", type: "text", required: false },
+          { id: "description", name: "Description", type: "text", required: true },
+          { id: "startDate", name: "Start Date", type: "date", required: true },
+          { id: "finishDate", name: "Finish Date", type: "date", required: true },
+          { id: "status", name: "Status", type: "single select", required: true },
+          { id: "projectType", name: "Project Type", type: "single select", required: true }
+        ]}
         onAddField={async (fieldId) => {
           const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
           if (!existing) return;

@@ -1,13 +1,17 @@
-import { Avatar, Box, IconButton, Menu, MenuItem, Stack, Typography } from "@mui/material";
+import { Avatar, Box, IconButton, Menu, MenuItem, Stack, Typography, Chip } from "@mui/material";
 import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
+import ViewSidebarOutlinedIcon from "@mui/icons-material/ViewSidebarOutlined";
+import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
+import { useViewMode } from "../../contexts/ViewModeContext";
 
 const Topbar = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { viewMode, toggleViewMode } = useViewMode();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
   const initials = useMemo(() => {
@@ -45,13 +49,29 @@ const Topbar = () => {
 
   return (
     <Box className="topbar">
-      <Stack spacing={0.5}>
-        <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-          Global Project Workflow
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Coordinate internal and external installations across offices.
-        </Typography>
+      <Stack direction="row" spacing={2} alignItems="center">
+        <Chip
+          icon={viewMode === "full" ? <ViewSidebarOutlinedIcon /> : <DashboardOutlinedIcon />}
+          label={viewMode === "full" ? "Full View" : "Minimal View"}
+          onClick={toggleViewMode}
+          sx={{
+            background: "rgba(45, 212, 191, 0.18)",
+            color: "#9df0e5",
+            border: "1px solid rgba(45, 212, 191, 0.3)",
+            cursor: "pointer",
+            "&:hover": {
+              background: "rgba(45, 212, 191, 0.28)"
+            }
+          }}
+        />
+        <Stack spacing={0.5}>
+          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
+            Global Project Workflow
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Coordinate internal and external installations across offices.
+          </Typography>
+        </Stack>
       </Stack>
       <Stack direction="row" spacing={2} alignItems="center">
         <Box className="status-chip">

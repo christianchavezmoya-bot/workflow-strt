@@ -11,6 +11,7 @@ export interface AdminTab {
   type: string;
   position: number;
   columns: string[];
+  columnTypes?: Record<string, string>;
   fieldIds: string[];
   config: TableConfig;
   primaryActionLabel?: string | null;

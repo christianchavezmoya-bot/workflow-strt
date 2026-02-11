@@ -1,4 +1,5 @@
-﻿import {
+﻿import { useEffect, useState } from "react";
+import {
   Box,
   Divider,
   FormControl,
@@ -20,6 +21,8 @@ import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined
 import { NavLink } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
+import { officesService } from "../../services/officesService";
+import type { Office } from "../../components/GlobalOfficeMap";
 import strataLogo from "../../assets/strata_transparent.png";
 
 const navItems = [
@@ -31,11 +34,20 @@ const navItems = [
   { label: "Profile", icon: <PersonOutlineOutlinedIcon />, to: "/profile" }
 ];
 
-const officeOptions = ["USA", "Australia", "South Africa", "All"] as const;
-
 const Sidebar = () => {
   const { user } = useAuth();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
+  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
+  const [officeOptions, setOfficeOptions] = useState<string[]>(["All"]);
+
+  useEffect(() => {
+    officesService.getAll().then((offices) => {
+      setGlobalOffices(offices);
+      // Extract unique countries from global offices
+      const countries = Array.from(new Set(offices.map((office) => office.country).filter(Boolean)));
+      setOfficeOptions([...countries.sort(), "All"]);
+    });
+  }, []);
 
   return (
     <Box className="sidebar">

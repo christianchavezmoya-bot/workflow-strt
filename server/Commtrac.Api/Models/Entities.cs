@@ -13,7 +13,7 @@ public class UserEntity
     [MaxLength(80)]
     public string Role { get; set; } = "Viewer";
     [MaxLength(40)]
-    public string Office { get; set; } = "USA";
+    public string Office { get; set; } = "Atlanta, United States";
     public bool IsActive { get; set; } = true;
     public bool IsFirstLogin { get; set; } = true;
     [MaxLength(200)]
@@ -114,7 +114,7 @@ public class ProjectEntity
     [MaxLength(40)]
     public string FinishDate { get; set; } = string.Empty;
     [MaxLength(40)]
-    public string Office { get; set; } = "USA";
+    public string Office { get; set; } = "Atlanta, United States";
     [MaxLength(120)]
     public string? Region { get; set; }
     [MaxLength(40)]
@@ -168,7 +168,7 @@ public class InstallationEntity
     public string AssignedTeam { get; set; } = string.Empty;
     public List<string> AssignedUsers { get; set; } = new();
     [MaxLength(40)]
-    public string Office { get; set; } = "USA";
+    public string Office { get; set; } = "Atlanta, United States";
     [MaxLength(800)]
     public string? InstallerNotes { get; set; }
     [MaxLength(40)]
@@ -379,4 +379,18 @@ public class QuickbaseSettingsEntity
     public string InstallationsTableId { get; set; } = string.Empty;
     public string ProjectsFieldMapJson { get; set; } = "{}";
     public string InstallationsFieldMapJson { get; set; } = "{}";
+}
+
+public class OfficeEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string Country { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string State { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string City { get; set; } = string.Empty;
+    public double Lat { get; set; }
+    public double Lng { get; set; }
 }

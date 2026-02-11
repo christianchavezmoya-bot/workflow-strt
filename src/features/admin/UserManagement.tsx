@@ -10,6 +10,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Paper,
   IconButton,
@@ -42,7 +43,7 @@ import {
   TableRows,
 } from "@mui/icons-material";
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
 import GlobalOfficeMap, { Office } from "../../components/GlobalOfficeMap";
@@ -53,8 +54,9 @@ import { useAuth } from "../../hooks/useAuth";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { adminTabsService, AdminTab, AdminTabRow } from "../../services/adminTabsService";
-import { fieldService } from "../../services/fieldService";
+import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
+import { roleConfigService, RolePermissions } from "../../services/roleConfigService";
 import api from "../../services/api";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer } from "../../store/customersSlice";
@@ -64,8 +66,12 @@ import { Customer } from "../../types/customer";
 import { Product } from "../../types/product";
 import { User, UserRole } from "../../types/user";
 
-const roles: UserRole[] = ["Admin", "Project Manager", "Engineer", "Viewer"];
-const offices: Array<Customer["office"]> = ["USA", "Australia", "South Africa", "All"];
+// Style for field definition labels (yellow bold)
+const fieldLabelStyle = {
+  color: '#FFD700',
+  fontWeight: 'bold'
+};
+
 const defaultCustomColumns = ["ID", "Name", "Created Date"];
 const getDefaultColumnType = (name: string) => {
   if (name === "ID") return "lookup field";
@@ -216,9 +222,32 @@ export const UserManagement: React.FC = () => {
   const { activeOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const location = useLocation();
   const usersState = useAppSelector((state) => state.users);
   const customersState = useAppSelector((state) => state.customers);
   const productsState = useAppSelector((state) => state.products);
+  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
+
+  // Derive offices dropdown list from globalOffices (City, Country format)
+  // NOTE: This dropdown shows ALL offices, not filtered by activeOffice
+  const offices = useMemo(() => {
+    console.log('Computing offices dropdown from globalOffices:', globalOffices.length, 'offices');
+    console.log('Current activeOffice filter:', activeOffice);
+
+    const officeNames = globalOffices
+      .map((office) => {
+        if (office.city && office.country) {
+          return `${office.city}, ${office.country}`;
+        }
+        return office.country || office.city;
+      })
+      .filter((name): name is string => !!name);
+    const result = Array.from(new Set([...officeNames, "All"]));
+    console.log('Computed offices dropdown (all offices, not filtered):', result);
+    return result;
+  }, [globalOffices]);
+
+  const [roles, setRoles] = useState<string[]>(["Admin", "Project Manager", "Engineer", "Viewer"]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [productOpen, setProductOpen] = useState(false);
@@ -232,7 +261,12 @@ export const UserManagement: React.FC = () => {
     id: string;
     label: string;
   } | null>(null);
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(() => {
+    const stored = localStorage.getItem("admin_active_tab");
+    return stored ? parseInt(stored, 10) : 0;
+  });
+  const [usersPage, setUsersPage] = useState(0);
+  const [usersRowsPerPage, setUsersRowsPerPage] = useState(25);
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
@@ -244,7 +278,7 @@ export const UserManagement: React.FC = () => {
     customerId: "",
     office: activeOffice === "All" ? "" : activeOffice
   });
-  const [editingCustomerId, setEditingCustomerId] = useState<number | null>(null);
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [editCustomerName, setEditCustomerName] = useState("");
   const [editCustomerIndustry, setEditCustomerIndustry] = useState("");
   const [editCustomerLogo, setEditCustomerLogo] = useState<string | null>(null);
@@ -321,8 +355,8 @@ export const UserManagement: React.FC = () => {
   const productsDynamic = useDynamicFields("products");
   const assetsDynamic = useDynamicFields("assets");
   const allFieldDefinitions = useFieldDefinitions();
-  const usersTableConfig = useTableConfig(
-    "users",
+  // Use database field definitions for users table
+  const allUsersFields = useMemo(() =>
     usersDynamic.definitions.map((field) => ({
       id: field.id,
       name: field.name,
@@ -330,7 +364,9 @@ export const UserManagement: React.FC = () => {
       linkToFieldId: field.linkToFieldId,
       actionType: field.actionType
     }))
-  );
+  , [usersDynamic.definitions]);
+
+  const usersTableConfig = useTableConfig("users", allUsersFields);
   const customersTableConfig = useTableConfig(
     "customers",
     customersDynamic.definitions.map((field) => ({
@@ -427,6 +463,15 @@ export const UserManagement: React.FC = () => {
     [usersDynamic.definitions, usersTableConfig.config]
   );
 
+  // Filter out static fields from dynamic fields to prevent duplicates in Edit User dialog
+  const dynamicOnlyUsersDefinitions = useMemo(() => {
+    const staticFieldIds = new Set(['field-user-name', 'field-email', 'field-role', 'field-office', 'field-active']);
+    const staticFieldNames = new Set(['User Name', 'Email', 'Role', 'Office', 'City', 'Office/City', 'Office / City', 'Global Offices', 'Active']);
+    return orderedUsersDefinitions.filter(def =>
+      !staticFieldIds.has(def.id) && !staticFieldNames.has(def.name)
+    );
+  }, [orderedUsersDefinitions]);
+
   const orderedCustomersDefinitions = useMemo(
     () => getOrderedDefinitions(customersDynamic.definitions, customersTableConfig.config),
     [customersDynamic.definitions, customersTableConfig.config]
@@ -472,13 +517,18 @@ export const UserManagement: React.FC = () => {
   const [rolesConfig, setRolesConfig] = useState(() => {
     try {
       const raw = localStorage.getItem("admin_roles_config");
-      if (raw) return JSON.parse(raw) as Record<string, Record<string, boolean>>;
+      if (raw) return JSON.parse(raw) as Record<string, RolePermissions>;
     } catch {
       // ignore
     }
     return {
       Viewer: {
-        viewOnly: true
+        viewOnly: true,
+        createDeleteTables: false,
+        createUsers: false,
+        editFields: false,
+        modifyData: false,
+        editForms: false
       },
       "Project Manager": {
         viewOnly: false,
@@ -504,7 +554,7 @@ export const UserManagement: React.FC = () => {
         modifyData: true,
         editForms: false
       }
-    };
+    } as Record<string, RolePermissions>;
   });
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -526,6 +576,55 @@ export const UserManagement: React.FC = () => {
     dispatch(fetchCustomers());
     dispatch(fetchProducts());
   }, [dispatch]);
+
+  useEffect(() => {
+    officesService.getAll()
+      .then(offices => {
+        console.log('Loaded global offices:', offices);
+        setGlobalOffices(offices);
+      })
+      .catch(error => {
+        console.error('Failed to load global offices:', error);
+        setGlobalOffices([]);
+      });
+  }, []);
+
+  // Load roles from backend
+  const loadRolesFromDatabase = async () => {
+    try {
+      const config = await roleConfigService.get();
+      console.log('Loaded roles config:', config);
+      console.log('config.roles:', config.roles);
+      console.log('config.roles JSON:', JSON.stringify(config.roles, null, 2));
+      console.log('typeof config.roles:', typeof config.roles);
+
+      const roleNames = Object.keys(config.roles || {});
+      console.log('Role names for dropdown:', roleNames);
+
+      if (roleNames.length > 0) {
+        setRoles(roleNames);
+        setRolesConfig(config.roles);
+        console.log('✅ Roles refreshed from database');
+      } else {
+        console.warn('No roles found in config, using defaults');
+        console.log('Keeping default roles:', ["Admin", "Project Manager", "Engineer", "Viewer"]);
+      }
+    } catch (error) {
+      console.error("Failed to load roles:", error);
+      console.log('Using default roles:', ["Admin", "Project Manager", "Engineer", "Viewer"]);
+    }
+  };
+
+  useEffect(() => {
+    loadRolesFromDatabase();
+
+    // Expose to window for console access (helpful for debugging and external scripts)
+    (window as any).refreshRoles = loadRolesFromDatabase;
+
+    return () => {
+      delete (window as any).refreshRoles;
+    };
+  }, []);
 
   // Fetch sites from API
   useEffect(() => {
@@ -574,8 +673,33 @@ export const UserManagement: React.FC = () => {
   }, [customAssetColumns]);
 
 
+  // Track initial mount to avoid saving on first load
+  const isInitialRolesMount = useRef(true);
+
   useEffect(() => {
+    // Update roles array to match rolesConfig keys (for dropdown)
+    const roleNames = Object.keys(rolesConfig);
+    if (roleNames.length > 0) {
+      setRoles(roleNames);
+    }
+
+    // Save to localStorage
     localStorage.setItem("admin_roles_config", JSON.stringify(rolesConfig));
+
+    // Skip database save on initial mount to avoid overwriting with stale localStorage data
+    if (isInitialRolesMount.current) {
+      isInitialRolesMount.current = false;
+      return;
+    }
+
+    // Save to database when roles are actually changed by user
+    roleConfigService.update({ roles: rolesConfig })
+      .then(() => {
+        console.log('✅ Roles saved to database');
+      })
+      .catch((error) => {
+        console.error('❌ Failed to save roles to database:', error);
+      });
   }, [rolesConfig]);
 
   // Site Management Helper Functions
@@ -714,16 +838,81 @@ export const UserManagement: React.FC = () => {
     setCustomerForm((prev) => ({ ...prev, office: activeOffice === "All" ? "" : activeOffice }));
   }, [activeOffice]);
 
+  // Clear customer filters when active office changes
+  useEffect(() => {
+    setCustomerFilters({});
+    setCustomerSort({ key: "", dir: "asc" });
+  }, [activeOffice]);
+
+  // Persist active tab to localStorage
+  useEffect(() => {
+    localStorage.setItem("admin_active_tab", String(tab));
+  }, [tab]);
+
   const users = useMemo(() => (usersState.items.length ? usersState.items : demoUsers), [usersState.items]);
   const products = useMemo(
     () => (productsState.items.length ? productsState.items : demoProducts),
     [productsState.items]
   );
 
+  // Map office cities/states to countries
+  const getCountryForOffice = useMemo(() => {
+    const map = new Map<string, string>();
+
+    // Add city → country mappings from globalOffices
+    globalOffices.forEach((office) => {
+      if (office.city && office.country) {
+        map.set(office.city, office.country);
+        map.set(office.city.toLowerCase(), office.country);
+      }
+    });
+
+    // Add common Australian state abbreviations and names
+    const australianStates = {
+      'NSW': 'Australia',
+      'New South Wales': 'Australia',
+      'VIC': 'Australia',
+      'Victoria': 'Australia',
+      'QLD': 'Australia',
+      'Queensland': 'Australia',
+      'WA': 'Australia',
+      'Western Australia': 'Australia',
+      'SA': 'Australia',
+      'South Australia': 'Australia',
+      'TAS': 'Australia',
+      'Tasmania': 'Australia',
+      'ACT': 'Australia',
+      'Australian Capital Territory': 'Australia',
+      'NT': 'Australia',
+      'Northern Territory': 'Australia'
+    };
+
+    Object.entries(australianStates).forEach(([state, country]) => {
+      map.set(state, country);
+      map.set(state.toLowerCase(), country);
+    });
+
+    return (officeLocation: string) => {
+      if (!officeLocation) return officeLocation;
+      // Try exact match first
+      const exactMatch = map.get(officeLocation);
+      if (exactMatch) return exactMatch;
+      // Try lowercase match
+      const lowerMatch = map.get(officeLocation.toLowerCase());
+      if (lowerMatch) return lowerMatch;
+      // Return original if no match found
+      return officeLocation;
+    };
+  }, [globalOffices]);
+
   const filteredCustomers = useMemo(() => {
     if (activeOffice === "All") return customersState.items;
-    return customersState.items.filter((customer) => customer.office === activeOffice || customer.office === "All");
-  }, [customersState.items, activeOffice]);
+
+    return customersState.items.filter((customer) => {
+      const customerCountry = getCountryForOffice(customer.office);
+      return customerCountry === activeOffice || customer.office === activeOffice || customer.office === "All";
+    });
+  }, [customersState.items, activeOffice, getCountryForOffice]);
 
   const [adminTabsConfig, setAdminTabsConfig] = useState<AdminTab[]>([]);
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
@@ -749,11 +938,6 @@ export const UserManagement: React.FC = () => {
   const [customTableConfigOpen, setCustomTableConfigOpen] = useState(false);
   const [customTableConfigTabId, setCustomTableConfigTabId] = useState<string | null>(null);
   const [adminTabsLoaded, setAdminTabsLoaded] = useState(false);
-  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
-
-  useEffect(() => {
-    officesService.getAll().then(setGlobalOffices).catch(console.error);
-  }, []);
 
   useEffect(() => {
     const loadTabs = async () => {
@@ -857,6 +1041,16 @@ export const UserManagement: React.FC = () => {
     }
   }, [tab, adminTabsConfig.length]);
 
+  // Handle navigation with specific tab selection
+  useEffect(() => {
+    const stateWithOpenTab = location.state as { openTab?: string } | null;
+    if (stateWithOpenTab?.openTab && adminTabsConfig.length > 0) {
+      const tabIndex = adminTabsConfig.findIndex((t) => t.type === stateWithOpenTab.openTab);
+      if (tabIndex >= 0) {
+        setTab(tabIndex);
+      }
+    }
+  }, [location.state, adminTabsConfig]);
 
   useEffect(() => {
     const loadRows = async () => {
@@ -865,9 +1059,17 @@ export const UserManagement: React.FC = () => {
         customTabs.map(async (tabItem) => {
           try {
             const rows = await adminTabsService.getRows(tabItem.id);
+            const today = new Date().toISOString().slice(0, 10);
             setAdminTabRows((prev) => ({
               ...prev,
-              [tabItem.id]: rows.map((row) => ({ ...row.data, _rowId: row.id }))
+              [tabItem.id]: rows.map((row) => {
+                const data = { ...row.data, _rowId: row.id };
+                // Backfill empty "Created Date" on existing rows
+                if ("Created Date" in data && !data["Created Date"]) {
+                  data["Created Date"] = today;
+                }
+                return data;
+              })
             }));
           } catch {
             // ignore
@@ -1055,10 +1257,85 @@ export const UserManagement: React.FC = () => {
     [roleLabels, roleAccessors]
   );
 
+  // Site/Customer table accessors and filters
+  const siteAccessors = useMemo(
+    () => ({
+      customer: (site: typeof sitesList[0]) => normalize(getCustomerName(site.customerId)),
+      siteName: (site: typeof sitesList[0]) => normalize(site.name),
+      city: (site: typeof sitesList[0]) => normalize(site.city ?? ""),
+      state: (site: typeof sitesList[0]) => normalize(site.state ?? ""),
+      industry: (site: typeof sitesList[0]) => {
+        const customer = getCustomerData(site.customerId);
+        return normalize(customer?.industry ?? "");
+      },
+      notes: (site: typeof sitesList[0]) => normalize(site.notes ?? "")
+    }),
+    [sitesList, customersState.items]
+  );
+
+  const siteFilterOptions = useMemo(
+    () => ({
+      customer: Array.from(new Set(sitesList.map((site) => siteAccessors.customer(site)))).sort(),
+      siteName: Array.from(new Set(sitesList.map((site) => siteAccessors.siteName(site)))).sort(),
+      city: Array.from(new Set(sitesList.map((site) => siteAccessors.city(site)))).sort(),
+      state: Array.from(new Set(sitesList.map((site) => siteAccessors.state(site)))).sort(),
+      industry: Array.from(new Set(sitesList.map((site) => siteAccessors.industry(site)))).sort(),
+      notes: Array.from(new Set(sitesList.map((site) => siteAccessors.notes(site)))).sort()
+    }),
+    [sitesList, siteAccessors]
+  );
+
+  const filteredSites = useMemo(() => {
+    let result = [...sitesList];
+
+    // Apply search filter
+    if (customerSearch) {
+      const searchLower = customerSearch.toLowerCase();
+      result = result.filter((site) => {
+        const customerName = getCustomerName(site.customerId).toLowerCase();
+        const siteName = site.name.toLowerCase();
+        const city = (site.city || '').toLowerCase();
+        const state = (site.state || '').toLowerCase();
+        return customerName.includes(searchLower) ||
+               siteName.includes(searchLower) ||
+               city.includes(searchLower) ||
+               state.includes(searchLower);
+      });
+    }
+
+    // Apply column filters
+    Object.entries(customerFilters).forEach(([key, valueSet]) => {
+      if (valueSet.size === 0) return;
+      result = result.filter((site) => {
+        const value = siteAccessors[key as keyof typeof siteAccessors]?.(site) ?? "";
+        return valueSet.has(value);
+      });
+    });
+
+    // Apply sorting
+    if (customerSort.key) {
+      result.sort((a, b) => {
+        const aVal = siteAccessors[customerSort.key as keyof typeof siteAccessors]?.(a) ?? "";
+        const bVal = siteAccessors[customerSort.key as keyof typeof siteAccessors]?.(b) ?? "";
+        return customerSort.dir === "asc"
+          ? aVal.localeCompare(bVal)
+          : bVal.localeCompare(aVal);
+      });
+    }
+
+    return result;
+  }, [sitesList, customerSearch, customerFilters, customerSort, siteAccessors, customersState.items]);
+
   const filteredUsers = useMemo(() => {
     const filtered = applyAutoFilter(numberedUsers, userFilters, userAccessors);
     return applyAutoSort(filtered, userSort, userAccessors);
   }, [numberedUsers, userFilters, userSort, userAccessors]);
+
+  const pagedUsers = useMemo(() => {
+    const start = usersPage * usersRowsPerPage;
+    const end = start + usersRowsPerPage;
+    return filteredUsers.slice(start, end);
+  }, [filteredUsers, usersPage, usersRowsPerPage]);
 
   const filteredProductRows = useMemo(() => {
     const filtered = applyAutoFilter(numberedProducts, productFilters, productAccessors);
@@ -1218,7 +1495,7 @@ export const UserManagement: React.FC = () => {
         ...customRowDialogColumns.map((name) => ({
           id: `default:${name}`,
           name,
-          type: getDefaultColumnType(name)
+          type: customRowDialogTab?.columnTypes?.[name] || getDefaultColumnType(name)
         })),
         ...allFieldDefinitions.definitions
           .filter((field) => (customRowDialogTab.fieldIds || []).includes(field.id))
@@ -1279,7 +1556,10 @@ export const UserManagement: React.FC = () => {
       const created = await dispatch(createCustomer({
         name: customerForm.name,
         customerId: customerForm.customerId,
-        office: customerForm.office || "USA"
+        office: customerForm.office || "USA",
+        logoShape: "round",
+        photoScale: 100,
+        logoSize: 70
       })).unwrap();
       await customersDynamic.upsertForEntity(
         created.id,
@@ -1503,8 +1783,20 @@ export const UserManagement: React.FC = () => {
 
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Box sx={{ mb: 4 }}>
+    <Container
+      maxWidth="lg"
+      sx={{
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'hidden',
+        overflowY: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: 2,
+        boxSizing: 'border-box'
+      }}
+    >
+      <Box sx={{ mb: 2, flexShrink: 0 }}>
         <Typography variant="h4" sx={{ mb: 2 }}>Admin</Typography>
 
         <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -1514,162 +1806,135 @@ export const UserManagement: React.FC = () => {
             ))}
           </Tabs>
 
-          <IconButton
-            size="small"
-            onClick={(event) => {
-              setAdminSettingsMenu(event.currentTarget);
-              setAdminSettingsMenuOpen(true);
-            }}
-          >
-            <SettingsOutlined fontSize="small" />
-          </IconButton>
+          <Stack direction="row" spacing={1} alignItems="center">
+            {adminTabsConfig[tab]?.type === "users" && (
+              <Button variant="contained" onClick={() => setInviteOpen(true)}>
+                Invite user
+              </Button>
+            )}
+            <IconButton
+              size="small"
+              onClick={(event) => {
+                setAdminSettingsMenu(event.currentTarget);
+                setAdminSettingsMenuOpen(true);
+              }}
+            >
+              <SettingsOutlined fontSize="small" />
+            </IconButton>
+          </Stack>
         </Stack>
       </Box>
 
       {/* Users Tab */}
       {adminTabsConfig[tab]?.type === "users" && (
-        <Box>
-          <Stack direction="row" sx={{ mb: 2 }}>
-            <Button variant="contained" onClick={() => setInviteOpen(true)}>
-              Invite user
-            </Button>
-          </Stack>
+        <>
+          <Box
+            className="glass-card"
+            sx={{
+              padding: 2,
+              paddingBottom: 0,
+              marginBottom: '64px',
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}
+          >
+            {actionError && <Alert severity="error" sx={{ mb: 2 }}>{actionError}</Alert>}
 
-          {actionError && <Alert severity="error">{actionError}</Alert>}
-
-          <Table>
-            <TableHead>
+            <Box sx={{ overflowX: 'auto', width: '100%', flex: 1 }}>
+              <Table sx={{ tableLayout: 'auto', width: '100%' }} size="small">
+            <TableHead
+              sx={{
+                position: 'sticky',
+                top: 0,
+                backgroundColor: 'var(--panel)',
+                zIndex: 10
+              }}
+            >
               <TableRow>
-                <TableCell>#</TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Name</span>
-                    <IconButton size="small" onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: "name" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Email</span>
-                    <IconButton size="small" onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: "email" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Role</span>
-                    <IconButton size="small" onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: "role" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Office</span>
-                    <IconButton size="small" onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: "office" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Status</span>
-                    <IconButton size="small" onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: "status" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                {usersTableConfig.visibleFields
-                  .filter((field) => {
-                    const fixed = new Set(
-                      ["Name", "Email", "Role", "Office", "Status"].map((value) => value.toLowerCase())
-                    );
-                    if (fixed.has(field.name.toLowerCase())) return false;
-                    const hasValue = Object.values(usersDynamic.valuesByEntity).some(
-                      (values) => values[field.id]?.value?.trim()
-                    );
-                    return hasValue;
-                  })
-                  .map((field) => (
-                  <TableCell key={`users-field-${field.id}`}>{field.name}</TableCell>
-                ))}
-                <TableCell>Actions</TableCell>
+                <TableCell sx={{ minWidth: 50, padding: '8px 12px' }}>#</TableCell>
+                {usersTableConfig.visibleFields.map((field) => {
+                  const accessorKey = field.id.startsWith("base-")
+                    ? field.id.replace("base-", "")
+                    : field.id;
+                  return (
+                    <TableCell
+                      key={`users-header-${field.id}`}
+                      sx={{
+                        minWidth: 120,
+                        whiteSpace: 'nowrap',
+                        padding: '8px 12px'
+                      }}
+                    >
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>{field.name}</span>
+                        <IconButton
+                          size="small"
+                          onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: accessorKey })}
+                        >
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                  );
+                })}
+                <TableCell sx={{ padding: '8px 12px' }}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {filteredUsers.map((user) => (
+              {pagedUsers.map((user) => (
                 <TableRow key={user.id} hover>
-                  <TableCell>{user.seq}</TableCell>
-                  <TableCell>{user.fullName}</TableCell>
-                  <TableCell>{user.email}</TableCell>
-                  <TableCell>
-                    <FormControl size="small">
-                      <Select
-                        value={user.role}
-                        onChange={(event) =>
-                          dispatch(
-                            updateUser({
-                              id: user.id,
-                              payload: { role: event.target.value as UserRole }
-                            })
-                          )
-                        }
-                      >
-                        {roles.map((role) => (
-                          <MenuItem key={role} value={role}>
-                            {role}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </TableCell>
-                  <TableCell>
-                    <FormControl size="small">
-                      <Select
-                        value={user.office}
-                        onChange={(event) =>
-                          dispatch(
-                            updateUser({
-                              id: user.id,
-                              payload: { office: event.target.value as User["office"] }
-                            })
-                          )
-                        }
-                      >
-                        {offices.filter((office) => office !== "All").map((office) => (
-                          <MenuItem key={office} value={office}>
-                            {office}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={!user.isActive && user.isFirstLogin ? "Pending" : user.isActive ? "Active" : "Inactive"}
-                      color={user.isActive ? "success" : "default"}
-                      size="small"
-                    />
-                  </TableCell>
-                  {usersTableConfig.visibleFields
-                    .filter((field) => {
-                      const fixed = new Set(
-                        ["Name", "Email", "Role", "Office", "Status"].map((value) => value.toLowerCase())
+                  <TableCell sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>{user.seq}</TableCell>
+                  {usersTableConfig.visibleFields.map((field) => {
+                    // Render built-in user fields from database field definitions
+                    if (field.id === "field-user-name") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>
+                          {user.fullName}
+                        </TableCell>
                       );
-                      if (fixed.has(field.name.toLowerCase())) return false;
-                      const hasValue = Object.values(usersDynamic.valuesByEntity).some(
-                        (values) => values[field.id]?.value?.trim()
+                    }
+                    if (field.id === "field-email") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>
+                          {user.email}
+                        </TableCell>
                       );
-                      return hasValue;
-                    })
-                    .map((field) => (
-                    <TableCell key={`${user.id}-${field.id}`}>
-                      {usersDynamic.valuesByEntity[user.id]?.[field.id]?.value || "-"}
-                    </TableCell>
-                  ))}
-                  <TableCell>
+                    }
+                    if (field.id === "field-role") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ padding: '8px 12px' }}>
+                          {user.role}
+                        </TableCell>
+                      );
+                    }
+                    if (field.id === "field-office") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ padding: '8px 12px' }}>
+                          {user.office || "-"}
+                        </TableCell>
+                      );
+                    }
+                    if (field.id === "field-active") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ padding: '8px 12px' }}>
+                          <Chip
+                            label={!user.isActive && user.isFirstLogin ? "Pending" : user.isActive ? "Active" : "Inactive"}
+                            color={user.isActive ? "success" : "default"}
+                            size="small"
+                          />
+                        </TableCell>
+                      );
+                    }
+                    // Render dynamic custom fields
+                    return (
+                      <TableCell key={`${user.id}-${field.id}`} sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>
+                        {usersDynamic.valuesByEntity[user.id]?.[field.id]?.value || "-"}
+                      </TableCell>
+                    );
+                  })}
+                  <TableCell sx={{ padding: '8px 12px' }}>
                     <Stack direction="row" spacing={1}>
                       <Button size="small" variant="outlined" onClick={() => dispatch(inviteUser(user.id))}>
                         Invite
@@ -1706,7 +1971,37 @@ export const UserManagement: React.FC = () => {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+              </Table>
+            </Box>
+          </Box>
+
+          <Box
+            sx={{
+              position: 'fixed',
+              bottom: 0,
+              left: '264px',
+              right: 0,
+              backgroundColor: 'var(--panel)',
+              borderTop: '1px solid var(--stroke)',
+              zIndex: 1000,
+              transition: 'left 0.3s ease'
+            }}
+            className="pagination-bar"
+          >
+            <TablePagination
+              component="div"
+              count={filteredUsers.length}
+              page={usersPage}
+              onPageChange={(_, nextPage) => setUsersPage(nextPage)}
+              rowsPerPage={usersRowsPerPage}
+              onRowsPerPageChange={(event) => {
+                setUsersRowsPerPage(Number(event.target.value));
+                setUsersPage(0);
+              }}
+              rowsPerPageOptions={[25, 50, 100, 500]}
+            />
+          </Box>
+
           <Menu
             anchorEl={userMenu.anchorEl}
             open={Boolean(userMenu.anchorEl)}
@@ -1769,7 +2064,7 @@ export const UserManagement: React.FC = () => {
               );
             })}
           </Menu>
-        </Box>
+        </>
       )}
 
       {/* Roles Tab */}
@@ -1861,7 +2156,7 @@ export const UserManagement: React.FC = () => {
                   ].map((perm) => (
                     <TableCell key={`${row.role}-${perm}`}>
                       <Checkbox
-                        checked={!!rolesConfig[row.role]?.[perm]}
+                        checked={!!(rolesConfig[row.role] as unknown as Record<string, boolean>)?.[perm]}
                         onChange={(event) =>
                           setRolesConfig((prev) => ({
                             ...prev,
@@ -1978,9 +2273,21 @@ export const UserManagement: React.FC = () => {
                 variant="contained"
                 startIcon={<AddOutlined />}
                 onClick={async () => {
+                  const customerCount = customersState.items.length + 1;
+
+                  // Generate sequential customer ID (CUST-XXXX format)
+                  const existingIds = customersState.items
+                    .map(c => c.customerId)
+                    .filter(id => id && id.startsWith('CUST-'))
+                    .map(id => parseInt(id.split('-')[1], 10))
+                    .filter(num => !isNaN(num));
+
+                  const nextNumber = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
+                  const customerId = `CUST-${String(nextNumber).padStart(4, '0')}`;
+
                   const newCustomerPayload = {
-                    name: `New Customer`,
-                    customerId: `CUST-${Date.now()}`,
+                    name: `customer${String(customerCount).padStart(2, '0')}`,
+                    customerId: customerId,
                     office: activeOffice === "All" ? "USA" : activeOffice,
                     industry: 'General',
                     logo: null,
@@ -2166,8 +2473,8 @@ export const UserManagement: React.FC = () => {
                                 e.stopPropagation();
                                 setEditingCustomerId(customer.id);
                                 setEditCustomerName(customer.name);
-                                setEditCustomerIndustry(customer.type);
-                                setEditCustomerLogo(customer.logo);
+                                setEditCustomerIndustry(customer.industry ?? "");
+                                setEditCustomerLogo(customer.logo ?? null);
                                 setEditCustomerLogoShape(customer.logoShape || 'round');
                                 setEditCustomerLogoSize(customer.logoSize || 70);
                                 setEditCustomerPhotoScale(customer.photoScale || 100);
@@ -2346,6 +2653,7 @@ export const UserManagement: React.FC = () => {
                           value={editCustomerName}
                           onChange={(e) => setEditCustomerName(e.target.value)}
                           placeholder="Customer Name"
+                          label="Customer Name"
                           fullWidth
                           sx={{
                             '& .MuiInputBase-root': {
@@ -2357,9 +2665,36 @@ export const UserManagement: React.FC = () => {
                         />
                         <TextField
                           size="small"
+                          value={customer.customerId}
+                          label="Customer ID"
+                          disabled
+                          fullWidth
+                          sx={{
+                            '& .MuiInputBase-root': {
+                              height: 26,
+                              fontSize: '0.75rem'
+                            }
+                          }}
+                        />
+                        <TextField
+                          size="small"
+                          value={customer.office}
+                          label="Office"
+                          disabled
+                          fullWidth
+                          sx={{
+                            '& .MuiInputBase-root': {
+                              height: 26,
+                              fontSize: '0.75rem'
+                            }
+                          }}
+                        />
+                        <TextField
+                          size="small"
                           value={editCustomerIndustry}
                           onChange={(e) => setEditCustomerIndustry(e.target.value)}
                           placeholder="Industry"
+                          label="Industry"
                           fullWidth
                           sx={{
                             '& .MuiInputBase-root': {
@@ -2421,44 +2756,121 @@ export const UserManagement: React.FC = () => {
                 <TableHead>
                   <TableRow>
                     <TableCell width="60">#</TableCell>
-                    <TableCell>Customer</TableCell>
-                    <TableCell>Site Name</TableCell>
-                    <TableCell>City</TableCell>
-                    <TableCell>State/Country</TableCell>
-                    <TableCell>Comments</TableCell>
+                    <TableCell width="80">Logo</TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>Customer</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "customer" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>Site Name</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "siteName" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>City</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "city" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>State/Country</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "state" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>Industry</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "industry" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>Comments</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "notes" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
                     <TableCell width="120" align="center">Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sitesList.length === 0 ? (
+                  {filteredSites.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} align="center">
+                      <TableCell colSpan={9} align="center">
                         <Typography variant="body2" color="text.secondary">
                           No sites found
                         </Typography>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sitesList
-                      .filter((site) => {
-                        if (!customerSearch) return true;
-                        const searchLower = customerSearch.toLowerCase();
-                        const customerName = getCustomerName(site.customerId).toLowerCase();
-                        const siteName = site.name.toLowerCase();
-                        const city = (site.city || '').toLowerCase();
-                        const state = (site.state || '').toLowerCase();
-                        return customerName.includes(searchLower) ||
-                               siteName.includes(searchLower) ||
-                               city.includes(searchLower) ||
-                               state.includes(searchLower);
-                      })
-                      .map((site, index) => {
+                    filteredSites.map((site, index) => {
                       const isEditing = editingSiteId === site.id;
                       const customer = getCustomerData(site.customerId);
 
                       return (
                         <TableRow key={site.id} hover={!isEditing}>
                           <TableCell>{index + 1}</TableCell>
+
+                          {/* Logo */}
+                          <TableCell>
+                            {customer?.logo ? (
+                              customer.logoShape === 'none' ? (
+                                <img
+                                  src={customer.logo}
+                                  alt={customer.name}
+                                  style={{
+                                    maxHeight: '30px',
+                                    maxWidth: '60px',
+                                    objectFit: 'contain',
+                                  }}
+                                />
+                              ) : (
+                                <Box
+                                  sx={{
+                                    width: customer.logoShape === 'rectangular' ? 60 : 30,
+                                    height: 30,
+                                    borderRadius: customer.logoShape === 'round' ? '50%' : '4px',
+                                    backgroundImage: `url(${customer.logo})`,
+                                    backgroundSize: `${customer.photoScale || 100}%`,
+                                    backgroundPosition: 'center',
+                                    backgroundRepeat: 'no-repeat',
+                                  }}
+                                />
+                              )
+                            ) : (
+                              <Box
+                                sx={{
+                                  width: 30,
+                                  height: 30,
+                                  borderRadius: '50%',
+                                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: 'white',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 'bold',
+                                }}
+                              >
+                                {getCustomerName(site.customerId).charAt(0)}
+                              </Box>
+                            )}
+                          </TableCell>
 
                           {/* Customer */}
                           <TableCell>
@@ -2470,103 +2882,13 @@ export const UserManagement: React.FC = () => {
                                 >
                                   {customersState.items.map((cust) => (
                                     <MenuItem key={cust.id} value={cust.id}>
-                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        {cust.logo ? (
-                                          cust.logoShape === 'none' ? (
-                                            <img
-                                              src={cust.logo}
-                                              alt={cust.name}
-                                              style={{
-                                                maxHeight: '20px',
-                                                maxWidth: '40px',
-                                                objectFit: 'contain',
-                                              }}
-                                            />
-                                          ) : (
-                                            <Box
-                                              sx={{
-                                                width: cust.logoShape === 'rectangular' ? 40 : 20,
-                                                height: 20,
-                                                borderRadius: cust.logoShape === 'round' ? '50%' : '4px',
-                                                backgroundImage: `url(${cust.logo})`,
-                                                backgroundSize: `${cust.photoScale || 100}%`,
-                                                backgroundPosition: 'center',
-                                                backgroundRepeat: 'no-repeat',
-                                              }}
-                                            />
-                                          )
-                                        ) : (
-                                          <Box
-                                            sx={{
-                                              width: 20,
-                                              height: 20,
-                                              borderRadius: '50%',
-                                              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                              display: 'flex',
-                                              alignItems: 'center',
-                                              justifyContent: 'center',
-                                              color: 'white',
-                                              fontSize: '0.625rem',
-                                              fontWeight: 'bold',
-                                            }}
-                                          >
-                                            {cust.name.charAt(0)}
-                                          </Box>
-                                        )}
-                                        <Typography variant="body2">{cust.name}</Typography>
-                                      </Box>
+                                      {cust.name}
                                     </MenuItem>
                                   ))}
                                 </Select>
                               </FormControl>
                             ) : (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                {customer?.logo ? (
-                                  customer.logoShape === 'none' ? (
-                                    <img
-                                      src={customer.logo}
-                                      alt={customer.name}
-                                      style={{
-                                        maxHeight: '30px',
-                                        maxWidth: '60px',
-                                        objectFit: 'contain',
-                                      }}
-                                    />
-                                  ) : (
-                                    <Box
-                                      sx={{
-                                        width: customer.logoShape === 'rectangular' ? 60 : 30,
-                                        height: 30,
-                                        borderRadius: customer.logoShape === 'round' ? '50%' : '4px',
-                                        backgroundImage: `url(${customer.logo})`,
-                                        backgroundSize: `${customer.photoScale || 100}%`,
-                                        backgroundPosition: 'center',
-                                        backgroundRepeat: 'no-repeat',
-                                      }}
-                                    />
-                                  )
-                                ) : (
-                                  <Box
-                                    sx={{
-                                      width: 30,
-                                      height: 30,
-                                      borderRadius: '50%',
-                                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      color: 'white',
-                                      fontSize: '0.75rem',
-                                      fontWeight: 'bold',
-                                    }}
-                                  >
-                                    {getCustomerName(site.customerId).charAt(0)}
-                                  </Box>
-                                )}
-                                <Typography variant="body2">
-                                  {getCustomerName(site.customerId)}
-                                </Typography>
-                              </Box>
+                              getCustomerName(site.customerId)
                             )}
                           </TableCell>
 
@@ -2610,6 +2932,11 @@ export const UserManagement: React.FC = () => {
                             ) : (
                               site.state || '-'
                             )}
+                          </TableCell>
+
+                          {/* Industry */}
+                          <TableCell>
+                            {customer?.industry || '-'}
                           </TableCell>
 
                           {/* Comments */}
@@ -2662,6 +2989,70 @@ export const UserManagement: React.FC = () => {
               </Table>
             </TableContainer>
           )}
+
+          {/* Customer/Site Filter Menu */}
+          <Menu
+            anchorEl={customerMenu.anchorEl}
+            open={Boolean(customerMenu.anchorEl)}
+            onClose={() => setCustomerMenu({ anchorEl: null, key: "" })}
+            slotProps={{
+              paper: {
+                sx: { maxHeight: 400 }
+              }
+            }}
+          >
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                if (customerMenu.key) setCustomerSort({ key: customerMenu.key, dir: "asc" });
+                setCustomerMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Sort A → Z
+            </MenuItem>
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                if (customerMenu.key) setCustomerSort({ key: customerMenu.key, dir: "desc" });
+                setCustomerMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Sort Z → A
+            </MenuItem>
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                setCustomerSort({ key: "", dir: "asc" });
+                setCustomerMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Clear sort
+            </MenuItem>
+            {(siteFilterOptions[customerMenu.key as keyof typeof siteFilterOptions] || []).map((option) => {
+              const label = option || "(Blank)";
+              const selected = !!customerFilters[customerMenu.key]?.has(option);
+              return (
+                <MenuItem
+                  dense
+                  key={`${customerMenu.key}-${option}`}
+                  sx={{ py: 0.25, minHeight: "unset" }}
+                  onClick={() => {
+                    if (!customerMenu.key) return;
+                    toggleFilterValue(setCustomerFilters, customerMenu.key, option);
+                  }}
+                >
+                  <Checkbox checked={selected} size="small" sx={{ py: 0 }} />
+                  <ListItemText
+                    primary={label}
+                    primaryTypographyProps={{ fontSize: "0.8125rem" }}
+                  />
+                </MenuItem>
+              );
+            })}
+          </Menu>
         </Box>
       )}
 
@@ -2695,7 +3086,7 @@ export const UserManagement: React.FC = () => {
                 {productsTableConfig.visibleFields.map((field) => (
                   <TableCell key={`products-header-${field.id}`}>
                     <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>{field.name}</span>
+                      <span style={fieldLabelStyle}>{field.name}</span>
                       <IconButton
                         size="small"
                         onClick={(event) => setProductMenu({ anchorEl: event.currentTarget, key: field.id })}
@@ -2745,7 +3136,11 @@ export const UserManagement: React.FC = () => {
                                   description: product.description || ""
                                 });
                                 const dynamicVals = productsDynamic.valuesByEntity[product.id] || {};
-                                setEditProductDynamicValues(dynamicVals);
+                                const stringVals: Record<string, string> = {};
+                                for (const [k, v] of Object.entries(dynamicVals)) {
+                                  stringVals[k] = typeof v === 'string' ? v : v.value;
+                                }
+                                setEditProductDynamicValues(stringVals);
                                 setEditProductOpen(true);
                               }}
                             >
@@ -2864,7 +3259,7 @@ export const UserManagement: React.FC = () => {
                 {assetsTableConfig.visibleFields.map((field) => (
                   <TableCell key={`assets-header-${field.id}`}>
                     <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>{field.name}</span>
+                      <span style={fieldLabelStyle}>{field.name}</span>
                       <IconButton
                         size="small"
                         onClick={(event) => setAssetMenu({ anchorEl: event.currentTarget, key: field.id })}
@@ -3279,7 +3674,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <DynamicFieldsForm
-              definitions={orderedUsersDefinitions}
+              definitions={dynamicOnlyUsersDefinitions}
               values={userDynamicValues}
               onChange={setUserDynamicValues}
             />
@@ -3343,7 +3738,7 @@ export const UserManagement: React.FC = () => {
                 if (roleForm.originalName && roleForm.originalName !== name) {
                   delete next[roleForm.originalName];
                 }
-                next[name] = { ...roleForm.permissions };
+                next[name] = { ...roleForm.permissions } as unknown as RolePermissions;
                 return next;
               });
               setRoleDialogOpen(false);
@@ -3429,17 +3824,6 @@ export const UserManagement: React.FC = () => {
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
           try {
-            // Handle base fields - update local config only, no API call
-            if (fieldId.startsWith("base-")) {
-              setBaseFieldNames((prev) => ({
-                ...prev,
-                [tableConfigTarget]: {
-                  ...(prev[tableConfigTarget] || {}),
-                  [fieldId]: name
-                }
-              }));
-              return;
-            }
             const defs =
               tableConfigTarget === "users"
                 ? usersDynamic.definitions
@@ -3471,8 +3855,6 @@ export const UserManagement: React.FC = () => {
         }}
         onDeleteField={async (fieldId) => {
           try {
-            // Skip API calls for base fields - they can't be deleted
-            if (fieldId.startsWith("base-")) return;
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
@@ -3520,7 +3902,10 @@ export const UserManagement: React.FC = () => {
                   ...(
                     adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.columns ||
                     defaultCustomColumns
-                  ).map((name) => ({ id: `default:${name}`, name, type: getDefaultColumnType(name) })),
+                  ).map((name) => {
+                    const storedType = adminTabsConfig.find((t) => t.id === customTableConfigTabId)?.columnTypes?.[name];
+                    return { id: `default:${name}`, name, type: storedType || getDefaultColumnType(name) };
+                  }),
                   ...allFieldDefinitions.definitions
                     .filter(
                       (field) =>
@@ -3612,22 +3997,25 @@ export const UserManagement: React.FC = () => {
               const oldName = fieldId.replace("default:", "");
               const nextName = name.trim() || oldName;
               setAdminTabsConfig((prev) =>
-                prev.map((tabItem) =>
-                  tabItem.id === customTableConfigTabId
-                    ? {
-                        ...tabItem,
-                        columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
-                        config: {
-                          order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
-                            id === fieldId ? `default:${nextName}` : id
-                          ),
-                          hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
-                            id === fieldId ? `default:${nextName}` : id
-                          )
-                        }
-                      }
-                    : tabItem
-                )
+                prev.map((tabItem) => {
+                  if (tabItem.id !== customTableConfigTabId) return tabItem;
+                  const nextColumnTypes = { ...(tabItem.columnTypes || {}) };
+                  delete nextColumnTypes[oldName];
+                  nextColumnTypes[nextName] = type;
+                  return {
+                    ...tabItem,
+                    columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
+                    columnTypes: nextColumnTypes,
+                    config: {
+                      order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
+                        id === fieldId ? `default:${nextName}` : id
+                      ),
+                      hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
+                        id === fieldId ? `default:${nextName}` : id
+                      )
+                    }
+                  };
+                })
               );
               setAdminTabRows((prev) => ({
                 ...prev,
@@ -3677,7 +4065,11 @@ export const UserManagement: React.FC = () => {
               setAdminTabsConfig((prev) =>
                 prev.map((tabItem) =>
                   tabItem.id === customTableConfigTabId
-                    ? { ...tabItem, columns: (tabItem.columns || []).filter((col) => col !== name) }
+                    ? {
+                        ...tabItem,
+                        columns: (tabItem.columns || []).filter((col) => col !== name),
+                        columnTypes: (() => { const ct = { ...(tabItem.columnTypes || {}) }; delete ct[name]; return ct; })()
+                      }
                     : tabItem
                 )
               );
@@ -3919,8 +4311,6 @@ export const UserManagement: React.FC = () => {
         }}
         onDeleteField={async (fieldId) => {
           try {
-            // Skip API calls for base fields - they can't be deleted
-            if (fieldId.startsWith("base-")) return;
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
@@ -3967,7 +4357,10 @@ export const UserManagement: React.FC = () => {
                   ...(
                     adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.columns ||
                     defaultCustomColumns
-                  ).map((name) => ({ id: `default:${name}`, name, type: getDefaultColumnType(name) })),
+                  ).map((name) => {
+                    const storedType = adminTabsConfig.find((t) => t.id === customTableConfigTabId)?.columnTypes?.[name];
+                    return { id: `default:${name}`, name, type: storedType || getDefaultColumnType(name) };
+                  }),
                   ...allFieldDefinitions.definitions
                     .filter(
                       (field) =>
@@ -4164,17 +4557,6 @@ export const UserManagement: React.FC = () => {
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
           try {
-            // Handle base fields - update local config only, no API call
-            if (fieldId.startsWith("base-")) {
-              setBaseFieldNames((prev) => ({
-                ...prev,
-                [tableConfigTarget]: {
-                  ...(prev[tableConfigTarget] || {}),
-                  [fieldId]: name
-                }
-              }));
-              return;
-            }
             const defs =
               tableConfigTarget === "users"
                 ? usersDynamic.definitions
@@ -4206,8 +4588,6 @@ export const UserManagement: React.FC = () => {
         }}
         onDeleteField={async (fieldId) => {
           try {
-            // Skip API calls for base fields - they can't be deleted
-            if (fieldId.startsWith("base-")) return;
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
@@ -4255,7 +4635,10 @@ export const UserManagement: React.FC = () => {
                   ...(
                     adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.columns ||
                     defaultCustomColumns
-                  ).map((name) => ({ id: `default:${name}`, name, type: getDefaultColumnType(name) })),
+                  ).map((name) => {
+                    const storedType = adminTabsConfig.find((t) => t.id === customTableConfigTabId)?.columnTypes?.[name];
+                    return { id: `default:${name}`, name, type: storedType || getDefaultColumnType(name) };
+                  }),
                   ...allFieldDefinitions.definitions
                     .filter(
                       (field) =>
@@ -4347,22 +4730,25 @@ export const UserManagement: React.FC = () => {
               const oldName = fieldId.replace("default:", "");
               const nextName = name.trim() || oldName;
               setAdminTabsConfig((prev) =>
-                prev.map((tabItem) =>
-                  tabItem.id === customTableConfigTabId
-                    ? {
-                        ...tabItem,
-                        columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
-                        config: {
-                          order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
-                            id === fieldId ? `default:${nextName}` : id
-                          ),
-                          hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
-                            id === fieldId ? `default:${nextName}` : id
-                          )
-                        }
-                      }
-                    : tabItem
-                )
+                prev.map((tabItem) => {
+                  if (tabItem.id !== customTableConfigTabId) return tabItem;
+                  const nextColumnTypes = { ...(tabItem.columnTypes || {}) };
+                  delete nextColumnTypes[oldName];
+                  nextColumnTypes[nextName] = type;
+                  return {
+                    ...tabItem,
+                    columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
+                    columnTypes: nextColumnTypes,
+                    config: {
+                      order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
+                        id === fieldId ? `default:${nextName}` : id
+                      ),
+                      hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
+                        id === fieldId ? `default:${nextName}` : id
+                      )
+                    }
+                  };
+                })
               );
               setAdminTabRows((prev) => ({
                 ...prev,
@@ -4412,7 +4798,11 @@ export const UserManagement: React.FC = () => {
               setAdminTabsConfig((prev) =>
                 prev.map((tabItem) =>
                   tabItem.id === customTableConfigTabId
-                    ? { ...tabItem, columns: (tabItem.columns || []).filter((col) => col !== name) }
+                    ? {
+                        ...tabItem,
+                        columns: (tabItem.columns || []).filter((col) => col !== name),
+                        columnTypes: (() => { const ct = { ...(tabItem.columnTypes || {}) }; delete ct[name]; return ct; })()
+                      }
                     : tabItem
                 )
               );
@@ -4575,9 +4965,11 @@ export const UserManagement: React.FC = () => {
               value={editUserForm.email}
               onChange={(event) => setEditUserForm((prev) => ({ ...prev, email: event.target.value }))}
             />
-            <FormControl>
+            <FormControl fullWidth>
+              <InputLabel sx={fieldLabelStyle}>Role</InputLabel>
               <Select
                 value={editUserForm.role}
+                label="Role"
                 onChange={(event) =>
                   setEditUserForm((prev) => ({ ...prev, role: event.target.value as UserRole }))
                 }
@@ -4589,9 +4981,11 @@ export const UserManagement: React.FC = () => {
                 ))}
               </Select>
             </FormControl>
-            <FormControl>
+            <FormControl fullWidth>
+              <InputLabel sx={fieldLabelStyle}>Office / City</InputLabel>
               <Select
                 value={editUserForm.office}
+                label="Office / City"
                 onChange={(event) =>
                   setEditUserForm((prev) => ({ ...prev, office: event.target.value as User["office"] }))
                 }
@@ -4604,7 +4998,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <DynamicFieldsForm
-              definitions={orderedUsersDefinitions}
+              definitions={dynamicOnlyUsersDefinitions}
               values={editUserDynamicValues}
               onChange={setEditUserDynamicValues}
             />
@@ -4977,6 +5371,7 @@ export const UserManagement: React.FC = () => {
                     type: "custom",
                     position: adminTabsConfig.length,
                     columns: ["ID", "Name", "Created Date"],
+                    columnTypes: { "ID": "lookup field", "Name": "text", "Created Date": "date" } as Record<string, string>,
                     fieldIds: [],
                     config: { order: [], hidden: [] }
                   };
@@ -5022,6 +5417,7 @@ export const UserManagement: React.FC = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ marginTop: 1 }}>
             {customRowDialogFields.map((field) => {
+              const isCreatedDate = field.name === "Created Date";
               const value = customRowForm[field.id] ?? "";
               const inputType = field.type === "date" ? "date" : "text";
               return (
@@ -5030,7 +5426,9 @@ export const UserManagement: React.FC = () => {
                   label={field.name}
                   type={inputType}
                   value={value}
-                  InputLabelProps={inputType === "date" ? { shrink: true } : undefined}
+                  InputLabelProps={inputType === "date" ? { shrink: true, sx: fieldLabelStyle } : { sx: fieldLabelStyle }}
+                  disabled={isCreatedDate}
+                  helperText={isCreatedDate ? "Auto-populated on creation" : undefined}
                   onChange={(event) =>
                     setCustomRowForm((prev) => ({
                       ...prev,
@@ -5064,8 +5462,14 @@ export const UserManagement: React.FC = () => {
                   : defaultCustomColumns;
               const tabFieldIds = customRowDialogTab.fieldIds || [];
               const nextRow: Record<string, string> = {};
+              const today = new Date().toISOString().slice(0, 10);
               columns.forEach((name) => {
-                nextRow[name] = customRowForm[`default:${name}`] ?? "";
+                let val = customRowForm[`default:${name}`] ?? "";
+                // Auto-populate "Created Date" on new rows
+                if (name === "Created Date" && !val && customRowDialogIndex === null) {
+                  val = today;
+                }
+                nextRow[name] = val;
               });
               tabFieldIds.forEach((fieldId) => {
                 nextRow[fieldId] = customRowForm[fieldId] ?? "";
@@ -5282,16 +5686,64 @@ export const UserManagement: React.FC = () => {
                   type="file"
                   hidden
                   accept="image/png,image/jpeg,image/jpg,image/gif,image/svg+xml"
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onloadend = () => {
-                        setEditCustomerLogo(reader.result as string);
-                        setEditCustomerPhotoScale(100);
-                      };
-                      reader.readAsDataURL(file);
+                    if (!file) return;
+
+                    // Check file size (warn if > 2MB)
+                    const maxFileSize = 2 * 1024 * 1024; // 2MB
+                    const maxDimension = 800; // Max width/height
+
+                    if (file.size > maxFileSize) {
+                      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+                      if (!confirm(`This image is ${sizeMB}MB, which is quite large. It will be automatically resized to optimize performance. Continue?`)) {
+                        return;
+                      }
                     }
+
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      const img = new Image();
+                      img.onload = () => {
+                        // Check if image needs resizing
+                        if (img.width > maxDimension || img.height > maxDimension) {
+                          // Calculate new dimensions maintaining aspect ratio
+                          let newWidth = img.width;
+                          let newHeight = img.height;
+
+                          if (img.width > img.height) {
+                            if (img.width > maxDimension) {
+                              newWidth = maxDimension;
+                              newHeight = (img.height * maxDimension) / img.width;
+                            }
+                          } else {
+                            if (img.height > maxDimension) {
+                              newHeight = maxDimension;
+                              newWidth = (img.width * maxDimension) / img.height;
+                            }
+                          }
+
+                          // Create canvas to resize
+                          const canvas = document.createElement('canvas');
+                          canvas.width = newWidth;
+                          canvas.height = newHeight;
+                          const ctx = canvas.getContext('2d');
+                          if (ctx) {
+                            ctx.drawImage(img, 0, 0, newWidth, newHeight);
+                            const resizedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                            setEditCustomerLogo(resizedDataUrl);
+                            setEditCustomerPhotoScale(100);
+                            alert(`Image resized from ${img.width}x${img.height} to ${Math.round(newWidth)}x${Math.round(newHeight)} for optimal display.`);
+                          }
+                        } else {
+                          // Image is within size limits, use as-is
+                          setEditCustomerLogo(reader.result as string);
+                          setEditCustomerPhotoScale(100);
+                        }
+                      };
+                      img.src = reader.result as string;
+                    };
+                    reader.readAsDataURL(file);
                   }}
                 />
               </Button>

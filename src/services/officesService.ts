@@ -1,42 +1,46 @@
 import { Office } from "../components/GlobalOfficeMap";
-
-// Automatically determine API base URL based on current hostname
-const getApiBaseUrl = () => {
-  if (import.meta.env.VITE_API_BASE) {
-    return import.meta.env.VITE_API_BASE;
-  }
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  return `${protocol}//${hostname}:4000/api`;
-};
-
-const API_BASE = getApiBaseUrl();
+import api from "./api";
 
 // In-memory cache for offices (shared across all users in same session)
 let officesCache: Office[] | null = null;
+let isMigrating = false; // Prevent infinite migration loops
 
 export const officesService = {
   async getAll(): Promise<Office[]> {
     try {
-      const response = await fetch(`${API_BASE}/offices`, {
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include", // Include cookies for authentication
-      });
+      const response = await api.get<Office[]>("/offices");
+      const data = response.data;
 
-      if (!response.ok) {
-        // If endpoint doesn't exist yet, use localStorage as fallback
-        if (response.status === 404) {
-          console.warn("Backend /offices endpoint not found. Using localStorage fallback.");
-          const stored = localStorage.getItem("globalOffices");
-          officesCache = stored ? JSON.parse(stored) : [];
-          return officesCache ?? [];
+      // If database is empty but localStorage has data, migrate it (only once)
+      if (data.length === 0 && !isMigrating) {
+        const stored = localStorage.getItem("globalOffices");
+        if (stored) {
+          const localOffices = JSON.parse(stored);
+          if (localOffices.length > 0) {
+            isMigrating = true; // Prevent recursive migrations
+            console.log("Migrating offices from localStorage to database...");
+            // Migrate each office to the database
+            for (const office of localOffices) {
+              try {
+                await this.create(office);
+              } catch (err) {
+                console.warn("Failed to migrate office:", office, err);
+              }
+            }
+            isMigrating = false;
+            // Fetch again to get the migrated data with proper IDs
+            try {
+              const migratedResponse = await api.get<Office[]>("/offices");
+              officesCache = migratedResponse.data;
+              localStorage.setItem("globalOffices", JSON.stringify(migratedResponse.data));
+              return migratedResponse.data;
+            } catch (err) {
+              console.warn("Failed to fetch migrated offices", err);
+            }
+          }
         }
-        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
       officesCache = data;
 
       // Also sync to localStorage as backup
@@ -56,46 +60,25 @@ export const officesService = {
 
   async create(office: Omit<Office, "id">): Promise<Office> {
     try {
-      const response = await fetch(`${API_BASE}/offices`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(office)
-      });
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          // Backend endpoint doesn't exist, use localStorage
-          console.warn("Backend /offices endpoint not found. Using localStorage.");
-          const id = `office-${Date.now()}`;
-          const newOffice = { ...office, id };
-          const all = await this.getAll();
-          const updated = [...all, newOffice];
-          localStorage.setItem("globalOffices", JSON.stringify(updated));
-          officesCache = updated;
-          return newOffice;
-        }
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const newOffice = await response.json();
+      const response = await api.post<Office>("/offices", office);
+      const newOffice = response.data;
 
       // Update cache
       if (officesCache) {
         officesCache = [...officesCache, newOffice];
       }
 
-      // Sync to localStorage as backup
-      const all = await this.getAll();
-      localStorage.setItem("globalOffices", JSON.stringify(all));
+      // Sync to localStorage as backup (use cache instead of calling getAll)
+      localStorage.setItem("globalOffices", JSON.stringify([...(officesCache || [])]));
 
       return newOffice;
     } catch (error) {
       console.error("Error creating office:", error);
-      // Fallback to localStorage
+      // Fallback to localStorage (don't call getAll to avoid infinite loop)
       const id = `office-${Date.now()}`;
       const newOffice = { ...office, id };
-      const all = await this.getAll();
+      const stored = localStorage.getItem("globalOffices");
+      const all = stored ? JSON.parse(stored) : [];
       const updated = [...all, newOffice];
       localStorage.setItem("globalOffices", JSON.stringify(updated));
       officesCache = updated;
@@ -105,41 +88,24 @@ export const officesService = {
 
   async update(id: string, office: Omit<Office, "id">): Promise<Office> {
     try {
-      const response = await fetch(`${API_BASE}/offices/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(office)
-      });
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          console.warn("Backend /offices endpoint not found. Using localStorage.");
-          const all = await this.getAll();
-          const updated = all.map((o) => (o.id === id ? { ...office, id } : o));
-          localStorage.setItem("globalOffices", JSON.stringify(updated));
-          officesCache = updated;
-          return { ...office, id };
-        }
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const updatedOffice = await response.json();
+      const response = await api.put<Office>(`/offices/${id}`, office);
+      const updatedOffice = response.data;
 
       // Update cache
       if (officesCache) {
         officesCache = officesCache.map((o) => (o.id === id ? updatedOffice : o));
       }
 
-      // Sync to localStorage
-      const all = await this.getAll();
-      localStorage.setItem("globalOffices", JSON.stringify(all));
+      // Sync to localStorage (use cache instead of calling getAll)
+      localStorage.setItem("globalOffices", JSON.stringify([...(officesCache || [])]));
 
       return updatedOffice;
     } catch (error) {
       console.error("Error updating office:", error);
-      const all = await this.getAll();
-      const updated = all.map((o) => (o.id === id ? { ...office, id } : o));
+      // Fallback to localStorage (don't call getAll to avoid infinite loop)
+      const stored = localStorage.getItem("globalOffices");
+      const all = stored ? JSON.parse(stored) : [];
+      const updated = all.map((o: Office) => (o.id === id ? { ...office, id } : o));
       localStorage.setItem("globalOffices", JSON.stringify(updated));
       officesCache = updated;
       return { ...office, id };
@@ -148,29 +114,21 @@ export const officesService = {
 
   async delete(id: string): Promise<void> {
     try {
-      const response = await fetch(`${API_BASE}/offices/${id}`, {
-        method: "DELETE",
-        credentials: "include"
-      });
-
-      if (!response.ok && response.status !== 404) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      await api.delete(`/offices/${id}`);
 
       // Update cache
       if (officesCache) {
         officesCache = officesCache.filter((o) => o.id !== id);
       }
 
-      // Update localStorage
-      const all = await this.getAll();
-      const filtered = all.filter((o) => o.id !== id);
-      localStorage.setItem("globalOffices", JSON.stringify(filtered));
+      // Update localStorage (use cache instead of calling getAll)
+      localStorage.setItem("globalOffices", JSON.stringify([...(officesCache || [])]));
     } catch (error) {
       console.error("Error deleting office:", error);
-      // Fallback: update cache and localStorage
-      const all = await this.getAll();
-      const filtered = all.filter((o) => o.id !== id);
+      // Fallback: update cache and localStorage (don't call getAll to avoid infinite loop)
+      const stored = localStorage.getItem("globalOffices");
+      const all = stored ? JSON.parse(stored) : [];
+      const filtered = all.filter((o: Office) => o.id !== id);
       localStorage.setItem("globalOffices", JSON.stringify(filtered));
       officesCache = filtered;
     }

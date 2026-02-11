@@ -200,44 +200,9 @@ const CustomerSites = () => {
       <Stack spacing={3} sx={{ py: 3 }}>
         {/* Header */}
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <IconButton onClick={() => navigate("/admin")}>
+          <IconButton onClick={() => navigate("/admin", { state: { openTab: "customers" } })}>
             <ArrowBack />
           </IconButton>
-          {customerLogoShape === 'none' && customerLogo ? (
-            <Box sx={{ display: 'flex', alignItems: 'center', maxHeight: 50 }}>
-              <img
-                src={customerLogo}
-                alt={customerName}
-                style={{
-                  maxHeight: `${50 * (customerPhotoScale / 100)}px`,
-                  height: 'auto',
-                  width: 'auto',
-                  objectFit: 'contain',
-                }}
-              />
-            </Box>
-          ) : (
-            <Box
-              sx={{
-                width: customerLogoShape === 'rectangular' ? 100 : 50,
-                height: 50,
-                borderRadius: customerLogoShape === 'none' ? '0px' : customerLogoShape === 'round' ? '50%' : '8px',
-                background: customerLogo ? "transparent" : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                backgroundImage: customerLogo ? `url(${customerLogo})` : "none",
-                backgroundSize: `${customerPhotoScale}%`,
-                backgroundPosition: "center",
-                backgroundRepeat: 'no-repeat',
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "white",
-                fontWeight: "bold",
-                fontSize: "1.2rem",
-              }}
-            >
-              {!customerLogo && customerName.charAt(0)}
-            </Box>
-          )}
           <Box sx={{ flex: 1 }}>
             <Typography variant="h5" sx={{ fontFamily: "Sora", fontWeight: 600 }}>
               Sites - {customerName}

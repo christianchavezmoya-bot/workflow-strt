@@ -7,6 +7,7 @@ import App from "./app/App";
 import { store } from "./store";
 import theme from "./theme/theme";
 import { FieldNotificationProvider } from "./contexts/FieldNotificationContext";
+import { ViewModeProvider } from "./contexts/ViewModeContext";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -15,9 +16,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <BrowserRouter>
-          <FieldNotificationProvider>
-            <App />
-          </FieldNotificationProvider>
+          <ViewModeProvider>
+            <FieldNotificationProvider>
+              <App />
+            </FieldNotificationProvider>
+          </ViewModeProvider>
         </BrowserRouter>
       </ThemeProvider>
     </Provider>

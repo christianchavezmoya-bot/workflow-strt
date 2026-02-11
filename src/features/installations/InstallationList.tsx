@@ -38,6 +38,8 @@ import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { fieldService } from "../../services/fieldService";
+import { officesService } from "../../services/officesService";
+import type { Office } from "../../components/GlobalOfficeMap";
 import { installationTabsService, InstallationTab, InstallationTabRow } from "../../services/installationTabsService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createInstallation, deleteInstallation, fetchInstallations, updateInstallation } from "../../store/installationSlice";
@@ -48,6 +50,12 @@ import { inspectionService, Inspection } from "../../services/inspectionService"
 import { issueService, Issue } from "../../services/issueService";
 import { documentService, DocumentRecord } from "../../services/documentService";
 import { customFieldService, CustomFieldDefinition } from "../../services/customFieldService";
+
+// Style for field definition labels (yellow bold)
+const fieldLabelStyle = {
+  color: '#FFD700',
+  fontWeight: 'bold'
+};
 
 const normalize = (value: string | number | undefined | null) => String(value ?? "");
 const defaultCustomColumns = ["ID", "Name", "Created Date"];
@@ -101,9 +109,17 @@ const InstallationList = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const usersState = useAppSelector((state) => state.users);
   const [localInstallations, setLocalInstallations] = useState<Installation[]>([]);
+  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
+
+  useEffect(() => {
+    officesService.getAll().then(setGlobalOffices);
+  }, []);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(() => {
+    const stored = localStorage.getItem("installation_active_tab");
+    return stored ? parseInt(stored, 10) : 0;
+  });
   const [installationTabsConfig, setInstallationTabsConfig] = useState<InstallationTab[]>([]);
   const [installationTabsLoaded, setInstallationTabsLoaded] = useState(false);
   const [installationTabManagerOpen, setInstallationTabManagerOpen] = useState(false);
@@ -290,9 +306,17 @@ const InstallationList = () => {
         customTabs.map(async (tabItem) => {
           try {
             const rows = await installationTabsService.getRows(tabItem.id);
+            const today = new Date().toISOString().slice(0, 10);
             setInstallationTabRows((prev) => ({
               ...prev,
-              [tabItem.id]: rows.map((row) => ({ ...row.data, _rowId: row.id }))
+              [tabItem.id]: rows.map((row) => {
+                const data = { ...row.data, _rowId: row.id };
+                // Backfill empty "Created Date" on existing rows
+                if ("Created Date" in data && !data["Created Date"]) {
+                  data["Created Date"] = today;
+                }
+                return data;
+              })
             }));
           } catch {
             // ignore
@@ -536,6 +560,11 @@ const InstallationList = () => {
     }
   }, [selectedJobNumber]);
 
+  // Persist active tab to localStorage
+  useEffect(() => {
+    localStorage.setItem("installation_active_tab", String(tab));
+  }, [tab]);
+
   useEffect(() => {
     const storedAssets = localStorage.getItem("admin_assets");
     if (storedAssets) {
@@ -703,10 +732,22 @@ const InstallationList = () => {
     Cancelled: 0
   };
 
+  // Map office cities to countries
+  const getCountryForOffice = useMemo(() => {
+    const map = new Map<string, string>();
+    globalOffices.forEach((office) => {
+      if (office.city && office.country) {
+        map.set(office.city, office.country);
+      }
+    });
+    return (officeCity: string) => map.get(officeCity) || officeCity;
+  }, [globalOffices]);
+
   const filteredData = useMemo(() => {
     const officeFiltered = dataWithSeq.filter((row) => {
-      const matchesOffice = activeOffice === "All" || row.office === activeOffice;
-      return matchesOffice;
+      if (activeOffice === "All") return true;
+      const installationCountry = getCountryForOffice(row.office);
+      return installationCountry === activeOffice || row.office === activeOffice;
     });
     const jobFiltered = selectedProjectIds.size
       ? officeFiltered.filter((row) => selectedProjectIds.has(row.projectId))
@@ -1137,7 +1178,7 @@ const InstallationList = () => {
                     {defaultFields.map((field) => (
                       <TableCell key={`${activeTab.id}-${field.id}`}>
                         <Stack direction="row" alignItems="center" spacing={0.5}>
-                          <span>{field.name}</span>
+                          <span style={fieldLabelStyle}>{field.name}</span>
                           <IconButton
                             size="small"
                             onClick={(event) =>
@@ -1394,7 +1435,7 @@ const InstallationList = () => {
                     {installationDynamicColumns.map((field) => (
                       <TableCell key={`installations-field-${field.id}`}>
                         <Stack direction="row" alignItems="center" spacing={0.5}>
-                          <span>{field.name}</span>
+                          <span style={fieldLabelStyle}>{field.name}</span>
                           <IconButton size="small" onClick={(event) => setInstallationMenu({ anchorEl: event.currentTarget, key: `dyn-${field.id}` })}>
                             <ArrowDropDown fontSize="small" />
                           </IconButton>
@@ -1820,6 +1861,7 @@ const InstallationList = () => {
                           onChange={(event) =>
                             setCustomFieldValues((prev) => ({ ...prev, [field.name]: event.target.value }))
                           }
+                          InputLabelProps={{ sx: fieldLabelStyle }}
                         />
                       </Grid>
                     ))}
@@ -1974,7 +2016,7 @@ const InstallationList = () => {
                   {inspectionDynamicColumns.map((field) => (
                     <TableCell key={`inspections-field-${field.id}`}>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span>{field.name}</span>
+                        <span style={fieldLabelStyle}>{field.name}</span>
                       </Stack>
                     </TableCell>
                   ))}
@@ -2151,7 +2193,7 @@ const InstallationList = () => {
                   {issueDynamicColumns.map((field) => (
                     <TableCell key={`issues-field-${field.id}`}>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span>{field.name}</span>
+                        <span style={fieldLabelStyle}>{field.name}</span>
                       </Stack>
                     </TableCell>
                   ))}
@@ -2348,7 +2390,7 @@ const InstallationList = () => {
                   {documentDynamicColumns.map((field) => (
                     <TableCell key={`documents-field-${field.id}`}>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span>{field.name}</span>
+                        <span style={fieldLabelStyle}>{field.name}</span>
                       </Stack>
                     </TableCell>
                   ))}
@@ -2509,6 +2551,7 @@ const InstallationList = () => {
             <Stack spacing={2} sx={{ marginTop: 1 }}>
               {defaultCustomColumns.map((name) => {
                 const fieldId = `default:${name}`;
+                const isCreatedDate = name === "Created Date";
                 const value = customInstallRowForm[fieldId] ?? "";
                 const inputType = getDefaultColumnType(name) === "date" ? "date" : "text";
                 return (
@@ -2517,7 +2560,9 @@ const InstallationList = () => {
                     label={name}
                     type={inputType}
                     value={value}
-                    InputLabelProps={inputType === "date" ? { shrink: true } : undefined}
+                    InputLabelProps={inputType === "date" ? { shrink: true, sx: fieldLabelStyle } : { sx: fieldLabelStyle }}
+                    disabled={isCreatedDate}
+                    helperText={isCreatedDate ? "Auto-populated on creation" : undefined}
                     onChange={(event) =>
                       setCustomInstallRowForm((prev) => ({
                         ...prev,
@@ -2546,8 +2591,14 @@ const InstallationList = () => {
               onClick={() => {
                 if (!customInstallRowDialogTabId) return;
                 const nextRow: Record<string, string> = {};
+                const today = new Date().toISOString().slice(0, 10);
                 defaultCustomColumns.forEach((name) => {
-                  nextRow[name] = customInstallRowForm[`default:${name}`] ?? "";
+                  let val = customInstallRowForm[`default:${name}`] ?? "";
+                  // Auto-populate "Created Date" on new rows
+                  if (name === "Created Date" && !val && customInstallRowDialogIndex === null) {
+                    val = today;
+                  }
+                  nextRow[name] = val;
                 });
                 setInstallationTabRows((prev) => {
                   const current = prev[customInstallRowDialogTabId] || [];
@@ -2787,7 +2838,7 @@ const InstallationList = () => {
         <MenuItem
           onClick={() => {
             setInstallationSettingsMenuOpen(false);
-            setTableConfigTarget(activeTabType);
+            setTableConfigTarget(activeTabType as "installations" | "inspections" | "issues" | "documents");
             setTableConfigOpen(true);
           }}
         >

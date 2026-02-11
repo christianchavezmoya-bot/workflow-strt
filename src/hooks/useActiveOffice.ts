@@ -1,14 +1,15 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 
-export type ActiveOffice = "USA" | "Australia" | "South Africa" | "All";
+export type ActiveOffice = string;
 
 const STORAGE_KEY = "active_office";
+const DEFAULT_OFFICE = "All";
 
 export const useActiveOffice = () => {
-  const [activeOffice, setActiveOffice] = useState<ActiveOffice>("USA");
+  const [activeOffice, setActiveOffice] = useState<ActiveOffice>(DEFAULT_OFFICE);
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) as ActiveOffice | null;
+    const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       setActiveOffice(stored);
     }
@@ -16,7 +17,7 @@ export const useActiveOffice = () => {
 
   useEffect(() => {
     const handler = () => {
-      const stored = localStorage.getItem(STORAGE_KEY) as ActiveOffice | null;
+      const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         setActiveOffice(stored);
       }

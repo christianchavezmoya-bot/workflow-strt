@@ -1,4 +1,4 @@
-﻿export type Office = "USA" | "Australia" | "South Africa";
+﻿export type Office = string;
 
 export type UserRole = "Admin" | "Project Manager" | "Engineer" | "Viewer";
 

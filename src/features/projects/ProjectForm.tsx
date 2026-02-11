@@ -29,12 +29,14 @@ import { demoCustomers, demoProducts } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { projectService } from "../../services/projectService";
+import { officesService } from "../../services/officesService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchCustomers } from "../../store/customersSlice";
 import { fetchProducts } from "../../store/productsSlice";
 import { createProject, updateProject } from "../../store/projectSlice";
 import { ApprovalDecision, Office, Project, ProjectStatus } from "../../types/project";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
+import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
 
 const schema = z
   .object({
@@ -44,9 +46,7 @@ const schema = z
     description: z.string().min(1, "Description is required"),
     startDate: z.string().min(1, "Start date is required"),
     finishDate: z.string().min(1, "Finish date is required"),
-    office: z
-      .enum(["USA", "Australia", "South Africa", ""])
-      .refine((value) => value !== "", "Office is required"),
+    office: z.string().min(1, "Office is required"),
     region: z.string().optional(),
     projectManager: z.string().optional(),
     projectType: z.enum(["Internal", "External"]),
@@ -72,8 +72,6 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 
-const officeOptions: Office[] = ["USA", "Australia", "South Africa"];
-
 const ProjectForm = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -84,6 +82,7 @@ const ProjectForm = () => {
   const productsState = useAppSelector((state) => state.products);
   const projectsDynamic = useDynamicFields("projects");
   const [projectDynamicValues, setProjectDynamicValues] = useState<Record<string, string>>({});
+  const [globalOffices, setGlobalOffices] = useState<GlobalOffice[]>([]);
   const customers = customersState.items.length ? customersState.items : demoCustomers;
   const filteredCustomers = useMemo(() => {
     if (activeOffice === "All") return customers;
@@ -120,6 +119,10 @@ const ProjectForm = () => {
     dispatch(fetchCustomers());
     dispatch(fetchProducts());
   }, [dispatch]);
+
+  useEffect(() => {
+    officesService.getAll().then(setGlobalOffices);
+  }, []);
 
   useEffect(() => {
     if (activeOffice === "All") {
@@ -199,6 +202,7 @@ const ProjectForm = () => {
   const isInstallationProject = watch("isInstallationProject");
   const status = watch("status");
   const customerId = watch("customerId");
+  const office = watch("office");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
 
   const matchedCustomerId = useMemo(() => {
@@ -223,6 +227,14 @@ const ProjectForm = () => {
       setValue("office", selected.office, { shouldValidate: true });
     }
   }, [customers, selectedCustomerId, setValue]);
+
+  useEffect(() => {
+    if (!office || globalOffices.length === 0) return;
+    const selectedOffice = globalOffices.find((o) => o.city === office);
+    if (selectedOffice && selectedOffice.country) {
+      setValue("region", selectedOffice.country, { shouldValidate: true });
+    }
+  }, [office, globalOffices, setValue]);
 
   const pushUiLog = (message: string, error?: string) => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: Array<{ id: string; time: string; method?: string; url?: string; status?: number; error?: string }> };
@@ -350,7 +362,7 @@ const ProjectForm = () => {
             </Grid>
             <Grid item xs={12} md={6}>
               <FormControl fullWidth error={!!errors.productIds}>
-                <FormLabel>Product included</FormLabel>
+                <FormLabel>Product included *</FormLabel>
                 <Controller
                   name="productIds"
                   control={control}
@@ -381,7 +393,7 @@ const ProjectForm = () => {
                 render={({ field }) => (
                   <TextField
                     {...field}
-                    label="Customer ID"
+                    label="Customer ID *"
                     fullWidth
                     error={!!errors.customerId}
                     helperText={errors.customerId?.message}
@@ -397,7 +409,7 @@ const ProjectForm = () => {
                 render={({ field }) => (
                   <TextField
                     {...field}
-                    label="Job Number"
+                    label="Job Number *"
                     fullWidth
                     error={!!errors.jobNumber}
                     helperText={errors.jobNumber?.message}
@@ -412,7 +424,7 @@ const ProjectForm = () => {
                 render={({ field }) => (
                   <TextField
                     {...field}
-                    label="Office"
+                    label="Office *"
                     fullWidth
                     select
                     SelectProps={{ native: true }}
@@ -420,9 +432,9 @@ const ProjectForm = () => {
                     helperText={errors.office?.message}
                   >
                     <option value="">Select office</option>
-                    {officeOptions.map((office) => (
-                      <option key={office} value={office}>
-                        {office}
+                    {globalOffices.map((office) => (
+                      <option key={office.id} value={office.city}>
+                        {office.city}
                       </option>
                     ))}
                   </TextField>
@@ -433,7 +445,7 @@ const ProjectForm = () => {
               <Controller
                 name="region"
                 control={control}
-                render={({ field }) => <TextField {...field} label="Region (optional)" fullWidth />}
+                render={({ field }) => <TextField {...field} label="Country/State" fullWidth />}
               />
             </Grid>
             <Grid item xs={12} md={6}>
@@ -450,7 +462,7 @@ const ProjectForm = () => {
                 render={({ field }) => (
                   <TextField
                     {...field}
-                    label="Description"
+                    label="Description *"
                     fullWidth
                     multiline
                     rows={3}
@@ -466,7 +478,7 @@ const ProjectForm = () => {
                 control={control}
                 render={({ field }) => (
                   <DatePicker
-                    label="Start Date"
+                    label="Start Date *"
                     value={field.value ? dayjs(field.value) : null}
                     onChange={(value) =>
                       field.onChange(value ? value.format("YYYY-MM-DD") : "")
@@ -488,7 +500,7 @@ const ProjectForm = () => {
                 control={control}
                 render={({ field }) => (
                   <DatePicker
-                    label="Finish Date"
+                    label="Finish Date *"
                     value={field.value ? dayjs(field.value) : null}
                     onChange={(value) =>
                       field.onChange(value ? value.format("YYYY-MM-DD") : "")
@@ -509,7 +521,7 @@ const ProjectForm = () => {
                 name="status"
                 control={control}
                 render={({ field }) => (
-                  <TextField {...field} label="Status" fullWidth select SelectProps={{ native: true }}>
+                  <TextField {...field} label="Status *" fullWidth select SelectProps={{ native: true }}>
                     {([
                       "Draft",
                       "In Planning",
@@ -530,7 +542,7 @@ const ProjectForm = () => {
             </Grid>
             <Grid item xs={12} md={6}>
               <FormControl>
-                <FormLabel>Project classification</FormLabel>
+                <FormLabel>Project Type *</FormLabel>
                 <Controller
                   name="projectType"
                   control={control}

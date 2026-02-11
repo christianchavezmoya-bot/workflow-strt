@@ -8,6 +8,8 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  IconButton,
+  Menu,
   MenuItem,
   Select,
   Stack,
@@ -20,14 +22,22 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography
 } from "@mui/material";
+import { Print, Download } from "@mui/icons-material";
 import { useEffect, useMemo, useState } from "react";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
 import api from "../../services/api";
 import { settingsService } from "../../services/settingsService";
 import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/settings";
 import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
+
+// Style for field definition labels (yellow bold)
+const fieldLabelStyle = {
+  color: '#FFD700',
+  fontWeight: 'bold'
+};
 
 const defaultSettings: QuickbaseSettingsForm = {
   enabled: false,
@@ -65,7 +75,10 @@ const parseJsonMap = (value: string) => {
 
 const Settings = () => {
   const { addNotification } = useFieldNotifications();
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(() => {
+    const stored = localStorage.getItem("settings_active_tab");
+    return stored ? parseInt(stored, 10) : 0;
+  });
   const [settings, setSettings] = useState<QuickbaseSettingsForm>(() => loadSettings());
   const [status, setStatus] = useState<"" | "saved" | "sent" | "error">("");
   const [sendError, setSendError] = useState<string | null>(null);
@@ -218,17 +231,27 @@ const Settings = () => {
     "currency"
   ];
 
-  const tableOptions = [
-    "projects",
-    "products",
-    "installations",
-    "inspections",
-    "issues",
-    "customers",
-    "users",
+  const [tableOptions, setTableOptions] = useState<string[]>([
+    "admintabs",
     "assets",
-    "documents"
-  ];
+    "customers",
+    "documents",
+    "inspections",
+    "installations",
+    "installationtabs",
+    "issues",
+    "offices",
+    "products",
+    "projects",
+    "roleconfigs",
+    "roles",
+    "sites",
+    "tableconfigs",
+    "users"
+  ]);
+  const [tablesLoading, setTablesLoading] = useState(false);
+  const [tablesSuccess, setTablesSuccess] = useState(false);
+  const [downloadMenuAnchor, setDownloadMenuAnchor] = useState<null | HTMLElement>(null);
   const tableColumnSlots = 6;
 
   const reloadFieldDefinitions = async () => {
@@ -240,8 +263,251 @@ const Settings = () => {
     }
   };
 
+  const refreshTables = async () => {
+    setTablesLoading(true);
+    setTablesSuccess(false);
+    try {
+      const tables = await fieldService.getAvailableTables();
+      setTableOptions(tables);
+      setTablesSuccess(true);
+      setTimeout(() => setTablesSuccess(false), 3000);
+    } catch (error) {
+      console.error("Failed to fetch tables:", error);
+      alert("Failed to refresh tables. Check console for details.");
+    } finally {
+      setTablesLoading(false);
+    }
+  };
+
+  const escapeHtml = (str: string) =>
+    str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  const handlePrintFields = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    // Sort fields alphabetically (same as UI)
+    const sortedFields = [...fieldDefinitions].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
+    const tableHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Field Definitions - ${new Date().toLocaleDateString()}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; }
+          h1 { color: #333; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
+          th { background-color: #f5f5f5; font-weight: bold; }
+          tr:nth-child(even) { background-color: #f9f9f9; }
+          .field-name { color: #FFD700; font-weight: bold; }
+          .field-type { color: #666; font-size: 11px; }
+          @media print { button { display: none; } }
+        </style>
+      </head>
+      <body>
+        <h1>Field Definitions</h1>
+        <p>Generated on: ${new Date().toLocaleString()}</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Created Field</th>
+              ${Array.from({ length: tableColumnSlots }).map((_, i) => `<th>Table ${i + 1}</th>`).join('')}
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sortedFields.map(field => {
+              const tables = field.tables ?? [];
+              const slots = Array.from({ length: tableColumnSlots }).map((_, index) => tables[index] || '');
+              return `
+                <tr>
+                  <td>
+                    <div class="field-name">${escapeHtml(field.name)}</div>
+                    <div class="field-type">${escapeHtml(field.fieldType)}</div>
+                  </td>
+                  ${slots.map(slot => `<td>${escapeHtml(slot)}</td>`).join('')}
+                  <td>Edit / Delete</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        <button onclick="window.print()" style="margin-top: 20px; padding: 10px 20px; cursor: pointer;">Print</button>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(tableHTML);
+    printWindow.document.close();
+  };
+
+  const handleDownloadCSV = () => {
+    // Sort fields alphabetically (same as UI)
+    const sortedFields = [...fieldDefinitions].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
+    // Convert to CSV with all table columns
+    const headers = [
+      'Created Field',
+      'Type',
+      ...Array.from({ length: tableColumnSlots }).map((_, i) => `Table ${i + 1}`),
+      'Actions'
+    ];
+
+    const rows = sortedFields.map(field => {
+      const tables = field.tables ?? [];
+      const slots = Array.from({ length: tableColumnSlots }).map((_, index) => tables[index] || '');
+      return [
+        field.name,
+        field.fieldType,
+        ...slots,
+        'Edit / Delete'
+      ];
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+
+    link.setAttribute('href', url);
+    link.setAttribute('download', `field-definitions-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setDownloadMenuAnchor(null);
+  };
+
+  const handleDownloadExcel = () => {
+    // Sort fields alphabetically (same as UI)
+    const sortedFields = [...fieldDefinitions].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
+    // Excel format (tab-separated values with .xls extension for Excel compatibility)
+    const headers = [
+      'Created Field',
+      'Type',
+      ...Array.from({ length: tableColumnSlots }).map((_, i) => `Table ${i + 1}`),
+      'Actions'
+    ];
+
+    const rows = sortedFields.map(field => {
+      const tables = field.tables ?? [];
+      const slots = Array.from({ length: tableColumnSlots }).map((_, index) => tables[index] || '');
+      return [
+        field.name,
+        field.fieldType,
+        ...slots,
+        'Edit / Delete'
+      ];
+    });
+
+    const tsvContent = [
+      headers.join('\t'),
+      ...rows.map(row => row.join('\t'))
+    ].join('\n');
+
+    const blob = new Blob([tsvContent], { type: 'application/vnd.ms-excel' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+
+    link.setAttribute('href', url);
+    link.setAttribute('download', `field-definitions-${new Date().toISOString().split('T')[0]}.xls`);
+    link.style.visibility = 'hidden';
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setDownloadMenuAnchor(null);
+  };
+
+  const handleDownloadWord = () => {
+    // Sort fields alphabetically (same as UI)
+    const sortedFields = [...fieldDefinitions].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
+    // Word format (HTML that Word can open)
+    const headers = [
+      'Created Field',
+      ...Array.from({ length: tableColumnSlots }).map((_, i) => `Table ${i + 1}`),
+      'Actions'
+    ];
+
+    const htmlContent = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'>
+      <head><meta charset='utf-8'><title>Field Definitions</title></head>
+      <body>
+        <h1>Field Definitions</h1>
+        <p>Generated on: ${new Date().toLocaleString()}</p>
+        <table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;">
+          <thead>
+            <tr style="background-color: #f5f5f5;">
+              ${headers.map(h => `<th>${h}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${sortedFields.map(field => {
+              const tables = field.tables ?? [];
+              const slots = Array.from({ length: tableColumnSlots }).map((_, index) => tables[index] || '');
+              return `
+                <tr>
+                  <td>
+                    <div style="color: #FFD700; font-weight: bold;">${field.name}</div>
+                    <div style="color: #666; font-size: 11px;">${field.fieldType}</div>
+                  </td>
+                  ${slots.map(slot => `<td>${slot}</td>`).join('')}
+                  <td>Edit / Delete</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([htmlContent], { type: 'application/msword' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+
+    link.setAttribute('href', url);
+    link.setAttribute('download', `field-definitions-${new Date().toISOString().split('T')[0]}.doc`);
+    link.style.visibility = 'hidden';
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setDownloadMenuAnchor(null);
+  };
+
+  const handleDownloadPDF = () => {
+    // For PDF, we'll open print dialog with a specific layout
+    // Users can save as PDF from the print dialog
+    handlePrintFields();
+    setDownloadMenuAnchor(null);
+  };
+
   useEffect(() => {
     reloadFieldDefinitions();
+  }, []);
+
+  // Load available tables on mount
+  useEffect(() => {
+    refreshTables();
   }, []);
 
   useEffect(() => {
@@ -256,6 +522,11 @@ const Settings = () => {
   useEffect(() => {
     localStorage.setItem("lookup_field_rows", JSON.stringify(lookupRows));
   }, [lookupRows]);
+
+  // Persist active tab to localStorage
+  useEffect(() => {
+    localStorage.setItem("settings_active_tab", String(tab));
+  }, [tab]);
 
   const checkApiStatus = async () => {
     try {
@@ -499,6 +770,7 @@ const Settings = () => {
                   value={fieldName}
                   onChange={(event) => setFieldName(event.target.value)}
                   fullWidth
+                  InputLabelProps={{ sx: fieldLabelStyle }}
                 />
                 <FormControl fullWidth>
                   <Select
@@ -549,32 +821,79 @@ const Settings = () => {
             <Box className="glass-card" sx={{ padding: 2 }}>
               <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
                 <Typography variant="subtitle1">Assigned fields</Typography>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  disabled={seedLoading}
-                  onClick={async () => {
-                    setSeedLoading(true);
-                    setSeedSuccess(false);
-                    try {
-                      const data = await fieldService.seedDefaults();
-                      setFieldDefinitions(data);
-                      setSeedSuccess(true);
-                      setTimeout(() => setSeedSuccess(false), 3000);
-                    } catch (error) {
-                      console.error("Failed to seed fields:", error);
-                      alert("Failed to seed default fields. Check console for details.");
-                    } finally {
-                      setSeedLoading(false);
-                    }
-                  }}
-                >
-                  {seedLoading ? "Loading..." : "Seed/Refresh Default Fields"}
-                </Button>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Tooltip title="Print">
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={handlePrintFields}
+                        disabled={fieldDefinitions.length === 0}
+                      >
+                        <Print />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="Download">
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={(e) => setDownloadMenuAnchor(e.currentTarget)}
+                        disabled={fieldDefinitions.length === 0}
+                      >
+                        <Download />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Menu
+                    anchorEl={downloadMenuAnchor}
+                    open={Boolean(downloadMenuAnchor)}
+                    onClose={() => setDownloadMenuAnchor(null)}
+                  >
+                    <MenuItem onClick={handleDownloadWord}>Word (.doc)</MenuItem>
+                    <MenuItem onClick={handleDownloadPDF}>PDF</MenuItem>
+                    <MenuItem onClick={handleDownloadCSV}>CSV</MenuItem>
+                    <MenuItem onClick={handleDownloadExcel}>Excel (.xls)</MenuItem>
+                  </Menu>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={seedLoading}
+                    onClick={async () => {
+                      setSeedLoading(true);
+                      setSeedSuccess(false);
+                      try {
+                        const data = await fieldService.seedDefaults();
+                        setFieldDefinitions(data);
+                        setSeedSuccess(true);
+                        setTimeout(() => setSeedSuccess(false), 3000);
+                      } catch (error) {
+                        console.error("Failed to seed fields:", error);
+                        alert("Failed to seed default fields. Check console for details.");
+                      } finally {
+                        setSeedLoading(false);
+                      }
+                    }}
+                  >
+                    {seedLoading ? "Loading..." : "Seed/Refresh Default Fields"}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={tablesLoading}
+                    onClick={refreshTables}
+                  >
+                    {tablesLoading ? "Loading..." : "Update Dropdown Tables"}
+                  </Button>
+                </Stack>
               </Stack>
               {seedSuccess && (
                 <Alert severity="success" sx={{ mb: 2 }}>
                   Default fields loaded successfully! ({fieldDefinitions.length} fields)
+                </Alert>
+              )}
+              {tablesSuccess && (
+                <Alert severity="success" sx={{ mb: 2 }}>
+                  Dropdown tables updated successfully! ({tableOptions.length} tables)
                 </Alert>
               )}
               <TextField
@@ -595,7 +914,7 @@ const Settings = () => {
                 <Table sx={{ marginTop: 1 }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Created field</TableCell>
+                      <TableCell sx={fieldLabelStyle}>Created field</TableCell>
                       {Array.from({ length: tableColumnSlots }).map((_, index) => (
                         <TableCell key={`table-header-${index}`}>{`Table ${index + 1}`}</TableCell>
                       ))}
@@ -619,7 +938,7 @@ const Settings = () => {
                         <TableRow key={field.id}>
                           <TableCell>
                             <Stack spacing={0.5}>
-                              <Typography variant="subtitle2">{field.name}</Typography>
+                              <Typography variant="subtitle2" sx={fieldLabelStyle}>{field.name}</Typography>
                               <Typography variant="caption" color="text.secondary">
                                 {field.fieldType}
                               </Typography>
@@ -784,6 +1103,7 @@ const Settings = () => {
                 setEditField((prev) => (prev ? { ...prev, name: event.target.value } : prev))
               }
               fullWidth
+              InputLabelProps={{ sx: fieldLabelStyle }}
             />
             <FormControl fullWidth>
               <Select

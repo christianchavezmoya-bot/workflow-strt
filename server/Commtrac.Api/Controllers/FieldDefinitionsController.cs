@@ -30,6 +30,32 @@ public class FieldDefinitionsController : ControllerBase
         return Ok(fields.Select(ToDto));
     }
 
+    [HttpGet("tables")]
+    public ActionResult<IEnumerable<string>> GetAvailableTables()
+    {
+        var tables = new List<string>
+        {
+            "projects",
+            "products",
+            "installations",
+            "inspections",
+            "issues",
+            "customers",
+            "sites",
+            "users",
+            "assets",
+            "documents",
+            "offices",
+            "globaloffices",
+            "roles",
+            "admintabs",
+            "installationtabs",
+            "tableconfigs",
+            "roleconfigs"
+        };
+        return Ok(tables.OrderBy(t => t));
+    }
+
     [HttpPost("seed")]
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<IEnumerable<FieldDefinitionDto>>> SeedDefaults()
@@ -38,10 +64,25 @@ public class FieldDefinitionsController : ControllerBase
         var existingIds = new HashSet<string>(existing.Select(e => e.Id));
         var defaults = DefaultFields().ToList();
 
+        // Add missing fields
         var missing = defaults.Where(field => !existingIds.Contains(field.Id)).ToList();
         if (missing.Count > 0)
         {
             _db.FieldDefinitions.AddRange(missing);
+        }
+
+        // Update names of existing fields if they've changed
+        foreach (var defaultField in defaults.Where(d => existingIds.Contains(d.Id)))
+        {
+            var existingField = existing.First(e => e.Id == defaultField.Id);
+            if (existingField.Name != defaultField.Name)
+            {
+                existingField.Name = defaultField.Name;
+            }
+        }
+
+        if (missing.Count > 0 || _db.ChangeTracker.HasChanges())
+        {
             await _db.SaveChangesAsync();
         }
 
@@ -130,7 +171,7 @@ public class FieldDefinitionsController : ControllerBase
             new FieldDefinitionEntity { Id = "field-customer", Name = "Customer", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "projects", "customers" }, JsonOptions), SortOrder = 3, IsActive = true },
             new FieldDefinitionEntity { Id = "field-products", Name = "Products", FieldType = "multi-select", TablesJson = JsonSerializer.Serialize(new[] { "projects", "products" }, JsonOptions), SortOrder = 4, IsActive = true },
             new FieldDefinitionEntity { Id = "field-status", Name = "Status", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "projects", "installations", "inspections", "issues" }, JsonOptions), SortOrder = 5, IsActive = true },
-            new FieldDefinitionEntity { Id = "field-office", Name = "Office", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "projects", "customers", "users" }, JsonOptions), SortOrder = 6, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-office", Name = "Global Offices", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "projects", "customers", "users" }, JsonOptions), SortOrder = 6, IsActive = true },
             new FieldDefinitionEntity { Id = "field-site-name", Name = "Site Name", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "installations" }, JsonOptions), SortOrder = 7, IsActive = true },
             new FieldDefinitionEntity { Id = "field-start-date", Name = "Start Date", FieldType = "date", TablesJson = JsonSerializer.Serialize(new[] { "installations", "issues" }, JsonOptions), SortOrder = 8, IsActive = true },
             new FieldDefinitionEntity { Id = "field-finish-date", Name = "Finish Date", FieldType = "date", TablesJson = JsonSerializer.Serialize(new[] { "issues" }, JsonOptions), SortOrder = 9, IsActive = true },
@@ -158,6 +199,16 @@ public class FieldDefinitionsController : ControllerBase
             new FieldDefinitionEntity { Id = "field-user-name", Name = "User Name", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "users" }, JsonOptions), SortOrder = 31, IsActive = true },
             new FieldDefinitionEntity { Id = "field-email", Name = "Email", FieldType = "email", TablesJson = JsonSerializer.Serialize(new[] { "users" }, JsonOptions), SortOrder = 32, IsActive = true },
             new FieldDefinitionEntity { Id = "field-role", Name = "Role", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "users" }, JsonOptions), SortOrder = 33, IsActive = true },
-            new FieldDefinitionEntity { Id = "field-active", Name = "Active", FieldType = "checkbox", TablesJson = JsonSerializer.Serialize(new[] { "users" }, JsonOptions), SortOrder = 34, IsActive = true }
+            new FieldDefinitionEntity { Id = "field-active", Name = "Active", FieldType = "checkbox", TablesJson = JsonSerializer.Serialize(new[] { "users" }, JsonOptions), SortOrder = 34, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-site-address", Name = "Address", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 35, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-site-city", Name = "City", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 36, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-site-state", Name = "State/Country", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 37, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-site-zipcode", Name = "Zip Code", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 38, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-site-contact-name", Name = "Contact Name", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 39, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-site-contact-phone", Name = "Contact Phone", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 40, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-site-contact-email", Name = "Contact Email", FieldType = "email", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 41, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-site-notes", Name = "Notes", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 42, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-customer-id", Name = "Customer ID", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "customers" }, JsonOptions), SortOrder = 43, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-customer-industry", Name = "Industry", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "customers" }, JsonOptions), SortOrder = 44, IsActive = true }
         };
 }

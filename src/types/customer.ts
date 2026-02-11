@@ -2,7 +2,7 @@
   id: string;
   name: string;
   customerId: string;
-  office: "USA" | "Australia" | "South Africa" | "All";
+  office: string;
   industry?: string | null;
   logo?: string | null;
   logoShape: 'none' | 'round' | 'rectangular';

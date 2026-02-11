@@ -91,13 +91,19 @@ export const demoCustomers: Customer[] = [
     id: "c-200",
     name: "Acme Energy",
     customerId: "C-1908",
-    office: "USA"
+    office: "USA",
+    logoShape: "round",
+    photoScale: 100,
+    logoSize: 70
   },
   {
     id: "c-201",
     name: "BlueWave Telecom",
     customerId: "C-2301",
-    office: "Australia"
+    office: "Australia",
+    logoShape: "round",
+    photoScale: 100,
+    logoSize: 70
   }
 ];
 

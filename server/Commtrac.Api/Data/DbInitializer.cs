@@ -51,14 +51,8 @@ public static class DbInitializer
             }
         }
 
-        if (!db.Customers.Any())
-        {
-            db.Customers.AddRange(
-                new CustomerEntity { Name = "Strata Worldwide", CustomerId = "CUST-1001", Office = "USA" },
-                new CustomerEntity { Name = "OmniBuild", CustomerId = "CUST-1002", Office = "Australia" },
-                new CustomerEntity { Name = "Westline Partners", CustomerId = "CUST-1003", Office = "All" }
-            );
-        }
+        // Customer seed data is now handled by migrations (SeedDemoCustomerAndSite)
+        // Removed default customers to avoid conflicts
 
         if (!db.Products.Any())
         {

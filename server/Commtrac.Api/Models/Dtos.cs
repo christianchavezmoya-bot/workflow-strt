@@ -346,3 +346,28 @@ public record RolePermissions(
 public record RoleConfigDto(
     Dictionary<string, RolePermissions> Roles
 );
+
+public record OfficeDto(
+    string Id,
+    string Country,
+    string State,
+    string City,
+    double Lat,
+    double Lng
+);
+
+public record CreateOfficeRequest(
+    string Country,
+    string State,
+    string City,
+    double Lat,
+    double Lng
+);
+
+public record UpdateOfficeRequest(
+    string? Country,
+    string? State,
+    string? City,
+    double? Lat,
+    double? Lng
+);

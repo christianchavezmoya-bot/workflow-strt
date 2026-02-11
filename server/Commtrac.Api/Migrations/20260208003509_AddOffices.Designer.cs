@@ -3,6 +3,7 @@ using System;
 using Commtrac.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Commtrac.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260208003509_AddOffices")]
+    partial class AddOffices
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.23");
@@ -657,10 +660,6 @@ namespace Commtrac.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("FieldDefinitionId");
-
-                    b.HasIndex("TableName", "EntityId");
-
                     b.ToTable("FieldValues");
                 });
 
@@ -698,8 +697,6 @@ namespace Commtrac.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("InstallationId");
-
                     b.ToTable("Inspections");
                 });
 
@@ -736,8 +733,6 @@ namespace Commtrac.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("InspectionId");
 
                     b.ToTable("InspectionPhotos");
                 });
@@ -859,8 +854,6 @@ namespace Commtrac.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId");
-
                     b.ToTable("Installations");
                 });
 
@@ -944,8 +937,6 @@ namespace Commtrac.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("InstallationId");
 
                     b.ToTable("Issues");
                 });
