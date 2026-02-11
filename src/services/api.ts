@@ -56,7 +56,7 @@ api.interceptors.response.use(
     const meta = (response.config as typeof response.config & { metadata?: { start: number } }).metadata;
     const durationMs = meta?.start ? Date.now() - meta.start : undefined;
     pushDebugLog({
-      id: crypto.randomUUID(),
+      id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2),
       time: new Date().toLocaleTimeString(),
       method: response.config.method?.toUpperCase(),
       url: response.config.url,
@@ -71,7 +71,7 @@ api.interceptors.response.use(
     const meta = (config as typeof config & { metadata?: { start: number } }).metadata;
     const durationMs = meta?.start ? Date.now() - meta.start : undefined;
     pushDebugLog({
-      id: crypto.randomUUID(),
+      id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2),
       time: new Date().toLocaleTimeString(),
       method: config.method?.toUpperCase(),
       url: config.url,
