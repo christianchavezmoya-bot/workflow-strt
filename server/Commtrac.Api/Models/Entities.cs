@@ -21,6 +21,11 @@ public class UserEntity
     [MaxLength(200)]
     public string? ResetToken { get; set; }
     public DateTime? ResetTokenExpiresUtc { get; set; }
+    public DateTime? PasswordChangedAt { get; set; }
+    public bool Is2faEnabled { get; set; }
+    [MaxLength(200)]
+    public string? TotpSecret { get; set; }
+    public string? RecoveryCodesJson { get; set; }
 }
 
 public class CustomerEntity
@@ -381,6 +386,32 @@ public class QuickbaseSettingsEntity
     public string InstallationsFieldMapJson { get; set; } = "{}";
 }
 
+public class NotificationSettingsEntity
+{
+    [Key]
+    public int Id { get; set; } = 1;
+
+    [MaxLength(200)]
+    public string SmtpHost { get; set; } = "";
+    public int SmtpPort { get; set; } = 25;
+    public bool SmtpUseSsl { get; set; }
+    [MaxLength(200)]
+    public string SmtpUser { get; set; } = "";
+    [MaxLength(500)]
+    public string SmtpPass { get; set; } = "";
+    [MaxLength(200)]
+    public string SmtpFrom { get; set; } = "no-reply@commtrac.local";
+    [MaxLength(300)]
+    public string FrontendBaseUrl { get; set; } = "http://localhost:5173";
+
+    [MaxLength(80)]
+    public string SmsProvider { get; set; } = "";
+    [MaxLength(200)]
+    public string SmsApiKey { get; set; } = "";
+    [MaxLength(80)]
+    public string SmsSender { get; set; } = "";
+}
+
 public class OfficeEntity
 {
     [Key]
@@ -393,4 +424,38 @@ public class OfficeEntity
     public string City { get; set; } = string.Empty;
     public double Lat { get; set; }
     public double Lng { get; set; }
+}
+
+public class AuditLogEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string UserId { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string UserEmail { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string Action { get; set; } = string.Empty;
+    [MaxLength(500)]
+    public string? Details { get; set; }
+    [MaxLength(80)]
+    public string? IpAddress { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+}
+
+public class SessionEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string UserId { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string UserEmail { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string? IpAddress { get; set; }
+    [MaxLength(500)]
+    public string? UserAgent { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime LastActiveAt { get; set; } = DateTime.UtcNow;
+    public bool IsRevoked { get; set; }
 }

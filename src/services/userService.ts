@@ -39,5 +39,9 @@ export const userService = {
   async deleteUser(id: string) {
     await api.delete(`/users/${id}`);
     return id;
+  },
+  async reset2fa(id: string) {
+    const response = await api.post<User>(`/users/${id}/reset-2fa`);
+    return response.data;
   }
 };

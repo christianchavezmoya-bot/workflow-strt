@@ -44,6 +44,7 @@ import { installationTabsService, InstallationTab, InstallationTabRow } from "..
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createInstallation, deleteInstallation, fetchInstallations, updateInstallation } from "../../store/installationSlice";
 import { fetchProjects } from "../../store/projectSlice";
+import { fetchProducts } from "../../store/productsSlice";
 import { createUser, fetchUsers } from "../../store/usersSlice";
 import { Installation } from "../../types/installation";
 import { inspectionService, Inspection } from "../../services/inspectionService";
@@ -108,6 +109,7 @@ const InstallationList = () => {
   const projectsState = useAppSelector((state) => state.projects);
   const [searchParams, setSearchParams] = useSearchParams();
   const usersState = useAppSelector((state) => state.users);
+  const productsState = useAppSelector((state) => state.products);
   const [localInstallations, setLocalInstallations] = useState<Installation[]>([]);
   const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
 
@@ -528,6 +530,10 @@ const InstallationList = () => {
   }, [dispatch]);
 
   useEffect(() => {
+    dispatch(fetchProducts());
+  }, [dispatch]);
+
+  useEffect(() => {
     dispatch(
       fetchProjects({
         office: activeOffice !== "All" ? activeOffice : undefined,
@@ -715,6 +721,37 @@ const InstallationList = () => {
   const selectedProjectId = useMemo(() => {
     return projects.find((project) => project.jobNumber === selectedJobNumber)?.id || "";
   }, [projects, selectedJobNumber]);
+
+  // Resolve product names for the selected project
+  // Use local state so the name persists even when the office-filtered project list changes
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.jobNumber === selectedJobNumber),
+    [projects, selectedJobNumber]
+  );
+  const [selectedProductNames, setSelectedProductNames] = useState("");
+  useEffect(() => {
+    const ids = selectedProject?.productIds ?? [];
+    if (ids.length === 0 || productsState.items.length === 0) return;
+    const productMap = new Map(productsState.items.map((p) => [p.id, p.name]));
+    const names = ids.map((id) => productMap.get(id) || id).join(", ");
+    if (names) setSelectedProductNames(names);
+  }, [selectedProject, productsState.items]);
+
+  // Clear product names when job number changes
+  useEffect(() => {
+    if (!selectedJobNumber) setSelectedProductNames("");
+  }, [selectedJobNumber]);
+
+  // Find all projects using the same product(s)
+  const [sameProductDialogOpen, setSameProductDialogOpen] = useState(false);
+  const projectsUsingSameProduct = useMemo(() => {
+    const ids = selectedProject?.productIds ?? [];
+    if (ids.length === 0) return [];
+    const idSet = new Set(ids);
+    return projects.filter(
+      (p) => p.id !== selectedProject?.id && p.productIds?.some((pid) => idSet.has(pid))
+    );
+  }, [projects, selectedProject]);
 
   const installerOptions = useMemo(() => {
     return usersState.items.map((user) => user.fullName).filter(Boolean);
@@ -1074,7 +1111,7 @@ const InstallationList = () => {
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
         <Box>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-            Installations
+            Installations{selectedProductNames ? ` — ${selectedProductNames}` : ""}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Showing {activeOffice === "All" ? "all offices" : activeOffice} installations.
@@ -1141,6 +1178,15 @@ const InstallationList = () => {
         >
           {selectedJobNumber ? `Job # ${selectedJobNumber}` : "Job # (not set)"}
         </Button>
+        {selectedProductNames && projectsUsingSameProduct.length > 0 && (
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setSameProductDialogOpen(true)}
+          >
+            {projectsUsingSameProduct.length} other project{projectsUsingSameProduct.length !== 1 ? "s" : ""} using same product
+          </Button>
+        )}
       </Stack>
 
       <Tabs value={tab} onChange={(_, next) => setTab(next)}>
@@ -3626,6 +3672,57 @@ const InstallationList = () => {
           if (tableConfigTarget === "documents") await documentsDynamic.reload();
         }}
       />
+
+      <Dialog open={sameProductDialogOpen} onClose={() => setSameProductDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Projects using: {selectedProductNames}</DialogTitle>
+        <DialogContent>
+          {projectsUsingSameProduct.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              No other projects are using this product.
+            </Typography>
+          ) : (
+            <Table size="small" sx={{ mt: 1 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Job #</TableCell>
+                  <TableCell>Customer</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Office</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {projectsUsingSameProduct.map((project) => (
+                  <TableRow
+                    key={project.id}
+                    hover
+                    sx={{ cursor: "pointer" }}
+                    onClick={() => {
+                      setSameProductDialogOpen(false);
+                      setSelectedJobNumber(project.jobNumber);
+                      setShowAllInstallations(false);
+                      localStorage.setItem("selected_job_number", project.jobNumber);
+                      localStorage.setItem("show_all_installations", "false");
+                      setSearchParams((prev) => {
+                        const next = new URLSearchParams(prev);
+                        next.set("job", project.jobNumber);
+                        return next;
+                      });
+                    }}
+                  >
+                    <TableCell>{project.jobNumber}</TableCell>
+                    <TableCell>{project.customerName}</TableCell>
+                    <TableCell>{project.status}</TableCell>
+                    <TableCell>{project.office}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSameProductDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 };

@@ -9,7 +9,15 @@ public static class DbInitializer
 {
     public static void Initialize(AppDbContext db, IConfiguration config)
     {
+        // Fix partially-applied Add2faFields migration:
+        // The 2FA columns may already exist from a failed run, but the migration
+        // wasn't recorded. Detect this and mark it as applied before running migrations.
+        FixPartialMigration(db);
+
         db.Database.Migrate();
+        EnsureAuditLogTable(db);
+        EnsureSessionsTable(db);
+        EnsurePasswordChangedAtColumn(db);
 
         if (!db.Users.Any())
         {
@@ -118,6 +126,146 @@ public static class DbInitializer
             });
         }
 
+        if (!db.NotificationSettings.Any())
+        {
+            // Seed a single row so admin can edit notification settings from the UI.
+            // Real values can also come from appsettings/env vars until configured.
+            db.NotificationSettings.Add(new NotificationSettingsEntity
+            {
+                Id = 1,
+                SmtpHost = "",
+                SmtpPort = 25,
+                SmtpUseSsl = false,
+                SmtpUser = "",
+                SmtpPass = "",
+                SmtpFrom = config["Email:FromAddress"] ?? "no-reply@commtrac.local",
+                FrontendBaseUrl = config["Email:FrontendBaseUrl"] ?? "http://localhost:5173",
+                SmsProvider = config["Sms:Provider"] ?? "",
+                SmsApiKey = config["Sms:ApiKey"] ?? "",
+                SmsSender = config["Sms:Sender"] ?? ""
+            });
+        }
+
         db.SaveChanges();
+    }
+
+    /// <summary>
+    /// Creates the AuditLogs table if it doesn't exist (no migration needed).
+    /// </summary>
+    private static void EnsureAuditLogTable(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS AuditLogs (
+                    Id TEXT PRIMARY KEY NOT NULL,
+                    UserId TEXT NOT NULL DEFAULT '',
+                    UserEmail TEXT NOT NULL DEFAULT '',
+                    Action TEXT NOT NULL DEFAULT '',
+                    Details TEXT,
+                    IpAddress TEXT,
+                    Timestamp TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_AuditLogs_UserId ON AuditLogs (UserId)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_AuditLogs_Timestamp ON AuditLogs (Timestamp)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureSessionsTable(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS Sessions (
+                    Id TEXT PRIMARY KEY NOT NULL,
+                    UserId TEXT NOT NULL DEFAULT '',
+                    UserEmail TEXT NOT NULL DEFAULT '',
+                    IpAddress TEXT,
+                    UserAgent TEXT,
+                    CreatedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                    LastActiveAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                    IsRevoked INTEGER NOT NULL DEFAULT 0
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_Sessions_UserId ON Sessions (UserId)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsurePasswordChangedAtColumn(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Users') WHERE name='PasswordChangedAt'";
+            var exists = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+            if (!exists)
+            {
+                cmd.CommandText = "ALTER TABLE Users ADD COLUMN PasswordChangedAt TEXT";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Handles the case where the Add2faFields migration was partially applied
+    /// (columns added to Users table but migration not recorded in history).
+    /// Detects this state and inserts the history record so Migrate() skips it.
+    /// </summary>
+    private static void FixPartialMigration(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            // Check if the 2FA column exists on the Users table
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Users') WHERE name='Is2faEnabled'";
+            var colExists = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+
+            if (!colExists) return; // Fresh DB or columns not yet added — let Migrate() handle it
+
+            // Check if the migration is already recorded
+            cmd.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId='20260212035001_Add2faFields'";
+            var migRecorded = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+
+            if (!migRecorded)
+            {
+                // Columns exist but migration not recorded — fix it
+                cmd.CommandText = "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES ('20260212035001_Add2faFields', '8.0.23')";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
     }
 }

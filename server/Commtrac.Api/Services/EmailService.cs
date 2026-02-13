@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Mail;
-using Microsoft.Extensions.Options;
 
 namespace Commtrac.Api.Services;
 
@@ -24,12 +23,12 @@ public interface IEmailSender
 
 public sealed class EmailSender : IEmailSender
 {
-    private readonly EmailSettings _settings;
+    private readonly NotificationSettingsService _settingsService;
     private readonly ILogger<EmailSender> _logger;
 
-    public EmailSender(IOptions<EmailSettings> options, ILogger<EmailSender> logger)
+    public EmailSender(NotificationSettingsService settingsService, ILogger<EmailSender> logger)
     {
-        _settings = options.Value;
+        _settingsService = settingsService;
         _logger = logger;
     }
 
@@ -42,26 +41,28 @@ public sealed class EmailSender : IEmailSender
     public Task SendNotificationAsync(string toEmail, string subject, string body)
         => SendAsync(toEmail, subject, body);
 
-    private Task SendAsync(string toEmail, string subject, string body)
+    private async Task SendAsync(string toEmail, string subject, string body)
     {
-        if (string.IsNullOrWhiteSpace(_settings.SmtpHost))
+        var settings = await _settingsService.GetEmailSettingsAsync();
+
+        if (string.IsNullOrWhiteSpace(settings.SmtpHost))
         {
             _logger.LogInformation("Email (simulated). To: {To} Subject: {Subject} Body: {Body}", toEmail, subject, body);
-            return Task.CompletedTask;
+            return;
         }
 
-        using var client = new SmtpClient(_settings.SmtpHost, _settings.SmtpPort)
+        using var client = new SmtpClient(settings.SmtpHost, settings.SmtpPort)
         {
-            EnableSsl = _settings.UseSsl
+            EnableSsl = settings.UseSsl
         };
 
-        if (!string.IsNullOrWhiteSpace(_settings.Username))
+        if (!string.IsNullOrWhiteSpace(settings.Username))
         {
-            client.Credentials = new NetworkCredential(_settings.Username, _settings.Password);
+            client.Credentials = new NetworkCredential(settings.Username, settings.Password);
         }
 
-        var mail = new MailMessage(_settings.FromAddress, toEmail, subject, body);
-        client.Send(mail);
-        return Task.CompletedTask;
+        var from = string.IsNullOrWhiteSpace(settings.FromAddress) ? "no-reply@commtrac.local" : settings.FromAddress;
+        var mail = new MailMessage(from, toEmail, subject, body);
+        await client.SendMailAsync(mail);
     }
 }

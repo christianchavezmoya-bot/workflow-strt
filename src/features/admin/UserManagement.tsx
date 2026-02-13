@@ -61,7 +61,7 @@ import api from "../../services/api";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer } from "../../store/customersSlice";
 import { createProduct, deleteProduct, fetchProducts, updateProduct } from "../../store/productsSlice";
-import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, updateUser } from "../../store/usersSlice";
+import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, reset2fa, updateUser } from "../../store/usersSlice";
 import { Customer } from "../../types/customer";
 import { Product } from "../../types/product";
 import { User, UserRole } from "../../types/user";
@@ -1927,6 +1927,18 @@ export const UserManagement: React.FC = () => {
                         </TableCell>
                       );
                     }
+                    if (field.id === "field-2fa") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ padding: '8px 12px' }}>
+                          <Chip
+                            label={user.is2faEnabled ? "2FA On" : "Off"}
+                            color={user.is2faEnabled ? "info" : "default"}
+                            size="small"
+                            variant={user.is2faEnabled ? "filled" : "outlined"}
+                          />
+                        </TableCell>
+                      );
+                    }
                     // Render dynamic custom fields
                     return (
                       <TableCell key={`${user.id}-${field.id}`} sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>
@@ -1947,6 +1959,16 @@ export const UserManagement: React.FC = () => {
                       >
                         Deactivate
                       </Button>
+                      {user.is2faEnabled && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="warning"
+                          onClick={() => dispatch(reset2fa(user.id))}
+                        >
+                          Reset 2FA
+                        </Button>
+                      )}
                       <Tooltip title="Edit user">
                         <IconButton size="small" onClick={() => handleEditUser(user)}>
                           <EditOutlined fontSize="small" />
@@ -3824,6 +3846,17 @@ export const UserManagement: React.FC = () => {
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
           try {
+            // Handle base fields — update local display name only
+            if (fieldId.startsWith("base-")) {
+              setBaseFieldNames((prev) => ({
+                ...prev,
+                [tableConfigTarget]: {
+                  ...(prev[tableConfigTarget] || {}),
+                  [fieldId]: name
+                }
+              }));
+              return;
+            }
             const defs =
               tableConfigTarget === "users"
                 ? usersDynamic.definitions
@@ -3832,7 +3865,8 @@ export const UserManagement: React.FC = () => {
                   : tableConfigTarget === "products"
                     ? productsDynamic.definitions
                     : assetsDynamic.definitions;
-            const existing = defs.find((item) => item.id === fieldId);
+            const existing = defs.find((item) => item.id === fieldId)
+              || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
             if (!existing) return;
             await fieldService.updateDefinition(fieldId, {
               ...existing,
@@ -3841,6 +3875,7 @@ export const UserManagement: React.FC = () => {
               linkToFieldId: linkToFieldId || null,
               actionType: actionType || null
             });
+            await allFieldDefinitions.reload();
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
@@ -4289,7 +4324,8 @@ export const UserManagement: React.FC = () => {
                 : tableConfigTarget === "products"
                   ? productsDynamic.definitions
                   : assetsDynamic.definitions;
-            const existing = defs.find((item) => item.id === fieldId);
+            const existing = defs.find((item) => item.id === fieldId)
+              || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
             if (!existing) return;
             await fieldService.updateDefinition(fieldId, {
               ...existing,
@@ -4298,6 +4334,7 @@ export const UserManagement: React.FC = () => {
               linkToFieldId: linkToFieldId || null,
               actionType: actionType || null
             });
+            await allFieldDefinitions.reload();
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
             if (tableConfigTarget === "assets") await assetsDynamic.reload();
@@ -4557,6 +4594,17 @@ export const UserManagement: React.FC = () => {
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
           try {
+            // Handle base fields — update local display name only
+            if (fieldId.startsWith("base-")) {
+              setBaseFieldNames((prev) => ({
+                ...prev,
+                [tableConfigTarget]: {
+                  ...(prev[tableConfigTarget] || {}),
+                  [fieldId]: name
+                }
+              }));
+              return;
+            }
             const defs =
               tableConfigTarget === "users"
                 ? usersDynamic.definitions
@@ -4565,7 +4613,8 @@ export const UserManagement: React.FC = () => {
                   : tableConfigTarget === "products"
                     ? productsDynamic.definitions
                     : assetsDynamic.definitions;
-            const existing = defs.find((item) => item.id === fieldId);
+            const existing = defs.find((item) => item.id === fieldId)
+              || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
             if (!existing) return;
             await fieldService.updateDefinition(fieldId, {
               ...existing,
@@ -4574,6 +4623,7 @@ export const UserManagement: React.FC = () => {
               linkToFieldId: linkToFieldId || null,
               actionType: actionType || null
             });
+            await allFieldDefinitions.reload();
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();

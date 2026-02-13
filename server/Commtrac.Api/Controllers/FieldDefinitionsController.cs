@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -13,12 +14,26 @@ namespace Commtrac.Api.Controllers;
 public class FieldDefinitionsController : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Regex GuidPattern = new(@"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private readonly AppDbContext _db;
 
     public FieldDefinitionsController(AppDbContext db)
     {
         _db = db;
     }
+
+    /// <summary>Converts a field name to a readable slug ID, e.g. "Job Number" → "field-job-number".</summary>
+    private static string ToSlug(string name)
+    {
+        var slug = name.Trim().ToLowerInvariant();
+        slug = Regex.Replace(slug, @"[^a-z0-9\s-]", ""); // strip special chars
+        slug = Regex.Replace(slug, @"[\s-]+", "-");        // collapse whitespace/hyphens
+        slug = slug.Trim('-');
+        return $"field-{slug}";
+    }
+
+    /// <summary>Returns true if the given ID looks like an auto-generated GUID.</summary>
+    private static bool IsGuid(string id) => GuidPattern.IsMatch(id);
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<FieldDefinitionDto>>> GetAll()
@@ -86,6 +101,9 @@ public class FieldDefinitionsController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
+        // Auto-migrate any GUID-based IDs to readable slugs
+        await MigrateGuidIdsInternal();
+
         var all = await _db.FieldDefinitions
             .OrderBy(f => f.SortOrder)
             .ThenBy(f => f.Name)
@@ -93,13 +111,118 @@ public class FieldDefinitionsController : ControllerBase
         return Ok(all.Select(ToDto));
     }
 
+    [HttpPost("actions/migrate-ids")]
+    [Authorize(Roles = "Admin")]
+    public async Task<ActionResult<object>> MigrateGuidIds()
+    {
+        var migrated = await MigrateGuidIdsInternal();
+        if (migrated == 0)
+        {
+            return Ok(new { migrated = 0, message = "No GUID-based field IDs found. All IDs are already readable." });
+        }
+        return Ok(new { migrated, message = $"Migrated {migrated} field ID(s) from GUIDs to readable slugs." });
+    }
+
+    /// <summary>Converts all GUID-based field IDs to readable slugs. Returns the number of fields migrated.</summary>
+    private async Task<int> MigrateGuidIdsInternal()
+    {
+        // Detach tracked entities so raw SQL changes are picked up on next query
+        _db.ChangeTracker.Clear();
+
+        var fields = await _db.FieldDefinitions.ToListAsync();
+        var guidFields = fields.Where(f => IsGuid(f.Id)).ToList();
+
+        if (guidFields.Count == 0) return 0;
+
+        // Build old ID → new slug mapping
+        var existingIds = new HashSet<string>(fields.Select(f => f.Id));
+        var idMap = new Dictionary<string, string>();
+
+        foreach (var field in guidFields)
+        {
+            var baseSlug = ToSlug(field.Name);
+            var slug = baseSlug;
+            var suffix = 2;
+            while (existingIds.Contains(slug) || idMap.ContainsValue(slug))
+            {
+                slug = $"{baseSlug}-{suffix}";
+                suffix++;
+            }
+            idMap[field.Id] = slug;
+        }
+
+        // Since SQLite doesn't support cascade updates on PKs, we use raw SQL within a transaction
+        using var transaction = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            foreach (var (oldId, newId) in idMap)
+            {
+                // Update FieldValues that reference this field
+                await _db.Database.ExecuteSqlRawAsync(
+                    "UPDATE FieldValues SET FieldDefinitionId = {0} WHERE FieldDefinitionId = {1}",
+                    newId, oldId);
+
+                // Update LinkToFieldId references in other field definitions
+                await _db.Database.ExecuteSqlRawAsync(
+                    "UPDATE FieldDefinitions SET LinkToFieldId = {0} WHERE LinkToFieldId = {1}",
+                    newId, oldId);
+
+                // Update the field definition ID itself
+                await _db.Database.ExecuteSqlRawAsync(
+                    "UPDATE FieldDefinitions SET Id = {0} WHERE Id = {1}",
+                    newId, oldId);
+            }
+
+            // Update AdminTabs FieldIdsJson — replace GUID references inside JSON arrays
+            _db.ChangeTracker.Clear();
+            var adminTabs = await _db.AdminTabs.ToListAsync();
+            foreach (var tab in adminTabs)
+            {
+                if (string.IsNullOrWhiteSpace(tab.FieldIdsJson)) continue;
+                var fieldIds = JsonSerializer.Deserialize<List<string>>(tab.FieldIdsJson, JsonOptions) ?? new List<string>();
+                var changed = false;
+                for (var i = 0; i < fieldIds.Count; i++)
+                {
+                    if (idMap.TryGetValue(fieldIds[i], out var newFieldId))
+                    {
+                        fieldIds[i] = newFieldId;
+                        changed = true;
+                    }
+                }
+                if (changed)
+                {
+                    tab.FieldIdsJson = JsonSerializer.Serialize(fieldIds, JsonOptions);
+                }
+            }
+
+            await _db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        // Clear tracker so subsequent queries see fresh data
+        _db.ChangeTracker.Clear();
+        return idMap.Count;
+    }
+
     [HttpPost]
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<FieldDefinitionDto>> Create([FromBody] FieldDefinitionDto request)
     {
+        // Generate a readable slug ID from the field name unless a non-GUID ID was explicitly provided
+        var id = request.Id;
+        if (string.IsNullOrWhiteSpace(id) || IsGuid(id))
+        {
+            id = await GenerateUniqueSlug(request.Name);
+        }
+
         var entity = new FieldDefinitionEntity
         {
-            Id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString() : request.Id,
+            Id = id,
             Name = request.Name,
             FieldType = request.FieldType,
             LinkToFieldId = string.IsNullOrWhiteSpace(request.LinkToFieldId) ? null : request.LinkToFieldId,
@@ -111,6 +234,20 @@ public class FieldDefinitionsController : ControllerBase
         _db.FieldDefinitions.Add(entity);
         await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetAll), new { id = entity.Id }, ToDto(entity));
+    }
+
+    /// <summary>Generates a unique slug, appending a numeric suffix if the base slug already exists.</summary>
+    private async Task<string> GenerateUniqueSlug(string name)
+    {
+        var baseSlug = ToSlug(name);
+        var slug = baseSlug;
+        var suffix = 2;
+        while (await _db.FieldDefinitions.AnyAsync(f => f.Id == slug))
+        {
+            slug = $"{baseSlug}-{suffix}";
+            suffix++;
+        }
+        return slug;
     }
 
     [HttpPut("{id}")]

@@ -50,3 +50,14 @@ server/**/obj/
 server/**/*.user
 server/**/*.suo
 server/**/.vs/
+
+# Local DB byproducts / build checks
+server/**/commtrac.db-shm
+server/**/commtrac.db-wal
+server/**/commtrac.db-journal
+server/**/commtrac_old.db
+server/**/objbuildcheck*/
+server/**/objbuildcheck2*/
+
+# Windows oddities
+nul

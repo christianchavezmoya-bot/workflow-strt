@@ -25,6 +25,7 @@ public class AppDbContext : DbContext
     public DbSet<IssueEntity> Issues => Set<IssueEntity>();
     public DbSet<DocumentEntity> Documents => Set<DocumentEntity>();
     public DbSet<QuickbaseSettingsEntity> QuickbaseSettings => Set<QuickbaseSettingsEntity>();
+    public DbSet<NotificationSettingsEntity> NotificationSettings => Set<NotificationSettingsEntity>();
     public DbSet<FieldDefinitionEntity> FieldDefinitions => Set<FieldDefinitionEntity>();
     public DbSet<FieldValueEntity> FieldValues => Set<FieldValueEntity>();
     public DbSet<AdminTabEntity> AdminTabs => Set<AdminTabEntity>();
@@ -34,6 +35,8 @@ public class AppDbContext : DbContext
     public DbSet<TableConfigEntity> TableConfigs => Set<TableConfigEntity>();
     public DbSet<RoleConfigEntity> RoleConfigs => Set<RoleConfigEntity>();
     public DbSet<OfficeEntity> Offices => Set<OfficeEntity>();
+    public DbSet<AuditLogEntity> AuditLogs => Set<AuditLogEntity>();
+    public DbSet<SessionEntity> Sessions => Set<SessionEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -115,6 +118,15 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<FieldValueEntity>()
             .HasIndex(v => v.FieldDefinitionId);
+
+        modelBuilder.Entity<AuditLogEntity>()
+            .HasIndex(a => a.UserId);
+
+        modelBuilder.Entity<AuditLogEntity>()
+            .HasIndex(a => a.Timestamp);
+
+        modelBuilder.Entity<SessionEntity>()
+            .HasIndex(s => s.UserId);
 
         modelBuilder.Entity<FieldDefinitionEntity>()
             .HasData(new[]

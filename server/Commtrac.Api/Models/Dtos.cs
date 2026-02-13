@@ -1,14 +1,38 @@
 namespace Commtrac.Api.Models;
 
-public record LoginRequest(string Email, string Password);
+public record LoginRequest(string Email, string Password, string? TrustedDeviceToken = null);
 
-public record LoginResponse(string Token, UserDto User, bool IsFirstLogin);
+public record LoginResponse(string? Token, UserDto? User, bool IsFirstLogin, bool Requires2fa = false, string? TwoFactorToken = null, string? TrustedDeviceToken = null, bool PasswordExpired = false);
 
 public record ForgotPasswordRequest(string Email);
 
 public record ResetPasswordRequest(string Token, string NewPassword);
 
 public record UpdateProfileRequest(string FullName, string Office);
+
+public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+// 2FA DTOs
+public record TwoFactorLoginRequest(string TwoFactorToken, string Code, bool RememberDevice = false);
+public record TwoFactorSetupResponse(string Secret, string QrCodeUri);
+public record TwoFactorVerifyRequest(string Code);
+public record TwoFactorDisableRequest(string Password);
+public record TwoFactorRecoveryRequest(string TwoFactorToken, string RecoveryCode, bool RememberDevice = false);
+public record TwoFactorRegenerateRequest(string Password);
+public record RecoveryCodesResponse(List<string> Codes);
+
+public record NotificationSettingsDto(
+    string SmtpHost,
+    int SmtpPort,
+    bool SmtpUseSsl,
+    string SmtpUser,
+    string SmtpPass,
+    string SmtpFrom,
+    string FrontendBaseUrl,
+    string SmsProvider,
+    string SmsApiKey,
+    string SmsSender
+);
 
 public record UserDto(
     string Id,
@@ -17,7 +41,19 @@ public record UserDto(
     string Role,
     string Office,
     bool IsActive,
-    bool IsFirstLogin
+    bool IsFirstLogin,
+    bool Is2faEnabled = false,
+    int RecoveryCodesRemaining = 0,
+    bool PasswordExpired = false
+);
+
+public record SessionDto(
+    string Id,
+    string IpAddress,
+    string UserAgent,
+    DateTime CreatedAt,
+    DateTime LastActiveAt,
+    bool IsCurrent
 );
 
 public record CreateUserRequest(

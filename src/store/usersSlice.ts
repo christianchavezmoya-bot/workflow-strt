@@ -44,6 +44,10 @@ export const deleteUser = createAsyncThunk("users/delete", async (id: string) =>
   return userService.deleteUser(id);
 });
 
+export const reset2fa = createAsyncThunk("users/reset2fa", async (id: string) => {
+  return userService.reset2fa(id);
+});
+
 const usersSlice = createSlice({
   name: "users",
   initialState,
@@ -91,6 +95,12 @@ const usersSlice = createSlice({
       })
       .addCase(deleteUser.fulfilled, (state, action) => {
         state.items = state.items.filter((item) => item.id !== action.payload);
+      })
+      .addCase(reset2fa.fulfilled, (state, action) => {
+        const index = state.items.findIndex((item) => item.id === action.payload.id);
+        if (index >= 0) {
+          state.items[index] = action.payload;
+        }
       });
   }
 });

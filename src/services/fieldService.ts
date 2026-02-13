@@ -44,6 +44,10 @@ export const fieldService = {
     const response = await api.get<string[]>("/field-definitions/tables");
     return response.data;
   },
+  async migrateIds() {
+    const response = await api.post<{ migrated: number; mapping?: Record<string, string>; message?: string }>("/field-definitions/actions/migrate-ids");
+    return response.data;
+  },
   async getValues(table: string, entityId: string) {
     const response = await api.get<FieldValue[]>("/field-values", {
       params: { table, entityId }

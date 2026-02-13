@@ -10,4 +10,7 @@ export interface User {
   office: Office;
   isActive: boolean;
   isFirstLogin: boolean;
+  is2faEnabled?: boolean;
+  recoveryCodesRemaining?: number;
+  passwordExpired?: boolean;
 }

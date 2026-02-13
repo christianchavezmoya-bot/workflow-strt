@@ -42,7 +42,66 @@ const pushDebugLog = (log: DebugLog) => {
   window.dispatchEvent(new Event("api-debug-log"));
 };
 
-api.interceptors.request.use((config) => {
+// ── Silent token refresh ────────────────────────────────────────────
+// Decode JWT expiry without a library. Returns epoch seconds or null.
+const getTokenExpiry = (token: string): number | null => {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.exp ?? null;
+  } catch {
+    return null;
+  }
+};
+
+// Refresh the token if it expires within this many minutes
+const REFRESH_THRESHOLD_MINUTES = 30;
+let refreshPromise: Promise<void> | null = null;
+
+const silentRefresh = async () => {
+  const token = localStorage.getItem("auth_token");
+  if (!token || token === "local") return;
+
+  const exp = getTokenExpiry(token);
+  if (!exp) return;
+
+  const remainingMs = exp * 1000 - Date.now();
+  if (remainingMs > REFRESH_THRESHOLD_MINUTES * 60 * 1000) return; // not close to expiry
+  if (remainingMs < 0) return; // already expired — let 401 handler redirect
+
+  // Deduplicate concurrent refresh calls
+  if (refreshPromise) {
+    await refreshPromise;
+    return;
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const res = await axios.post(
+        `${getApiBaseUrl()}/auth/refresh`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.token) {
+        localStorage.setItem("auth_token", res.data.token);
+        if (res.data.user) {
+          localStorage.setItem("auth_user", JSON.stringify(res.data.user));
+        }
+      }
+    } catch {
+      // Refresh failed — token may be invalid; let the next 401 handle it
+    }
+  })();
+
+  try { await refreshPromise; } finally { refreshPromise = null; }
+};
+
+api.interceptors.request.use(async (config) => {
+  // Skip refresh for the refresh call itself and for login-related endpoints
+  const url = config.url ?? "";
+  if (!url.includes("/auth/refresh") && !url.includes("/auth/login")) {
+    await silentRefresh();
+  }
+
   const token = localStorage.getItem("auth_token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -80,7 +139,13 @@ api.interceptors.response.use(
       error: error?.message
     });
     if (status === 401) {
-      window.location.href = "/login";
+      const reqUrl = config.url ?? "";
+      // Don't redirect for login/refresh calls — they handle their own errors
+      if (!reqUrl.includes("/auth/login") && !reqUrl.includes("/auth/refresh")) {
+        localStorage.removeItem("auth_token");
+        localStorage.removeItem("auth_user");
+        window.location.href = "/login";
+      }
     }
     if (status >= 500) {
       console.error("Server error", error);

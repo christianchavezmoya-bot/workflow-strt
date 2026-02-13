@@ -32,6 +32,7 @@ import api from "../../services/api";
 import { settingsService } from "../../services/settingsService";
 import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/settings";
 import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
+import { useAuth } from "../../hooks/useAuth";
 
 // Style for field definition labels (yellow bold)
 const fieldLabelStyle = {
@@ -73,8 +74,22 @@ const parseJsonMap = (value: string) => {
   }
 };
 
+interface AuditLogEntry {
+  id: string;
+  userId: string;
+  userEmail: string;
+  action: string;
+  details: string | null;
+  ipAddress: string | null;
+  timestamp: string;
+}
+
 const Settings = () => {
   const { addNotification } = useFieldNotifications();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "Admin" || localStorage.getItem("local_auth_user")?.includes('"Admin"');
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [tab, setTab] = useState(() => {
     const stored = localStorage.getItem("settings_active_tab");
     return stored ? parseInt(stored, 10) : 0;
@@ -94,6 +109,8 @@ const Settings = () => {
   const [fieldSearch, setFieldSearch] = useState("");
   const [seedLoading, setSeedLoading] = useState(false);
   const [seedSuccess, setSeedSuccess] = useState(false);
+  const [migrateLoading, setMigrateLoading] = useState(false);
+  const [migrateResult, setMigrateResult] = useState<{ migrated: number; message?: string } | null>(null);
   const [lookupRows, setLookupRows] = useState<Record<string, Array<{ id: string; label: string }>>>({});
   const [notifySettings, setNotifySettings] = useState(() => {
     try {
@@ -109,11 +126,15 @@ const Settings = () => {
       smtpPass: "",
       smtpFrom: "",
       smtpUseSsl: true,
+      frontendBaseUrl: "http://localhost:5173",
       smsProvider: "",
       smsApiKey: "",
       smsSender: ""
     };
   });
+  const [notifySending, setNotifySending] = useState(false);
+  const [notifyStatus, setNotifyStatus] = useState<"" | "saved" | "sent" | "error">("");
+  const [notifyError, setNotifyError] = useState<string | null>(null);
   const localUser = useMemo(() => {
     const raw = localStorage.getItem("local_auth_user");
     if (!raw) return null;
@@ -197,9 +218,37 @@ const Settings = () => {
     setStatus("");
   };
 
-  const handleSaveNotify = () => {
+  const handleSaveNotify = async () => {
     localStorage.setItem("notify_settings", JSON.stringify(notifySettings));
-    setStatus("saved");
+
+    if (!isAdmin) {
+      setNotifyStatus("saved");
+      return;
+    }
+
+    setNotifySending(true);
+    setNotifyError(null);
+    try {
+      const smtpPort = parseInt(String(notifySettings.smtpPort || "25"), 10);
+      await settingsService.saveNotificationSettings({
+        smtpHost: String(notifySettings.smtpHost || ""),
+        smtpPort: Number.isFinite(smtpPort) ? smtpPort : 25,
+        smtpUseSsl: Boolean(notifySettings.smtpUseSsl),
+        smtpUser: String(notifySettings.smtpUser || ""),
+        smtpPass: String(notifySettings.smtpPass || ""),
+        smtpFrom: String(notifySettings.smtpFrom || ""),
+        frontendBaseUrl: String(notifySettings.frontendBaseUrl || "http://localhost:5173"),
+        smsProvider: String(notifySettings.smsProvider || ""),
+        smsApiKey: String(notifySettings.smsApiKey || ""),
+        smsSender: String(notifySettings.smsSender || "")
+      });
+      setNotifyStatus("sent");
+    } catch {
+      setNotifyError("Failed to save SMS/SMTP settings to backend.");
+      setNotifyStatus("error");
+    } finally {
+      setNotifySending(false);
+    }
   };
 
   const handleClearLocalAuth = () => {
@@ -542,6 +591,30 @@ const Settings = () => {
     checkApiStatus();
   }, []);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    (async () => {
+      try {
+        const s = await settingsService.getNotificationSettings();
+        setNotifySettings((prev) => ({
+          ...prev,
+          smtpHost: s.smtpHost ?? "",
+          smtpPort: String(s.smtpPort ?? ""),
+          smtpUseSsl: Boolean(s.smtpUseSsl),
+          smtpUser: s.smtpUser ?? "",
+          smtpPass: s.smtpPass ?? "",
+          smtpFrom: s.smtpFrom ?? "",
+          frontendBaseUrl: s.frontendBaseUrl ?? "http://localhost:5173",
+          smsProvider: s.smsProvider ?? "",
+          smsApiKey: s.smsApiKey ?? "",
+          smsSender: s.smsSender ?? ""
+        }));
+      } catch {
+        // Fall back to localStorage.
+      }
+    })();
+  }, [isAdmin]);
+
   return (
     <Stack spacing={3}>
       <Box>
@@ -558,6 +631,7 @@ const Settings = () => {
           <Tab label="Quickbase" />
           <Tab label="SMS/SMTP" />
           <Tab label="Fields/Data" />
+          {isAdmin && <Tab label="Audit Log" />}
         </Tabs>
 
         {tab === 0 && (
@@ -686,7 +760,7 @@ const Settings = () => {
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Typography variant="h6">SMS/SMTP settings</Typography>
             <Typography variant="body2" color="text.secondary">
-              Configure email and SMS providers for notifications (stored locally for now).
+              Configure email and SMS providers for notifications (Admin saves to the database).
             </Typography>
             <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
             <TextField
@@ -708,6 +782,19 @@ const Settings = () => {
                 onChange={(event) => setNotifySettings((prev) => ({ ...prev, smtpUser: event.target.value }))}
                 fullWidth
               />
+            </Stack>
+            <TextField
+              label="Frontend Base URL"
+              value={String(notifySettings.frontendBaseUrl || "")}
+              onChange={(event) => setNotifySettings((prev) => ({ ...prev, frontendBaseUrl: event.target.value }))}
+              fullWidth
+            />
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Switch
+                checked={Boolean(notifySettings.smtpUseSsl)}
+                onChange={(event) => setNotifySettings((prev) => ({ ...prev, smtpUseSsl: event.target.checked }))}
+              />
+              <Typography variant="body2">Use SSL</Typography>
             </Stack>
             <TextField
               label="SMTP Password"
@@ -742,11 +829,85 @@ const Settings = () => {
               onChange={(event) => setNotifySettings((prev) => ({ ...prev, smsApiKey: event.target.value }))}
               fullWidth
             />
+            {notifyStatus === "error" && notifyError && (
+              <Alert severity="error">{notifyError}</Alert>
+            )}
             <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-              <Button variant="contained" onClick={handleSaveNotify}>
-                Save SMS/SMTP settings
+              <Button variant="contained" onClick={handleSaveNotify} disabled={notifySending}>
+                {notifySending ? "Saving..." : "Save SMS/SMTP settings"}
               </Button>
             </Stack>
+          </Stack>
+        )}
+
+        {tab === 3 && isAdmin && (
+          <Stack spacing={2} sx={{ marginTop: 2 }}>
+            <Typography variant="h6">2FA Audit Log</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Security events related to two-factor authentication.
+            </Typography>
+            <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            <Button
+              variant="outlined"
+              disabled={auditLoading}
+              onClick={async () => {
+                setAuditLoading(true);
+                try {
+                  const response = await api.get<AuditLogEntry[]>("/auth/audit-log?limit=200");
+                  setAuditLogs(response.data);
+                } catch {
+                  setAuditLogs([]);
+                }
+                setAuditLoading(false);
+              }}
+              sx={{ alignSelf: "flex-start" }}
+            >
+              {auditLoading ? "Loading..." : "Load audit log"}
+            </Button>
+            {auditLogs.length > 0 && (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Timestamp</TableCell>
+                    <TableCell>User</TableCell>
+                    <TableCell>Action</TableCell>
+                    <TableCell>Details</TableCell>
+                    <TableCell>IP</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {auditLogs.map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>
+                        {new Date(log.timestamp).toLocaleString()}
+                      </TableCell>
+                      <TableCell>{log.userEmail}</TableCell>
+                      <TableCell>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontFamily: "monospace",
+                            fontSize: "0.8rem",
+                            color: log.action.includes("failed") ? "error.main" :
+                                   log.action.includes("disabled") || log.action.includes("reset") ? "warning.main" :
+                                   "success.main"
+                          }}
+                        >
+                          {log.action}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{log.details || "—"}</TableCell>
+                      <TableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{log.ipAddress || "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            {auditLogs.length === 0 && !auditLoading && (
+              <Typography variant="body2" color="text.secondary">
+                Click "Load audit log" to view recent 2FA security events.
+              </Typography>
+            )}
           </Stack>
         )}
 
@@ -884,11 +1045,42 @@ const Settings = () => {
                   >
                     {tablesLoading ? "Loading..." : "Update Dropdown Tables"}
                   </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={migrateLoading}
+                    onClick={async () => {
+                      setMigrateLoading(true);
+                      setMigrateResult(null);
+                      try {
+                        const result = await fieldService.migrateIds();
+                        setMigrateResult(result);
+                        if (result.migrated > 0) {
+                          await reloadFieldDefinitions();
+                        }
+                        setTimeout(() => setMigrateResult(null), 5000);
+                      } catch (error) {
+                        console.error("Failed to migrate IDs:", error);
+                        alert("Failed to migrate field IDs. Check console for details.");
+                      } finally {
+                        setMigrateLoading(false);
+                      }
+                    }}
+                  >
+                    {migrateLoading ? "Migrating..." : "Migrate GUID IDs"}
+                  </Button>
                 </Stack>
               </Stack>
               {seedSuccess && (
                 <Alert severity="success" sx={{ mb: 2 }}>
                   Default fields loaded successfully! ({fieldDefinitions.length} fields)
+                </Alert>
+              )}
+              {migrateResult && (
+                <Alert severity="success" sx={{ mb: 2 }}>
+                  {migrateResult.migrated > 0
+                    ? `Migrated ${migrateResult.migrated} field ID(s) from GUIDs to readable slugs.`
+                    : migrateResult.message || "All field IDs are already readable."}
                 </Alert>
               )}
               {tablesSuccess && (
@@ -915,6 +1107,8 @@ const Settings = () => {
                   <TableHead>
                     <TableRow>
                       <TableCell sx={fieldLabelStyle}>Created field</TableCell>
+                      <TableCell>Backend Tag</TableCell>
+                      <TableCell>UI Field Name</TableCell>
                       {Array.from({ length: tableColumnSlots }).map((_, index) => (
                         <TableCell key={`table-header-${index}`}>{`Table ${index + 1}`}</TableCell>
                       ))}
@@ -943,6 +1137,16 @@ const Settings = () => {
                                 {field.fieldType}
                               </Typography>
                             </Stack>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.8rem", color: "text.secondary" }}>
+                              {field.id}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {field.name}
+                            </Typography>
                           </TableCell>
                           {slots.map((value, index) => (
                             <TableCell key={`${field.id}-${index}`}>
@@ -1019,7 +1223,7 @@ const Settings = () => {
                       field.fieldType.toLowerCase().includes(fieldSearch.toLowerCase())
                     ).length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={tableColumnSlots + 2} align="center">
+                        <TableCell colSpan={tableColumnSlots + 4} align="center">
                           <Typography variant="body2" color="text.secondary">
                             No fields match your search "{fieldSearch}"
                           </Typography>
