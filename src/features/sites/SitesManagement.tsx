@@ -33,6 +33,7 @@ interface Site {
   address?: string;
   city?: string;
   state?: string;
+  country?: string;
   contactName?: string;
   contactPhone?: string;
   notes?: string;
@@ -99,6 +100,7 @@ export const SitesManagement = () => {
         address: editFormData.address,
         city: editFormData.city,
         state: editFormData.state,
+        country: editFormData.country,
         zipCode: null,
         contactName: editFormData.contactName,
         contactPhone: editFormData.contactPhone,
@@ -172,7 +174,8 @@ export const SitesManagement = () => {
                   <TableCell>Customer</TableCell>
                   <TableCell>Site Name</TableCell>
                   <TableCell>City</TableCell>
-                  <TableCell>State/Country</TableCell>
+                  <TableCell>State</TableCell>
+                  <TableCell>Country</TableCell>
                   <TableCell>Comments</TableCell>
                   <TableCell width="120" align="center">Actions</TableCell>
                 </TableRow>
@@ -180,11 +183,11 @@ export const SitesManagement = () => {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">Loading...</TableCell>
+                    <TableCell colSpan={8} align="center">Loading...</TableCell>
                   </TableRow>
                 ) : sites.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">No sites found</TableCell>
+                    <TableCell colSpan={8} align="center">No sites found</TableCell>
                   </TableRow>
                 ) : (
                   sites.map((site, index) => {
@@ -274,7 +277,7 @@ export const SitesManagement = () => {
                           )}
                         </TableCell>
 
-                        {/* State/Country */}
+                        {/* State */}
                         <TableCell>
                           {isEditing ? (
                             <TextField
@@ -285,6 +288,20 @@ export const SitesManagement = () => {
                             />
                           ) : (
                             site.state || '-'
+                          )}
+                        </TableCell>
+
+                        {/* Country */}
+                        <TableCell>
+                          {isEditing ? (
+                            <TextField
+                              size="small"
+                              value={editFormData.country || ''}
+                              onChange={(e) => setEditFormData(prev => ({ ...prev, country: e.target.value }))}
+                              fullWidth
+                            />
+                          ) : (
+                            site.country || '-'
                           )}
                         </TableCell>
 

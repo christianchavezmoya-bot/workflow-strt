@@ -5,6 +5,7 @@ export interface Site {
   address?: string;
   city?: string;
   state?: string;
+  country?: string;
   zipCode?: string;
   contactName?: string;
   contactPhone?: string;
@@ -14,11 +15,12 @@ export interface Site {
 }
 
 export interface CreateSiteDto {
-  customerId: string;
+  customerId?: string;
   name: string;
   address?: string;
   city?: string;
   state?: string;
+  country?: string;
   zipCode?: string;
   contactName?: string;
   contactPhone?: string;
@@ -27,10 +29,12 @@ export interface CreateSiteDto {
 }
 
 export interface UpdateSiteDto {
+  customerId?: string;
   name?: string;
   address?: string;
   city?: string;
   state?: string;
+  country?: string;
   zipCode?: string;
   contactName?: string;
   contactPhone?: string;

@@ -50,20 +50,25 @@ public class SitesController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<SiteDto>> Create([FromBody] CreateSiteRequest request)
     {
-        // Verify customer exists
-        var customerExists = await _db.Customers.AnyAsync(c => c.Id == request.CustomerId);
-        if (!customerExists)
+        var customerId = request.CustomerId?.Trim() ?? string.Empty;
+        if (!string.IsNullOrEmpty(customerId))
         {
-            return BadRequest("Customer not found");
+            // Verify customer exists (allow creating "unassigned" sites with empty CustomerId).
+            var customerExists = await _db.Customers.AnyAsync(c => c.Id == customerId);
+            if (!customerExists)
+            {
+                return BadRequest("Customer not found");
+            }
         }
 
         var site = new SiteEntity
         {
-            CustomerId = request.CustomerId,
+            CustomerId = customerId,
             Name = request.Name,
             Address = request.Address,
             City = request.City,
             State = request.State,
+            Country = request.Country,
             ZipCode = request.ZipCode,
             ContactName = request.ContactName,
             ContactPhone = request.ContactPhone,
@@ -87,10 +92,24 @@ public class SitesController : ControllerBase
             return NotFound();
         }
 
+        if (request.CustomerId != null)
+        {
+            var nextCustomerId = request.CustomerId.Trim();
+            if (!string.IsNullOrEmpty(nextCustomerId))
+            {
+                var customerExists = await _db.Customers.AnyAsync(c => c.Id == nextCustomerId);
+                if (!customerExists)
+                {
+                    return BadRequest("Customer not found");
+                }
+            }
+            site.CustomerId = nextCustomerId;
+        }
         if (!string.IsNullOrWhiteSpace(request.Name)) site.Name = request.Name;
         if (request.Address != null) site.Address = request.Address;
         if (request.City != null) site.City = request.City;
         if (request.State != null) site.State = request.State;
+        if (request.Country != null) site.Country = request.Country;
         if (request.ZipCode != null) site.ZipCode = request.ZipCode;
         if (request.ContactName != null) site.ContactName = request.ContactName;
         if (request.ContactPhone != null) site.ContactPhone = request.ContactPhone;
@@ -125,6 +144,7 @@ public class SitesController : ControllerBase
             site.Address,
             site.City,
             site.State,
+            site.Country,
             site.ZipCode,
             site.ContactName,
             site.ContactPhone,

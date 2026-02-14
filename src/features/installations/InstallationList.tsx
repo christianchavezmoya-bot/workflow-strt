@@ -40,6 +40,7 @@ import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { fieldService } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
 import type { Office } from "../../components/GlobalOfficeMap";
+import { createCountryResolver } from "../../utils/officeCountry";
 import { installationTabsService, InstallationTab, InstallationTabRow } from "../../services/installationTabsService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createInstallation, deleteInstallation, fetchInstallations, updateInstallation } from "../../store/installationSlice";
@@ -536,7 +537,7 @@ const InstallationList = () => {
   useEffect(() => {
     dispatch(
       fetchProjects({
-        office: activeOffice !== "All" ? activeOffice : undefined,
+        country: activeOffice !== "All" ? activeOffice : undefined,
         page: 1,
         pageSize: 200
       })
@@ -754,7 +755,10 @@ const InstallationList = () => {
   }, [projects, selectedProject]);
 
   const installerOptions = useMemo(() => {
-    return usersState.items.map((user) => user.fullName).filter(Boolean);
+    return usersState.items
+      .map((user) => user.fullName)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
   }, [usersState.items]);
   const installerOptionsWithAdd = useMemo(
     () => [...installerOptions, "Add new installer..."],
@@ -769,21 +773,12 @@ const InstallationList = () => {
     Cancelled: 0
   };
 
-  // Map office cities to countries
-  const getCountryForOffice = useMemo(() => {
-    const map = new Map<string, string>();
-    globalOffices.forEach((office) => {
-      if (office.city && office.country) {
-        map.set(office.city, office.country);
-      }
-    });
-    return (officeCity: string) => map.get(officeCity) || officeCity;
-  }, [globalOffices]);
+  const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
 
   const filteredData = useMemo(() => {
     const officeFiltered = dataWithSeq.filter((row) => {
       if (activeOffice === "All") return true;
-      const installationCountry = getCountryForOffice(row.office);
+      const installationCountry = countryForOffice(row.office);
       return installationCountry === activeOffice || row.office === activeOffice;
     });
     const jobFiltered = selectedProjectIds.size
@@ -822,6 +817,7 @@ const InstallationList = () => {
   }, [
     dataWithSeq,
     activeOffice,
+    countryForOffice,
     installationFilters,
     installationSort,
     progressForStatus,
@@ -830,13 +826,17 @@ const InstallationList = () => {
 
   const officeJobInstallationIds = useMemo(() => {
     const officeFiltered = dataWithSeq.filter(
-      (row) => activeOffice === "All" || row.office === activeOffice
+      (row) => {
+        if (activeOffice === "All") return true;
+        const installationCountry = countryForOffice(row.office);
+        return installationCountry === activeOffice || row.office === activeOffice;
+      }
     );
     const jobFiltered = selectedProjectIds.size
       ? officeFiltered.filter((row) => selectedProjectIds.has(row.projectId))
       : officeFiltered;
     return new Set(jobFiltered.map((row) => row.id));
-  }, [dataWithSeq, activeOffice, selectedProjectIds]);
+  }, [dataWithSeq, activeOffice, selectedProjectIds, countryForOffice]);
 
   const installationFilterOptions = useMemo(
     () => ({
@@ -1939,7 +1939,7 @@ const InstallationList = () => {
                         scheduledEnd: "",
                         status: "Not Started",
                         assignedTeam: formInstallation.installer || "Unassigned",
-                        office: activeOffice === "All" ? "USA" : activeOffice,
+                        office: selectedProject?.office || (activeOffice === "All" ? "USA" : activeOffice),
                         machineType: formInstallation.machineType,
                         pm1Serial: formInstallation.pm1Serial,
                         pm2Serial: formInstallation.pm2Serial,
@@ -3229,7 +3229,7 @@ const InstallationList = () => {
                 scheduledEnd: "",
                 status: "Not Started",
                 assignedTeam: newInstallationForm.installer || "Unassigned",
-                office: activeOffice === "All" ? "USA" : activeOffice,
+                office: selectedProject?.office || (activeOffice === "All" ? "USA" : activeOffice),
                 machineType: newInstallationForm.machineType,
                 pm1Serial: newInstallationForm.pm1Serial,
                 pm2Serial: newInstallationForm.pm2Serial,

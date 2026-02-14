@@ -57,7 +57,7 @@ const Sidebar = () => {
       <Stack spacing={2}>
         <Box className="glass-card" sx={{ padding: "12px 14px" }}>
           <Typography variant="caption" color="text.secondary">
-            Active office
+            Active global office
           </Typography>
           <FormControl size="small" fullWidth>
             <Select value={activeOffice} onChange={(event) => updateActiveOffice(event.target.value as typeof activeOffice)}>

@@ -3,6 +3,7 @@ import { Project, ProjectStatus, ProjectType } from "../types/project";
 
 export interface ProjectFilters {
   office?: string;
+  country?: string;
   status?: ProjectStatus | "All";
   type?: ProjectType | "All";
   search?: string;

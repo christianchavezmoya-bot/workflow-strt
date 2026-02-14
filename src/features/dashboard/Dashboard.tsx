@@ -11,6 +11,7 @@ import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
 import { officesService } from "../../services/officesService";
 import type { Office } from "../../components/GlobalOfficeMap";
+import { createCountryResolver } from "../../utils/officeCountry";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -33,32 +34,23 @@ const Dashboard = () => {
     });
   }, []);
 
-  // Map office cities to countries
-  const getCountryForOffice = useMemo(() => {
-    const map = new Map<string, string>();
-    globalOffices.forEach((office) => {
-      if (office.city && office.country) {
-        map.set(office.city, office.country);
-      }
-    });
-    return (officeCity: string) => map.get(officeCity) || officeCity;
-  }, [globalOffices]);
+  const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
 
   const filteredProjects = useMemo(() => {
     if (activeOffice === "All") return projects;
     return projects.filter((project) => {
-      const projectCountry = getCountryForOffice(project.office);
+      const projectCountry = countryForOffice(project.office);
       return projectCountry === activeOffice || project.office === activeOffice;
     });
-  }, [activeOffice, projects, getCountryForOffice]);
+  }, [activeOffice, projects, countryForOffice]);
 
   const filteredInstallations = useMemo(() => {
     if (activeOffice === "All") return installations;
     return installations.filter((installation) => {
-      const installationCountry = getCountryForOffice(installation.office);
+      const installationCountry = countryForOffice(installation.office);
       return installationCountry === activeOffice || installation.office === activeOffice;
     });
-  }, [activeOffice, installations, getCountryForOffice]);
+  }, [activeOffice, installations, countryForOffice]);
 
   const productCount = products.length;
   const projectCount = filteredProjects.length;
@@ -76,7 +68,7 @@ const Dashboard = () => {
   return (
     <Stack spacing={3}>
       <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-        <SummaryCard title="Total Projects" value={String(projectCount)} trend="Across active office" />
+        <SummaryCard title="Total Projects" value={String(projectCount)} trend="Across active global office" />
         <SummaryCard title="Active Installations" value={String(activeInstallationsCount)} trend="Scheduled + In Progress" />
         <SummaryCard title="Pending Approvals" value={String(pendingApprovalCount)} trend="Awaiting review" />
         <SummaryCard title="Products" value={String(productCount)} trend="Catalog size" />
@@ -94,11 +86,11 @@ const Dashboard = () => {
             : [activeOffice]
           ).map((region) => {
             const regionProjects = projects.filter((project) => {
-              const projectCountry = getCountryForOffice(project.office);
+              const projectCountry = countryForOffice(project.office);
               return projectCountry === region || project.office === region;
             });
             const regionInstallations = installations.filter((installation) => {
-              const installationCountry = getCountryForOffice(installation.office);
+              const installationCountry = countryForOffice(installation.office);
               return installationCountry === region || installation.office === region;
             });
             const regionActiveInstalls = regionInstallations.filter((installation) =>

@@ -218,6 +218,7 @@ function DraggablePaper(props: any) {
 }
 
 export const UserManagement: React.FC = () => {
+  const VIRTUAL_SITE_PREFIX = "virtual-site-for-customer:";
   const { user } = useAuth();
   const { activeOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
@@ -296,6 +297,7 @@ export const UserManagement: React.FC = () => {
     address?: string;
     city?: string;
     state?: string;
+    country?: string;
     contactName?: string;
     contactPhone?: string;
     notes?: string;
@@ -306,6 +308,7 @@ export const UserManagement: React.FC = () => {
     name?: string;
     city?: string;
     state?: string;
+    country?: string;
     notes?: string;
     customerId?: string | number;
   }>({});
@@ -718,6 +721,7 @@ export const UserManagement: React.FC = () => {
       name: site.name,
       city: site.city,
       state: site.state,
+      country: site.country,
       notes: site.notes,
       customerId: site.customerId,
     });
@@ -727,17 +731,45 @@ export const UserManagement: React.FC = () => {
     if (!editingSiteId) return;
 
     try {
+      const isVirtual = editingSiteId.startsWith(VIRTUAL_SITE_PREFIX);
+      if (isVirtual) {
+        const name = (editSiteFormData.name || "").trim();
+        if (!name) {
+          alert("Site name is required.");
+          return;
+        }
+        const response = await api.post('/sites', {
+          name,
+          address: '',
+          city: editSiteFormData.city,
+          state: editSiteFormData.state,
+          country: editSiteFormData.country,
+          zipCode: null,
+          contactName: '',
+          contactPhone: '',
+          contactEmail: null,
+          notes: editSiteFormData.notes,
+          customerId: String(editSiteFormData.customerId ?? "")
+        });
+
+        setSitesList(prev => [...prev, response.data]);
+        setEditingSiteId(null);
+        setEditSiteFormData({});
+        return;
+      }
+
       const response = await api.put(`/sites/${editingSiteId}`, {
         name: editSiteFormData.name,
         address: '',
         city: editSiteFormData.city,
         state: editSiteFormData.state,
+        country: editSiteFormData.country,
         zipCode: null,
         contactName: '',
         contactPhone: '',
         contactEmail: null,
         notes: editSiteFormData.notes,
-        customerId: editSiteFormData.customerId,
+        customerId: String(editSiteFormData.customerId ?? "")
       });
 
       setSitesList(prev => prev.map(s => s.id === editingSiteId ? { ...s, ...response.data } : s));
@@ -751,6 +783,7 @@ export const UserManagement: React.FC = () => {
 
   const handleDeleteSite = async (siteId: string) => {
     if (!confirm('Are you sure you want to delete this site?')) return;
+    if (siteId.startsWith(VIRTUAL_SITE_PREFIX)) return;
 
     try {
       await api.delete(`/sites/${siteId}`);
@@ -862,8 +895,30 @@ export const UserManagement: React.FC = () => {
     // Add city → country mappings from globalOffices
     globalOffices.forEach((office) => {
       if (office.city && office.country) {
+        // Country to itself + common aliases (handles legacy values where Office already stores a country)
+        const country = office.country.trim();
+        const low = country.toLowerCase();
+        const aliases =
+          ["usa", "us", "u.s.", "united states", "united states of america"].includes(low)
+            ? [country, "USA", "US", "U.S.", "United States", "United States of America"]
+            : ["uk", "u.k.", "united kingdom", "great britain", "britain"].includes(low)
+              ? [country, "UK", "U.K.", "United Kingdom", "Great Britain", "Britain"]
+              : ["uae", "u.a.e.", "united arab emirates"].includes(low)
+                ? [country, "UAE", "U.A.E.", "United Arab Emirates"]
+                : [country];
+
+        aliases.forEach((alias) => {
+          map.set(alias, country);
+          map.set(alias.toLowerCase(), country);
+        });
+
         map.set(office.city, office.country);
         map.set(office.city.toLowerCase(), office.country);
+
+        // "City, Country" format (used by some dropdowns / legacy values)
+        const cityCountry = `${office.city}, ${office.country}`;
+        map.set(cityCountry, office.country);
+        map.set(cityCountry.toLowerCase(), office.country);
       }
     });
 
@@ -893,26 +948,21 @@ export const UserManagement: React.FC = () => {
     });
 
     return (officeLocation: string) => {
-      if (!officeLocation) return officeLocation;
+      const value = (officeLocation ?? "").trim();
+      if (!value) return value;
       // Try exact match first
-      const exactMatch = map.get(officeLocation);
+      const exactMatch = map.get(value);
       if (exactMatch) return exactMatch;
       // Try lowercase match
-      const lowerMatch = map.get(officeLocation.toLowerCase());
+      const lowerMatch = map.get(value.toLowerCase());
       if (lowerMatch) return lowerMatch;
       // Return original if no match found
-      return officeLocation;
+      return value;
     };
   }, [globalOffices]);
 
-  const filteredCustomers = useMemo(() => {
-    if (activeOffice === "All") return customersState.items;
-
-    return customersState.items.filter((customer) => {
-      const customerCountry = getCountryForOffice(customer.office);
-      return customerCountry === activeOffice || customer.office === activeOffice || customer.office === "All";
-    });
-  }, [customersState.items, activeOffice, getCountryForOffice]);
+  // Customers are visible across all offices (no activeOffice filtering).
+  const filteredCustomers = useMemo(() => customersState.items, [customersState.items]);
 
   const [adminTabsConfig, setAdminTabsConfig] = useState<AdminTab[]>([]);
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
@@ -1264,6 +1314,7 @@ export const UserManagement: React.FC = () => {
       siteName: (site: typeof sitesList[0]) => normalize(site.name),
       city: (site: typeof sitesList[0]) => normalize(site.city ?? ""),
       state: (site: typeof sitesList[0]) => normalize(site.state ?? ""),
+      country: (site: typeof sitesList[0]) => normalize(site.country ?? ""),
       industry: (site: typeof sitesList[0]) => {
         const customer = getCustomerData(site.customerId);
         return normalize(customer?.industry ?? "");
@@ -1279,6 +1330,7 @@ export const UserManagement: React.FC = () => {
       siteName: Array.from(new Set(sitesList.map((site) => siteAccessors.siteName(site)))).sort(),
       city: Array.from(new Set(sitesList.map((site) => siteAccessors.city(site)))).sort(),
       state: Array.from(new Set(sitesList.map((site) => siteAccessors.state(site)))).sort(),
+      country: Array.from(new Set(sitesList.map((site) => siteAccessors.country(site)))).sort(),
       industry: Array.from(new Set(sitesList.map((site) => siteAccessors.industry(site)))).sort(),
       notes: Array.from(new Set(sitesList.map((site) => siteAccessors.notes(site)))).sort()
     }),
@@ -1286,7 +1338,29 @@ export const UserManagement: React.FC = () => {
   );
 
   const filteredSites = useMemo(() => {
-    let result = [...sitesList];
+    const customerIdsWithRealSites = new Set(
+      sitesList
+        .map((site) => String(site.customerId ?? "").trim())
+        .filter(Boolean)
+    );
+
+    const virtualSites = customersState.items
+      .filter((customer) => !customerIdsWithRealSites.has(String(customer.id)))
+      .map((customer) => ({
+        id: `${VIRTUAL_SITE_PREFIX}${customer.id}`,
+        customerId: customer.id,
+        name: "",
+        address: "",
+        city: "",
+        state: "",
+        country: "",
+        contactName: "",
+        contactPhone: "",
+        notes: "",
+        createdAt: new Date().toISOString()
+      }));
+
+    let result = [...sitesList, ...virtualSites];
 
     // Apply search filter
     if (customerSearch) {
@@ -1296,10 +1370,12 @@ export const UserManagement: React.FC = () => {
         const siteName = site.name.toLowerCase();
         const city = (site.city || '').toLowerCase();
         const state = (site.state || '').toLowerCase();
+        const country = (site.country || '').toLowerCase();
         return customerName.includes(searchLower) ||
                siteName.includes(searchLower) ||
                city.includes(searchLower) ||
-               state.includes(searchLower);
+               state.includes(searchLower) ||
+               country.includes(searchLower);
       });
     }
 
@@ -1327,9 +1403,15 @@ export const UserManagement: React.FC = () => {
   }, [sitesList, customerSearch, customerFilters, customerSort, siteAccessors, customersState.items]);
 
   const filteredUsers = useMemo(() => {
-    const filtered = applyAutoFilter(numberedUsers, userFilters, userAccessors);
+    const officeFiltered = numberedUsers.filter((row) => {
+      if (activeOffice === "All") return true;
+      const userCountry = getCountryForOffice(row.office || "");
+      return userCountry === activeOffice || row.office === activeOffice;
+    });
+
+    const filtered = applyAutoFilter(officeFiltered, userFilters, userAccessors);
     return applyAutoSort(filtered, userSort, userAccessors);
-  }, [numberedUsers, userFilters, userSort, userAccessors]);
+  }, [numberedUsers, activeOffice, userFilters, userSort, userAccessors, getCountryForOffice]);
 
   const pagedUsers = useMemo(() => {
     const start = usersPage * usersRowsPerPage;
@@ -2354,12 +2436,14 @@ export const UserManagement: React.FC = () => {
                     address: '',
                     city: '',
                     state: '',
+                    country: '',
                     zipCode: null,
                     contactName: '',
                     contactPhone: '',
                     contactEmail: null,
                     notes: '',
-                    customerId: defaultCustomer.id
+                    // Create "unassigned" site in table view: no associated customer/logo.
+                    customerId: ""
                   };
 
                   try {
@@ -2367,14 +2451,16 @@ export const UserManagement: React.FC = () => {
                     setSitesList(prev => [...prev, response.data]);
                     setEditingSiteId(response.data.id);
                     setEditSiteFormData({
+                      customerId: response.data.customerId,
                       name: response.data.name,
                       city: response.data.city,
                       state: response.data.state,
+                      country: response.data.country,
                       notes: response.data.notes,
                     });
                   } catch (err) {
                     console.error('Failed to create site', err);
-                    alert('Failed to create site. Make sure the customer exists in the database.');
+                    alert('Failed to create site.');
                   }
                 }}
               >
@@ -2805,8 +2891,16 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>State/Country</span>
+                        <span style={fieldLabelStyle}>State</span>
                         <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "state" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>Country</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "country" })}>
                           <ArrowDropDown fontSize="small" />
                         </IconButton>
                       </Stack>
@@ -2833,7 +2927,7 @@ export const UserManagement: React.FC = () => {
                 <TableBody>
                   {filteredSites.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} align="center">
+                      <TableCell colSpan={10} align="center">
                         <Typography variant="body2" color="text.secondary">
                           No sites found
                         </Typography>
@@ -2902,7 +2996,14 @@ export const UserManagement: React.FC = () => {
                                   value={editSiteFormData.customerId || ''}
                                   onChange={(e) => setEditSiteFormData(prev => ({ ...prev, customerId: e.target.value }))}
                                 >
-                                  {customersState.items.map((cust) => (
+                                  <MenuItem value="">
+                                    (Unassigned)
+                                  </MenuItem>
+                                  {[...customersState.items]
+                                    .sort((a, b) =>
+                                      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
+                                    )
+                                    .map((cust) => (
                                     <MenuItem key={cust.id} value={cust.id}>
                                       {cust.name}
                                     </MenuItem>
@@ -2924,7 +3025,7 @@ export const UserManagement: React.FC = () => {
                                 fullWidth
                               />
                             ) : (
-                              site.name
+                              site.name || ""
                             )}
                           </TableCell>
 
@@ -2942,7 +3043,7 @@ export const UserManagement: React.FC = () => {
                             )}
                           </TableCell>
 
-                          {/* State/Country */}
+                          {/* State */}
                           <TableCell>
                             {isEditing ? (
                               <TextField
@@ -2953,6 +3054,20 @@ export const UserManagement: React.FC = () => {
                               />
                             ) : (
                               site.state || '-'
+                            )}
+                          </TableCell>
+
+                          {/* Country */}
+                          <TableCell>
+                            {isEditing ? (
+                              <TextField
+                                size="small"
+                                value={editSiteFormData.country || ''}
+                                onChange={(e) => setEditSiteFormData(prev => ({ ...prev, country: e.target.value }))}
+                                fullWidth
+                              />
+                            ) : (
+                              site.country || '-'
                             )}
                           </TableCell>
 
@@ -2996,9 +3111,16 @@ export const UserManagement: React.FC = () => {
                                   </IconButton>
                                 </Tooltip>
                                 <Tooltip title="Delete">
-                                  <IconButton size="small" onClick={() => handleDeleteSite(site.id)} color="error">
-                                    <DeleteOutline fontSize="small" />
-                                  </IconButton>
+                                  <span>
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handleDeleteSite(site.id)}
+                                      color="error"
+                                      disabled={site.id.startsWith(VIRTUAL_SITE_PREFIX)}
+                                    >
+                                      <DeleteOutline fontSize="small" />
+                                    </IconButton>
+                                  </span>
                                 </Tooltip>
                               </Box>
                             )}

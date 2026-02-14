@@ -31,6 +31,7 @@ import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { fieldService } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
 import type { Office } from "../../components/GlobalOfficeMap";
+import { createCountryResolver } from "../../utils/officeCountry";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { deleteProject, fetchProjects, updateProjectStatus } from "../../store/projectSlice";
@@ -104,6 +105,13 @@ const builtInColumnConfigs: ColumnConfig[] = [
     required: false,
     minWidth: 150,
     renderCell: (project: Project) => project.customerName || "-"
+  },
+  {
+    id: "siteName",
+    name: "Site",
+    required: false,
+    minWidth: 160,
+    renderCell: (project: Project) => project.siteName || "-"
   },
   {
     id: "customerId",
@@ -221,23 +229,10 @@ const ProjectList = () => {
     }))
   );
   const allFieldDefinitions = useFieldDefinitions();
-  const projectFixedColumns = useMemo(
-    () =>
-      new Set(
-        ["Job Number", "Customer", "Products", "Project Type", "Status", "Office"].map((value) => value.toLowerCase())
-      ),
-    []
-  );
   const projectDynamicColumns = useMemo(
-    () =>
-      projectsTableConfig.visibleFields.filter((field) => {
-        if (projectFixedColumns.has(field.name.toLowerCase())) return false;
-        const hasValue = Object.values(projectsDynamic.valuesByEntity).some(
-          (values) => values[field.id]?.value?.trim()
-        );
-        return hasValue;
-      }),
-    [projectsTableConfig.visibleFields, projectsDynamic.valuesByEntity, projectFixedColumns]
+    // Show all dynamic fields assigned to Projects, even if none have values yet.
+    () => projectsTableConfig.visibleFields,
+    [projectsTableConfig.visibleFields]
   );
   const availableFieldsForProjects = useMemo(
     () => allFieldDefinitions.definitions.filter((field) => !field.tables.includes("projects")),
@@ -250,8 +245,11 @@ const ProjectList = () => {
     key: ""
   });
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+  const canDeleteProjects = user?.role === "Admin" || user?.role === "Project Manager";
 
   // Clear column filters when active office changes
   useEffect(() => {
@@ -262,12 +260,13 @@ const ProjectList = () => {
   useEffect(() => {
     dispatch(
       fetchProjects({
-        // Don't filter by office on server-side - we'll filter client-side to support country-based filtering
+        // Filter by country on the server so pagination doesn't hide matching projects.
+        country: activeOffice !== "All" ? activeOffice : undefined,
         page: page + 1,
         pageSize: rowsPerPage
       })
     );
-  }, [dispatch, page, rowsPerPage]);
+  }, [dispatch, activeOffice, page, rowsPerPage]);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -276,21 +275,13 @@ const ProjectList = () => {
   const sourceProjects = items;
   const products = productsState.items.length ? productsState.items : demoProducts;
 
-  // Map office cities to countries
-  const getCountryForOffice = useMemo(() => {
-    const map = new Map<string, string>();
-    globalOffices.forEach((office) => {
-      if (office.city && office.country) {
-        map.set(office.city, office.country);
-      }
-    });
-    return (officeCity: string) => map.get(officeCity) || officeCity;
-  }, [globalOffices]);
+  const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
 
   const projectAccessors = useMemo(
     () => ({
       jobNumber: (project: Project) => normalize(project.jobNumber),
       customerName: (project: Project) => normalize(project.customerName),
+      siteName: (project: Project) => normalize(project.siteName),
       customerId: (project: Project) => normalize(project.customerId),
       products: (project: Project) =>
         normalize(
@@ -316,14 +307,14 @@ const ProjectList = () => {
     const officeFiltered = sourceProjects.filter(
       (project) => {
         if (activeOffice === "All") return true;
-        const projectCountry = getCountryForOffice(project.office);
+        const projectCountry = countryForOffice(project.office);
         return projectCountry === activeOffice || project.office === activeOffice;
       }
     );
 
     const filtered = applyAutoFilter(officeFiltered, autoFilters, projectAccessors);
     return applyAutoSort(filtered, autoSort, projectAccessors);
-  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, getCountryForOffice]);
+  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice]);
 
   const numberedProjects = useMemo(
     () => filteredProjects.map((project, index) => ({ ...project, seq: index + 1 })),
@@ -341,6 +332,7 @@ const ProjectList = () => {
     () => ({
       jobNumber: Array.from(new Set(sourceProjects.map((project) => projectAccessors.jobNumber(project)))).sort(),
       customerName: Array.from(new Set(sourceProjects.map((project) => projectAccessors.customerName(project)))).sort(),
+      siteName: Array.from(new Set(sourceProjects.map((project) => projectAccessors.siteName(project)))).sort(),
       customerId: Array.from(new Set(sourceProjects.map((project) => projectAccessors.customerId(project)))).sort(),
       products: Array.from(new Set(sourceProjects.map((project) => projectAccessors.products(project)))).sort(),
       office: Array.from(new Set(sourceProjects.map((project) => projectAccessors.office(project)))).sort(),
@@ -376,7 +368,8 @@ const ProjectList = () => {
       .map((id) => {
         const builtIn = builtInColumnConfigs.find((col) => col.id === id);
         if (builtIn) {
-          return { ...builtIn, isBuiltIn: true };
+          const overrideName = projectsTableConfig.config.baseFieldNames?.[builtIn.id];
+          return { ...builtIn, name: overrideName || builtIn.name, isBuiltIn: true };
         }
         const dynamic = projectDynamicColumns.find((field) => field.id === id);
         if (dynamic) {
@@ -564,9 +557,17 @@ const ProjectList = () => {
                     <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
                       <EditOutlined fontSize="small" />
                     </IconButton>
-                    <IconButton size="small" onClick={() => setDeleteTarget(project)}>
-                      <DeleteOutline fontSize="small" />
-                    </IconButton>
+                    {canDeleteProjects && (
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setDeleteError(null);
+                          setDeleteTarget(project);
+                        }}
+                      >
+                        <DeleteOutline fontSize="small" />
+                      </IconButton>
+                    )}
                   </Stack>
                 </TableCell>
             </TableRow>
@@ -606,22 +607,48 @@ const ProjectList = () => {
       {deleteTarget && (
         <Box className="glass-card" sx={{ padding: 2, marginTop: 2 }}>
           <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
-            <Typography variant="body2">
-              Delete project {deleteTarget.jobNumber}? This cannot be undone.
-            </Typography>
+            <Box>
+              <Typography variant="body2">
+                Delete project {deleteTarget.jobNumber}? This cannot be undone.
+              </Typography>
+              {deleteError && (
+                <Typography variant="caption" color="error">
+                  {deleteError}
+                </Typography>
+              )}
+            </Box>
             <Stack direction="row" spacing={1}>
-              <Button variant="outlined" onClick={() => setDeleteTarget(null)}>
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  if (deleteSaving) return;
+                  setDeleteTarget(null);
+                  setDeleteError(null);
+                }}
+                disabled={deleteSaving}
+              >
                 Cancel
               </Button>
               <Button
                 variant="contained"
                 color="error"
-                onClick={() => {
-                  dispatch(deleteProject(deleteTarget.id));
-                  setDeleteTarget(null);
+                disabled={deleteSaving}
+                onClick={async () => {
+                  try {
+                    setDeleteSaving(true);
+                    setDeleteError(null);
+                    await dispatch(deleteProject(deleteTarget.id)).unwrap();
+                    setDeleteTarget(null);
+                  } catch (e) {
+                    // Most common cause is 403 when user lacks role, or API down.
+                    console.error("Delete project failed:", e);
+                    setDeleteError("Unable to delete project. Check your permissions and API availability.");
+                  } finally {
+                    setDeleteSaving(false);
+                  }
                 }}
               >
-                Delete
+                {deleteSaving ? "Deleting..." : "Delete"}
               </Button>
             </Stack>
           </Stack>
@@ -692,6 +719,7 @@ const ProjectList = () => {
         open={tableConfigOpen}
         onClose={() => setTableConfigOpen(false)}
         title="Table configuration: projects"
+        deferFieldChanges
         availableFields={availableFieldsForProjects.map((field) => ({
           id: field.id,
           name: field.name,
@@ -705,6 +733,7 @@ const ProjectList = () => {
         builtInColumns={[
           { id: "jobNumber", name: "Job Number", type: "text", required: true },
           { id: "customerName", name: "Customer", type: "text", required: false },
+          { id: "siteName", name: "Site", type: "text", required: false },
           { id: "customerId", name: "Customer ID", type: "text", required: true },
           { id: "products", name: "Products", type: "multi-select", required: true },
           { id: "office", name: "Office", type: "text", required: true },
@@ -727,7 +756,7 @@ const ProjectList = () => {
           await projectsDynamic.reload();
         }}
         onCreateField={async (name, type, linkToFieldId, actionType) => {
-          await fieldService.createDefinition({
+          const created = await fieldService.createDefinition({
             id: "",
             name,
             fieldType: type,
@@ -739,6 +768,7 @@ const ProjectList = () => {
           });
           await allFieldDefinitions.reload();
           await projectsDynamic.reload();
+          return created;
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
           const existing = projectsDynamic.definitions.find((item) => item.id === fieldId);
@@ -750,10 +780,18 @@ const ProjectList = () => {
             linkToFieldId: linkToFieldId || null,
             actionType: actionType || null
           });
+          await allFieldDefinitions.reload();
           await projectsDynamic.reload();
         }}
         onDeleteField={async (fieldId) => {
-          await fieldService.deleteDefinition(fieldId);
+          // In Projects table config, "remove" means unassign from Projects (do not delete globally).
+          const existing =
+            allFieldDefinitions.definitions.find((item) => item.id === fieldId) ??
+            projectsDynamic.definitions.find((item) => item.id === fieldId);
+          if (!existing) return;
+          const tables = (existing.tables || []).filter((t) => t !== "projects");
+          await fieldService.updateDefinition(fieldId, { ...existing, tables });
+          await allFieldDefinitions.reload();
           await projectsDynamic.reload();
         }}
       />

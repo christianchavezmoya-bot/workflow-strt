@@ -62,6 +62,8 @@ public class SiteEntity
     public string? City { get; set; }
     [MaxLength(40)]
     public string? State { get; set; }
+    [MaxLength(100)]
+    public string? Country { get; set; }
     [MaxLength(20)]
     public string? ZipCode { get; set; }
     [MaxLength(200)]
@@ -110,6 +112,8 @@ public class ProjectEntity
     public string CustomerName { get; set; } = string.Empty;
     [MaxLength(80)]
     public string CustomerId { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string? SiteId { get; set; }
     [MaxLength(80)]
     public string JobNumber { get; set; } = string.Empty;
     [MaxLength(800)]

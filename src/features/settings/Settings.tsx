@@ -105,6 +105,9 @@ const Settings = () => {
   const [fieldType, setFieldType] = useState("text");
   const [editField, setEditField] = useState<null | { id: string; name: string; type: string }>(null);
   const [fieldDefinitions, setFieldDefinitions] = useState<FieldDefinition[]>([]);
+  const [assignedFieldsDraft, setAssignedFieldsDraft] = useState<Record<string, string[]>>({});
+  const [assignedFieldsDirty, setAssignedFieldsDirty] = useState(false);
+  const [assignedFieldsSaving, setAssignedFieldsSaving] = useState(false);
   const [lookupFieldId, setLookupFieldId] = useState<string | null>(null);
   const [fieldSearch, setFieldSearch] = useState("");
   const [seedLoading, setSeedLoading] = useState(false);
@@ -307,17 +310,91 @@ const Settings = () => {
     try {
       const data = await fieldService.getDefinitions();
       setFieldDefinitions(data);
+      window.dispatchEvent(new Event("field-definitions-changed"));
     } catch {
       setFieldDefinitions([]);
     }
   };
+
+  const saveAssignedFields = async () => {
+    setAssignedFieldsSaving(true);
+    try {
+      const updates = fieldDefinitions
+        .map((field) => {
+          const draft = assignedFieldsDraft[field.id];
+          if (!draft) return null;
+          const nextTables = draft.map((v) => String(v || "").trim()).filter(Boolean);
+          const prevTables = (field.tables ?? []).map((v) => String(v || "").trim()).filter(Boolean);
+          const changed = nextTables.join("|") !== prevTables.join("|");
+          if (!changed) return null;
+          return { field, nextTables };
+        })
+        .filter((x): x is { field: FieldDefinition; nextTables: string[] } => x !== null);
+
+      if (updates.length === 0) {
+        setAssignedFieldsDirty(false);
+        return;
+      }
+
+      await Promise.all(
+        updates.map(({ field, nextTables }) =>
+          fieldService.updateDefinition(field.id, {
+            ...field,
+            tables: nextTables
+          })
+        )
+      );
+
+      setAssignedFieldsDirty(false);
+      await reloadFieldDefinitions();
+    } catch (error) {
+      console.error("Failed to save assigned fields:", error);
+      alert("Failed to save assigned fields. Check console for details.");
+    } finally {
+      setAssignedFieldsSaving(false);
+    }
+  };
+
+  const discardAssignedFields = () => {
+    setAssignedFieldsDirty(false);
+    setAssignedFieldsDraft(() => {
+      const next: Record<string, string[]> = {};
+      fieldDefinitions.forEach((field) => {
+        const tables = field.tables ?? [];
+        next[field.id] = Array.from({ length: tableColumnSlots }).map((_, i) => tables[i] || "");
+      });
+      return next;
+    });
+  };
+
+  // Draft assigned-fields state: edit multiple rows then save once.
+  useEffect(() => {
+    setAssignedFieldsDraft((prev) => {
+      const next: Record<string, string[]> = {};
+
+      fieldDefinitions.forEach((field) => {
+        const existing = prev[field.id];
+        if (existing && assignedFieldsDirty) {
+          next[field.id] = existing;
+          return;
+        }
+
+        const tables = field.tables ?? [];
+        next[field.id] = Array.from({ length: tableColumnSlots }).map((_, i) => tables[i] || "");
+      });
+
+      return next;
+    });
+  }, [fieldDefinitions, tableColumnSlots, assignedFieldsDirty]);
 
   const refreshTables = async () => {
     setTablesLoading(true);
     setTablesSuccess(false);
     try {
       const tables = await fieldService.getAvailableTables();
-      setTableOptions(tables);
+      setTableOptions(
+        [...tables].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
+      );
       setTablesSuccess(true);
       setTimeout(() => setTablesSuccess(false), 3000);
     } catch (error) {
@@ -964,6 +1041,7 @@ const Settings = () => {
                             if (prev.some((item) => item.id === created.id)) return prev;
                             return [...prev, created];
                           });
+                          window.dispatchEvent(new Event("field-definitions-changed"));
                           // Trigger notification
                           addNotification(trimmed);
                         })
@@ -994,7 +1072,7 @@ const Settings = () => {
                       </IconButton>
                     </span>
                   </Tooltip>
-                  <Tooltip title="Download">
+                 <Tooltip title="Download">
                     <span>
                       <IconButton
                         size="small"
@@ -1036,6 +1114,22 @@ const Settings = () => {
                     }}
                   >
                     {seedLoading ? "Loading..." : "Seed/Refresh Default Fields"}
+                  </Button>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={!assignedFieldsDirty || assignedFieldsSaving}
+                    onClick={saveAssignedFields}
+                  >
+                    {assignedFieldsSaving ? "Saving..." : "Save assigned fields"}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={!assignedFieldsDirty || assignedFieldsSaving}
+                    onClick={discardAssignedFields}
+                  >
+                    Discard changes
                   </Button>
                   <Button
                     variant="outlined"
@@ -1127,7 +1221,9 @@ const Settings = () => {
                       })
                       .map((field) => {
                       const tables = field.tables ?? [];
-                      const slots = Array.from({ length: tableColumnSlots }).map((_, index) => tables[index] || "");
+                      const slots =
+                        assignedFieldsDraft[field.id] ??
+                        Array.from({ length: tableColumnSlots }).map((_, index) => tables[index] || "");
                       return (
                         <TableRow key={field.id}>
                           <TableCell>
@@ -1156,27 +1252,25 @@ const Settings = () => {
                                   displayEmpty
                                   onChange={(event) => {
                                     const nextValue = event.target.value;
-                                    const nextTables = [...slots];
-                                    const previousValue = nextTables[index];
-                                    nextTables[index] = nextValue;
+                                    const nextTables = [...(assignedFieldsDraft[field.id] ?? slots)];
+                                    const previousValue = nextTables[index] ?? "";
+                                    nextTables[index] = String(nextValue);
 
                                     // Trigger notification if assigning to a new table (not removing or changing)
                                     if (nextValue && nextValue !== previousValue) {
                                       addNotification(field.name);
                                     }
 
-                                    fieldService
-                                      .updateDefinition(field.id, {
-                                        ...field,
-                                        tables: nextTables.filter(Boolean)
-                                      })
-                                      .then(() => reloadFieldDefinitions());
+                                    setAssignedFieldsDraft((prev) => ({ ...prev, [field.id]: nextTables }));
+                                    setAssignedFieldsDirty(true);
                                   }}
                                 >
                                   <MenuItem value="">
                                     <em>None</em>
                                   </MenuItem>
-                                  {tableOptions.map((option) => (
+                                  {[...tableOptions]
+                                    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
+                                    .map((option) => (
                                     <MenuItem key={option} value={option}>
                                       {option}
                                     </MenuItem>

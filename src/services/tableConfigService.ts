@@ -5,6 +5,7 @@ export interface GlobalTableConfig {
   order: string[];
   hidden: string[];
   baseFieldNames: Record<string, string>;
+  baseFieldMeta: Record<string, { fieldType?: string | null; required?: boolean; options?: string[] | null }>;
 }
 
 export const tableConfigService = {

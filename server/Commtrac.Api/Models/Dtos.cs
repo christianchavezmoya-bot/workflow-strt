@@ -114,6 +114,7 @@ public record SiteDto(
     string? Address,
     string? City,
     string? State,
+    string? Country,
     string? ZipCode,
     string? ContactName,
     string? ContactPhone,
@@ -123,11 +124,12 @@ public record SiteDto(
 );
 
 public record CreateSiteRequest(
-    string CustomerId,
+    string? CustomerId,
     string Name,
     string? Address,
     string? City,
     string? State,
+    string? Country,
     string? ZipCode,
     string? ContactName,
     string? ContactPhone,
@@ -136,10 +138,12 @@ public record CreateSiteRequest(
 );
 
 public record UpdateSiteRequest(
+    string? CustomerId,
     string? Name,
     string? Address,
     string? City,
     string? State,
+    string? Country,
     string? ZipCode,
     string? ContactName,
     string? ContactPhone,
@@ -193,6 +197,8 @@ public record ProjectDto(
     string Id,
     string CustomerName,
     string CustomerId,
+    string? SiteId,
+    string? SiteName,
     string JobNumber,
     string Description,
     string StartDate,
@@ -321,7 +327,14 @@ public record GlobalTableConfigDto(
     string TableName,
     List<string> Order,
     List<string> Hidden,
-    Dictionary<string, string> BaseFieldNames
+    Dictionary<string, string> BaseFieldNames,
+    Dictionary<string, BaseFieldMetaDto> BaseFieldMeta
+);
+
+public record BaseFieldMetaDto(
+    string? FieldType,
+    bool Required,
+    List<string>? Options
 );
 
 public record InstallationTabDto(

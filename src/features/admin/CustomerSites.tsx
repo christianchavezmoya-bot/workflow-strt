@@ -34,6 +34,7 @@ const CustomerSites = () => {
   const [editSiteAddress, setEditSiteAddress] = useState("");
   const [editSiteCity, setEditSiteCity] = useState("");
   const [editSiteState, setEditSiteState] = useState("");
+  const [editSiteCountry, setEditSiteCountry] = useState("");
   const [editSiteContactName, setEditSiteContactName] = useState("");
   const [editSiteContactPhone, setEditSiteContactPhone] = useState("");
 
@@ -88,6 +89,7 @@ const CustomerSites = () => {
       address: "",
       city: "",
       state: "",
+      country: "",
       contactName: "",
       contactPhone: "",
       createdAt: new Date().toISOString(),
@@ -99,6 +101,7 @@ const CustomerSites = () => {
     setEditSiteAddress("");
     setEditSiteCity("");
     setEditSiteState("");
+    setEditSiteCountry("");
     setEditSiteContactName("");
     setEditSiteContactPhone("");
   };
@@ -115,6 +118,7 @@ const CustomerSites = () => {
           address: editSiteAddress,
           city: editSiteCity,
           state: editSiteState,
+          country: editSiteCountry,
           zipCode: null,
           contactName: editSiteContactName,
           contactPhone: editSiteContactPhone,
@@ -129,10 +133,12 @@ const CustomerSites = () => {
       } else {
         // Update existing site
         const response = await api.put(`/sites/${siteId}`, {
+          customerId: String(customerId),
           name: editSiteName,
           address: editSiteAddress,
           city: editSiteCity,
           state: editSiteState,
+          country: editSiteCountry,
           zipCode: null,
           contactName: editSiteContactName,
           contactPhone: editSiteContactPhone,
@@ -178,6 +184,7 @@ const CustomerSites = () => {
     setEditSiteAddress(site.address || "");
     setEditSiteCity(site.city || "");
     setEditSiteState(site.state || "");
+    setEditSiteCountry(site.country || "");
     setEditSiteContactName(site.contactName || "");
     setEditSiteContactPhone(site.contactPhone || "");
   };
@@ -187,6 +194,7 @@ const CustomerSites = () => {
     setEditSiteAddress("");
     setEditSiteCity("");
     setEditSiteState("");
+    setEditSiteCountry("");
     setEditSiteContactName("");
     setEditSiteContactPhone("");
   };
@@ -453,9 +461,7 @@ const CustomerSites = () => {
                         color="textSecondary"
                         sx={{ display: "block", mb: 1 }}
                       >
-                        {site.city && site.state
-                          ? `${site.city}, ${site.state}`
-                          : site.city || site.state || "No location"}
+                        {[site.city, site.state, site.country].filter(Boolean).join(", ") || "No location"}
                       </Typography>
                       {site.contactName && (
                         <Typography variant="caption" color="textSecondary" sx={{ display: "block" }}>
@@ -565,6 +571,19 @@ const CustomerSites = () => {
                           value={editSiteState}
                           onChange={(e) => setEditSiteState(e.target.value)}
                           placeholder="State"
+                          fullWidth
+                          sx={{
+                            "& .MuiInputBase-root": {
+                              height: 26,
+                              fontSize: "0.75rem",
+                            },
+                          }}
+                        />
+                        <TextField
+                          size="small"
+                          value={editSiteCountry}
+                          onChange={(e) => setEditSiteCountry(e.target.value)}
+                          placeholder="Country"
                           fullWidth
                           sx={{
                             "& .MuiInputBase-root": {
