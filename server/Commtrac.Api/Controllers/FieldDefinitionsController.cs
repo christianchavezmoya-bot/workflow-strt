@@ -347,6 +347,9 @@ public class FieldDefinitionsController : ControllerBase
             new FieldDefinitionEntity { Id = "field-site-contact-email", Name = "Contact Email", FieldType = "email", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 42, IsActive = true },
             new FieldDefinitionEntity { Id = "field-site-notes", Name = "Notes", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 43, IsActive = true },
             new FieldDefinitionEntity { Id = "field-customer-id", Name = "Customer ID", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "customers" }, JsonOptions), SortOrder = 44, IsActive = true },
-            new FieldDefinitionEntity { Id = "field-customer-industry", Name = "Industry", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "customers" }, JsonOptions), SortOrder = 45, IsActive = true }
+            new FieldDefinitionEntity { Id = "field-customer-industry", Name = "Industry", FieldType = "text", TablesJson = JsonSerializer.Serialize(new[] { "customers" }, JsonOptions), SortOrder = 45, IsActive = true },
+            // Primary key targets for reference/lookup fields (enables linking to Customers/Sites in the UI).
+            new FieldDefinitionEntity { Id = "field-customer-key", Name = "Customer Key", FieldType = "primary key", TablesJson = JsonSerializer.Serialize(new[] { "customers" }, JsonOptions), SortOrder = 46, IsActive = true },
+            new FieldDefinitionEntity { Id = "field-site-key", Name = "Site Key", FieldType = "primary key", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 47, IsActive = true }
         };
 }

@@ -18,6 +18,7 @@ public static class DbInitializer
         EnsureAuditLogTable(db);
         EnsureSessionsTable(db);
         EnsurePasswordChangedAtColumn(db);
+        EnsureLinkableKeyFieldDefinitions(db);
 
         if (!db.Users.Any())
         {
@@ -147,6 +148,41 @@ public static class DbInitializer
         }
 
         db.SaveChanges();
+    }
+
+    // TableConfigDialog only allows linking to fields that are typed as "primary key"/"composite key"/"lookup field".
+    // Seed lightweight PK definitions for Customers/Sites so "Link to" can target those tables.
+    private static void EnsureLinkableKeyFieldDefinitions(AppDbContext db)
+    {
+        if (!db.FieldDefinitions.Any(f => f.Id == "field-customer-key"))
+        {
+            db.FieldDefinitions.Add(new FieldDefinitionEntity
+            {
+                Id = "field-customer-key",
+                Name = "Customer Key",
+                FieldType = "primary key",
+                LinkToFieldId = null,
+                ActionType = null,
+                TablesJson = JsonSerializer.Serialize(new[] { "customers" }),
+                SortOrder = 46,
+                IsActive = true
+            });
+        }
+
+        if (!db.FieldDefinitions.Any(f => f.Id == "field-site-key"))
+        {
+            db.FieldDefinitions.Add(new FieldDefinitionEntity
+            {
+                Id = "field-site-key",
+                Name = "Site Key",
+                FieldType = "primary key",
+                LinkToFieldId = null,
+                ActionType = null,
+                TablesJson = JsonSerializer.Serialize(new[] { "sites" }),
+                SortOrder = 47,
+                IsActive = true
+            });
+        }
     }
 
     /// <summary>

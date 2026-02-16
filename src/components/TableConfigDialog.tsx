@@ -134,6 +134,12 @@ const TableConfigDialog = ({
     if (type === "lookup field") return ["open linked table", "create linked table"];
     return [];
   };
+  const normalizeAction = (type: string, actionType?: string | null) => {
+    const action = (actionType || "").trim();
+    if (!action) return "";
+    const options = getActionOptions(type);
+    return options.includes(action) ? action : "";
+  };
   const fieldMetaById = new Map(
     [
       ...effectiveAvailableFields,
@@ -555,7 +561,16 @@ const TableConfigDialog = ({
                 InputLabelProps={{ sx: fieldLabelStyle }}
               />
               <FormControl size="small" fullWidth>
-                <Select value={newFieldType} onChange={(event) => setNewFieldType(event.target.value)}>
+                <Select
+                  value={newFieldType}
+                  onChange={(event) => {
+                    const nextType = String(event.target.value || "text");
+                    setNewFieldType(nextType);
+                    if (!linkableTypes.has(nextType)) setNewFieldLinkTo("");
+                    const allowed = getActionOptions(nextType);
+                    if (allowed.length === 0 || !allowed.includes(newFieldAction)) setNewFieldAction("");
+                  }}
+                >
                   {fieldTypes.map((type) => (
                     <MenuItem key={type} value={type}>
                       {type}
@@ -581,7 +596,7 @@ const TableConfigDialog = ({
               </FormControl>
               <FormControl size="small" fullWidth disabled={getActionOptions(newFieldType).length === 0}>
                 <Select
-                  value={newFieldAction}
+                  value={normalizeAction(newFieldType, newFieldAction)}
                   displayEmpty
                   onChange={(event) => setNewFieldAction(event.target.value)}
                 >
@@ -606,7 +621,7 @@ const TableConfigDialog = ({
                       trimmed,
                       newFieldType,
                       linkableTypes.has(newFieldType) ? (newFieldLinkTo || null) : null,
-                      getActionOptions(newFieldType).length ? (newFieldAction || null) : null
+                      getActionOptions(newFieldType).length ? (normalizeAction(newFieldType, newFieldAction) || null) : null
                     );
                   } else {
                     if (typeof onCreateField !== "function") return;
@@ -614,7 +629,7 @@ const TableConfigDialog = ({
                       trimmed,
                       newFieldType,
                       linkableTypes.has(newFieldType) ? (newFieldLinkTo || null) : null,
-                      getActionOptions(newFieldType).length ? (newFieldAction || null) : null
+                      getActionOptions(newFieldType).length ? (normalizeAction(newFieldType, newFieldAction) || null) : null
                     );
                   }
                   setNewFieldName("");
@@ -786,7 +801,7 @@ const TableConfigDialog = ({
                     create.name,
                     create.type,
                     linkableTypes.has(create.type) ? (create.linkToFieldId || null) : null,
-                    getActionOptions(create.type).length ? (create.actionType || null) : null
+                    getActionOptions(create.type).length ? (normalizeAction(create.type, create.actionType) || null) : null
                   );
                   const createdId = (created as FieldDefinition | undefined)?.id;
                   if (createdId) tempIdToCreatedId[tempId] = createdId;
@@ -808,7 +823,7 @@ const TableConfigDialog = ({
                     edit.name,
                     edit.type,
                     linkableTypes.has(edit.type) ? (edit.linkToFieldId || null) : null,
-                    getActionOptions(edit.type).length ? (edit.actionType || null) : null
+                    getActionOptions(edit.type).length ? (normalizeAction(edit.type, edit.actionType) || null) : null
                   );
                 }
 
@@ -942,9 +957,18 @@ const TableConfigDialog = ({
             <FormControl fullWidth>
               <Select
                 value={editField?.type || "text"}
-                onChange={(event) =>
-                  setEditField((prev) => (prev ? { ...prev, type: event.target.value } : prev))
-                }
+                onChange={(event) => {
+                  const nextType = String(event.target.value || "text");
+                  setEditField((prev) => {
+                    if (!prev) return prev;
+                    return {
+                      ...prev,
+                      type: nextType,
+                      linkToFieldId: linkableTypes.has(nextType) ? (prev.linkToFieldId ?? null) : null,
+                      actionType: normalizeAction(nextType, prev.actionType || "")
+                    };
+                  });
+                }}
               >
                 {fieldTypes.map((type) => (
                   <MenuItem key={type} value={type}>
@@ -977,7 +1001,7 @@ const TableConfigDialog = ({
             >
               <Select
                 displayEmpty
-                value={editField?.actionType || ""}
+                value={normalizeAction(editField?.type || "text", editField?.actionType || "")}
                 onChange={(event) =>
                   setEditField((prev) => (prev ? { ...prev, actionType: event.target.value } : prev))
                 }
@@ -1015,7 +1039,7 @@ const TableConfigDialog = ({
                     trimmed,
                     editField.type,
                     linkableTypes.has(editField.type) ? (editField.linkToFieldId || null) : null,
-                    getActionOptions(editField.type).length ? (editField.actionType || null) : null
+                    getActionOptions(editField.type).length ? (normalizeAction(editField.type, editField.actionType) || null) : null
                   );
                 } else {
                   const commitReplace = async () => {
@@ -1032,7 +1056,7 @@ const TableConfigDialog = ({
                           trimmed,
                           editField.type,
                           linkableTypes.has(editField.type) ? (editField.linkToFieldId || null) : null,
-                          getActionOptions(editField.type).length ? (editField.actionType || null) : null
+                          getActionOptions(editField.type).length ? (normalizeAction(editField.type, editField.actionType) || null) : null
                         );
                       }
                     } catch (e) {
@@ -1054,7 +1078,7 @@ const TableConfigDialog = ({
                     trimmed,
                     editField.type,
                     linkableTypes.has(editField.type) ? (editField.linkToFieldId || null) : null,
-                    getActionOptions(editField.type).length ? (editField.actionType || null) : null
+                    getActionOptions(editField.type).length ? (normalizeAction(editField.type, editField.actionType) || null) : null
                   );
                 }
                 setEditField(null);
@@ -1082,7 +1106,7 @@ const TableConfigDialog = ({
                   editField.name,
                   editField.type,
                   linkableTypes.has(editField.type) ? (editField.linkToFieldId || null) : null,
-                  getActionOptions(editField.type).length ? (editField.actionType || null) : null
+                  getActionOptions(editField.type).length ? (normalizeAction(editField.type, editField.actionType) || null) : null
                 );
               } else if (typeof onEditField === "function") {
                 onEditField(
@@ -1090,7 +1114,7 @@ const TableConfigDialog = ({
                   editField.name,
                   editField.type,
                   linkableTypes.has(editField.type) ? (editField.linkToFieldId || null) : null,
-                  getActionOptions(editField.type).length ? (editField.actionType || null) : null
+                  getActionOptions(editField.type).length ? (normalizeAction(editField.type, editField.actionType) || null) : null
                 );
               }
               setEditField(null);

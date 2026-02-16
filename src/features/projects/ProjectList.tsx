@@ -2,7 +2,6 @@
 import {
   Box,
   Button,
-  Chip,
   Checkbox,
   IconButton,
   ListItemText,
@@ -452,13 +451,19 @@ const ProjectList = () => {
     }
 
     if (actions.length === 0) {
-      return <Chip label="No actions" size="small" variant="outlined" />;
+      return null;
     }
 
     return (
-      <Stack direction="row" spacing={1} flexWrap="wrap">
+      <Stack direction="row" spacing={1} flexWrap="nowrap">
         {actions.map((label) => (
-          <Button key={label} size="small" variant="outlined" onClick={() => handleAction(project, label)}>
+          <Button
+            key={label}
+            size="small"
+            variant="outlined"
+            color="primary"
+            onClick={() => handleAction(project, label)}
+          >
             {label}
           </Button>
         ))}
@@ -552,7 +557,7 @@ const ProjectList = () => {
                   </TableCell>
                 ))}
                 <TableCell sx={{ padding: '8px 12px' }}>
-                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
                     {renderActions(project)}
                     <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
                       <EditOutlined fontSize="small" />
