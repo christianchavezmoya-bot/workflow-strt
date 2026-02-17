@@ -32,6 +32,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
+import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import { useAuth } from "../../hooks/useAuth";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
@@ -236,6 +237,7 @@ const InstallationList = () => {
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<Installation | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Installation | null>(null);
+  const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
   const [newDocument, setNewDocument] = useState({
     link: "",
     fileName: "",
@@ -2842,31 +2844,27 @@ const InstallationList = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete installation</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            Are you sure you want to delete this installation? This action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setDeleteTarget(null)}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={() => {
-              if (!deleteTarget) return;
-              dispatch(deleteInstallation(deleteTarget.id));
-              setLocalInstallations((prev) => prev.filter((item) => item.id !== deleteTarget.id));
-              setDeleteTarget(null);
-            }}
-          >
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <DeleteConfirmDialog
+        open={!!deleteTarget}
+        entityType="installation"
+        entityLabel={deleteTarget?.installationId || deleteTarget?.installationNumber || deleteTarget?.id}
+        loading={!!deleteTarget && deleteSavingId === deleteTarget.id}
+        onClose={() => {
+          if (deleteSavingId) return;
+          setDeleteTarget(null);
+        }}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          try {
+            setDeleteSavingId(deleteTarget.id);
+            await dispatch(deleteInstallation(deleteTarget.id)).unwrap();
+            setLocalInstallations((prev) => prev.filter((item) => item.id !== deleteTarget.id));
+            setDeleteTarget(null);
+          } finally {
+            setDeleteSavingId(null);
+          }
+        }}
+      />
 
       <Menu
         anchorEl={installationSettingsMenu}

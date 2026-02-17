@@ -3,6 +3,10 @@
   Box,
   Button,
   Checkbox,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   FormControlLabel,
   FormHelperText,
@@ -39,6 +43,7 @@ import { officesService } from "../../services/officesService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchCustomers } from "../../store/customersSlice";
 import { fetchProducts } from "../../store/productsSlice";
+import { fetchUsers } from "../../store/usersSlice";
 import { createProject, updateProject } from "../../store/projectSlice";
 import { ApprovalDecision, Office, Project, ProjectStatus } from "../../types/project";
 import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
@@ -86,11 +91,12 @@ type FormValues = z.infer<typeof schema>;
 const ProjectForm = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { activeOffice } = useActiveOffice();
+  const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const { items } = useAppSelector((state) => state.projects);
   const customersState = useAppSelector((state) => state.customers);
   const productsState = useAppSelector((state) => state.products);
+  const usersState = useAppSelector((state) => state.users);
   const projectsDynamic = useDynamicFields("projects");
   const allFieldDefinitions = useFieldDefinitions();
   const projectsTableConfig = useTableConfig(
@@ -164,6 +170,7 @@ const ProjectForm = () => {
   useEffect(() => {
     dispatch(fetchCustomers());
     dispatch(fetchProducts());
+    dispatch(fetchUsers());
   }, [dispatch]);
 
   useEffect(() => {
@@ -244,11 +251,13 @@ const ProjectForm = () => {
   const customerId = watch("customerId");
   const siteId = watch("siteId");
   const office = watch("office");
+  const projectManager = watch("projectManager");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [allSites, setAllSites] = useState<Site[]>([]);
   const [sitesLoading, setSitesLoading] = useState(false);
   const [sitesLoadError, setSitesLoadError] = useState<string | null>(null);
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
+  const [globalOfficePrompt, setGlobalOfficePrompt] = useState<{ country: string; managerName: string } | null>(null);
 
   useEffect(() => {
     setSitesLoading(true);
@@ -331,6 +340,61 @@ const ProjectForm = () => {
       setValue("region", selectedOffice.country, { shouldValidate: true });
     }
   }, [office, globalOffices, setValue]);
+
+  useEffect(() => {
+    const managerName = String(projectManager || "").trim();
+    if (!managerName || globalOffices.length === 0 || usersState.items.length === 0) return;
+
+    const selectedManager = usersState.items.find(
+      (user) => String(user.fullName || "").trim().toLowerCase() === managerName.toLowerCase()
+    );
+    if (!selectedManager) return;
+
+    const managerOfficeRaw = String(selectedManager.office || "").trim();
+    if (!managerOfficeRaw || managerOfficeRaw.toLowerCase() === "all") return;
+
+    const managerCountry = countryForOffice(managerOfficeRaw);
+    if (!managerCountry) return;
+
+    let managerCity = "";
+    const officeByCity = globalOffices.find(
+      (o) => (o.city || "").trim().toLowerCase() === managerOfficeRaw.toLowerCase()
+    );
+    if (officeByCity?.city) {
+      managerCity = officeByCity.city;
+    } else {
+      const possibleCity = managerOfficeRaw.split(",")[0]?.trim();
+      const officeByPrefix = globalOffices.find(
+        (o) => (o.city || "").trim().toLowerCase() === String(possibleCity || "").toLowerCase()
+      );
+      if (officeByPrefix?.city) {
+        managerCity = officeByPrefix.city;
+      } else {
+        managerCity =
+          globalOffices.find(
+            (o) => (o.country || "").trim().toLowerCase() === managerCountry.toLowerCase() && !!o.city
+          )?.city || "";
+      }
+    }
+
+    if (managerCity) {
+      setValue("office", managerCity, { shouldValidate: true });
+    }
+    setValue("region", managerCountry, { shouldValidate: true });
+
+    if (
+      activeOffice !== "All" &&
+      managerCountry &&
+      activeOffice.toLowerCase() !== managerCountry.toLowerCase()
+    ) {
+      setGlobalOfficePrompt((prev) => {
+        if (prev && prev.country.toLowerCase() === managerCountry.toLowerCase()) return prev;
+        return { country: managerCountry, managerName };
+      });
+    } else {
+      setGlobalOfficePrompt(null);
+    }
+  }, [projectManager, usersState.items, globalOffices, countryForOffice, setValue, activeOffice]);
 
   const pushUiLog = (message: string, error?: string) => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: Array<{ id: string; time: string; method?: string; url?: string; status?: number; error?: string }> };
@@ -639,8 +703,22 @@ const ProjectForm = () => {
   );
   const hiddenSet = useMemo(() => new Set(projectsTableConfig.config.hidden || []), [projectsTableConfig.config.hidden]);
   const baseFieldMeta = projectsTableConfig.config.baseFieldMeta || {};
+  const projectManagerMeta = baseFieldMeta["projectManager"] || {};
   const isRequiredField = (fieldId: string) => !!baseFieldMeta[fieldId]?.required && !hiddenSet.has(fieldId);
   const labelWithRequired = (fieldId: string, label: string) => (isRequiredField(fieldId) ? `${label} *` : label);
+  const projectManagerOptions = useMemo(() => {
+    const userNames = usersState.items
+      .filter(
+        (user) =>
+          user.isActive &&
+          String(user.role || "").trim().toLowerCase() === "project manager"
+      )
+      .map((user) => user.fullName)
+      .filter((name): name is string => !!name && !!name.trim());
+    return Array.from(new Set(userNames)).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
+    );
+  }, [usersState.items]);
 
   const customerNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -915,13 +993,37 @@ const ProjectForm = () => {
               name="projectManager"
               control={control}
               render={({ field }) => (
-                <TextField
-                  {...field}
-                  label={labelWithRequired("projectManager", labelProjectManager)}
-                  fullWidth
-                  error={!!errors.projectManager}
-                  helperText={errors.projectManager?.message || "Primary owner for delivery and communication."}
-                />
+                (["dropdown", "single select", "reference", "lookup field"] as string[]).includes(
+                  (projectManagerMeta.fieldType || "").toLowerCase()
+                ) ? (
+                  <TextField
+                    {...field}
+                    label={labelWithRequired("projectManager", labelProjectManager)}
+                    fullWidth
+                    select
+                    SelectProps={{ native: true }}
+                    error={!!errors.projectManager}
+                    helperText={
+                      errors.projectManager?.message ||
+                      "Select from active project managers."
+                    }
+                  >
+                    <option value="">Select project manager</option>
+                    {projectManagerOptions.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </TextField>
+                ) : (
+                  <TextField
+                    {...field}
+                    label={labelWithRequired("projectManager", labelProjectManager)}
+                    fullWidth
+                    error={!!errors.projectManager}
+                    helperText={errors.projectManager?.message || "Primary owner for delivery and communication."}
+                  />
+                )
               )}
             />
           </Grid>
@@ -1361,6 +1463,39 @@ const ProjectForm = () => {
           await projectsDynamic.reload();
         }}
       />
+      <Dialog
+        open={!!globalOfficePrompt}
+        onClose={() => setGlobalOfficePrompt(null)}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          className: "glass-card",
+          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)" }
+        }}
+      >
+        <DialogTitle>Switch Global Active Office?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Project manager {globalOfficePrompt?.managerName} is assigned to {globalOfficePrompt?.country}.
+            Change Global Active Office to {globalOfficePrompt?.country}?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => setGlobalOfficePrompt(null)}>
+            Keep Current
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              if (!globalOfficePrompt?.country) return;
+              updateActiveOffice(globalOfficePrompt.country);
+              setGlobalOfficePrompt(null);
+            }}
+          >
+            Change Office
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 };

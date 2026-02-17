@@ -375,7 +375,16 @@ const TableConfigDialog = ({
       for (const [key, value] of Object.entries(prev.baseFieldNames || {})) {
         baseFieldNamesNext[mapKey(key)] = value;
       }
-      const baseFieldMetaNext: Record<string, { fieldType?: string | null; required?: boolean; options?: string[] | null }> = {};
+      const baseFieldMetaNext: Record<
+        string,
+        {
+          fieldType?: string | null;
+          required?: boolean;
+          options?: string[] | null;
+          linkToFieldId?: string | null;
+          actionType?: string | null;
+        }
+      > = {};
       for (const [key, value] of Object.entries(prev.baseFieldMeta || {})) {
         baseFieldMetaNext[mapKey(key)] = value;
       }
@@ -687,8 +696,12 @@ const TableConfigDialog = ({
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {column.type || "text"}
-                    {!isBuiltIn && fieldMetaById.get(column.id)?.actionType
-                      ? ` · ${fieldMetaById.get(column.id)?.actionType}`
+                    {((isBuiltIn
+                      ? draftConfig.baseFieldMeta?.[column.id]?.actionType
+                      : fieldMetaById.get(column.id)?.actionType) || "")
+                      ? ` · ${isBuiltIn
+                          ? draftConfig.baseFieldMeta?.[column.id]?.actionType
+                          : fieldMetaById.get(column.id)?.actionType}`
                       : ""}
                   </Typography>
                 </Box>
@@ -710,8 +723,8 @@ const TableConfigDialog = ({
                         name: column.name,
                         type: (configMeta?.fieldType as string) || column.type || "text",
                         isBuiltIn,
-                        linkToFieldId: meta?.linkToFieldId ?? null,
-                        actionType: meta?.actionType ?? null
+                        linkToFieldId: (configMeta?.linkToFieldId as string | null) ?? meta?.linkToFieldId ?? null,
+                        actionType: (configMeta?.actionType as string | null) ?? meta?.actionType ?? null
                       });
                     }}
                   >
@@ -842,7 +855,16 @@ const TableConfigDialog = ({
                   if (!nextKey.startsWith(tempIdPrefix)) mappedBaseFieldNames[nextKey] = value;
                 }
 
-                const mappedBaseFieldMeta: Record<string, { fieldType?: string | null; required?: boolean; options?: string[] | null }> = {};
+                const mappedBaseFieldMeta: Record<
+                  string,
+                  {
+                    fieldType?: string | null;
+                    required?: boolean;
+                    options?: string[] | null;
+                    linkToFieldId?: string | null;
+                    actionType?: string | null;
+                  }
+                > = {};
                 for (const [key, value] of Object.entries(draftConfig.baseFieldMeta || {})) {
                   const nextKey = mapKey(key);
                   if (!nextKey.startsWith(tempIdPrefix)) mappedBaseFieldMeta[nextKey] = value;
@@ -1092,7 +1114,11 @@ const TableConfigDialog = ({
                   ...(prev.baseFieldMeta || {}),
                   [editField.id]: {
                     ...(prev.baseFieldMeta?.[editField.id] || {}),
-                    fieldType: editField.type
+                    fieldType: editField.type,
+                    linkToFieldId: linkableTypes.has(editField.type) ? (editField.linkToFieldId || null) : null,
+                    actionType: getActionOptions(editField.type).length
+                      ? (normalizeAction(editField.type, editField.actionType) || null)
+                      : null
                   }
                 }
               }));

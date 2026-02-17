@@ -5,7 +5,16 @@ export interface GlobalTableConfig {
   order: string[];
   hidden: string[];
   baseFieldNames: Record<string, string>;
-  baseFieldMeta: Record<string, { fieldType?: string | null; required?: boolean; options?: string[] | null }>;
+  baseFieldMeta: Record<
+    string,
+    {
+      fieldType?: string | null;
+      required?: boolean;
+      options?: string[] | null;
+      linkToFieldId?: string | null;
+      actionType?: string | null;
+    }
+  >;
 }
 
 export const tableConfigService = {

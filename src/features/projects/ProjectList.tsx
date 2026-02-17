@@ -20,6 +20,7 @@ import {
 import { ArrowDropDown, DeleteOutline, EditOutlined } from "@mui/icons-material";
 import { Link } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
+import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import TableConfigDialog from "../../components/TableConfigDialog";
 import { demoProducts } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
@@ -244,8 +245,7 @@ const ProjectList = () => {
     key: ""
   });
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
-  const [deleteSaving, setDeleteSaving] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const canDeleteProjects = user?.role === "Admin" || user?.role === "Project Manager";
@@ -565,8 +565,8 @@ const ProjectList = () => {
                     {canDeleteProjects && (
                       <IconButton
                         size="small"
+                        disabled={deleteSavingId === project.id}
                         onClick={() => {
-                          setDeleteError(null);
                           setDeleteTarget(project);
                         }}
                       >
@@ -608,57 +608,6 @@ const ProjectList = () => {
           rowsPerPageOptions={[25, 50, 100, 500]}
         />
       </Box>
-
-      {deleteTarget && (
-        <Box className="glass-card" sx={{ padding: 2, marginTop: 2 }}>
-          <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
-            <Box>
-              <Typography variant="body2">
-                Delete project {deleteTarget.jobNumber}? This cannot be undone.
-              </Typography>
-              {deleteError && (
-                <Typography variant="caption" color="error">
-                  {deleteError}
-                </Typography>
-              )}
-            </Box>
-            <Stack direction="row" spacing={1}>
-              <Button
-                variant="outlined"
-                onClick={() => {
-                  if (deleteSaving) return;
-                  setDeleteTarget(null);
-                  setDeleteError(null);
-                }}
-                disabled={deleteSaving}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="contained"
-                color="error"
-                disabled={deleteSaving}
-                onClick={async () => {
-                  try {
-                    setDeleteSaving(true);
-                    setDeleteError(null);
-                    await dispatch(deleteProject(deleteTarget.id)).unwrap();
-                    setDeleteTarget(null);
-                  } catch (e) {
-                    // Most common cause is 403 when user lacks role, or API down.
-                    console.error("Delete project failed:", e);
-                    setDeleteError("Unable to delete project. Check your permissions and API availability.");
-                  } finally {
-                    setDeleteSaving(false);
-                  }
-                }}
-              >
-                {deleteSaving ? "Deleting..." : "Delete"}
-              </Button>
-            </Stack>
-          </Stack>
-        </Box>
-      )}
 
       <Menu
         anchorEl={autoMenu.anchorEl}
@@ -719,6 +668,30 @@ const ProjectList = () => {
           Loading projects...
         </Typography>
       )}
+
+      <DeleteConfirmDialog
+        open={!!deleteTarget}
+        entityType="project"
+        entityLabel={deleteTarget?.jobNumber || deleteTarget?.id}
+        loading={!!deleteTarget && deleteSavingId === deleteTarget.id}
+        onClose={() => {
+          if (deleteSavingId) return;
+          setDeleteTarget(null);
+        }}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          try {
+            setDeleteSavingId(deleteTarget.id);
+            await dispatch(deleteProject(deleteTarget.id)).unwrap();
+            setDeleteTarget(null);
+          } catch (e) {
+            console.error("Delete project failed:", e);
+            alert("Unable to delete project. Check your permissions and API availability.");
+          } finally {
+            setDeleteSavingId(null);
+          }
+        }}
+      />
 
       <TableConfigDialog
         open={tableConfigOpen}

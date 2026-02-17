@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Site } from "../../types/site";
 import api from "../../services/api";
+import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 
 const CustomerSites = () => {
   const { customerId } = useParams<{ customerId: string }>();
@@ -28,6 +29,8 @@ const CustomerSites = () => {
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Site | null>(null);
+  const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
 
   // Edit form state
   const [editSiteName, setEditSiteName] = useState("");
@@ -160,21 +163,33 @@ const CustomerSites = () => {
     }
   };
 
-  const handleDeleteSite = async (siteId: string) => {
-    const isNewSite = siteId.startsWith("new-");
+  const handleDeleteSite = (siteId: string) => {
+    const target = sitesList.find((site) => site.id === siteId);
+    if (!target) return;
+    setDeleteTarget(target);
+  };
+
+  const confirmDeleteSite = async () => {
+    if (!deleteTarget) return;
+    const isNewSite = deleteTarget.id.startsWith("new-");
 
     if (isNewSite) {
       // Just remove from local state
-      setSitesList((prev) => prev.filter((s) => s.id !== siteId));
+      setSitesList((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      setDeleteTarget(null);
       return;
     }
 
     try {
-      await api.delete(`/sites/${siteId}`);
-      setSitesList((prev) => prev.filter((s) => s.id !== siteId));
+      setDeleteSavingId(deleteTarget.id);
+      await api.delete(`/sites/${deleteTarget.id}`);
+      setSitesList((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      setDeleteTarget(null);
     } catch (err) {
       console.error("Failed to delete site", err);
       alert("Failed to delete site");
+    } finally {
+      setDeleteSavingId(null);
     }
   };
 
@@ -607,6 +622,17 @@ const CustomerSites = () => {
             })}
           </Box>
         )}
+        <DeleteConfirmDialog
+          open={!!deleteTarget}
+          entityType="site"
+          entityLabel={deleteTarget?.name || deleteTarget?.id}
+          loading={!!deleteTarget && deleteSavingId === deleteTarget.id}
+          onClose={() => {
+            if (deleteSavingId) return;
+            setDeleteTarget(null);
+          }}
+          onConfirm={confirmDeleteSite}
+        />
       </Stack>
     </Container>
   );

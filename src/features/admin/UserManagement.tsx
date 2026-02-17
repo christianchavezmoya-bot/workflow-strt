@@ -46,6 +46,7 @@ import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEv
 import { useNavigate, useLocation } from "react-router-dom";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
+import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import GlobalOfficeMap, { Office } from "../../components/GlobalOfficeMap";
 import { demoCustomers, demoProducts, demoUsers } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
@@ -258,10 +259,11 @@ export const UserManagement: React.FC = () => {
   const [assetOpen, setAssetOpen] = useState(false);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
-    type: "user" | "customer" | "product" | "role";
+    type: "user" | "customer" | "product" | "role" | "site" | "office";
     id: string;
     label: string;
   } | null>(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
   const [tab, setTab] = useState(() => {
     const stored = localStorage.getItem("admin_active_tab");
     return stored ? parseInt(stored, 10) : 0;
@@ -782,16 +784,13 @@ export const UserManagement: React.FC = () => {
   };
 
   const handleDeleteSite = async (siteId: string) => {
-    if (!confirm('Are you sure you want to delete this site?')) return;
     if (siteId.startsWith(VIRTUAL_SITE_PREFIX)) return;
-
-    try {
-      await api.delete(`/sites/${siteId}`);
-      setSitesList(prev => prev.filter(s => s.id !== siteId));
-    } catch (err) {
-      console.error('Failed to delete site', err);
-      alert('Failed to delete site');
-    }
+    const site = sitesList.find((item) => item.id === siteId);
+    setDeleteTarget({
+      type: "site",
+      id: siteId,
+      label: site?.name || siteId
+    });
   };
 
   const handleCancelSiteEdit = () => {
@@ -1805,32 +1804,51 @@ export const UserManagement: React.FC = () => {
   };
 
   const handleDeleteOffice = async (id: string) => {
-    try {
-      await officesService.delete(id);
-      setGlobalOffices((prev) => prev.filter((o) => o.id !== id));
-    } catch (error) {
-      console.error("Failed to delete office:", error);
-    }
+    const office = globalOffices.find((item) => item.id === id);
+    const officeLabel = office
+      ? [office.city, office.country].filter(Boolean).join(", ") || office.id
+      : id;
+    setDeleteTarget({
+      type: "office",
+      id,
+      label: officeLabel
+    });
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
-    if (deleteTarget.type === "user") {
-      dispatch(deleteUser(deleteTarget.id));
+    try {
+      setDeleteSaving(true);
+      if (deleteTarget.type === "user") {
+        await dispatch(deleteUser(deleteTarget.id)).unwrap();
+      }
+      if (deleteTarget.type === "customer") {
+        await dispatch(deleteCustomer(deleteTarget.id)).unwrap();
+      }
+      if (deleteTarget.type === "product") {
+        await dispatch(deleteProduct(deleteTarget.id)).unwrap();
+      }
+      if (deleteTarget.type === "role") {
+        setRolesConfig((prev) => {
+          const { [deleteTarget.id]: _, ...rest } = prev;
+          return rest;
+        });
+      }
+      if (deleteTarget.type === "site") {
+        await api.delete(`/sites/${deleteTarget.id}`);
+        setSitesList((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      }
+      if (deleteTarget.type === "office") {
+        await officesService.delete(deleteTarget.id);
+        setGlobalOffices((prev) => prev.filter((o) => o.id !== deleteTarget.id));
+      }
+      setDeleteTarget(null);
+    } catch (error) {
+      console.error("Failed to delete item:", error);
+      alert("Failed to delete item");
+    } finally {
+      setDeleteSaving(false);
     }
-    if (deleteTarget.type === "customer") {
-      dispatch(deleteCustomer(deleteTarget.id));
-    }
-    if (deleteTarget.type === "product") {
-      dispatch(deleteProduct(deleteTarget.id));
-    }
-    if (deleteTarget.type === "role") {
-      setRolesConfig((prev) => {
-        const { [deleteTarget.id]: _, ...rest } = prev;
-        return rest;
-      });
-    }
-    setDeleteTarget(null);
   };
 
   const toggleFilterValue = (
@@ -2560,14 +2578,11 @@ export const UserManagement: React.FC = () => {
                               sx={{ padding: 0.25 }}
                               onClick={async (e) => {
                                 e.stopPropagation();
-                                if (!confirm(`Delete customer "${customer.name}"?`)) return;
-                                try {
-                                  await api.delete(`/customers/${customer.id}`);
-                                  await dispatch(fetchCustomers());
-                                } catch (err) {
-                                  console.error("Failed to delete customer", err);
-                                  alert("Failed to delete customer");
-                                }
+                                setDeleteTarget({
+                                  type: "customer",
+                                  id: customer.id,
+                                  label: customer.name
+                                });
                               }}
                             >
                               <DeleteOutline sx={{ fontSize: 18 }} />
@@ -5672,22 +5687,17 @@ export const UserManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete {deleteTarget?.type}</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            Are you sure you want to delete {deleteTarget?.label}? This action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setDeleteTarget(null)}>
-            Cancel
-          </Button>
-          <Button variant="contained" color="error" onClick={handleConfirmDelete}>
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <DeleteConfirmDialog
+        open={!!deleteTarget}
+        entityType={deleteTarget?.type || "item"}
+        entityLabel={deleteTarget?.label}
+        loading={deleteSaving}
+        onClose={() => {
+          if (deleteSaving) return;
+          setDeleteTarget(null);
+        }}
+        onConfirm={handleConfirmDelete}
+      />
 
       {/* Logo Upload Dialog */}
       <Dialog
