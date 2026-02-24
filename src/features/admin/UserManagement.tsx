@@ -65,6 +65,7 @@ import { createProduct, deleteProduct, fetchProducts, updateProduct } from "../.
 import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, reset2fa, updateUser } from "../../store/usersSlice";
 import { Customer } from "../../types/customer";
 import { Product } from "../../types/product";
+import type { ProductFeatureDefinition, ProductFeatureValueType } from "../../types/product";
 import { User, UserRole } from "../../types/user";
 
 // Style for field definition labels (yellow bold)
@@ -319,6 +320,7 @@ export const UserManagement: React.FC = () => {
     name: "",
     description: ""
   });
+  const [productFeatures, setProductFeatures] = useState<ProductFeatureDefinition[]>([]);
   const [editUserForm, setEditUserForm] = useState({
     id: "",
     fullName: "",
@@ -338,6 +340,7 @@ export const UserManagement: React.FC = () => {
     name: "",
     description: ""
   });
+  const [editProductFeatures, setEditProductFeatures] = useState<ProductFeatureDefinition[]>([]);
   const [assetForm, setAssetForm] = useState({
     machineType: "",
     machineId: "",
@@ -403,11 +406,11 @@ export const UserManagement: React.FC = () => {
   const productsTableConfig = useTableConfig(
     "products",
     useMemo(() => [
-      { id: "base-name", name: baseFieldNames.products?.["base-name"] || "Name", type: "text" },
+      { id: "base-name", name: baseFieldNames.products?.["base-name"] || "Product name", type: "text" },
       { id: "base-description", name: baseFieldNames.products?.["base-description"] || "Description", type: "text" },
       ...productsDynamic.definitions.map((field) => ({
         id: field.id,
-        name: field.name,
+        name: field.id === "field-products" ? "Divisions" : field.name,
         type: field.fieldType,
         linkToFieldId: field.linkToFieldId,
         actionType: field.actionType
@@ -471,7 +474,7 @@ export const UserManagement: React.FC = () => {
   // Filter out static fields from dynamic fields to prevent duplicates in Edit User dialog
   const dynamicOnlyUsersDefinitions = useMemo(() => {
     const staticFieldIds = new Set(['field-user-name', 'field-email', 'field-role', 'field-office', 'field-active']);
-    const staticFieldNames = new Set(['User Name', 'Email', 'Role', 'Office', 'City', 'Office/City', 'Office / City', 'Global Offices', 'Active']);
+    const staticFieldNames = new Set(['User Name', 'Email', 'Role', 'Role name', 'Office', 'City', 'Office/City', 'Office / City', 'Global Offices', 'Active']);
     return orderedUsersDefinitions.filter(def =>
       !staticFieldIds.has(def.id) && !staticFieldNames.has(def.name)
     );
@@ -1656,9 +1659,17 @@ export const UserManagement: React.FC = () => {
   };
 
   const handleCreateProduct = async () => {
+    const normalizedFeatures = productFeatures
+      .map((feature) => ({
+        ...feature,
+        name: feature.name.trim(),
+        options: (feature.options || []).map((item) => item.trim()).filter(Boolean)
+      }))
+      .filter((feature) => feature.name);
     const payload: Omit<Product, "id"> = {
       name: productForm.name,
-      description: productForm.description || undefined
+      description: productForm.description || undefined,
+      features: normalizedFeatures
     };
     try {
       setActionError(null);
@@ -1673,6 +1684,7 @@ export const UserManagement: React.FC = () => {
     }
     setProductOpen(false);
     setProductForm({ name: "", description: "" });
+    setProductFeatures([]);
     setProductDynamicValues({});
   };
 
@@ -1700,6 +1712,7 @@ export const UserManagement: React.FC = () => {
       name: product.name,
       description: product.description || ""
     });
+    setEditProductFeatures(product.features || []);
     const existing = productsDynamic.valuesByEntity[product.id] || {};
     const next: Record<string, string> = {};
     productsDynamic.definitions.forEach((field) => {
@@ -1763,6 +1776,13 @@ export const UserManagement: React.FC = () => {
 
   const handleSaveProduct = async () => {
     if (!editProductForm.id) return;
+    const normalizedFeatures = editProductFeatures
+      .map((feature) => ({
+        ...feature,
+        name: feature.name.trim(),
+        options: (feature.options || []).map((item) => item.trim()).filter(Boolean)
+      }))
+      .filter((feature) => feature.name);
     try {
       setActionError(null);
       const updated = await dispatch(
@@ -1770,7 +1790,8 @@ export const UserManagement: React.FC = () => {
           id: editProductForm.id,
           payload: {
             name: editProductForm.name,
-            description: editProductForm.description || undefined
+            description: editProductForm.description || undefined,
+            features: normalizedFeatures
           }
         })
       ).unwrap();
@@ -1783,6 +1804,32 @@ export const UserManagement: React.FC = () => {
       setActionError(resolveErrorMessage(error, "Failed to update product."));
     }
     setEditProductOpen(false);
+  };
+
+  const createFeature = (): ProductFeatureDefinition => ({
+    id: crypto.randomUUID ? crypto.randomUUID() : `feature-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name: "",
+    valueType: "text",
+    options: []
+  });
+
+  const featureTypeOptions: ProductFeatureValueType[] = [
+    "text", "number", "tri-state", "single-select", "multi-select",
+    "date", "rating", "percentage", "file", "rich-text", "link", "component"
+  ];
+  const featureTypeLabels: Record<ProductFeatureValueType, string> = {
+    "text": "Text",
+    "number": "Number",
+    "tri-state": "Yes / No / N/A",
+    "single-select": "Single-select",
+    "multi-select": "Multi-select",
+    "date": "Date",
+    "rating": "Rating (1–5)",
+    "percentage": "Percentage (%)",
+    "file": "File / Image",
+    "rich-text": "Rich text",
+    "link": "Link (URL)",
+    "component": "Component (sub-fields)"
   };
 
   const handleAddOffice = async (office: Omit<Office, "id">) => {
@@ -1968,7 +2015,7 @@ export const UserManagement: React.FC = () => {
                       }}
                     >
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>{field.name}</span>
+                        <span style={fieldLabelStyle}>{field.id === "field-role" ? "Role name" : field.name}</span>
                         <IconButton
                           size="small"
                           onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: accessorKey })}
@@ -2206,7 +2253,7 @@ export const UserManagement: React.FC = () => {
                 <TableCell>#</TableCell>
                 <TableCell>
                   <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Role</span>
+                    <span>Role name</span>
                     <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "role" })}>
                       <ArrowDropDown fontSize="small" />
                     </IconButton>
@@ -2882,7 +2929,7 @@ export const UserManagement: React.FC = () => {
                     <TableCell width="80">Logo</TableCell>
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>Customer</span>
+                        <span style={fieldLabelStyle}>Customer name</span>
                         <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "customer" })}>
                           <ArrowDropDown fontSize="small" />
                         </IconButton>
@@ -3300,6 +3347,7 @@ export const UserManagement: React.FC = () => {
                                   stringVals[k] = typeof v === 'string' ? v : v.value;
                                 }
                                 setEditProductDynamicValues(stringVals);
+                                setEditProductFeatures(product.features || []);
                                 setEditProductOpen(true);
                               }}
                             >
@@ -3807,8 +3855,10 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setFormData((prev) => ({ ...prev, email: event.target.value }))}
             />
             <FormControl>
+              <InputLabel sx={fieldLabelStyle}>Role name</InputLabel>
               <Select
                 value={formData.role}
+                label="Role name"
                 onChange={(event) => setFormData((prev) => ({ ...prev, role: event.target.value as UserRole }))}
               >
                 {roles.map((role) => (
@@ -5120,6 +5170,131 @@ export const UserManagement: React.FC = () => {
               multiline
               rows={2}
             />
+            <Stack spacing={1}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="subtitle2">Product Features Definition</Typography>
+                <Button size="small" onClick={() => setProductFeatures((prev) => [...prev, createFeature()])}>
+                  Add feature
+                </Button>
+              </Stack>
+              {productFeatures.map((feature) => (
+                <Stack key={feature.id} spacing={0.5}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center">
+                    <TextField
+                      label="Feature name"
+                      value={feature.name}
+                      onChange={(event) =>
+                        setProductFeatures((prev) =>
+                          prev.map((f) => (f.id === feature.id ? { ...f, name: event.target.value } : f))
+                        )
+                      }
+                      sx={{ flex: 2 }}
+                    />
+                    <FormControl sx={{ minWidth: 160, flex: 1 }}>
+                      <Select
+                        value={feature.valueType}
+                        onChange={(event) =>
+                          setProductFeatures((prev) =>
+                            prev.map((f) =>
+                              f.id === feature.id ? { ...f, valueType: event.target.value as ProductFeatureValueType } : f
+                            )
+                          )
+                        }
+                      >
+                        {featureTypeOptions.map((type) => (
+                          <MenuItem key={type} value={type}>
+                            {featureTypeLabels[type]}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    {(feature.valueType === "multi-select" || feature.valueType === "single-select") && (
+                      <TextField
+                        label="Options (comma separated)"
+                        value={(feature.options || []).join(", ")}
+                        onChange={(event) =>
+                          setProductFeatures((prev) =>
+                            prev.map((f) =>
+                              f.id === feature.id
+                                ? {
+                                    ...f,
+                                    options: event.target.value
+                                      .split(",")
+                                      .map((item) => item.trim())
+                                      .filter(Boolean)
+                                  }
+                                : f
+                            )
+                          )
+                        }
+                        sx={{ flex: 2 }}
+                      />
+                    )}
+                    <Button
+                      color="error"
+                      onClick={() => setProductFeatures((prev) => prev.filter((f) => f.id !== feature.id))}
+                    >
+                      Remove
+                    </Button>
+                  </Stack>
+                  {feature.valueType === "component" && (
+                    <Box sx={{ pl: 2, borderLeft: "2px solid", borderColor: "divider" }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
+                        <Typography variant="caption" color="text.secondary">Sub-fields</Typography>
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            setProductFeatures((prev) =>
+                              prev.map((f) =>
+                                f.id === feature.id
+                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: crypto.randomUUID(), name: "", valueType: "text" as const }] }
+                                  : f
+                              )
+                            )
+                          }
+                        >
+                          + Add sub-field
+                        </Button>
+                      </Stack>
+                      {(feature.subProperties ?? []).map((sf) => (
+                        <Stack key={sf.id} direction="row" spacing={1} alignItems="center" mb={0.5}>
+                          <TextField
+                            size="small"
+                            label="Sub-field name"
+                            value={sf.name}
+                            sx={{ flex: 1 }}
+                            onChange={(e) =>
+                              setProductFeatures((prev) =>
+                                prev.map((f) =>
+                                  f.id === feature.id
+                                    ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, name: e.target.value } : s)) }
+                                    : f
+                                )
+                              )
+                            }
+                          />
+                          <Button
+                            color="error"
+                            size="small"
+                            onClick={() =>
+                              setProductFeatures((prev) =>
+                                prev.map((f) =>
+                                  f.id === feature.id
+                                    ? { ...f, subProperties: (f.subProperties ?? []).filter((s) => s.id !== sf.id) }
+                                    : f
+                                )
+                              )
+                            }
+                          >
+                            Remove
+                          </Button>
+                        </Stack>
+                      ))}
+                    </Box>
+                  )}
+                </Stack>
+              ))}
+            </Stack>
             <DynamicFieldsForm
               definitions={orderedProductsDefinitions}
               values={productDynamicValues}
@@ -5153,10 +5328,10 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setEditUserForm((prev) => ({ ...prev, email: event.target.value }))}
             />
             <FormControl fullWidth>
-              <InputLabel sx={fieldLabelStyle}>Role</InputLabel>
+              <InputLabel sx={fieldLabelStyle}>Role name</InputLabel>
               <Select
                 value={editUserForm.role}
-                label="Role"
+                label="Role name"
                 onChange={(event) =>
                   setEditUserForm((prev) => ({ ...prev, role: event.target.value as UserRole }))
                 }
@@ -5246,7 +5421,7 @@ export const UserManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={editProductOpen} onClose={() => setEditProductOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={editProductOpen} onClose={() => { setEditProductOpen(false); setEditProductFeatures([]); }} maxWidth="sm" fullWidth>
         <DialogTitle>Edit product</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ marginTop: 1 }}>
@@ -5262,6 +5437,131 @@ export const UserManagement: React.FC = () => {
               multiline
               rows={2}
             />
+            <Stack spacing={1}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="subtitle2">Product Features Definition</Typography>
+                <Button size="small" onClick={() => setEditProductFeatures((prev) => [...prev, createFeature()])}>
+                  Add feature
+                </Button>
+              </Stack>
+              {editProductFeatures.map((feature) => (
+                <Stack key={feature.id} spacing={0.5}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center">
+                    <TextField
+                      label="Feature name"
+                      value={feature.name}
+                      onChange={(event) =>
+                        setEditProductFeatures((prev) =>
+                          prev.map((f) => (f.id === feature.id ? { ...f, name: event.target.value } : f))
+                        )
+                      }
+                      sx={{ flex: 2 }}
+                    />
+                    <FormControl sx={{ minWidth: 160, flex: 1 }}>
+                      <Select
+                        value={feature.valueType}
+                        onChange={(event) =>
+                          setEditProductFeatures((prev) =>
+                            prev.map((f) =>
+                              f.id === feature.id ? { ...f, valueType: event.target.value as ProductFeatureValueType } : f
+                            )
+                          )
+                        }
+                      >
+                        {featureTypeOptions.map((type) => (
+                          <MenuItem key={type} value={type}>
+                            {featureTypeLabels[type]}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    {(feature.valueType === "multi-select" || feature.valueType === "single-select") && (
+                      <TextField
+                        label="Options (comma separated)"
+                        value={(feature.options || []).join(", ")}
+                        onChange={(event) =>
+                          setEditProductFeatures((prev) =>
+                            prev.map((f) =>
+                              f.id === feature.id
+                                ? {
+                                    ...f,
+                                    options: event.target.value
+                                      .split(",")
+                                      .map((item) => item.trim())
+                                      .filter(Boolean)
+                                  }
+                                : f
+                            )
+                          )
+                        }
+                        sx={{ flex: 2 }}
+                      />
+                    )}
+                    <Button
+                      color="error"
+                      onClick={() => setEditProductFeatures((prev) => prev.filter((f) => f.id !== feature.id))}
+                    >
+                      Remove
+                    </Button>
+                  </Stack>
+                  {feature.valueType === "component" && (
+                    <Box sx={{ pl: 2, borderLeft: "2px solid", borderColor: "divider" }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
+                        <Typography variant="caption" color="text.secondary">Sub-fields</Typography>
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            setEditProductFeatures((prev) =>
+                              prev.map((f) =>
+                                f.id === feature.id
+                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: crypto.randomUUID(), name: "", valueType: "text" as const }] }
+                                  : f
+                              )
+                            )
+                          }
+                        >
+                          + Add sub-field
+                        </Button>
+                      </Stack>
+                      {(feature.subProperties ?? []).map((sf) => (
+                        <Stack key={sf.id} direction="row" spacing={1} alignItems="center" mb={0.5}>
+                          <TextField
+                            size="small"
+                            label="Sub-field name"
+                            value={sf.name}
+                            sx={{ flex: 1 }}
+                            onChange={(e) =>
+                              setEditProductFeatures((prev) =>
+                                prev.map((f) =>
+                                  f.id === feature.id
+                                    ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, name: e.target.value } : s)) }
+                                    : f
+                                )
+                              )
+                            }
+                          />
+                          <Button
+                            color="error"
+                            size="small"
+                            onClick={() =>
+                              setEditProductFeatures((prev) =>
+                                prev.map((f) =>
+                                  f.id === feature.id
+                                    ? { ...f, subProperties: (f.subProperties ?? []).filter((s) => s.id !== sf.id) }
+                                    : f
+                                )
+                              )
+                            }
+                          >
+                            Remove
+                          </Button>
+                        </Stack>
+                      ))}
+                    </Box>
+                  )}
+                </Stack>
+              ))}
+            </Stack>
             <DynamicFieldsForm
               definitions={orderedProductsDefinitions}
               values={editProductDynamicValues}
@@ -5270,7 +5570,7 @@ export const UserManagement: React.FC = () => {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button variant="outlined" onClick={() => setEditProductOpen(false)}>
+          <Button variant="outlined" onClick={() => { setEditProductOpen(false); setEditProductFeatures([]); }}>
             Cancel
           </Button>
           <Button variant="contained" onClick={handleSaveProduct} disabled={!editProductForm.name.trim()}>
@@ -5961,3 +6261,5 @@ export const UserManagement: React.FC = () => {
 };
 
 export default UserManagement;
+
+

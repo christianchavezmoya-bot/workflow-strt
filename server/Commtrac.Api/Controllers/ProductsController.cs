@@ -3,6 +3,7 @@ using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
 
@@ -12,6 +13,7 @@ namespace Commtrac.Api.Controllers;
 public class ProductsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public ProductsController(AppDbContext db)
     {
@@ -32,7 +34,8 @@ public class ProductsController : ControllerBase
         var product = new ProductEntity
         {
             Name = request.Name,
-            Description = request.Description
+            Description = request.Description,
+            FeaturesJson = JsonSerializer.Serialize(request.Features ?? new List<ProductFeatureDefinitionDto>(), JsonOptions)
         };
 
         _db.Products.Add(product);
@@ -52,6 +55,10 @@ public class ProductsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(request.Name)) product.Name = request.Name;
         if (request.Description is not null) product.Description = request.Description;
+        if (request.Features is not null)
+        {
+            product.FeaturesJson = JsonSerializer.Serialize(request.Features, JsonOptions);
+        }
 
         await _db.SaveChangesAsync();
         return Ok(ToDto(product));
@@ -73,5 +80,10 @@ public class ProductsController : ControllerBase
     }
 
     private static ProductDto ToDto(ProductEntity product)
-        => new(product.Id, product.Name, product.Description);
+    {
+        var features = string.IsNullOrWhiteSpace(product.FeaturesJson)
+            ? new List<ProductFeatureDefinitionDto>()
+            : JsonSerializer.Deserialize<List<ProductFeatureDefinitionDto>>(product.FeaturesJson, JsonOptions) ?? new List<ProductFeatureDefinitionDto>();
+        return new(product.Id, product.Name, product.Description, features);
+    }
 }

@@ -129,7 +129,7 @@ const Settings = () => {
       smtpPass: "",
       smtpFrom: "",
       smtpUseSsl: true,
-      frontendBaseUrl: "http://localhost:5173",
+      frontendBaseUrl: window.location.origin,
       smsProvider: "",
       smsApiKey: "",
       smsSender: ""
@@ -240,7 +240,7 @@ const Settings = () => {
         smtpUser: String(notifySettings.smtpUser || ""),
         smtpPass: String(notifySettings.smtpPass || ""),
         smtpFrom: String(notifySettings.smtpFrom || ""),
-        frontendBaseUrl: String(notifySettings.frontendBaseUrl || "http://localhost:5173"),
+        frontendBaseUrl: String(notifySettings.frontendBaseUrl || window.location.origin),
         smsProvider: String(notifySettings.smsProvider || ""),
         smsApiKey: String(notifySettings.smsApiKey || ""),
         smsSender: String(notifySettings.smsSender || "")
@@ -681,7 +681,7 @@ const Settings = () => {
           smtpUser: s.smtpUser ?? "",
           smtpPass: s.smtpPass ?? "",
           smtpFrom: s.smtpFrom ?? "",
-          frontendBaseUrl: s.frontendBaseUrl ?? "http://localhost:5173",
+          frontendBaseUrl: s.frontendBaseUrl ?? window.location.origin,
           smsProvider: s.smsProvider ?? "",
           smsApiKey: s.smsApiKey ?? "",
           smsSender: s.smsSender ?? ""

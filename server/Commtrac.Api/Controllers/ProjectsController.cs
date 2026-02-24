@@ -3,6 +3,7 @@ using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
 
@@ -12,6 +13,7 @@ namespace Commtrac.Api.Controllers;
 public class ProjectsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public ProjectsController(AppDbContext db)
     {
@@ -167,7 +169,8 @@ public class ProjectsController : ControllerBase
             ProjectManager = request.ProjectManager,
             ContractValue = request.ContractValue,
             ProbabilityStage = request.ProbabilityStage,
-            ProductIds = request.ProductIds ?? new List<string>()
+            ProductIds = request.ProductIds ?? new List<string>(),
+            ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions)
         };
 
         _db.Projects.Add(project);
@@ -212,6 +215,7 @@ public class ProjectsController : ControllerBase
         project.ContractValue = request.ContractValue;
         project.ProbabilityStage = request.ProbabilityStage;
         project.ProductIds = request.ProductIds ?? new List<string>();
+        project.ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions);
 
         await _db.SaveChangesAsync();
         string? siteName = null;
@@ -288,7 +292,10 @@ public class ProjectsController : ControllerBase
             project.ProjectManager,
             project.ContractValue,
             project.ProbabilityStage,
-            project.ProductIds
+            project.ProductIds,
+            string.IsNullOrWhiteSpace(project.ProductFeatureValuesJson)
+                ? new Dictionary<string, string>()
+                : JsonSerializer.Deserialize<Dictionary<string, string>>(project.ProductFeatureValuesJson, JsonOptions) ?? new Dictionary<string, string>()
         );
 }
 

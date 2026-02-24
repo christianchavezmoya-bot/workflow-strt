@@ -420,7 +420,8 @@ public class AuthController : ControllerBase
         await _db.SaveChangesAsync();
 
         var emailSettings = await _notificationSettings.GetEmailSettingsAsync();
-        var link = $"{emailSettings.FrontendBaseUrl}/reset-password?token={Uri.EscapeDataString(token)}";
+        var baseUrl = ResolveFrontendBaseUrl(emailSettings.FrontendBaseUrl);
+        var link = $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}";
         await _emailSender.SendPasswordResetAsync(user.Email, link);
         return NoContent();
     }
@@ -851,6 +852,46 @@ public class AuthController : ControllerBase
             IpAddress = ip
         });
         await _db.SaveChangesAsync();
+    }
+
+    private string ResolveFrontendBaseUrl(string? configuredBaseUrl)
+    {
+        var configured = (configuredBaseUrl ?? string.Empty).Trim().TrimEnd('/');
+
+        if (!string.IsNullOrWhiteSpace(configured) && !IsLocalhostUrl(configured))
+        {
+            return configured;
+        }
+
+        var origin = Request.Headers.Origin.ToString().Trim().TrimEnd('/');
+        if (Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
+        {
+            return $"{originUri.Scheme}://{originUri.Authority}";
+        }
+
+        var referer = Request.Headers.Referer.ToString().Trim();
+        if (Uri.TryCreate(referer, UriKind.Absolute, out var refererUri))
+        {
+            return $"{refererUri.Scheme}://{refererUri.Authority}";
+        }
+
+        if (Uri.TryCreate(configured, UriKind.Absolute, out var configuredUri))
+        {
+            return $"{configuredUri.Scheme}://{configuredUri.Authority}";
+        }
+
+        return $"{Request.Scheme}://{Request.Host.Value}";
+    }
+
+    private static bool IsLocalhostUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var host = uri.Host.ToLowerInvariant();
+        return host == "localhost" || host == "127.0.0.1" || host == "::1";
     }
 
     private static UserDto ToDto(UserEntity user)

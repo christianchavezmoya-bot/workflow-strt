@@ -154,17 +154,60 @@ public record UpdateSiteRequest(
 public record ProductDto(
     string Id,
     string Name,
-    string? Description
+    string? Description,
+    List<ProductFeatureDefinitionDto>? Features
 );
+
+public record FeatureSubPropertyDto(
+    string Id,
+    string Name,
+    string ValueType
+);
+
+public record ProductFeatureDefinitionDto(
+    string Id,
+    string Name,
+    string ValueType,
+    List<string>? Options,
+    int Quantity,
+    List<FeatureSubPropertyDto>? SubProperties
+);
+
+public record FeatureSelectionDto(string FeatureId, bool Included, int ActiveCount);
+
+public record WorkInstructionTemplateDto(
+    string Id,
+    string Name,
+    string ProductId,
+    string Status,
+    List<FeatureSelectionDto> FeatureSelections,
+    string? Notes,
+    string? WorkflowTemplateId,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertWITemplateRequest(
+    string Name,
+    string ProductId,
+    string Status,
+    List<FeatureSelectionDto> FeatureSelections,
+    string? Notes,
+    string? WorkflowTemplateId
+);
+
+public record SaveAsRequest(string Name);
 
 public record CreateProductRequest(
     string Name,
-    string? Description
+    string? Description,
+    List<ProductFeatureDefinitionDto>? Features
 );
 
 public record UpdateProductRequest(
     string? Name,
-    string? Description
+    string? Description,
+    List<ProductFeatureDefinitionDto>? Features
 );
 
 public record AssetDto(
@@ -213,7 +256,8 @@ public record ProjectDto(
     string? ProjectManager,
     decimal? ContractValue,
     string? ProbabilityStage,
-    List<string>? ProductIds
+    List<string>? ProductIds,
+    Dictionary<string, string>? ProductFeatureValues
 );
 
 public record UpdateProjectStatusRequest(
@@ -419,4 +463,101 @@ public record UpdateOfficeRequest(
     string? City,
     double? Lat,
     double? Lng
+);
+
+public record WorkflowTemplateDto(
+    string Id,
+    string Name,
+    string ProductId,
+    string StepsJson,
+    string MediaJson,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertWorkflowTemplateRequest(
+    string Name,
+    string ProductId,
+    string StepsJson,
+    string? MediaJson
+);
+
+public record WorkInstructionDto(
+    string Id,
+    string ProductId,
+    string Title,
+    string? Summary,
+    string StepsJson,
+    string Status,
+    string FeatureValuesJson,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertWorkInstructionRequest(
+    string Title,
+    string? Summary,
+    string StepsJson,
+    string Status,
+    string? FeatureValuesJson
+);
+
+public record WorkOrderDto(
+    string Id,
+    string WorkflowTemplateId,
+    string ProductId,
+    string JobReference,
+    string Status,
+    string StepsDataJson,
+    string? ProjectAssetId,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertWorkOrderRequest(
+    string? WorkflowTemplateId,
+    string? ProductId,
+    string? JobReference,
+    string? Status,
+    string? StepsDataJson,
+    string? ProjectAssetId
+);
+
+public record ProjectAssetDto(
+    string Id,
+    string ProjectId,
+    string ProductId,
+    string? ProductConfigId,
+    string? WorkflowTemplateId,
+    string AssetTag,
+    string? SerialNumber,
+    string? Location,
+    string? AssignedUserId,
+    string Status,
+    string? WorkOrderId,
+    string? Notes,
+    string FeatureValuesJson,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertProjectAssetRequest(
+    string? ProjectId,
+    string? ProductId,
+    string? ProductConfigId,
+    string? WorkflowTemplateId,
+    string? AssetTag,
+    string? SerialNumber,
+    string? Location,
+    string? AssignedUserId,
+    string? Status,
+    string? WorkOrderId,
+    string? Notes,
+    string? FeatureValuesJson
+);
+
+public record BulkCreateProjectAssetsRequest(
+    string ProjectId,
+    string ProductId,
+    List<UpsertProjectAssetRequest> Assets
 );

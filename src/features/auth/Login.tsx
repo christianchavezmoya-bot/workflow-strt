@@ -2,14 +2,10 @@ import {
   Box,
   Button,
   Checkbox,
-  FormControl,
   FormControlLabel,
   IconButton,
   InputAdornment,
-  MenuItem,
-  Select,
   Stack,
-  Switch,
   TextField,
   Typography
 } from "@mui/material";
@@ -17,16 +13,11 @@ import { Visibility, VisibilityOff } from "@mui/icons-material";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authService } from "../../services/authService";
-import { UserRole } from "../../types/user";
 
 const Login = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("Local Tester");
-  const [role, setRole] = useState<UserRole>("Project Manager");
-  const [office, setOffice] = useState<"USA" | "Australia" | "South Africa">("USA");
-  const [localMode, setLocalMode] = useState(true);
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +34,6 @@ const Login = () => {
   const handleLoginSuccess = (result: { token?: string; user?: unknown; isFirstLogin: boolean; trustedDeviceToken?: string; passwordExpired?: boolean }) => {
     localStorage.setItem("auth_token", result.token!);
     localStorage.setItem("auth_user", JSON.stringify(result.user));
-    localStorage.removeItem("local_auth_user");
     if (result.trustedDeviceToken) {
       localStorage.setItem("trusted_device_token", result.trustedDeviceToken);
     }
@@ -58,22 +48,6 @@ const Login = () => {
     setLoading(true);
     setError(null);
     try {
-      if (localMode) {
-        const localUser = {
-          id: "local-user",
-          email: email || "local@commtrac.test",
-          fullName,
-          role,
-          office,
-          isActive: true,
-          isFirstLogin: false
-        };
-        localStorage.setItem("auth_token", "local");
-        localStorage.setItem("local_auth_user", JSON.stringify(localUser));
-        localStorage.removeItem("auth_user");
-        navigate("/");
-        return;
-      }
       const trustedDeviceToken = localStorage.getItem("trusted_device_token") || undefined;
       const result = await authService.login({ email, password, trustedDeviceToken });
 
@@ -273,40 +247,6 @@ const Login = () => {
               Sign in to manage projects and installations.
             </Typography>
           </Box>
-          <FormControlLabel
-            control={
-              <Switch checked={localMode} onChange={(event) => setLocalMode(event.target.checked)} />
-            }
-            label="Local test mode (no backend required)"
-          />
-          {localMode && (
-            <Stack spacing={2}>
-              <TextField
-                label="Full name"
-                fullWidth
-                value={fullName}
-                onChange={(event) => setFullName(event.target.value)}
-              />
-              <FormControl fullWidth>
-                <Select value={role} onChange={(event) => setRole(event.target.value as UserRole)}>
-                  {["Admin", "Project Manager", "Engineer", "Viewer"].map((value) => (
-                    <MenuItem key={value} value={value}>
-                      {value}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl fullWidth>
-                <Select value={office} onChange={(event) => setOffice(event.target.value as typeof office)}>
-                  {["USA", "Australia", "South Africa"].map((value) => (
-                    <MenuItem key={value} value={value}>
-                      {value}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Stack>
-          )}
           <TextField
             label="Email"
             type="email"
@@ -314,33 +254,29 @@ const Login = () => {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
-          {!localMode && (
-            <>
-              <TextField
-                label="Password"
-                type={showPassword ? "text" : "password"}
-                fullWidth
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton
-                        onClick={() => setShowPassword(!showPassword)}
-                        edge="end"
-                        aria-label="toggle password visibility"
-                      >
-                        {showPassword ? <VisibilityOff /> : <Visibility />}
-                      </IconButton>
-                    </InputAdornment>
-                  )
-                }}
-              />
-              <Button variant="text" onClick={handleForgotPassword} sx={{ alignSelf: "flex-start" }}>
-                Forgot password?
-              </Button>
-            </>
-          )}
+          <TextField
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            fullWidth
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    onClick={() => setShowPassword(!showPassword)}
+                    edge="end"
+                    aria-label="toggle password visibility"
+                  >
+                    {showPassword ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              )
+            }}
+          />
+          <Button variant="text" onClick={handleForgotPassword} sx={{ alignSelf: "flex-start" }}>
+            Forgot password?
+          </Button>
           {error && (
             <Typography variant="body2" color="error">
               {error}
@@ -352,7 +288,7 @@ const Login = () => {
             </Typography>
           )}
           <Button variant="contained" size="large" onClick={handleSubmit} disabled={loading}>
-            {loading ? "Signing in..." : localMode ? "Enter local workspace" : "Sign in"}
+            {loading ? "Signing in..." : "Sign in"}
           </Button>
           <Typography variant="caption" color="text.secondary">
             First time logging in? You will be guided through profile setup.

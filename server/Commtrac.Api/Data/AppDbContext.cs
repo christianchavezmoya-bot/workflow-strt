@@ -37,6 +37,11 @@ public class AppDbContext : DbContext
     public DbSet<OfficeEntity> Offices => Set<OfficeEntity>();
     public DbSet<AuditLogEntity> AuditLogs => Set<AuditLogEntity>();
     public DbSet<SessionEntity> Sessions => Set<SessionEntity>();
+    public DbSet<WorkflowTemplateEntity> WorkflowTemplates => Set<WorkflowTemplateEntity>();
+    public DbSet<WorkInstructionTemplateEntity> WorkInstructionTemplates => Set<WorkInstructionTemplateEntity>();
+    public DbSet<WorkInstructionEntity> WorkInstructions => Set<WorkInstructionEntity>();
+    public DbSet<WorkOrderEntity> WorkOrders => Set<WorkOrderEntity>();
+    public DbSet<ProjectAssetEntity> ProjectAssets => Set<ProjectAssetEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -54,6 +59,14 @@ public class AppDbContext : DbContext
             .Property(p => p.ProductIds)
             .HasConversion(listConverter)
             .Metadata.SetValueComparer(listComparer);
+
+        modelBuilder.Entity<ProductEntity>()
+            .Property(p => p.FeaturesJson)
+            .HasDefaultValue("[]");
+
+        modelBuilder.Entity<ProjectEntity>()
+            .Property(p => p.ProductFeatureValuesJson)
+            .HasDefaultValue("{}");
 
         modelBuilder.Entity<InstallationEntity>()
             .Property(i => i.AssignedUsers)
@@ -132,6 +145,47 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<SessionEntity>()
             .HasIndex(s => s.UserId);
 
+        modelBuilder.Entity<WorkflowTemplateEntity>()
+            .Property(w => w.StepsJson)
+            .HasDefaultValue("[]");
+
+        modelBuilder.Entity<WorkflowTemplateEntity>()
+            .Property(w => w.MediaJson)
+            .HasDefaultValue("[]");
+
+        modelBuilder.Entity<WorkflowTemplateEntity>()
+            .HasIndex(w => w.ProductId);
+
+        modelBuilder.Entity<WorkInstructionEntity>()
+            .Property(w => w.StepsJson)
+            .HasDefaultValue("[]");
+
+        modelBuilder.Entity<WorkInstructionEntity>()
+            .Property(w => w.FeatureValuesJson)
+            .HasDefaultValue("{}");
+
+        modelBuilder.Entity<WorkInstructionEntity>()
+            .HasIndex(w => w.ProductId);
+
+        modelBuilder.Entity<WorkOrderEntity>()
+            .Property(w => w.StepsDataJson)
+            .HasDefaultValue("[]");
+
+        modelBuilder.Entity<WorkOrderEntity>()
+            .HasIndex(w => w.ProductId);
+
+        modelBuilder.Entity<WorkOrderEntity>()
+            .HasIndex(w => w.WorkflowTemplateId);
+
+        modelBuilder.Entity<ProjectAssetEntity>()
+            .HasIndex(a => a.ProjectId);
+
+        modelBuilder.Entity<ProjectAssetEntity>()
+            .HasIndex(a => a.ProductId);
+
+        modelBuilder.Entity<ProjectAssetEntity>()
+            .HasIndex(a => a.ProductConfigId);
+
         modelBuilder.Entity<FieldDefinitionEntity>()
             .HasData(new[]
             {
@@ -186,3 +240,5 @@ public class AppDbContext : DbContext
             });
     }
 }
+
+

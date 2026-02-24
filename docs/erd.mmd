@@ -1,0 +1,278 @@
+erDiagram
+  AdminTabRows {
+    TEXT Id PK NOT_NULL
+    TEXT DataJson NOT_NULL
+    INTEGER Position NOT_NULL
+    TEXT TabId NOT_NULL
+  }
+  AdminTabs {
+    TEXT Id PK NOT_NULL
+    TEXT ColumnsJson NOT_NULL
+    TEXT ConfigJson NOT_NULL
+    TEXT FieldIdsJson NOT_NULL
+    TEXT Label NOT_NULL
+    INTEGER Position NOT_NULL
+    TEXT PrimaryActionLabel NULL
+    TEXT Type NOT_NULL
+  }
+  Assets {
+    TEXT Id PK NOT_NULL
+    TEXT Comments NOT_NULL
+    TEXT MachineId NOT_NULL
+    TEXT MachineType NOT_NULL
+    TEXT PmCount NOT_NULL
+    INTEGER Seq NOT_NULL
+    TEXT SerialNumber NOT_NULL
+  }
+  AuditLogs {
+    TEXT Id PK NOT_NULL
+    TEXT Action NOT_NULL
+    TEXT Details NULL
+    TEXT IpAddress NULL
+    TEXT Timestamp NOT_NULL
+    TEXT UserEmail NOT_NULL
+    TEXT UserId NOT_NULL
+  }
+  Customers {
+    TEXT Id PK NOT_NULL
+    TEXT CustomerId NOT_NULL
+    TEXT Industry NULL
+    TEXT Logo NULL
+    TEXT LogoShape NOT_NULL
+    INTEGER LogoSize NOT_NULL
+    TEXT Name NOT_NULL
+    TEXT Office NOT_NULL
+    INTEGER PhotoScale NOT_NULL
+  }
+  CustomFieldDefinitions {
+    TEXT Id PK NOT_NULL
+    TEXT FieldType NOT_NULL
+    INTEGER IsActive NOT_NULL
+    TEXT Name NOT_NULL
+    TEXT OptionsJson NOT_NULL
+    TEXT Product NULL
+    TEXT Scope NOT_NULL
+    INTEGER SortOrder NOT_NULL
+  }
+  Documents {
+    TEXT Id PK NOT_NULL
+    TEXT ContentType NULL
+    TEXT FilePath NULL
+    INTEGER FileSize NULL
+    TEXT LinkedTo NOT_NULL
+    TEXT Name NOT_NULL
+    TEXT Type NOT_NULL
+    TEXT UploadedAt NOT_NULL
+  }
+  FieldDefinitions {
+    TEXT Id PK NOT_NULL
+    TEXT ActionType NULL
+    TEXT FieldType NOT_NULL
+    INTEGER IsActive NOT_NULL
+    TEXT LinkToFieldId NULL
+    TEXT Name NOT_NULL
+    INTEGER SortOrder NOT_NULL
+    TEXT TablesJson NOT_NULL
+  }
+  FieldValues {
+    TEXT Id PK NOT_NULL
+    TEXT EntityId NOT_NULL
+    TEXT FieldDefinitionId NOT_NULL
+    TEXT TableName NOT_NULL
+    TEXT UpdatedAt NOT_NULL
+    TEXT Value NOT_NULL
+  }
+  InspectionPhotos {
+    TEXT Id PK NOT_NULL
+    TEXT ContentType NULL
+    TEXT FileName NOT_NULL
+    TEXT FilePath NOT_NULL
+    INTEGER FileSize NULL
+    TEXT InspectionId NOT_NULL
+    TEXT UploadedAt NOT_NULL
+  }
+  Inspections {
+    TEXT Id PK NOT_NULL
+    TEXT Inspector NOT_NULL
+    TEXT InstallationId NOT_NULL
+    TEXT Name NOT_NULL
+    INTEGER PhotoCount NOT_NULL
+    TEXT ScheduledDate NULL
+    TEXT Status NOT_NULL
+  }
+  Installations {
+    TEXT Id PK NOT_NULL
+    TEXT ActualFinish NULL
+    TEXT ActualStart NULL
+    TEXT AssignedTeam NOT_NULL
+    TEXT AssignedUsers NOT_NULL
+    TEXT CustomFieldsJson NOT_NULL
+    TEXT CustomerSignOffContact NULL
+    TEXT CustomerSignOffDate NULL
+    TEXT InstallationId NULL
+    TEXT InstallationName NULL
+    TEXT InstallationNumber NOT_NULL
+    TEXT InstallerNotes NULL
+    TEXT MachineType NULL
+    TEXT Office NOT_NULL
+    TEXT Pm1Serial NULL
+    TEXT Pm2Serial NULL
+    TEXT Pm3Serial NULL
+    TEXT Pm4Serial NULL
+    TEXT ProjectId NOT_NULL
+    TEXT ScheduledEnd NOT_NULL
+    TEXT ScheduledStart NOT_NULL
+    TEXT SiteContactEmail NULL
+    TEXT SiteContactName NULL
+    TEXT SiteContactPhone NULL
+    TEXT SiteLocation NOT_NULL
+    TEXT Status NOT_NULL
+  }
+  InstallationTabRows {
+    TEXT Id PK NOT_NULL
+    TEXT DataJson NOT_NULL
+    INTEGER Position NOT_NULL
+    TEXT TabId NOT_NULL
+  }
+  InstallationTabs {
+    TEXT Id PK NOT_NULL
+    TEXT Label NOT_NULL
+    INTEGER Position NOT_NULL
+    TEXT Type NOT_NULL
+  }
+  Issues {
+    TEXT Id PK NOT_NULL
+    TEXT Description NULL
+    TEXT InstallationId NOT_NULL
+    TEXT Owner NOT_NULL
+    TEXT Priority NOT_NULL
+    TEXT Status NOT_NULL
+    TEXT Title NOT_NULL
+  }
+  NotificationSettings {
+    INTEGER Id PK NOT_NULL
+    TEXT FrontendBaseUrl NOT_NULL
+    TEXT SmsApiKey NOT_NULL
+    TEXT SmsProvider NOT_NULL
+    TEXT SmsSender NOT_NULL
+    TEXT SmtpFrom NOT_NULL
+    TEXT SmtpHost NOT_NULL
+    TEXT SmtpPass NOT_NULL
+    INTEGER SmtpPort NOT_NULL
+    INTEGER SmtpUseSsl NOT_NULL
+    TEXT SmtpUser NOT_NULL
+  }
+  Offices {
+    TEXT Id PK NOT_NULL
+    TEXT City NOT_NULL
+    TEXT Country NOT_NULL
+    REAL Lat NOT_NULL
+    REAL Lng NOT_NULL
+    TEXT State NOT_NULL
+  }
+  Products {
+    TEXT Id PK NOT_NULL
+    TEXT Description NULL
+    TEXT FeaturesJson NOT_NULL
+    TEXT Name NOT_NULL
+  }
+  Projects {
+    TEXT Id PK NOT_NULL
+    TEXT ApprovalDecision NULL
+    TEXT ContractValue NULL
+    TEXT CustomerId NOT_NULL
+    TEXT CustomerName NOT_NULL
+    TEXT Description NOT_NULL
+    TEXT FinishDate NOT_NULL
+    TEXT InstallationMode NULL
+    INTEGER IsInstallationProject NOT_NULL
+    TEXT JobNumber NOT_NULL
+    TEXT Office NOT_NULL
+    TEXT ProbabilityStage NULL
+    TEXT ProductFeatureValuesJson NOT_NULL
+    TEXT ProductIds NOT_NULL
+    TEXT ProjectManager NULL
+    TEXT ProjectType NOT_NULL
+    TEXT Region NULL
+    TEXT SiteId NULL
+    TEXT StartDate NOT_NULL
+    TEXT Status NOT_NULL
+  }
+  QuickbaseSettings {
+    INTEGER Id PK NOT_NULL
+    INTEGER Enabled NOT_NULL
+    TEXT InstallationsFieldMapJson NOT_NULL
+    TEXT InstallationsTableId NOT_NULL
+    TEXT ProjectsFieldMapJson NOT_NULL
+    TEXT ProjectsTableId NOT_NULL
+    TEXT RealmHostname NOT_NULL
+    TEXT UserToken NOT_NULL
+  }
+  RoleConfigs {
+    INTEGER Id PK NOT_NULL
+    TEXT ConfigJson NOT_NULL
+  }
+  Sessions {
+    TEXT Id PK NOT_NULL
+    TEXT CreatedAt NOT_NULL
+    TEXT IpAddress NULL
+    INTEGER IsRevoked NOT_NULL
+    TEXT LastActiveAt NOT_NULL
+    TEXT UserAgent NULL
+    TEXT UserEmail NOT_NULL
+    TEXT UserId NOT_NULL
+  }
+  Sites {
+    TEXT Id PK NOT_NULL
+    TEXT Address NULL
+    TEXT City NULL
+    TEXT ContactEmail NULL
+    TEXT ContactName NULL
+    TEXT ContactPhone NULL
+    TEXT Country NULL
+    TEXT CreatedAt NOT_NULL
+    TEXT CustomerId NOT_NULL
+    TEXT Name NOT_NULL
+    TEXT Notes NULL
+    TEXT State NULL
+    TEXT ZipCode NULL
+  }
+  TableConfigs {
+    INTEGER Id PK NOT_NULL
+    TEXT BaseFieldMetaJson NOT_NULL
+    TEXT BaseFieldNamesJson NOT_NULL
+    TEXT HiddenJson NOT_NULL
+    TEXT OrderJson NOT_NULL
+    TEXT TableName NOT_NULL
+  }
+  Users {
+    TEXT Id PK NOT_NULL
+    TEXT Email NOT_NULL
+    TEXT FullName NOT_NULL
+    INTEGER Is2faEnabled NOT_NULL
+    INTEGER IsActive NOT_NULL
+    INTEGER IsFirstLogin NOT_NULL
+    TEXT Office NOT_NULL
+    TEXT PasswordChangedAt NULL
+    TEXT PasswordHash NOT_NULL
+    TEXT RecoveryCodesJson NULL
+    TEXT ResetToken NULL
+    TEXT ResetTokenExpiresUtc NULL
+    TEXT Role NOT_NULL
+    TEXT TotpSecret NULL
+  }
+  Customers ||--o{ Sites : "CustomerId (INFERRED)"
+  Customers ||--o{ Projects : "CustomerId (INFERRED)"
+  Sites ||--o{ Projects : "SiteId (INFERRED)"
+  Projects ||--o{ Installations : "ProjectId (INFERRED)"
+  Installations ||--o{ Inspections : "InstallationId (INFERRED)"
+  Installations ||--o{ Issues : "InstallationId (INFERRED)"
+  Inspections ||--o{ InspectionPhotos : "InspectionId (INFERRED)"
+  FieldDefinitions ||--o{ FieldValues : "FieldDefinitionId (INFERRED)"
+  AdminTabs ||--o{ AdminTabRows : "TabId (INFERRED)"
+  InstallationTabs ||--o{ InstallationTabRows : "TabId (INFERRED)"
+  Users ||--o{ AuditLogs : "UserId (INFERRED)"
+  Users ||--o{ Sessions : "UserId (INFERRED)"
+  Products ||--o{ Projects : "ProductIds (INFERRED)"
+  Users ||--o{ Installations : "AssignedUsers (INFERRED)"
+  Users ||--o{ Projects : "ProjectManager (INFERRED)"

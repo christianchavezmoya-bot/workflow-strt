@@ -353,3 +353,5 @@ public class FieldDefinitionsController : ControllerBase
             new FieldDefinitionEntity { Id = "field-site-key", Name = "Site Key", FieldType = "primary key", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 47, IsActive = true }
         };
 }
+
+

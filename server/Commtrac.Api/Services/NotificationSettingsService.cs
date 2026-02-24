@@ -55,7 +55,7 @@ public sealed class NotificationSettingsService
         entity.SmtpUser = dto.SmtpUser?.Trim() ?? "";
         entity.SmtpPass = dto.SmtpPass ?? "";
         entity.SmtpFrom = dto.SmtpFrom?.Trim() ?? "";
-        entity.FrontendBaseUrl = (dto.FrontendBaseUrl?.Trim().TrimEnd('/')) ?? "http://localhost:5173";
+        entity.FrontendBaseUrl = (dto.FrontendBaseUrl?.Trim().TrimEnd('/')) ?? "";
         entity.SmsProvider = dto.SmsProvider?.Trim() ?? "";
         entity.SmsApiKey = dto.SmsApiKey ?? "";
         entity.SmsSender = dto.SmsSender?.Trim() ?? "";
@@ -67,6 +67,17 @@ public sealed class NotificationSettingsService
     public async Task<EmailSettings> GetEmailSettingsAsync()
     {
         var s = await GetAsync();
+        var configuredFrontendBaseUrl = (_fallbackEmail.FrontendBaseUrl ?? "").Trim().TrimEnd('/');
+        var effectiveFrontendBaseUrl = (s.FrontendBaseUrl ?? "").Trim().TrimEnd('/');
+
+        if (string.IsNullOrWhiteSpace(effectiveFrontendBaseUrl) || IsLocalhostUrl(effectiveFrontendBaseUrl))
+        {
+            if (!string.IsNullOrWhiteSpace(configuredFrontendBaseUrl) && !IsLocalhostUrl(configuredFrontendBaseUrl))
+            {
+                effectiveFrontendBaseUrl = configuredFrontendBaseUrl;
+            }
+        }
+
         return new EmailSettings
         {
             SmtpHost = s.SmtpHost ?? "",
@@ -75,7 +86,7 @@ public sealed class NotificationSettingsService
             Username = s.SmtpUser ?? "",
             Password = s.SmtpPass ?? "",
             FromAddress = string.IsNullOrWhiteSpace(s.SmtpFrom) ? "no-reply@commtrac.local" : s.SmtpFrom,
-            FrontendBaseUrl = string.IsNullOrWhiteSpace(s.FrontendBaseUrl) ? "http://localhost:5173" : s.FrontendBaseUrl.TrimEnd('/')
+            FrontendBaseUrl = effectiveFrontendBaseUrl
         };
     }
 
@@ -103,4 +114,15 @@ public sealed class NotificationSettingsService
             entity.SmsApiKey,
             entity.SmsSender
         );
+
+    private static bool IsLocalhostUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var host = uri.Host.ToLowerInvariant();
+        return host == "localhost" || host == "127.0.0.1" || host == "::1";
+    }
 }

@@ -85,6 +85,7 @@ public class ProductEntity
     public string Name { get; set; } = string.Empty;
     [MaxLength(500)]
     public string? Description { get; set; }
+    public string FeaturesJson { get; set; } = "[]";
 }
 
 public class AssetEntity
@@ -141,6 +142,7 @@ public class ProjectEntity
     [MaxLength(120)]
     public string? ProbabilityStage { get; set; }
     public List<string> ProductIds { get; set; } = new();
+    public string ProductFeatureValuesJson { get; set; } = "{}";
 }
 
 public class InstallationEntity
@@ -462,4 +464,104 @@ public class SessionEntity
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime LastActiveAt { get; set; } = DateTime.UtcNow;
     public bool IsRevoked { get; set; }
+}
+
+public class WorkflowTemplateEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string ProductId { get; set; } = string.Empty;
+    public string StepsJson { get; set; } = "[]";
+    public string MediaJson { get; set; } = "[]";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class WorkInstructionEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string ProductId { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+    [MaxLength(800)]
+    public string? Summary { get; set; }
+    public string StepsJson { get; set; } = "[]";
+    [MaxLength(20)]
+    public string Status { get; set; } = "Draft";
+    public string FeatureValuesJson { get; set; } = "{}";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class WorkOrderEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string WorkflowTemplateId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string ProductId { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string JobReference { get; set; } = string.Empty;
+    [MaxLength(20)]
+    public string Status { get; set; } = "InProgress";
+    public string StepsDataJson { get; set; } = "[]";
+    [MaxLength(100)]
+    public string? ProjectAssetId { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class WorkInstructionTemplateEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string ProductId { get; set; } = string.Empty;
+    [MaxLength(20)]
+    public string Status { get; set; } = "Draft";
+    public string FeatureSelectionsJson { get; set; } = "[]";
+    public string? Notes { get; set; }
+    [MaxLength(100)]
+    public string? WorkflowTemplateId { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class ProjectAssetEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string ProjectId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string ProductId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? ProductConfigId { get; set; }
+    [MaxLength(100)]
+    public string? WorkflowTemplateId { get; set; }
+    [MaxLength(200)]
+    public string AssetTag { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string? SerialNumber { get; set; }
+    [MaxLength(200)]
+    public string? Location { get; set; }
+    [MaxLength(80)]
+    public string? AssignedUserId { get; set; }
+    [MaxLength(20)]
+    public string Status { get; set; } = "NotStarted";
+    [MaxLength(100)]
+    public string? WorkOrderId { get; set; }
+    [MaxLength(800)]
+    public string? Notes { get; set; }
+    public string FeatureValuesJson { get; set; } = "{}";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

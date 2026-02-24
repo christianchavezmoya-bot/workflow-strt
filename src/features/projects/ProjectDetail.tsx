@@ -1,4 +1,4 @@
-﻿import { Alert, Box, Button, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Stack, Typography } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import StatusStepper from "../../components/ui/StatusStepper";
@@ -131,7 +131,7 @@ const ProjectDetail = () => {
             Project detail - {project.jobNumber}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            {project.customerName} • {project.office}
+            {project.customerName} � {project.office}
           </Typography>
         </Box>
         <Button variant="outlined" component={Link} to={`/projects/${project.id}/edit`}>
@@ -184,3 +184,5 @@ const ProjectDetail = () => {
 };
 
 export default ProjectDetail;
+
+

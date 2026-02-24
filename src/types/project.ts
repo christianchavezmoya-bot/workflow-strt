@@ -39,4 +39,5 @@ export interface Project {
   contractValue?: number;
   probabilityStage?: string;
   productIds?: string[];
+  productFeatureValues?: Record<string, string>;
 }

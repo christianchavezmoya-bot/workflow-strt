@@ -1,0 +1,146 @@
+using Commtrac.Api.Data;
+using Commtrac.Api.Models;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace Commtrac.Api.Controllers;
+
+[ApiController]
+[Route("api/project-assets")]
+[Authorize]
+public class ProjectAssetsController : ControllerBase
+{
+    private readonly AppDbContext _db;
+
+    public ProjectAssetsController(AppDbContext db)
+    {
+        _db = db;
+    }
+
+    // GET api/project-assets/by-project/{projectId}
+    [HttpGet("by-project/{projectId}")]
+    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProject(string projectId)
+    {
+        var assets = await _db.ProjectAssets
+            .Where(a => a.ProjectId == projectId)
+            .OrderByDescending(a => a.CreatedAt)
+            .ToListAsync();
+
+        return Ok(assets.Select(ToDto));
+    }
+
+    // GET api/project-assets/by-product/{productId}
+    [HttpGet("by-product/{productId}")]
+    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProduct(string productId)
+    {
+        var assets = await _db.ProjectAssets
+            .Where(a => a.ProductId == productId)
+            .OrderByDescending(a => a.CreatedAt)
+            .ToListAsync();
+
+        return Ok(assets.Select(ToDto));
+    }
+
+    // GET api/project-assets/{id}
+    [HttpGet("{id}")]
+    public async Task<ActionResult<ProjectAssetDto>> GetById(string id)
+    {
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
+        if (asset is null) return NotFound();
+        return Ok(ToDto(asset));
+    }
+
+    // POST api/project-assets
+    [HttpPost]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<ActionResult<ProjectAssetDto>> Create([FromBody] UpsertProjectAssetRequest request)
+    {
+        var asset = new ProjectAssetEntity
+        {
+            ProjectId = request.ProjectId ?? string.Empty,
+            ProductId = request.ProductId ?? string.Empty,
+            ProductConfigId = string.IsNullOrWhiteSpace(request.ProductConfigId) ? null : request.ProductConfigId,
+            WorkflowTemplateId = string.IsNullOrWhiteSpace(request.WorkflowTemplateId) ? null : request.WorkflowTemplateId,
+            AssetTag = request.AssetTag?.Trim() ?? string.Empty,
+            SerialNumber = string.IsNullOrWhiteSpace(request.SerialNumber) ? null : request.SerialNumber.Trim(),
+            Location = string.IsNullOrWhiteSpace(request.Location) ? null : request.Location.Trim(),
+            AssignedUserId = string.IsNullOrWhiteSpace(request.AssignedUserId) ? null : request.AssignedUserId,
+            Status = string.IsNullOrWhiteSpace(request.Status) ? "NotStarted" : request.Status,
+            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
+            FeatureValuesJson = string.IsNullOrWhiteSpace(request.FeatureValuesJson) ? "{}" : request.FeatureValuesJson,
+        };
+        _db.ProjectAssets.Add(asset);
+        await _db.SaveChangesAsync();
+        return CreatedAtAction(nameof(GetById), new { id = asset.Id }, ToDto(asset));
+    }
+
+    // POST api/project-assets/bulk
+    [HttpPost("bulk")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> BulkCreate([FromBody] BulkCreateProjectAssetsRequest request)
+    {
+        var created = new List<ProjectAssetEntity>();
+        foreach (var item in request.Assets)
+        {
+            var asset = new ProjectAssetEntity
+            {
+                ProjectId = request.ProjectId,
+                ProductId = request.ProductId,
+                ProductConfigId = string.IsNullOrWhiteSpace(item.ProductConfigId) ? null : item.ProductConfigId,
+                WorkflowTemplateId = string.IsNullOrWhiteSpace(item.WorkflowTemplateId) ? null : item.WorkflowTemplateId,
+                AssetTag = item.AssetTag?.Trim() ?? string.Empty,
+                SerialNumber = string.IsNullOrWhiteSpace(item.SerialNumber) ? null : item.SerialNumber.Trim(),
+                Location = string.IsNullOrWhiteSpace(item.Location) ? null : item.Location.Trim(),
+                AssignedUserId = string.IsNullOrWhiteSpace(item.AssignedUserId) ? null : item.AssignedUserId,
+                Status = "NotStarted",
+                Notes = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim(),
+            };
+            created.Add(asset);
+            _db.ProjectAssets.Add(asset);
+        }
+        await _db.SaveChangesAsync();
+        return Ok(created.Select(ToDto));
+    }
+
+    // PUT api/project-assets/{id}
+    [HttpPut("{id}")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<ActionResult<ProjectAssetDto>> Update(string id, [FromBody] UpsertProjectAssetRequest request)
+    {
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
+        if (asset is null) return NotFound();
+
+        if (!string.IsNullOrWhiteSpace(request.AssetTag)) asset.AssetTag = request.AssetTag.Trim();
+        if (request.SerialNumber is not null) asset.SerialNumber = string.IsNullOrWhiteSpace(request.SerialNumber) ? null : request.SerialNumber.Trim();
+        if (request.Location is not null) asset.Location = string.IsNullOrWhiteSpace(request.Location) ? null : request.Location.Trim();
+        if (request.AssignedUserId is not null) asset.AssignedUserId = string.IsNullOrWhiteSpace(request.AssignedUserId) ? null : request.AssignedUserId;
+        if (!string.IsNullOrWhiteSpace(request.Status)) asset.Status = request.Status;
+        if (request.Notes is not null) asset.Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
+        if (request.ProductConfigId is not null) asset.ProductConfigId = string.IsNullOrWhiteSpace(request.ProductConfigId) ? null : request.ProductConfigId;
+        if (request.WorkflowTemplateId is not null) asset.WorkflowTemplateId = string.IsNullOrWhiteSpace(request.WorkflowTemplateId) ? null : request.WorkflowTemplateId;
+        if (request.WorkOrderId is not null) asset.WorkOrderId = string.IsNullOrWhiteSpace(request.WorkOrderId) ? null : request.WorkOrderId;
+        if (request.FeatureValuesJson is not null) asset.FeatureValuesJson = string.IsNullOrWhiteSpace(request.FeatureValuesJson) ? "{}" : request.FeatureValuesJson;
+        asset.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        return Ok(ToDto(asset));
+    }
+
+    // DELETE api/project-assets/{id}
+    [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Delete(string id)
+    {
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
+        if (asset is null) return NotFound();
+        _db.ProjectAssets.Remove(asset);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    private static ProjectAssetDto ToDto(ProjectAssetEntity a) =>
+        new(a.Id, a.ProjectId, a.ProductId, a.ProductConfigId, a.WorkflowTemplateId,
+            a.AssetTag, a.SerialNumber, a.Location, a.AssignedUserId, a.Status,
+            a.WorkOrderId, a.Notes, a.FeatureValuesJson, a.CreatedAt, a.UpdatedAt);
+}

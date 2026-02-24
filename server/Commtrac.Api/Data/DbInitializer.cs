@@ -140,7 +140,7 @@ public static class DbInitializer
                 SmtpUser = "",
                 SmtpPass = "",
                 SmtpFrom = config["Email:FromAddress"] ?? "no-reply@commtrac.local",
-                FrontendBaseUrl = config["Email:FrontendBaseUrl"] ?? "http://localhost:5173",
+                FrontendBaseUrl = config["Email:FrontendBaseUrl"] ?? "",
                 SmsProvider = config["Sms:Provider"] ?? "",
                 SmsApiKey = config["Sms:ApiKey"] ?? "",
                 SmsSender = config["Sms:Sender"] ?? ""

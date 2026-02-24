@@ -1,6 +1,6 @@
 import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { ContentCopy } from "@mui/icons-material";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authService, Session, LoginHistoryEntry } from "../../services/authService";
 import { useAuth } from "../../hooks/useAuth";
@@ -16,6 +16,7 @@ const ProfileWizard = () => {
 
   // 2FA state
   const [setup2faOpen, setSetup2faOpen] = useState(false);
+  const [firstLogin2faPromptOpen, setFirstLogin2faPromptOpen] = useState(false);
   const [is2faEnabled, setIs2faEnabled] = useState(user?.is2faEnabled ?? false);
   const [disablePassword, setDisablePassword] = useState("");
   const [disableLoading, setDisableLoading] = useState(false);
@@ -47,6 +48,35 @@ const ProfileWizard = () => {
   const [regenError, setRegenError] = useState<string | null>(null);
   const [regenCodes, setRegenCodes] = useState<string[] | null>(null);
 
+  const isFirstLoginWithout2fa = !!user?.isFirstLogin && !is2faEnabled;
+
+  const markFirstLogin2faPromptDismissed = () => {
+    if (!user?.id) return;
+    sessionStorage.setItem(`first_login_2fa_prompt_dismissed:${user.id}`, "1");
+  };
+
+  const isFirstLogin2faPromptDismissed = () => {
+    if (!user?.id) return false;
+    return sessionStorage.getItem(`first_login_2fa_prompt_dismissed:${user.id}`) === "1";
+  };
+
+  const notifyAuthUserUpdated = () => {
+    window.dispatchEvent(new Event("auth-user-updated"));
+  };
+
+  const updateCachedUser = (updates: Partial<ReturnType<typeof JSON.parse>>) => {
+    const stored = localStorage.getItem("auth_user");
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored);
+      const merged = { ...parsed, ...updates };
+      localStorage.setItem("auth_user", JSON.stringify(merged));
+      notifyAuthUserUpdated();
+    } catch {
+      // ignore malformed cached auth_user
+    }
+  };
+
   const handleSave = async () => {
     setError(null);
     if (!fullName.trim()) {
@@ -57,6 +87,7 @@ const ProfileWizard = () => {
     try {
       const updated = await authService.updateProfile({ fullName: fullName.trim(), office });
       localStorage.setItem("auth_user", JSON.stringify(updated));
+      notifyAuthUserUpdated();
       navigate("/");
     } catch {
       setError("Unable to save profile.");
@@ -73,13 +104,7 @@ const ProfileWizard = () => {
       setIs2faEnabled(false);
       setShowDisable(false);
       setDisablePassword("");
-      // Update cached user
-      const stored = localStorage.getItem("auth_user");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        parsed.is2faEnabled = false;
-        localStorage.setItem("auth_user", JSON.stringify(parsed));
-      }
+      updateCachedUser({ is2faEnabled: false });
     } catch {
       setDisableError("Incorrect password.");
     } finally {
@@ -167,6 +192,13 @@ const ProfileWizard = () => {
     }
   };
 
+  // First-time users: invite them to enable 2FA once per browser session.
+  useEffect(() => {
+    if (isFirstLoginWithout2fa && !isFirstLogin2faPromptDismissed()) {
+      setFirstLogin2faPromptOpen(true);
+    }
+  }, [isFirstLoginWithout2fa]);
+
   return (
     <Stack spacing={3}>
       <Box>
@@ -187,6 +219,9 @@ const ProfileWizard = () => {
             onChange={(event) => setFullName(event.target.value)}
           />
           <FormControl fullWidth>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.75 }}>
+              Country
+            </Typography>
             <Select value={office} onChange={(event) => setOffice(event.target.value)}>
               {["USA", "Australia", "South Africa"].map((value) => (
                 <MenuItem key={value} value={value}>
@@ -499,15 +534,39 @@ const ProfileWizard = () => {
         onClose={() => setSetup2faOpen(false)}
         onEnabled={() => {
           setIs2faEnabled(true);
-          // Update cached user
-          const stored = localStorage.getItem("auth_user");
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            parsed.is2faEnabled = true;
-            localStorage.setItem("auth_user", JSON.stringify(parsed));
-          }
+          updateCachedUser({ is2faEnabled: true });
+          setFirstLogin2faPromptOpen(false);
+          markFirstLogin2faPromptDismissed();
         }}
       />
+
+      <Dialog open={firstLogin2faPromptOpen} onClose={undefined} maxWidth="sm" fullWidth>
+        <DialogTitle>Increase your account security</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            We recommend enabling two-factor authentication (2FA) now to better protect your account.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setFirstLogin2faPromptOpen(false);
+              markFirstLogin2faPromptDismissed();
+            }}
+          >
+            Not now
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setFirstLogin2faPromptOpen(false);
+              setSetup2faOpen(true);
+            }}
+          >
+            Enable 2FA
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Regenerate Recovery Codes Dialog */}
       <Dialog open={regenOpen} onClose={regenCodes ? undefined : closeRegenDialog} maxWidth="sm" fullWidth>

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -101,7 +101,7 @@ const builtInColumnConfigs: ColumnConfig[] = [
   },
   {
     id: "customerName",
-    name: "Customer",
+    name: "Customer name",
     required: false,
     minWidth: 150,
     renderCell: (project: Project) => project.customerName || "-"
@@ -122,7 +122,7 @@ const builtInColumnConfigs: ColumnConfig[] = [
   },
   {
     id: "products",
-    name: "Products",
+    name: "Product name",
     required: true,
     minWidth: 150,
     renderCell: (project: Project, products: any[]) =>
@@ -710,10 +710,10 @@ const ProjectList = () => {
         onChange={projectsTableConfig.setConfig}
         builtInColumns={[
           { id: "jobNumber", name: "Job Number", type: "text", required: true },
-          { id: "customerName", name: "Customer", type: "text", required: false },
+          { id: "customerName", name: "Customer name", type: "text", required: false },
           { id: "siteName", name: "Site", type: "text", required: false },
           { id: "customerId", name: "Customer ID", type: "text", required: true },
-          { id: "products", name: "Products", type: "multi-select", required: true },
+          { id: "products", name: "Product name", type: "multi-select", required: true },
           { id: "office", name: "Office", type: "text", required: true },
           { id: "region", name: "Country/State", type: "text", required: false },
           { id: "projectManager", name: "Project Manager", type: "text", required: false },
@@ -778,3 +778,5 @@ const ProjectList = () => {
 };
 
 export default ProjectList;
+
+

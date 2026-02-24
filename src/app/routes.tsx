@@ -5,6 +5,8 @@ import ProjectList from "../features/projects/ProjectList";
 import ProjectForm from "../features/projects/ProjectForm";
 import ProjectDetail from "../features/projects/ProjectDetail";
 import InstallationList from "../features/installations/InstallationList";
+import AssetInstallationPage from "../features/installations/AssetInstallationPage";
+import WorkInstructions from "../features/workInstructions/WorkInstructions";
 import UserManagement from "../features/admin/UserManagement";
 import CustomerSites from "../features/admin/CustomerSites";
 import ProfileWizard from "../features/profile/ProfileWizard";
@@ -24,6 +26,8 @@ const AppRoutes = () => {
         <Route path="/projects/:id" element={<ProjectDetail />} />
         <Route path="/projects/:id/edit" element={<ProjectForm />} />
         <Route path="/installations" element={<InstallationList />} />
+        <Route path="/installations/assets" element={<AssetInstallationPage />} />
+        <Route path="/work-instructions" element={<WorkInstructions />} />
         <Route path="/admin" element={<UserManagement />} />
         <Route path="/admin/customers/:customerId/sites" element={<CustomerSites />} />
         <Route path="/settings" element={<Settings />} />

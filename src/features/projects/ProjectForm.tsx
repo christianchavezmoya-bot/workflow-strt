@@ -1,4 +1,4 @@
-﻿import {
+import {
   Alert,
   Box,
   Button,
@@ -12,14 +12,18 @@
   FormHelperText,
   FormLabel,
   Grid,
+  InputLabel,
   ListItemText,
   MenuItem,
   Radio,
   RadioGroup,
+  Rating,
   Select,
   Stack,
   Switch,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography
 } from "@mui/material";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
@@ -46,6 +50,7 @@ import { fetchProducts } from "../../store/productsSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { createProject, updateProject } from "../../store/projectSlice";
 import { ApprovalDecision, Office, Project, ProjectStatus } from "../../types/project";
+import type { ProductFeatureDefinition } from "../../types/product";
 import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import type { Site } from "../../types/site";
@@ -199,6 +204,7 @@ const ProjectForm = () => {
         isInstallationProject: localProject.isInstallationProject,
         productIds: localProject.productIds ?? []
       });
+      setProductFeatureValues(localProject.productFeatureValues || {});
       return;
     }
 
@@ -220,6 +226,7 @@ const ProjectForm = () => {
         isInstallationProject: project.isInstallationProject,
         productIds: project.productIds ?? []
       });
+      setProductFeatureValues(project.productFeatureValues || {});
     });
   }, [id, items, reset]);
 
@@ -258,6 +265,7 @@ const ProjectForm = () => {
   const [sitesLoadError, setSitesLoadError] = useState<string | null>(null);
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
   const [globalOfficePrompt, setGlobalOfficePrompt] = useState<{ country: string; managerName: string } | null>(null);
+  const [productFeatureValues, setProductFeatureValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setSitesLoading(true);
@@ -547,7 +555,8 @@ const ProjectForm = () => {
       approvalDecision: data.approvalDecision || undefined,
       isInstallationProject: data.isInstallationProject,
       projectManager: data.projectManager,
-      productIds: data.productIds ?? []
+      productIds: data.productIds ?? [],
+      productFeatureValues
     };
 
     try {
@@ -673,7 +682,7 @@ const ProjectForm = () => {
   const labelCustomer = builtInLabel("customerName", "Customer");
   const labelCustomerId = builtInLabel("customerId", "Customer ID");
   const labelSite = builtInLabel("siteName", "Site");
-  const labelProducts = builtInLabel("products", "Products");
+  const labelProducts = builtInLabel("products", "Product name");
   const labelJobNumber = builtInLabel("jobNumber", "Job Number");
   const labelOffice = builtInLabel("office", "Office");
   const labelRegion = builtInLabel("region", "Country");
@@ -719,6 +728,15 @@ const ProjectForm = () => {
       a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
     );
   }, [usersState.items]);
+  const selectedProductId = watch("productIds")?.[0] || "";
+  const selectedProduct = useMemo(
+    () => products.find((product) => product.id === selectedProductId),
+    [products, selectedProductId]
+  );
+  const selectedProductFeatures = useMemo<ProductFeatureDefinition[]>(
+    () => selectedProduct?.features || [],
+    [selectedProduct]
+  );
 
   const customerNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -1299,6 +1317,175 @@ const ProjectForm = () => {
 
             {visibleIdSet.has("products") && renderFormField("products")}
             <Grid item xs={12} md={6} />
+            {selectedProductFeatures.length > 0 && (
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Product Features: {selectedProduct?.name}
+                </Typography>
+                <Grid container spacing={2}>
+                  {selectedProductFeatures.map((feature) => {
+                    const key = `${selectedProductId}:${feature.id}`;
+                    const value = productFeatureValues[key] || "";
+                    const setVal = (v: string) => setProductFeatureValues((prev) => ({ ...prev, [key]: v }));
+
+                    if (feature.valueType === "tri-state") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <Stack spacing={0.5}>
+                            <Typography variant="caption" color="text.secondary">{feature.name}</Typography>
+                            <ToggleButtonGroup
+                              value={value || null}
+                              exclusive
+                              onChange={(_, next) => { if (next !== null) setVal(next); }}
+                              size="small"
+                            >
+                              <ToggleButton value="yes">Yes</ToggleButton>
+                              <ToggleButton value="no">No</ToggleButton>
+                              <ToggleButton value="na">N/A</ToggleButton>
+                            </ToggleButtonGroup>
+                          </Stack>
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "single-select") {
+                      const options = feature.options || [];
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <FormControl fullWidth size="small">
+                            <InputLabel>{feature.name}</InputLabel>
+                            <Select label={feature.name} value={value} onChange={(event) => setVal(event.target.value)}>
+                              {options.map((option) => (
+                                <MenuItem key={option} value={option}>{option}</MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "multi-select") {
+                      const options = feature.options || [];
+                      const selectedValues = value ? value.split(",").map((x) => x.trim()).filter(Boolean) : [];
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <FormControl fullWidth>
+                            <FormLabel>{feature.name}</FormLabel>
+                            <Select
+                              multiple
+                              value={selectedValues}
+                              onChange={(event) => {
+                                const next = Array.isArray(event.target.value) ? event.target.value : [];
+                                setVal(next.join(","));
+                              }}
+                              renderValue={(selected) => (Array.isArray(selected) ? selected.join(", ") : "")}
+                            >
+                              {options.map((option) => (
+                                <MenuItem key={option} value={option}>
+                                  <Checkbox checked={selectedValues.includes(option)} />
+                                  <ListItemText primary={option} />
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "rating") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <Stack spacing={0.5}>
+                            <Typography variant="caption" color="text.secondary">{feature.name}</Typography>
+                            <Rating
+                              value={parseInt(value) || 0}
+                              onChange={(_, next) => setVal(next ? String(next) : "")}
+                            />
+                          </Stack>
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "percentage") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <TextField
+                            label={`${feature.name} (%)`}
+                            fullWidth
+                            type="number"
+                            inputProps={{ min: 0, max: 100 }}
+                            value={value}
+                            onChange={(event) => setVal(event.target.value)}
+                          />
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "date") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <TextField
+                            label={feature.name}
+                            fullWidth
+                            type="date"
+                            value={value}
+                            onChange={(event) => setVal(event.target.value)}
+                            InputLabelProps={{ shrink: true }}
+                          />
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "rich-text") {
+                      return (
+                        <Grid item xs={12} key={key}>
+                          <TextField
+                            label={feature.name}
+                            fullWidth
+                            multiline
+                            rows={3}
+                            value={value}
+                            onChange={(event) => setVal(event.target.value)}
+                          />
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "link") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <TextField
+                            label={feature.name}
+                            fullWidth
+                            type="url"
+                            placeholder="https://"
+                            value={value}
+                            onChange={(event) => setVal(event.target.value)}
+                          />
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "file") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <TextField
+                            label={feature.name}
+                            fullWidth
+                            placeholder="File URL or path"
+                            value={value}
+                            onChange={(event) => setVal(event.target.value)}
+                          />
+                        </Grid>
+                      );
+                    }
+                    return (
+                      <Grid item xs={12} md={6} key={key}>
+                        <TextField
+                          label={feature.name}
+                          fullWidth
+                          type={feature.valueType === "number" ? "number" : "text"}
+                          value={value}
+                          onChange={(event) => setVal(event.target.value)}
+                        />
+                      </Grid>
+                    );
+                  })}
+                </Grid>
+              </Grid>
+            )}
 
             {visibleIdSet.has("projectManager") && renderFormField("projectManager")}
             {visibleIdSet.has("office") ? renderFormField("office") : <Grid item xs={12} md={6} />}
@@ -1400,10 +1587,10 @@ const ProjectForm = () => {
         onChange={projectsTableConfig.setConfig}
         builtInColumns={[
           { id: "jobNumber", name: "Job Number", type: "text", required: true },
-          { id: "customerName", name: "Customer", type: "text", required: false },
+          { id: "customerName", name: "Customer name", type: "text", required: false },
           { id: "siteName", name: "Site", type: "text", required: false },
           { id: "customerId", name: "Customer ID", type: "text", required: true },
-          { id: "products", name: "Products", type: "multi-select", required: true },
+          { id: "products", name: "Product name", type: "multi-select", required: true },
           { id: "office", name: "Office", type: "text", required: true },
           { id: "region", name: "Country/State", type: "text", required: false },
           { id: "projectManager", name: "Project Manager", type: "text", required: false },
@@ -1501,4 +1688,6 @@ const ProjectForm = () => {
 };
 
 export default ProjectForm;
+
+
 
