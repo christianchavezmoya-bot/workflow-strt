@@ -51,7 +51,8 @@ server/**/*.user
 server/**/*.suo
 server/**/.vs/
 
-# Local DB byproducts / build checks
+# SQLite runtime database — never commit, local data only
+server/**/commtrac.db
 server/**/commtrac.db-shm
 server/**/commtrac.db-wal
 server/**/commtrac.db-journal

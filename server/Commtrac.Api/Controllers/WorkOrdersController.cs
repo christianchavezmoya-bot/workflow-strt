@@ -51,6 +51,7 @@ public class WorkOrdersController : ControllerBase
             Status = string.IsNullOrWhiteSpace(request.Status) ? "InProgress" : request.Status,
             StepsDataJson = string.IsNullOrWhiteSpace(request.StepsDataJson) ? "[]" : request.StepsDataJson,
             ProjectAssetId = string.IsNullOrWhiteSpace(request.ProjectAssetId) ? null : request.ProjectAssetId,
+            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
         };
         _db.WorkOrders.Add(order);
         await _db.SaveChangesAsync();
@@ -81,6 +82,7 @@ public class WorkOrdersController : ControllerBase
         if (!string.IsNullOrWhiteSpace(request.Status)) order.Status = request.Status;
         if (request.StepsDataJson is not null) order.StepsDataJson = request.StepsDataJson;
         if (!string.IsNullOrWhiteSpace(request.JobReference)) order.JobReference = request.JobReference.Trim();
+        if (request.Notes is not null) order.Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
         order.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -114,5 +116,5 @@ public class WorkOrdersController : ControllerBase
 
     private static WorkOrderDto ToDto(WorkOrderEntity w) =>
         new(w.Id, w.WorkflowTemplateId, w.ProductId, w.JobReference, w.Status,
-            w.StepsDataJson, w.ProjectAssetId, w.CreatedAt, w.UpdatedAt);
+            w.StepsDataJson, w.ProjectAssetId, w.Notes, w.CreatedAt, w.UpdatedAt);
 }

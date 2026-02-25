@@ -9,6 +9,7 @@ export interface WorkOrderDto {
   status: WorkOrderStatus;
   stepsDataJson: string;
   projectAssetId?: string;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -26,6 +27,7 @@ function fromDto(dto: WorkOrderDto): WorkOrder {
     status: dto.status,
     stepsData,
     projectAssetId: dto.projectAssetId,
+    notes: dto.notes,
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
   };
@@ -65,6 +67,7 @@ export const workOrderService = {
       jobReference: input.jobReference,
       stepsDataJson: input.stepsDataJson,
       projectAssetId: input.projectAssetId ?? null,
+      notes: input.notes ?? null,
     });
     const order = fromDto(res.data);
     const existing = lsRead(order.productId);
@@ -77,6 +80,11 @@ export const workOrderService = {
       status,
       stepsDataJson: JSON.stringify(stepsData),
     });
+    return fromDto(res.data);
+  },
+
+  async patch(id: string, fields: { jobReference?: string; notes?: string }): Promise<WorkOrder> {
+    const res = await api.put<WorkOrderDto>(`/work-orders/${id}`, fields);
     return fromDto(res.data);
   },
 

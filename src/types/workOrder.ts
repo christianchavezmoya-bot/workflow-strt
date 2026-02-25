@@ -14,6 +14,7 @@ export interface WorkOrder {
   status: WorkOrderStatus;
   stepsData: StepCapture[];
   projectAssetId?: string;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -24,4 +25,5 @@ export interface CreateWorkOrderInput {
   jobReference: string;
   stepsDataJson: string; // JSON StepCapture[]
   projectAssetId?: string;
+  notes?: string;
 }

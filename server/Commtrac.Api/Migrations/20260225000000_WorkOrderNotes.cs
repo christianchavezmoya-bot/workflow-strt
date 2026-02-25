@@ -8,26 +8,26 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Commtrac.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260224120000_AssetFeatureValues")]
-    public partial class AssetFeatureValues : Migration
+    [Migration("20260225000000_WorkOrderNotes")]
+    public partial class WorkOrderNotes : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<string>(
-                name: "FeatureValuesJson",
-                table: "ProjectAssets",
+                name: "Notes",
+                table: "WorkOrders",
                 type: "TEXT",
-                nullable: false,
-                defaultValue: "{}");
+                maxLength: 1000,
+                nullable: true);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "FeatureValuesJson",
-                table: "ProjectAssets");
+                name: "Notes",
+                table: "WorkOrders");
         }
     }
 }

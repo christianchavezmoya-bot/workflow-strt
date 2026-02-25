@@ -11,6 +11,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   ImageOutlined,
+  LibraryAddOutlined,
   PlayArrowOutlined,
   QrCodeScannerOutlined,
   SwapHorizOutlined,
@@ -33,6 +34,7 @@ import {
   FormControl,
   Grid,
   IconButton,
+  InputLabel,
   MenuItem,
   Paper,
   Select,
@@ -47,6 +49,7 @@ import {
 import type { Decision, MediaItem, StepInput, StepInputType, Workflow, WorkflowStep } from "../../types/workflow";
 import type { ProductFeatureDefinition } from "../../types/product";
 import { workflowTemplateService } from "../../services/workflowTemplateService";
+import { productConfigService, type ProductConfig } from "../../services/productConfigService";
 import WorkOrderRunner from "./WorkOrderRunner";
 
 // ------------------------------------------------------------------
@@ -193,15 +196,23 @@ interface WorkflowBuilderProps {
   configName?: string;
   /** Called the first time a new template is persisted (id was null → now has id). */
   onTemplateSaved?: (templateId: string) => void;
+  /** Called when user publishes a new Work Instruction from the builder. */
+  onInstructionCreated?: (config: ProductConfig) => void;
 }
 
-const WorkflowBuilder = ({ productId, productName, productFeatures = [], initialTemplateId, configName, onTemplateSaved }: WorkflowBuilderProps) => {
+const WorkflowBuilder = ({ productId, productName, productFeatures = [], initialTemplateId, configName, onTemplateSaved, onInstructionCreated }: WorkflowBuilderProps) => {
   const [workflow, setWorkflow] = useState<Workflow>(() => createDefaultWorkflow(productId, productName));
   const [runnerOpen, setRunnerOpen] = useState(false);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const justLoadedRef = useRef(true); // prevents save from firing on load-triggered state changes
+
+  // Publish-as-work-instruction dialog
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishForm, setPublishForm] = useState({ name: "", configType: "", notes: "", status: "Active" });
+  const [publishSaving, setPublishSaving] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
 
   // Load workflow: LS fallback immediately, then API overrides
   useEffect(() => {
@@ -493,6 +504,35 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   }
 
   // ------------------------------------------------------------------
+  // Publish as Work Instruction
+  // ------------------------------------------------------------------
+
+  async function publishAsInstruction() {
+    if (!templateId) return;
+    const name = publishForm.name.trim();
+    if (!name) { setPublishError("Name is required."); return; }
+    setPublishSaving(true);
+    setPublishError(null);
+    try {
+      const config = await productConfigService.create({
+        name,
+        productId,
+        status: publishForm.status,
+        notes: publishForm.notes.trim() || undefined,
+        featureSelections: [],
+        configType: publishForm.configType.trim() || undefined,
+        workflowTemplateId: templateId,
+      });
+      onInstructionCreated?.(config);
+      setPublishOpen(false);
+    } catch {
+      setPublishError("Failed to publish. Please try again.");
+    } finally {
+      setPublishSaving(false);
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Render
   // ------------------------------------------------------------------
 
@@ -525,7 +565,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             </Typography>
           </Stack>
         </Stack>
-        <Stack direction="row" spacing={1}>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           <Button
             size="small"
             variant="contained"
@@ -536,6 +576,21 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           >
             Run
           </Button>
+          {!configName && templateId && (
+            <Button
+              size="small"
+              variant="outlined"
+              color="primary"
+              startIcon={<LibraryAddOutlined />}
+              onClick={() => {
+                setPublishForm({ name: workflow.name, configType: "", notes: "", status: "Active" });
+                setPublishError(null);
+                setPublishOpen(true);
+              }}
+            >
+              Publish as Work Instruction
+            </Button>
+          )}
           <Button size="small" variant="outlined" startIcon={<DownloadOutlined />} onClick={exportJSON}>
             Export JSON
           </Button>
@@ -613,6 +668,67 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
         productId={productId}
         productName={productName}
       />
+
+      {/* Publish as Work Instruction dialog */}
+      <Dialog open={publishOpen} onClose={() => !publishSaving && setPublishOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Publish as Work Instruction</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Save this workflow as a named work instruction in the Instructions library. It will be linked to this workflow template so it can be previewed and exported.
+            </Typography>
+            {publishError && <Alert severity="error">{publishError}</Alert>}
+            <TextField
+              label="Instruction name"
+              size="small"
+              fullWidth
+              required
+              value={publishForm.name}
+              onChange={(e) => setPublishForm((f) => ({ ...f, name: e.target.value }))}
+            />
+            <TextField
+              label="Configuration type"
+              size="small"
+              fullWidth
+              placeholder="e.g. Installation, Maintenance, Inspection…"
+              value={publishForm.configType}
+              onChange={(e) => setPublishForm((f) => ({ ...f, configType: e.target.value }))}
+            />
+            <TextField
+              label="Description / notes"
+              size="small"
+              fullWidth
+              multiline
+              rows={3}
+              value={publishForm.notes}
+              onChange={(e) => setPublishForm((f) => ({ ...f, notes: e.target.value }))}
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel>Status</InputLabel>
+              <Select
+                label="Status"
+                value={publishForm.status}
+                onChange={(e) => setPublishForm((f) => ({ ...f, status: e.target.value }))}
+              >
+                <MenuItem value="Active">Active</MenuItem>
+                <MenuItem value="Draft">Draft</MenuItem>
+                <MenuItem value="Archived">Archived</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPublishOpen(false)} disabled={publishSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={publishAsInstruction}
+            disabled={publishSaving || !publishForm.name.trim()}
+            startIcon={publishSaving ? <CircularProgress size={14} /> : <LibraryAddOutlined />}
+          >
+            {publishSaving ? "Publishing…" : "Publish"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 };
@@ -961,11 +1077,8 @@ function StepEditorPanel({
               workflow={workflow}
               step={step}
               templateId={templateId}
-              onStepChange={(patch) => updateStep(step.id, patch)}
-              onWorkflowUpdate={(wf) => {
-                justLoadedRef.current = true;
-                setWorkflow(wf);
-              }}
+              onStepChange={onStepChange}
+              onWorkflowUpdate={onWorkflowUpdate}
             />
           </TabPanel>
         </Box>

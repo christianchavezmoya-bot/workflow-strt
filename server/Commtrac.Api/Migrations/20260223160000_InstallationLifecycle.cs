@@ -1,11 +1,15 @@
 using System;
+using Commtrac.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace Commtrac.Api.Migrations
 {
-    /// <inheritdoc />
+    [DbContext(typeof(AppDbContext))]
+    [Migration("20260223160000_InstallationLifecycle")]
     public partial class InstallationLifecycle : Migration
     {
         /// <inheritdoc />

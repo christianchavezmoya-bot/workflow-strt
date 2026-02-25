@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -54,6 +55,8 @@ public class WorkInstructionTemplatesController : ControllerBase
             FeatureSelectionsJson = SerializeSelections(request.FeatureSelections),
             Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
             WorkflowTemplateId = string.IsNullOrWhiteSpace(request.WorkflowTemplateId) ? null : request.WorkflowTemplateId,
+            ConfigType = string.IsNullOrWhiteSpace(request.ConfigType) ? null : request.ConfigType.Trim(),
+            CreatedBy = User.FindFirstValue(ClaimTypes.Name) ?? User.FindFirstValue(ClaimTypes.Email) ?? "Unknown",
         };
         _db.WorkInstructionTemplates.Add(item);
         await _db.SaveChangesAsync();
@@ -74,6 +77,8 @@ public class WorkInstructionTemplatesController : ControllerBase
         item.Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
         if (request.WorkflowTemplateId is not null)
             item.WorkflowTemplateId = string.IsNullOrWhiteSpace(request.WorkflowTemplateId) ? null : request.WorkflowTemplateId;
+        if (request.ConfigType is not null)
+            item.ConfigType = string.IsNullOrWhiteSpace(request.ConfigType) ? null : request.ConfigType.Trim();
         item.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -105,6 +110,6 @@ public class WorkInstructionTemplatesController : ControllerBase
         }
         catch { }
 
-        return new(w.Id, w.Name, w.ProductId, w.Status, selections, w.Notes, w.WorkflowTemplateId, w.CreatedAt, w.UpdatedAt);
+        return new(w.Id, w.Name, w.ProductId, w.Status, selections, w.Notes, w.WorkflowTemplateId, w.ConfigType, w.CreatedBy, w.CreatedAt, w.UpdatedAt);
     }
 }

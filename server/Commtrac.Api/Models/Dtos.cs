@@ -183,6 +183,8 @@ public record WorkInstructionTemplateDto(
     List<FeatureSelectionDto> FeatureSelections,
     string? Notes,
     string? WorkflowTemplateId,
+    string? ConfigType,
+    string? CreatedBy,
     DateTime CreatedAt,
     DateTime UpdatedAt
 );
@@ -193,7 +195,8 @@ public record UpsertWITemplateRequest(
     string Status,
     List<FeatureSelectionDto> FeatureSelections,
     string? Notes,
-    string? WorkflowTemplateId
+    string? WorkflowTemplateId,
+    string? ConfigType
 );
 
 public record SaveAsRequest(string Name);
@@ -510,6 +513,7 @@ public record WorkOrderDto(
     string Status,
     string StepsDataJson,
     string? ProjectAssetId,
+    string? Notes,
     DateTime CreatedAt,
     DateTime UpdatedAt
 );
@@ -520,7 +524,8 @@ public record UpsertWorkOrderRequest(
     string? JobReference,
     string? Status,
     string? StepsDataJson,
-    string? ProjectAssetId
+    string? ProjectAssetId,
+    string? Notes
 );
 
 public record ProjectAssetDto(

@@ -513,6 +513,8 @@ public class WorkOrderEntity
     public string StepsDataJson { get; set; } = "[]";
     [MaxLength(100)]
     public string? ProjectAssetId { get; set; }
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -531,6 +533,10 @@ public class WorkInstructionTemplateEntity
     public string? Notes { get; set; }
     [MaxLength(100)]
     public string? WorkflowTemplateId { get; set; }
+    [MaxLength(100)]
+    public string? ConfigType { get; set; }
+    [MaxLength(200)]
+    public string? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

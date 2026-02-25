@@ -14,6 +14,8 @@ export interface ProductConfig {
   featureSelections: FeatureSelection[];
   notes?: string;
   workflowTemplateId?: string;
+  configType?: string;
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -25,6 +27,7 @@ export interface UpsertProductConfigInput {
   featureSelections: FeatureSelection[];
   notes?: string;
   workflowTemplateId?: string;
+  configType?: string;
 }
 
 const LS_KEY = (productId: string) => `product_configs_v1_${productId}`;
@@ -61,6 +64,7 @@ export const productConfigService = {
       featureSelections: input.featureSelections,
       notes: input.notes ?? null,
       workflowTemplateId: input.workflowTemplateId ?? null,
+      configType: input.configType ?? null,
     });
     const configs = lsRead(input.productId);
     configs.unshift(res.data);

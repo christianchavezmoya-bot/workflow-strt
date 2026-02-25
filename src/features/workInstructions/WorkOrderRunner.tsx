@@ -37,8 +37,8 @@ interface WorkOrderRunnerProps {
   productName: string;
   /** Links this work order execution to a specific project asset. */
   projectAssetId?: string;
-  /** Called immediately after the work order is successfully saved. */
-  onComplete?: () => void;
+  /** Called after save with any feature values captured during the run (featureId → value). */
+  onComplete?: (capturedFeatureValues: Record<string, string>) => void;
 }
 
 type Stage = "setup" | "running" | "summary";
@@ -141,6 +141,20 @@ export default function WorkOrderRunner({ open, onClose, workflow, productId, pr
     }
   }
 
+  // Extract featureId → value map from captured inputs that are linked to product features
+  function extractFeatureValues(): Record<string, string> {
+    const result: Record<string, string> = {};
+    for (const step of stepsSorted) {
+      for (const inp of step.inputs ?? []) {
+        if (inp.featureId) {
+          const val = values[step.id]?.[inp.id];
+          if (val !== undefined && val !== "") result[inp.featureId] = val;
+        }
+      }
+    }
+    return result;
+  }
+
   // Build StepCapture array from values
   function buildStepsData(): StepCapture[] {
     return stepsSorted
@@ -164,7 +178,7 @@ export default function WorkOrderRunner({ open, onClose, workflow, productId, pr
         projectAssetId,
       });
       setSaved(true);
-      onComplete?.();
+      onComplete?.(extractFeatureValues());
       setTimeout(() => handleClose(), 1200);
     } catch {
       setSaveError("Save failed. Check your connection and try again.");

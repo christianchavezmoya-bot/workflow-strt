@@ -63,13 +63,10 @@ public static class DbInitializer
         // Customer seed data is now handled by migrations (SeedDemoCustomerAndSite)
         // Removed default customers to avoid conflicts
 
-        if (!db.Products.Any())
-        {
-            db.Products.AddRange(
-                new ProductEntity { Name = "Tracker Alpha", Description = "Core tracking suite." },
-                new ProductEntity { Name = "Tracker Pro", Description = "Advanced reporting and alerts." }
-            );
-        }
+        SeedProducts(db);
+        db.SaveChanges(); // flush products before feature patch so LINQ queries can find them
+
+        EnsureAim100Features(db);
 
         if (!db.Projects.Any())
         {
@@ -267,6 +264,61 @@ public static class DbInitializer
         {
             conn.Close();
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Product seeding
+    // -----------------------------------------------------------------------
+
+    // All known products. Add new products here — they will be inserted on
+    // first startup if the name doesn't already exist in the database.
+    private static readonly (string Name, string? Description)[] KnownProducts =
+    [
+        ("AIM-100",               "AIM-100 field device"),
+        ("Commtrac",              "Commtrac core platform"),
+        ("EDGE AI",               "EDGE AI processing module"),
+        ("Hazard Avert",          "Hazard detection and avoidance"),
+        ("Hazard Avert - Gen 2",  "Hazard Avert second generation"),
+        ("Ping Alert",            "Personnel alerting system"),
+        ("New Ice Cream",         null),
+        ("Coffee",                null),
+    ];
+
+    private static void SeedProducts(AppDbContext db)
+    {
+        var existingNames = db.Products.Select(p => p.Name).ToHashSet();
+        foreach (var (name, desc) in KnownProducts)
+        {
+            if (!existingNames.Contains(name))
+                db.Products.Add(new ProductEntity { Name = name, Description = desc });
+        }
+    }
+
+    // AIM-100 feature definitions reconstructed from the AIM-100 Workflow StepsJson.
+    // The IDs are kept identical so existing workflow step featureId references stay intact.
+    private const string Aim100FeaturesJson =
+        """[{"id":"088aa75d-fd13-4d99-bf18-07c4c95c21c9","name":"Front Camera","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"5b2f3511-9a13-4fb3-86f1-1b30d132bce6","name":"Router","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"b3eef625-8bf1-4488-8af8-0699bd0e9ad9","name":"Wi-Fi Antenna","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"c6b4b1d8-4b03-44c6-9225-779850febcde","name":"IP","valueType":"text","options":[],"quantity":0,"subProperties":null},""" +
+        """{"id":"7b267e0a-9c42-4b3d-8aa9-4cea574cf57e","name":"CAN BUS","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"87e9f6ad-b0f8-4cd4-ae8f-4c816932f57d","name":"Park Brake Signal","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"d8369777-e271-4f21-ba83-4512be0347d1","name":"Reverse Signal","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"2f579496-94d3-4bd3-b834-0934653a4fd4","name":"AIM-100","valueType":"component","options":[],"quantity":0,"subProperties":[""" +
+            """{"id":"404335f9-7aa8-4eae-9a38-eb97617b76e6","name":"Part Number","valueType":"text"},""" +
+            """{"id":"9e9efc4a-ad1c-4263-827e-2bd2d620ff48","name":"Serial Number","valueType":"text"},""" +
+            """{"id":"af17eb48-4286-4cbb-b567-c7bc87880301","name":"IP","valueType":"text"},""" +
+            """{"id":"92366f8e-1561-4dc3-915f-b597037d5d82","name":"Firmware","valueType":"text"}]}]""";
+
+    /// <summary>
+    /// Restores AIM-100 feature definitions if they are missing (FeaturesJson == "[]").
+    /// Only patches the row when empty so any UI edits to features are never overwritten.
+    /// </summary>
+    private static void EnsureAim100Features(AppDbContext db)
+    {
+        var aim100 = db.Products.FirstOrDefault(p => p.Name == "AIM-100");
+        if (aim100 is null || aim100.FeaturesJson != "[]") return;
+        aim100.FeaturesJson = Aim100FeaturesJson;
     }
 
     /// <summary>
