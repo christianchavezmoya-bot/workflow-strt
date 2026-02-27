@@ -18,6 +18,7 @@ public static class DbInitializer
         EnsureAuditLogTable(db);
         EnsureSessionsTable(db);
         EnsurePasswordChangedAtColumn(db);
+        EnsureDocumentTables(db);
         EnsureLinkableKeyFieldDefinitions(db);
 
         if (!db.Users.Any())
@@ -350,6 +351,61 @@ public static class DbInitializer
                 cmd.CommandText = "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES ('20260212035001_Add2faFields', '8.0.23')";
                 cmd.ExecuteNonQuery();
             }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureDocumentTables(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            // Add CreatedBy column to Documents if missing
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='CreatedBy'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN CreatedBy TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            // Add Notes column to Documents if missing
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='Notes'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN Notes TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            // Add CustomValuesJson column to Documents if missing
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='CustomValuesJson'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN CustomValuesJson TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            // Add DownloadUrl column to Documents if missing
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='DownloadUrl'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN DownloadUrl TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            // Create DocumentConfigs table if missing
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS DocumentConfigs (
+                    Id INTEGER PRIMARY KEY NOT NULL,
+                    TabsJson TEXT NOT NULL DEFAULT '[]',
+                    FieldsJson TEXT NOT NULL DEFAULT '[]'
+                )";
+            cmd.ExecuteNonQuery();
         }
         finally
         {

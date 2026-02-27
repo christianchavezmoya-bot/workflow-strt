@@ -3,10 +3,11 @@ import {
   ArticleOutlined,
   ArrowBackOutlined,
   BuildOutlined,
+  ContentCopyOutlined,
   DeleteOutline,
   DownloadOutlined,
   FormatListBulletedOutlined,
-  LinkOutlined,
+  PublishOutlined,
   SearchOutlined,
   SettingsOutlined,
 } from "@mui/icons-material";
@@ -21,16 +22,13 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  FormControl,
   FormControlLabel,
   IconButton,
   InputAdornment,
-  InputLabel,
   ListItemIcon,
   Menu,
   MenuItem,
   Paper,
-  Select,
   Stack,
   Switch,
   Tab,
@@ -47,11 +45,12 @@ import {
   Typography,
 } from "@mui/material";
 import { demoProducts } from "../../data/demo";
-import { productConfigService, type FeatureSelection, type ProductConfig } from "../../services/productConfigService";
-import { workflowTemplateService } from "../../services/workflowTemplateService";
+import type { FeatureSelection } from "../../services/productConfigService";
+import { workflowConfigService } from "../../services/workflowConfigService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import type { Workflow } from "../../types/workflow";
+import type { WorkflowConfig } from "../../types/workflowConfig";
 import WorkflowBuilder from "./WorkflowBuilder";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -64,7 +63,18 @@ function formatDate(iso: string) {
   }
 }
 
-function downloadJson(cfg: ProductConfig, productName: string) {
+function parseSteps(cfg: WorkflowConfig): Workflow | null {
+  try {
+    const parsed = JSON.parse(cfg.stepsJson);
+    if (parsed && Array.isArray(parsed.steps)) return parsed as Workflow;
+    if (Array.isArray(parsed)) {
+      return { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
+    }
+  } catch {}
+  return null;
+}
+
+function downloadJson(cfg: WorkflowConfig, productName: string) {
   const blob = new Blob(
     [JSON.stringify({ ...cfg, productName }, null, 2)],
     { type: "application/json" },
@@ -77,8 +87,9 @@ function downloadJson(cfg: ProductConfig, productName: string) {
   URL.revokeObjectURL(url);
 }
 
-function printPdf(cfg: ProductConfig, workflow: Workflow | null, productName: string) {
-  const steps = workflow?.steps ?? [];
+function printPdf(cfg: WorkflowConfig, productName: string) {
+  const workflow = parseSteps(cfg);
+  const steps = workflow?.steps ? [...workflow.steps].sort((a, b) => a.order - b.order) : [];
   const stepsHtml = steps
     .map(
       (step) => `
@@ -111,11 +122,10 @@ function printPdf(cfg: ProductConfig, workflow: Workflow | null, productName: st
     <p style="margin:0 0 16px;font-size:13px;color:#666">
       Product: ${productName}&nbsp;|&nbsp;
       Configuration Type: ${cfg.configType ?? "—"}&nbsp;|&nbsp;
-      Status: ${cfg.status}
+      Status: ${cfg.status}&nbsp;|&nbsp;v${cfg.version}
     </p>
     ${cfg.notes ? `<p style="margin:0 0 12px;font-size:12px;color:#555;font-style:italic">${cfg.notes}</p>` : ""}
     ${cfg.createdBy ? `<p style="margin:0 0 12px;font-size:12px;color:#888">Created by: ${cfg.createdBy} on ${formatDate(cfg.createdAt)}</p>` : ""}
-    ${workflow ? `<p style="margin:0 0 12px;font-size:12px">Linked workflow: <strong>${workflow.name}</strong></p>` : ""}
     <hr style="margin:14px 0">
     ${stepsHtml || "<p>No workflow steps defined.</p>"}
     </body></html>`;
@@ -128,29 +138,38 @@ function printPdf(cfg: ProductConfig, workflow: Workflow | null, productName: st
   w.print();
 }
 
+// ─── Status chip ──────────────────────────────────────────────────────────────
+
+function StatusChip({ status }: { status: string }) {
+  const color =
+    status === "Published" ? "success"
+    : status === "Archived" ? "default"
+    : "warning";
+  return <Chip size="small" label={status} color={color as "success" | "default" | "warning"} />;
+}
+
 // ─── Preview dialog ────────────────────────────────────────────────────────────
 
 interface PreviewProps {
   open: boolean;
-  cfg: ProductConfig;
-  workflow: Workflow | null;
-  loading: boolean;
+  cfg: WorkflowConfig;
   productName: string;
   onClose: () => void;
 }
 
-function PreviewDialog({ open, cfg, workflow, loading, productName, onClose }: PreviewProps) {
+function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
   const [activeStep, setActiveStep] = useState(0);
 
-  useEffect(() => {
-    if (open) setActiveStep(0);
-  }, [open, cfg.id]);
-
+  const workflow = useMemo(() => parseSteps(cfg), [cfg]);
   const steps = useMemo(
     () => (workflow?.steps ? [...workflow.steps].sort((a, b) => a.order - b.order) : []),
     [workflow],
   );
   const currentStep = steps[activeStep] ?? null;
+
+  useEffect(() => {
+    if (open) setActiveStep(0);
+  }, [open, cfg.id]);
 
   return (
     <Dialog
@@ -172,9 +191,6 @@ function PreviewDialog({ open, cfg, workflow, loading, productName, onClose }: P
               {cfg.configType && (
                 <Typography variant="caption" sx={{ opacity: 0.85 }}>Type: {cfg.configType}</Typography>
               )}
-              {workflow && (
-                <Typography variant="caption" sx={{ opacity: 0.85 }}>Workflow: {workflow.name}</Typography>
-              )}
               {cfg.createdBy && (
                 <Typography variant="caption" sx={{ opacity: 0.85 }}>By: {cfg.createdBy}</Typography>
               )}
@@ -187,21 +203,15 @@ function PreviewDialog({ open, cfg, workflow, loading, productName, onClose }: P
             )}
           </Box>
           <Stack alignItems="flex-end" spacing={0.75} sx={{ flexShrink: 0 }}>
-            <Chip
-              size="small"
-              label={cfg.status}
-              sx={{
-                bgcolor:
-                  cfg.status === "Active" ? "success.light"
-                  : cfg.status === "Archived" ? "grey.400"
-                  : "warning.light",
-                color:
-                  cfg.status === "Active" ? "success.dark"
-                  : cfg.status === "Archived" ? "grey.800"
-                  : "warning.dark",
-                fontWeight: 700,
-              }}
-            />
+            <Stack direction="row" spacing={0.5} alignItems="center">
+              <StatusChip status={cfg.status} />
+              <Chip
+                size="small"
+                label={`v${cfg.version}`}
+                variant="outlined"
+                sx={{ color: "primary.contrastText", borderColor: "rgba(255,255,255,0.5)" }}
+              />
+            </Stack>
             {steps.length > 0 && (
               <Typography variant="caption" sx={{ opacity: 0.7 }}>
                 {steps.length} step{steps.length === 1 ? "" : "s"}
@@ -213,17 +223,13 @@ function PreviewDialog({ open, cfg, workflow, loading, productName, onClose }: P
 
       {/* ── Body ── */}
       <Box sx={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        {loading ? (
-          <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", flex: 1 }}>
-            <CircularProgress size={32} />
-          </Box>
-        ) : !workflow ? (
+        {!workflow || steps.length === 0 ? (
           <Box sx={{ p: 3, flex: 1 }}>
-            <Alert severity="info">No workflow template linked to this work instruction.</Alert>
-          </Box>
-        ) : steps.length === 0 ? (
-          <Box sx={{ p: 3, flex: 1 }}>
-            <Alert severity="info">This workflow has no steps defined yet.</Alert>
+            <Alert severity="info">
+              {!workflow
+                ? "No workflow steps defined for this work instruction."
+                : "This workflow has no steps defined yet."}
+            </Alert>
           </Box>
         ) : (
           <>
@@ -287,7 +293,6 @@ function PreviewDialog({ open, cfg, workflow, loading, productName, onClose }: P
             <Box sx={{ flex: 1, overflowY: "auto", p: 3.5 }}>
               {currentStep && (
                 <Stack spacing={3}>
-                  {/* Step heading */}
                   <Box>
                     <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1 }}>
                       <Box
@@ -320,7 +325,6 @@ function PreviewDialog({ open, cfg, workflow, loading, productName, onClose }: P
 
                   <Divider />
 
-                  {/* Input fields as form rows */}
                   {(currentStep.inputs ?? []).length === 0 ? (
                     <Typography variant="body2" color="text.disabled" fontStyle="italic">
                       No input fields for this step.
@@ -381,7 +385,6 @@ function PreviewDialog({ open, cfg, workflow, loading, productName, onClose }: P
                     </Stack>
                   )}
 
-                  {/* Decision options */}
                   {currentStep.decisionsEnabled && (currentStep.decisions ?? []).length > 0 && (
                     <Box>
                       <Typography
@@ -400,7 +403,6 @@ function PreviewDialog({ open, cfg, workflow, loading, productName, onClose }: P
                     </Box>
                   )}
 
-                  {/* Prev / Next navigation */}
                   <Stack direction="row" spacing={1} alignItems="center" pt={1}>
                     <Button
                       size="small"
@@ -442,7 +444,6 @@ function PreviewDialog({ open, cfg, workflow, loading, productName, onClose }: P
 interface ConfigFormState {
   name: string;
   configType: string;
-  status: string;
   notes: string;
   featureSelections: FeatureSelection[];
 }
@@ -450,7 +451,6 @@ interface ConfigFormState {
 const emptyConfigForm = (): ConfigFormState => ({
   name: "",
   configType: "",
-  status: "Draft",
   notes: "",
   featureSelections: [],
 });
@@ -464,27 +464,24 @@ const WorkInstructions = () => {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState<"instructions" | "builder">("instructions");
 
-  const [configs, setConfigs] = useState<ProductConfig[]>([]);
+  const [configs, setConfigs] = useState<WorkflowConfig[]>([]);
   const [configsLoading, setConfigsLoading] = useState(false);
   const [configSearch, setConfigSearch] = useState("");
 
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
-  const [editingConfig, setEditingConfig] = useState<ProductConfig | null>(null);
+  const [editingConfig, setEditingConfig] = useState<WorkflowConfig | null>(null);
   const [configForm, setConfigForm] = useState<ConfigFormState>(emptyConfigForm());
   const [configError, setConfigError] = useState<string | null>(null);
   const [configSaving, setConfigSaving] = useState(false);
 
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
-
-  const [previewConfig, setPreviewConfig] = useState<ProductConfig | null>(null);
-  const [previewWorkflow, setPreviewWorkflow] = useState<Workflow | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-
-  const [exportMenu, setExportMenu] = useState<{ el: HTMLElement; cfg: ProductConfig } | null>(null);
-  const [exportWorkflow, setExportWorkflow] = useState<Workflow | null>(null);
-
-  const [deleteConfig, setDeleteConfig] = useState<ProductConfig | null>(null);
+  const [previewConfig, setPreviewConfig] = useState<WorkflowConfig | null>(null);
+  const [exportMenu, setExportMenu] = useState<{ el: HTMLElement; cfg: WorkflowConfig } | null>(null);
+  const [deleteConfig, setDeleteConfig] = useState<WorkflowConfig | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [cloningId, setCloningId] = useState<string | null>(null);
 
   const [settingsMenu, setSettingsMenu] = useState<HTMLElement | null>(null);
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
@@ -511,7 +508,7 @@ const WorkInstructions = () => {
   const loadConfigs = useCallback(async (productId: string) => {
     setConfigsLoading(true);
     try {
-      const data = await productConfigService.listByProduct(productId);
+      const data = await workflowConfigService.listByProduct(productId);
       setConfigs(data);
     } finally {
       setConfigsLoading(false);
@@ -542,13 +539,26 @@ const WorkInstructions = () => {
 
   // ─── Config CRUD ─────────────────────────────────────────────────────────────
 
-  function openEditConfig(cfg: ProductConfig) {
+  function openNewConfig() {
+    setEditingConfig(null);
+    setConfigForm({
+      ...emptyConfigForm(),
+      featureSelections: activeFeatures.map((f) => ({ featureId: f.id, included: false, activeCount: 0 })),
+    });
+    setConfigError(null);
+    setConfigDialogOpen(true);
+  }
+
+  function openEditConfig(cfg: WorkflowConfig) {
     setEditingConfig(cfg);
-    const selMap = new Map(cfg.featureSelections.map((s) => [s.featureId, s]));
+    let featureSels: FeatureSelection[] = [];
+    try {
+      featureSels = JSON.parse(cfg.featureSelectionsJson) as FeatureSelection[];
+    } catch {}
+    const selMap = new Map(featureSels.map((s) => [s.featureId, s]));
     setConfigForm({
       name: cfg.name,
       configType: cfg.configType ?? "",
-      status: cfg.status,
       notes: cfg.notes ?? "",
       featureSelections: activeFeatures.map(
         (f) => selMap.get(f.id) ?? { featureId: f.id, included: false, activeCount: 0 },
@@ -573,16 +583,15 @@ const WorkInstructions = () => {
       const payload = {
         name,
         productId: activeProduct.id,
-        status: configForm.status,
         notes: configForm.notes.trim() || undefined,
-        featureSelections: configForm.featureSelections,
         configType: configForm.configType.trim() || undefined,
+        featureSelectionsJson: JSON.stringify(configForm.featureSelections),
       };
       if (editingConfig) {
-        const updated = await productConfigService.update(editingConfig.id, payload);
+        const updated = await workflowConfigService.update(editingConfig.id, payload);
         setConfigs((prev) => prev.map((c) => (c.id === editingConfig.id ? updated : c)));
       } else {
-        const created = await productConfigService.create(payload);
+        const created = await workflowConfigService.create(payload);
         setConfigs((prev) => [created, ...prev]);
       }
       closeConfigDialog();
@@ -594,10 +603,10 @@ const WorkInstructions = () => {
   }
 
   async function confirmDelete() {
-    if (!deleteConfig || !activeProduct) return;
+    if (!deleteConfig) return;
     setDeleting(true);
     try {
-      await productConfigService.remove(deleteConfig.id, activeProduct.id);
+      await workflowConfigService.remove(deleteConfig.id, deleteConfig.productId);
       setConfigs((prev) => prev.filter((c) => c.id !== deleteConfig.id));
       if (selectedConfigId === deleteConfig.id) setSelectedConfigId(null);
       setDeleteConfig(null);
@@ -606,51 +615,42 @@ const WorkInstructions = () => {
     }
   }
 
-  async function handleTemplateSaved(templateId: string) {
-    if (!selectedConfigId) return;
+  async function handlePublish(cfg: WorkflowConfig) {
+    setPublishingId(cfg.id);
     try {
-      const updated = await productConfigService.update(selectedConfigId, { workflowTemplateId: templateId });
-      setConfigs((prev) => prev.map((c) => (c.id === selectedConfigId ? updated : c)));
+      const updated = await workflowConfigService.publish(cfg.id);
+      setConfigs((prev) => prev.map((c) => (c.id === cfg.id ? updated : c)));
     } catch {
-      console.warn("[WorkInstructions] failed to link template to config");
+      console.warn("[WorkInstructions] publish failed");
+    } finally {
+      setPublishingId(null);
     }
   }
 
-  function openBuilder(cfg: ProductConfig) {
+  async function handleClone(cfg: WorkflowConfig) {
+    setCloningId(cfg.id);
+    try {
+      const cloned = await workflowConfigService.clone(cfg.id);
+      setConfigs((prev) => [cloned, ...prev]);
+    } catch {
+      console.warn("[WorkInstructions] clone failed");
+    } finally {
+      setCloningId(null);
+    }
+  }
+
+  function openBuilder(cfg: WorkflowConfig) {
     setSelectedConfigId(cfg.id);
     setViewMode("builder");
   }
 
-  function handleInstructionCreated(config: ProductConfig) {
-    setConfigs((prev) => [config, ...prev]);
+  function handleConfigSaved(updated: WorkflowConfig) {
+    setConfigs((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+  }
+
+  function handleConfigPublished(updated: WorkflowConfig) {
+    setConfigs((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
     setViewMode("instructions");
-  }
-
-  // ─── Preview ──────────────────────────────────────────────────────────────────
-
-  async function openPreview(cfg: ProductConfig) {
-    setPreviewConfig(cfg);
-    setPreviewWorkflow(null);
-    if (cfg.workflowTemplateId) {
-      setPreviewLoading(true);
-      try {
-        const wf = await workflowTemplateService.getById(cfg.workflowTemplateId);
-        setPreviewWorkflow(wf);
-      } finally {
-        setPreviewLoading(false);
-      }
-    }
-  }
-
-  // ─── Export ───────────────────────────────────────────────────────────────────
-
-  async function openExportMenu(e: React.MouseEvent<HTMLElement>, cfg: ProductConfig) {
-    setExportMenu({ el: e.currentTarget, cfg });
-    setExportWorkflow(null);
-    if (cfg.workflowTemplateId) {
-      const wf = await workflowTemplateService.getById(cfg.workflowTemplateId);
-      setExportWorkflow(wf);
-    }
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────────
@@ -717,20 +717,25 @@ const WorkInstructions = () => {
             </Typography>
           ) : (
             <Stack spacing={2}>
-              <TextField
-                size="small"
-                placeholder="Search work instructions…"
-                value={configSearch}
-                onChange={(e) => setConfigSearch(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchOutlined fontSize="small" />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ maxWidth: 360 }}
-              />
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <TextField
+                  size="small"
+                  placeholder="Search work instructions…"
+                  value={configSearch}
+                  onChange={(e) => setConfigSearch(e.target.value)}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchOutlined fontSize="small" />
+                      </InputAdornment>
+                    ),
+                  }}
+                  sx={{ maxWidth: 360 }}
+                />
+                <Button variant="contained" size="small" onClick={openNewConfig}>
+                  + New Work Instruction
+                </Button>
+              </Stack>
 
               {configsLoading ? (
                 <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
@@ -739,7 +744,7 @@ const WorkInstructions = () => {
               ) : filteredConfigs.length === 0 ? (
                 <Alert severity="info">
                   {configs.length === 0
-                    ? `No work instructions yet for ${activeProduct.name}. Use the Builder to create and publish one.`
+                    ? `No work instructions yet for ${activeProduct.name}. Click "+ New Work Instruction" to create one.`
                     : "No work instructions match the search."}
                 </Alert>
               ) : (
@@ -761,24 +766,8 @@ const WorkInstructions = () => {
                         <TableCell>
                           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                             <Typography variant="body2" fontWeight={500}>{cfg.name}</Typography>
-                            <Chip
-                              size="small"
-                              label={cfg.status}
-                              color={
-                                cfg.status === "Active" ? "success"
-                                : cfg.status === "Archived" ? "default"
-                                : "warning"
-                              }
-                            />
-                            {cfg.workflowTemplateId && (
-                              <Chip
-                                size="small"
-                                icon={<LinkOutlined sx={{ fontSize: 11 }} />}
-                                label="Workflow"
-                                color="primary"
-                                variant="outlined"
-                              />
-                            )}
+                            <StatusChip status={cfg.status} />
+                            <Chip size="small" label={`v${cfg.version}`} variant="outlined" />
                           </Stack>
                         </TableCell>
                         <TableCell>
@@ -799,22 +788,45 @@ const WorkInstructions = () => {
                           <Typography variant="body2">{formatDate(cfg.createdAt)}</Typography>
                         </TableCell>
                         <TableCell align="right">
-                          <Stack direction="row" spacing={0.25} justifyContent="flex-end">
+                          <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
+                            {/* New version — Published/Archived */}
+                            {(cfg.status === "Published" || cfg.status === "Archived") && (
+                              <Tooltip title="Create new version (Draft)">
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleClone(cfg)}
+                                    disabled={cloningId === cfg.id}
+                                  >
+                                    {cloningId === cfg.id
+                                      ? <CircularProgress size={14} />
+                                      : <ContentCopyOutlined fontSize="small" />}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            )}
                             <Tooltip title="Preview workflow">
-                              <IconButton size="small" onClick={() => openPreview(cfg)}>
+                              <IconButton size="small" onClick={() => setPreviewConfig(cfg)}>
                                 <ArticleOutlined fontSize="small" />
                               </IconButton>
                             </Tooltip>
                             <Tooltip title="Export">
-                              <IconButton size="small" onClick={(e) => openExportMenu(e, cfg)}>
+                              <IconButton size="small" onClick={(e) => setExportMenu({ el: e.currentTarget, cfg })}>
                                 <DownloadOutlined fontSize="small" />
                               </IconButton>
                             </Tooltip>
-                            <Tooltip title="Open Builder">
+                            <Tooltip title={cfg.status === "Published" ? "View in Builder (read-only)" : "Open Builder"}>
                               <IconButton size="small" color="primary" onClick={() => openBuilder(cfg)}>
                                 <BuildOutlined fontSize="small" />
                               </IconButton>
                             </Tooltip>
+                            {cfg.status === "Draft" && (
+                              <Tooltip title="Edit details">
+                                <IconButton size="small" onClick={() => openEditConfig(cfg)}>
+                                  <SettingsOutlined fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
                             <Tooltip title="Delete">
                               <IconButton size="small" color="error" onClick={() => setDeleteConfig(cfg)}>
                                 <DeleteOutline fontSize="small" />
@@ -844,19 +856,23 @@ const WorkInstructions = () => {
               Back to Instructions
             </Button>
             {selectedConfig && (
-              <Typography variant="body2" color="text.secondary">
-                / {selectedConfig.name}
-              </Typography>
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  / {selectedConfig.name}
+                </Typography>
+                <StatusChip status={selectedConfig.status} />
+                <Chip size="small" label={`v${selectedConfig.version}`} variant="outlined" />
+              </>
             )}
           </Stack>
           <WorkflowBuilder
             productId={activeProduct.id}
             productName={activeProduct.name}
             productFeatures={activeFeatures}
-            initialTemplateId={selectedConfig?.workflowTemplateId ?? undefined}
+            initialConfigId={selectedConfig?.id ?? null}
             configName={selectedConfig?.name}
-            onTemplateSaved={handleTemplateSaved}
-            onInstructionCreated={handleInstructionCreated}
+            onConfigSaved={handleConfigSaved}
+            onConfigPublished={handleConfigPublished}
           />
         </Stack>
       )}
@@ -885,7 +901,7 @@ const WorkInstructions = () => {
         <MenuItem
           onClick={() => {
             if (!exportMenu) return;
-            printPdf(exportMenu.cfg, exportWorkflow, activeProduct?.name ?? "");
+            printPdf(exportMenu.cfg, activeProduct?.name ?? "");
             setExportMenu(null);
           }}
         >
@@ -899,10 +915,8 @@ const WorkInstructions = () => {
         <PreviewDialog
           open
           cfg={previewConfig}
-          workflow={previewWorkflow}
-          loading={previewLoading}
           productName={activeProduct?.name ?? ""}
-          onClose={() => { setPreviewConfig(null); setPreviewWorkflow(null); }}
+          onClose={() => setPreviewConfig(null)}
         />
       )}
 
@@ -916,6 +930,11 @@ const WorkInstructions = () => {
         <DialogTitle>{editingConfig ? "Edit Work Instruction" : "New Work Instruction"}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {!editingConfig && (
+              <Alert severity="info" sx={{ fontSize: "0.8rem" }}>
+                New work instructions are created as <strong>Draft</strong>. Use the Builder to add steps, then publish when ready.
+              </Alert>
+            )}
             <TextField
               label="Work Instruction Name"
               value={configForm.name}
@@ -933,18 +952,6 @@ const WorkInstructions = () => {
               placeholder="e.g. Installation, Maintenance, Inspection"
               helperText="Used to identify this instruction type when assigning to an asset"
             />
-            <FormControl size="small" fullWidth>
-              <InputLabel>Status</InputLabel>
-              <Select
-                label="Status"
-                value={configForm.status}
-                onChange={(e) => setConfigForm((p) => ({ ...p, status: e.target.value }))}
-              >
-                <MenuItem value="Draft">Draft</MenuItem>
-                <MenuItem value="Active">Active</MenuItem>
-                <MenuItem value="Archived">Archived</MenuItem>
-              </Select>
-            </FormControl>
             <TextField
               label="Description"
               value={configForm.notes}
@@ -1012,7 +1019,7 @@ const WorkInstructions = () => {
         <DialogActions>
           <Button onClick={closeConfigDialog} disabled={configSaving}>Cancel</Button>
           <Button variant="contained" onClick={saveConfig} disabled={configSaving}>
-            {configSaving ? "Saving…" : "Save"}
+            {configSaving ? "Saving…" : editingConfig ? "Save Changes" : "Create Draft"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1026,6 +1033,11 @@ const WorkInstructions = () => {
       >
         <DialogTitle>Delete Work Instruction?</DialogTitle>
         <DialogContent>
+          {deleteConfig?.status === "Published" && (
+            <Alert severity="warning" sx={{ mb: 1.5 }}>
+              This instruction is <strong>Published</strong> and may be assigned to assets. Deleting it will fail if any workflow runs reference it.
+            </Alert>
+          )}
           <Typography>
             Delete <strong>{deleteConfig?.name}</strong>? This cannot be undone.
           </Typography>

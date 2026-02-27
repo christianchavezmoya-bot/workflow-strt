@@ -406,8 +406,13 @@ public record DocumentDto(
     string UploadedAt,
     string? ContentType,
     long? FileSize,
-    string? DownloadUrl
+    string? DownloadUrl,
+    string? CreatedBy,
+    string? Notes,
+    string? CustomValuesJson
 );
+
+public record DocumentConfigDto(string TabsJson, string FieldsJson);
 
 public record InspectionPhotoDto(
     string Id,
@@ -535,13 +540,17 @@ public record ProjectAssetDto(
     string? ProductConfigId,
     string? WorkflowTemplateId,
     string AssetTag,
+    string? AssetName,
     string? SerialNumber,
+    string? AssetModel,
+    string? Manufacturer,
     string? Location,
     string? AssignedUserId,
     string Status,
     string? WorkOrderId,
     string? Notes,
     string FeatureValuesJson,
+    string IssuesJson,
     DateTime CreatedAt,
     DateTime UpdatedAt
 );
@@ -552,17 +561,119 @@ public record UpsertProjectAssetRequest(
     string? ProductConfigId,
     string? WorkflowTemplateId,
     string? AssetTag,
+    string? AssetName,
     string? SerialNumber,
+    string? AssetModel,
+    string? Manufacturer,
     string? Location,
     string? AssignedUserId,
     string? Status,
     string? WorkOrderId,
     string? Notes,
-    string? FeatureValuesJson
+    string? FeatureValuesJson,
+    string? IssuesJson
 );
 
 public record BulkCreateProjectAssetsRequest(
     string ProjectId,
     string ProductId,
     List<UpsertProjectAssetRequest> Assets
+);
+
+// ─── v2 Workflow Config Unification DTOs ──────────────────────────────────────
+
+public record WorkflowConfigDto(
+    string Id,
+    string ProductId,
+    string Name,
+    string? DisplayName,
+    string? ConfigType,
+    string Status,
+    int Version,
+    string? TemplateSourceId,
+    string StepsJson,
+    string MediaJson,
+    string FeatureSelectionsJson,
+    string? Notes,
+    string? CreatedBy,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertWorkflowConfigRequest(
+    string? Name,
+    string? ProductId,
+    string? DisplayName,
+    string? ConfigType,
+    string? Notes,
+    string? StepsJson,
+    string? MediaJson,
+    string? FeatureSelectionsJson
+);
+
+public record WorkflowTypeDto(
+    string Id,
+    string Name,
+    string? Icon,
+    int SortOrder,
+    bool IsActive
+);
+
+public record UpsertWorkflowTypeRequest(
+    string Name,
+    string? Icon,
+    int SortOrder
+);
+
+public record AssetWorkflowAssignmentDto(
+    string Id,
+    string AssetId,
+    string WorkflowConfigId,
+    string WorkflowTypeId,
+    string WorkflowTypeName,
+    string WorkflowConfigName,
+    bool Active,
+    string? AssignedBy,
+    DateTime AssignedAt
+);
+
+public record CreateAssignmentRequest(
+    string AssetId,
+    string WorkflowConfigId,
+    string WorkflowTypeId
+);
+
+public record AssetWorkflowRunDto(
+    string Id,
+    string AssetId,
+    string WorkflowConfigId,
+    int WorkflowVersion,
+    string WorkflowSnapshotJson,
+    string? WorkOrderId,
+    string Status,
+    bool IsLocked,
+    string? TechnicianUserId,
+    string StepResultsJson,
+    string IssuesJson,
+    DateTime StartedAt,
+    DateTime? CompletedAt,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record StartRunRequest(
+    string AssetId,
+    string WorkflowConfigId,
+    string? TechnicianUserId
+);
+
+public record SaveRunProgressRequest(
+    string StepResultsJson,
+    string? IssuesJson,
+    string? Status
+);
+
+public record CompleteRunRequest(
+    string StepResultsJson,
+    string IssuesJson
 );

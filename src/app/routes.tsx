@@ -8,6 +8,8 @@ import AssetInstallationPage from "../features/installations/AssetInstallationPa
 import WorkInstructions from "../features/workInstructions/WorkInstructions";
 import UserManagement from "../features/admin/UserManagement";
 import CustomerSites from "../features/admin/CustomerSites";
+import AssetRegistryPage from "../features/admin/AssetRegistryPage";
+import DocumentsPage from "../features/documents/DocumentsPage";
 import ProfileWizard from "../features/profile/ProfileWizard";
 import Settings from "../features/settings/Settings";
 import Login from "../features/auth/Login";
@@ -26,8 +28,10 @@ const AppRoutes = () => {
         <Route path="/projects/:id/edit" element={<ProjectForm />} />
         <Route path="/installations/assets" element={<AssetInstallationPage />} />
         <Route path="/work-instructions" element={<WorkInstructions />} />
+        <Route path="/documents" element={<DocumentsPage />} />
         <Route path="/admin" element={<UserManagement />} />
         <Route path="/admin/customers/:customerId/sites" element={<CustomerSites />} />
+        <Route path="/admin/asset-registry" element={<AssetRegistryPage />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile" element={<ProfileWizard />} />
       </Route>

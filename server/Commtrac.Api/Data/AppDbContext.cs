@@ -24,6 +24,7 @@ public class AppDbContext : DbContext
     public DbSet<InspectionPhotoEntity> InspectionPhotos => Set<InspectionPhotoEntity>();
     public DbSet<IssueEntity> Issues => Set<IssueEntity>();
     public DbSet<DocumentEntity> Documents => Set<DocumentEntity>();
+    public DbSet<DocumentConfigEntity> DocumentConfigs => Set<DocumentConfigEntity>();
     public DbSet<QuickbaseSettingsEntity> QuickbaseSettings => Set<QuickbaseSettingsEntity>();
     public DbSet<NotificationSettingsEntity> NotificationSettings => Set<NotificationSettingsEntity>();
     public DbSet<FieldDefinitionEntity> FieldDefinitions => Set<FieldDefinitionEntity>();
@@ -42,6 +43,11 @@ public class AppDbContext : DbContext
     public DbSet<WorkInstructionEntity> WorkInstructions => Set<WorkInstructionEntity>();
     public DbSet<WorkOrderEntity> WorkOrders => Set<WorkOrderEntity>();
     public DbSet<ProjectAssetEntity> ProjectAssets => Set<ProjectAssetEntity>();
+    // ─── v2 Workflow Config Unification ───────────────────────────────────────
+    public DbSet<WorkflowConfigEntity> WorkflowConfigs => Set<WorkflowConfigEntity>();
+    public DbSet<WorkflowTypeEntity> WorkflowTypes => Set<WorkflowTypeEntity>();
+    public DbSet<AssetWorkflowAssignmentEntity> AssetWorkflowAssignments => Set<AssetWorkflowAssignmentEntity>();
+    public DbSet<AssetWorkflowRunEntity> AssetWorkflowRuns => Set<AssetWorkflowRunEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -185,6 +191,51 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<ProjectAssetEntity>()
             .HasIndex(a => a.ProductConfigId);
+
+        // ─── v2 WorkflowConfig indexes ────────────────────────────────────────
+        modelBuilder.Entity<WorkflowConfigEntity>()
+            .HasIndex(c => c.ProductId);
+
+        modelBuilder.Entity<WorkflowConfigEntity>()
+            .HasIndex(c => c.Status);
+
+        modelBuilder.Entity<WorkflowConfigEntity>()
+            .Property(c => c.StepsJson).HasDefaultValue("[]");
+
+        modelBuilder.Entity<WorkflowConfigEntity>()
+            .Property(c => c.MediaJson).HasDefaultValue("[]");
+
+        modelBuilder.Entity<WorkflowConfigEntity>()
+            .Property(c => c.FeatureSelectionsJson).HasDefaultValue("[]");
+
+        modelBuilder.Entity<AssetWorkflowAssignmentEntity>()
+            .HasIndex(a => a.AssetId);
+
+        modelBuilder.Entity<AssetWorkflowAssignmentEntity>()
+            .HasIndex(a => a.WorkflowConfigId);
+
+        modelBuilder.Entity<AssetWorkflowRunEntity>()
+            .HasIndex(r => r.AssetId);
+
+        modelBuilder.Entity<AssetWorkflowRunEntity>()
+            .HasIndex(r => r.WorkflowConfigId);
+
+        modelBuilder.Entity<AssetWorkflowRunEntity>()
+            .Property(r => r.StepResultsJson).HasDefaultValue("[]");
+
+        modelBuilder.Entity<AssetWorkflowRunEntity>()
+            .Property(r => r.IssuesJson).HasDefaultValue("[]");
+
+        modelBuilder.Entity<AssetWorkflowRunEntity>()
+            .Property(r => r.WorkflowSnapshotJson).HasDefaultValue("{}");
+
+        // Seed default WorkflowTypes
+        modelBuilder.Entity<WorkflowTypeEntity>().HasData(
+            new WorkflowTypeEntity { Id = "wftype-installation",   Name = "Installation",   SortOrder = 1, IsActive = true },
+            new WorkflowTypeEntity { Id = "wftype-commissioning",  Name = "Commissioning",  SortOrder = 2, IsActive = true },
+            new WorkflowTypeEntity { Id = "wftype-inspection",     Name = "Inspection",     SortOrder = 3, IsActive = true },
+            new WorkflowTypeEntity { Id = "wftype-repair",         Name = "Repair",         SortOrder = 4, IsActive = true }
+        );
 
         modelBuilder.Entity<FieldDefinitionEntity>()
             .HasData(new[]

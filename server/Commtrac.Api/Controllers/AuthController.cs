@@ -704,6 +704,7 @@ public class AuthController : ControllerBase
         {
             new(ClaimTypes.NameIdentifier, user.Id),
             new(ClaimTypes.Email, user.Email),
+            new(ClaimTypes.Name, user.FullName),
             new(ClaimTypes.Role, user.Role),
             new("office", user.Office)
         };

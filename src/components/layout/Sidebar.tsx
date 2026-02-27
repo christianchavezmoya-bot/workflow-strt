@@ -14,8 +14,10 @@ import {
 } from "@mui/material";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import AssignmentOutlinedIcon from "@mui/icons-material/AssignmentOutlined";
+import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
 import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
 import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
+import InventoryOutlinedIcon from "@mui/icons-material/InventoryOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
 import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
@@ -27,13 +29,15 @@ import type { Office } from "../../components/GlobalOfficeMap";
 import strataLogo from "../../assets/strata_transparent.png";
 
 const navItems = [
-  { label: "Dashboard", icon: <DashboardOutlinedIcon />, to: "/" },
-  { label: "Projects", icon: <AssignmentOutlinedIcon />, to: "/projects" },
-  { label: "Asset Table", icon: <TableChartOutlinedIcon />, to: "/installations/assets" },
-  { label: "Work Instructions", icon: <MenuBookOutlinedIcon />, to: "/work-instructions" },
-  { label: "Admin", icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin" },
-  { label: "Settings", icon: <SettingsOutlinedIcon />, to: "/settings" },
-  { label: "Profile", icon: <PersonOutlineOutlinedIcon />, to: "/profile" }
+  { label: "Dashboard",       icon: <DashboardOutlinedIcon />,            to: "/" },
+  { label: "Projects",        icon: <AssignmentOutlinedIcon />,           to: "/projects" },
+  { label: "Asset Table",     icon: <TableChartOutlinedIcon />,           to: "/installations/assets" },
+  { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
+  { label: "Documents",       icon: <FolderOutlinedIcon />,               to: "/documents" },
+  { label: "Asset Registry",  icon: <InventoryOutlinedIcon />,            to: "/admin/asset-registry" },
+  { label: "Admin",           icon: <AdminPanelSettingsOutlinedIcon />,   to: "/admin" },
+  { label: "Settings",        icon: <SettingsOutlinedIcon />,             to: "/settings" },
+  { label: "Profile",         icon: <PersonOutlineOutlinedIcon />,        to: "/profile" },
 ];
 
 const Sidebar = () => {

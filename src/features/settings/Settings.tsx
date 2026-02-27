@@ -2,6 +2,8 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
+  CircularProgress,
   Divider,
   Dialog,
   DialogActions,
@@ -25,9 +27,11 @@ import {
   Tooltip,
   Typography
 } from "@mui/material";
-import { Print, Download } from "@mui/icons-material";
+import { AddOutlined, DeleteOutline, EditOutlined, Print, Download } from "@mui/icons-material";
 import { useEffect, useMemo, useState } from "react";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
+import { workflowTypeService } from "../../services/workflowTypeService";
+import type { WorkflowType } from "../../types/workflowType";
 import api from "../../services/api";
 import { settingsService } from "../../services/settingsService";
 import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/settings";
@@ -138,6 +142,51 @@ const Settings = () => {
   const [notifySending, setNotifySending] = useState(false);
   const [notifyStatus, setNotifyStatus] = useState<"" | "saved" | "sent" | "error">("");
   const [notifyError, setNotifyError] = useState<string | null>(null);
+
+  // Workflow types manager
+  const [wfTypes, setWfTypes] = useState<WorkflowType[]>([]);
+  const [wfTypesLoading, setWfTypesLoading] = useState(false);
+  const [wfTypeDialog, setWfTypeDialog] = useState(false);
+  const [wfTypeEditId, setWfTypeEditId] = useState<string | null>(null);
+  const [wfTypeForm, setWfTypeForm] = useState({ name: "", icon: "", sortOrder: "99" });
+  const [wfTypeSaving, setWfTypeSaving] = useState(false);
+  const [wfTypeError, setWfTypeError] = useState<string | null>(null);
+
+  async function loadWfTypes() {
+    setWfTypesLoading(true);
+    try {
+      const types = await workflowTypeService.listAll();
+      setWfTypes(types.sort((a, b) => a.sortOrder - b.sortOrder));
+    } catch { console.warn("Failed to load workflow types"); } finally {
+      setWfTypesLoading(false);
+    }
+  }
+
+  async function saveWfType() {
+    if (!wfTypeForm.name.trim()) { setWfTypeError("Name is required."); return; }
+    setWfTypeSaving(true);
+    setWfTypeError(null);
+    try {
+      const sortOrder = parseInt(wfTypeForm.sortOrder, 10) || 99;
+      if (wfTypeEditId) {
+        await workflowTypeService.update(wfTypeEditId, wfTypeForm.name.trim(), wfTypeForm.icon.trim() || undefined, sortOrder);
+      } else {
+        await workflowTypeService.create(wfTypeForm.name.trim(), wfTypeForm.icon.trim() || undefined, sortOrder);
+      }
+      await loadWfTypes();
+      setWfTypeDialog(false);
+    } catch { setWfTypeError("Failed to save workflow type."); } finally {
+      setWfTypeSaving(false);
+    }
+  }
+
+  async function removeWfType(id: string) {
+    if (!confirm("Delete this workflow type? Existing assignments using it will be unaffected.")) return;
+    try {
+      await workflowTypeService.remove(id);
+      setWfTypes((prev) => prev.filter((t) => t.id !== id));
+    } catch { alert("Failed to delete workflow type."); }
+  }
   const localUser = useMemo(() => {
     const raw = localStorage.getItem("local_auth_user");
     if (!raw) return null;
@@ -708,6 +757,7 @@ const Settings = () => {
           <Tab label="Quickbase" />
           <Tab label="SMS/SMTP" />
           <Tab label="Fields/Data" />
+          <Tab label="Workflow Types" onClick={() => { if (wfTypes.length === 0) loadWfTypes(); }} />
           {isAdmin && <Tab label="Audit Log" />}
         </Tabs>
 
@@ -917,7 +967,95 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 3 && isAdmin && (
+        {tab === 3 && (
+          <Stack spacing={2} sx={{ marginTop: 2 }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Box>
+                <Typography variant="h6">Workflow Types</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Manage the workflow categories used in the installation workflow system (Installation, Commissioning, Inspection, etc.).
+                </Typography>
+              </Box>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AddOutlined />}
+                onClick={() => {
+                  setWfTypeEditId(null);
+                  setWfTypeForm({ name: "", icon: "", sortOrder: String((wfTypes.length + 1) * 10) });
+                  setWfTypeError(null);
+                  setWfTypeDialog(true);
+                }}
+              >
+                Add type
+              </Button>
+            </Stack>
+            <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            {wfTypesLoading ? (
+              <Stack alignItems="center" sx={{ py: 3 }}>
+                <CircularProgress size={28} />
+              </Stack>
+            ) : wfTypes.length === 0 ? (
+              <Alert severity="info">
+                No workflow types found.{" "}
+                <Button size="small" onClick={loadWfTypes}>Refresh</Button>
+              </Alert>
+            ) : (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Icon</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Sort Order</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Status</Typography></TableCell>
+                    <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {wfTypes.map((t) => (
+                    <TableRow key={t.id} hover>
+                      <TableCell><Typography variant="body2" fontWeight={600}>{t.name}</Typography></TableCell>
+                      <TableCell><Typography variant="body2" color="text.secondary">{t.icon || "—"}</Typography></TableCell>
+                      <TableCell><Typography variant="body2" color="text.secondary">{t.sortOrder}</Typography></TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={t.isActive ? "Active" : "Inactive"}
+                          color={t.isActive ? "success" : "default"}
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                          <Tooltip title="Edit">
+                            <IconButton size="small" onClick={() => {
+                              setWfTypeEditId(t.id);
+                              setWfTypeForm({ name: t.name, icon: t.icon ?? "", sortOrder: String(t.sortOrder) });
+                              setWfTypeError(null);
+                              setWfTypeDialog(true);
+                            }}>
+                              <EditOutlined fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete (soft)">
+                            <IconButton size="small" color="error" onClick={() => removeWfType(t.id)}>
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            <Button size="small" variant="outlined" onClick={loadWfTypes} disabled={wfTypesLoading}>
+              {wfTypesLoading ? "Refreshing…" : "Refresh"}
+            </Button>
+          </Stack>
+        )}
+
+        {tab === 4 && isAdmin && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Typography variant="h6">2FA Audit Log</Typography>
             <Typography variant="body2" color="text.secondary">
@@ -1517,6 +1655,52 @@ const Settings = () => {
         <DialogActions>
           <Button variant="outlined" onClick={() => setLookupFieldId(null)}>
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add / Edit Workflow Type dialog */}
+      <Dialog open={wfTypeDialog} onClose={() => !wfTypeSaving && setWfTypeDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{wfTypeEditId ? "Edit Workflow Type" : "Add Workflow Type"}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Name *"
+              size="small"
+              fullWidth
+              value={wfTypeForm.name}
+              onChange={(e) => setWfTypeForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="e.g. Installation, Inspection"
+            />
+            <TextField
+              label="Icon (emoji or code)"
+              size="small"
+              fullWidth
+              value={wfTypeForm.icon}
+              onChange={(e) => setWfTypeForm((p) => ({ ...p, icon: e.target.value }))}
+              placeholder="e.g. 🔧 or wrench"
+            />
+            <TextField
+              label="Sort Order"
+              size="small"
+              fullWidth
+              type="number"
+              value={wfTypeForm.sortOrder}
+              onChange={(e) => setWfTypeForm((p) => ({ ...p, sortOrder: e.target.value }))}
+              helperText="Lower numbers appear first"
+            />
+            {wfTypeError && <Alert severity="error" sx={{ fontSize: 12 }}>{wfTypeError}</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setWfTypeDialog(false)} disabled={wfTypeSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={saveWfType}
+            disabled={wfTypeSaving || !wfTypeForm.name.trim()}
+            startIcon={wfTypeSaving ? <CircularProgress size={14} /> : undefined}
+          >
+            {wfTypeSaving ? "Saving…" : wfTypeEditId ? "Save changes" : "Add type"}
           </Button>
         </DialogActions>
       </Dialog>

@@ -11,9 +11,10 @@ import {
   DownloadOutlined,
   EditOutlined,
   ImageOutlined,
-  LibraryAddOutlined,
   PlayArrowOutlined,
+  PublishOutlined,
   QrCodeScannerOutlined,
+  RestartAltOutlined,
   SwapHorizOutlined,
   UploadOutlined,
   VideocamOutlined,
@@ -48,8 +49,8 @@ import {
 } from "@mui/material";
 import type { Decision, MediaItem, StepInput, StepInputType, Workflow, WorkflowStep } from "../../types/workflow";
 import type { ProductFeatureDefinition } from "../../types/product";
-import { workflowTemplateService } from "../../services/workflowTemplateService";
-import { productConfigService, type ProductConfig } from "../../services/productConfigService";
+import { workflowConfigService } from "../../services/workflowConfigService";
+import type { WorkflowConfig } from "../../types/workflowConfig";
 import WorkOrderRunner from "./WorkOrderRunner";
 
 // ------------------------------------------------------------------
@@ -190,40 +191,51 @@ interface WorkflowBuilderProps {
   productId: string;
   productName: string;
   productFeatures?: ProductFeatureDefinition[];
-  /** Load a specific template by id instead of the product's first template. */
-  initialTemplateId?: string | null;
+  /** The WorkflowConfig id to load and save steps into. */
+  initialConfigId?: string | null;
   /** Label shown in the toolbar to identify the active configuration. */
   configName?: string;
-  /** Called the first time a new template is persisted (id was null → now has id). */
-  onTemplateSaved?: (templateId: string) => void;
-  /** Called when user publishes a new Work Instruction from the builder. */
-  onInstructionCreated?: (config: ProductConfig) => void;
+  /** Called after steps are auto-saved to the config. */
+  onConfigSaved?: (config: WorkflowConfig) => void;
+  /** Called when user publishes the config from the builder. Navigates back to list. */
+  onConfigPublished?: (config: WorkflowConfig) => void;
 }
 
-const WorkflowBuilder = ({ productId, productName, productFeatures = [], initialTemplateId, configName, onTemplateSaved, onInstructionCreated }: WorkflowBuilderProps) => {
+const WorkflowBuilder = ({ productId, productName, productFeatures = [], initialConfigId, configName, onConfigSaved, onConfigPublished }: WorkflowBuilderProps) => {
   const [workflow, setWorkflow] = useState<Workflow>(() => createDefaultWorkflow(productId, productName));
   const [runnerOpen, setRunnerOpen] = useState(false);
-  const [templateId, setTemplateId] = useState<string | null>(null);
+  const [currentConfig, setCurrentConfig] = useState<WorkflowConfig | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const justLoadedRef = useRef(true); // prevents save from firing on load-triggered state changes
+  const importedRef = useRef(false);  // blocks async API load from overwriting a user import
 
-  // Publish-as-work-instruction dialog
-  const [publishOpen, setPublishOpen] = useState(false);
-  const [publishForm, setPublishForm] = useState({ name: "", configType: "", notes: "", status: "Active" });
   const [publishSaving, setPublishSaving] = useState(false);
-  const [publishError, setPublishError] = useState<string | null>(null);
+  const [pendingImport, setPendingImport] = useState<{ raw: Workflow; normalized: Workflow } | null>(null);
+  // Tracks the active config ID — may be set by auto-save when initialConfigId is null
+  const [resolvedConfigId, setResolvedConfigId] = useState<string | null>(initialConfigId ?? null);
+  const resolvedConfigIdRef = useRef<string | null>(initialConfigId ?? null);
 
-  // Load workflow: LS fallback immediately, then API overrides
+  // Keep resolvedConfigId in sync when the prop changes (e.g. parent selects a different config)
+  useEffect(() => {
+    setResolvedConfigId(initialConfigId ?? null);
+    resolvedConfigIdRef.current = initialConfigId ?? null;
+  }, [initialConfigId]);
+
+  // Load workflow from WorkflowConfig
   useEffect(() => {
     justLoadedRef.current = true;
-    setTemplateId(null);
+    importedRef.current = false;  // reset import guard on config change
+    setCurrentConfig(null);
     setSaveStatus("idle");
 
-    // Fast restore from localStorage
-    const lsKey = initialTemplateId
-      ? `wf_builder_v2_${initialTemplateId}`
-      : `wf_builder_v2_${productId}`;
+    if (!initialConfigId) {
+      setWorkflow(createDefaultWorkflow(productId, productName));
+      return;
+    }
+
+    // Fast restore from localStorage while API loads
+    const lsKey = `wf_builder_v3_${initialConfigId}`;
     const lsFallback = (() => {
       try {
         const raw = localStorage.getItem(lsKey);
@@ -233,21 +245,36 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     })();
     setWorkflow(lsFallback);
 
-    // Authoritative load from API
-    const loadPromise = initialTemplateId
-      ? workflowTemplateService.getById(initialTemplateId)
-      : workflowTemplateService.getFirstByProduct(productId);
-
-    loadPromise
-      .then((wf) => {
-        if (wf) {
+    // Authoritative load from API — skip if user already imported a file
+    workflowConfigService.getById(initialConfigId)
+      .then((cfg) => {
+        if (!cfg) return;
+        setCurrentConfig(cfg);
+        if (importedRef.current) return; // user imported after page load — don't overwrite
+        try {
+          const parsed = JSON.parse(cfg.stepsJson);
+          let wf: Workflow;
+          if (parsed && Array.isArray(parsed.steps)) {
+            wf = parsed as Workflow;
+          } else if (Array.isArray(parsed) && parsed.length > 0) {
+            wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
+          } else {
+            wf = createDefaultWorkflow(productId, productName);
+            wf.name = cfg.name;
+          }
+          // Merge media from mediaJson
+          try {
+            const media = JSON.parse(cfg.mediaJson);
+            if (Array.isArray(media)) wf.media = media;
+          } catch {}
           justLoadedRef.current = true;
           setWorkflow(wf);
-          setTemplateId(wf.id);
+        } catch {
+          // keep LS fallback
         }
       })
-      .catch(() => { /* keep LS data; next save will POST a new template */ });
-  }, [productId, initialTemplateId]); // eslint-disable-line react-hooks/exhaustive-deps
+      .catch(() => { /* keep LS fallback */ });
+  }, [productId, initialConfigId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stepsSorted = useMemo(
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
@@ -262,22 +289,27 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     setSelectedStepId(stepsSorted[0]?.id || null);
   }, [workflow.steps]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Debounced save to API (800 ms after last change)
+  // Debounced save to WorkflowConfig (800 ms after last change)
   useEffect(() => {
     if (justLoadedRef.current) {
       justLoadedRef.current = false;
       return;
     }
+    const activeConfigId = resolvedConfigIdRef.current ?? initialConfigId;
+    if (!activeConfigId) return; // no config to save to
+    if (currentConfig?.status === "Published" || currentConfig?.status === "Archived") return; // read-only
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setSaveStatus("idle");
+    // persist draft to LS immediately
+    try { localStorage.setItem(`wf_builder_v3_${activeConfigId}`, JSON.stringify(workflow)); } catch {}
     saveTimerRef.current = setTimeout(async () => {
       setSaveStatus("saving");
       try {
-        const id = await workflowTemplateService.upsert(templateId, workflow);
-        if (!templateId && onTemplateSaved) {
-          onTemplateSaved(id);
-        }
-        setTemplateId(id);
+        const updated = await workflowConfigService.update(activeConfigId, {
+          stepsJson: JSON.stringify(workflow),
+        });
+        setCurrentConfig(updated);
+        onConfigSaved?.(updated);
         setSaveStatus("saved");
       } catch {
         setSaveStatus("error");
@@ -472,61 +504,120 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     URL.revokeObjectURL(url);
   }
 
+  function normalizeImportedWorkflow(parsed: Workflow, targetProductId: string): Workflow {
+    return {
+      ...parsed,
+      id: uid(),
+      productId: targetProductId,
+      createdAt: parsed.createdAt || Date.now(),
+      name: parsed.name || "Imported Workflow",
+      media: Array.isArray(parsed.media) ? parsed.media : [],
+      steps: normalizeOrders(
+        (parsed.steps || []).map((s, idx) => ({
+          id: s.id || uid(),
+          order: typeof s.order === "number" ? s.order : idx + 1,
+          title: s.title ?? "",
+          description: s.description ?? "",
+          overrideInReport: !!s.overrideInReport,
+          overrideReportText: s.overrideReportText ?? "",
+          includeDescriptionInReport: typeof s.includeDescriptionInReport === "boolean" ? s.includeDescriptionInReport : true,
+          mediaIds: Array.isArray(s.mediaIds) ? s.mediaIds : [],
+          decisionsEnabled: !!s.decisionsEnabled,
+          decisions: Array.isArray(s.decisions)
+            ? s.decisions.map((d) => ({ id: d.id || uid(), label: d.label ?? "", targetStepId: d.targetStepId ?? null }))
+            : [],
+          inputs: Array.isArray(s.inputs)
+            ? s.inputs.map((i) => ({ id: i.id || uid(), type: (i.type || "text") as StepInputType, label: i.label ?? "", required: !!i.required, options: i.options }))
+            : [],
+          nextStepId: s.nextStepId ?? null,
+        }))
+      ),
+    };
+  }
+
   async function importJSON(file: File) {
-    const parsed = JSON.parse(await file.text()) as Workflow;
-    if (!parsed || !Array.isArray(parsed.steps)) throw new Error("Invalid workflow file");
-    parsed.id = parsed.id || uid();
-    parsed.productId = productId;
-    parsed.createdAt = parsed.createdAt || Date.now();
-    parsed.name = parsed.name || "Imported Workflow";
-    parsed.media = Array.isArray(parsed.media) ? parsed.media : [];
-    parsed.steps = normalizeOrders(
-      (parsed.steps || []).map((s, idx) => ({
-        id: s.id || uid(),
-        order: typeof s.order === "number" ? s.order : idx + 1,
-        title: s.title ?? "",
-        description: s.description ?? "",
-        overrideInReport: !!s.overrideInReport,
-        overrideReportText: s.overrideReportText ?? "",
-        includeDescriptionInReport: typeof s.includeDescriptionInReport === "boolean" ? s.includeDescriptionInReport : true,
-        mediaIds: Array.isArray(s.mediaIds) ? s.mediaIds : [],
-        decisionsEnabled: !!s.decisionsEnabled,
-        decisions: Array.isArray(s.decisions)
-          ? s.decisions.map((d) => ({ id: d.id || uid(), label: d.label ?? "", targetStepId: d.targetStepId ?? null }))
-          : [],
-        inputs: Array.isArray(s.inputs)
-          ? s.inputs.map((i) => ({ id: i.id || uid(), type: (i.type || "text") as StepInputType, label: i.label ?? "", required: !!i.required, options: i.options }))
-          : [],
-        nextStepId: s.nextStepId ?? null,
-      }))
-    );
-    setWorkflow(parsed);
+    const raw = JSON.parse(await file.text());
+    if (!raw || (typeof raw !== "object" && !Array.isArray(raw))) throw new Error("Invalid workflow file");
+
+    // Resolve steps from multiple possible file formats:
+    // 1. Workflow export:   { steps: [...], productId, name, ... }
+    // 2. WorkflowConfig:    { stepsJson: "[...]", productId, name, ... }
+    // 3. Raw steps array:   [{ id, title, ... }, ...]
+    let steps: WorkflowStep[] | null = null;
+    const srcProductId: string | undefined = Array.isArray(raw) ? undefined : raw.productId;
+    const srcName: string | undefined = Array.isArray(raw) ? undefined : raw.name;
+
+    if (Array.isArray(raw)) {
+      steps = raw as WorkflowStep[];
+    } else if (typeof raw.stepsJson === "string") {
+      // WorkflowConfig format — parse stepsJson string first (may contain full Workflow or steps array)
+      try {
+        const inner = JSON.parse(raw.stepsJson);
+        if (Array.isArray(inner)) steps = inner as WorkflowStep[];
+        else if (inner && Array.isArray(inner.steps)) steps = inner.steps as WorkflowStep[];
+      } catch {}
+    }
+    // Fall back to raw.steps if stepsJson wasn't present or yielded nothing
+    if (!steps && Array.isArray(raw.steps)) {
+      steps = raw.steps as WorkflowStep[];
+    }
+
+    if (!steps || steps.length === 0) throw new Error("Invalid workflow file — no steps found");
+
+    const asWorkflow: Workflow = {
+      id: raw.id || uid(),
+      name: srcName || "Imported Workflow",
+      productId: srcProductId || productId,
+      createdAt: (raw.createdAt as number) || Date.now(),
+      steps,
+      media: Array.isArray(raw.media) ? raw.media as MediaItem[] : [],
+    };
+
+    // Always show preview dialog so user can confirm before overwriting current steps
+    setPendingImport({ raw: asWorkflow, normalized: normalizeImportedWorkflow(asWorkflow, productId) });
   }
 
   // ------------------------------------------------------------------
-  // Publish as Work Instruction
+  // Auto-create config if needed (for media uploads before first save)
   // ------------------------------------------------------------------
 
-  async function publishAsInstruction() {
-    if (!templateId) return;
-    const name = publishForm.name.trim();
-    if (!name) { setPublishError("Name is required."); return; }
-    setPublishSaving(true);
-    setPublishError(null);
+  async function ensureConfigId(): Promise<string | null> {
+    if (resolvedConfigIdRef.current) return resolvedConfigIdRef.current;
     try {
-      const config = await productConfigService.create({
-        name,
+      const created = await workflowConfigService.create({
+        name: workflow.name || `${productName} Workflow`,
         productId,
-        status: publishForm.status,
-        notes: publishForm.notes.trim() || undefined,
-        featureSelections: [],
-        configType: publishForm.configType.trim() || undefined,
-        workflowTemplateId: templateId,
+        stepsJson: JSON.stringify(workflow),
       });
-      onInstructionCreated?.(config);
-      setPublishOpen(false);
+      resolvedConfigIdRef.current = created.id;
+      setResolvedConfigId(created.id);
+      setCurrentConfig(created);
+      onConfigSaved?.(created);
+      return created.id;
     } catch {
-      setPublishError("Failed to publish. Please try again.");
+      return null;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Publish WorkflowConfig
+  // ------------------------------------------------------------------
+
+  async function handlePublish() {
+    let cfgId = resolvedConfigIdRef.current ?? initialConfigId;
+    if (!cfgId) {
+      cfgId = await ensureConfigId();
+      if (!cfgId) return;
+    }
+    setPublishSaving(true);
+    try {
+      // Flush latest steps before publishing so the snapshot is current
+      await workflowConfigService.update(cfgId, { stepsJson: JSON.stringify(workflow) });
+      const updated = await workflowConfigService.publish(cfgId);
+      setCurrentConfig(updated);
+      onConfigPublished?.(updated);
+    } catch {
+      console.warn("[WorkflowBuilder] publish failed");
     } finally {
       setPublishSaving(false);
     }
@@ -536,8 +627,22 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   // Render
   // ------------------------------------------------------------------
 
+  const isReadOnly = currentConfig?.status === "Published" || currentConfig?.status === "Archived";
+
   return (
     <Stack spacing={2}>
+      {/* Read-only banner for Published/Archived */}
+      {isReadOnly && (
+        <Alert severity={currentConfig?.status === "Archived" ? "warning" : "info"}>
+          This work instruction is <strong>{currentConfig?.status}</strong> and is read-only.
+          {currentConfig?.status === "Published" && " Use \"Create new version\" from the instructions list to make changes."}
+        </Alert>
+      )}
+      {!initialConfigId && (
+        <Alert severity="info">
+          Select a work instruction from the list to start editing, or create a new one.
+        </Alert>
+      )}
       {/* Toolbar */}
       <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={1.5}>
         <Stack spacing={0.5}>
@@ -552,6 +657,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             value={workflow.name}
             onChange={(e) => updateWorkflow((wf) => { wf.name = e.target.value; return wf; })}
             sx={{ minWidth: 280 }}
+            disabled={isReadOnly}
           />
           <Stack direction="row" alignItems="center" spacing={0.75}>
             {saveStatus === "saving" && <CircularProgress size={11} />}
@@ -576,19 +682,16 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           >
             Run
           </Button>
-          {!configName && templateId && (
+          {currentConfig?.status !== "Published" && currentConfig?.status !== "Archived" && (
             <Button
               size="small"
-              variant="outlined"
+              variant="contained"
               color="primary"
-              startIcon={<LibraryAddOutlined />}
-              onClick={() => {
-                setPublishForm({ name: workflow.name, configType: "", notes: "", status: "Active" });
-                setPublishError(null);
-                setPublishOpen(true);
-              }}
+              startIcon={publishSaving ? <CircularProgress size={14} /> : <PublishOutlined />}
+              onClick={handlePublish}
+              disabled={publishSaving || stepsSorted.length === 0}
             >
-              Publish as Work Instruction
+              {publishSaving ? "Publishing…" : "Publish"}
             </Button>
           )}
           <Button size="small" variant="outlined" startIcon={<DownloadOutlined />} onClick={exportJSON}>
@@ -597,7 +700,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           <input
             ref={importRef}
             type="file"
-            accept="application/json"
+            accept=".json,application/json,text/plain"
             style={{ display: "none" }}
             onChange={async (e) => {
               const f = e.target.files?.[0];
@@ -608,6 +711,22 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           <Button size="small" variant="outlined" startIcon={<UploadOutlined />} onClick={() => importRef.current?.click()}>
             Import JSON
           </Button>
+          <Tooltip title="Clear all steps and reset to blank">
+            <Button
+              size="small"
+              variant="outlined"
+              color="warning"
+              startIcon={<RestartAltOutlined />}
+              onClick={() => {
+                if (window.confirm("Reset to blank workflow? This will remove all current steps.")) {
+                  importedRef.current = true;
+                  setWorkflow(createDefaultWorkflow(productId, productName));
+                }
+              }}
+            >
+              Reset
+            </Button>
+          </Tooltip>
         </Stack>
       </Stack>
 
@@ -634,7 +753,8 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               step={selectedStep}
               stepsSorted={stepsSorted}
               workflow={workflow}
-              templateId={templateId}
+              templateId={resolvedConfigId}
+              ensureConfigId={ensureConfigId}
               productFeatures={productFeatures}
               onStepChange={(patch) => updateStep(selectedStep.id, patch)}
               onAddDecision={() => addDecision(selectedStep.id)}
@@ -669,66 +789,53 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
         productName={productName}
       />
 
-      {/* Publish as Work Instruction dialog */}
-      <Dialog open={publishOpen} onClose={() => !publishSaving && setPublishOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Publish as Work Instruction</DialogTitle>
+      {/* Import confirmation dialog */}
+      {(() => {
+        const isCrossProduct = !!(pendingImport?.raw.productId && pendingImport.raw.productId !== productId);
+        return (
+      <Dialog open={!!pendingImport} onClose={() => setPendingImport(null)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          {isCrossProduct ? <WarningOutlined color="warning" /> : <UploadOutlined color="primary" />}
+          {isCrossProduct ? "Different Product Workflow" : "Import Workflow"}
+        </DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              Save this workflow as a named work instruction in the Instructions library. It will be linked to this workflow template so it can be previewed and exported.
-            </Typography>
-            {publishError && <Alert severity="error">{publishError}</Alert>}
-            <TextField
-              label="Instruction name"
-              size="small"
-              fullWidth
-              required
-              value={publishForm.name}
-              onChange={(e) => setPublishForm((f) => ({ ...f, name: e.target.value }))}
-            />
-            <TextField
-              label="Configuration type"
-              size="small"
-              fullWidth
-              placeholder="e.g. Installation, Maintenance, Inspection…"
-              value={publishForm.configType}
-              onChange={(e) => setPublishForm((f) => ({ ...f, configType: e.target.value }))}
-            />
-            <TextField
-              label="Description / notes"
-              size="small"
-              fullWidth
-              multiline
-              rows={3}
-              value={publishForm.notes}
-              onChange={(e) => setPublishForm((f) => ({ ...f, notes: e.target.value }))}
-            />
-            <FormControl size="small" fullWidth>
-              <InputLabel>Status</InputLabel>
-              <Select
-                label="Status"
-                value={publishForm.status}
-                onChange={(e) => setPublishForm((f) => ({ ...f, status: e.target.value }))}
-              >
-                <MenuItem value="Active">Active</MenuItem>
-                <MenuItem value="Draft">Draft</MenuItem>
-                <MenuItem value="Archived">Archived</MenuItem>
-              </Select>
-            </FormControl>
-          </Stack>
+          <Typography variant="body2" gutterBottom>
+            <strong>{pendingImport?.raw.name || "Unnamed"}</strong> —{" "}
+            <strong>{pendingImport?.normalized.steps.length ?? 0} step{pendingImport?.normalized.steps.length !== 1 ? "s" : ""}</strong>
+            {isCrossProduct && " (from a different product)"}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {isCrossProduct
+              ? `This file was created for a different product. The steps will be copied as a template for ${productName}. Media attachments will not carry over.`
+              : "This will replace the current steps with the imported ones."}
+          </Typography>
+          {isCrossProduct && (
+          <Alert severity="info" sx={{ mt: 1.5, fontSize: 12 }}>
+            The imported workflow will be treated as a new draft — it won't overwrite the original.
+          </Alert>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPublishOpen(false)} disabled={publishSaving}>Cancel</Button>
+          <Button onClick={() => setPendingImport(null)}>Cancel</Button>
           <Button
             variant="contained"
-            onClick={publishAsInstruction}
-            disabled={publishSaving || !publishForm.name.trim()}
-            startIcon={publishSaving ? <CircularProgress size={14} /> : <LibraryAddOutlined />}
+            onClick={() => {
+              if (pendingImport) {
+                importedRef.current = true;
+                setWorkflow(pendingImport.normalized);
+              }
+              setPendingImport(null);
+            }}
           >
-            {publishSaving ? "Publishing…" : "Publish"}
+            {pendingImport?.raw.productId && pendingImport.raw.productId !== productId
+              ? `Use as Template (${pendingImport.normalized.steps.length} steps)`
+              : `Load ${pendingImport?.normalized.steps.length ?? 0} steps`}
           </Button>
         </DialogActions>
       </Dialog>
+        );
+      })()}
+
     </Stack>
   );
 };
@@ -916,6 +1023,7 @@ interface StepEditorPanelProps {
   stepsSorted: WorkflowStep[];
   workflow: Workflow;
   templateId: string | null;
+  ensureConfigId: () => Promise<string | null>;
   productFeatures: ProductFeatureDefinition[];
   onStepChange: (patch: Partial<WorkflowStep>) => void;
   onAddDecision: () => void;
@@ -933,6 +1041,7 @@ function StepEditorPanel({
   stepsSorted,
   workflow,
   templateId,
+  ensureConfigId,
   productFeatures,
   onStepChange,
   onAddDecision,
@@ -1077,6 +1186,7 @@ function StepEditorPanel({
               workflow={workflow}
               step={step}
               templateId={templateId}
+              ensureConfigId={ensureConfigId}
               onStepChange={onStepChange}
               onWorkflowUpdate={onWorkflowUpdate}
             />
@@ -1583,11 +1693,12 @@ interface MediaLibraryPanelProps {
   workflow: Workflow;
   step: WorkflowStep;
   templateId: string | null;
+  ensureConfigId: () => Promise<string | null>;
   onStepChange: (patch: Partial<WorkflowStep>) => void;
   onWorkflowUpdate: (wf: Workflow) => void;
 }
 
-function MediaLibraryPanel({ workflow, step, templateId, onStepChange, onWorkflowUpdate }: MediaLibraryPanelProps) {
+function MediaLibraryPanel({ workflow, step, templateId, ensureConfigId, onStepChange, onWorkflowUpdate }: MediaLibraryPanelProps) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1597,7 +1708,10 @@ function MediaLibraryPanel({ workflow, step, templateId, onStepChange, onWorkflo
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file || !templateId) return;
+    if (!file) return;
+    // Auto-create config if not saved yet
+    const cfgId = templateId || await ensureConfigId();
+    if (!cfgId) { setUploadError("Could not create workflow config. Save the workflow name first."); return; }
     setUploadError(null);
 
     let fileToUpload = file;
@@ -1613,8 +1727,9 @@ function MediaLibraryPanel({ workflow, step, templateId, onStepChange, onWorkflo
 
     setUploading(true);
     try {
-      const updated = await workflowTemplateService.uploadMedia(templateId, fileToUpload);
-      onWorkflowUpdate(updated);
+      const updatedConfig = await workflowConfigService.uploadMedia(cfgId, fileToUpload);
+      const updatedMedia = (() => { try { return JSON.parse(updatedConfig.mediaJson); } catch { return []; } })();
+      onWorkflowUpdate({ ...workflow, media: updatedMedia });
     } catch {
       setUploadError("Upload failed. Check file size and try again.");
     } finally {
@@ -1624,14 +1739,16 @@ function MediaLibraryPanel({ workflow, step, templateId, onStepChange, onWorkflo
   }
 
   async function handleDelete(mediaId: string) {
-    if (!templateId) return;
+    const cfgId = templateId || await ensureConfigId();
+    if (!cfgId) return;
     try {
-      const updated = await workflowTemplateService.deleteMedia(templateId, mediaId);
+      const updatedConfig = await workflowConfigService.deleteMedia(cfgId, mediaId);
       // Also detach from step if attached
       if (attachedIds.has(mediaId)) {
         onStepChange({ mediaIds: (step.mediaIds || []).filter((id) => id !== mediaId) });
       }
-      onWorkflowUpdate(updated);
+      const updatedMedia = (() => { try { return JSON.parse(updatedConfig.mediaJson); } catch { return []; } })();
+      onWorkflowUpdate({ ...workflow, media: updatedMedia });
     } catch {
       setUploadError("Delete failed.");
     }
@@ -1675,18 +1792,12 @@ function MediaLibraryPanel({ workflow, step, templateId, onStepChange, onWorkflo
             variant="contained"
             startIcon={<UploadOutlined />}
             onClick={() => fileInputRef.current?.click()}
-            disabled={!templateId || uploading}
+            disabled={uploading}
           >
             Upload
           </Button>
         </Stack>
       </Stack>
-
-      {!templateId && (
-        <Alert severity="warning" sx={{ fontSize: 12 }}>
-          Save the workflow first to enable media uploads.
-        </Alert>
-      )}
 
       {uploadError && (
         <Alert severity="error" sx={{ fontSize: 12 }} onClose={() => setUploadError(null)}>

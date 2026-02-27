@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -12,6 +13,7 @@ namespace Commtrac.Api.Controllers;
 [Authorize]
 public class DocumentsController : ControllerBase
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
 
@@ -40,7 +42,11 @@ public class DocumentsController : ControllerBase
             LinkedTo = request.LinkedTo,
             UploadedAt = request.UploadedAt,
             ContentType = request.ContentType,
-            FileSize = request.FileSize
+            FileSize = request.FileSize,
+            DownloadUrl = request.DownloadUrl,
+            CreatedBy = User.Identity?.Name ?? request.CreatedBy,
+            Notes = request.Notes,
+            CustomValuesJson = request.CustomValuesJson
         };
 
         _db.Documents.Add(doc);
@@ -78,7 +84,10 @@ public class DocumentsController : ControllerBase
             UploadedAt = DateTime.UtcNow.ToString("s"),
             FilePath = Path.Combine("Storage", "Documents", storedName),
             ContentType = request.File.ContentType,
-            FileSize = request.File.Length
+            FileSize = request.File.Length,
+            CreatedBy = User.Identity?.Name ?? request.CreatedBy,
+            Notes = request.Notes,
+            CustomValuesJson = request.CustomValuesJson
         };
 
         _db.Documents.Add(doc);
@@ -87,6 +96,7 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpGet("{id}/download")]
+    [AllowAnonymous]
     public async Task<IActionResult> Download(string id)
     {
         var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
@@ -102,7 +112,30 @@ public class DocumentsController : ControllerBase
         }
 
         var contentType = string.IsNullOrWhiteSpace(doc.ContentType) ? "application/octet-stream" : doc.ContentType;
-        return PhysicalFile(fullPath, contentType, doc.Name);
+        // inline disposition: browser opens PDF/images in-tab; filename still available for "Save As"
+        var safeName = Uri.EscapeDataString(doc.Name ?? "document");
+        Response.Headers["Content-Disposition"] = $"inline; filename*=UTF-8''{safeName}";
+        return PhysicalFile(fullPath, contentType, enableRangeProcessing: true);
+    }
+
+    [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> Delete(string id)
+    {
+        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+
+        // Delete the physical file if one exists
+        if (!string.IsNullOrWhiteSpace(doc.FilePath))
+        {
+            var fullPath = Path.Combine(_env.ContentRootPath, doc.FilePath);
+            if (System.IO.File.Exists(fullPath))
+                System.IO.File.Delete(fullPath);
+        }
+
+        _db.Documents.Remove(doc);
+        await _db.SaveChangesAsync();
+        return NoContent();
     }
 
     [HttpPut("{id}")]
@@ -121,9 +154,48 @@ public class DocumentsController : ControllerBase
         doc.UploadedAt = request.UploadedAt;
         doc.ContentType = request.ContentType;
         doc.FileSize = request.FileSize;
+        // Preserve original creator — only set if not already recorded
+        if (string.IsNullOrWhiteSpace(doc.CreatedBy))
+            doc.CreatedBy = User.Identity?.Name ?? request.CreatedBy;
+        doc.Notes = request.Notes;
+        doc.CustomValuesJson = request.CustomValuesJson;
+        // Only update DownloadUrl for URL-linked docs (uploaded docs use FilePath, not DownloadUrl)
+        if (string.IsNullOrWhiteSpace(doc.FilePath))
+            doc.DownloadUrl = request.DownloadUrl;
 
         await _db.SaveChangesAsync();
         return Ok(ToDto(doc, Request));
+    }
+
+    // ── Document UI Config (tabs + custom fields) ────────────────────────────
+
+    [HttpGet("config")]
+    public async Task<ActionResult<DocumentConfigDto>> GetConfig()
+    {
+        var config = await _db.DocumentConfigs.FirstOrDefaultAsync(c => c.Id == 1);
+        return Ok(new DocumentConfigDto(
+            config?.TabsJson ?? "[]",
+            config?.FieldsJson ?? "[]"
+        ));
+    }
+
+    [HttpPut("config")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<ActionResult<DocumentConfigDto>> SaveConfig([FromBody] DocumentConfigDto dto)
+    {
+        var config = await _db.DocumentConfigs.FirstOrDefaultAsync(c => c.Id == 1);
+        if (config == null)
+        {
+            config = new DocumentConfigEntity { Id = 1, TabsJson = dto.TabsJson, FieldsJson = dto.FieldsJson };
+            _db.DocumentConfigs.Add(config);
+        }
+        else
+        {
+            config.TabsJson = dto.TabsJson;
+            config.FieldsJson = dto.FieldsJson;
+        }
+        await _db.SaveChangesAsync();
+        return Ok(new DocumentConfigDto(config.TabsJson, config.FieldsJson));
     }
 
     private static DocumentDto ToDto(DocumentEntity doc, HttpRequest request)
@@ -135,7 +207,12 @@ public class DocumentsController : ControllerBase
             doc.UploadedAt,
             doc.ContentType,
             doc.FileSize,
-            string.IsNullOrWhiteSpace(doc.FilePath) ? null : $"{request.Scheme}://{request.Host}/api/documents/{doc.Id}/download"
+            string.IsNullOrWhiteSpace(doc.FilePath)
+                ? doc.DownloadUrl   // URL-linked document — use stored URL
+                : $"{request.Scheme}://{request.Host}/api/documents/{doc.Id}/download",
+            doc.CreatedBy,
+            doc.Notes,
+            doc.CustomValuesJson
         );
 }
 
@@ -147,4 +224,10 @@ public class UploadDocumentRequest
     public string? Type { get; set; }
     [FromForm(Name = "linkedTo")]
     public string? LinkedTo { get; set; }
+    [FromForm(Name = "createdBy")]
+    public string? CreatedBy { get; set; }
+    [FromForm(Name = "notes")]
+    public string? Notes { get; set; }
+    [FromForm(Name = "customValuesJson")]
+    public string? CustomValuesJson { get; set; }
 }

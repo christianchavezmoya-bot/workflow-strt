@@ -58,17 +58,21 @@ public class ProjectAssetsController : ControllerBase
     {
         var asset = new ProjectAssetEntity
         {
-            ProjectId = request.ProjectId ?? string.Empty,
-            ProductId = request.ProductId ?? string.Empty,
-            ProductConfigId = string.IsNullOrWhiteSpace(request.ProductConfigId) ? null : request.ProductConfigId,
+            ProjectId          = request.ProjectId ?? string.Empty,
+            ProductId          = request.ProductId ?? string.Empty,
+            ProductConfigId    = string.IsNullOrWhiteSpace(request.ProductConfigId) ? null : request.ProductConfigId,
             WorkflowTemplateId = string.IsNullOrWhiteSpace(request.WorkflowTemplateId) ? null : request.WorkflowTemplateId,
-            AssetTag = request.AssetTag?.Trim() ?? string.Empty,
-            SerialNumber = string.IsNullOrWhiteSpace(request.SerialNumber) ? null : request.SerialNumber.Trim(),
-            Location = string.IsNullOrWhiteSpace(request.Location) ? null : request.Location.Trim(),
-            AssignedUserId = string.IsNullOrWhiteSpace(request.AssignedUserId) ? null : request.AssignedUserId,
-            Status = string.IsNullOrWhiteSpace(request.Status) ? "NotStarted" : request.Status,
-            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
-            FeatureValuesJson = string.IsNullOrWhiteSpace(request.FeatureValuesJson) ? "{}" : request.FeatureValuesJson,
+            AssetTag           = request.AssetTag?.Trim() ?? string.Empty,
+            AssetName          = string.IsNullOrWhiteSpace(request.AssetName) ? null : request.AssetName.Trim(),
+            SerialNumber       = string.IsNullOrWhiteSpace(request.SerialNumber) ? null : request.SerialNumber.Trim(),
+            AssetModel         = string.IsNullOrWhiteSpace(request.AssetModel) ? null : request.AssetModel.Trim(),
+            Manufacturer       = string.IsNullOrWhiteSpace(request.Manufacturer) ? null : request.Manufacturer.Trim(),
+            Location           = string.IsNullOrWhiteSpace(request.Location) ? null : request.Location.Trim(),
+            AssignedUserId     = string.IsNullOrWhiteSpace(request.AssignedUserId) ? null : request.AssignedUserId,
+            Status             = string.IsNullOrWhiteSpace(request.Status) ? "NotStarted" : request.Status,
+            Notes              = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
+            FeatureValuesJson  = string.IsNullOrWhiteSpace(request.FeatureValuesJson) ? "{}" : request.FeatureValuesJson,
+            IssuesJson         = string.IsNullOrWhiteSpace(request.IssuesJson) ? "[]" : request.IssuesJson,
         };
         _db.ProjectAssets.Add(asset);
         await _db.SaveChangesAsync();
@@ -85,16 +89,19 @@ public class ProjectAssetsController : ControllerBase
         {
             var asset = new ProjectAssetEntity
             {
-                ProjectId = request.ProjectId,
-                ProductId = request.ProductId,
-                ProductConfigId = string.IsNullOrWhiteSpace(item.ProductConfigId) ? null : item.ProductConfigId,
+                ProjectId          = request.ProjectId,
+                ProductId          = request.ProductId,
+                ProductConfigId    = string.IsNullOrWhiteSpace(item.ProductConfigId) ? null : item.ProductConfigId,
                 WorkflowTemplateId = string.IsNullOrWhiteSpace(item.WorkflowTemplateId) ? null : item.WorkflowTemplateId,
-                AssetTag = item.AssetTag?.Trim() ?? string.Empty,
-                SerialNumber = string.IsNullOrWhiteSpace(item.SerialNumber) ? null : item.SerialNumber.Trim(),
-                Location = string.IsNullOrWhiteSpace(item.Location) ? null : item.Location.Trim(),
-                AssignedUserId = string.IsNullOrWhiteSpace(item.AssignedUserId) ? null : item.AssignedUserId,
-                Status = "NotStarted",
-                Notes = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim(),
+                AssetTag           = item.AssetTag?.Trim() ?? string.Empty,
+                AssetName          = string.IsNullOrWhiteSpace(item.AssetName) ? null : item.AssetName.Trim(),
+                SerialNumber       = string.IsNullOrWhiteSpace(item.SerialNumber) ? null : item.SerialNumber.Trim(),
+                AssetModel         = string.IsNullOrWhiteSpace(item.AssetModel) ? null : item.AssetModel.Trim(),
+                Manufacturer       = string.IsNullOrWhiteSpace(item.Manufacturer) ? null : item.Manufacturer.Trim(),
+                Location           = string.IsNullOrWhiteSpace(item.Location) ? null : item.Location.Trim(),
+                AssignedUserId     = string.IsNullOrWhiteSpace(item.AssignedUserId) ? null : item.AssignedUserId,
+                Status             = "NotStarted",
+                Notes              = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim(),
             };
             created.Add(asset);
             _db.ProjectAssets.Add(asset);
@@ -111,16 +118,20 @@ public class ProjectAssetsController : ControllerBase
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
 
-        if (!string.IsNullOrWhiteSpace(request.AssetTag)) asset.AssetTag = request.AssetTag.Trim();
-        if (request.SerialNumber is not null) asset.SerialNumber = string.IsNullOrWhiteSpace(request.SerialNumber) ? null : request.SerialNumber.Trim();
-        if (request.Location is not null) asset.Location = string.IsNullOrWhiteSpace(request.Location) ? null : request.Location.Trim();
-        if (request.AssignedUserId is not null) asset.AssignedUserId = string.IsNullOrWhiteSpace(request.AssignedUserId) ? null : request.AssignedUserId;
-        if (!string.IsNullOrWhiteSpace(request.Status)) asset.Status = request.Status;
-        if (request.Notes is not null) asset.Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
-        if (request.ProductConfigId is not null) asset.ProductConfigId = string.IsNullOrWhiteSpace(request.ProductConfigId) ? null : request.ProductConfigId;
-        if (request.WorkflowTemplateId is not null) asset.WorkflowTemplateId = string.IsNullOrWhiteSpace(request.WorkflowTemplateId) ? null : request.WorkflowTemplateId;
-        if (request.WorkOrderId is not null) asset.WorkOrderId = string.IsNullOrWhiteSpace(request.WorkOrderId) ? null : request.WorkOrderId;
-        if (request.FeatureValuesJson is not null) asset.FeatureValuesJson = string.IsNullOrWhiteSpace(request.FeatureValuesJson) ? "{}" : request.FeatureValuesJson;
+        if (!string.IsNullOrWhiteSpace(request.AssetTag))   asset.AssetTag        = request.AssetTag.Trim();
+        if (request.AssetName is not null)                  asset.AssetName        = string.IsNullOrWhiteSpace(request.AssetName) ? null : request.AssetName.Trim();
+        if (request.SerialNumber is not null)               asset.SerialNumber     = string.IsNullOrWhiteSpace(request.SerialNumber) ? null : request.SerialNumber.Trim();
+        if (request.AssetModel is not null)                 asset.AssetModel       = string.IsNullOrWhiteSpace(request.AssetModel) ? null : request.AssetModel.Trim();
+        if (request.Manufacturer is not null)               asset.Manufacturer     = string.IsNullOrWhiteSpace(request.Manufacturer) ? null : request.Manufacturer.Trim();
+        if (request.Location is not null)                   asset.Location         = string.IsNullOrWhiteSpace(request.Location) ? null : request.Location.Trim();
+        if (request.AssignedUserId is not null)             asset.AssignedUserId   = string.IsNullOrWhiteSpace(request.AssignedUserId) ? null : request.AssignedUserId;
+        if (!string.IsNullOrWhiteSpace(request.Status))    asset.Status            = request.Status;
+        if (request.Notes is not null)                      asset.Notes            = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
+        if (request.ProductConfigId is not null)            asset.ProductConfigId  = string.IsNullOrWhiteSpace(request.ProductConfigId) ? null : request.ProductConfigId;
+        if (request.WorkflowTemplateId is not null)         asset.WorkflowTemplateId = string.IsNullOrWhiteSpace(request.WorkflowTemplateId) ? null : request.WorkflowTemplateId;
+        if (request.WorkOrderId is not null)                asset.WorkOrderId      = string.IsNullOrWhiteSpace(request.WorkOrderId) ? null : request.WorkOrderId;
+        if (request.FeatureValuesJson is not null)          asset.FeatureValuesJson = string.IsNullOrWhiteSpace(request.FeatureValuesJson) ? "{}" : request.FeatureValuesJson;
+        if (request.IssuesJson is not null)                 asset.IssuesJson       = string.IsNullOrWhiteSpace(request.IssuesJson) ? "[]" : request.IssuesJson;
         asset.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -129,11 +140,23 @@ public class ProjectAssetsController : ControllerBase
 
     // DELETE api/project-assets/{id}
     [HttpDelete("{id}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
+
+        // Remove dependent workflow records if those tables exist (migration may not be applied yet)
+        try
+        {
+            var assignments = await _db.AssetWorkflowAssignments.Where(a => a.AssetId == id).ToListAsync();
+            _db.AssetWorkflowAssignments.RemoveRange(assignments);
+
+            var runs = await _db.AssetWorkflowRuns.Where(r => r.AssetId == id).ToListAsync();
+            _db.AssetWorkflowRuns.RemoveRange(runs);
+        }
+        catch { /* tables may not exist yet if migration is pending — skip */ }
+
         _db.ProjectAssets.Remove(asset);
         await _db.SaveChangesAsync();
         return NoContent();
@@ -141,6 +164,7 @@ public class ProjectAssetsController : ControllerBase
 
     private static ProjectAssetDto ToDto(ProjectAssetEntity a) =>
         new(a.Id, a.ProjectId, a.ProductId, a.ProductConfigId, a.WorkflowTemplateId,
-            a.AssetTag, a.SerialNumber, a.Location, a.AssignedUserId, a.Status,
-            a.WorkOrderId, a.Notes, a.FeatureValuesJson, a.CreatedAt, a.UpdatedAt);
+            a.AssetTag, a.AssetName, a.SerialNumber, a.AssetModel, a.Manufacturer,
+            a.Location, a.AssignedUserId, a.Status, a.WorkOrderId, a.Notes,
+            a.FeatureValuesJson, a.IssuesJson, a.CreatedAt, a.UpdatedAt);
 }

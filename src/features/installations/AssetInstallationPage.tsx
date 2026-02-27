@@ -1,21 +1,31 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   AddOutlined,
+  ArchiveOutlined,
   ArticleOutlined,
+  AssignmentOutlined,
+  CheckBoxOutlineBlankOutlined,
+  CheckBoxOutlined,
   CheckCircleOutlined,
   DeleteOutline,
   EditOutlined,
   ErrorOutlined,
   ExpandLessOutlined,
   ExpandMoreOutlined,
+  FileUploadOutlined,
+  HistoryOutlined,
   HourglassEmptyOutlined,
+  DragIndicatorOutlined,
   PlayArrowOutlined,
   RefreshOutlined,
+  ReportProblemOutlined,
+  ViewColumnOutlined,
 } from "@mui/icons-material";
 import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Collapse,
@@ -28,6 +38,9 @@ import {
   IconButton,
   InputLabel,
   LinearProgress,
+  ListItemIcon,
+  ListItemText,
+  Menu,
   MenuItem,
   Paper,
   Select,
@@ -51,9 +64,52 @@ import { demoProducts } from "../../data/demo";
 import { projectAssetService } from "../../services/projectAssetService";
 import { productConfigService, type ProductConfig } from "../../services/productConfigService";
 import { workflowTemplateService } from "../../services/workflowTemplateService";
-import type { ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset";
+import { workflowConfigService } from "../../services/workflowConfigService";
+import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
+import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { workflowTypeService } from "../../services/workflowTypeService";
+import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset";
+import type { WorkflowConfig } from "../../types/workflowConfig";
+import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
+import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 import type { StepInput, Workflow } from "../../types/workflow";
 import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
+import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
+
+// ------------------------------------------------------------------
+// Column configuration
+// ------------------------------------------------------------------
+
+interface ColumnDef {
+  id: string;
+  label: string;
+}
+
+const CONFIGURABLE_COLUMNS: ColumnDef[] = [
+  { id: "assetName",     label: "Asset Name" },
+  { id: "serialNumber",  label: "Serial #" },
+  { id: "assetModel",    label: "Asset Model" },
+  { id: "manufacturer",  label: "Manufacturer" },
+  { id: "configType",    label: "Config Type" },
+  { id: "project",       label: "Project" },
+  { id: "siteName",      label: "Site Name" },
+  { id: "location",      label: "Location" },
+  { id: "assignedTech",  label: "Assigned Tech" },
+  { id: "features",      label: "Features" },
+  { id: "status",        label: "Status" },
+];
+
+const DEFAULT_COL_ORDER = CONFIGURABLE_COLUMNS.map((c) => c.id);
+const LS_COL_KEY = "asset_installation_columns_v1";
+const ARCHIVE_COL_IDS = ["serialNumber", "assetModel", "manufacturer", "project", "siteName", "configType", "status"];
+
+function loadColumnConfig(): { order: string[]; hidden: string[] } {
+  try {
+    const raw = localStorage.getItem(LS_COL_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return { order: DEFAULT_COL_ORDER, hidden: [] };
+}
 
 // ------------------------------------------------------------------
 // Status helpers
@@ -112,7 +168,10 @@ interface AssetForm {
   projectId: string;
   configId: string;
   assetTag: string;
+  assetName: string;
   serialNumber: string;
+  assetModel: string;
+  manufacturer: string;
   location: string;
   assignedUserId: string;
   notes: string;
@@ -123,7 +182,10 @@ const emptyForm = (): AssetForm => ({
   projectId: "",
   configId: "",
   assetTag: "",
+  assetName: "",
   serialNumber: "",
+  assetModel: "",
+  manufacturer: "",
   location: "",
   assignedUserId: "",
   notes: "",
@@ -250,6 +312,46 @@ const AssetInstallationPage = () => {
   const [runnerAsset, setRunnerAsset] = useState<ProjectAsset | null>(null);
   const [runnerWorkflow, setRunnerWorkflow] = useState<Workflow | null>(null);
   const [runnerLoading, setRunnerLoading] = useState<string | null>(null);
+  const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>(undefined);
+
+  // Context menu (right-click on assignment run button)
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<HTMLElement | null>(null);
+  const [contextMenuAsset, setContextMenuAsset] = useState<ProjectAsset | null>(null);
+  const [contextMenuAssignment, setContextMenuAssignment] = useState<WorkflowAssignment | null>(null);
+
+  // Column settings
+  const [colConfig, setColConfig] = useState(loadColumnConfig);
+  const [colSettingsOpen, setColSettingsOpen] = useState(false);
+  const [settingsOrder, setSettingsOrder] = useState<string[]>([]);
+  const [settingsHidden, setSettingsHidden] = useState<string[]>([]);
+
+  // Archive view
+  const [archiveMode, setArchiveMode] = useState(false);
+
+  // Issues
+  const [issueDialogOpen, setIssueDialogOpen] = useState(false);
+  const [issueDialogAsset, setIssueDialogAsset] = useState<ProjectAsset | null>(null);
+  const [issueForm, setIssueForm] = useState<{ description: string; severity: "low" | "medium" | "high" }>({ description: "", severity: "medium" });
+
+  // Workflow assignments + runs (keyed by assetId)
+  const [assignmentsMap, setAssignmentsMap] = useState<Record<string, WorkflowAssignment[]>>({});
+  const [runsMap, setRunsMap] = useState<Record<string, AssetWorkflowRun[]>>({});
+  const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
+  const [workflowConfigs, setWorkflowConfigs] = useState<WorkflowConfig[]>([]);
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [assignDialogAsset, setAssignDialogAsset] = useState<ProjectAsset | null>(null);
+  const [assignForm, setAssignForm] = useState({ workflowTypeId: "", workflowConfigId: "" });
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [runHistoryAsset, setRunHistoryAsset] = useState<ProjectAsset | null>(null);
+  const [runHistoryAssignment, setRunHistoryAssignment] = useState<WorkflowAssignment | null>(null);
+
+  // Column filters
+  const [colFilters, setColFilters] = useState<Record<string, string>>({});
+
+  // CSV import
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
+  const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
+  const [csvImporting, setCsvImporting] = useState(false);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -316,26 +418,55 @@ const AssetInstallationPage = () => {
   const visibleAssets = useMemo(() => {
     const q = search.trim().toLowerCase();
     return assets.filter((a) => {
-      if (selectedProjectId && a.projectId !== selectedProjectId) return false;
-      if (statusFilter !== "All" && a.status !== statusFilter) return false;
-      if (q && !([a.assetTag, a.serialNumber, a.location].some((f) => f?.toLowerCase().includes(q)))) return false;
+      if (archiveMode) {
+        if (a.status !== "Complete") return false;
+      } else {
+        if (selectedProjectId && a.projectId !== selectedProjectId) return false;
+        if (statusFilter !== "All" && a.status !== statusFilter) return false;
+      }
+      if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q)))) return false;
       return true;
     });
-  }, [assets, selectedProjectId, statusFilter, search]);
+  }, [assets, selectedProjectId, statusFilter, search, archiveMode]);
 
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const configMap = useMemo(() => new Map(configs.map((c) => [c.id, c])), [configs]);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
+
+  const visibleColumns = useMemo(() => {
+    if (archiveMode) {
+      return ARCHIVE_COL_IDS
+        .map((id) => CONFIGURABLE_COLUMNS.find((c) => c.id === id))
+        .filter((c): c is ColumnDef => !!c);
+    }
+    const hiddenSet = new Set(colConfig.hidden);
+    return colConfig.order
+      .map((id) => CONFIGURABLE_COLUMNS.find((c) => c.id === id))
+      .filter((c): c is ColumnDef => !!c && !hiddenSet.has(c.id));
+  }, [colConfig, archiveMode]);
 
   // ------------------------------------------------------------------
   // Add asset
   // ------------------------------------------------------------------
 
   function openAdd() {
-    setAddForm(emptyForm());
+    setAddForm({ ...emptyForm(), projectId: selectedProjectId || "" });
     setAddError(null);
     setConfigFeatureInputs([]);
     setAddOpen(true);
+  }
+
+  function openColumnSettings() {
+    setSettingsOrder(colConfig.order);
+    setSettingsHidden(colConfig.hidden);
+    setColSettingsOpen(true);
+  }
+
+  function applyColumnSettings() {
+    const next = { order: settingsOrder, hidden: settingsHidden };
+    setColConfig(next);
+    try { localStorage.setItem(LS_COL_KEY, JSON.stringify(next)); } catch {}
+    setColSettingsOpen(false);
   }
 
   async function saveAsset() {
@@ -352,7 +483,10 @@ const AssetInstallationPage = () => {
         productConfigId: addForm.configId || undefined,
         workflowTemplateId: selectedAddConfig?.workflowTemplateId || undefined,
         assetTag: tag,
+        assetName: addForm.assetName.trim() || undefined,
         serialNumber: addForm.serialNumber.trim() || undefined,
+        assetModel: addForm.assetModel.trim() || undefined,
+        manufacturer: addForm.manufacturer.trim() || undefined,
         location: addForm.location.trim() || undefined,
         assignedUserId: addForm.assignedUserId || undefined,
         notes: addForm.notes.trim() || undefined,
@@ -381,7 +515,10 @@ const AssetInstallationPage = () => {
       projectId: asset.projectId,
       configId: asset.productConfigId ?? "",
       assetTag: asset.assetTag,
+      assetName: asset.assetName ?? "",
       serialNumber: asset.serialNumber ?? "",
+      assetModel: asset.assetModel ?? "",
+      manufacturer: asset.manufacturer ?? "",
       location: asset.location ?? "",
       assignedUserId: asset.assignedUserId ?? "",
       notes: asset.notes ?? "",
@@ -396,12 +533,25 @@ const AssetInstallationPage = () => {
     if (!editAsset) return;
     const tag = editForm.assetTag.trim();
     if (!tag) { setEditError("Asset tag is required."); return; }
+    // Check for blocking issues when changing to Complete
+    if (editStatus === "Complete" && editAsset.status !== "Complete") {
+      let issues: AssetIssue[] = [];
+      try { issues = JSON.parse(editAsset.issuesJson || "[]"); } catch {}
+      const blockingOpen = issues.filter((i) => i.isBlocking && !i.resolved);
+      if (blockingOpen.length > 0) {
+        setEditError(`Cannot set to Complete — ${blockingOpen.length} blocking issue${blockingOpen.length === 1 ? "" : "s"} must be resolved first.`);
+        return;
+      }
+    }
     setEditSaving(true);
     setEditError(null);
     try {
       const updated = await projectAssetService.update(editAsset.id, {
         assetTag: tag,
+        assetName: editForm.assetName.trim() || undefined,
         serialNumber: editForm.serialNumber.trim() || undefined,
+        assetModel: editForm.assetModel.trim() || undefined,
+        manufacturer: editForm.manufacturer.trim() || undefined,
         location: editForm.location.trim() || undefined,
         assignedUserId: editForm.assignedUserId || undefined,
         notes: editForm.notes.trim() || undefined,
@@ -471,6 +621,279 @@ const AssetInstallationPage = () => {
       projectAssetService.update(runnerAsset.id, { featureValuesJson: JSON.stringify(merged) }).catch(console.warn);
     }
     refreshAssets();
+  }
+
+  // ------------------------------------------------------------------
+  // Issues
+  // ------------------------------------------------------------------
+
+  async function handleFlagIssue(info: { description: string; severity: "low" | "medium" | "high"; stepId?: string; stepTitle?: string }) {
+    if (!runnerAsset) return;
+    let issues: AssetIssue[] = [];
+    try { issues = JSON.parse(runnerAsset.issuesJson || "[]"); } catch {}
+    const newIssue: AssetIssue = {
+      id: crypto.randomUUID(),
+      ...info,
+      issueType: "observation",
+      isBlocking: false,
+      reportedAt: new Date().toISOString(),
+      resolved: false,
+    };
+    issues.push(newIssue);
+    try {
+      const updated = await projectAssetService.update(runnerAsset.id, {
+        issuesJson: JSON.stringify(issues),
+        status: "Issue",
+      });
+      setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+      setRunnerAsset(updated);
+    } catch { console.warn("Failed to save issue"); }
+  }
+
+  async function handleAddIssue() {
+    if (!issueDialogAsset || !issueForm.description.trim()) return;
+    let issues: AssetIssue[] = [];
+    try { issues = JSON.parse(issueDialogAsset.issuesJson || "[]"); } catch {}
+    const newIssue: AssetIssue = {
+      id: crypto.randomUUID(),
+      description: issueForm.description.trim(),
+      severity: issueForm.severity,
+      issueType: "observation",
+      isBlocking: false,
+      reportedAt: new Date().toISOString(),
+      resolved: false,
+    };
+    issues.push(newIssue);
+    try {
+      const updated = await projectAssetService.update(issueDialogAsset.id, { issuesJson: JSON.stringify(issues) });
+      setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    } catch { console.warn("Failed to add issue"); }
+    setIssueDialogOpen(false);
+    setIssueDialogAsset(null);
+    setIssueForm({ description: "", severity: "medium" });
+  }
+
+  async function handleToggleIssueResolved(asset: ProjectAsset, issueId: string) {
+    let issues: AssetIssue[] = [];
+    try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
+    issues = issues.map((i) => i.id === issueId ? { ...i, resolved: !i.resolved } : i);
+    try {
+      const updated = await projectAssetService.update(asset.id, { issuesJson: JSON.stringify(issues) });
+      setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    } catch { console.warn("Failed to update issue"); }
+  }
+
+  // ------------------------------------------------------------------
+  // Workflow assignment helpers
+  // ------------------------------------------------------------------
+
+  async function loadAssignmentsForAsset(assetId: string) {
+    try {
+      const [assignments, runs] = await Promise.all([
+        assetWorkflowAssignmentService.listByAsset(assetId),
+        assetWorkflowRunService.listByAsset(assetId),
+      ]);
+      setAssignmentsMap((prev) => ({ ...prev, [assetId]: assignments }));
+      setRunsMap((prev) => ({ ...prev, [assetId]: runs }));
+    } catch { console.warn("[AssetInstallationPage] loadAssignmentsForAsset failed"); }
+  }
+
+  async function openAssignDialog(asset: ProjectAsset) {
+    setAssignDialogAsset(asset);
+    setAssignForm({ workflowTypeId: "", workflowConfigId: "" });
+    setAssignDialogOpen(true);
+    // Load workflow types + published configs for this product
+    try {
+      const [types, cfgs] = await Promise.all([
+        workflowTypeService.list(),
+        workflowConfigService.listByProduct(asset.productId, "Published"),
+      ]);
+      setWorkflowTypes(types);
+      setWorkflowConfigs(cfgs);
+    } catch { console.warn("[AssetInstallationPage] failed to load workflow types/configs"); }
+  }
+
+  async function saveAssignment() {
+    if (!assignDialogAsset || !assignForm.workflowTypeId || !assignForm.workflowConfigId) return;
+    setAssignSaving(true);
+    try {
+      await assetWorkflowAssignmentService.create(assignDialogAsset.id, assignForm.workflowConfigId, assignForm.workflowTypeId);
+      await loadAssignmentsForAsset(assignDialogAsset.id);
+      setAssignDialogOpen(false);
+    } catch { console.warn("[AssetInstallationPage] saveAssignment failed"); } finally {
+      setAssignSaving(false);
+    }
+  }
+
+  async function removeAssignment(assetId: string, assignmentId: string) {
+    try {
+      await assetWorkflowAssignmentService.remove(assignmentId);
+      await loadAssignmentsForAsset(assetId);
+    } catch { console.warn("[AssetInstallationPage] removeAssignment failed"); }
+  }
+
+  async function handleStartAssignmentRun(asset: ProjectAsset, assignment: WorkflowAssignment) {
+    setRunnerLoading(asset.id);
+    try {
+      // Load the workflow config to get steps
+      const cfg = await workflowConfigService.getById(assignment.workflowConfigId);
+      if (!cfg) { alert("Workflow config not found."); return; }
+      let wf: Workflow | null = null;
+      try {
+        const parsed = JSON.parse(cfg.stepsJson);
+        if (parsed?.steps) wf = parsed as Workflow;
+        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
+      } catch {}
+      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
+      setRunnerAsset(asset);
+      setRunnerWorkflow(wf);
+      setRunnerWorkflowConfigId(assignment.workflowConfigId);
+      setRunnerOpen(true);
+    } catch { alert("Failed to load workflow."); } finally {
+      setRunnerLoading(null);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // CSV import helpers
+  // ------------------------------------------------------------------
+
+  function parseCSV(text: string): Record<string, string>[] {
+    const lines = text.trim().split("\n");
+    if (lines.length < 2) return [];
+    const cols = lines[0].split(",").map((c) => c.trim().toLowerCase().replace(/[\s#]+/g, "_").replace(/^"|"$/g, ""));
+    return lines.slice(1).map((row) => {
+      const vals = row.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+      return Object.fromEntries(cols.map((c, i) => [c, vals[i] ?? ""]));
+    }).filter((r) => Object.values(r).some(Boolean));
+  }
+
+  async function handleCSVFile(file: File) {
+    const text = await file.text();
+    const rows = parseCSV(text);
+    setCsvRows(rows);
+    setCsvImportOpen(true);
+  }
+
+  async function importCSV() {
+    if (!activeProduct || csvRows.length === 0) return;
+    setCsvImporting(true);
+    try {
+      const configsByType = new Map(workflowConfigs.map((c) => [c.configType?.toLowerCase(), c]));
+      const assets = csvRows
+        .filter((r) => r.asset_tag || r.assettag)
+        .map((r) => ({
+          assetTag: r.asset_tag || r.assettag || "",
+          assetName: r.asset_name || r.assetname || "",
+          serialNumber: r.serial_number || r["serial_#"] || r.serialnumber || "",
+          assetModel: r.model || r.asset_model || "",
+          manufacturer: r.manufacturer || "",
+          productConfigId: (() => {
+            const ct = (r.config_type || r.configtype || "").toLowerCase();
+            return configsByType.get(ct)?.id;
+          })(),
+        }));
+      await Promise.all(assets.map((a) =>
+        projectAssetService.create({
+          projectId: selectedProjectId || projects[0]?.id || "",
+          productId: activeProduct.id,
+          assetTag: a.assetTag,
+          assetName: a.assetName || undefined,
+          serialNumber: a.serialNumber || undefined,
+          assetModel: a.assetModel || undefined,
+          manufacturer: a.manufacturer || undefined,
+          productConfigId: a.productConfigId,
+        }),
+      ));
+      setCsvImportOpen(false);
+      setCsvRows([]);
+      refreshAssets();
+    } catch { alert("Import failed. Check your CSV and try again."); } finally {
+      setCsvImporting(false);
+    }
+  }
+
+  function issuesBadge(asset: ProjectAsset) {
+    let issues: AssetIssue[] = [];
+    try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
+    const openCount = issues.filter((i) => !i.resolved).length;
+    if (!openCount) return null;
+    return (
+      <Tooltip title={`${openCount} open issue${openCount !== 1 ? "s" : ""}`}>
+        <Chip
+          size="small"
+          label={openCount}
+          color="error"
+          icon={<ReportProblemOutlined sx={{ fontSize: "0.85rem !important" }} />}
+          sx={{ height: 20, "& .MuiChip-label": { px: 0.5 } }}
+        />
+      </Tooltip>
+    );
+  }
+
+  const SEVERITY_COLOR: Record<"low" | "medium" | "high", string> = {
+    low: "#2196f3",
+    medium: "#ff9800",
+    high: "#f44336",
+  };
+
+  function renderIssuesPanel(asset: ProjectAsset) {
+    let issues: AssetIssue[] = [];
+    try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
+    return (
+      <Box sx={{ mt: 1.5 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.75}>
+          <Typography variant="caption" fontWeight={700} color="text.secondary"
+            sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Issues {issues.length > 0 && `(${issues.filter(i => !i.resolved).length} open)`}
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            startIcon={<ReportProblemOutlined fontSize="small" />}
+            sx={{ fontSize: 11, py: 0.25 }}
+            onClick={() => { setIssueDialogAsset(asset); setIssueDialogOpen(true); }}
+          >
+            Add issue
+          </Button>
+        </Stack>
+        {issues.length === 0 ? (
+          <Typography variant="caption" color="text.disabled">No issues recorded.</Typography>
+        ) : (
+          <Stack spacing={0.5}>
+            {issues.map((issue) => (
+              <Stack key={issue.id} direction="row" alignItems="flex-start" spacing={1}
+                sx={{ p: 0.75, borderRadius: 1, border: "1px solid", borderColor: "divider",
+                  bgcolor: issue.resolved ? "rgba(255,255,255,0.02)" : "rgba(244,67,54,0.04)",
+                  opacity: issue.resolved ? 0.55 : 1 }}>
+                <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: SEVERITY_COLOR[issue.severity], mt: 0.6, flexShrink: 0 }} />
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="caption" sx={{ textDecoration: issue.resolved ? "line-through" : "none" }}>
+                    {issue.description}
+                  </Typography>
+                  {issue.stepTitle && (
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Step: {issue.stepTitle}
+                    </Typography>
+                  )}
+                  <Typography variant="caption" color="text.disabled" display="block">
+                    {new Date(issue.reportedAt).toLocaleString()} · {issue.severity}
+                  </Typography>
+                </Box>
+                <Tooltip title={issue.resolved ? "Mark open" : "Mark resolved"}>
+                  <IconButton size="small" onClick={() => handleToggleIssueResolved(asset, issue.id)}>
+                    {issue.resolved
+                      ? <CheckBoxOutlined fontSize="small" color="success" />
+                      : <CheckBoxOutlineBlankOutlined fontSize="small" />}
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            ))}
+          </Stack>
+        )}
+      </Box>
+    );
   }
 
   function actionButton(asset: ProjectAsset) {
@@ -685,6 +1108,145 @@ const AssetInstallationPage = () => {
   }
 
   // ------------------------------------------------------------------
+  // Dynamic column cell renderer
+  // ------------------------------------------------------------------
+
+  function renderColumnCell(
+    colId: string,
+    asset: ProjectAsset,
+    cfg: ProductConfig | null | undefined,
+    proj: ReturnType<typeof projectMap.get>,
+    tech: ReturnType<typeof userMap.get>,
+  ) {
+    switch (colId) {
+      case "assetName":
+        return <Typography variant="body2">{asset.assetName || "—"}</Typography>;
+      case "serialNumber":
+        return <Typography variant="body2" color="text.secondary">{asset.serialNumber || "—"}</Typography>;
+      case "assetModel":
+        return <Typography variant="body2" color="text.secondary">{asset.assetModel || "—"}</Typography>;
+      case "manufacturer":
+        return <Typography variant="body2" color="text.secondary">{asset.manufacturer || "—"}</Typography>;
+      case "configType":
+        return <Typography variant="body2" color="text.secondary">{cfg?.configType || "—"}</Typography>;
+      case "project":
+        return <Typography variant="body2" color="text.secondary">{proj ? proj.jobNumber : asset.projectId.slice(0, 8)}</Typography>;
+      case "siteName":
+        return <Typography variant="body2" color="text.secondary">{proj?.siteName || "—"}</Typography>;
+      case "location":
+        return <Typography variant="body2" color="text.secondary">{asset.location || "—"}</Typography>;
+      case "assignedTech":
+        return <Typography variant="body2" color="text.secondary">{tech ? tech.fullName : "—"}</Typography>;
+      case "features":
+        return featureCompletenessChip(asset);
+      case "status":
+        return (
+          <Chip
+            size="small"
+            label={STATUS_LABELS[asset.status as ProjectAssetStatus] ?? asset.status}
+            color={STATUS_COLORS[asset.status as ProjectAssetStatus] ?? "default"}
+            icon={
+              asset.status === "InProgress" ? <HourglassEmptyOutlined sx={{ fontSize: "0.9rem !important" }} /> :
+              asset.status === "Complete" ? <CheckCircleOutlined sx={{ fontSize: "0.9rem !important" }} /> :
+              asset.status === "Issue" ? <ErrorOutlined sx={{ fontSize: "0.9rem !important" }} /> :
+              undefined
+            }
+          />
+        );
+      default:
+        return null;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Workflow assignments panel (expanded row)
+  // ------------------------------------------------------------------
+
+  function renderWorkflowAssignmentsPanel(asset: ProjectAsset) {
+    const assignments = assignmentsMap[asset.id] ?? [];
+    const runs = runsMap[asset.id] ?? [];
+    const runLoading = runnerLoading === asset.id;
+
+    return (
+      <Box sx={{ mt: 1.5 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.75}>
+          <Typography variant="caption" fontWeight={700} color="text.secondary"
+            sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Workflow Assignments {assignments.length > 0 && `(${assignments.length})`}
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            color="primary"
+            startIcon={<AssignmentOutlined fontSize="small" />}
+            sx={{ fontSize: 11, py: 0.25 }}
+            onClick={() => openAssignDialog(asset)}
+          >
+            Assign workflow
+          </Button>
+        </Stack>
+        {assignments.length === 0 ? (
+          <Typography variant="caption" color="text.disabled">
+            No workflow assignments. Click "Assign workflow" to add one.
+          </Typography>
+        ) : (
+          <Stack spacing={0.5}>
+            {assignments.map((asgn) => {
+              const latestRun = runs
+                .filter((r) => r.workflowConfigId === asgn.workflowConfigId)
+                .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+              return (
+                <Stack key={asgn.id} direction="row" alignItems="center" spacing={1}
+                  sx={{ p: 0.75, borderRadius: 1, border: "1px solid", borderColor: "divider", bgcolor: "rgba(255,255,255,0.02)" }}>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="caption" fontWeight={600}>{asgn.workflowTypeName || "Workflow"}</Typography>
+                    <Typography variant="caption" color="text.secondary" display="block" noWrap>
+                      {asgn.workflowConfigName || asgn.workflowConfigId}
+                    </Typography>
+                  </Box>
+                  {latestRun && (
+                    <Chip
+                      size="small"
+                      label={latestRun.status}
+                      color={latestRun.status === "Complete" ? "success" : latestRun.status === "Issue" ? "error" : "primary"}
+                      variant={latestRun.isLocked ? "filled" : "outlined"}
+                      sx={{ fontSize: 10, height: 18 }}
+                    />
+                  )}
+                  <Tooltip title={latestRun?.status === "Complete" ? "Right-click to re-run or view history" : ""}>
+                    <Button
+                      size="small"
+                      variant={latestRun?.status === "InProgress" ? "contained" : "outlined"}
+                      color={latestRun?.status === "Issue" ? "error" : latestRun?.status === "Complete" ? "inherit" : "success"}
+                      disabled={runLoading}
+                      startIcon={runLoading ? <CircularProgress size={12} /> : <PlayArrowOutlined />}
+                      onClick={() => handleStartAssignmentRun(asset, asgn)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setContextMenuAnchor(e.currentTarget);
+                        setContextMenuAsset(asset);
+                        setContextMenuAssignment(asgn);
+                      }}
+                      sx={{ fontSize: 11, py: 0.25 }}
+                    >
+                      {!latestRun ? "Start" : latestRun.status === "InProgress" ? "Continue" : latestRun.status === "Complete" ? "View" : "Review"}
+                    </Button>
+                  </Tooltip>
+                  <Tooltip title="Remove assignment">
+                    <IconButton size="small" onClick={() => removeAssignment(asset.id, asgn.id)}>
+                      <DeleteOutline sx={{ fontSize: "0.9rem" }} />
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
+              );
+            })}
+          </Stack>
+        )}
+      </Box>
+    );
+  }
+
+  // ------------------------------------------------------------------
   // Render
   // ------------------------------------------------------------------
 
@@ -700,8 +1262,20 @@ const AssetInstallationPage = () => {
             Track assets across projects — start work orders, record status, and monitor progress.
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
+        <Stack direction="row" spacing={1} alignItems="center">
           <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={refreshAssets}>Refresh</Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<FileUploadOutlined />}
+            disabled={!activeProduct}
+            onClick={() => {
+              if (activeProduct) workflowConfigService.listByProduct(activeProduct.id, "Published").then(setWorkflowConfigs);
+              setCsvImportOpen(true);
+            }}
+          >
+            Import CSV
+          </Button>
           <Button variant="contained" startIcon={<AddOutlined />} onClick={openAdd} disabled={!activeProduct}>Add asset</Button>
         </Stack>
       </Stack>
@@ -793,6 +1367,34 @@ const AssetInstallationPage = () => {
           value={search} onChange={(e) => setSearch(e.target.value)} sx={{ minWidth: 260 }} />
       </Stack>
 
+      {/* Table toolbar */}
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Tooltip title={archiveMode ? "Exit archive view" : "Show completed assets archive"}>
+          <Button
+            size="small"
+            variant={archiveMode ? "contained" : "outlined"}
+            color={archiveMode ? "success" : "inherit"}
+            startIcon={<ArchiveOutlined fontSize="small" />}
+            onClick={() => setArchiveMode((v) => !v)}
+            sx={{ fontSize: 12 }}
+          >
+            {archiveMode ? "Archive View — Exit" : "Archive"}
+          </Button>
+        </Tooltip>
+        {!archiveMode && (
+          <Tooltip title="Column settings">
+            <IconButton size="small" onClick={openColumnSettings} sx={{ opacity: 0.7, "&:hover": { opacity: 1 } }}>
+              <ViewColumnOutlined fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+        {archiveMode && (
+          <Typography variant="caption" color="text.secondary">
+            Showing completed assets · read-only view
+          </Typography>
+        )}
+      </Box>
+
       {/* Asset table */}
       <Paper className="glass-card" sx={{ overflow: "hidden" }}>
         {loadingAssets ? (
@@ -813,13 +1415,11 @@ const AssetInstallationPage = () => {
               <TableRow>
                 <TableCell sx={{ width: 36, px: 1 }} />
                 <TableCell><Typography variant="caption" fontWeight={700}>Asset Tag</Typography></TableCell>
-                <TableCell><Typography variant="caption" fontWeight={700}>Serial #</Typography></TableCell>
-                <TableCell><Typography variant="caption" fontWeight={700}>Config Type</Typography></TableCell>
-                <TableCell><Typography variant="caption" fontWeight={700}>Project</Typography></TableCell>
-                <TableCell><Typography variant="caption" fontWeight={700}>Location</Typography></TableCell>
-                <TableCell><Typography variant="caption" fontWeight={700}>Assigned Tech</Typography></TableCell>
-                <TableCell><Typography variant="caption" fontWeight={700}>Features</Typography></TableCell>
-                <TableCell><Typography variant="caption" fontWeight={700}>Status</Typography></TableCell>
+                {visibleColumns.map((col) => (
+                  <TableCell key={col.id}>
+                    <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
+                  </TableCell>
+                ))}
                 <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
               </TableRow>
             </TableHead>
@@ -838,7 +1438,11 @@ const AssetInstallationPage = () => {
                     sx={{ bgcolor: hasIssue ? "rgba(211,47,47,0.04)" : undefined }}
                   >
                     <TableCell sx={{ px: 1 }}>
-                      <IconButton size="small" onClick={() => setExpandedAssetId(isExpanded ? null : asset.id)}>
+                      <IconButton size="small" onClick={() => {
+                        const nextId = isExpanded ? null : asset.id;
+                        setExpandedAssetId(nextId);
+                        if (nextId && !assignmentsMap[nextId]) loadAssignmentsForAsset(nextId);
+                      }}>
                         {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
                       </IconButton>
                     </TableCell>
@@ -846,39 +1450,14 @@ const AssetInstallationPage = () => {
                       <Stack direction="row" alignItems="center" spacing={0.75}>
                         {hasIssue && <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "error.main", flexShrink: 0 }} />}
                         <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
+                        {issuesBadge(asset)}
                       </Stack>
                     </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">{asset.serialNumber || "—"}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">{cfg?.configType || "—"}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">
-                        {proj ? proj.jobNumber : asset.projectId.slice(0, 8)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">{asset.location || "—"}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">{tech ? tech.fullName : "—"}</Typography>
-                    </TableCell>
-                    <TableCell>{featureCompletenessChip(asset)}</TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        label={STATUS_LABELS[asset.status as ProjectAssetStatus] ?? asset.status}
-                        color={STATUS_COLORS[asset.status as ProjectAssetStatus] ?? "default"}
-                        icon={
-                          asset.status === "InProgress" ? <HourglassEmptyOutlined sx={{ fontSize: "0.9rem !important" }} /> :
-                          asset.status === "Complete" ? <CheckCircleOutlined sx={{ fontSize: "0.9rem !important" }} /> :
-                          asset.status === "Issue" ? <ErrorOutlined sx={{ fontSize: "0.9rem !important" }} /> :
-                          undefined
-                        }
-                      />
-                    </TableCell>
+                    {visibleColumns.map((col) => (
+                      <TableCell key={col.id}>
+                        {renderColumnCell(col.id, asset, cfg, proj, tech ?? undefined)}
+                      </TableCell>
+                    ))}
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
                         {actionButton(asset)}
@@ -904,7 +1483,7 @@ const AssetInstallationPage = () => {
 
                   // Expandable feature detail row
                   <TableRow key={`${asset.id}-detail`}>
-                    <TableCell colSpan={10} sx={{ py: 0 }}>
+                    <TableCell colSpan={3 + visibleColumns.length} sx={{ py: 0 }}>
                       <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                         <Box sx={{ px: 3, py: 2, bgcolor: "rgba(45,212,191,0.05)", borderBottom: "1px solid", borderColor: "divider" }}>
                           <Typography variant="caption" fontWeight={700} color="text.secondary"
@@ -918,6 +1497,10 @@ const AssetInstallationPage = () => {
                               <Typography variant="caption">{asset.notes}</Typography>
                             </Box>
                           )}
+                          <Divider sx={{ my: 1.5 }} />
+                          {renderIssuesPanel(asset)}
+                          <Divider sx={{ my: 1.5 }} />
+                          {renderWorkflowAssignmentsPanel(asset)}
                         </Box>
                       </Collapse>
                     </TableCell>
@@ -982,13 +1565,50 @@ const AssetInstallationPage = () => {
               </Alert>
             )}
 
+            {/* Auto-filled project info */}
+            {addForm.projectId && (() => {
+              const proj = projects.find((p) => p.id === addForm.projectId);
+              if (!proj) return null;
+              return (
+                <Stack direction="row" spacing={1.5}>
+                  <TextField
+                    label="Project #" size="small" fullWidth
+                    value={proj.jobNumber}
+                    InputProps={{ readOnly: true }}
+                    sx={{ "& .MuiInputBase-input": { color: "text.secondary" } }}
+                  />
+                  {proj.siteName && (
+                    <TextField
+                      label="Site Name" size="small" fullWidth
+                      value={proj.siteName}
+                      InputProps={{ readOnly: true }}
+                      sx={{ "& .MuiInputBase-input": { color: "text.secondary" } }}
+                    />
+                  )}
+                </Stack>
+              );
+            })()}
+
             <TextField label="Asset Tag *" size="small" fullWidth required
               value={addForm.assetTag}
               onChange={(e) => setAddForm((p) => ({ ...p, assetTag: e.target.value }))}
               placeholder="e.g. VEH-001" />
+            <TextField label="Asset Name" size="small" fullWidth
+              value={addForm.assetName}
+              onChange={(e) => setAddForm((p) => ({ ...p, assetName: e.target.value }))}
+              placeholder="e.g. AGI-10, Shuttle Car, Skid Steer"
+              helperText="Equipment type or model name" />
             <TextField label="Serial Number" size="small" fullWidth
               value={addForm.serialNumber}
               onChange={(e) => setAddForm((p) => ({ ...p, serialNumber: e.target.value }))} />
+            <TextField label="Asset Model" size="small" fullWidth
+              value={addForm.assetModel}
+              onChange={(e) => setAddForm((p) => ({ ...p, assetModel: e.target.value }))}
+              placeholder="e.g. Axis P3245-V" />
+            <TextField label="Manufacturer" size="small" fullWidth
+              value={addForm.manufacturer}
+              onChange={(e) => setAddForm((p) => ({ ...p, manufacturer: e.target.value }))}
+              placeholder="e.g. Axis, Cisco" />
             <TextField
               label="Location" size="small" fullWidth
               value={addForm.location}
@@ -1034,12 +1654,44 @@ const AssetInstallationPage = () => {
         <DialogTitle>Edit Asset — {editAsset?.assetTag}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {/* Site name from project (read-only) */}
+            {editAsset && (() => {
+              const proj = projectMap.get(editAsset.projectId);
+              if (!proj?.siteName) return null;
+              return (
+                <Stack direction="row" spacing={1.5}>
+                  <TextField
+                    label="Project #" size="small" fullWidth
+                    value={proj.jobNumber}
+                    InputProps={{ readOnly: true }}
+                    sx={{ "& .MuiInputBase-input": { color: "text.secondary" } }}
+                  />
+                  <TextField
+                    label="Site Name" size="small" fullWidth
+                    value={proj.siteName}
+                    InputProps={{ readOnly: true }}
+                    sx={{ "& .MuiInputBase-input": { color: "text.secondary" } }}
+                  />
+                </Stack>
+              );
+            })()}
+
             <TextField label="Asset Tag *" size="small" fullWidth required
               value={editForm.assetTag}
               onChange={(e) => setEditForm((p) => ({ ...p, assetTag: e.target.value }))} />
+            <TextField label="Asset Name" size="small" fullWidth
+              value={editForm.assetName}
+              onChange={(e) => setEditForm((p) => ({ ...p, assetName: e.target.value }))}
+              placeholder="e.g. AGI-10, Shuttle Car, Skid Steer" />
             <TextField label="Serial Number" size="small" fullWidth
               value={editForm.serialNumber}
               onChange={(e) => setEditForm((p) => ({ ...p, serialNumber: e.target.value }))} />
+            <TextField label="Asset Model" size="small" fullWidth
+              value={editForm.assetModel}
+              onChange={(e) => setEditForm((p) => ({ ...p, assetModel: e.target.value }))} />
+            <TextField label="Manufacturer" size="small" fullWidth
+              value={editForm.manufacturer}
+              onChange={(e) => setEditForm((p) => ({ ...p, manufacturer: e.target.value }))} />
             <TextField label="Location" size="small" fullWidth
               value={editForm.location}
               onChange={(e) => setEditForm((p) => ({ ...p, location: e.target.value }))} />
@@ -1093,15 +1745,345 @@ const AssetInstallationPage = () => {
         </DialogActions>
       </Dialog>
 
+      {/* Add issue dialog */}
+      <Dialog open={issueDialogOpen} onClose={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); }} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <ReportProblemOutlined color="error" fontSize="small" />
+            <span>Add Issue — {issueDialogAsset?.assetTag}</span>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Description"
+              size="small"
+              fullWidth
+              multiline
+              rows={3}
+              value={issueForm.description}
+              onChange={(e) => setIssueForm((p) => ({ ...p, description: e.target.value }))}
+              placeholder="Describe the issue…"
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel>Severity</InputLabel>
+              <Select
+                label="Severity"
+                value={issueForm.severity}
+                onChange={(e) => setIssueForm((p) => ({ ...p, severity: e.target.value as "low" | "medium" | "high" }))}
+              >
+                <MenuItem value="low">Low</MenuItem>
+                <MenuItem value="medium">Medium</MenuItem>
+                <MenuItem value="high">High</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); }}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={handleAddIssue} disabled={!issueForm.description.trim()}>
+            Add issue
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Column settings dialog */}
+      <Dialog open={colSettingsOpen} onClose={() => setColSettingsOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Column Settings</DialogTitle>
+        <DialogContent>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
+            Check to show a column. Drag rows to reorder — top of the list = leftmost in the table.
+          </Typography>
+          <Stack spacing={0.75}>
+            {settingsOrder.map((id, idx) => {
+              const col = CONFIGURABLE_COLUMNS.find((c) => c.id === id);
+              if (!col) return null;
+              const isHidden = settingsHidden.includes(id);
+              return (
+                <Stack
+                  key={id}
+                  direction="row"
+                  alignItems="center"
+                  spacing={0.5}
+                  draggable
+                  onDragStart={(e) => e.dataTransfer.setData("text/plain", String(idx))}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    const fromIdx = Number(e.dataTransfer.getData("text/plain"));
+                    if (fromIdx === idx) return;
+                    const next = [...settingsOrder];
+                    const [moved] = next.splice(fromIdx, 1);
+                    next.splice(idx, 0, moved);
+                    setSettingsOrder(next);
+                  }}
+                  sx={{
+                    px: 1, py: 0.5, borderRadius: 1,
+                    border: "1px solid",
+                    borderColor: "divider",
+                    bgcolor: isHidden ? "action.disabledBackground" : "action.hover",
+                    cursor: "grab",
+                    "&:active": { cursor: "grabbing" },
+                  }}
+                >
+                  <DragIndicatorOutlined fontSize="small" sx={{ color: "text.disabled", flexShrink: 0 }} />
+                  <Checkbox
+                    size="small"
+                    checked={!isHidden}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) =>
+                      setSettingsHidden((prev) =>
+                        e.target.checked ? prev.filter((h) => h !== id) : [...prev, id]
+                      )
+                    }
+                  />
+                  <Typography variant="body2" sx={{ flex: 1, opacity: isHidden ? 0.45 : 1, userSelect: "none" }}>
+                    {col.label}
+                  </Typography>
+                </Stack>
+              );
+            })}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setColSettingsOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={applyColumnSettings}>Apply</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Assign workflow dialog */}
+      <Dialog open={assignDialogOpen} onClose={() => !assignSaving && setAssignDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <AssignmentOutlined fontSize="small" />
+            <span>Assign Workflow — {assignDialogAsset?.assetTag}</span>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl size="small" fullWidth required>
+              <InputLabel>Workflow Type *</InputLabel>
+              <Select
+                label="Workflow Type *"
+                value={assignForm.workflowTypeId}
+                onChange={(e) => setAssignForm((p) => ({ ...p, workflowTypeId: e.target.value }))}
+              >
+                {workflowTypes.map((t) => (
+                  <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth required>
+              <InputLabel>Workflow Config (Published) *</InputLabel>
+              <Select
+                label="Workflow Config (Published) *"
+                value={assignForm.workflowConfigId}
+                onChange={(e) => setAssignForm((p) => ({ ...p, workflowConfigId: e.target.value }))}
+              >
+                {workflowConfigs.length === 0 && (
+                  <MenuItem value="" disabled>No published configs available</MenuItem>
+                )}
+                {workflowConfigs.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.name}
+                    {c.configType ? ` — ${c.configType}` : ""}
+                    <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>v{c.version}</Typography>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAssignDialogOpen(false)} disabled={assignSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={saveAssignment}
+            disabled={assignSaving || !assignForm.workflowTypeId || !assignForm.workflowConfigId}
+            startIcon={assignSaving ? <CircularProgress size={14} /> : undefined}
+          >
+            {assignSaving ? "Saving…" : "Assign"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* CSV import dialog */}
+      <Dialog open={csvImportOpen} onClose={() => !csvImporting && setCsvImportOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" justifyContent="space-between">
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <FileUploadOutlined fontSize="small" />
+              <span>Import Assets from CSV</span>
+            </Stack>
+            <Tooltip title={
+              <Box sx={{ fontSize: 12 }}>
+                <strong>Expected columns:</strong><br />
+                Asset Tag* (required)<br />
+                Asset Name<br />
+                Config Type (matched to published configs)<br />
+                Serial # / Serial Number<br />
+                Model / Asset Model<br />
+                Manufacturer
+              </Box>
+            }>
+              <IconButton size="small" sx={{ opacity: 0.6 }}>
+                <Typography sx={{ fontSize: 14, fontWeight: 700, lineHeight: 1 }}>ⓘ</Typography>
+              </IconButton>
+            </Tooltip>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {csvRows.length === 0 ? (
+              <Box
+                sx={{
+                  border: "2px dashed",
+                  borderColor: "divider",
+                  borderRadius: 2,
+                  p: 4,
+                  textAlign: "center",
+                  cursor: "pointer",
+                  "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" },
+                }}
+                onClick={() => document.getElementById("csv-upload-input")?.click()}
+              >
+                <FileUploadOutlined sx={{ fontSize: 40, opacity: 0.4, mb: 1 }} />
+                <Typography variant="body2" color="text.secondary">Click to upload a CSV file</Typography>
+                <Typography variant="caption" color="text.disabled">or drag and drop</Typography>
+                <input
+                  id="csv-upload-input"
+                  type="file"
+                  accept=".csv"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleCSVFile(file);
+                    e.target.value = "";
+                  }}
+                />
+              </Box>
+            ) : (
+              <>
+                <Alert severity="info" sx={{ fontSize: 12 }}>
+                  {csvRows.filter((r) => r.asset_tag || r.assettag).length} valid rows found.
+                  {csvRows.filter((r) => !r.asset_tag && !r.assettag).length > 0 &&
+                    ` ${csvRows.filter((r) => !r.asset_tag && !r.assettag).length} rows skipped (missing asset tag).`
+                  }
+                </Alert>
+                <Box sx={{ maxHeight: 320, overflow: "auto" }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell><Typography variant="caption" fontWeight={700}>Asset Tag</Typography></TableCell>
+                        <TableCell><Typography variant="caption" fontWeight={700}>Asset Name</Typography></TableCell>
+                        <TableCell><Typography variant="caption" fontWeight={700}>Config Type</Typography></TableCell>
+                        <TableCell><Typography variant="caption" fontWeight={700}>Serial #</Typography></TableCell>
+                        <TableCell><Typography variant="caption" fontWeight={700}>Model</Typography></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {csvRows.map((r, i) => {
+                        const tag = r.asset_tag || r.assettag;
+                        const valid = !!tag;
+                        return (
+                          <TableRow key={i} sx={{ opacity: valid ? 1 : 0.4 }}>
+                            <TableCell>
+                              <Stack direction="row" alignItems="center" spacing={0.5}>
+                                <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: valid ? "success.main" : "error.main", flexShrink: 0 }} />
+                                <Typography variant="body2">{tag || "(missing)"}</Typography>
+                              </Stack>
+                            </TableCell>
+                            <TableCell><Typography variant="body2">{r.asset_name || r.assetname || "—"}</Typography></TableCell>
+                            <TableCell><Typography variant="body2">{r.config_type || r.configtype || "—"}</Typography></TableCell>
+                            <TableCell><Typography variant="body2">{r.serial_number || r["serial_#"] || r.serialnumber || "—"}</Typography></TableCell>
+                            <TableCell><Typography variant="body2">{r.model || r.asset_model || "—"}</Typography></TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </Box>
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={() => setCsvRows([])}
+                  sx={{ alignSelf: "flex-start", fontSize: 12 }}
+                >
+                  Clear / upload different file
+                </Button>
+              </>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setCsvImportOpen(false); setCsvRows([]); }} disabled={csvImporting}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={importCSV}
+            disabled={csvImporting || csvRows.filter((r) => r.asset_tag || r.assettag).length === 0}
+            startIcon={csvImporting ? <CircularProgress size={14} /> : <FileUploadOutlined />}
+          >
+            {csvImporting ? "Importing…" : `Import ${csvRows.filter((r) => r.asset_tag || r.assettag).length} asset${csvRows.filter((r) => r.asset_tag || r.assettag).length !== 1 ? "s" : ""}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Run history dialog */}
+      {runHistoryAsset && runHistoryAssignment && (
+        <AssetWorkflowRunHistoryDialog
+          open={Boolean(runHistoryAsset)}
+          onClose={() => { setRunHistoryAsset(null); setRunHistoryAssignment(null); }}
+          asset={runHistoryAsset}
+          assignment={runHistoryAssignment}
+        />
+      )}
+
+      {/* Right-click context menu on assignment run button */}
+      <Menu
+        anchorEl={contextMenuAnchor}
+        open={Boolean(contextMenuAnchor)}
+        onClose={() => setContextMenuAnchor(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+      >
+        <MenuItem
+          onClick={() => {
+            setContextMenuAnchor(null);
+            if (contextMenuAsset && contextMenuAssignment) {
+              handleStartAssignmentRun(contextMenuAsset, contextMenuAssignment);
+            }
+          }}
+        >
+          <ListItemIcon><PlayArrowOutlined fontSize="small" /></ListItemIcon>
+          <ListItemText>Re-run workflow</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setContextMenuAnchor(null);
+            if (contextMenuAsset && contextMenuAssignment) {
+              setRunHistoryAsset(contextMenuAsset);
+              setRunHistoryAssignment(contextMenuAssignment);
+            }
+          }}
+        >
+          <ListItemIcon><HistoryOutlined fontSize="small" /></ListItemIcon>
+          <ListItemText>View run history</ListItemText>
+        </MenuItem>
+      </Menu>
+
       {/* Work order runner */}
       {runnerOpen && runnerWorkflow && runnerAsset && activeProduct && (
         <WorkOrderRunner
           open={runnerOpen}
-          onClose={() => { setRunnerOpen(false); setRunnerAsset(null); setRunnerWorkflow(null); }}
+          onClose={() => {
+            setRunnerOpen(false);
+            setRunnerAsset(null);
+            setRunnerWorkflow(null);
+            setRunnerWorkflowConfigId(undefined);
+          }}
           workflow={runnerWorkflow}
           productId={activeProduct.id}
           productName={activeProduct.name}
           projectAssetId={runnerAsset.id}
+          workflowConfigId={runnerWorkflowConfigId}
           onComplete={handleWorkOrderComplete}
         />
       )}

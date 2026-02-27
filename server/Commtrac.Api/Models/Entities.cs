@@ -268,6 +268,21 @@ public class DocumentEntity
     [MaxLength(120)]
     public string? ContentType { get; set; }
     public long? FileSize { get; set; }
+    [MaxLength(200)]
+    public string? CreatedBy { get; set; }
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+    public string? CustomValuesJson { get; set; }
+    [MaxLength(2000)]
+    public string? DownloadUrl { get; set; }
+}
+
+public class DocumentConfigEntity
+{
+    [Key]
+    public int Id { get; set; } = 1;
+    public string TabsJson { get; set; } = "[]";
+    public string FieldsJson { get; set; } = "[]";
 }
 
 public class InspectionPhotoEntity
@@ -549,14 +564,23 @@ public class ProjectAssetEntity
     public string ProjectId { get; set; } = string.Empty;
     [MaxLength(100)]
     public string ProductId { get; set; } = string.Empty;
+    // Deprecated: replaced by AssetWorkflowAssignmentEntity. Kept for migration safety.
     [MaxLength(100)]
     public string? ProductConfigId { get; set; }
+    // Deprecated: replaced by AssetWorkflowAssignmentEntity. Kept for migration safety.
     [MaxLength(100)]
     public string? WorkflowTemplateId { get; set; }
     [MaxLength(200)]
     public string AssetTag { get; set; } = string.Empty;
+    /// <summary>Equipment type/name e.g. "AGI-10", "Shuttle Car", "Skid Steer"</summary>
+    [MaxLength(200)]
+    public string? AssetName { get; set; }
     [MaxLength(200)]
     public string? SerialNumber { get; set; }
+    [MaxLength(200)]
+    public string? AssetModel { get; set; }
+    [MaxLength(200)]
+    public string? Manufacturer { get; set; }
     [MaxLength(200)]
     public string? Location { get; set; }
     [MaxLength(80)]
@@ -568,6 +592,113 @@ public class ProjectAssetEntity
     [MaxLength(800)]
     public string? Notes { get; set; }
     public string FeatureValuesJson { get; set; } = "{}";
+    public string IssuesJson { get; set; } = "[]";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+// ─── Workflow Config Unification (v2 architecture) ────────────────────────────
+
+/// <summary>
+/// Unified workflow configuration — merges WorkInstructionTemplate + WorkflowTemplate.
+/// Contains both the metadata (config type, feature selections) and the steps/media.
+/// Status gates: Draft (editable) → Published (immutable, assignable) → Archived.
+/// </summary>
+public class WorkflowConfigEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string ProductId { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string? DisplayName { get; set; }
+    [MaxLength(100)]
+    public string? ConfigType { get; set; }
+    /// <summary>Draft | Published | Archived</summary>
+    [MaxLength(20)]
+    public string Status { get; set; } = "Draft";
+    public int Version { get; set; } = 1;
+    /// <summary>ID of the WorkflowConfig this was cloned from (null if original)</summary>
+    [MaxLength(100)]
+    public string? TemplateSourceId { get; set; }
+    public string StepsJson { get; set; } = "[]";
+    public string MediaJson { get; set; } = "[]";
+    public string FeatureSelectionsJson { get; set; } = "[]";
+    public string? Notes { get; set; }
+    [MaxLength(200)]
+    public string? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// User-defined workflow execution types (Installation, Commissioning, Inspection, Repair…).
+/// Seeded with 4 defaults; admins can add custom types.
+/// </summary>
+public class WorkflowTypeEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(50)]
+    public string? Icon { get; set; }
+    public int SortOrder { get; set; } = 0;
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// Planning layer — links a WorkflowConfig to a ProjectAsset for a given workflow type.
+/// An asset can have multiple assignments (one per workflow type).
+/// </summary>
+public class AssetWorkflowAssignmentEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string AssetId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string WorkflowConfigId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string WorkflowTypeId { get; set; } = string.Empty;
+    public bool Active { get; set; } = true;
+    [MaxLength(200)]
+    public string? AssignedBy { get; set; }
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Execution instance — one record per time a workflow is run against an asset.
+/// WorkflowSnapshotJson is a frozen copy of the config at the moment the run started.
+/// IsLocked=true after completion; locked runs are read-only.
+/// </summary>
+public class AssetWorkflowRunEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string AssetId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string WorkflowConfigId { get; set; } = string.Empty;
+    public int WorkflowVersion { get; set; } = 1;
+    /// <summary>Frozen snapshot of the workflow config at run start. Immutable once set.</summary>
+    public string WorkflowSnapshotJson { get; set; } = "{}";
+    /// <summary>Legacy link to WorkOrder (for historical runs migrated from old schema)</summary>
+    [MaxLength(100)]
+    public string? WorkOrderId { get; set; }
+    /// <summary>InProgress | Complete | Issue</summary>
+    [MaxLength(20)]
+    public string Status { get; set; } = "InProgress";
+    /// <summary>Once locked, StepResultsJson and IssuesJson cannot be modified.</summary>
+    public bool IsLocked { get; set; } = false;
+    [MaxLength(80)]
+    public string? TechnicianUserId { get; set; }
+    public string StepResultsJson { get; set; } = "[]";
+    public string IssuesJson { get; set; } = "[]";
+    public DateTime StartedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? CompletedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
