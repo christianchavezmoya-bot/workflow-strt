@@ -20,7 +20,9 @@ export const workflowConfigService = {
     try {
       const params = status ? `?status=${status}` : "";
       const res = await api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}${params}`);
-      lsWrite(productId, res.data);
+      // Only cache unfiltered results — a status-filtered response would corrupt the cache
+      // for callers that need all statuses (e.g. WorkInstructions table).
+      if (!status) lsWrite(productId, res.data);
       return res.data;
     } catch (err: unknown) {
       console.warn("[workflowConfigService] API unavailable, falling back to localStorage", err);

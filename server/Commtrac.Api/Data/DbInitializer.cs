@@ -19,6 +19,7 @@ public static class DbInitializer
         EnsureSessionsTable(db);
         EnsurePasswordChangedAtColumn(db);
         EnsureDocumentTables(db);
+        EnsureAssetDocumentLinksTables(db);
         EnsureLinkableKeyFieldDefinitions(db);
 
         if (!db.Users.Any())
@@ -351,6 +352,46 @@ public static class DbInitializer
                 cmd.CommandText = "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES ('20260212035001_Add2faFields', '8.0.23')";
                 cmd.ExecuteNonQuery();
             }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Creates the AssetDocumentLinks bridge table (asset ↔ library document) if it
+    /// doesn't exist. This table is created here rather than via an EF migration so
+    /// it follows the same idempotent Ensure* pattern used by all other post-initial
+    /// tables in this project.
+    /// </summary>
+    private static void EnsureAssetDocumentLinksTables(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS AssetDocumentLinks (
+                    Id         TEXT PRIMARY KEY NOT NULL,
+                    AssetId    TEXT NOT NULL DEFAULT '',
+                    DocumentId TEXT NOT NULL DEFAULT '',
+                    AttachedBy TEXT NULL,
+                    AttachedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_AssetDocumentLinks_AssetId
+                ON AssetDocumentLinks (AssetId)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_AssetDocumentLinks_DocumentId
+                ON AssetDocumentLinks (DocumentId)";
+            cmd.ExecuteNonQuery();
         }
         finally
         {

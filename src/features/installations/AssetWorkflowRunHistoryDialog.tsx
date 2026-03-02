@@ -6,10 +6,15 @@ import {
   ExpandMoreOutlined,
   HourglassEmptyOutlined,
   LockOutlined,
+  RadioButtonUncheckedOutlined,
   ReportProblemOutlined,
+  TuneOutlined,
+  VisibilityOffOutlined,
 } from "@mui/icons-material";
 import {
+  Alert,
   Box,
+  Button,
   Chip,
   CircularProgress,
   Collapse,
@@ -17,13 +22,16 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControlLabel,
   IconButton,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
+  TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -62,6 +70,16 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
   const [loading, setLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
 
+  // Issue action state — keyed by issueId
+  const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
+  const [pendingNotes, setPendingNotes] = useState<Record<string, string>>({});
+  const [pendingInternal, setPendingInternal] = useState<Record<string, boolean>>({});
+  const [savingIssueId, setSavingIssueId] = useState<string | null>(null);
+  const [issueError, setIssueError] = useState<string | null>(null);
+
+  // Mutable local copy of issues per run (so changes are reflected instantly)
+  const [runIssueMap, setRunIssueMap] = useState<Record<string, RunIssue[]>>({});
+
   useEffect(() => {
     if (!open) return;
     setLoading(true);
@@ -71,6 +89,10 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
           .filter((r) => r.workflowConfigId === assignment.workflowConfigId)
           .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
         setRuns(filtered);
+        // Seed local issue map
+        const map: Record<string, RunIssue[]> = {};
+        for (const r of filtered) map[r.id] = parseIssues(r.issuesJson);
+        setRunIssueMap(map);
       })
       .finally(() => setLoading(false));
   }, [open, asset.id, assignment.workflowConfigId]);
@@ -87,8 +109,225 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
     return parseStepResults(run.stepResultsJson).length;
   }
 
-  function openIssueCount(run: AssetWorkflowRun): number {
-    return parseIssues(run.issuesJson).filter((i) => !i.resolved).length;
+  function openIssueCount(runId: string): number {
+    return (runIssueMap[runId] ?? []).filter((i) => !i.resolved).length;
+  }
+
+  function toggleActionPanel(issueId: string, issue: RunIssue) {
+    if (activeIssueId === issueId) {
+      setActiveIssueId(null);
+    } else {
+      setActiveIssueId(issueId);
+      // Seed pending edits from current values
+      setPendingNotes((prev) => ({ ...prev, [issueId]: issue.resolvedNote ?? "" }));
+      setPendingInternal((prev) => ({ ...prev, [issueId]: issue.internalOnly ?? false }));
+      setIssueError(null);
+    }
+  }
+
+  async function saveIssueAction(runId: string, issueId: string, patch: Partial<RunIssue>) {
+    setSavingIssueId(issueId);
+    setIssueError(null);
+    try {
+      const updated = (runIssueMap[runId] ?? []).map((i) =>
+        i.id === issueId ? { ...i, ...patch } : i,
+      );
+      const result = await assetWorkflowRunService.patchIssues(runId, JSON.stringify(updated));
+      // Refresh local map from server response
+      setRunIssueMap((prev) => ({ ...prev, [runId]: parseIssues(result.issuesJson) }));
+      // Update the run status in the runs list
+      setRuns((prev) => prev.map((r) => (r.id === runId ? { ...r, status: result.status, issuesJson: result.issuesJson } : r)));
+      setActiveIssueId(null);
+    } catch {
+      setIssueError("Failed to save — check your connection and try again.");
+    } finally {
+      setSavingIssueId(null);
+    }
+  }
+
+  function handleToggleResolved(runId: string, issue: RunIssue) {
+    const note = pendingNotes[issue.id] ?? issue.resolvedNote ?? "";
+    const internal = pendingInternal[issue.id] ?? issue.internalOnly ?? false;
+    saveIssueAction(runId, issue.id, {
+      resolved: !issue.resolved,
+      resolvedNote: note || undefined,
+      internalOnly: internal,
+    });
+  }
+
+  function handleSaveNote(runId: string, issue: RunIssue) {
+    const note = pendingNotes[issue.id] ?? "";
+    const internal = pendingInternal[issue.id] ?? issue.internalOnly ?? false;
+    saveIssueAction(runId, issue.id, {
+      resolvedNote: note || undefined,
+      internalOnly: internal,
+    });
+  }
+
+  function renderIssueCard(runId: string, issue: RunIssue) {
+    const isActive = activeIssueId === issue.id;
+    const isSaving = savingIssueId === issue.id;
+    const dotColor = issue.resolved ? "#4caf50" : (SEVERITY_COLOR[issue.severity] ?? "#999");
+
+    return (
+      <Stack key={issue.id}>
+        {/* Issue summary row */}
+        <Stack
+          direction="row"
+          alignItems="flex-start"
+          spacing={1}
+          sx={{
+            p: 0.75,
+            borderRadius: 1,
+            border: "1px solid",
+            borderColor: isActive ? "primary.main" : "divider",
+            opacity: issue.resolved ? 0.75 : 1,
+            bgcolor: issue.isBlocking && !issue.resolved
+              ? "rgba(244,67,54,0.04)"
+              : isActive
+              ? "action.selected"
+              : undefined,
+            transition: "border-color 0.15s",
+          }}
+        >
+          {/* Severity dot */}
+          <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: dotColor, mt: 0.65, flexShrink: 0 }} />
+
+          {/* Issue body */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+              <Typography
+                variant="caption"
+                sx={{ textDecoration: issue.resolved ? "line-through" : "none", fontWeight: issue.isBlocking && !issue.resolved ? 600 : 400 }}
+              >
+                {issue.description}
+              </Typography>
+              {issue.resolved
+                ? <Chip size="small" label="Resolved" color="success" sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.4 } }} />
+                : issue.isBlocking
+                ? <Chip size="small" label="Blocking" color="error" sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.4 } }} />
+                : null
+              }
+              {issue.internalOnly && (
+                <Chip
+                  size="small"
+                  icon={<VisibilityOffOutlined sx={{ fontSize: "0.65rem !important" }} />}
+                  label="Internal"
+                  variant="outlined"
+                  sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.4 } }}
+                />
+              )}
+            </Stack>
+            {issue.stepTitle && (
+              <Typography variant="caption" color="text.secondary" display="block">Step: {issue.stepTitle}</Typography>
+            )}
+            <Typography variant="caption" color="text.disabled" display="block">
+              {new Date(issue.reportedAt).toLocaleString()} · {issue.severity}
+              {issue.createdBy ? ` · ${issue.createdBy}` : ""}
+            </Typography>
+            {issue.resolved && issue.resolvedNote && (
+              <Typography variant="caption" color="success.main" display="block" sx={{ mt: 0.25 }}>
+                ✓ {issue.resolvedNote}
+              </Typography>
+            )}
+          </Box>
+
+          {/* Action toggle button */}
+          <Tooltip title={isActive ? "Close actions" : "Manage issue"}>
+            <IconButton
+              size="small"
+              sx={{ p: 0.25, flexShrink: 0, color: isActive ? "primary.main" : "text.secondary" }}
+              onClick={() => toggleActionPanel(issue.id, issue)}
+            >
+              <TuneOutlined sx={{ fontSize: 14 }} />
+            </IconButton>
+          </Tooltip>
+        </Stack>
+
+        {/* Inline action panel */}
+        <Collapse in={isActive} timeout="auto" unmountOnExit>
+          <Box
+            sx={{
+              ml: 2,
+              mt: 0.5,
+              mb: 0.5,
+              pl: 1.5,
+              borderLeft: "2px solid",
+              borderColor: "primary.main",
+            }}
+          >
+            <Stack spacing={1.25} sx={{ py: 1 }}>
+              <TextField
+                size="small"
+                fullWidth
+                multiline
+                rows={2}
+                label="Resolution note"
+                placeholder="Describe how this was resolved or add context…"
+                value={pendingNotes[issue.id] ?? ""}
+                onChange={(e) => setPendingNotes((prev) => ({ ...prev, [issue.id]: e.target.value }))}
+              />
+              <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      size="small"
+                      checked={pendingInternal[issue.id] ?? false}
+                      onChange={(e) => setPendingInternal((prev) => ({ ...prev, [issue.id]: e.target.checked }))}
+                    />
+                  }
+                  label={
+                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                      <VisibilityOffOutlined sx={{ fontSize: 13, color: "text.secondary" }} />
+                      <Typography variant="caption" color="text.secondary">
+                        Internal only — hidden from customer reports
+                      </Typography>
+                    </Stack>
+                  }
+                />
+                <Box sx={{ flex: 1 }} />
+                <Button
+                  size="small"
+                  variant="text"
+                  color="inherit"
+                  disabled={isSaving}
+                  onClick={() => setActiveIssueId(null)}
+                  sx={{ fontSize: 11 }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={isSaving}
+                  onClick={() => handleSaveNote(runId, issue)}
+                  sx={{ fontSize: 11 }}
+                >
+                  {isSaving ? <CircularProgress size={12} /> : "Save note"}
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  color={issue.resolved ? "warning" : "success"}
+                  disabled={isSaving}
+                  startIcon={
+                    isSaving
+                      ? <CircularProgress size={12} />
+                      : issue.resolved
+                      ? <RadioButtonUncheckedOutlined fontSize="small" />
+                      : <CheckCircleOutlined fontSize="small" />
+                  }
+                  onClick={() => handleToggleResolved(runId, issue)}
+                >
+                  {issue.resolved ? "Reopen issue" : "Issue resolved"}
+                </Button>
+              </Stack>
+              {issueError && <Alert severity="error" sx={{ fontSize: 11 }}>{issueError}</Alert>}
+            </Stack>
+          </Box>
+        </Collapse>
+      </Stack>
+    );
   }
 
   return (
@@ -129,8 +368,8 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
             {runs.map((run, idx) => {
               const isExpanded = expandedRunId === run.id;
               const stepResults = parseStepResults(run.stepResultsJson);
-              const issues = parseIssues(run.issuesJson);
-              const openIssues = openIssueCount(run);
+              const issues = runIssueMap[run.id] ?? [];
+              const openIssues = openIssueCount(run.id);
 
               return (
                 <Box key={run.id}>
@@ -257,39 +496,10 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
                         <>
                           <Typography variant="caption" fontWeight={700} color="text.secondary"
                             sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 0.75 }}>
-                            Issues ({issues.filter((i) => !i.resolved).length} open)
+                            Issues ({issues.filter((i) => !i.resolved).length} open · {issues.filter((i) => i.resolved).length} resolved)
                           </Typography>
                           <Stack spacing={0.5}>
-                            {issues.map((issue) => (
-                              <Stack key={issue.id} direction="row" alignItems="flex-start" spacing={1}
-                                sx={{
-                                  p: 0.75,
-                                  borderRadius: 1,
-                                  border: "1px solid",
-                                  borderColor: "divider",
-                                  opacity: issue.resolved ? 0.5 : 1,
-                                  bgcolor: issue.isBlocking && !issue.resolved ? "rgba(244,67,54,0.04)" : undefined,
-                                }}>
-                                <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: SEVERITY_COLOR[issue.severity] ?? "#999", mt: 0.6, flexShrink: 0 }} />
-                                <Box sx={{ flex: 1, minWidth: 0 }}>
-                                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                                    <Typography variant="caption" sx={{ textDecoration: issue.resolved ? "line-through" : "none" }}>
-                                      {issue.description}
-                                    </Typography>
-                                    {issue.isBlocking && (
-                                      <Chip size="small" label="Blocking" color="error" sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.4 } }} />
-                                    )}
-                                  </Stack>
-                                  {issue.stepTitle && (
-                                    <Typography variant="caption" color="text.secondary" display="block">Step: {issue.stepTitle}</Typography>
-                                  )}
-                                  <Typography variant="caption" color="text.disabled" display="block">
-                                    {new Date(issue.reportedAt).toLocaleString()} · {issue.severity}
-                                    {issue.resolved ? " · resolved" : ""}
-                                  </Typography>
-                                </Box>
-                              </Stack>
-                            ))}
+                            {issues.map((issue) => renderIssueCard(run.id, issue))}
                           </Stack>
                         </>
                       )}

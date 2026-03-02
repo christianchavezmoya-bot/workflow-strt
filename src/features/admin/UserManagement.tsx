@@ -41,6 +41,9 @@ import {
   SettingsOutlined,
   GridView,
   TableRows,
+  EmailOutlined,
+  PersonOffOutlined,
+  LockResetOutlined,
 } from "@mui/icons-material";
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -2094,27 +2097,30 @@ export const UserManagement: React.FC = () => {
                     );
                   })}
                   <TableCell sx={{ padding: '8px 12px' }}>
-                    <Stack direction="row" spacing={1}>
-                      <Button size="small" variant="outlined" onClick={() => dispatch(inviteUser(user.id))}>
-                        Invite
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => dispatch(deactivateUser(user.id))}
-                        disabled={!user.isActive}
-                      >
-                        Deactivate
-                      </Button>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <Tooltip title="Send invite email">
+                        <IconButton size="small" onClick={() => dispatch(inviteUser(user.id))}>
+                          <EmailOutlined fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title={user.isActive ? "Deactivate user" : "User already inactive"}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="warning"
+                            disabled={!user.isActive}
+                            onClick={() => dispatch(deactivateUser(user.id))}
+                          >
+                            <PersonOffOutlined fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
                       {user.is2faEnabled && (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color="warning"
-                          onClick={() => dispatch(reset2fa(user.id))}
-                        >
-                          Reset 2FA
-                        </Button>
+                        <Tooltip title="Reset 2FA">
+                          <IconButton size="small" color="warning" onClick={() => dispatch(reset2fa(user.id))}>
+                            <LockResetOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       )}
                       <Tooltip title="Edit user">
                         <IconButton size="small" onClick={() => handleEditUser(user)}>
@@ -2124,6 +2130,7 @@ export const UserManagement: React.FC = () => {
                       <Tooltip title="Delete user">
                         <IconButton
                           size="small"
+                          color="error"
                           onClick={() =>
                             setDeleteTarget({
                               type: "user",

@@ -85,4 +85,10 @@ export const documentService = {
     const response = await api.get<Blob>(downloadUrl, { responseType: "blob" });
     return URL.createObjectURL(response.data);
   },
+
+  /** Fetch a document file with the auth token and return the raw ArrayBuffer (for client-side parsing). */
+  async openDocumentAsBuffer(downloadUrl: string): Promise<ArrayBuffer> {
+    const response = await api.get<ArrayBuffer>(downloadUrl, { responseType: "arraybuffer" });
+    return response.data;
+  },
 };

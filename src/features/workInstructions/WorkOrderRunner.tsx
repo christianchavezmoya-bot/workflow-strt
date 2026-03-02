@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircleOutlined,
+  DeleteOutlineOutlined,
+  EditOutlined,
   LockOutlined,
+  PauseOutlined,
   QrCodeScannerOutlined,
+  RadioButtonUncheckedOutlined,
   ReportProblemOutlined,
 } from "@mui/icons-material";
 import {
@@ -56,8 +60,14 @@ interface WorkOrderRunnerProps {
   workflowConfigId?: string;
   /** Provide to continue an existing run (skips startRun call). */
   existingRunId?: string;
+  /** Values from a previous run to pre-populate as editable defaults (re-run scenario). */
+  prefillValues?: Record<string, Record<string, string>>;
   /** Called after run is locked. */
   onComplete?: (capturedFeatureValues: Record<string, string>) => void;
+  /** Called when user pauses — receives progress, step titles, and any feature values captured so far. */
+  onPause?: (progress: { done: number; total: number; completedTitles: string[]; partialFeatureValues: Record<string, string> }) => void;
+  /** Full name of the currently logged-in user, stored on each issue. */
+  currentUserName?: string;
 }
 
 type Stage = "setup" | "running" | "summary";
@@ -71,7 +81,10 @@ export default function WorkOrderRunner({
   projectAssetId,
   workflowConfigId,
   existingRunId,
+  prefillValues,
   onComplete,
+  onPause,
+  currentUserName,
 }: WorkOrderRunnerProps) {
   const stepsSorted = useMemo(
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
@@ -83,7 +96,7 @@ export default function WorkOrderRunner({
   const [currentStepId, setCurrentStepId] = useState<string | null>(stepsSorted[0]?.id ?? null);
   const [history, setHistory] = useState<string[]>([]);
   // values[stepId][inputId] = string value
-  const [values, setValues] = useState<Record<string, Record<string, string>>>({});
+  const [values, setValues] = useState<Record<string, Record<string, string>>>(prefillValues ?? {});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -94,11 +107,15 @@ export default function WorkOrderRunner({
   const [flagOpen, setFlagOpen] = useState(false);
   const [flagDescription, setFlagDescription] = useState("");
   const [flagSeverity, setFlagSeverity] = useState<"low" | "medium" | "high">("medium");
-  const [flagIssueType, setFlagIssueType] = useState<"blocking" | "observation">("observation");
   const [flagSubmitted, setFlagSubmitted] = useState(false);
+  // Issue editing
+  const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
+  const [editIssueDesc, setEditIssueDesc] = useState("");
+  const [editIssueSeverity, setEditIssueSeverity] = useState<"low" | "medium" | "high">("medium");
 
   // Run tracking
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
+  const [resumingRun, setResumingRun] = useState(Boolean(existingRunId));
   const [startingRun, setStartingRun] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [blockingError, setBlockingError] = useState<string | null>(null);
@@ -119,7 +136,7 @@ export default function WorkOrderRunner({
     setJobReference("");
     setCurrentStepId(stepsSorted[0]?.id ?? null);
     setHistory([]);
-    setValues({});
+    setValues(prefillValues ?? {});
     setSaved(false);
     setSaveError(null);
     setBlockingError(null);
@@ -127,31 +144,66 @@ export default function WorkOrderRunner({
     setFlagOpen(false);
     setFlagDescription("");
     setFlagSeverity("medium");
-    setFlagIssueType("observation");
     setFlagSubmitted(false);
     setIssues([]);
     setActiveRunId(existingRunId ?? null);
+    setResumingRun(Boolean(existingRunId));
+    setEditingIssueId(null);
+    setEditIssueDesc("");
+    setEditIssueSeverity("medium");
   }
 
   function submitFlag() {
     if (!flagDescription.trim()) return;
+    const isBlocking = flagSeverity === "high";
     const issue: RunIssue = {
       id: crypto.randomUUID ? crypto.randomUUID() : `issue_${Date.now()}`,
       description: flagDescription.trim(),
-      issueType: flagIssueType,
-      isBlocking: flagIssueType === "blocking",
+      issueType: isBlocking ? "blocking" : "observation",
+      isBlocking,
       severity: flagSeverity,
       stepId: currentStep?.id,
       stepTitle: currentStep?.title,
       reportedAt: new Date().toISOString(),
       resolved: false,
+      createdBy: currentUserName,
     };
     setIssues((prev) => [...prev, issue]);
+    // Clear description only — keep form open so user can add more issues
     setFlagDescription("");
-    setFlagSeverity("medium");
-    setFlagIssueType("observation");
-    setFlagOpen(false);
     setFlagSubmitted(true);
+  }
+
+  function deleteIssue(id: string) {
+    setIssues((prev) => prev.filter((i) => i.id !== id));
+    autosaveProgress();
+  }
+
+  function startEditIssue(issue: RunIssue) {
+    setEditingIssueId(issue.id);
+    setEditIssueDesc(issue.description);
+    setEditIssueSeverity(issue.severity);
+  }
+
+  function saveEditIssue() {
+    if (!editingIssueId || !editIssueDesc.trim()) return;
+    const isBlocking = editIssueSeverity === "high";
+    setIssues((prev) => prev.map((i) =>
+      i.id === editingIssueId
+        ? { ...i, description: editIssueDesc.trim(), severity: editIssueSeverity, isBlocking, issueType: isBlocking ? "blocking" : "observation" }
+        : i,
+    ));
+    setEditingIssueId(null);
+    setEditIssueDesc("");
+    setEditIssueSeverity("medium");
+    autosaveProgress();
+  }
+
+  function toggleResolveIssue(id: string) {
+    setIssues((prev) => prev.map((i) =>
+      i.id === id ? { ...i, resolved: !i.resolved } : i,
+    ));
+    autosaveProgress();
   }
 
   function handleClose() {
@@ -159,34 +211,85 @@ export default function WorkOrderRunner({
     onClose();
   }
 
-  async function startRun() {
-    setCurrentStepId(stepsSorted[0]?.id ?? null);
+  async function handlePause() {
+    await autosaveProgress();
+    const completedTitles = history
+      .map((id) => stepsSorted.find((s) => s.id === id)?.title ?? "")
+      .filter(Boolean);
+    const partialFeatureValues = extractFeatureValues();
+    onPause?.({ done: history.length, total: stepsSorted.length, completedTitles, partialFeatureValues });
+    reset();
+    onClose();
+  }
 
-    if (isRealRun && !activeRunId) {
-      setStartingRun(true);
-      setStartError(null);
-      try {
-        const run = await assetWorkflowRunService.startRun(projectAssetId!, workflowConfigId!);
-        setActiveRunId(run.id);
-        // Load existing progress if continuing
-        if (run.stepResultsJson && run.stepResultsJson !== "[]") {
-          try {
-            const prev = JSON.parse(run.stepResultsJson) as StepCapture[];
-            const prevValues: Record<string, Record<string, string>> = {};
-            for (const sc of prev) prevValues[sc.stepId] = sc.values;
-            setValues(prevValues);
-          } catch {}
-        }
-        if (run.issuesJson && run.issuesJson !== "[]") {
-          try { setIssues(JSON.parse(run.issuesJson) as RunIssue[]); } catch {}
-        }
-      } catch {
-        setStartError("Could not start run. Check your connection and try again.");
-        setStartingRun(false);
+  async function startRun() {
+    if (!isRealRun) {
+      setCurrentStepId(stepsSorted[0]?.id ?? null);
+      setStage("running");
+      return;
+    }
+
+    setStartingRun(true);
+    setStartError(null);
+    try {
+      // Fetch or create the run. Backend is idempotent: returns existing active run if present.
+      let run = activeRunId
+        ? await assetWorkflowRunService.getById(activeRunId)
+        : await assetWorkflowRunService.startRun(projectAssetId!, workflowConfigId!);
+
+      if (!run) {
+        setStartError("Could not load run. Please try again.");
         return;
-      } finally {
-        setStartingRun(false);
       }
+      setActiveRunId(run.id);
+
+      // Restore step values and issues from saved progress
+      let prevValues: Record<string, Record<string, string>> = {};
+      let navRestored = false;
+      if (run.stepResultsJson && run.stepResultsJson !== "[]") {
+        try {
+          const prev = JSON.parse(run.stepResultsJson) as StepCapture[];
+          const navEntry = prev.find((sc) => sc.stepId === "__nav__");
+          const dataEntries = prev.filter((sc) => sc.stepId !== "__nav__");
+
+          // Restore input values
+          for (const sc of dataEntries) prevValues[sc.stepId] = sc.values;
+          setValues(prevValues);
+
+          // Restore exact navigation position from nav marker
+          if (navEntry?.values?.currentStepId) {
+            const savedStepId = navEntry.values.currentStepId;
+            const savedHistory: string[] = JSON.parse(navEntry.values.historyJson ?? "[]");
+            setCurrentStepId(savedStepId);
+            setHistory(savedHistory);
+            setResumingRun(true);
+            navRestored = true;
+          }
+        } catch {}
+      }
+      if (run.issuesJson && run.issuesJson !== "[]") {
+        try { setIssues(JSON.parse(run.issuesJson) as RunIssue[]); } catch {}
+      }
+
+      // Fallback if no nav marker: go to first step without captured data
+      if (!navRestored) {
+        const hasData = Object.keys(prevValues).length > 0;
+        if (hasData) {
+          setResumingRun(true);
+          const firstIncomplete = stepsSorted.find((s) => !Object.keys(prevValues[s.id] ?? {}).length);
+          const resumeStepId = firstIncomplete?.id ?? stepsSorted[stepsSorted.length - 1]?.id ?? null;
+          const resumeIdx = stepsSorted.findIndex((s) => s.id === resumeStepId);
+          setHistory(stepsSorted.slice(0, Math.max(resumeIdx, 0)).map((s) => s.id));
+          setCurrentStepId(resumeStepId);
+        } else {
+          setCurrentStepId(stepsSorted[0]?.id ?? null);
+        }
+      }
+    } catch {
+      setStartError("Could not start run. Check your connection and try again.");
+      return;
+    } finally {
+      setStartingRun(false);
     }
 
     setStage("running");
@@ -210,14 +313,6 @@ export default function WorkOrderRunner({
     return true;
   }
 
-  function goTo(targetId: string | null) {
-    if (!targetId || !currentStepId) return;
-    setHistory((prev) => [...prev, currentStepId]);
-    setCurrentStepId(targetId);
-    setRequiredWarning(false);
-    autosaveProgress();
-  }
-
   function goBack() {
     if (!history.length) return;
     const prev = history[history.length - 1];
@@ -229,35 +324,57 @@ export default function WorkOrderRunner({
   function handleNext() {
     if (!currentStep) return;
     setRequiredWarning(!checkRequired(currentStep));
+    setFlagOpen(false);
+    setFlagSubmitted(false);
     if (isLastStep || !currentStep.nextStepId) {
       autosaveProgress();
       setStage("summary");
     } else {
-      setHistory((prev) => [...prev, currentStep.id]);
-      setCurrentStepId(currentStep.nextStepId);
-      autosaveProgress();
+      const nextStepId = currentStep.nextStepId;
+      const nextHistory = [...history, currentStep.id];
+      setHistory(nextHistory);
+      setCurrentStepId(nextStepId);
+      autosaveProgress(nextStepId, nextHistory);
     }
   }
 
   function handleDecision(targetId: string | null) {
     if (!currentStep) return;
     setRequiredWarning(!checkRequired(currentStep));
-    autosaveProgress();
+    setFlagOpen(false);
+    setFlagSubmitted(false);
     if (targetId) {
-      goTo(targetId);
+      const nextHistory = [...history, currentStep.id];
+      setHistory(nextHistory);
+      setCurrentStepId(targetId);
+      autosaveProgress(targetId, nextHistory);
     } else {
+      autosaveProgress();
       setStage("summary");
     }
   }
 
-  function buildStepsData(): StepCapture[] {
-    return stepsSorted
+  function buildStepsData(navStepId?: string, navHistory?: string[]): StepCapture[] {
+    const dataSteps = stepsSorted
       .map((step) => ({
         stepId: step.id,
         values: values[step.id] ?? {},
         completedAt: new Date().toISOString(),
       }))
       .filter((sc) => Object.keys(sc.values).length > 0);
+
+    // Navigation marker — always saved so exact step + history can be restored on resume.
+    // When navigating forward we pass the NEXT step explicitly (state updates are async,
+    // so reading currentStepId/history from closure would give the previous step).
+    const navEntry: StepCapture = {
+      stepId: "__nav__",
+      values: {
+        currentStepId: navStepId ?? currentStepId ?? stepsSorted[0]?.id ?? "",
+        historyJson: JSON.stringify(navHistory ?? history),
+      },
+      completedAt: new Date().toISOString(),
+    };
+    return [...dataSteps, navEntry];
   }
 
   function extractFeatureValues(): Record<string, string> {
@@ -273,12 +390,12 @@ export default function WorkOrderRunner({
     return result;
   }
 
-  async function autosaveProgress() {
+  async function autosaveProgress(navStepId?: string, navHistory?: string[]) {
     if (!activeRunId) return;
     try {
       await assetWorkflowRunService.saveProgress(
         activeRunId,
-        JSON.stringify(buildStepsData()),
+        JSON.stringify(buildStepsData(navStepId, navHistory)),
         JSON.stringify(issues),
       );
     } catch {
@@ -295,7 +412,7 @@ export default function WorkOrderRunner({
       const issuesJson = JSON.stringify(issues);
 
       if (activeRunId) {
-        await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson);
+        await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName);
       }
       // Note: if no activeRunId (preview mode), we still show summary without persisting
 
@@ -436,9 +553,15 @@ export default function WorkOrderRunner({
             <Stack spacing={0.5}>
               <Typography variant="body2" color="text.secondary">{stepsSorted.length} step{stepsSorted.length === 1 ? "" : "s"}</Typography>
             </Stack>
-            {existingRunId && (
+            {prefillValues && !resumingRun && Object.keys(prefillValues).length > 0 && (
               <Alert severity="info" sx={{ fontSize: 12 }}>
-                Continuing a previous run. Your progress has been preserved.
+                Values from the previous run have been pre-loaded. Review and update
+                each step before completing.
+              </Alert>
+            )}
+            {resumingRun && (
+              <Alert severity="info" sx={{ fontSize: 12 }}>
+                Continuing a previous run. Your progress will be restored.
               </Alert>
             )}
             {blockingIssues.length > 0 && (
@@ -466,7 +589,7 @@ export default function WorkOrderRunner({
             disabled={stepsSorted.length === 0 || startingRun}
             startIcon={startingRun ? <CircularProgress size={14} /> : undefined}
           >
-            {startingRun ? "Starting…" : existingRunId ? "Continue →" : "Start →"}
+            {startingRun ? "Loading…" : resumingRun ? "Continue →" : "Start →"}
           </Button>
         </DialogActions>
       </>
@@ -577,61 +700,115 @@ export default function WorkOrderRunner({
 
         {/* Flag issue inline form */}
         <Collapse in={flagOpen}>
-          <Box sx={{ px: 3, pb: 1, pt: 0 }}>
+          <Box sx={{ px: 3, pb: 1.5, pt: 0 }}>
             <Divider sx={{ mb: 1.5 }} />
-            <Typography variant="caption" fontWeight={700} color="error" display="block" mb={1}>
+            <Typography variant="caption" fontWeight={700} color="error" display="block" mb={0.5}>
               Flag issue on this step
             </Typography>
+            <Typography variant="caption" color="text.secondary" display="block" mb={1.25}>
+              <strong>High</strong> severity = <strong>blocking</strong> — workflow cannot be completed until resolved.&nbsp;
+              <strong>Medium</strong> or <strong>Low</strong> = observation — noted but does not block completion.
+            </Typography>
             <Stack spacing={1.25}>
+              {/* Issues already flagged on this step */}
+              {issues.filter((i) => i.stepId === currentStep?.id).length > 0 && (
+                <Stack spacing={0.75}>
+                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                    Flagged on this step:
+                  </Typography>
+                  {issues.filter((i) => i.stepId === currentStep?.id).map((issue) => (
+                    <Paper key={issue.id} variant="outlined" sx={{ p: 1, borderColor: issue.isBlocking ? "error.light" : "warning.light" }}>
+                      {editingIssueId === issue.id ? (
+                        <Stack spacing={0.75}>
+                          <TextField size="small" fullWidth multiline rows={2} label="Description"
+                            value={editIssueDesc} onChange={(e) => setEditIssueDesc(e.target.value)} />
+                          <FormControl size="small" sx={{ maxWidth: 220 }}>
+                            <InputLabel>Severity</InputLabel>
+                            <Select label="Severity" value={editIssueSeverity}
+                              onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
+                              <MenuItem value="low">Low — observation only</MenuItem>
+                              <MenuItem value="medium">Medium — attention needed</MenuItem>
+                              <MenuItem value="high">High — blocks completion</MenuItem>
+                            </Select>
+                          </FormControl>
+                          <Stack direction="row" spacing={0.75}>
+                            <Button size="small" variant="contained" color="primary" disabled={!editIssueDesc.trim()} onClick={saveEditIssue}>Save</Button>
+                            <Button size="small" onClick={() => setEditingIssueId(null)}>Cancel</Button>
+                          </Stack>
+                        </Stack>
+                      ) : (
+                        <Stack spacing={0.25}>
+                          <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
+                            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                              {issue.resolved
+                                ? <Chip size="small" label="Resolved" color="success" sx={{ height: 18, fontSize: 10 }} />
+                                : <Chip size="small" label={issue.isBlocking ? "Blocking" : "Observation"} color={issue.isBlocking ? "error" : "warning"} sx={{ height: 18, fontSize: 10 }} />
+                              }
+                              <Chip size="small" label={issue.severity.toUpperCase()} variant="outlined" sx={{ height: 18, fontSize: 10 }} />
+                            </Stack>
+                            <Stack direction="row" spacing={0}>
+                              {issue.isBlocking && (
+                                <Tooltip title={issue.resolved ? "Mark as unresolved" : "Mark as resolved"}>
+                                  <IconButton size="small" color={issue.resolved ? "default" : "success"} onClick={() => toggleResolveIssue(issue.id)} sx={{ p: 0.25 }}>
+                                    {issue.resolved ? <RadioButtonUncheckedOutlined sx={{ fontSize: 14 }} /> : <CheckCircleOutlined sx={{ fontSize: 14 }} />}
+                                  </IconButton>
+                                </Tooltip>
+                              )}
+                              <Tooltip title="Edit issue"><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
+                              <Tooltip title="Delete issue"><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
+                            </Stack>
+                          </Stack>
+                          <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
+                          <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
+                            {issue.createdBy ? `${issue.createdBy} · ` : ""}{new Date(issue.reportedAt).toLocaleString()}
+                          </Typography>
+                        </Stack>
+                      )}
+                    </Paper>
+                  ))}
+                </Stack>
+              )}
               <TextField
                 size="small"
                 fullWidth
                 multiline
                 rows={2}
                 label="Describe the issue"
+                placeholder="Describe what you observed…"
                 value={flagDescription}
-                onChange={(e) => setFlagDescription(e.target.value)}
+                onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
               />
-              <Stack direction="row" spacing={1}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>Issue Type</InputLabel>
-                  <Select
-                    label="Issue Type"
-                    value={flagIssueType}
-                    onChange={(e) => setFlagIssueType(e.target.value as "blocking" | "observation")}
-                  >
-                    <MenuItem value="observation">Observation (non-blocking)</MenuItem>
-                    <MenuItem value="blocking">Blocking (must resolve to complete)</MenuItem>
-                  </Select>
-                </FormControl>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>Severity</InputLabel>
-                  <Select
-                    label="Severity"
-                    value={flagSeverity}
-                    onChange={(e) => setFlagSeverity(e.target.value as "low" | "medium" | "high")}
-                  >
-                    <MenuItem value="low">Low</MenuItem>
-                    <MenuItem value="medium">Medium</MenuItem>
-                    <MenuItem value="high">High</MenuItem>
-                  </Select>
-                </FormControl>
-              </Stack>
-              {flagIssueType === "blocking" && (
-                <Alert severity="warning" sx={{ fontSize: 11 }}>
-                  Blocking issues must be resolved before the workflow can be completed.
-                </Alert>
-              )}
-              <Stack direction="row" spacing={1}>
-                <Button size="small" onClick={() => setFlagOpen(false)}>Cancel</Button>
+              <FormControl size="small" sx={{ maxWidth: 260 }}>
+                <InputLabel>Severity</InputLabel>
+                <Select
+                  label="Severity"
+                  value={flagSeverity}
+                  onChange={(e) => setFlagSeverity(e.target.value as "low" | "medium" | "high")}
+                >
+                  <MenuItem value="low">Low — observation only</MenuItem>
+                  <MenuItem value="medium">Medium — attention needed</MenuItem>
+                  <MenuItem value="high">High — blocks completion</MenuItem>
+                </Select>
+              </FormControl>
+              <Stack direction="row" spacing={1} alignItems="center">
                 <Button
                   size="small"
                   variant="contained"
-                  color="error"
+                  color="success"
                   disabled={!flagDescription.trim()}
                   onClick={submitFlag}
+                  sx={{ flexShrink: 0 }}
                 >
-                  Submit issue
+                  Add issue
+                </Button>
+                {flagSubmitted && (
+                  <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
+                    ✓ Issue added — type another or close
+                  </Typography>
+                )}
+                <Box sx={{ flex: 1 }} />
+                <Button size="small" variant="text" color="inherit" onClick={() => { setFlagOpen(false); setFlagSubmitted(false); }}>
+                  Close
                 </Button>
               </Stack>
             </Stack>
@@ -639,25 +816,44 @@ export default function WorkOrderRunner({
         </Collapse>
 
         <DialogActions sx={{ flexWrap: "wrap", gap: 0.75, justifyContent: "space-between" }}>
-          <Stack direction="row" spacing={0.75}>
+          <Stack direction="row" spacing={0.75} alignItems="center">
             <Button onClick={goBack} disabled={history.length === 0} variant="outlined" size="small">
               ← Back
             </Button>
-            {!flagOpen && (
-              <Tooltip title="Flag an issue on this step">
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="error"
-                  startIcon={<ReportProblemOutlined fontSize="small" />}
-                  onClick={() => { setFlagOpen(true); setFlagSubmitted(false); }}
-                >
-                  {flagSubmitted ? "Issue flagged ✓" : "Flag issue"}
-                </Button>
-              </Tooltip>
-            )}
+            {!flagOpen && (() => {
+              const stepIssueCount = issues.filter((i) => i.stepId === currentStep?.id).length;
+              return (
+                <Tooltip title="Flag an issue on this step">
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    startIcon={<ReportProblemOutlined fontSize="small" />}
+                    onClick={() => { setFlagOpen(true); setFlagSubmitted(false); }}
+                  >
+                    {stepIssueCount > 0 ? `Issues (${stepIssueCount}) +` : "Flag issue"}
+                  </Button>
+                </Tooltip>
+              );
+            })()}
           </Stack>
-          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+            <Tooltip title="Save progress and close — resume later from where you left off">
+              <Button
+                size="small"
+                variant="outlined"
+                color="warning"
+                startIcon={<PauseOutlined fontSize="small" />}
+                onClick={handlePause}
+              >
+                Pause
+              </Button>
+            </Tooltip>
+            <Tooltip title="Close without saving current step inputs">
+              <Button size="small" color="inherit" onClick={handleClose}>
+                Cancel
+              </Button>
+            </Tooltip>
             {hasDecisions ? (
               (currentStep.decisions ?? []).map((d) => (
                 <Button
@@ -728,21 +924,53 @@ export default function WorkOrderRunner({
                 </Typography>
                 {issues.map((issue) => (
                   <Paper key={issue.id} variant="outlined" sx={{ p: 1.25, borderColor: issue.isBlocking ? "error.main" : undefined }}>
-                    <Stack direction="row" spacing={1} alignItems="flex-start">
-                      <Chip
-                        size="small"
-                        label={issue.issueType}
-                        color={issue.isBlocking ? "error" : "default"}
-                        sx={{ flexShrink: 0 }}
-                      />
-                      <Chip size="small" label={issue.severity} variant="outlined" sx={{ flexShrink: 0 }} />
-                      <Typography variant="caption" sx={{ flex: 1 }}>
-                        {issue.description}
-                        {issue.stepTitle && (
-                          <Typography component="span" variant="caption" color="text.secondary"> · {issue.stepTitle}</Typography>
-                        )}
-                      </Typography>
-                    </Stack>
+                    {editingIssueId === issue.id ? (
+                      <Stack spacing={0.75}>
+                        <TextField size="small" fullWidth multiline rows={2} label="Description"
+                          value={editIssueDesc} onChange={(e) => setEditIssueDesc(e.target.value)} />
+                        <FormControl size="small" sx={{ maxWidth: 220 }}>
+                          <InputLabel>Severity</InputLabel>
+                          <Select label="Severity" value={editIssueSeverity}
+                            onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
+                            <MenuItem value="low">Low — observation only</MenuItem>
+                            <MenuItem value="medium">Medium — attention needed</MenuItem>
+                            <MenuItem value="high">High — blocks completion</MenuItem>
+                          </Select>
+                        </FormControl>
+                        <Stack direction="row" spacing={0.75}>
+                          <Button size="small" variant="contained" color="primary" disabled={!editIssueDesc.trim()} onClick={saveEditIssue}>Save</Button>
+                          <Button size="small" onClick={() => setEditingIssueId(null)}>Cancel</Button>
+                        </Stack>
+                      </Stack>
+                    ) : (
+                      <Stack spacing={0.5}>
+                        <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
+                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                            {issue.resolved
+                              ? <Chip size="small" label="Resolved" color="success" sx={{ flexShrink: 0 }} />
+                              : <Chip size="small" label={issue.isBlocking ? "Blocking" : "Observation"} color={issue.isBlocking ? "error" : "default"} sx={{ flexShrink: 0 }} />
+                            }
+                            <Chip size="small" label={issue.severity} variant="outlined" sx={{ flexShrink: 0 }} />
+                            {issue.stepTitle && <Chip size="small" label={issue.stepTitle} variant="outlined" sx={{ flexShrink: 0 }} />}
+                          </Stack>
+                          <Stack direction="row" spacing={0}>
+                            {issue.isBlocking && (
+                              <Tooltip title={issue.resolved ? "Mark as unresolved" : "Mark as resolved — clears the blocking flag"}>
+                                <IconButton size="small" color={issue.resolved ? "default" : "success"} onClick={() => toggleResolveIssue(issue.id)} sx={{ p: 0.25 }}>
+                                  {issue.resolved ? <RadioButtonUncheckedOutlined sx={{ fontSize: 14 }} /> : <CheckCircleOutlined sx={{ fontSize: 14 }} />}
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                            <Tooltip title="Edit issue"><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
+                            <Tooltip title="Delete issue"><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
+                          </Stack>
+                        </Stack>
+                        <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
+                        <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
+                          {issue.createdBy ? `${issue.createdBy} · ` : ""}{new Date(issue.reportedAt).toLocaleString()}
+                        </Typography>
+                      </Stack>
+                    )}
                   </Paper>
                 ))}
               </Stack>
@@ -751,7 +979,9 @@ export default function WorkOrderRunner({
             {hasBlockingIssues && !blockingError && (
               <Alert severity="error" sx={{ fontSize: 12 }}>
                 {blockingIssues.length} blocking issue{blockingIssues.length === 1 ? "" : "s"} must be resolved before locking this run.
-                {!activeRunId && " (Preview mode: not enforced)"}
+                {activeRunId
+                  ? " Use the ✓ button on each blocking issue above to mark it resolved once the problem is fixed."
+                  : " (Preview mode: not enforced)"}
               </Alert>
             )}
 

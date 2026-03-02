@@ -48,6 +48,12 @@ public class AppDbContext : DbContext
     public DbSet<WorkflowTypeEntity> WorkflowTypes => Set<WorkflowTypeEntity>();
     public DbSet<AssetWorkflowAssignmentEntity> AssetWorkflowAssignments => Set<AssetWorkflowAssignmentEntity>();
     public DbSet<AssetWorkflowRunEntity> AssetWorkflowRuns => Set<AssetWorkflowRunEntity>();
+    public DbSet<BrandSettingEntity> BrandSettings => Set<BrandSettingEntity>();
+    // ─── Asset Documents ──────────────────────────────────────────────────────
+    public DbSet<AssetDocumentEntity> AssetDocuments => Set<AssetDocumentEntity>();
+    public DbSet<AssetDocumentRevisionEntity> AssetDocumentRevisions => Set<AssetDocumentRevisionEntity>();
+    // ─── Asset Document Links (library references per asset) ─────────────────
+    public DbSet<AssetDocumentLinkEntity> AssetDocumentLinks => Set<AssetDocumentLinkEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -228,6 +234,19 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<AssetWorkflowRunEntity>()
             .Property(r => r.WorkflowSnapshotJson).HasDefaultValue("{}");
+
+        // ─── Asset Document indexes ───────────────────────────────────────────
+        modelBuilder.Entity<AssetDocumentEntity>()
+            .HasIndex(d => d.AssetId);
+
+        modelBuilder.Entity<AssetDocumentRevisionEntity>()
+            .HasIndex(r => r.DocumentId);
+
+        modelBuilder.Entity<AssetDocumentLinkEntity>()
+            .HasIndex(l => l.AssetId);
+
+        modelBuilder.Entity<AssetDocumentLinkEntity>()
+            .HasIndex(l => l.DocumentId);
 
         // Seed default WorkflowTypes
         modelBuilder.Entity<WorkflowTypeEntity>().HasData(

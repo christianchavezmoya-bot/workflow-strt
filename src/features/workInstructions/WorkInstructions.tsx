@@ -645,11 +645,18 @@ const WorkInstructions = () => {
   }
 
   function handleConfigSaved(updated: WorkflowConfig) {
-    setConfigs((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    setConfigs((prev) => {
+      const exists = prev.some((c) => c.id === updated.id);
+      return exists ? prev.map((c) => (c.id === updated.id ? updated : c)) : [updated, ...prev];
+    });
   }
 
   function handleConfigPublished(updated: WorkflowConfig) {
-    setConfigs((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    setConfigs((prev) => {
+      const exists = prev.some((c) => c.id === updated.id);
+      return exists ? prev.map((c) => (c.id === updated.id ? updated : c)) : [updated, ...prev];
+    });
+    setSelectedConfigId(updated.id);
     setViewMode("instructions");
   }
 

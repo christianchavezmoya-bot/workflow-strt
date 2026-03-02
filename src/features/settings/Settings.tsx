@@ -28,7 +28,7 @@ import {
   Typography
 } from "@mui/material";
 import { AddOutlined, DeleteOutline, EditOutlined, Print, Download } from "@mui/icons-material";
-import { useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import type { WorkflowType } from "../../types/workflowType";
@@ -37,6 +37,145 @@ import { settingsService } from "../../services/settingsService";
 import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/settings";
 import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
 import { useAuth } from "../../hooks/useAuth";
+import { brandSettingsService } from "../../services/brandSettingsService";
+
+// ─── Business Logo Tab ────────────────────────────────────────────────────────
+function BusinessLogoTab() {
+  const [logo, setLogo] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    brandSettingsService.get().then((data) => {
+      setLogo(data.logoBase64 ?? null);
+      setLoading(false);
+    });
+  }, []);
+
+  async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) {
+      setError("File too large. Maximum size is 500 KB.");
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      setSaving(true);
+      setError(null);
+      try {
+        const updated = await brandSettingsService.set(base64);
+        setLogo(updated.logoBase64 ?? null);
+        setSuccess(true);
+        setTimeout(() => setSuccess(false), 3000);
+      } catch {
+        setError("Failed to save logo. Make sure you are logged in as Admin.");
+      } finally {
+        setSaving(false);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  async function handleDelete() {
+    if (!confirm("Remove the business logo?")) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await brandSettingsService.remove();
+      setLogo(null);
+    } catch {
+      setError("Failed to remove logo.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <Stack spacing={2} sx={{ marginTop: 2 }}>
+      <Typography variant="h6">Business Logo</Typography>
+      <Typography variant="body2" color="text.secondary">
+        Upload your company logo. It will appear in the left header of generated PDF reports.
+        Accepted formats: PNG, JPG, SVG — maximum 500 KB.
+      </Typography>
+      <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+
+      {loading ? (
+        <CircularProgress size={24} />
+      ) : (
+        <>
+          <Box
+            sx={{
+              width: 320,
+              height: 110,
+              border: "1px dashed rgba(255,255,255,0.25)",
+              borderRadius: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+              background: "rgba(255,255,255,0.04)",
+            }}
+          >
+            {logo ? (
+              <Box
+                component="img"
+                src={logo}
+                alt="Business logo"
+                sx={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", padding: "8px" }}
+              />
+            ) : (
+              <Typography variant="body2" color="text.disabled">
+                No logo set
+              </Typography>
+            )}
+          </Box>
+
+          {error && <Alert severity="error" sx={{ maxWidth: 500 }}>{error}</Alert>}
+          {success && <Alert severity="success" sx={{ maxWidth: 500 }}>Logo saved successfully.</Alert>}
+
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Button
+              variant="contained"
+              component="label"
+              disabled={saving}
+              sx={{ minWidth: 140 }}
+            >
+              {saving ? "Uploading…" : logo ? "Replace Logo" : "Upload Logo"}
+              <input
+                type="file"
+                hidden
+                accept="image/png,image/jpeg,image/svg+xml"
+                onChange={handleFileChange}
+              />
+            </Button>
+            {logo && (
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteOutline />}
+                disabled={deleting}
+                onClick={handleDelete}
+              >
+                {deleting ? "Removing…" : "Remove Logo"}
+              </Button>
+            )}
+          </Stack>
+
+          <Typography variant="caption" color="text.disabled">
+            Only Admins can upload or remove the logo.
+          </Typography>
+        </>
+      )}
+    </Stack>
+  );
+}
 
 // Style for field definition labels (yellow bold)
 const fieldLabelStyle = {
@@ -758,6 +897,7 @@ const Settings = () => {
           <Tab label="SMS/SMTP" />
           <Tab label="Fields/Data" />
           <Tab label="Workflow Types" onClick={() => { if (wfTypes.length === 0) loadWfTypes(); }} />
+          <Tab label="Business Logo" />
           {isAdmin && <Tab label="Audit Log" />}
         </Tabs>
 
@@ -1055,7 +1195,9 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 4 && isAdmin && (
+        {tab === 4 && <BusinessLogoTab />}
+
+        {tab === 5 && isAdmin && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Typography variant="h6">2FA Audit Log</Typography>
             <Typography variant="body2" color="text.secondary">

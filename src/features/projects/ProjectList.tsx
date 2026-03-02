@@ -91,7 +91,7 @@ const builtInColumnConfigs: ColumnConfig[] = [
       >
         <Button
           component={Link}
-          to={`/installations?job=${encodeURIComponent(project.jobNumber)}`}
+          to={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}`}
           sx={{ minWidth: "auto", padding: 0 }}
         >
           {project.jobNumber}

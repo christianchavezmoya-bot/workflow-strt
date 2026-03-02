@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AddOutlined,
   ArchiveOutlined,
@@ -13,6 +13,7 @@ import {
   ExpandLessOutlined,
   ExpandMoreOutlined,
   FileUploadOutlined,
+  FolderOutlined,
   HistoryOutlined,
   HourglassEmptyOutlined,
   DragIndicatorOutlined,
@@ -23,6 +24,7 @@ import {
 } from "@mui/icons-material";
 import {
   Alert,
+  Badge,
   Box,
   Button,
   Checkbox,
@@ -43,6 +45,7 @@ import {
   Menu,
   MenuItem,
   Paper,
+  Popover,
   Select,
   Stack,
   Tab,
@@ -56,6 +59,8 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
+import { useSearchParams } from "react-router-dom";
+import { useAuth } from "../../hooks/useAuth";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
@@ -68,13 +73,19 @@ import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { workflowTypeService } from "../../services/workflowTypeService";
+import { brandSettingsService } from "../../services/brandSettingsService";
+import { customerService } from "../../services/customerService";
+import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
+import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
-import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
+import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { StepInput, Workflow } from "../../types/workflow";
 import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
+import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
+import AssetDocumentsDialog from "./AssetDocumentsDialog";
 
 // ------------------------------------------------------------------
 // Column configuration
@@ -193,7 +204,7 @@ const emptyForm = (): AssetForm => ({
 });
 
 // ------------------------------------------------------------------
-// Report generator
+// Report generator (type only — the async function lives inside the component)
 // ------------------------------------------------------------------
 
 type FeatureDef = {
@@ -203,78 +214,17 @@ type FeatureDef = {
   subProperties?: { id: string; name: string }[];
 };
 
-function generateAssetReport(
-  asset: ProjectAsset,
-  cfg: ProductConfig | null | undefined,
-  proj: { jobNumber: string; customerName: string } | undefined,
-  tech: { fullName: string } | undefined,
-  productName: string,
-  features: FeatureDef[],
-) {
-  let fv: Record<string, string> = {};
-  try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
-
-  const featureRows = features.map((feat, i) => {
-    const raw = fv[feat.id];
-    let displayVal = raw || "—";
-    if (feat.valueType === "component" && feat.subProperties?.length && raw) {
-      try {
-        const sub: Record<string, string> = JSON.parse(raw);
-        const parts = feat.subProperties
-          .filter((sp) => sub[sp.id])
-          .map((sp) => `${sp.name}: ${sub[sp.id]}`);
-        displayVal = parts.length ? parts.join(", ") : "—";
-      } catch {}
-    }
-    const bg = i % 2 === 0 ? "#f9f9f9" : "#fff";
-    return `<tr style="background:${bg}">
-      <td style="padding:5px 12px 5px 0;color:#555;font-size:12px;width:40%;font-weight:500">${feat.name}</td>
-      <td style="padding:5px 0;font-size:12px">${displayVal}</td>
-    </tr>`;
-  }).join("");
-
-  const html = `<html><head><title>Asset Report — ${asset.assetTag}</title>
-    <style>
-      body{font-family:Arial,sans-serif;padding:32px;color:#1a1a1a}
-      h2{margin:0;font-size:20px}h3{margin:4px 0 20px;color:#555;font-size:14px;font-weight:normal}
-      table{width:100%;border-collapse:collapse}
-      @media print{body{padding:0}}
-    </style></head><body>
-    <h2>Asset Installation Report</h2>
-    <h3>Asset Tag: ${asset.assetTag}</h3>
-    <div style="background:#1a73e8;color:#fff;padding:12px 16px;border-radius:6px 6px 0 0">
-      <strong style="font-size:13px">${productName}</strong>
-      ${cfg ? ` &nbsp;·&nbsp; ${cfg.name}` : ""}
-      ${cfg?.configType ? ` &nbsp;·&nbsp; ${cfg.configType}` : ""}
-    </div>
-    <table style="border:1px solid #ddd;border-top:none;margin-bottom:20px">
-      <tr><td style="padding:5px 12px 5px 8px;color:#555;font-size:12px;font-weight:500;border-bottom:1px solid #eee;width:40%">Serial Number</td><td style="font-size:12px;padding:5px 8px;border-bottom:1px solid #eee">${asset.serialNumber || "—"}</td></tr>
-      <tr style="background:#f9f9f9"><td style="padding:5px 12px 5px 8px;color:#555;font-size:12px;font-weight:500;border-bottom:1px solid #eee">Project</td><td style="font-size:12px;padding:5px 8px;border-bottom:1px solid #eee">${proj ? `${proj.jobNumber} — ${proj.customerName}` : "—"}</td></tr>
-      <tr><td style="padding:5px 12px 5px 8px;color:#555;font-size:12px;font-weight:500;border-bottom:1px solid #eee">Location</td><td style="font-size:12px;padding:5px 8px;border-bottom:1px solid #eee">${asset.location || "—"}</td></tr>
-      <tr style="background:#f9f9f9"><td style="padding:5px 12px 5px 8px;color:#555;font-size:12px;font-weight:500;border-bottom:1px solid #eee">Assigned Technician</td><td style="font-size:12px;padding:5px 8px;border-bottom:1px solid #eee">${tech?.fullName || "—"}</td></tr>
-      <tr><td style="padding:5px 12px 5px 8px;color:#555;font-size:12px;font-weight:500;${asset.notes ? "border-bottom:1px solid #eee" : ""}">Status</td><td style="font-size:12px;padding:5px 8px;${asset.notes ? "border-bottom:1px solid #eee" : ""}">${STATUS_LABELS[asset.status as ProjectAssetStatus] || asset.status}</td></tr>
-      ${asset.notes ? `<tr style="background:#f9f9f9"><td style="padding:5px 12px 5px 8px;color:#555;font-size:12px;font-weight:500">Notes</td><td style="font-size:12px;padding:5px 8px">${asset.notes}</td></tr>` : ""}
-    </table>
-    ${featureRows ? `<h4 style="margin:20px 0 8px;font-size:13px">Feature Values</h4><table style="border:1px solid #ddd">${featureRows}</table>` : ""}
-  </body></html>`;
-
-  const w = window.open("", "_blank");
-  if (!w) return;
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  w.print();
-}
-
 // ------------------------------------------------------------------
 // Component
 // ------------------------------------------------------------------
 
 const AssetInstallationPage = () => {
   const dispatch = useAppDispatch();
+  const { user: currentUser } = useAuth();
   const productsState = useAppSelector((s) => s.products);
   const projects = useAppSelector((s) => s.projects.items);
   const users = useAppSelector((s) => s.users.items);
+  const [searchParams] = useSearchParams();
 
   const [tab, setTab] = useState(0);
   const [selectedProjectId, setSelectedProjectId] = useState("");
@@ -283,6 +233,7 @@ const AssetInstallationPage = () => {
 
   const [assets, setAssets] = useState<ProjectAsset[]>([]);
   const [configs, setConfigs] = useState<ProductConfig[]>([]);
+  const [publishedWfConfigs, setPublishedWfConfigs] = useState<WorkflowConfig[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [healthMap, setHealthMap] = useState<Record<string, AssetHealth>>({});
 
@@ -313,6 +264,12 @@ const AssetInstallationPage = () => {
   const [runnerWorkflow, setRunnerWorkflow] = useState<Workflow | null>(null);
   const [runnerLoading, setRunnerLoading] = useState<string | null>(null);
   const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>(undefined);
+  const [runnerExistingRunId, setRunnerExistingRunId] = useState<string | undefined>(undefined);
+  // Tracks paused workflow progress per asset: { done, total, completedTitles }
+  const [pausedProgress, setPausedProgress] = useState<Record<string, { done: number; total: number; completedTitles: string[] }>>({});
+  // Popover anchor for the paused progress badge
+  const [progressPopoverAnchor, setProgressPopoverAnchor] = useState<HTMLElement | null>(null);
+  const [progressPopoverAssetId, setProgressPopoverAssetId] = useState<string | null>(null);
 
   // Context menu (right-click on assignment run button)
   const [contextMenuAnchor, setContextMenuAnchor] = useState<HTMLElement | null>(null);
@@ -344,6 +301,11 @@ const AssetInstallationPage = () => {
   const [assignSaving, setAssignSaving] = useState(false);
   const [runHistoryAsset, setRunHistoryAsset] = useState<ProjectAsset | null>(null);
   const [runHistoryAssignment, setRunHistoryAssignment] = useState<WorkflowAssignment | null>(null);
+  // New run history dialog (with re-run support)
+  const [runHistoryOpen, setRunHistoryOpen] = useState(false);
+  const [runHistoryConfigId, setRunHistoryConfigId] = useState("");
+  const [runHistoryConfigName, setRunHistoryConfigName] = useState("");
+  const [runnerPrefillValues, setRunnerPrefillValues] = useState<Record<string, Record<string, string>> | undefined>(undefined);
 
   // Column filters
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
@@ -352,6 +314,16 @@ const AssetInstallationPage = () => {
   const [csvImportOpen, setCsvImportOpen] = useState(false);
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
   const [csvImporting, setCsvImporting] = useState(false);
+
+  // PDF report
+  const [reportGenerating, setReportGenerating] = useState<string | null>(null);
+  // Extra context passed into WorkflowRunHistoryDialog for the PDF download
+  const [runHistoryProject, setRunHistoryProject] = useState<{ customerName: string; jobNumber: string; siteName?: string } | null>(null);
+  const [runHistoryCustomerLogo, setRunHistoryCustomerLogo] = useState<string | null>(null);
+  // Asset documents
+  const [docsOpen, setDocsOpen] = useState(false);
+  const [docsAsset, setDocsAsset] = useState<ProjectAsset | null>(null);
+  const [docsCountMap, setDocsCountMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -368,19 +340,35 @@ const AssetInstallationPage = () => {
     if (tab >= products.length) setTab(Math.max(0, products.length - 1));
   }, [tab, products.length]);
 
+  // Auto-select product tab from ?product= URL param (e.g. navigating from project job number)
+  useEffect(() => {
+    const productId = searchParams.get("product");
+    if (!productId || products.length === 0) return;
+    const idx = products.findIndex((p) => p.id === productId);
+    if (idx >= 0) setTab(idx);
+  }, [products]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const activeProduct = products[tab];
   const activeFeatures = useMemo(() => (activeProduct?.features ?? []) as FeatureDef[], [activeProduct]);
 
   useEffect(() => {
-    if (!activeProduct?.id) { setAssets([]); setConfigs([]); return; }
+    if (!activeProduct?.id) { setAssets([]); setConfigs([]); setPublishedWfConfigs([]); return; }
     setLoadingAssets(true);
     Promise.all([
       projectAssetService.listByProduct(activeProduct.id),
       productConfigService.listByProduct(activeProduct.id),
-    ]).then(([a, c]) => {
+      workflowConfigService.listByProduct(activeProduct.id, "Published"),
+    ]).then(([a, c, wc]) => {
       setAssets(a);
       setConfigs(c);
+      setPublishedWfConfigs(wc);
       setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+      // Load document counts per asset (fire-and-forget, non-blocking)
+      const countMap: Record<string, number> = {};
+      Promise.all(a.map(async (asset) => {
+        const docs = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
+        countMap[asset.id] = docs.length;
+      })).then(() => setDocsCountMap(countMap));
     }).finally(() => setLoadingAssets(false));
   }, [activeProduct?.id]);
 
@@ -429,8 +417,15 @@ const AssetInstallationPage = () => {
     });
   }, [assets, selectedProjectId, statusFilter, search, archiveMode]);
 
+  // Projects filtered to those linked to the active product (used in add/edit dialogs)
+  const productProjects = useMemo(
+    () => projects.filter((p) => p.productIds?.includes(activeProduct?.id ?? "")),
+    [projects, activeProduct?.id],
+  );
+
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const configMap = useMemo(() => new Map(configs.map((c) => [c.id, c])), [configs]);
+  const wfConfigMap = useMemo(() => new Map(publishedWfConfigs.map((c) => [c.id, c])), [publishedWfConfigs]);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
   const visibleColumns = useMemo(() => {
@@ -594,17 +589,46 @@ const AssetInstallationPage = () => {
   // ------------------------------------------------------------------
 
   async function handleStartWorkOrder(asset: ProjectAsset) {
-    if (!asset.workflowTemplateId) {
-      alert("This asset has no workflow template linked. Assign a configuration with a workflow first.");
-      return;
-    }
     setRunnerLoading(asset.id);
     try {
-      const wf = await workflowTemplateService.getById(asset.workflowTemplateId);
-      if (!wf) { alert("Workflow template not found."); return; }
-      setRunnerAsset(asset);
-      setRunnerWorkflow(wf);
-      setRunnerOpen(true);
+      // New path: productConfigId → WorkflowConfig (published work instruction)
+      if (asset.productConfigId) {
+        const wfConfig = await workflowConfigService.getById(asset.productConfigId);
+        if (!wfConfig) { alert("Work instruction config not found."); return; }
+        let wf: Workflow | null = null;
+        try { wf = JSON.parse(wfConfig.stepsJson) as Workflow; } catch {}
+        if (!wf) { alert("Work instruction has no steps. Open it in Work Instructions and add steps first."); return; }
+
+        // Find the active (non-locked) run so we can resume exactly where we left off
+        let existingRunId: string | undefined = undefined;
+        if (asset.status === "InProgress") {
+          let runs: AssetWorkflowRun[] | undefined = runsMap[asset.id];
+          if (!runs) {
+            try { runs = await assetWorkflowRunService.listByAsset(asset.id); } catch {}
+          }
+          const activeRun = runs?.find((r) => r.workflowConfigId === wfConfig.id && !r.isLocked);
+          if (activeRun) existingRunId = activeRun.id;
+        }
+
+        setRunnerExistingRunId(existingRunId);
+        setRunnerAsset(asset);
+        setRunnerWorkflow(wf);
+        setRunnerWorkflowConfigId(wfConfig.id);
+        setRunnerOpen(true);
+        return;
+      }
+      // Legacy path: workflowTemplateId
+      if (asset.workflowTemplateId) {
+        const wf = await workflowTemplateService.getById(asset.workflowTemplateId);
+        if (!wf) { alert("Workflow template not found."); return; }
+        setRunnerExistingRunId(undefined);
+        setRunnerAsset(asset);
+        setRunnerWorkflow(wf);
+        setRunnerWorkflowConfigId(undefined);
+        setRunnerOpen(true);
+        return;
+      }
+      alert("This asset has no work instruction assigned. Edit the asset and select a Configuration Type first.");
     } catch {
       alert("Failed to load workflow.");
     } finally {
@@ -613,13 +637,22 @@ const AssetInstallationPage = () => {
   }
 
   async function handleWorkOrderComplete(capturedValues: Record<string, string>) {
-    // Sync captured feature values back to the asset record
+    // Sync captured feature values back to the asset record — await so refreshAssets sees the new values
     if (runnerAsset && Object.keys(capturedValues).length > 0) {
       let existing: Record<string, string> = {};
       try { existing = JSON.parse(runnerAsset.featureValuesJson || "{}"); } catch {}
       const merged = { ...existing, ...capturedValues };
-      projectAssetService.update(runnerAsset.id, { featureValuesJson: JSON.stringify(merged) }).catch(console.warn);
+      await projectAssetService.update(runnerAsset.id, { featureValuesJson: JSON.stringify(merged) }).catch(console.warn);
     }
+    refreshAssets();
+  }
+
+  async function syncPartialFeatureValues(asset: ProjectAsset, capturedValues: Record<string, string>) {
+    if (Object.keys(capturedValues).length === 0) return;
+    let existing: Record<string, string> = {};
+    try { existing = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
+    const merged = { ...existing, ...capturedValues };
+    await projectAssetService.update(asset.id, { featureValuesJson: JSON.stringify(merged) }).catch(console.warn);
     refreshAssets();
   }
 
@@ -745,6 +778,17 @@ const AssetInstallationPage = () => {
         else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
       } catch {}
       if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
+
+      // Find the active (non-locked) run so we can resume exactly where we left off
+      let existingRunId: string | undefined = undefined;
+      let runs: AssetWorkflowRun[] | undefined = runsMap[asset.id];
+      if (!runs) {
+        try { runs = await assetWorkflowRunService.listByAsset(asset.id); } catch {}
+      }
+      const activeRun = runs?.find((r) => r.workflowConfigId === assignment.workflowConfigId && !r.isLocked);
+      if (activeRun) existingRunId = activeRun.id;
+
+      setRunnerExistingRunId(existingRunId);
       setRunnerAsset(asset);
       setRunnerWorkflow(wf);
       setRunnerWorkflowConfigId(assignment.workflowConfigId);
@@ -753,6 +797,147 @@ const AssetInstallationPage = () => {
       setRunnerLoading(null);
     }
   }
+
+  // ------------------------------------------------------------------
+  // Run history + re-run
+  // ------------------------------------------------------------------
+
+  function openRunHistory(asset: ProjectAsset, wfConfigId?: string, wfConfigName?: string) {
+    const configId = wfConfigId ?? asset.productConfigId;
+    if (!configId) {
+      alert("No workflow config associated with this asset.");
+      return;
+    }
+    const cached = wfConfigMap.get(configId);
+    const cfgName = wfConfigName ?? cached?.displayName ?? cached?.name ?? "Workflow";
+    setRunHistoryAsset(asset);
+    setRunHistoryConfigId(configId);
+    setRunHistoryConfigName(cfgName);
+
+    // Populate project / customer context for the PDF report
+    const proj = projects.find((p) => p.id === asset.projectId);
+    setRunHistoryProject(proj ? { customerName: proj.customerName, jobNumber: proj.jobNumber, siteName: proj.siteName } : null);
+    setRunHistoryCustomerLogo(null); // reset; fetch async below
+    if (proj?.customerId) {
+      customerService.getCustomers()
+        .then(async (all) => {
+          const rawLogo = all.find((c) => c.customerId === proj.customerId || c.id === proj.customerId)?.logo ?? null;
+          const resolved = rawLogo ? await resolveImageToDataUrl(rawLogo) : null;
+          setRunHistoryCustomerLogo(resolved);
+        })
+        .catch(() => setRunHistoryCustomerLogo(null));
+    }
+
+    setRunHistoryOpen(true);
+  }
+
+  async function handleGeneratePdfReport(asset: ProjectAsset) {
+    setReportGenerating(asset.id);
+    try {
+      // Runs — use cached value or fetch
+      let runs = runsMap[asset.id];
+      if (!runs) {
+        try { runs = await assetWorkflowRunService.listByAsset(asset.id); } catch { runs = []; }
+      }
+
+      // Prefer the latest locked (Complete) run; fall back to newest run
+      const sorted = [...(runs ?? [])].sort((a, b) => (b.runNumber ?? 0) - (a.runNumber ?? 0));
+      const run = sorted.find((r) => r.isLocked) ?? sorted[0] ?? null;
+
+      // Stub run if the asset has never been run
+      const effectiveRun: AssetWorkflowRun = run ?? {
+        id: "", assetId: asset.id,
+        workflowConfigId: asset.productConfigId ?? "",
+        workflowVersion: 1, workflowSnapshotJson: "{}",
+        status: "InProgress", isLocked: false,
+        stepResultsJson: "[]", issuesJson: "[]",
+        runNumber: 1, startedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      };
+
+      // Workflow config name
+      const configId = effectiveRun.workflowConfigId || asset.productConfigId;
+      const wfCfg = configId ? wfConfigMap.get(configId) : null;
+      const configName = wfCfg?.displayName ?? wfCfg?.name ?? "Installation Record";
+
+      // Assigned technician
+      const tech = users.find((u) => u.id === asset.assignedUserId);
+
+      // Project + customer logo
+      const proj = projects.find((p) => p.id === asset.projectId);
+      let rawCustomerLogo: string | null = null;
+      if (proj?.customerId) {
+        try {
+          const allCustomers = await customerService.getCustomers();
+          rawCustomerLogo = allCustomers.find((c) => c.customerId === proj.customerId || c.id === proj.customerId)?.logo ?? null;
+        } catch { /* ignore */ }
+      }
+
+      // Business logo + customer logo — resolve data URL regardless of source format
+      const brandSettings = await brandSettingsService.get();
+      const [bizLogoResolved, custLogoResolved] = await Promise.all([
+        brandSettings.logoBase64 ? resolveImageToDataUrl(brandSettings.logoBase64) : Promise.resolve(null),
+        rawCustomerLogo ? resolveImageToDataUrl(rawCustomerLogo) : Promise.resolve(null),
+      ]);
+
+      await generateWorkflowReport({
+        run: effectiveRun,
+        asset,
+        workflowConfigName: configName,
+        businessLogoBase64: bizLogoResolved,
+        customerLogoBase64: custLogoResolved,
+        customerName: proj?.customerName,
+        jobNumber: proj?.jobNumber,
+        siteName: proj?.siteName,
+        siteLocation: asset.location ?? undefined,
+        assignedTechnician: tech?.fullName,
+      });
+    } catch (err) {
+      console.error("[AssetInstallationPage] Report generation failed", err);
+      alert("Failed to generate PDF report.");
+    } finally {
+      setReportGenerating(null);
+    }
+  }
+
+  async function handleRerun(
+    prefillValues: Record<string, Record<string, string>>,
+    _latestRun: AssetWorkflowRun
+  ) {
+    const asset = runHistoryAsset;
+    const configId = runHistoryConfigId;
+    if (!asset || !configId) return;
+    setRunHistoryOpen(false);
+
+    setRunnerLoading(asset.id);
+    try {
+      const cfg = wfConfigMap.get(configId) ?? await workflowConfigService.getById(configId);
+      if (!cfg) { alert("Workflow config not found."); return; }
+      let wf: Workflow | null = null;
+      try {
+        const parsed = JSON.parse(cfg.stepsJson);
+        if (parsed?.steps) wf = parsed as Workflow;
+        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
+      } catch {}
+      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
+
+      setRunnerPrefillValues(prefillValues);
+      setRunnerExistingRunId(undefined); // fresh run
+      setRunnerAsset(asset);
+      setRunnerWorkflow(wf);
+      setRunnerWorkflowConfigId(configId);
+      setRunnerOpen(true);
+    } catch { alert("Failed to load workflow."); } finally {
+      setRunnerLoading(null);
+    }
+  }
+
+  // useCallback with [] deps — setDocsCountMap (setState setter) is always stable,
+  // so this callback never changes identity and won't destabilize the dialog's
+  // reload useCallback, preventing an infinite re-render loop.
+  const handleDocsChanged = useCallback((assetId: string, count: number) => {
+    setDocsCountMap(prev => ({ ...prev, [assetId]: count }));
+  }, []);
 
   // ------------------------------------------------------------------
   // CSV import helpers
@@ -840,12 +1025,26 @@ const AssetInstallationPage = () => {
   function renderIssuesPanel(asset: ProjectAsset) {
     let issues: AssetIssue[] = [];
     try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
+
+    // Collect issues from all workflow runs for this asset
+    const runs = runsMap[asset.id] ?? [];
+    const runIssues: RunIssue[] = [];
+    for (const run of runs) {
+      try {
+        const ri = JSON.parse(run.issuesJson || "[]") as RunIssue[];
+        runIssues.push(...ri);
+      } catch {}
+    }
+
+    const openCount = issues.filter(i => !i.resolved).length + runIssues.filter(i => !i.resolved).length;
+    const totalCount = issues.length + runIssues.length;
+
     return (
       <Box sx={{ mt: 1.5 }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.75}>
           <Typography variant="caption" fontWeight={700} color="text.secondary"
             sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
-            Issues {issues.length > 0 && `(${issues.filter(i => !i.resolved).length} open)`}
+            Issues {totalCount > 0 && `(${openCount} open)`}
           </Typography>
           <Button
             size="small"
@@ -858,7 +1057,7 @@ const AssetInstallationPage = () => {
             Add issue
           </Button>
         </Stack>
-        {issues.length === 0 ? (
+        {totalCount === 0 ? (
           <Typography variant="caption" color="text.disabled">No issues recorded.</Typography>
         ) : (
           <Stack spacing={0.5}>
@@ -890,6 +1089,31 @@ const AssetInstallationPage = () => {
                 </Tooltip>
               </Stack>
             ))}
+            {runIssues.map((issue) => (
+              <Stack key={`run-${issue.id}`} direction="row" alignItems="flex-start" spacing={1}
+                sx={{ p: 0.75, borderRadius: 1, border: "1px solid", borderColor: "divider",
+                  bgcolor: issue.resolved ? "rgba(255,255,255,0.02)" : "rgba(244,67,54,0.04)",
+                  opacity: issue.resolved ? 0.55 : 1 }}>
+                <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: SEVERITY_COLOR[issue.severity], mt: 0.6, flexShrink: 0 }} />
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Stack direction="row" alignItems="center" spacing={0.5} mb={0.25}>
+                    <Typography variant="caption" sx={{ textDecoration: issue.resolved ? "line-through" : "none" }}>
+                      {issue.description}
+                    </Typography>
+                    <Chip size="small" label="Workflow" sx={{ fontSize: 9, height: 16, "& .MuiChip-label": { px: 0.5 } }} />
+                  </Stack>
+                  {issue.stepTitle && (
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Step: {issue.stepTitle}
+                    </Typography>
+                  )}
+                  <Typography variant="caption" color="text.disabled" display="block">
+                    {issue.createdBy ? `${issue.createdBy} · ` : ""}{new Date(issue.reportedAt).toLocaleString()} · {issue.severity}
+                    {issue.isBlocking && " · Blocking"}
+                  </Typography>
+                </Box>
+              </Stack>
+            ))}
           </Stack>
         )}
       </Box>
@@ -898,33 +1122,59 @@ const AssetInstallationPage = () => {
 
   function actionButton(asset: ProjectAsset) {
     const loading = runnerLoading === asset.id;
-    if (!asset.workflowTemplateId) {
+    if (!asset.productConfigId && !asset.workflowTemplateId) {
       return <Typography variant="caption" color="text.secondary">No workflow</Typography>;
     }
+    const progress = pausedProgress[asset.id];
+    const progressBadge = progress ? (
+      <Tooltip title="Click to see completed steps">
+        <Chip
+          size="small"
+          label={`${progress.done}/${progress.total} steps`}
+          variant="outlined"
+          color="warning"
+          clickable
+          sx={{ fontSize: 10, height: 20 }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setProgressPopoverAnchor(e.currentTarget);
+            setProgressPopoverAssetId(asset.id);
+          }}
+        />
+      </Tooltip>
+    ) : null;
     if (asset.status === "NotStarted") {
       return (
-        <Button size="small" variant="outlined" color="success"
-          startIcon={loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />}
-          disabled={loading} onClick={() => handleStartWorkOrder(asset)}>
-          Start
-        </Button>
+        <Stack direction="row" spacing={0.5} alignItems="center">
+          {progressBadge}
+          <Button size="small" variant="outlined" color="success"
+            startIcon={loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />}
+            disabled={loading} onClick={() => handleStartWorkOrder(asset)}>
+            Start
+          </Button>
+        </Stack>
       );
     }
     if (asset.status === "InProgress") {
       return (
-        <Button size="small" variant="contained" color="primary"
-          startIcon={loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />}
-          disabled={loading} onClick={() => handleStartWorkOrder(asset)}>
-          Continue
-        </Button>
+        <Stack direction="row" spacing={0.5} alignItems="center">
+          {progressBadge}
+          <Button size="small" variant="contained" color="primary"
+            startIcon={loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />}
+            disabled={loading} onClick={() => handleStartWorkOrder(asset)}>
+            Continue
+          </Button>
+        </Stack>
       );
     }
     if (asset.status === "Complete") {
       return (
-        <Button size="small" variant="text" color="inherit" startIcon={<CheckCircleOutlined />}
-          onClick={() => handleStartWorkOrder(asset)}>
-          View
-        </Button>
+        <Tooltip title="View run history, download report, or re-run workflow">
+          <Button size="small" variant="text" color="inherit" startIcon={<HistoryOutlined />}
+            onClick={() => openRunHistory(asset)}>
+            View/Edit
+          </Button>
+        </Tooltip>
       );
     }
     return (
@@ -1127,8 +1377,11 @@ const AssetInstallationPage = () => {
         return <Typography variant="body2" color="text.secondary">{asset.assetModel || "—"}</Typography>;
       case "manufacturer":
         return <Typography variant="body2" color="text.secondary">{asset.manufacturer || "—"}</Typography>;
-      case "configType":
-        return <Typography variant="body2" color="text.secondary">{cfg?.configType || "—"}</Typography>;
+      case "configType": {
+        const cfgType = cfg?.configType
+          || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.configType : undefined);
+        return <Typography variant="body2" color="text.secondary">{cfgType || "—"}</Typography>;
+      }
       case "project":
         return <Typography variant="body2" color="text.secondary">{proj ? proj.jobNumber : asset.projectId.slice(0, 8)}</Typography>;
       case "siteName":
@@ -1213,14 +1466,18 @@ const AssetInstallationPage = () => {
                       sx={{ fontSize: 10, height: 18 }}
                     />
                   )}
-                  <Tooltip title={latestRun?.status === "Complete" ? "Right-click to re-run or view history" : ""}>
+                  <Tooltip title={latestRun?.status === "Complete" ? "View run history, download report, or re-run workflow" : ""}>
                     <Button
                       size="small"
                       variant={latestRun?.status === "InProgress" ? "contained" : "outlined"}
                       color={latestRun?.status === "Issue" ? "error" : latestRun?.status === "Complete" ? "inherit" : "success"}
                       disabled={runLoading}
-                      startIcon={runLoading ? <CircularProgress size={12} /> : <PlayArrowOutlined />}
-                      onClick={() => handleStartAssignmentRun(asset, asgn)}
+                      startIcon={runLoading ? <CircularProgress size={12} /> : latestRun?.status === "Complete" ? <HistoryOutlined /> : <PlayArrowOutlined />}
+                      onClick={() =>
+                        latestRun?.status === "Complete"
+                          ? openRunHistory(asset, asgn.workflowConfigId, asgn.workflowConfigName)
+                          : handleStartAssignmentRun(asset, asgn)
+                      }
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setContextMenuAnchor(e.currentTarget);
@@ -1229,7 +1486,7 @@ const AssetInstallationPage = () => {
                       }}
                       sx={{ fontSize: 11, py: 0.25 }}
                     >
-                      {!latestRun ? "Start" : latestRun.status === "InProgress" ? "Continue" : latestRun.status === "Complete" ? "View" : "Review"}
+                      {!latestRun ? "Start" : latestRun.status === "InProgress" ? "Continue" : latestRun.status === "Complete" ? "View/Edit" : "Review"}
                     </Button>
                   </Tooltip>
                   <Tooltip title="Remove assignment">
@@ -1350,7 +1607,7 @@ const AssetInstallationPage = () => {
           <InputLabel>Project</InputLabel>
           <Select label="Project" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
             <MenuItem value="">All projects</MenuItem>
-            {projects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} — {p.customerName}</MenuItem>)}
+            {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} — {p.customerName}</MenuItem>)}
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ minWidth: 160 }}>
@@ -1441,7 +1698,7 @@ const AssetInstallationPage = () => {
                       <IconButton size="small" onClick={() => {
                         const nextId = isExpanded ? null : asset.id;
                         setExpandedAssetId(nextId);
-                        if (nextId && !assignmentsMap[nextId]) loadAssignmentsForAsset(nextId);
+                        if (nextId) loadAssignmentsForAsset(nextId);
                       }}>
                         {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
                       </IconButton>
@@ -1461,11 +1718,30 @@ const AssetInstallationPage = () => {
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
                         {actionButton(asset)}
-                        <Tooltip title="Generate report">
-                          <IconButton size="small"
-                            onClick={() => generateAssetReport(asset, cfg, proj, tech ?? undefined, activeProduct?.name ?? "", activeFeatures)}>
-                            <ArticleOutlined fontSize="small" />
+                        <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
+                          <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
+                            <Badge
+                              badgeContent={`${docsCountMap[asset.id] ?? 0}/3`}
+                              color={
+                                (docsCountMap[asset.id] ?? 0) === 0 ? "default" :
+                                (docsCountMap[asset.id] ?? 0) === 3 ? "success" : "primary"
+                              }
+                              sx={{ "& .MuiBadge-badge": { fontSize: 9, minWidth: 28, height: 16 } }}
+                            >
+                              <FolderOutlined fontSize="small" />
+                            </Badge>
                           </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Generate PDF report">
+                          <span>
+                            <IconButton size="small"
+                              disabled={reportGenerating === asset.id}
+                              onClick={() => handleGeneratePdfReport(asset)}>
+                              {reportGenerating === asset.id
+                                ? <CircularProgress size={16} />
+                                : <ArticleOutlined fontSize="small" />}
+                            </IconButton>
+                          </span>
                         </Tooltip>
                         <Tooltip title="Edit asset">
                           <IconButton size="small" onClick={() => openEditAsset(asset)}>
@@ -1524,16 +1800,20 @@ const AssetInstallationPage = () => {
                 value={addForm.projectId}
                 onChange={(e) => {
                   const projId = e.target.value;
-                  const proj = projects.find((p) => p.id === projId);
+                  const proj = productProjects.find((p) => p.id === projId);
                   setAddForm((p) => ({
                     ...p,
                     projectId: projId,
-                    // Auto-fill location from site if currently empty
                     location: p.location || proj?.siteName || "",
                   }));
                 }}
               >
-                {projects.map((proj) => (
+                {productProjects.length === 0 && (
+                  <MenuItem disabled value="">
+                    No projects linked to {activeProduct?.name ?? "this product"}
+                  </MenuItem>
+                )}
+                {productProjects.map((proj) => (
                   <MenuItem key={proj.id} value={proj.id}>
                     {proj.jobNumber} — {proj.customerName}
                     {proj.siteName ? ` (${proj.siteName})` : ""}
@@ -1543,25 +1823,23 @@ const AssetInstallationPage = () => {
             </FormControl>
 
             <FormControl size="small" fullWidth>
-              <InputLabel>Configuration (asset type)</InputLabel>
+              <InputLabel>Configuration Type</InputLabel>
               <Select
-                label="Configuration (asset type)"
+                label="Configuration Type"
                 value={addForm.configId}
                 onChange={(e) => setAddForm((p) => ({ ...p, configId: e.target.value }))}
               >
                 <MenuItem value="">(None)</MenuItem>
-                {configs.map((cfg) => (
-                  <MenuItem key={cfg.id} value={cfg.id}>
-                    {cfg.name}
-                    {cfg.configType ? ` — ${cfg.configType}` : ""}
-                    {cfg.workflowTemplateId ? " ✓" : " (no workflow)"}
+                {publishedWfConfigs.map((wc) => (
+                  <MenuItem key={wc.id} value={wc.id}>
+                    {wc.configType ? `${wc.configType} — ` : ""}{wc.name}
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
-            {selectedAddConfig && !selectedAddConfig.workflowTemplateId && (
-              <Alert severity="warning" sx={{ fontSize: 12 }}>
-                This configuration has no workflow linked. Open the Builder in Work Instructions to add one.
+            {publishedWfConfigs.length === 0 && (
+              <Alert severity="info" sx={{ fontSize: 12 }}>
+                No published work instructions for {activeProduct?.name ?? "this product"} yet. Publish one in Work Instructions first.
               </Alert>
             )}
 
@@ -2027,15 +2305,79 @@ const AssetInstallationPage = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Run history dialog */}
+      {/* Legacy run history dialog (assignment panel history icon) */}
       {runHistoryAsset && runHistoryAssignment && (
         <AssetWorkflowRunHistoryDialog
-          open={Boolean(runHistoryAsset)}
+          open={Boolean(runHistoryAsset && runHistoryAssignment)}
           onClose={() => { setRunHistoryAsset(null); setRunHistoryAssignment(null); }}
           asset={runHistoryAsset}
           assignment={runHistoryAssignment}
         />
       )}
+
+      {/* New run history dialog — View/Edit button → history, re-run, PDF report */}
+      {docsOpen && docsAsset && (
+        <AssetDocumentsDialog
+          open={docsOpen}
+          onClose={() => setDocsOpen(false)}
+          asset={docsAsset}
+          currentUserName={currentUser?.fullName ?? ""}
+          onDocsChanged={handleDocsChanged}
+          products={products}
+        />
+      )}
+
+      {runHistoryOpen && runHistoryAsset && (
+        <WorkflowRunHistoryDialog
+          open={runHistoryOpen}
+          onClose={() => { setRunHistoryOpen(false); }}
+          asset={runHistoryAsset}
+          workflowConfigId={runHistoryConfigId}
+          workflowConfigName={runHistoryConfigName}
+          currentUserName={currentUser?.fullName ?? ""}
+          onRerun={handleRerun}
+          project={runHistoryProject ?? undefined}
+          customerLogoBase64={runHistoryCustomerLogo}
+          assignedTechnician={users.find((u) => u.id === runHistoryAsset?.assignedUserId)?.fullName}
+        />
+      )}
+
+      {/* Paused progress popover — click badge to see completed steps */}
+      <Popover
+        open={Boolean(progressPopoverAnchor)}
+        anchorEl={progressPopoverAnchor}
+        onClose={() => { setProgressPopoverAnchor(null); setProgressPopoverAssetId(null); }}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        transformOrigin={{ vertical: "top", horizontal: "center" }}
+        slotProps={{ paper: { sx: { p: 1.5, minWidth: 220, maxWidth: 320 } } }}
+      >
+        {progressPopoverAssetId && (() => {
+          const prog = pausedProgress[progressPopoverAssetId];
+          if (!prog) return null;
+          return (
+            <Box>
+              <Typography variant="caption" fontWeight={700} color="text.secondary"
+                sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1 }}>
+                Progress — {prog.done} of {prog.total} steps
+              </Typography>
+              <Stack spacing={0.4}>
+                {prog.completedTitles.map((title, idx) => (
+                  <Stack key={idx} direction="row" alignItems="center" spacing={0.75}>
+                    <CheckCircleOutlined sx={{ fontSize: 14, color: "success.main", flexShrink: 0 }} />
+                    <Typography variant="caption" noWrap>{title || `Step ${idx + 1}`}</Typography>
+                  </Stack>
+                ))}
+                {prog.done < prog.total && (
+                  <Stack direction="row" alignItems="center" spacing={0.75} sx={{ opacity: 0.45 }}>
+                    <HourglassEmptyOutlined sx={{ fontSize: 14, flexShrink: 0 }} />
+                    <Typography variant="caption">{prog.total - prog.done} step{prog.total - prog.done !== 1 ? "s" : ""} remaining</Typography>
+                  </Stack>
+                )}
+              </Stack>
+            </Box>
+          );
+        })()}
+      </Popover>
 
       {/* Right-click context menu on assignment run button */}
       <Menu
@@ -2074,17 +2416,36 @@ const AssetInstallationPage = () => {
         <WorkOrderRunner
           open={runnerOpen}
           onClose={() => {
+            const closedAssetId = runnerAsset?.id;
             setRunnerOpen(false);
             setRunnerAsset(null);
             setRunnerWorkflow(null);
             setRunnerWorkflowConfigId(undefined);
+            setRunnerExistingRunId(undefined);
+            setRunnerPrefillValues(undefined);
+            refreshAssets();
+            if (closedAssetId) loadAssignmentsForAsset(closedAssetId);
           }}
           workflow={runnerWorkflow}
           productId={activeProduct.id}
           productName={activeProduct.name}
           projectAssetId={runnerAsset.id}
           workflowConfigId={runnerWorkflowConfigId}
-          onComplete={handleWorkOrderComplete}
+          existingRunId={runnerExistingRunId}
+          prefillValues={runnerPrefillValues}
+          currentUserName={currentUser.fullName}
+          onComplete={(vals) => {
+            // Clear paused progress badge on completion
+            if (runnerAsset) setPausedProgress((prev) => { const n = { ...prev }; delete n[runnerAsset.id]; return n; });
+            handleWorkOrderComplete(vals);
+          }}
+          onPause={(progress) => {
+            if (runnerAsset) {
+              setPausedProgress((prev) => ({ ...prev, [runnerAsset.id]: progress }));
+              // Sync any feature values captured so far so the chevron shows partial data
+              syncPartialFeatureValues(runnerAsset, progress.partialFeatureValues);
+            }
+          }}
         />
       )}
     </Stack>

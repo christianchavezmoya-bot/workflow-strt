@@ -774,10 +774,20 @@ export default function DocumentsPage() {
                       // Custom field column
                       const cf = customFields.find((f) => f.id === colId);
                       if (!cf) return <TableCell key={colId} />;
-                      const val = (doc as unknown as Record<string, unknown>)[colId] as string | undefined;
+                      // Custom values live in doc.customValues (hydrated from customValuesJson),
+                      // NOT as top-level properties of doc.
+                      const rawVal = doc.customValues?.[colId];
+                      // For relation fields the stored value is an entity ID — resolve to name.
+                      let displayVal: string | undefined;
+                      if (cf.type === "relation" && rawVal) {
+                        const opts = relationOptions(cf);
+                        displayVal = opts.find((o) => o.id === rawVal)?.name ?? rawVal;
+                      } else {
+                        displayVal = rawVal;
+                      }
                       return (
                         <TableCell key={colId}>
-                          <Typography variant="body2" color="text.secondary">{val || "—"}</Typography>
+                          <Typography variant="body2" color="text.secondary">{displayVal || "—"}</Typography>
                         </TableCell>
                       );
                     })}

@@ -697,8 +697,77 @@ public class AssetWorkflowRunEntity
     public string? TechnicianUserId { get; set; }
     public string StepResultsJson { get; set; } = "[]";
     public string IssuesJson { get; set; } = "[]";
+    /// <summary>Sequential run number per asset+config (1 = first run, 2 = first re-run, …)</summary>
+    public int RunNumber { get; set; } = 1;
+    /// <summary>Full name of the user who locked/completed the run.</summary>
+    [MaxLength(200)]
+    public string? CompletedByName { get; set; }
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>Simple key-value store for brand/global settings (e.g. business logo).</summary>
+public class BrandSettingEntity
+{
+    [Key]
+    [MaxLength(80)]
+    public string Key { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+// ─── Asset Documents ──────────────────────────────────────────────────────────
+// One AssetDocumentEntity = one document slot per asset (max 3 per asset).
+// Each upload/replace appends a new AssetDocumentRevisionEntity child record.
+
+public class AssetDocumentEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string AssetId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string Label { get; set; } = "Document";   // Drawing | BOM | Agreement | Datasheet | Other
+    [MaxLength(200)]
+    public string? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class AssetDocumentRevisionEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string DocumentId { get; set; } = string.Empty;
+    public int RevisionNumber { get; set; } = 1;
+    [MaxLength(260)]
+    public string OriginalName { get; set; } = string.Empty;
+    [MaxLength(260)]
+    public string StoredName { get; set; } = string.Empty;   // "{revId}_{safeOriginalName}"
+    [MaxLength(120)]
+    public string MimeType { get; set; } = string.Empty;
+    public long FileSizeBytes { get; set; }
+    [MaxLength(200)]
+    public string? UploadedBy { get; set; }
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+}
+
+// ─── Asset Document Links ──────────────────────────────────────────────────────
+// Bridge table: references from an asset to a library document (max 3 per asset).
+// The DocumentEntity in the global library is the source of truth; this link is
+// just a reference. Detaching a link does NOT delete the library document.
+
+public class AssetDocumentLinkEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string AssetId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string DocumentId { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string? AttachedBy { get; set; }
+    public DateTime AttachedAt { get; set; } = DateTime.UtcNow;
 }

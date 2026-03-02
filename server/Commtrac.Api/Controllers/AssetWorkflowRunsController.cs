@@ -19,6 +19,7 @@ public class AssetWorkflowRunsController : ControllerBase
         e.Id, e.AssetId, e.WorkflowConfigId, e.WorkflowVersion,
         e.WorkflowSnapshotJson, e.WorkOrderId, e.Status, e.IsLocked,
         e.TechnicianUserId, e.StepResultsJson, e.IssuesJson,
+        e.RunNumber, e.CompletedByName,
         e.StartedAt, e.CompletedAt, e.CreatedAt, e.UpdatedAt
     );
 
@@ -51,6 +52,14 @@ public class AssetWorkflowRunsController : ControllerBase
         if (config.Status != "Published")
             return BadRequest(new { message = "Only Published configurations can be executed." });
 
+        // Idempotent: return existing active (non-locked) run so progress is preserved across sessions
+        var existingRun = await _db.AssetWorkflowRuns
+            .Where(r => r.AssetId == req.AssetId && r.WorkflowConfigId == req.WorkflowConfigId && !r.IsLocked)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefaultAsync();
+        if (existingRun is not null)
+            return Ok(ToDto(existingRun));
+
         // Snapshot: freeze the full config at this moment
         var snapshot = JsonSerializer.Serialize(new
         {
@@ -62,6 +71,9 @@ public class AssetWorkflowRunsController : ControllerBase
             featureSelectionsJson = config.FeatureSelectionsJson,
             snapshotAt           = DateTime.UtcNow,
         });
+
+        var runCount = await _db.AssetWorkflowRuns
+            .CountAsync(r => r.AssetId == req.AssetId && r.WorkflowConfigId == req.WorkflowConfigId);
 
         var now = DateTime.UtcNow;
         var run = new AssetWorkflowRunEntity
@@ -76,6 +88,7 @@ public class AssetWorkflowRunsController : ControllerBase
             TechnicianUserId     = req.TechnicianUserId,
             StepResultsJson      = "[]",
             IssuesJson           = "[]",
+            RunNumber            = runCount + 1,
             StartedAt            = now,
             CreatedAt            = now,
             UpdatedAt            = now,
@@ -134,12 +147,13 @@ public class AssetWorkflowRunsController : ControllerBase
             });
 
         var now = DateTime.UtcNow;
-        run.StepResultsJson = req.StepResultsJson;
-        run.IssuesJson      = req.IssuesJson;
-        run.Status          = "Complete";
-        run.IsLocked        = true;
-        run.CompletedAt     = now;
-        run.UpdatedAt       = now;
+        run.StepResultsJson  = req.StepResultsJson;
+        run.IssuesJson       = req.IssuesJson;
+        run.Status           = "Complete";
+        run.IsLocked         = true;
+        run.CompletedByName  = req.CompletedByName;
+        run.CompletedAt      = now;
+        run.UpdatedAt        = now;
 
         // Update asset status — Complete only if no open blocking issues remain across all runs
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
@@ -154,6 +168,39 @@ public class AssetWorkflowRunsController : ControllerBase
 
             asset.Status    = anyBlock ? "Issue" : "Complete";
             asset.UpdatedAt = now;
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(ToDto(run));
+    }
+
+    // PATCH api/asset-workflow-runs/{id}/issues — update issues on any run (inc. locked)
+    [HttpPatch("{id}/issues")]
+    public async Task<IActionResult> PatchIssues(string id, [FromBody] PatchIssuesRequest req)
+    {
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
+        if (run is null) return NotFound();
+
+        run.IssuesJson = req.IssuesJson;
+        run.UpdatedAt  = DateTime.UtcNow;
+
+        // Recalculate asset status now that issues may have changed
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is not null)
+        {
+            var allRuns = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
+            var anyBlock = allRuns.Any(r => {
+                var json = r.Id == id ? req.IssuesJson : r.IssuesJson;
+                return ParseIssues(json).Any(i =>
+                    i.TryGetProperty("isBlocking", out var b) && b.GetBoolean() &&
+                    i.TryGetProperty("resolved",   out var rv) && !rv.GetBoolean());
+            });
+            var anyLocked = allRuns.Any(r => r.IsLocked || r.Id == id);
+            if (anyLocked)
+            {
+                asset.Status    = anyBlock ? "Issue" : "Complete";
+                asset.UpdatedAt = DateTime.UtcNow;
+            }
         }
 
         await _db.SaveChangesAsync();

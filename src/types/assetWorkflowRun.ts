@@ -9,7 +9,10 @@ export interface RunIssue {
   stepTitle?: string;
   reportedAt: string;
   resolved: boolean;
+  resolvedNote?: string;   // resolution comment added from history view
   isBlocking: boolean;
+  createdBy?: string;
+  internalOnly?: boolean;  // if true, not included in customer-facing reports
 }
 
 export interface StepResult {
@@ -30,6 +33,8 @@ export interface AssetWorkflowRun {
   technicianUserId?: string;
   stepResultsJson: string;
   issuesJson: string;
+  runNumber: number;
+  completedByName?: string;
   startedAt: string;
   completedAt?: string;
   createdAt: string;

@@ -33,6 +33,7 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormControlLabel,
   Grid,
   IconButton,
   InputLabel,
@@ -49,6 +50,7 @@ import {
 } from "@mui/material";
 import type { Decision, MediaItem, StepInput, StepInputType, Workflow, WorkflowStep } from "../../types/workflow";
 import type { ProductFeatureDefinition } from "../../types/product";
+import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import WorkOrderRunner from "./WorkOrderRunner";
@@ -187,6 +189,13 @@ function TabPanel({ value, index, children }: { value: number; index: number; ch
 // WorkflowBuilder — main component
 // ------------------------------------------------------------------
 
+interface PublishForm {
+  name: string;
+  configType: string;
+  notes: string;
+  featureSelections: FeatureSelection[];
+}
+
 interface WorkflowBuilderProps {
   productId: string;
   productName: string;
@@ -211,6 +220,8 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   const importedRef = useRef(false);  // blocks async API load from overwriting a user import
 
   const [publishSaving, setPublishSaving] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [publishForm, setPublishForm] = useState<PublishForm>({ name: "", configType: "", notes: "", featureSelections: [] });
   const [pendingImport, setPendingImport] = useState<{ raw: Workflow; normalized: Workflow } | null>(null);
   // Tracks the active config ID — may be set by auto-save when initialConfigId is null
   const [resolvedConfigId, setResolvedConfigId] = useState<string | null>(initialConfigId ?? null);
@@ -603,7 +614,24 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   // Publish WorkflowConfig
   // ------------------------------------------------------------------
 
-  async function handlePublish() {
+  function openPublishDialog() {
+    let featureSels: FeatureSelection[] = [];
+    if (currentConfig) {
+      try { featureSels = JSON.parse(currentConfig.featureSelectionsJson) as FeatureSelection[]; } catch {}
+    }
+    const selMap = new Map(featureSels.map((s) => [s.featureId, s]));
+    setPublishForm({
+      name: currentConfig?.name ?? workflow.name,
+      configType: currentConfig?.configType ?? "",
+      notes: currentConfig?.notes ?? "",
+      featureSelections: productFeatures.map(
+        (f) => selMap.get(f.id) ?? { featureId: f.id, included: false, activeCount: 0 },
+      ),
+    });
+    setPublishDialogOpen(true);
+  }
+
+  async function handleConfirmPublish() {
     let cfgId = resolvedConfigIdRef.current ?? initialConfigId;
     if (!cfgId) {
       cfgId = await ensureConfigId();
@@ -611,10 +639,16 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     }
     setPublishSaving(true);
     try {
-      // Flush latest steps before publishing so the snapshot is current
-      await workflowConfigService.update(cfgId, { stepsJson: JSON.stringify(workflow) });
+      await workflowConfigService.update(cfgId, {
+        name: publishForm.name.trim() || undefined,
+        configType: publishForm.configType.trim() || undefined,
+        notes: publishForm.notes.trim() || undefined,
+        featureSelectionsJson: JSON.stringify(publishForm.featureSelections),
+        stepsJson: JSON.stringify(workflow),
+      });
       const updated = await workflowConfigService.publish(cfgId);
       setCurrentConfig(updated);
+      setPublishDialogOpen(false);
       onConfigPublished?.(updated);
     } catch {
       console.warn("[WorkflowBuilder] publish failed");
@@ -687,9 +721,9 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               size="small"
               variant="contained"
               color="primary"
-              startIcon={publishSaving ? <CircularProgress size={14} /> : <PublishOutlined />}
-              onClick={handlePublish}
-              disabled={publishSaving || stepsSorted.length === 0}
+              startIcon={<PublishOutlined />}
+              onClick={openPublishDialog}
+              disabled={stepsSorted.length === 0}
             >
               {publishSaving ? "Publishing…" : "Publish"}
             </Button>
@@ -788,6 +822,120 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
         productId={productId}
         productName={productName}
       />
+
+      {/* Publish dialog */}
+      <Dialog
+        open={publishDialogOpen}
+        onClose={() => !publishSaving && setPublishDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <PublishOutlined color="primary" />
+          Publish Work Instruction
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="info" sx={{ fontSize: "0.8rem" }}>
+              Review and confirm details before publishing. Once published, this work instruction will be <strong>locked</strong> and ready to assign to assets.
+            </Alert>
+            <TextField
+              label="Work Instruction Name"
+              value={publishForm.name}
+              onChange={(e) => setPublishForm((p) => ({ ...p, name: e.target.value }))}
+              fullWidth
+              required
+              autoFocus
+            />
+            <TextField
+              label="Configuration Type"
+              value={publishForm.configType}
+              onChange={(e) => setPublishForm((p) => ({ ...p, configType: e.target.value }))}
+              fullWidth
+              placeholder="e.g. Installation, Maintenance, Inspection"
+              helperText="Used to identify this instruction type when assigning to an asset"
+            />
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                Product: <strong>{productName}</strong>
+              </Typography>
+            </Box>
+            {productFeatures.length > 0 && (
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Product Feature Inclusions</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Specify which features are active for this configuration and how many are installed.
+                </Typography>
+                {productFeatures.map((feat) => {
+                  const sel = publishForm.featureSelections.find((s) => s.featureId === feat.id);
+                  const included = sel?.included ?? false;
+                  const count = sel?.activeCount ?? 0;
+                  const update = (patch: Partial<FeatureSelection>) =>
+                    setPublishForm((p) => ({
+                      ...p,
+                      featureSelections: p.featureSelections.map((s) =>
+                        s.featureId === feat.id ? { ...s, ...patch } : s,
+                      ),
+                    }));
+                  return (
+                    <Paper key={feat.id} variant="outlined" sx={{ p: 1.5 }}>
+                      <Stack direction="row" alignItems="center" spacing={2}>
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              size="small"
+                              checked={included}
+                              onChange={(e) => update({ included: e.target.checked })}
+                            />
+                          }
+                          label={<Typography variant="body2">{feat.name}</Typography>}
+                          sx={{ flexGrow: 1, m: 0 }}
+                        />
+                        {included && (
+                          <TextField
+                            label="Qty"
+                            type="number"
+                            size="small"
+                            value={count}
+                            onChange={(e) =>
+                              update({ activeCount: Math.max(0, parseInt(e.target.value) || 0) })
+                            }
+                            inputProps={{ min: 0 }}
+                            sx={{ width: 80 }}
+                          />
+                        )}
+                      </Stack>
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            )}
+            <TextField
+              label="Description"
+              value={publishForm.notes}
+              onChange={(e) => setPublishForm((p) => ({ ...p, notes: e.target.value }))}
+              fullWidth
+              multiline
+              rows={2}
+              placeholder="Optional description or notes"
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPublishDialogOpen(false)} disabled={publishSaving}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={publishSaving ? <CircularProgress size={14} /> : <PublishOutlined />}
+            onClick={handleConfirmPublish}
+            disabled={publishSaving || !publishForm.name.trim()}
+          >
+            {publishSaving ? "Publishing…" : "Confirm & Publish"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Import confirmation dialog */}
       {(() => {

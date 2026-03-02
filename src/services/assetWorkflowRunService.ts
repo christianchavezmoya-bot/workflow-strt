@@ -39,16 +39,23 @@ export const assetWorkflowRunService = {
     return res.data;
   },
 
-  async completeRun(runId: string, stepResultsJson: string, issuesJson: string): Promise<AssetWorkflowRun> {
+  async completeRun(runId: string, stepResultsJson: string, issuesJson: string, completedByName?: string): Promise<AssetWorkflowRun> {
     const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/complete`, {
       stepResultsJson,
       issuesJson,
+      completedByName: completedByName ?? null,
     });
     return res.data;
   },
 
   async reopen(runId: string): Promise<AssetWorkflowRun> {
     const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/reopen`);
+    return res.data;
+  },
+
+  /** Patch issues only — works on locked and in-progress runs. */
+  async patchIssues(runId: string, issuesJson: string): Promise<AssetWorkflowRun> {
+    const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/issues`, { issuesJson });
     return res.data;
   },
 };

@@ -655,6 +655,8 @@ public record AssetWorkflowRunDto(
     string? TechnicianUserId,
     string StepResultsJson,
     string IssuesJson,
+    int RunNumber,
+    string? CompletedByName,
     DateTime StartedAt,
     DateTime? CompletedAt,
     DateTime CreatedAt,
@@ -675,5 +677,50 @@ public record SaveRunProgressRequest(
 
 public record CompleteRunRequest(
     string StepResultsJson,
-    string IssuesJson
+    string IssuesJson,
+    string? CompletedByName
+);
+
+public record PatchIssuesRequest(string IssuesJson);
+
+public record BrandSettingDto(string? LogoBase64);
+public record UpdateBrandSettingRequest(string? LogoBase64);
+
+// ─── Asset Documents ──────────────────────────────────────────────────────────
+public record AssetDocumentRevisionDto(
+    string Id,
+    int RevisionNumber,
+    string OriginalName,
+    string MimeType,
+    long FileSizeBytes,
+    string? UploadedBy,
+    DateTime UploadedAt
+);
+
+public record AssetDocumentDto(
+    string Id,
+    string AssetId,
+    string Label,
+    string? CreatedBy,
+    DateTime CreatedAt,
+    AssetDocumentRevisionDto? CurrentRevision,
+    IEnumerable<AssetDocumentRevisionDto> History
+);
+
+public record PatchDocumentLabelRequest(string Label);
+
+// ─── Asset Document Links (bridge: asset ↔ library document) ─────────────────
+public record AssetDocumentLinkDto(
+    string Id,
+    string AssetId,
+    string DocumentId,
+    string? AttachedBy,
+    DateTime AttachedAt,
+    DocumentDto Document
+);
+
+public record CreateAssetDocumentLinkRequest(
+    string AssetId,
+    string DocumentId,
+    string? AttachedBy
 );
