@@ -15,8 +15,16 @@ const defaultUser: User = {
 export const useAuth = () => {
   const [user, setUser] = useState<User>(defaultUser);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [devRoleOverride, setDevRoleOverride] = useState<string | null>(
+    () => localStorage.getItem("dev_role_override")
+  );
 
-  const memoized = useMemo(() => ({ user, isAuthenticated }), [user, isAuthenticated]);
+  const effectiveUser = useMemo(
+    () => devRoleOverride ? { ...user, role: devRoleOverride as User["role"] } : user,
+    [user, devRoleOverride]
+  );
+
+  const memoized = useMemo(() => ({ user: effectiveUser, isAuthenticated }), [effectiveUser, isAuthenticated]);
 
   useEffect(() => {
     const syncFromStorage = () => {
@@ -84,11 +92,18 @@ export const useAuth = () => {
       }
     };
 
+    const onDevRoleOverride = (e: Event) => {
+      const role = (e as CustomEvent<{ role: string | null }>).detail.role;
+      setDevRoleOverride(role);
+    };
+
     window.addEventListener("auth-user-updated", onAuthUserUpdated);
     window.addEventListener("storage", onStorage);
+    window.addEventListener("dev-role-override-changed", onDevRoleOverride);
     return () => {
       window.removeEventListener("auth-user-updated", onAuthUserUpdated);
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener("dev-role-override-changed", onDevRoleOverride);
     };
   }, []);
 

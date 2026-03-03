@@ -15,10 +15,12 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Site } from "../../types/site";
 import api from "../../services/api";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
+import { usePermissions } from "../../hooks/usePermissions";
 
 const CustomerSites = () => {
   const { customerId } = useParams<{ customerId: string }>();
   const navigate = useNavigate();
+  const can = usePermissions();
 
   const [customerName, setCustomerName] = useState<string>("Loading...");
   const [customerLogo, setCustomerLogo] = useState<string | null>(null);
@@ -234,13 +236,15 @@ const CustomerSites = () => {
               Manage physical locations for this customer
             </Typography>
           </Box>
-          <Button
-            variant="contained"
-            startIcon={<AddOutlined />}
-            onClick={handleAddNewSite}
-          >
-            Add New Site
-          </Button>
+          {can.modifyData && (
+            <Button
+              variant="contained"
+              startIcon={<AddOutlined />}
+              onClick={handleAddNewSite}
+            >
+              Add New Site
+            </Button>
+          )}
         </Box>
 
         {/* Loading State */}
@@ -331,14 +335,16 @@ const CustomerSites = () => {
                   <Typography variant="body2" color="text.secondary">
                     No sites found
                   </Typography>
-                  <Button
-                    variant="contained"
-                    size="small"
-                    startIcon={<AddOutlined />}
-                    onClick={handleAddNewSite}
-                  >
-                    Add New Site
-                  </Button>
+                  {can.modifyData && (
+                    <Button
+                      variant="contained"
+                      size="small"
+                      startIcon={<AddOutlined />}
+                      onClick={handleAddNewSite}
+                    >
+                      Add New Site
+                    </Button>
+                  )}
                 </Paper>
               </Box>
             )}
@@ -384,41 +390,43 @@ const CustomerSites = () => {
                         },
                       }}
                     >
-                      <Box
-                        sx={{
-                          position: "absolute",
-                          top: 8,
-                          right: 8,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 0.25,
-                        }}
-                      >
-                        <Tooltip title="Delete site">
-                          <IconButton
-                            size="small"
-                            sx={{ padding: 0.25 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteSite(site.id);
-                            }}
-                          >
-                            <DeleteOutline sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Edit site">
-                          <IconButton
-                            size="small"
-                            sx={{ padding: 0.25 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditClick(site);
-                            }}
-                          >
-                            <EditOutlined sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
+                      {can.modifyData && (
+                        <Box
+                          sx={{
+                            position: "absolute",
+                            top: 8,
+                            right: 8,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 0.25,
+                          }}
+                        >
+                          <Tooltip title="Delete site">
+                            <IconButton
+                              size="small"
+                              sx={{ padding: 0.25 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteSite(site.id);
+                              }}
+                            >
+                              <DeleteOutline sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Edit site">
+                            <IconButton
+                              size="small"
+                              sx={{ padding: 0.25 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditClick(site);
+                              }}
+                            >
+                              <EditOutlined sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      )}
 
                       {/* Customer Logo */}
                       {customerLogoShape === 'none' && customerLogo ? (

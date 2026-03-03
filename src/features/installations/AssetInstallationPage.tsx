@@ -61,6 +61,7 @@ import {
 } from "@mui/material";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
@@ -221,6 +222,7 @@ type FeatureDef = {
 const AssetInstallationPage = () => {
   const dispatch = useAppDispatch();
   const { user: currentUser } = useAuth();
+  const can = usePermissions();
   const productsState = useAppSelector((s) => s.products);
   const projects = useAppSelector((s) => s.projects.items);
   const users = useAppSelector((s) => s.users.items);
@@ -1466,34 +1468,38 @@ const AssetInstallationPage = () => {
                       sx={{ fontSize: 10, height: 18 }}
                     />
                   )}
-                  <Tooltip title={latestRun?.status === "Complete" ? "View run history, download report, or re-run workflow" : ""}>
-                    <Button
-                      size="small"
-                      variant={latestRun?.status === "InProgress" ? "contained" : "outlined"}
-                      color={latestRun?.status === "Issue" ? "error" : latestRun?.status === "Complete" ? "inherit" : "success"}
-                      disabled={runLoading}
-                      startIcon={runLoading ? <CircularProgress size={12} /> : latestRun?.status === "Complete" ? <HistoryOutlined /> : <PlayArrowOutlined />}
-                      onClick={() =>
-                        latestRun?.status === "Complete"
-                          ? openRunHistory(asset, asgn.workflowConfigId, asgn.workflowConfigName)
-                          : handleStartAssignmentRun(asset, asgn)
-                      }
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setContextMenuAnchor(e.currentTarget);
-                        setContextMenuAsset(asset);
-                        setContextMenuAssignment(asgn);
-                      }}
-                      sx={{ fontSize: 11, py: 0.25 }}
-                    >
-                      {!latestRun ? "Start" : latestRun.status === "InProgress" ? "Continue" : latestRun.status === "Complete" ? "View/Edit" : "Review"}
-                    </Button>
-                  </Tooltip>
-                  <Tooltip title="Remove assignment">
-                    <IconButton size="small" onClick={() => removeAssignment(asset.id, asgn.id)}>
-                      <DeleteOutline sx={{ fontSize: "0.9rem" }} />
-                    </IconButton>
-                  </Tooltip>
+                  {can.modifyData && (
+                    <Tooltip title={latestRun?.status === "Complete" ? "View run history, download report, or re-run workflow" : ""}>
+                      <Button
+                        size="small"
+                        variant={latestRun?.status === "InProgress" ? "contained" : "outlined"}
+                        color={latestRun?.status === "Issue" ? "error" : latestRun?.status === "Complete" ? "inherit" : "success"}
+                        disabled={runLoading}
+                        startIcon={runLoading ? <CircularProgress size={12} /> : latestRun?.status === "Complete" ? <HistoryOutlined /> : <PlayArrowOutlined />}
+                        onClick={() =>
+                          latestRun?.status === "Complete"
+                            ? openRunHistory(asset, asgn.workflowConfigId, asgn.workflowConfigName)
+                            : handleStartAssignmentRun(asset, asgn)
+                        }
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setContextMenuAnchor(e.currentTarget);
+                          setContextMenuAsset(asset);
+                          setContextMenuAssignment(asgn);
+                        }}
+                        sx={{ fontSize: 11, py: 0.25 }}
+                      >
+                        {!latestRun ? "Start" : latestRun.status === "InProgress" ? "Continue" : latestRun.status === "Complete" ? "View/Edit" : "Review"}
+                      </Button>
+                    </Tooltip>
+                  )}
+                  {can.modifyData && (
+                    <Tooltip title="Remove assignment">
+                      <IconButton size="small" onClick={() => removeAssignment(asset.id, asgn.id)}>
+                        <DeleteOutline sx={{ fontSize: "0.9rem" }} />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                 </Stack>
               );
             })}
@@ -1521,19 +1527,23 @@ const AssetInstallationPage = () => {
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={refreshAssets}>Refresh</Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<FileUploadOutlined />}
-            disabled={!activeProduct}
-            onClick={() => {
-              if (activeProduct) workflowConfigService.listByProduct(activeProduct.id, "Published").then(setWorkflowConfigs);
-              setCsvImportOpen(true);
-            }}
-          >
-            Import CSV
-          </Button>
-          <Button variant="contained" startIcon={<AddOutlined />} onClick={openAdd} disabled={!activeProduct}>Add asset</Button>
+          {can.modifyData && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<FileUploadOutlined />}
+              disabled={!activeProduct}
+              onClick={() => {
+                if (activeProduct) workflowConfigService.listByProduct(activeProduct.id, "Published").then(setWorkflowConfigs);
+                setCsvImportOpen(true);
+              }}
+            >
+              Import CSV
+            </Button>
+          )}
+          {can.modifyData && (
+            <Button variant="contained" startIcon={<AddOutlined />} onClick={openAdd} disabled={!activeProduct}>Add asset</Button>
+          )}
         </Stack>
       </Stack>
 
@@ -1638,7 +1648,7 @@ const AssetInstallationPage = () => {
             {archiveMode ? "Archive View — Exit" : "Archive"}
           </Button>
         </Tooltip>
-        {!archiveMode && (
+        {!archiveMode && can.editFields && (
           <Tooltip title="Column settings">
             <IconButton size="small" onClick={openColumnSettings} sx={{ opacity: 0.7, "&:hover": { opacity: 1 } }}>
               <ViewColumnOutlined fontSize="small" />
@@ -1717,42 +1727,50 @@ const AssetInstallationPage = () => {
                     ))}
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-                        {actionButton(asset)}
-                        <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
-                          <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
-                            <Badge
-                              badgeContent={`${docsCountMap[asset.id] ?? 0}/3`}
-                              color={
-                                (docsCountMap[asset.id] ?? 0) === 0 ? "default" :
-                                (docsCountMap[asset.id] ?? 0) === 3 ? "success" : "primary"
-                              }
-                              sx={{ "& .MuiBadge-badge": { fontSize: 9, minWidth: 28, height: 16 } }}
-                            >
-                              <FolderOutlined fontSize="small" />
-                            </Badge>
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Generate PDF report">
-                          <span>
-                            <IconButton size="small"
-                              disabled={reportGenerating === asset.id}
-                              onClick={() => handleGeneratePdfReport(asset)}>
-                              {reportGenerating === asset.id
-                                ? <CircularProgress size={16} />
-                                : <ArticleOutlined fontSize="small" />}
+                        {can.modifyData && actionButton(asset)}
+                        {!can.viewOnly && (
+                          <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
+                            <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
+                              <Badge
+                                badgeContent={`${docsCountMap[asset.id] ?? 0}/3`}
+                                color={
+                                  (docsCountMap[asset.id] ?? 0) === 0 ? "default" :
+                                  (docsCountMap[asset.id] ?? 0) === 3 ? "success" : "primary"
+                                }
+                                sx={{ "& .MuiBadge-badge": { fontSize: 9, minWidth: 28, height: 16 } }}
+                              >
+                                <FolderOutlined fontSize="small" />
+                              </Badge>
                             </IconButton>
-                          </span>
-                        </Tooltip>
-                        <Tooltip title="Edit asset">
-                          <IconButton size="small" onClick={() => openEditAsset(asset)}>
-                            <EditOutlined fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete asset">
-                          <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
-                            <DeleteOutline fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                          </Tooltip>
+                        )}
+                        {!can.viewOnly && (
+                          <Tooltip title="Generate PDF report">
+                            <span>
+                              <IconButton size="small"
+                                disabled={reportGenerating === asset.id}
+                                onClick={() => handleGeneratePdfReport(asset)}>
+                                {reportGenerating === asset.id
+                                  ? <CircularProgress size={16} />
+                                  : <ArticleOutlined fontSize="small" />}
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        )}
+                        {can.modifyData && (
+                          <Tooltip title="Edit asset">
+                            <IconButton size="small" onClick={() => openEditAsset(asset)}>
+                              <EditOutlined fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {can.modifyData && (
+                          <Tooltip title="Delete asset">
+                            <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                       </Stack>
                     </TableCell>
                   </TableRow>,

@@ -1,6 +1,7 @@
 ﻿export type Office = string;
 
-export type UserRole = "Admin" | "Project Manager" | "Engineer" | "Viewer";
+export type BaseUserRole = "Admin" | "Project Manager" | "Engineer" | "Viewer";
+export type UserRole = BaseUserRole | (string & {});
 
 export interface User {
   id: string;

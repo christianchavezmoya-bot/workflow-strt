@@ -1,5 +1,6 @@
 ﻿import { Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
+import { usePermissions } from "../hooks/usePermissions";
 import Dashboard from "../features/dashboard/Dashboard";
 import ProjectList from "../features/projects/ProjectList";
 import ProjectForm from "../features/projects/ProjectForm";
@@ -14,6 +15,11 @@ import ProfileWizard from "../features/profile/ProfileWizard";
 import Settings from "../features/settings/Settings";
 import Login from "../features/auth/Login";
 import ResetPassword from "../features/auth/ResetPassword";
+
+const SettingsRoute = () => {
+  const can = usePermissions();
+  return can.viewOnly ? <Navigate to="/" replace /> : <Settings />;
+};
 
 const AppRoutes = () => {
   return (
@@ -32,7 +38,7 @@ const AppRoutes = () => {
         <Route path="/admin" element={<UserManagement />} />
         <Route path="/admin/customers/:customerId/sites" element={<CustomerSites />} />
         <Route path="/admin/asset-registry" element={<AssetRegistryPage />} />
-        <Route path="/settings" element={<Settings />} />
+        <Route path="/settings" element={<SettingsRoute />} />
         <Route path="/profile" element={<ProfileWizard />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

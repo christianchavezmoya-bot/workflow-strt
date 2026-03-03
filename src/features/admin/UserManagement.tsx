@@ -16,7 +16,6 @@ import {
   IconButton,
   Box,
   Typography,
-  Container,
   Stack,
   Tabs,
   Tab,
@@ -55,6 +54,7 @@ import { demoCustomers, demoProducts, demoUsers } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { adminTabsService, AdminTab, AdminTabRow } from "../../services/adminTabsService";
@@ -225,6 +225,7 @@ function DraggablePaper(props: any) {
 export const UserManagement: React.FC = () => {
   const VIRTUAL_SITE_PREFIX = "virtual-site-for-customer:";
   const { user } = useAuth();
+  const can = usePermissions();
   const { activeOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
@@ -378,6 +379,17 @@ export const UserManagement: React.FC = () => {
   , [usersDynamic.definitions]);
 
   const usersTableConfig = useTableConfig("users", allUsersFields);
+
+  const ROLES_FIELDS = useMemo(() => [
+    { id: "base-viewOnly",            name: "View only" },
+    { id: "base-createDeleteTables",  name: "Create/Delete tables" },
+    { id: "base-createUsers",         name: "Create users" },
+    { id: "base-editFields",          name: "Edit fields" },
+    { id: "base-modifyData",          name: "Modify data" },
+    { id: "base-editForms",           name: "Edit forms" },
+  ], []);
+  const rolesTableConfig = useTableConfig("roles", ROLES_FIELDS);
+
   const customersTableConfig = useTableConfig(
     "customers",
     customersDynamic.definitions.map((field) => ({
@@ -438,9 +450,10 @@ export const UserManagement: React.FC = () => {
     ], [baseFieldNames, assetsDynamic.definitions])
   );
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
-  const [tableConfigTarget, setTableConfigTarget] = useState<"users" | "customers" | "products" | "assets">("users");
+  const [tableConfigTarget, setTableConfigTarget] = useState<"users" | "customers" | "products" | "assets" | "roles">("users");
 
   const availableFieldsForAdminTable = useMemo(() => {
+    if (tableConfigTarget === "roles") return [];
     const tableName = tableConfigTarget;
     return allFieldDefinitions.definitions.filter((field) => !field.tables.includes(tableName));
   }, [allFieldDefinitions.definitions, tableConfigTarget]);
@@ -694,8 +707,9 @@ export const UserManagement: React.FC = () => {
       setRoles(roleNames);
     }
 
-    // Save to localStorage
+    // Save to localStorage and notify same-tab listeners
     localStorage.setItem("admin_roles_config", JSON.stringify(rolesConfig));
+    window.dispatchEvent(new CustomEvent("roles-config-changed"));
 
     // Skip database save on initial mount to avoid overwriting with stale localStorage data
     if (isInitialRolesMount.current) {
@@ -1933,35 +1947,19 @@ export const UserManagement: React.FC = () => {
 
 
   return (
-    <Container
-      maxWidth="lg"
-      sx={{
-        height: '100vh',
-        maxHeight: '100vh',
-        overflow: 'hidden',
-        overflowY: 'hidden',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: 2,
-        boxSizing: 'border-box'
-      }}
-    >
-      <Box sx={{ mb: 2, flexShrink: 0 }}>
-        <Typography variant="h4" sx={{ mb: 2 }}>Admin</Typography>
-
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Tabs value={tab} onChange={(e, newValue) => setTab(newValue)}>
-            {adminTabsConfig.map((tabConfig) => (
-              <Tab key={tabConfig.id} label={tabConfig.label} />
-            ))}
-          </Tabs>
-
-          <Stack direction="row" spacing={1} alignItems="center">
-            {adminTabsConfig[tab]?.type === "users" && (
-              <Button variant="contained" onClick={() => setInviteOpen(true)}>
-                Invite user
-              </Button>
-            )}
+    <Stack spacing={3} sx={{ p: 3 }}>
+      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} gap={2}>
+        <Box>
+          <Typography variant="h5" sx={{ fontFamily: "Sora", fontWeight: 700 }}>Admin</Typography>
+          <Typography variant="body2" color="text.secondary">Manage users, roles, offices and system settings</Typography>
+        </Box>
+        <Stack direction="row" spacing={1} alignItems="center">
+          {adminTabsConfig[tab]?.type === "users" && can.createUsers && (
+            <Button variant="contained" onClick={() => setInviteOpen(true)}>
+              Invite user
+            </Button>
+          )}
+          {can.createDeleteTables && (
             <IconButton
               size="small"
               onClick={(event) => {
@@ -1971,37 +1969,30 @@ export const UserManagement: React.FC = () => {
             >
               <SettingsOutlined fontSize="small" />
             </IconButton>
-          </Stack>
+          )}
         </Stack>
-      </Box>
+      </Stack>
+
+      <Paper className="glass-card" sx={{ p: 1.5 }}>
+        <Tabs value={tab} onChange={(e, newValue) => setTab(newValue)}>
+          {adminTabsConfig.map((tabConfig) => (
+            <Tab key={tabConfig.id} label={tabConfig.label} />
+          ))}
+        </Tabs>
+      </Paper>
 
       {/* Users Tab */}
       {adminTabsConfig[tab]?.type === "users" && (
         <>
-          <Box
+          <Paper
             className="glass-card"
-            sx={{
-              padding: 2,
-              paddingBottom: 0,
-              marginBottom: '64px',
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden'
-            }}
+            sx={{ overflow: 'hidden' }}
           >
-            {actionError && <Alert severity="error" sx={{ mb: 2 }}>{actionError}</Alert>}
+            {actionError && <Alert severity="error" sx={{ m: 2 }}>{actionError}</Alert>}
 
-            <Box sx={{ overflowX: 'auto', width: '100%', flex: 1 }}>
+            <Box sx={{ overflowX: 'auto', width: '100%' }}>
               <Table sx={{ tableLayout: 'auto', width: '100%' }} size="small">
-            <TableHead
-              sx={{
-                position: 'sticky',
-                top: 0,
-                backgroundColor: 'var(--panel)',
-                zIndex: 10
-              }}
-            >
+            <TableHead>
               <TableRow>
                 <TableCell sx={{ minWidth: 50, padding: '8px 12px' }}>#</TableCell>
                 {usersTableConfig.visibleFields.map((field) => {
@@ -2098,50 +2089,58 @@ export const UserManagement: React.FC = () => {
                   })}
                   <TableCell sx={{ padding: '8px 12px' }}>
                     <Stack direction="row" spacing={0.5} alignItems="center">
-                      <Tooltip title="Send invite email">
-                        <IconButton size="small" onClick={() => dispatch(inviteUser(user.id))}>
-                          <EmailOutlined fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title={user.isActive ? "Deactivate user" : "User already inactive"}>
-                        <span>
-                          <IconButton
-                            size="small"
-                            color="warning"
-                            disabled={!user.isActive}
-                            onClick={() => dispatch(deactivateUser(user.id))}
-                          >
-                            <PersonOffOutlined fontSize="small" />
+                      {can.createUsers && (
+                        <Tooltip title="Send invite email">
+                          <IconButton size="small" onClick={() => dispatch(inviteUser(user.id))}>
+                            <EmailOutlined fontSize="small" />
                           </IconButton>
-                        </span>
-                      </Tooltip>
-                      {user.is2faEnabled && (
+                        </Tooltip>
+                      )}
+                      {can.createUsers && (
+                        <Tooltip title={user.isActive ? "Deactivate user" : "User already inactive"}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              color="warning"
+                              disabled={!user.isActive}
+                              onClick={() => dispatch(deactivateUser(user.id))}
+                            >
+                              <PersonOffOutlined fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      )}
+                      {can.createUsers && user.is2faEnabled && (
                         <Tooltip title="Reset 2FA">
                           <IconButton size="small" color="warning" onClick={() => dispatch(reset2fa(user.id))}>
                             <LockResetOutlined fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
-                      <Tooltip title="Edit user">
-                        <IconButton size="small" onClick={() => handleEditUser(user)}>
-                          <EditOutlined fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete user">
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() =>
-                            setDeleteTarget({
-                              type: "user",
-                              id: user.id,
-                              label: user.fullName
-                            })
-                          }
-                        >
-                          <DeleteOutline fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      {can.createUsers && (
+                        <Tooltip title="Edit user">
+                          <IconButton size="small" onClick={() => handleEditUser(user)}>
+                            <EditOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {can.createUsers && (
+                        <Tooltip title="Delete user">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() =>
+                              setDeleteTarget({
+                                type: "user",
+                                id: user.id,
+                                label: user.fullName
+                              })
+                            }
+                          >
+                            <DeleteOutline fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </Stack>
                   </TableCell>
                 </TableRow>
@@ -2149,34 +2148,21 @@ export const UserManagement: React.FC = () => {
             </TableBody>
               </Table>
             </Box>
-          </Box>
-
-          <Box
-            sx={{
-              position: 'fixed',
-              bottom: 0,
-              left: '264px',
-              right: 0,
-              backgroundColor: 'var(--panel)',
-              borderTop: '1px solid var(--stroke)',
-              zIndex: 1000,
-              transition: 'left 0.3s ease'
-            }}
-            className="pagination-bar"
-          >
-            <TablePagination
-              component="div"
-              count={filteredUsers.length}
-              page={usersPage}
-              onPageChange={(_, nextPage) => setUsersPage(nextPage)}
-              rowsPerPage={usersRowsPerPage}
-              onRowsPerPageChange={(event) => {
-                setUsersRowsPerPage(Number(event.target.value));
-                setUsersPage(0);
-              }}
-              rowsPerPageOptions={[25, 50, 100, 500]}
-            />
-          </Box>
+            <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
+              <TablePagination
+                component="div"
+                count={filteredUsers.length}
+                page={usersPage}
+                onPageChange={(_, nextPage) => setUsersPage(nextPage)}
+                rowsPerPage={usersRowsPerPage}
+                onRowsPerPageChange={(event) => {
+                  setUsersRowsPerPage(Number(event.target.value));
+                  setUsersPage(0);
+                }}
+                rowsPerPageOptions={[25, 50, 100, 500]}
+              />
+            </Box>
+          </Paper>
 
           <Menu
             anchorEl={userMenu.anchorEl}
@@ -2245,15 +2231,18 @@ export const UserManagement: React.FC = () => {
 
       {/* Roles Tab */}
       {adminTabsConfig[tab]?.type === "roles" && (
-        <Box>
-          <Stack direction="row" sx={{ mb: 2 }}>
-            <Button variant="contained" onClick={() => openRoleDialog()}>
-              New role
-            </Button>
-          </Stack>
+        <Stack spacing={2}>
+          {can.createDeleteTables && (
+            <Stack direction="row">
+              <Button variant="contained" onClick={() => openRoleDialog()}>
+                New role
+              </Button>
+            </Stack>
+          )}
 
           {actionError && <Alert severity="error">{actionError}</Alert>}
 
+          <Paper className="glass-card" sx={{ overflow: 'hidden' }}>
           <Table>
             <TableHead>
               <TableRow>
@@ -2266,55 +2255,20 @@ export const UserManagement: React.FC = () => {
                     </IconButton>
                   </Stack>
                 </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>View only</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "viewOnly" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Create/Delete tables</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "createDeleteTables" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Create users</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "createUsers" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Edit fields</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "editFields" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Modify data</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "modifyData" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Edit forms</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "editForms" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                               <TableCell>Actions</TableCell>
+                {rolesTableConfig.visibleFields.map((field) => {
+                  const permKey = field.id.startsWith("base-") ? field.id.replace("base-", "") : field.id;
+                  return (
+                    <TableCell key={`roles-header-${field.id}`}>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span>{field.name}</span>
+                        <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: permKey })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                  );
+                })}
+                {can.createDeleteTables && <TableCell>Actions</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -2322,59 +2276,50 @@ export const UserManagement: React.FC = () => {
                 <TableRow key={row.role} hover>
                   <TableCell>{row.seq}</TableCell>
                   <TableCell>{row.role}</TableCell>
-                  {[
-                    "viewOnly",
-                    "createDeleteTables",
-                    "createUsers",
-                    "editFields",
-                    "modifyData",
-                    "editForms"
-                  ].map((perm) => (
-                    <TableCell key={`${row.role}-${perm}`}>
-                      <Checkbox
-                        checked={!!(rolesConfig[row.role] as unknown as Record<string, boolean>)?.[perm]}
-                        onChange={(event) =>
-                          setRolesConfig((prev) => ({
-                            ...prev,
-                            [row.role]: {
-                              ...prev[row.role],
-                              [perm]: event.target.checked
-                            }
-                          }))
-                        }
-                      />
-                    </TableCell>
-                  ))}
-                  <TableCell>
-                    <Stack direction="row" spacing={1}>
-                      <Tooltip title="Edit role">
-                        <IconButton
-                          size="small"
-                          onClick={() => openRoleDialog(row.role)}
-                        >
-                          <EditOutlined fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete role">
-                        <IconButton
-                          size="small"
-                          onClick={() =>
-                            setDeleteTarget({
-                              type: "role",
-                              id: row.role,
-                              label: row.role
-                            })
+                  {rolesTableConfig.visibleFields.map((field) => {
+                    const permKey = field.id.startsWith("base-") ? field.id.replace("base-", "") : field.id;
+                    return (
+                      <TableCell key={`${row.role}-${field.id}`}>
+                        <Checkbox
+                          checked={!!(rolesConfig[row.role] as unknown as Record<string, boolean>)?.[permKey]}
+                          disabled={!can.createDeleteTables}
+                          onChange={(event) =>
+                            setRolesConfig((prev) => ({
+                              ...prev,
+                              [row.role]: {
+                                ...prev[row.role],
+                                [permKey]: event.target.checked
+                              }
+                            }))
                           }
-                        >
-                          <DeleteOutline fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                  </TableCell>
+                        />
+                      </TableCell>
+                    );
+                  })}
+                  {can.createDeleteTables && (
+                    <TableCell>
+                      <Stack direction="row" spacing={1}>
+                        <Tooltip title="Edit role">
+                          <IconButton size="small" onClick={() => openRoleDialog(row.role)}>
+                            <EditOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete role">
+                          <IconButton
+                            size="small"
+                            onClick={() => setDeleteTarget({ type: "role", id: row.role, label: row.role })}
+                          >
+                            <DeleteOutline fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
           </Table>
+          </Paper>
           <Menu
             anchorEl={roleMenu.anchorEl}
             open={Boolean(roleMenu.anchorEl)}
@@ -2437,14 +2382,14 @@ export const UserManagement: React.FC = () => {
               );
             })}
           </Menu>
-        </Box>
+        </Stack>
       )}
 
       {/* Customers Tab */}
       {adminTabsConfig[tab]?.type === "customers" && (
-        <Box>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2} sx={{ mb: 2 }}>
-            {customerViewMode === 'cards' ? (
+        <Stack spacing={2}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
+            {can.modifyData && customerViewMode === 'cards' ? (
               <Button
                 variant="contained"
                 startIcon={<AddOutlined />}
@@ -2490,7 +2435,7 @@ export const UserManagement: React.FC = () => {
               >
                 New Client
               </Button>
-            ) : (
+            ) : can.modifyData ? (
               <Button
                 variant="contained"
                 startIcon={<AddOutlined />}
@@ -2538,7 +2483,7 @@ export const UserManagement: React.FC = () => {
               >
                 New Site
               </Button>
-            )}
+            ) : null}
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
               <TextField
                 size="small"
@@ -2626,40 +2571,44 @@ export const UserManagement: React.FC = () => {
                         }}
                       >
                         <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-                          <Tooltip title="Delete customer">
-                            <IconButton
-                              size="small"
-                              sx={{ padding: 0.25 }}
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                setDeleteTarget({
-                                  type: "customer",
-                                  id: customer.id,
-                                  label: customer.name
-                                });
-                              }}
-                            >
-                              <DeleteOutline sx={{ fontSize: 18 }} />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Edit customer">
-                            <IconButton
-                              size="small"
-                              sx={{ padding: 0.25 }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingCustomerId(customer.id);
-                                setEditCustomerName(customer.name);
-                                setEditCustomerIndustry(customer.industry ?? "");
-                                setEditCustomerLogo(customer.logo ?? null);
-                                setEditCustomerLogoShape(customer.logoShape || 'round');
-                                setEditCustomerLogoSize(customer.logoSize || 70);
-                                setEditCustomerPhotoScale(customer.photoScale || 100);
-                              }}
-                            >
-                              <EditOutlined sx={{ fontSize: 18 }} />
-                            </IconButton>
-                          </Tooltip>
+                          {can.modifyData && (
+                            <Tooltip title="Delete customer">
+                              <IconButton
+                                size="small"
+                                sx={{ padding: 0.25 }}
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  setDeleteTarget({
+                                    type: "customer",
+                                    id: customer.id,
+                                    label: customer.name
+                                  });
+                                }}
+                              >
+                                <DeleteOutline sx={{ fontSize: 18 }} />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                          {can.modifyData && (
+                            <Tooltip title="Edit customer">
+                              <IconButton
+                                size="small"
+                                sx={{ padding: 0.25 }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingCustomerId(customer.id);
+                                  setEditCustomerName(customer.name);
+                                  setEditCustomerIndustry(customer.industry ?? "");
+                                  setEditCustomerLogo(customer.logo ?? null);
+                                  setEditCustomerLogoShape(customer.logoShape || 'round');
+                                  setEditCustomerLogoSize(customer.logoSize || 70);
+                                  setEditCustomerPhotoScale(customer.photoScale || 100);
+                                }}
+                              >
+                                <EditOutlined sx={{ fontSize: 18 }} />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Box>
                         {/* Logo Area - Fixed height */}
                         <Box
@@ -2990,7 +2939,7 @@ export const UserManagement: React.FC = () => {
                         </IconButton>
                       </Stack>
                     </TableCell>
-                    <TableCell width="120" align="center">Actions</TableCell>
+                    {can.modifyData && <TableCell width="120" align="center">Actions</TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -3162,38 +3111,40 @@ export const UserManagement: React.FC = () => {
                           </TableCell>
 
                           {/* Actions */}
-                          <TableCell align="center">
-                            {isEditing ? (
-                              <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
-                                <Button size="small" variant="contained" onClick={handleSaveSite}>
-                                  Save
-                                </Button>
-                                <Button size="small" variant="outlined" onClick={handleCancelSiteEdit}>
-                                  Cancel
-                                </Button>
-                              </Box>
-                            ) : (
-                              <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
-                                <Tooltip title="Edit">
-                                  <IconButton size="small" onClick={() => handleEditSite(site)}>
-                                    <EditOutlined fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Delete">
-                                  <span>
-                                    <IconButton
-                                      size="small"
-                                      onClick={() => handleDeleteSite(site.id)}
-                                      color="error"
-                                      disabled={site.id.startsWith(VIRTUAL_SITE_PREFIX)}
-                                    >
-                                      <DeleteOutline fontSize="small" />
+                          {can.modifyData && (
+                            <TableCell align="center">
+                              {isEditing ? (
+                                <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+                                  <Button size="small" variant="contained" onClick={handleSaveSite}>
+                                    Save
+                                  </Button>
+                                  <Button size="small" variant="outlined" onClick={handleCancelSiteEdit}>
+                                    Cancel
+                                  </Button>
+                                </Box>
+                              ) : (
+                                <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+                                  <Tooltip title="Edit">
+                                    <IconButton size="small" onClick={() => handleEditSite(site)}>
+                                      <EditOutlined fontSize="small" />
                                     </IconButton>
-                                  </span>
-                                </Tooltip>
-                              </Box>
-                            )}
-                          </TableCell>
+                                  </Tooltip>
+                                  <Tooltip title="Delete">
+                                    <span>
+                                      <IconButton
+                                        size="small"
+                                        onClick={() => handleDeleteSite(site.id)}
+                                        color="error"
+                                        disabled={site.id.startsWith(VIRTUAL_SITE_PREFIX)}
+                                      >
+                                        <DeleteOutline fontSize="small" />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                </Box>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
                       );
                     })
@@ -3266,7 +3217,7 @@ export const UserManagement: React.FC = () => {
               );
             })}
           </Menu>
-        </Box>
+        </Stack>
       )}
 
       {/* Global Offices Tab */}
@@ -3283,15 +3234,18 @@ export const UserManagement: React.FC = () => {
 
       {/* Products Tab */}
       {adminTabsConfig[tab]?.type === "products" && (
-        <Box>
-          <Stack direction="row" sx={{ mb: 2 }}>
-            <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setProductOpen(true)}>
-              New Product
-            </Button>
+        <Stack spacing={2}>
+          <Stack direction="row">
+            {can.modifyData && (
+              <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setProductOpen(true)}>
+                New Product
+              </Button>
+            )}
           </Stack>
 
           {actionError && <Alert severity="error">{actionError}</Alert>}
 
+          <Paper className="glass-card" sx={{ overflow: 'hidden' }}>
           <Table>
             <TableHead>
               <TableRow>
@@ -3337,6 +3291,7 @@ export const UserManagement: React.FC = () => {
                           {getProductFieldValue(field.id)}
                         </TableCell>
                       ))}
+                      {can.modifyData && (
                       <TableCell>
                         <Stack direction="row" spacing={1}>
                           <Tooltip title="Edit product">
@@ -3373,12 +3328,14 @@ export const UserManagement: React.FC = () => {
                           </Tooltip>
                         </Stack>
                       </TableCell>
+                      )}
                     </TableRow>
                   );
                 })
               )}
             </TableBody>
           </Table>
+          </Paper>
           <Menu
             anchorEl={productMenu.anchorEl}
             open={Boolean(productMenu.anchorEl)}
@@ -3441,31 +3398,34 @@ export const UserManagement: React.FC = () => {
               );
             })}
           </Menu>
-        </Box>
+        </Stack>
       )}
 
       {/* Assets Tab */}
       {adminTabsConfig[tab]?.type === "assets" && (
-        <Box>
-          <Stack direction="row" sx={{ mb: 2 }}>
-            <Button variant="contained" startIcon={<AddOutlined />} onClick={() => {
-              setEditingAssetId(null);
-              setAssetForm({
-                machineType: "",
-                machineId: "",
-                serialNumber: "",
-                pmCount: "1",
-                comments: ""
-              });
-              setAssetDynamicValues({});
-              setAssetOpen(true);
-            }}>
-              New Asset
-            </Button>
+        <Stack spacing={2}>
+          <Stack direction="row">
+            {can.modifyData && (
+              <Button variant="contained" startIcon={<AddOutlined />} onClick={() => {
+                setEditingAssetId(null);
+                setAssetForm({
+                  machineType: "",
+                  machineId: "",
+                  serialNumber: "",
+                  pmCount: "1",
+                  comments: ""
+                });
+                setAssetDynamicValues({});
+                setAssetOpen(true);
+              }}>
+                New Asset
+              </Button>
+            )}
           </Stack>
 
           {actionError && <Alert severity="error">{actionError}</Alert>}
 
+          <Paper className="glass-card" sx={{ overflow: 'hidden' }}>
           <Table>
             <TableHead>
               <TableRow>
@@ -3514,6 +3474,7 @@ export const UserManagement: React.FC = () => {
                           {getAssetFieldValue(field.id)}
                         </TableCell>
                       ))}
+                      {can.modifyData && (
                       <TableCell>
                         <Stack direction="row" spacing={1}>
                           <Tooltip title="Edit asset">
@@ -3552,12 +3513,14 @@ export const UserManagement: React.FC = () => {
                           </Tooltip>
                         </Stack>
                       </TableCell>
+                      )}
                     </TableRow>
                   );
                 })
               )}
             </TableBody>
           </Table>
+          </Paper>
           <Menu
             anchorEl={assetMenu.anchorEl}
             open={Boolean(assetMenu.anchorEl)}
@@ -3620,7 +3583,7 @@ export const UserManagement: React.FC = () => {
               );
             })}
           </Menu>
-        </Box>
+        </Stack>
       )}
 
       {/* Custom Tabs - Dynamically Rendered */}
@@ -3665,8 +3628,9 @@ export const UserManagement: React.FC = () => {
           }
 
           return (
-            <Box key={tabConfig.id}>
+            <Stack key={tabConfig.id} spacing={2}>
               {/* Table */}
+              <Paper className="glass-card" sx={{ overflow: 'hidden' }}>
               <Table>
                 <TableHead>
                   <TableRow>
@@ -3751,6 +3715,7 @@ export const UserManagement: React.FC = () => {
                   )}
                 </TableBody>
               </Table>
+              </Paper>
               <Menu
                 anchorEl={customTabMenu.tabId === tabConfig.id ? customTabMenu.anchorEl : null}
                 open={Boolean(customTabMenu.tabId === tabConfig.id && customTabMenu.anchorEl)}
@@ -3842,7 +3807,7 @@ export const UserManagement: React.FC = () => {
                   );
                 })}
               </Menu>
-            </Box>
+            </Stack>
           );
         })}
 
@@ -3979,28 +3944,34 @@ export const UserManagement: React.FC = () => {
         fields={
           tableConfigTarget === "users"
             ? usersTableConfig.orderedFields
-            : tableConfigTarget === "customers"
-              ? customersTableConfig.orderedFields
-              : tableConfigTarget === "products"
-                ? productsTableConfig.orderedFields
-                : assetsTableConfig.orderedFields
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.orderedFields
+              : tableConfigTarget === "customers"
+                ? customersTableConfig.orderedFields
+                : tableConfigTarget === "products"
+                  ? productsTableConfig.orderedFields
+                  : assetsTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "users"
             ? usersTableConfig.config
-            : tableConfigTarget === "customers"
-              ? customersTableConfig.config
-              : tableConfigTarget === "products"
-                ? productsTableConfig.config
-                : assetsTableConfig.config
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.config
+              : tableConfigTarget === "customers"
+                ? customersTableConfig.config
+                : tableConfigTarget === "products"
+                  ? productsTableConfig.config
+                  : assetsTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
+          if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
           if (tableConfigTarget === "customers") customersTableConfig.setConfig(next);
           if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
           if (tableConfigTarget === "assets") assetsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
           if (!existing) return;
           const tables = existing.tables.includes(tableConfigTarget)
@@ -4083,6 +4054,7 @@ export const UserManagement: React.FC = () => {
           }
         }}
         onDeleteField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           try {
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
@@ -4452,23 +4424,29 @@ export const UserManagement: React.FC = () => {
         fields={
           tableConfigTarget === "users"
             ? usersTableConfig.orderedFields
-            : tableConfigTarget === "products"
-              ? productsTableConfig.orderedFields
-              : assetsTableConfig.orderedFields
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.orderedFields
+              : tableConfigTarget === "products"
+                ? productsTableConfig.orderedFields
+                : assetsTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "users"
             ? usersTableConfig.config
-            : tableConfigTarget === "products"
-              ? productsTableConfig.config
-              : assetsTableConfig.config
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.config
+              : tableConfigTarget === "products"
+                ? productsTableConfig.config
+                : assetsTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
+          if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
           if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
           if (tableConfigTarget === "assets") assetsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
           if (!existing) return;
           const tables = existing.tables.includes(tableConfigTarget)
@@ -4481,6 +4459,7 @@ export const UserManagement: React.FC = () => {
           if (tableConfigTarget === "assets") await assetsDynamic.reload();
         }}
         onCreateField={async (name, type, linkToFieldId, actionType) => {
+          if (tableConfigTarget === "roles") return;
           await fieldService.createDefinition({
             id: "",
             name,
@@ -4541,6 +4520,7 @@ export const UserManagement: React.FC = () => {
           }
         }}
         onDeleteField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           try {
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
@@ -4727,28 +4707,34 @@ export const UserManagement: React.FC = () => {
         fields={
           tableConfigTarget === "users"
             ? usersTableConfig.orderedFields
-            : tableConfigTarget === "customers"
-              ? customersTableConfig.orderedFields
-              : tableConfigTarget === "products"
-                ? productsTableConfig.orderedFields
-                : assetsTableConfig.orderedFields
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.orderedFields
+              : tableConfigTarget === "customers"
+                ? customersTableConfig.orderedFields
+                : tableConfigTarget === "products"
+                  ? productsTableConfig.orderedFields
+                  : assetsTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "users"
             ? usersTableConfig.config
-            : tableConfigTarget === "customers"
-              ? customersTableConfig.config
-              : tableConfigTarget === "products"
-                ? productsTableConfig.config
-                : assetsTableConfig.config
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.config
+              : tableConfigTarget === "customers"
+                ? customersTableConfig.config
+                : tableConfigTarget === "products"
+                  ? productsTableConfig.config
+                  : assetsTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
+          if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
           if (tableConfigTarget === "customers") customersTableConfig.setConfig(next);
           if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
           if (tableConfigTarget === "assets") assetsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
           if (!existing) return;
           const tables = existing.tables.includes(tableConfigTarget)
@@ -4831,6 +4817,7 @@ export const UserManagement: React.FC = () => {
           }
         }}
         onDeleteField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           try {
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
@@ -5704,6 +5691,7 @@ export const UserManagement: React.FC = () => {
                 return;
               }
               if (selected.type === "users") setTableConfigTarget("users");
+              if (selected.type === "roles") setTableConfigTarget("roles");
               if (selected.type === "products") setTableConfigTarget("products");
               if (selected.type === "assets") setTableConfigTarget("assets");
               setTableConfigOpen(true);
@@ -6263,7 +6251,7 @@ export const UserManagement: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
-    </Container>
+    </Stack>
   );
 };
 

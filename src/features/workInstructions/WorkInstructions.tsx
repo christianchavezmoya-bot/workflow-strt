@@ -47,6 +47,7 @@ import {
 import { demoProducts } from "../../data/demo";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
+import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import type { Workflow } from "../../types/workflow";
@@ -458,6 +459,7 @@ const emptyConfigForm = (): ConfigFormState => ({
 // ─── WorkInstructions component ───────────────────────────────────────────────
 
 const WorkInstructions = () => {
+  const can = usePermissions();
   const dispatch = useAppDispatch();
   const productsState = useAppSelector((state) => state.products);
 
@@ -685,18 +687,22 @@ const WorkInstructions = () => {
               <FormatListBulletedOutlined fontSize="small" sx={{ mr: 0.75 }} />
               Instructions
             </ToggleButton>
-            <ToggleButton value="builder">
-              <BuildOutlined fontSize="small" sx={{ mr: 0.75 }} />
-              Builder
-            </ToggleButton>
+            {can.editForms && (
+              <ToggleButton value="builder">
+                <BuildOutlined fontSize="small" sx={{ mr: 0.75 }} />
+                Builder
+              </ToggleButton>
+            )}
           </ToggleButtonGroup>
-          <IconButton
-            size="small"
-            onMouseEnter={(e) => { setSettingsMenu(e.currentTarget); setSettingsMenuOpen(true); }}
-            onClick={(e) => { setSettingsMenu(e.currentTarget); setSettingsMenuOpen(true); }}
-          >
-            <SettingsOutlined fontSize="small" />
-          </IconButton>
+          {can.editForms && (
+            <IconButton
+              size="small"
+              onMouseEnter={(e) => { setSettingsMenu(e.currentTarget); setSettingsMenuOpen(true); }}
+              onClick={(e) => { setSettingsMenu(e.currentTarget); setSettingsMenuOpen(true); }}
+            >
+              <SettingsOutlined fontSize="small" />
+            </IconButton>
+          )}
         </Stack>
       </Stack>
 
@@ -739,9 +745,11 @@ const WorkInstructions = () => {
                   }}
                   sx={{ maxWidth: 360 }}
                 />
-                <Button variant="contained" size="small" onClick={openNewConfig}>
-                  + New Work Instruction
-                </Button>
+                {can.editForms && (
+                  <Button variant="contained" size="small" onClick={openNewConfig}>
+                    + New Work Instruction
+                  </Button>
+                )}
               </Stack>
 
               {configsLoading ? (
@@ -797,7 +805,7 @@ const WorkInstructions = () => {
                         <TableCell align="right">
                           <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
                             {/* New version — Published/Archived */}
-                            {(cfg.status === "Published" || cfg.status === "Archived") && (
+                            {can.editForms && (cfg.status === "Published" || cfg.status === "Archived") && (
                               <Tooltip title="Create new version (Draft)">
                                 <span>
                                   <IconButton
@@ -817,28 +825,34 @@ const WorkInstructions = () => {
                                 <ArticleOutlined fontSize="small" />
                               </IconButton>
                             </Tooltip>
-                            <Tooltip title="Export">
-                              <IconButton size="small" onClick={(e) => setExportMenu({ el: e.currentTarget, cfg })}>
-                                <DownloadOutlined fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title={cfg.status === "Published" ? "View in Builder (read-only)" : "Open Builder"}>
-                              <IconButton size="small" color="primary" onClick={() => openBuilder(cfg)}>
-                                <BuildOutlined fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            {cfg.status === "Draft" && (
+                            {!can.viewOnly && (
+                              <Tooltip title="Export">
+                                <IconButton size="small" onClick={(e) => setExportMenu({ el: e.currentTarget, cfg })}>
+                                  <DownloadOutlined fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                            {can.editForms && (
+                              <Tooltip title={cfg.status === "Published" ? "View in Builder (read-only)" : "Open Builder"}>
+                                <IconButton size="small" color="primary" onClick={() => openBuilder(cfg)}>
+                                  <BuildOutlined fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                            {can.editForms && cfg.status === "Draft" && (
                               <Tooltip title="Edit details">
                                 <IconButton size="small" onClick={() => openEditConfig(cfg)}>
                                   <SettingsOutlined fontSize="small" />
                                 </IconButton>
                               </Tooltip>
                             )}
-                            <Tooltip title="Delete">
-                              <IconButton size="small" color="error" onClick={() => setDeleteConfig(cfg)}>
-                                <DeleteOutline fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
+                            {can.editForms && (
+                              <Tooltip title="Delete">
+                                <IconButton size="small" color="error" onClick={() => setDeleteConfig(cfg)}>
+                                  <DeleteOutline fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
                           </Stack>
                         </TableCell>
                       </TableRow>

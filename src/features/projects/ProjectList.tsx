@@ -25,6 +25,7 @@ import TableConfigDialog from "../../components/TableConfigDialog";
 import { demoProducts } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
@@ -207,6 +208,7 @@ const applyAutoFilter = <T,>(
 
 const ProjectList = () => {
   const { user } = useAuth();
+  const can = usePermissions();
   const { activeOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const { items, total, loading, error } = useAppSelector((state) => state.projects);
@@ -248,7 +250,7 @@ const ProjectList = () => {
   const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const canDeleteProjects = user?.role === "Admin" || user?.role === "Project Manager";
+  const canDeleteProjects = can.modifyData;
 
   // Clear column filters when active office changes
   useEffect(() => {
@@ -442,11 +444,11 @@ const ProjectList = () => {
       actions.push("Approve", "Request Info", "Reject");
     }
 
-    if (project.status === "Approved" && user?.role !== "Viewer") {
+    if (project.status === "Approved" && can.modifyData) {
       actions.push("Start Work");
     }
 
-    if (project.status === "In Progress" && user?.role !== "Viewer") {
+    if (project.status === "In Progress" && can.modifyData) {
       actions.push("Mark Completed");
     }
 
@@ -483,12 +485,16 @@ const ProjectList = () => {
           </Typography>
         </Box>
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-          <Button variant="contained" component={Link} to="/projects/new">
-            Create project
-          </Button>
-          <Button variant="outlined" onClick={() => setTableConfigOpen(true)}>
-            Table configuration
-          </Button>
+          {can.modifyData && (
+            <Button variant="contained" component={Link} to="/projects/new">
+              Create project
+            </Button>
+          )}
+          {can.editFields && (
+            <Button variant="outlined" onClick={() => setTableConfigOpen(true)}>
+              Table configuration
+            </Button>
+          )}
         </Stack>
       </Stack>
 
@@ -559,9 +565,11 @@ const ProjectList = () => {
                 <TableCell sx={{ padding: '8px 12px' }}>
                   <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
                     {renderActions(project)}
-                    <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
-                      <EditOutlined fontSize="small" />
-                    </IconButton>
+                    {can.modifyData && (
+                      <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
+                        <EditOutlined fontSize="small" />
+                      </IconButton>
+                    )}
                     {canDeleteProjects && (
                       <IconButton
                         size="small"

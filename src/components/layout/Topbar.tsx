@@ -1,12 +1,32 @@
-import { Avatar, Box, IconButton, Menu, MenuItem, Stack, Typography, Chip } from "@mui/material";
+import { Avatar, Badge, Box, Divider, IconButton, ListItemIcon, Menu, MenuItem, Stack, Typography, Chip } from "@mui/material";
 import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
 import ViewSidebarOutlinedIcon from "@mui/icons-material/ViewSidebarOutlined";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
+import CheckIcon from "@mui/icons-material/Check";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { useViewMode } from "../../contexts/ViewModeContext";
+
+function getRolesFromCache(): string[] {
+  try {
+    const raw = localStorage.getItem("admin_roles_config");
+    if (raw) return Object.keys(JSON.parse(raw));
+  } catch {
+    // ignore
+  }
+  return ["Admin", "Project Manager", "Engineer", "Viewer"];
+}
+
+function setDevRoleOverride(role: string | null) {
+  if (role) {
+    localStorage.setItem("dev_role_override", role);
+  } else {
+    localStorage.removeItem("dev_role_override");
+  }
+  window.dispatchEvent(new CustomEvent("dev-role-override-changed", { detail: { role } }));
+}
 
 const Topbar = () => {
   const navigate = useNavigate();
@@ -14,6 +34,10 @@ const Topbar = () => {
   const { viewMode, toggleViewMode } = useViewMode();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
+  const [roleMenuAnchor, setRoleMenuAnchor] = useState<null | HTMLElement>(null);
+
+  const activeOverride = localStorage.getItem("dev_role_override");
+
   const initials = useMemo(() => {
     const fullName = user?.fullName?.trim();
     if (fullName) {
@@ -35,6 +59,7 @@ const Topbar = () => {
 
   const handleClose = () => {
     setAnchorEl(null);
+    setRoleMenuAnchor(null);
   };
 
   const handleLogout = () => {
@@ -43,9 +68,12 @@ const Topbar = () => {
     localStorage.removeItem("local_auth_user");
     localStorage.removeItem("mock_role");
     localStorage.removeItem("mock_office");
+    localStorage.removeItem("dev_role_override");
     handleClose();
     navigate("/login");
   };
+
+  const availableRoles = getRolesFromCache();
 
   return (
     <Box className="topbar">
@@ -85,8 +113,26 @@ const Topbar = () => {
           <NotificationsNoneOutlinedIcon />
         </IconButton>
         <IconButton color="inherit" onClick={handleOpen}>
-          <Avatar sx={{ bgcolor: "#2dd4bf", color: "#0b1d24" }}>{initials}</Avatar>
+          <Badge
+            overlap="circular"
+            anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+            variant="dot"
+            invisible={!activeOverride}
+            sx={{
+              "& .MuiBadge-dot": {
+                backgroundColor: "#f59e0b",
+                border: "2px solid var(--panel)",
+                width: 10,
+                height: 10,
+                borderRadius: "50%"
+              }
+            }}
+          >
+            <Avatar sx={{ bgcolor: "#2dd4bf", color: "#0b1d24" }}>{initials}</Avatar>
+          </Badge>
         </IconButton>
+
+        {/* Profile menu */}
         <Menu
           anchorEl={anchorEl}
           open={menuOpen}
@@ -95,8 +141,24 @@ const Topbar = () => {
           transformOrigin={{ vertical: "top", horizontal: "right" }}
         >
           <MenuItem disabled>
-            {user?.fullName || "User"} {user?.role ? `(${user.role})` : ""}
+            <Stack>
+              <Typography variant="body2">{user?.fullName || "User"}</Typography>
+              <Typography variant="caption" color="text.secondary">{user?.role}</Typography>
+            </Stack>
           </MenuItem>
+          <Divider />
+          <MenuItem
+            onClick={(e) => setRoleMenuAnchor(e.currentTarget)}
+            sx={{ justifyContent: "space-between" }}
+          >
+            <Typography variant="body2">Test as role…</Typography>
+            {activeOverride && (
+              <Typography variant="caption" color="warning.main" sx={{ ml: 1 }}>
+                {activeOverride}
+              </Typography>
+            )}
+          </MenuItem>
+          <Divider />
           <MenuItem
             onClick={() => {
               handleClose();
@@ -106,6 +168,45 @@ const Topbar = () => {
             Profile
           </MenuItem>
           <MenuItem onClick={handleLogout}>Logout</MenuItem>
+        </Menu>
+
+        {/* Role switcher submenu */}
+        <Menu
+          anchorEl={roleMenuAnchor}
+          open={Boolean(roleMenuAnchor)}
+          onClose={() => setRoleMenuAnchor(null)}
+          anchorOrigin={{ vertical: "top", horizontal: "left" }}
+          transformOrigin={{ vertical: "top", horizontal: "right" }}
+        >
+          {availableRoles.map((role) => (
+            <MenuItem
+              key={role}
+              dense
+              onClick={() => {
+                setDevRoleOverride(role);
+                handleClose();
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 28 }}>
+                {activeOverride === role && <CheckIcon fontSize="small" sx={{ color: "warning.main" }} />}
+              </ListItemIcon>
+              <Typography variant="body2">{role}</Typography>
+            </MenuItem>
+          ))}
+          {activeOverride && (
+            <>
+              <Divider />
+              <MenuItem
+                dense
+                onClick={() => {
+                  setDevRoleOverride(null);
+                  handleClose();
+                }}
+              >
+                <Typography variant="body2" color="text.secondary">Clear role test</Typography>
+              </MenuItem>
+            </>
+          )}
         </Menu>
       </Stack>
     </Box>

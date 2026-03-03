@@ -49,6 +49,7 @@ import { productService } from "../../services/productService";
 import { projectService } from "../../services/projectService";
 import { customerService } from "../../services/customerService";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 
 // ------------------------------------------------------------------
 // Types
@@ -190,6 +191,7 @@ function parseFieldsJson(json: string): { customFields: CustomField[]; columnOrd
 
 export default function DocumentsPage() {
   useAuth(); // keep auth context available for future use
+  const can = usePermissions();
 
   // ---- data -------------------------------------------------------
   const [docs, setDocs]       = useState<DocumentRecord[]>([]);
@@ -633,35 +635,41 @@ export default function DocumentsPage() {
         <Stack direction="row" spacing={1} alignItems="center">
           <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={loadDocs}>Refresh</Button>
 
-          {/* Gear settings */}
-          <Tooltip title="Document settings">
-            <IconButton ref={gearRef} size="small" onClick={() => setGearOpen(true)}
-              sx={{ opacity: 0.75, "&:hover": { opacity: 1 } }}>
-              <SettingsOutlined fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Menu anchorEl={gearRef.current} open={gearOpen} onClose={() => setGearOpen(false)}
-            anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-            transformOrigin={{ vertical: "top", horizontal: "right" }}>
-            <MenuItem dense onClick={openTabManager} sx={{ py: 1 }}>
-              <Stack spacing={0.25}>
-                <Typography variant="body2" fontWeight={600}>Document Tab Manager</Typography>
-                <Typography variant="caption" color="text.secondary">Edit, remove, or relocate document tabs</Typography>
-              </Stack>
-            </MenuItem>
-            <Divider />
-            <MenuItem dense onClick={openFieldConfig} sx={{ py: 1 }}>
-              <Stack spacing={0.25}>
-                <Typography variant="body2" fontWeight={600}>Configure Document Window</Typography>
-                <Typography variant="caption" color="text.secondary">Add, edit, or delete fields in the document form</Typography>
-              </Stack>
-            </MenuItem>
-          </Menu>
+          {/* Gear settings — admin only */}
+          {can.editForms && (
+            <>
+              <Tooltip title="Document settings">
+                <IconButton ref={gearRef} size="small" onClick={() => setGearOpen(true)}
+                  sx={{ opacity: 0.75, "&:hover": { opacity: 1 } }}>
+                  <SettingsOutlined fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Menu anchorEl={gearRef.current} open={gearOpen} onClose={() => setGearOpen(false)}
+                anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+                transformOrigin={{ vertical: "top", horizontal: "right" }}>
+                <MenuItem dense onClick={openTabManager} sx={{ py: 1 }}>
+                  <Stack spacing={0.25}>
+                    <Typography variant="body2" fontWeight={600}>Document Tab Manager</Typography>
+                    <Typography variant="caption" color="text.secondary">Edit, remove, or relocate document tabs</Typography>
+                  </Stack>
+                </MenuItem>
+                <Divider />
+                <MenuItem dense onClick={openFieldConfig} sx={{ py: 1 }}>
+                  <Stack spacing={0.25}>
+                    <Typography variant="body2" fontWeight={600}>Configure Document Window</Typography>
+                    <Typography variant="caption" color="text.secondary">Add, edit, or delete fields in the document form</Typography>
+                  </Stack>
+                </MenuItem>
+              </Menu>
+            </>
+          )}
 
-          <Button variant="contained" startIcon={<AddOutlined />}
-            onClick={() => { setAddForm(makeEmptyForm()); setAddError(null); setAddOpen(true); }}>
-            Add document
-          </Button>
+          {can.modifyData && (
+            <Button variant="contained" startIcon={<AddOutlined />}
+              onClick={() => { setAddForm(makeEmptyForm()); setAddError(null); setAddOpen(true); }}>
+              Add document
+            </Button>
+          )}
         </Stack>
       </Stack>
 
@@ -793,23 +801,27 @@ export default function DocumentsPage() {
                     })}
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.25} justifyContent="flex-end">
-                        {doc.downloadUrl && (
+                        {doc.downloadUrl && !can.viewOnly && (
                           <Tooltip title="Preview / open">
                             <IconButton size="small" onClick={() => openPreview(doc)}>
                               <DownloadOutlined fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
-                        <Tooltip title="Edit">
-                          <IconButton size="small" onClick={() => openEdit(doc)}>
-                            <EditOutlined fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete">
-                          <IconButton size="small" color="error" onClick={() => setDeleteDoc(doc)}>
-                            <DeleteOutline fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                        {can.modifyData && (
+                          <Tooltip title="Edit">
+                            <IconButton size="small" onClick={() => openEdit(doc)}>
+                              <EditOutlined fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {can.modifyData && (
+                          <Tooltip title="Delete">
+                            <IconButton size="small" color="error" onClick={() => setDeleteDoc(doc)}>
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                       </Stack>
                     </TableCell>
                   </TableRow>

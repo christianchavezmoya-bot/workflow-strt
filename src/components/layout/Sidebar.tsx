@@ -24,6 +24,7 @@ import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
 import { NavLink } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import { officesService } from "../../services/officesService";
 import type { Office } from "../../components/GlobalOfficeMap";
 import strataLogo from "../../assets/strata_transparent.png";
@@ -42,7 +43,12 @@ const navItems = [
 
 const Sidebar = () => {
   const { user } = useAuth();
+  const can = usePermissions();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.to === "/settings" && can.viewOnly) return false;
+    return true;
+  });
   const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
   const [officeOptions, setOfficeOptions] = useState<string[]>(["All"]);
 
@@ -81,7 +87,7 @@ const Sidebar = () => {
         <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
       </Stack>
       <List sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <ListItemButton
             key={item.label}
             component={NavLink}

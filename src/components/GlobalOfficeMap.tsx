@@ -30,6 +30,7 @@ import "leaflet/dist/leaflet.css";
 import { geocodingService } from "../services/geocodingService";
 import { countries } from "../data/countries";
 import { getStatesForCountry } from "../data/states";
+import { usePermissions } from "../hooks/usePermissions";
 
 // Fix default marker icon in Leaflet
 import L from "leaflet";
@@ -73,6 +74,7 @@ export default function GlobalOfficeMap({
   onUpdateOffice,
   onDeleteOffice
 }: GlobalOfficeMapProps) {
+  const can = usePermissions();
   const [view, setView] = useState<"map" | "table">("map");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingOffice, setEditingOffice] = useState<Office | null>(null);
@@ -338,14 +340,16 @@ export default function GlobalOfficeMap({
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
         <Stack direction="row" spacing={2} alignItems="center">
           <Typography variant="h6">Global Offices</Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddLocationAltOutlined />}
-            onClick={handleAddNewOffice}
-            size="small"
-          >
-            Add Office
-          </Button>
+          {can.modifyData && (
+            <Button
+              variant="contained"
+              startIcon={<AddLocationAltOutlined />}
+              onClick={handleAddNewOffice}
+              size="small"
+            >
+              Add Office
+            </Button>
+          )}
         </Stack>
         <ToggleButtonGroup
           value={view}
@@ -407,7 +411,7 @@ export default function GlobalOfficeMap({
                 <TableCell sx={fieldLabelStyle}>Country</TableCell>
                 <TableCell sx={fieldLabelStyle}>State/Region</TableCell>
                 <TableCell sx={fieldLabelStyle}>City</TableCell>
-                <TableCell>Actions</TableCell>
+                {can.modifyData && <TableCell>Actions</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -426,20 +430,22 @@ export default function GlobalOfficeMap({
                     <TableCell>{office.country}</TableCell>
                     <TableCell>{office.state || "-"}</TableCell>
                     <TableCell>{office.city}</TableCell>
-                    <TableCell>
-                      <Stack direction="row" spacing={1}>
-                        <Tooltip title="Edit office">
-                          <IconButton size="small" onClick={() => handleEditOffice(office)}>
-                            <EditOutlined fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete office">
-                          <IconButton size="small" onClick={() => onDeleteOffice(office.id)}>
-                            <DeleteOutline fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </Stack>
-                    </TableCell>
+                    {can.modifyData && (
+                      <TableCell>
+                        <Stack direction="row" spacing={1}>
+                          <Tooltip title="Edit office">
+                            <IconButton size="small" onClick={() => handleEditOffice(office)}>
+                              <EditOutlined fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete office">
+                            <IconButton size="small" onClick={() => onDeleteOffice(office.id)}>
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))
               )}
@@ -633,16 +639,18 @@ export default function GlobalOfficeMap({
               {contextMenu.office.state && `${contextMenu.office.state}, `}
               {contextMenu.office.country}
             </Typography>
-            <Stack spacing={1}>
-              <MenuItem onClick={handleContextMenuEdit}>
-                <EditOutlined sx={{ mr: 1 }} fontSize="small" />
-                Edit Office
-              </MenuItem>
-              <MenuItem onClick={handleContextMenuDelete} sx={{ color: "error.main" }}>
-                <DeleteOutline sx={{ mr: 1 }} fontSize="small" />
-                Delete Office
-              </MenuItem>
-            </Stack>
+            {can.modifyData && (
+              <Stack spacing={1}>
+                <MenuItem onClick={handleContextMenuEdit}>
+                  <EditOutlined sx={{ mr: 1 }} fontSize="small" />
+                  Edit Office
+                </MenuItem>
+                <MenuItem onClick={handleContextMenuDelete} sx={{ color: "error.main" }}>
+                  <DeleteOutline sx={{ mr: 1 }} fontSize="small" />
+                  Delete Office
+                </MenuItem>
+              </Stack>
+            )}
           </Box>
         )}
       </Menu>
