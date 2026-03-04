@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ArticleOutlined,
   ArrowBackOutlined,
@@ -462,6 +463,7 @@ const WorkInstructions = () => {
   const can = usePermissions();
   const dispatch = useAppDispatch();
   const productsState = useAppSelector((state) => state.products);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState<"instructions" | "builder">("instructions");
@@ -499,11 +501,44 @@ const WorkInstructions = () => {
     if (tab >= products.length) setTab(Math.max(0, products.length - 1));
   }, [tab, products.length]);
 
+  // Restore active product tab + view mode from URL (priority) or sessionStorage (fallback).
+  // Always pushes the resolved state back to the URL so Favorites captures the exact sub-page.
+  useEffect(() => {
+    if (products.length === 0) return;
+    const productIdFromUrl = searchParams.get("product");
+    const viewFromUrl = searchParams.get("view");
+
+    let resolvedTabIdx = 0;
+    if (productIdFromUrl) {
+      const idx = products.findIndex((p) => p.id === productIdFromUrl);
+      if (idx >= 0) resolvedTabIdx = idx;
+    } else {
+      try {
+        const stored = sessionStorage.getItem("work_instructions_active_product_id");
+        if (stored) {
+          const idx = products.findIndex((p) => p.id === stored);
+          if (idx >= 0) resolvedTabIdx = idx;
+        }
+      } catch {}
+    }
+
+    const resolvedView: "instructions" | "builder" =
+      viewFromUrl === "builder" ? "builder" : "instructions";
+
+    setTab(resolvedTabIdx);
+    setViewMode(resolvedView);
+
+    const productId = products[resolvedTabIdx]?.id;
+    const params: Record<string, string> = {};
+    if (productId) params.product = productId;
+    params.view = resolvedView;
+    setSearchParams(params, { replace: true });
+  }, [products]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const activeProduct = products[tab];
   const activeFeatures = activeProduct?.features ?? [];
 
   useEffect(() => {
-    setViewMode("instructions");
     setSelectedConfigId(null);
   }, [activeProduct?.id]);
 
@@ -681,7 +716,16 @@ const WorkInstructions = () => {
             value={viewMode}
             exclusive
             size="small"
-            onChange={(_, next) => { if (next) setViewMode(next); }}
+            onChange={(_, next) => {
+              if (next) {
+                setViewMode(next);
+                const productId = products[tab]?.id;
+                const params: Record<string, string> = {};
+                if (productId) params.product = productId;
+                params.view = next;
+                setSearchParams(params, { replace: true });
+              }
+            }}
           >
             <ToggleButton value="instructions">
               <FormatListBulletedOutlined fontSize="small" sx={{ mr: 0.75 }} />
@@ -710,7 +754,16 @@ const WorkInstructions = () => {
       <Paper className="glass-card" sx={{ p: 1.5 }}>
         <Tabs
           value={tab}
-          onChange={(_, next) => setTab(next)}
+          onChange={(_, next) => {
+            setTab(next);
+            setViewMode("instructions");
+            const productId = products[next]?.id ?? "";
+            try { sessionStorage.setItem("work_instructions_active_product_id", productId); } catch {}
+            const params: Record<string, string> = {};
+            if (productId) params.product = productId;
+            params.view = "instructions";
+            setSearchParams(params, { replace: true });
+          }}
           variant="scrollable"
           allowScrollButtonsMobile
           scrollButtons="auto"

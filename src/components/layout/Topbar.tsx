@@ -1,13 +1,17 @@
-import { Avatar, Badge, Box, Divider, IconButton, ListItemIcon, Menu, MenuItem, Stack, Typography, Chip } from "@mui/material";
+import { Avatar, Badge, Box, Button, Divider, IconButton, ListItemIcon, Menu, MenuItem, Popover, Stack, TextField, Tooltip, Typography, Chip } from "@mui/material";
 import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
 import ViewSidebarOutlinedIcon from "@mui/icons-material/ViewSidebarOutlined";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import CheckIcon from "@mui/icons-material/Check";
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import StarOutlinedIcon from "@mui/icons-material/StarOutlined";
+import StarBorderOutlinedIcon from "@mui/icons-material/StarBorderOutlined";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { useViewMode } from "../../contexts/ViewModeContext";
+import { useFavoritesContext } from "../../contexts/FavoritesContext";
+import { useAppSelector } from "../../store/hooks";
 
 function getRolesFromCache(): string[] {
   try {
@@ -28,15 +32,106 @@ function setDevRoleOverride(role: string | null) {
   window.dispatchEvent(new CustomEvent("dev-role-override-changed", { detail: { role } }));
 }
 
+const ROUTE_LABELS: Record<string, string> = {
+  "/": "Dashboard",
+  "/projects": "Projects",
+  "/installations/assets": "Installations",
+  "/work-instructions": "Work Instructions",
+  "/documents": "Documents",
+  "/admin": "Admin",
+  "/admin/asset-registry": "Asset Registry",
+  "/settings": "Settings",
+  "/profile": "Profile",
+};
+
+// Human-readable labels for ?tab= URL params (Admin + Settings)
+const TAB_LABELS: Record<string, string> = {
+  // Admin tabs (dynamic type keys)
+  users: "Users",
+  roles: "Roles",
+  customers: "Customers",
+  offices: "Global Offices",
+  products: "Products",
+  // Settings tabs
+  quickbase: "Quickbase",
+  sms: "SMS/SMTP",
+  fields: "Fields/Data",
+  "workflow-types": "Workflow Types",
+  logo: "Business Logo",
+  audit: "Audit Log",
+};
+
 const Topbar = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { viewMode, toggleViewMode } = useViewMode();
+  const { isFavorited, getFavorite, add, remove } = useFavoritesContext();
+  const products = useAppSelector((s) => s.products.items);
+  const projects = useAppSelector((s) => s.projects.items);
+
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
   const [roleMenuAnchor, setRoleMenuAnchor] = useState<null | HTMLElement>(null);
 
-  const activeOverride = localStorage.getItem("dev_role_override");
+  // ── Favorites star ───────────────────────────────────────────────────────────
+  const currentPath = location.pathname + location.search;
+  const alreadyFavorited = isFavorited(currentPath);
+
+  const autoLabel = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const productId = params.get("product");
+    const projectId = params.get("project");
+    const tabKey = params.get("tab");
+    const viewKey = params.get("view");
+    const parts: string[] = [ROUTE_LABELS[location.pathname] ?? location.pathname];
+    if (productId) {
+      const p = products.find((p) => p.id === productId);
+      if (p) parts.push(p.name);
+    }
+    if (projectId) {
+      const proj = projects.find((p) => p.id === projectId);
+      if (proj) parts.push(proj.jobNumber);
+    }
+    if (tabKey && TAB_LABELS[tabKey]) {
+      parts.push(TAB_LABELS[tabKey]);
+    }
+    if (viewKey === "builder") {
+      parts.push("Builder");
+    }
+    return parts.join(" — ");
+  }, [location.pathname, location.search, products, projects]);
+
+  const [starAnchor, setStarAnchor] = useState<null | HTMLElement>(null);
+  const [favLabel, setFavLabel] = useState("");
+
+  function handleStarClick(e: React.MouseEvent<HTMLElement>) {
+    if (alreadyFavorited) {
+      const existing = getFavorite(currentPath);
+      if (existing) remove(existing.id);
+    } else {
+      setFavLabel(autoLabel);
+      setStarAnchor(e.currentTarget);
+    }
+  }
+
+  function handleFavSave() {
+    const label = favLabel.trim() || autoLabel;
+    add(label, currentPath);
+    setStarAnchor(null);
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const [activeOverride, setActiveOverride] = useState<string | null>(
+    () => localStorage.getItem("dev_role_override")
+  );
+  useEffect(() => {
+    function handleRoleChange(e: Event) {
+      setActiveOverride((e as CustomEvent<{ role: string | null }>).detail.role);
+    }
+    window.addEventListener("dev-role-override-changed", handleRoleChange);
+    return () => window.removeEventListener("dev-role-override-changed", handleRoleChange);
+  }, []);
 
   const initials = useMemo(() => {
     const fullName = user?.fullName?.trim();
@@ -73,7 +168,7 @@ const Topbar = () => {
     navigate("/login");
   };
 
-  const availableRoles = getRolesFromCache();
+  const availableRoles = useMemo(() => getRolesFromCache(), []);
 
   return (
     <Box className="topbar">
@@ -97,7 +192,7 @@ const Topbar = () => {
             Global Project Workflow
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Coordinate internal and external installations across offices.
+            {autoLabel}
           </Typography>
         </Stack>
       </Stack>
@@ -106,6 +201,43 @@ const Topbar = () => {
           <span className="status-dot" />
           Quickbase connected
         </Box>
+        <Tooltip title={alreadyFavorited ? "Remove from Favorites" : "Add to Favorites"}>
+          <IconButton color="inherit" onClick={handleStarClick}>
+            {alreadyFavorited
+              ? <StarOutlinedIcon sx={{ color: "#f59e0b" }} />
+              : <StarBorderOutlinedIcon />}
+          </IconButton>
+        </Tooltip>
+
+        {/* Add-favorite popover */}
+        <Popover
+          open={Boolean(starAnchor)}
+          anchorEl={starAnchor}
+          onClose={() => setStarAnchor(null)}
+          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+          transformOrigin={{ vertical: "top", horizontal: "right" }}
+          slotProps={{ paper: { sx: { p: 2, width: 300 } } }}
+        >
+          <Stack spacing={1.5}>
+            <Typography variant="subtitle2" fontWeight={700}>
+              Add to Favorites
+            </Typography>
+            <TextField
+              label="Name"
+              size="small"
+              fullWidth
+              autoFocus
+              value={favLabel}
+              onChange={(e) => setFavLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleFavSave(); }}
+            />
+            <Stack direction="row" spacing={1} justifyContent="flex-end">
+              <Button size="small" onClick={() => setStarAnchor(null)}>Cancel</Button>
+              <Button size="small" variant="contained" onClick={handleFavSave}>Save</Button>
+            </Stack>
+          </Stack>
+        </Popover>
+
         <IconButton color="inherit">
           <SearchOutlinedIcon />
         </IconButton>

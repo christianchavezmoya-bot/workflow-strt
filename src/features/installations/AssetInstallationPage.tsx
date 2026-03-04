@@ -87,6 +87,7 @@ import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
 import AssetDocumentsDialog from "./AssetDocumentsDialog";
+import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 
 // ------------------------------------------------------------------
 // Column configuration
@@ -229,7 +230,9 @@ const AssetInstallationPage = () => {
   const [searchParams] = useSearchParams();
 
   const [tab, setTab] = useState(0);
-  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(
+    () => { try { return sessionStorage.getItem("installations_selected_project_id") ?? ""; } catch { return ""; } }
+  );
   const [statusFilter, setStatusFilter] = useState<ProjectAssetStatus | "All">("All");
   const [search, setSearch] = useState("");
 
@@ -291,6 +294,9 @@ const AssetInstallationPage = () => {
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
   const [issueDialogAsset, setIssueDialogAsset] = useState<ProjectAsset | null>(null);
   const [issueForm, setIssueForm] = useState<{ description: string; severity: "low" | "medium" | "high" }>({ description: "", severity: "medium" });
+  // Issue detail dialog (comments / close)
+  const [issueDetailAsset, setIssueDetailAsset] = useState<ProjectAsset | null>(null);
+  const [issueDetailIssueId, setIssueDetailIssueId] = useState<string | null>(null);
 
   // Workflow assignments + runs (keyed by assetId)
   const [assignmentsMap, setAssignmentsMap] = useState<Record<string, WorkflowAssignment[]>>({});
@@ -342,12 +348,32 @@ const AssetInstallationPage = () => {
     if (tab >= products.length) setTab(Math.max(0, products.length - 1));
   }, [tab, products.length]);
 
-  // Auto-select product tab from ?product= URL param (e.g. navigating from project job number)
+  // Restore product tab + project from URL params (priority) or sessionStorage (fallback).
+  // Only saves to sessionStorage when a URL param provides a new value (not on SS restore,
+  // which avoids the first-render race where tab=0 would overwrite the stored product).
   useEffect(() => {
-    const productId = searchParams.get("product");
-    if (!productId || products.length === 0) return;
-    const idx = products.findIndex((p) => p.id === productId);
-    if (idx >= 0) setTab(idx);
+    if (products.length === 0) return;
+    const productIdFromUrl = searchParams.get("product");
+    if (productIdFromUrl) {
+      const idx = products.findIndex((p) => p.id === productIdFromUrl);
+      if (idx >= 0) {
+        setTab(idx);
+        try { sessionStorage.setItem("installations_active_product_id", productIdFromUrl); } catch {}
+      }
+    } else {
+      try {
+        const stored = sessionStorage.getItem("installations_active_product_id");
+        if (stored) {
+          const idx = products.findIndex((p) => p.id === stored);
+          if (idx >= 0) setTab(idx);
+        }
+      } catch {}
+    }
+    const projectIdFromUrl = searchParams.get("project");
+    if (projectIdFromUrl) {
+      setSelectedProjectId(projectIdFromUrl);
+      try { sessionStorage.setItem("installations_selected_project_id", projectIdFromUrl); } catch {}
+    }
   }, [products]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeProduct = products[tab];
@@ -577,8 +603,8 @@ const AssetInstallationPage = () => {
     setDeletingAsset(true);
     try {
       await projectAssetService.remove(deleteAsset.id);
-      setAssets((prev) => prev.filter((a) => a.id !== deleteAsset.id));
       setDeleteAsset(null);
+      refreshAssets();
     } catch {
       alert("Failed to delete asset.");
     } finally {
@@ -715,6 +741,19 @@ const AssetInstallationPage = () => {
     try {
       const updated = await projectAssetService.update(asset.id, { issuesJson: JSON.stringify(issues) });
       setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    } catch { console.warn("Failed to update issue"); }
+  }
+
+  async function handleIssueDetailSave(updatedIssue: AssetIssue) {
+    if (!issueDetailAsset) return;
+    let issues: AssetIssue[] = [];
+    try { issues = JSON.parse(issueDetailAsset.issuesJson || "[]"); } catch {}
+    issues = issues.map((i) => i.id === updatedIssue.id ? updatedIssue : i);
+    try {
+      const updated = await projectAssetService.update(issueDetailAsset.id, { issuesJson: JSON.stringify(issues) });
+      setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+      // Keep the dialog open with refreshed asset so the user sees the saved state
+      setIssueDetailAsset(updated);
     } catch { console.warn("Failed to update issue"); }
   }
 
@@ -1082,8 +1121,8 @@ const AssetInstallationPage = () => {
                     {new Date(issue.reportedAt).toLocaleString()} · {issue.severity}
                   </Typography>
                 </Box>
-                <Tooltip title={issue.resolved ? "Mark open" : "Mark resolved"}>
-                  <IconButton size="small" onClick={() => handleToggleIssueResolved(asset, issue.id)}>
+                <Tooltip title={issue.resolved ? "Closed — click to view" : "Add comments or close issue"}>
+                  <IconButton size="small" onClick={() => { setIssueDetailAsset(asset); setIssueDetailIssueId(issue.id); }}>
                     {issue.resolved
                       ? <CheckBoxOutlined fontSize="small" color="success" />
                       : <CheckBoxOutlineBlankOutlined fontSize="small" />}
@@ -1549,7 +1588,7 @@ const AssetInstallationPage = () => {
 
       {/* Product tabs with health dots */}
       <Paper className="glass-card" sx={{ p: 1.5 }}>
-        <Tabs value={tab} onChange={(_, next) => setTab(next)} variant="scrollable" allowScrollButtonsMobile scrollButtons="auto">
+        <Tabs value={tab} onChange={(_, next) => { setTab(next); try { sessionStorage.setItem("installations_active_product_id", products[next]?.id ?? ""); } catch {} }} variant="scrollable" allowScrollButtonsMobile scrollButtons="auto">
           {products.map((p) => {
             const h = healthMap[p.id];
             const dotColor = tabDotColor(h);
@@ -1615,7 +1654,7 @@ const AssetInstallationPage = () => {
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} flexWrap="wrap" useFlexGap>
         <FormControl size="small" sx={{ minWidth: 220 }}>
           <InputLabel>Project</InputLabel>
-          <Select label="Project" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
+          <Select label="Project" value={selectedProjectId} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
             <MenuItem value="">All projects</MenuItem>
             {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} — {p.customerName}</MenuItem>)}
           </Select>
@@ -1979,6 +2018,19 @@ const AssetInstallationPage = () => {
               value={editForm.assetName}
               onChange={(e) => setEditForm((p) => ({ ...p, assetName: e.target.value }))}
               placeholder="e.g. AGI-10, Shuttle Car, Skid Steer" />
+            <FormControl size="small" fullWidth>
+              <InputLabel>Configuration Type</InputLabel>
+              <Select
+                label="Configuration Type"
+                value={editForm.configId}
+                onChange={(e) => setEditForm((p) => ({ ...p, configId: e.target.value }))}
+              >
+                <MenuItem value="">(None)</MenuItem>
+                {configs.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <TextField label="Serial Number" size="small" fullWidth
               value={editForm.serialNumber}
               onChange={(e) => setEditForm((p) => ({ ...p, serialNumber: e.target.value }))} />
@@ -2466,6 +2518,22 @@ const AssetInstallationPage = () => {
           }}
         />
       )}
+
+      {/* Issue detail dialog (comments / close) */}
+      {issueDetailAsset && issueDetailIssueId && (() => {
+        let issues: AssetIssue[] = [];
+        try { issues = JSON.parse(issueDetailAsset.issuesJson || "[]"); } catch {}
+        const issue = issues.find((i) => i.id === issueDetailIssueId);
+        return issue ? (
+          <IssueDetailDialog
+            open={Boolean(issueDetailIssueId)}
+            issue={issue}
+            currentUser={currentUser?.fullName ?? currentUser?.email ?? "User"}
+            onClose={() => { setIssueDetailIssueId(null); setIssueDetailAsset(null); }}
+            onSave={(updated) => handleIssueDetailSave(updated as AssetIssue)}
+          />
+        ) : null;
+      })()}
     </Stack>
   );
 };

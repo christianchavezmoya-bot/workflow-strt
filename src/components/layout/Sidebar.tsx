@@ -28,11 +28,12 @@ import { usePermissions } from "../../hooks/usePermissions";
 import { officesService } from "../../services/officesService";
 import type { Office } from "../../components/GlobalOfficeMap";
 import strataLogo from "../../assets/strata_transparent.png";
+import FavoritesSection from "./FavoritesSection";
 
 const navItems = [
   { label: "Dashboard",       icon: <DashboardOutlinedIcon />,            to: "/" },
   { label: "Projects",        icon: <AssignmentOutlinedIcon />,           to: "/projects" },
-  { label: "Asset Table",     icon: <TableChartOutlinedIcon />,           to: "/installations/assets" },
+  { label: "Installations",   icon: <TableChartOutlinedIcon />,           to: "/installations/assets" },
   { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
   { label: "Documents",       icon: <FolderOutlinedIcon />,               to: "/documents" },
   { label: "Asset Registry",  icon: <InventoryOutlinedIcon />,            to: "/admin/asset-registry" },
@@ -86,6 +87,7 @@ const Sidebar = () => {
         </Box>
         <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
       </Stack>
+      <FavoritesSection />
       <List sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
         {visibleNavItems.map((item) => (
           <ListItemButton

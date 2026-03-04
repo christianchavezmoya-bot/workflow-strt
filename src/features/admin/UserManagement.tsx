@@ -45,7 +45,7 @@ import {
   LockResetOutlined,
 } from "@mui/icons-material";
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
@@ -230,6 +230,7 @@ export const UserManagement: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const usersState = useAppSelector((state) => state.users);
   const customersState = useAppSelector((state) => state.customers);
   const productsState = useAppSelector((state) => state.products);
@@ -699,6 +700,8 @@ export const UserManagement: React.FC = () => {
 
   // Track initial mount to avoid saving on first load
   const isInitialRolesMount = useRef(true);
+  // Track whether the initial URL push for tab sync has run
+  const adminUrlInitialized = useRef(false);
 
   useEffect(() => {
     // Update roles array to match rolesConfig keys (for dropdown)
@@ -1110,16 +1113,23 @@ export const UserManagement: React.FC = () => {
     }
   }, [tab, adminTabsConfig.length]);
 
-  // Handle navigation with specific tab selection
+  // Handle navigation with specific tab selection (location.state OR URL ?tab= param).
+  // On first load with no URL param, pushes the current tab type to the URL so
+  // Favorites always captures the correct sub-page.
   useEffect(() => {
+    if (adminTabsConfig.length === 0) return;
     const stateWithOpenTab = location.state as { openTab?: string } | null;
-    if (stateWithOpenTab?.openTab && adminTabsConfig.length > 0) {
-      const tabIndex = adminTabsConfig.findIndex((t) => t.type === stateWithOpenTab.openTab);
-      if (tabIndex >= 0) {
-        setTab(tabIndex);
-      }
+    const tabType = stateWithOpenTab?.openTab ?? searchParams.get("tab");
+    if (tabType) {
+      const tabIndex = adminTabsConfig.findIndex((t) => t.type === tabType);
+      if (tabIndex >= 0) setTab(tabIndex);
+      adminUrlInitialized.current = true;
+    } else if (!adminUrlInitialized.current) {
+      adminUrlInitialized.current = true;
+      const currentType = adminTabsConfig[tab]?.type;
+      if (currentType) setSearchParams({ tab: currentType }, { replace: true });
     }
-  }, [location.state, adminTabsConfig]);
+  }, [location.state, searchParams, adminTabsConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const loadRows = async () => {
@@ -1974,7 +1984,11 @@ export const UserManagement: React.FC = () => {
       </Stack>
 
       <Paper className="glass-card" sx={{ p: 1.5 }}>
-        <Tabs value={tab} onChange={(e, newValue) => setTab(newValue)}>
+        <Tabs value={tab} onChange={(_, newValue) => {
+          setTab(newValue);
+          const type = adminTabsConfig[newValue]?.type ?? "";
+          if (type) setSearchParams({ tab: type }, { replace: true });
+        }}>
           {adminTabsConfig.map((tabConfig) => (
             <Tab key={tabConfig.id} label={tabConfig.label} />
           ))}

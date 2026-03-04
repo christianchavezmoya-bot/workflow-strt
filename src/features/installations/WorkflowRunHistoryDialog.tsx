@@ -161,7 +161,7 @@ export default function WorkflowRunHistoryDialog({
 
   const latestLockedRun = runs.find((r) => r.isLocked) ?? null;
 
-  async function handleDownloadReport(run: AssetWorkflowRun) {
+  async function handleDownloadReport(run: AssetWorkflowRun, includeAllSteps = false) {
     setReportGenerating(run.id);
     try {
       const [brandSettings, resolvedCustLogo] = await Promise.all([
@@ -182,6 +182,7 @@ export default function WorkflowRunHistoryDialog({
         siteName: project?.siteName,
         siteLocation: asset.location ?? undefined,
         assignedTechnician,
+        includeAllSteps,
       });
     } catch (err) {
       console.error("[WorkflowRunHistoryDialog] Report generation failed", err);
@@ -348,13 +349,13 @@ export default function WorkflowRunHistoryDialog({
                         sx={{ flexShrink: 0 }}
                       >
                         {run.isLocked && (
-                          <Tooltip title="Download PDF report">
+                          <Tooltip title="Download standard PDF report (completed steps only)">
                             <IconButton
                               size="small"
                               disabled={reportGenerating === run.id}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                void handleDownloadReport(run);
+                                void handleDownloadReport(run, false);
                               }}
                             >
                               {reportGenerating === run.id
@@ -386,16 +387,30 @@ export default function WorkflowRunHistoryDialog({
                       <Box sx={{ px: 4, pb: 2, bgcolor: "rgba(255,255,255,0.02)" }}>
                         {/* Download report CTA inside expanded section */}
                         {run.isLocked && (
-                          <Stack direction="row" sx={{ mt: 1.25, mb: 1.5 }}>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              startIcon={reportGenerating === run.id ? <CircularProgress size={13} /> : <DownloadOutlined />}
-                              disabled={reportGenerating === run.id}
-                              onClick={() => void handleDownloadReport(run)}
-                            >
-                              {reportGenerating === run.id ? "Generating…" : "Download PDF Report"}
-                            </Button>
+                          <Stack direction="row" spacing={1} sx={{ mt: 1.25, mb: 1.5 }} flexWrap="wrap" useFlexGap>
+                            <Tooltip title="Completed steps only">
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={reportGenerating === run.id ? <CircularProgress size={13} /> : <DownloadOutlined />}
+                                disabled={reportGenerating === run.id}
+                                onClick={() => void handleDownloadReport(run, false)}
+                              >
+                                {reportGenerating === run.id ? "Generating…" : "Standard Report"}
+                              </Button>
+                            </Tooltip>
+                            <Tooltip title="All workflow steps including uncompleted ones">
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="secondary"
+                                startIcon={reportGenerating === run.id ? <CircularProgress size={13} /> : <DownloadOutlined />}
+                                disabled={reportGenerating === run.id}
+                                onClick={() => void handleDownloadReport(run, true)}
+                              >
+                                Full Report (all steps)
+                              </Button>
+                            </Tooltip>
                           </Stack>
                         )}
 
@@ -657,6 +672,9 @@ export default function WorkflowRunHistoryDialog({
             </Stack>
           )}
         </DialogContent>
+        <DialogActions sx={{ px: 2.5, py: 1.5 }}>
+          <Button onClick={onClose}>Close</Button>
+        </DialogActions>
       </Dialog>
 
       {/* ── Re-run confirmation dialog ── */}

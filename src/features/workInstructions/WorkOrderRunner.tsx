@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircleOutlined,
+  CommentOutlined,
   DeleteOutlineOutlined,
   EditOutlined,
   LockOutlined,
   PauseOutlined,
   QrCodeScannerOutlined,
-  RadioButtonUncheckedOutlined,
   ReportProblemOutlined,
 } from "@mui/icons-material";
 import {
@@ -39,6 +39,7 @@ import {
 import type { StepInput, Workflow, WorkflowStep } from "../../types/workflow";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import type { RunIssue } from "../../types/assetWorkflowRun";
+import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -112,6 +113,8 @@ export default function WorkOrderRunner({
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [editIssueDesc, setEditIssueDesc] = useState("");
   const [editIssueSeverity, setEditIssueSeverity] = useState<"low" | "medium" | "high">("medium");
+  // Issue detail dialog (comments / close)
+  const [issueDetailId, setIssueDetailId] = useState<string | null>(null);
 
   // Run tracking
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
@@ -151,6 +154,7 @@ export default function WorkOrderRunner({
     setEditingIssueId(null);
     setEditIssueDesc("");
     setEditIssueSeverity("medium");
+    setIssueDetailId(null);
   }
 
   function submitFlag() {
@@ -199,10 +203,8 @@ export default function WorkOrderRunner({
     autosaveProgress();
   }
 
-  function toggleResolveIssue(id: string) {
-    setIssues((prev) => prev.map((i) =>
-      i.id === id ? { ...i, resolved: !i.resolved } : i,
-    ));
+  function handleIssueDetailSave(updated: RunIssue) {
+    setIssues((prev) => prev.map((i) => i.id === updated.id ? updated : i));
     autosaveProgress();
   }
 
@@ -747,13 +749,11 @@ export default function WorkOrderRunner({
                               <Chip size="small" label={issue.severity.toUpperCase()} variant="outlined" sx={{ height: 18, fontSize: 10 }} />
                             </Stack>
                             <Stack direction="row" spacing={0}>
-                              {issue.isBlocking && (
-                                <Tooltip title={issue.resolved ? "Mark as unresolved" : "Mark as resolved"}>
-                                  <IconButton size="small" color={issue.resolved ? "default" : "success"} onClick={() => toggleResolveIssue(issue.id)} sx={{ p: 0.25 }}>
-                                    {issue.resolved ? <RadioButtonUncheckedOutlined sx={{ fontSize: 14 }} /> : <CheckCircleOutlined sx={{ fontSize: 14 }} />}
-                                  </IconButton>
-                                </Tooltip>
-                              )}
+                              <Tooltip title="Add comments or close issue">
+                                <IconButton size="small" onClick={() => setIssueDetailId(issue.id)} sx={{ p: 0.25 }}>
+                                  <CommentOutlined sx={{ fontSize: 14 }} />
+                                </IconButton>
+                              </Tooltip>
                               <Tooltip title="Edit issue"><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
                               <Tooltip title="Delete issue"><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
                             </Stack>
@@ -954,13 +954,11 @@ export default function WorkOrderRunner({
                             {issue.stepTitle && <Chip size="small" label={issue.stepTitle} variant="outlined" sx={{ flexShrink: 0 }} />}
                           </Stack>
                           <Stack direction="row" spacing={0}>
-                            {issue.isBlocking && (
-                              <Tooltip title={issue.resolved ? "Mark as unresolved" : "Mark as resolved — clears the blocking flag"}>
-                                <IconButton size="small" color={issue.resolved ? "default" : "success"} onClick={() => toggleResolveIssue(issue.id)} sx={{ p: 0.25 }}>
-                                  {issue.resolved ? <RadioButtonUncheckedOutlined sx={{ fontSize: 14 }} /> : <CheckCircleOutlined sx={{ fontSize: 14 }} />}
-                                </IconButton>
-                              </Tooltip>
-                            )}
+                            <Tooltip title="Add comments or close issue">
+                              <IconButton size="small" onClick={() => setIssueDetailId(issue.id)} sx={{ p: 0.25 }}>
+                                <CommentOutlined sx={{ fontSize: 14 }} />
+                              </IconButton>
+                            </Tooltip>
                             <Tooltip title="Edit issue"><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
                             <Tooltip title="Delete issue"><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
                           </Stack>
@@ -978,9 +976,9 @@ export default function WorkOrderRunner({
 
             {hasBlockingIssues && !blockingError && (
               <Alert severity="error" sx={{ fontSize: 12 }}>
-                {blockingIssues.length} blocking issue{blockingIssues.length === 1 ? "" : "s"} must be resolved before locking this run.
+                {blockingIssues.length} blocking issue{blockingIssues.length === 1 ? "" : "s"} must be closed before locking this run.
                 {activeRunId
-                  ? " Use the ✓ button on each blocking issue above to mark it resolved once the problem is fixed."
+                  ? " Click the comment icon on each blocking issue to add notes and close it."
                   : " (Preview mode: not enforced)"}
               </Alert>
             )}
@@ -1043,11 +1041,24 @@ export default function WorkOrderRunner({
     );
   }
 
+  const issueForDetail = issueDetailId ? issues.find((i) => i.id === issueDetailId) ?? null : null;
+
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      {stage === "setup" && renderSetup()}
-      {stage === "running" && renderRunning()}
-      {stage === "summary" && renderSummary()}
-    </Dialog>
+    <>
+      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+        {stage === "setup" && renderSetup()}
+        {stage === "running" && renderRunning()}
+        {stage === "summary" && renderSummary()}
+      </Dialog>
+      {issueForDetail && (
+        <IssueDetailDialog
+          open={Boolean(issueDetailId)}
+          issue={issueForDetail}
+          currentUser={currentUserName ?? "Unknown"}
+          onClose={() => setIssueDetailId(null)}
+          onSave={(updated) => handleIssueDetailSave(updated as RunIssue)}
+        />
+      )}
+    </>
   );
 }

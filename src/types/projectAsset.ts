@@ -1,5 +1,13 @@
 export type ProjectAssetStatus = "NotStarted" | "InProgress" | "Complete" | "Issue";
 
+export interface IssueComment {
+  id: string;
+  text: string;
+  author: string;
+  createdAt: string;
+  tag?: "escalated";
+}
+
 export interface AssetIssue {
   id: string;
   description: string;
@@ -11,6 +19,10 @@ export interface AssetIssue {
   stepTitle?: string;
   reportedAt: string;
   resolved: boolean;
+  comments?: IssueComment[];
+  resolutionNote?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 export interface ProjectAsset {

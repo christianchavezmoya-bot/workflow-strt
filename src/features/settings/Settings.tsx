@@ -29,6 +29,7 @@ import {
 } from "@mui/material";
 import { AddOutlined, DeleteOutline, EditOutlined, Print, Download } from "@mui/icons-material";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import type { WorkflowType } from "../../types/workflowType";
@@ -227,16 +228,32 @@ interface AuditLogEntry {
   timestamp: string;
 }
 
+const SETTINGS_TAB_KEYS = ["quickbase", "sms", "fields", "workflow-types", "logo", "audit"];
+
 const Settings = () => {
   const { addNotification } = useFieldNotifications();
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isAdmin = user?.role === "Admin" || localStorage.getItem("local_auth_user")?.includes('"Admin"');
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [tab, setTab] = useState(() => {
+    // URL param takes priority over localStorage
+    const urlKey = new URLSearchParams(window.location.search).get("tab");
+    if (urlKey) {
+      const idx = SETTINGS_TAB_KEYS.indexOf(urlKey);
+      if (idx >= 0) return idx;
+    }
     const stored = localStorage.getItem("settings_active_tab");
     return stored ? parseInt(stored, 10) : 0;
   });
+
+  // Push the resolved tab to URL on mount so Favorites always captures the correct sub-page.
+  useEffect(() => {
+    const key = SETTINGS_TAB_KEYS[tab];
+    if (key) setSearchParams({ tab: key }, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [settings, setSettings] = useState<QuickbaseSettingsForm>(() => loadSettings());
   const [status, setStatus] = useState<"" | "saved" | "sent" | "error">("");
   const [sendError, setSendError] = useState<string | null>(null);
@@ -892,7 +909,11 @@ const Settings = () => {
       </Box>
 
       <Box className="glass-card" sx={{ padding: 3 }}>
-        <Tabs value={tab} onChange={(_, next) => setTab(next)}>
+        <Tabs value={tab} onChange={(_, next) => {
+          setTab(next);
+          const key = SETTINGS_TAB_KEYS[next] ?? "";
+          if (key) setSearchParams({ tab: key }, { replace: true });
+        }}>
           <Tab label="Quickbase" />
           <Tab label="SMS/SMTP" />
           <Tab label="Fields/Data" />

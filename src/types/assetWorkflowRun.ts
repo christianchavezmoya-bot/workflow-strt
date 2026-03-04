@@ -1,3 +1,5 @@
+import type { IssueComment } from "./projectAsset";
+
 export type RunStatus = "InProgress" | "Complete" | "Issue";
 
 export interface RunIssue {
@@ -13,6 +15,10 @@ export interface RunIssue {
   isBlocking: boolean;
   createdBy?: string;
   internalOnly?: boolean;  // if true, not included in customer-facing reports
+  comments?: IssueComment[];
+  resolutionNote?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 export interface StepResult {
