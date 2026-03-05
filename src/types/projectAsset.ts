@@ -5,7 +5,6 @@ export interface IssueComment {
   text: string;
   author: string;
   createdAt: string;
-  tag?: "escalated";
 }
 
 export interface AssetIssue {

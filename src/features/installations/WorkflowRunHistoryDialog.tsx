@@ -7,6 +7,7 @@ import {
   ExpandMoreOutlined,
   HourglassEmptyOutlined,
   LockOutlined,
+  PlayArrowOutlined,
   ReplayOutlined,
   ReportProblemOutlined,
 } from "@mui/icons-material";
@@ -51,6 +52,7 @@ interface Props {
     prefillValues: Record<string, Record<string, string>>,
     latestRun: AssetWorkflowRun
   ) => void;
+  onContinue?: (run: AssetWorkflowRun) => void;
   /** Customer / project context forwarded from the parent page for the PDF report. */
   project?: { customerName: string; jobNumber: string; siteName?: string };
   customerLogoBase64?: string | null;
@@ -129,6 +131,7 @@ export default function WorkflowRunHistoryDialog({
   workflowConfigId,
   workflowConfigName,
   onRerun,
+  onContinue,
   project,
   customerLogoBase64,
   assignedTechnician,
@@ -160,6 +163,7 @@ export default function WorkflowRunHistoryDialog({
   }, [open, asset.id, workflowConfigId]);
 
   const latestLockedRun = runs.find((r) => r.isLocked) ?? null;
+  const latestInProgressRun = runs.find((r) => !r.isLocked && r.status === "InProgress") ?? null;
 
   async function handleDownloadReport(run: AssetWorkflowRun, includeAllSteps = false) {
     setReportGenerating(run.id);
@@ -221,6 +225,19 @@ export default function WorkflowRunHistoryDialog({
                   variant="outlined"
                 />
               )}
+              {latestInProgressRun && onContinue && (
+                <Tooltip title="Resume the in-progress run from where it was paused">
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="primary"
+                    startIcon={<PlayArrowOutlined />}
+                    onClick={() => { onContinue(latestInProgressRun); onClose(); }}
+                  >
+                    Continue
+                  </Button>
+                </Tooltip>
+              )}
               <Tooltip
                 title={
                   latestLockedRun
@@ -231,7 +248,7 @@ export default function WorkflowRunHistoryDialog({
                 <span>
                   <Button
                     size="small"
-                    variant="contained"
+                    variant="outlined"
                     startIcon={<ReplayOutlined />}
                     disabled={!latestLockedRun}
                     onClick={() => setRerunConfirmOpen(true)}
@@ -366,12 +383,30 @@ export default function WorkflowRunHistoryDialog({
                         )}
                         <Chip
                           size="small"
-                          label={run.status}
+                          label={run.status === "InProgress" ? "In Progress" : run.status}
                           color={STATUS_COLOR[run.status] ?? "default"}
                           icon={
                             (STATUS_ICON[run.status] as React.ReactElement) ?? undefined
                           }
                         />
+                        {!run.isLocked && run.status === "InProgress" && onContinue && (
+                          <Tooltip title="Resume this run">
+                            <Button
+                              size="small"
+                              variant="contained"
+                              color="primary"
+                              startIcon={<PlayArrowOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onContinue(run);
+                                onClose();
+                              }}
+                              sx={{ ml: 0.5 }}
+                            >
+                              Continue
+                            </Button>
+                          </Tooltip>
+                        )}
                         {run.isLocked && (
                           <Tooltip title="Run is locked (completed)">
                             <LockOutlined

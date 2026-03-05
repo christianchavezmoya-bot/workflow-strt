@@ -4,14 +4,12 @@ import {
   Avatar,
   Box,
   Button,
-  Checkbox,
   Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
-  FormControlLabel,
   Stack,
   TextField,
   Tooltip,
@@ -20,7 +18,6 @@ import {
 import {
   CheckCircleOutlined,
   ErrorOutlined,
-  WarningAmberOutlined,
 } from "@mui/icons-material";
 import type { AssetIssue, IssueComment } from "../../types/projectAsset";
 import type { RunIssue } from "../../types/assetWorkflowRun";
@@ -64,7 +61,6 @@ function initials(name: string) {
 
 export default function IssueDetailDialog({ open, issue, currentUser, readOnly = false, onClose, onSave }: Props) {
   const [commentText, setCommentText] = useState("");
-  const [isEscalation, setIsEscalation] = useState(false);
   const [resolutionNote, setResolutionNote] = useState(issue.resolutionNote ?? "");
   const [resolutionError, setResolutionError] = useState(false);
 
@@ -78,11 +74,9 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
       text,
       author: currentUser,
       createdAt: new Date().toISOString(),
-      tag: isEscalation ? "escalated" : undefined,
     };
     onSave({ ...issue, comments: [...comments, newComment] });
     setCommentText("");
-    setIsEscalation(false);
   }
 
   function handleCloseIssue() {
@@ -100,8 +94,6 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
       resolvedBy: currentUser,
     });
   }
-
-  const hasEscalation = comments.some((c) => c.tag === "escalated");
 
   return (
     <Dialog
@@ -130,9 +122,6 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
             />
             {issue.resolved && (
               <Chip size="small" label="Closed" color="success" icon={<CheckCircleOutlined />} />
-            )}
-            {!issue.resolved && hasEscalation && (
-              <Chip size="small" label="Escalated" sx={{ bgcolor: "#f59e0b22", color: "#f59e0b", borderColor: "#f59e0b55" }} variant="outlined" />
             )}
           </Stack>
           <Typography variant="subtitle1" fontWeight={600}>
@@ -196,7 +185,7 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
                         width: 28,
                         height: 28,
                         fontSize: "0.7rem",
-                        bgcolor: c.tag === "escalated" ? "#f59e0b" : "#2dd4bf",
+                        bgcolor: "#2dd4bf",
                         color: "#0b1d24",
                         flexShrink: 0,
                         mt: 0.25,
@@ -213,20 +202,6 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
                       <Typography variant="caption" color="text.secondary">
                         {formatDate(c.createdAt)}
                       </Typography>
-                      {c.tag === "escalated" && (
-                        <Chip
-                          size="small"
-                          label="Escalated"
-                          icon={<WarningAmberOutlined />}
-                          sx={{
-                            height: 18,
-                            fontSize: "0.65rem",
-                            bgcolor: "#f59e0b22",
-                            color: "#f59e0b",
-                            "& .MuiChip-icon": { fontSize: "0.75rem", color: "#f59e0b" },
-                          }}
-                        />
-                      )}
                     </Stack>
                     <Typography variant="body2" sx={{ mt: 0.25, whiteSpace: "pre-wrap" }}>
                       {c.text}
@@ -254,22 +229,7 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
                   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleAddComment();
                 }}
               />
-              <Stack direction="row" alignItems="center" justifyContent="space-between">
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      size="small"
-                      checked={isEscalation}
-                      onChange={(e) => setIsEscalation(e.target.checked)}
-                      sx={{ color: "#f59e0b", "&.Mui-checked": { color: "#f59e0b" } }}
-                    />
-                  }
-                  label={
-                    <Typography variant="caption" sx={{ color: isEscalation ? "#f59e0b" : "text.secondary" }}>
-                      Mark as escalation
-                    </Typography>
-                  }
-                />
+              <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                 <Button
                   size="small"
                   variant="outlined"
@@ -278,7 +238,7 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
                 >
                   Add Comment
                 </Button>
-              </Stack>
+              </Box>
             </Stack>
           </Box>
         )}

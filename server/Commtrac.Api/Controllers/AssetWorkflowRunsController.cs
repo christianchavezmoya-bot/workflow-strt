@@ -95,9 +95,9 @@ public class AssetWorkflowRunsController : ControllerBase
         };
         _db.AssetWorkflowRuns.Add(run);
 
-        // Update asset status to InProgress if it was NotStarted
+        // Update asset status to InProgress whenever a new run is created
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == req.AssetId);
-        if (asset is not null && asset.Status == "NotStarted")
+        if (asset is not null)
         {
             asset.Status    = "InProgress";
             asset.UpdatedAt = now;
@@ -120,6 +120,21 @@ public class AssetWorkflowRunsController : ControllerBase
         if (req.IssuesJson is not null) run.IssuesJson = req.IssuesJson;
         if (req.Status is not null)     run.Status     = req.Status;
         run.UpdatedAt = DateTime.UtcNow;
+
+        // Update asset status based on current open issues in this run
+        if (req.IssuesJson is not null)
+        {
+            var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+            if (asset is not null && asset.Status != "NotStarted")
+            {
+                var issues = ParseIssues(req.IssuesJson);
+                var hasOpenIssues = issues.Any(i =>
+                    i.TryGetProperty("resolved", out var r) && !r.GetBoolean());
+                asset.Status    = hasOpenIssues ? "Issue" : "InProgress";
+                asset.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await _db.SaveChangesAsync();
         return Ok(ToDto(run));
     }

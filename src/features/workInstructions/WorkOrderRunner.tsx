@@ -25,6 +25,7 @@ import {
   IconButton,
   InputLabel,
   LinearProgress,
+  Menu,
   MenuItem,
   Paper,
   Select,
@@ -115,6 +116,8 @@ export default function WorkOrderRunner({
   const [editIssueSeverity, setEditIssueSeverity] = useState<"low" | "medium" | "high">("medium");
   // Issue detail dialog (comments / close)
   const [issueDetailId, setIssueDetailId] = useState<string | null>(null);
+  // Right-click context menu anchor for the issues chip
+  const [issueMenuAnchor, setIssueMenuAnchor] = useState<Element | null>(null);
 
   // Run tracking
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
@@ -155,6 +158,7 @@ export default function WorkOrderRunner({
     setEditIssueDesc("");
     setEditIssueSeverity("medium");
     setIssueDetailId(null);
+    setIssueMenuAnchor(null);
   }
 
   function submitFlag() {
@@ -623,12 +627,47 @@ export default function WorkOrderRunner({
             <Stack direction="row" spacing={0.75} alignItems="center">
               {jobReference && <Chip label={jobReference} size="small" variant="outlined" />}
               {issues.length > 0 && (
-                <Chip
-                  size="small"
-                  label={`${issues.length} issue${issues.length === 1 ? "" : "s"}${blockingCount > 0 ? ` (${blockingCount} blocking)` : ""}`}
-                  color={blockingCount > 0 ? "error" : "warning"}
-                />
+                <Tooltip title="Right-click for details">
+                  <Chip
+                    size="small"
+                    label={`${issues.length} issue${issues.length === 1 ? "" : "s"}${blockingCount > 0 ? ` (${blockingCount} blocking)` : ""}`}
+                    color={blockingCount > 0 ? "error" : "warning"}
+                    onContextMenu={(e) => { e.preventDefault(); setIssueMenuAnchor(e.currentTarget); }}
+                    sx={{ cursor: "context-menu" }}
+                  />
+                </Tooltip>
               )}
+              <Menu
+                anchorEl={issueMenuAnchor}
+                open={Boolean(issueMenuAnchor)}
+                onClose={() => setIssueMenuAnchor(null)}
+                PaperProps={{ sx: { minWidth: 280, maxWidth: 360 } }}
+              >
+                <Typography variant="caption" fontWeight={700} sx={{ px: 2, py: 0.75, display: "block", textTransform: "uppercase", letterSpacing: 0.8, color: "text.secondary" }}>
+                  Issues — click to jump to step
+                </Typography>
+                {issues.map((issue) => (
+                  <MenuItem
+                    key={issue.id}
+                    onClick={() => {
+                      if (issue.stepId) setCurrentStepId(issue.stepId);
+                      setIssueDetailId(issue.id);
+                      setIssueMenuAnchor(null);
+                    }}
+                    sx={{ gap: 1, alignItems: "flex-start", py: 0.75 }}
+                  >
+                    <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: issue.severity === "high" ? "error.main" : issue.severity === "medium" ? "warning.main" : "text.disabled", flexShrink: 0, mt: 0.6 }} />
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {issue.stepTitle ?? "No step"}
+                      </Typography>
+                      <Typography variant="caption" noWrap sx={{ textDecoration: issue.resolved ? "line-through" : "none" }}>
+                        {issue.description.length > 60 ? issue.description.slice(0, 60) + "…" : issue.description}
+                      </Typography>
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Menu>
             </Stack>
           </Stack>
           <LinearProgress variant="determinate" value={progress} sx={{ mt: 1, borderRadius: 1 }} />
@@ -773,7 +812,7 @@ export default function WorkOrderRunner({
                 fullWidth
                 multiline
                 rows={2}
-                label="Describe the issue"
+                label="Describe/Add issue here"
                 placeholder="Describe what you observed…"
                 value={flagDescription}
                 onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
