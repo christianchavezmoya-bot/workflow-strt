@@ -1631,11 +1631,19 @@ const AssetInstallationPage = () => {
       case "features":
         return featureCompletenessChip(asset);
       case "status":
+        const status = asset.status as ProjectAssetStatus;
+        const baseColor = STATUS_COLORS[status] ?? "default";
+        const issueHealth = status === "Issue" ? computeAssetHealth(asset, runsMap[asset.id] ?? []) : null;
+        const issueColor =
+          issueHealth === "green" ? "success"
+          : issueHealth === "amber" ? "warning"
+          : issueHealth === "red" ? "error"
+          : baseColor;
         return (
           <Chip
             size="small"
-            label={STATUS_LABELS[asset.status as ProjectAssetStatus] ?? asset.status}
-            color={STATUS_COLORS[asset.status as ProjectAssetStatus] ?? "default"}
+            label={STATUS_LABELS[status] ?? asset.status}
+            color={issueColor}
             icon={
               asset.status === "InProgress" ? <HourglassEmptyOutlined sx={{ fontSize: "0.9rem !important" }} /> :
               asset.status === "Complete" ? <CheckCircleOutlined sx={{ fontSize: "0.9rem !important" }} /> :

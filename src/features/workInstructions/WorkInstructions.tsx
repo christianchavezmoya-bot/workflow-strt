@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ArticleOutlined,
@@ -23,7 +23,9 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
   FormControlLabel,
+  InputLabel,
   IconButton,
   InputAdornment,
   ListItemIcon,
@@ -44,6 +46,7 @@ import {
   ToggleButtonGroup,
   Tooltip,
   Typography,
+  Select,
 } from "@mui/material";
 import { demoProducts } from "../../data/demo";
 import type { FeatureSelection } from "../../services/productConfigService";
@@ -55,7 +58,7 @@ import type { Workflow } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import WorkflowBuilder from "./WorkflowBuilder";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function formatDate(iso: string) {
   try {
@@ -117,13 +120,13 @@ function printPdf(cfg: WorkflowConfig, productName: string) {
     )
     .join("");
 
-  const html = `<html><head><title>Work Instruction — ${cfg.name}</title>
+  const html = `<html><head><title>Work Instruction â€” ${cfg.name}</title>
     <style>body{font-family:Arial,sans-serif;padding:30px;color:#1a1a1a}@media print{body{padding:0}}</style>
     </head><body>
     <h2 style="margin:0 0 4px">Work Instruction: ${cfg.name}</h2>
     <p style="margin:0 0 16px;font-size:13px;color:#666">
       Product: ${productName}&nbsp;|&nbsp;
-      Configuration Type: ${cfg.configType ?? "—"}&nbsp;|&nbsp;
+      Configuration Type: ${cfg.configType ?? "â€”"}&nbsp;|&nbsp;
       Status: ${cfg.status}&nbsp;|&nbsp;v${cfg.version}
     </p>
     ${cfg.notes ? `<p style="margin:0 0 12px;font-size:12px;color:#555;font-style:italic">${cfg.notes}</p>` : ""}
@@ -140,7 +143,7 @@ function printPdf(cfg: WorkflowConfig, productName: string) {
   w.print();
 }
 
-// ─── Status chip ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Status chip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function StatusChip({ status }: { status: string }) {
   const color =
@@ -150,7 +153,7 @@ function StatusChip({ status }: { status: string }) {
   return <Chip size="small" label={status} color={color as "success" | "default" | "warning"} />;
 }
 
-// ─── Preview dialog ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Preview dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface PreviewProps {
   open: boolean;
@@ -181,7 +184,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
       fullWidth
       PaperProps={{ sx: { height: "88vh", display: "flex", flexDirection: "column", overflow: "hidden" } }}
     >
-      {/* ── Colored header band ── */}
+      {/* â”€â”€ Colored header band â”€â”€ */}
       <Box sx={{ bgcolor: "primary.main", color: "primary.contrastText", px: 3, py: 2.5, flexShrink: 0 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
           <Box sx={{ minWidth: 0 }}>
@@ -223,7 +226,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
         </Stack>
       </Box>
 
-      {/* ── Body ── */}
+      {/* â”€â”€ Body â”€â”€ */}
       <Box sx={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {!workflow || steps.length === 0 ? (
           <Box sx={{ p: 3, flex: 1 }}>
@@ -235,7 +238,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
           </Box>
         ) : (
           <>
-            {/* Left sidebar — step list */}
+            {/* Left sidebar â€” step list */}
             <Box
               sx={{
                 width: 200,
@@ -291,7 +294,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
               ))}
             </Box>
 
-            {/* Right — step content */}
+            {/* Right â€” step content */}
             <Box sx={{ flex: 1, overflowY: "auto", p: 3.5 }}>
               {currentStep && (
                 <Stack spacing={3}>
@@ -371,7 +374,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                             >
                               {inp.type}
                               {inp.type === "choice" && (inp.options ?? []).length > 0
-                                ? ` · ${inp.options!.join(" / ")}`
+                                ? ` Â· ${inp.options!.join(" / ")}`
                                 : ""}
                             </Typography>
                           </Box>
@@ -412,7 +415,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                       onClick={() => setActiveStep((p) => Math.max(0, p - 1))}
                       disabled={activeStep === 0}
                     >
-                      ← Previous
+                      â† Previous
                     </Button>
                     <Button
                       size="small"
@@ -420,7 +423,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                       onClick={() => setActiveStep((p) => Math.min(steps.length - 1, p + 1))}
                       disabled={activeStep === steps.length - 1}
                     >
-                      Next →
+                      Next â†’
                     </Button>
                     <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
                       Step {activeStep + 1} of {steps.length}
@@ -441,7 +444,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
   );
 }
 
-// ─── Config form state ────────────────────────────────────────────────────────
+// â”€â”€â”€ Config form state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface ConfigFormState {
   name: string;
@@ -450,6 +453,8 @@ interface ConfigFormState {
   featureSelections: FeatureSelection[];
 }
 
+type WorkInstructionSortKey = "name" | "configType" | "createdBy" | "dateCreated" | "status";
+
 const emptyConfigForm = (): ConfigFormState => ({
   name: "",
   configType: "",
@@ -457,7 +462,7 @@ const emptyConfigForm = (): ConfigFormState => ({
   featureSelections: [],
 });
 
-// ─── WorkInstructions component ───────────────────────────────────────────────
+// â”€â”€â”€ WorkInstructions component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const WorkInstructions = () => {
   const can = usePermissions();
@@ -471,6 +476,8 @@ const WorkInstructions = () => {
   const [configs, setConfigs] = useState<WorkflowConfig[]>([]);
   const [configsLoading, setConfigsLoading] = useState(false);
   const [configSearch, setConfigSearch] = useState("");
+  const [sortBy, setSortBy] = useState<WorkInstructionSortKey>("dateCreated");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState<WorkflowConfig | null>(null);
@@ -564,17 +571,37 @@ const WorkInstructions = () => {
 
   const filteredConfigs = useMemo(() => {
     const q = configSearch.trim().toLowerCase();
-    if (!q) return configs;
-    return configs.filter(
+    const filtered = !q ? configs : configs.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         (c.configType ?? "").toLowerCase().includes(q) ||
         (c.notes ?? "").toLowerCase().includes(q) ||
         (c.createdBy ?? "").toLowerCase().includes(q),
     );
-  }, [configs, configSearch]);
 
-  // ─── Config CRUD ─────────────────────────────────────────────────────────────
+    const getSortValue = (config: WorkflowConfig) => {
+      switch (sortBy) {
+        case "name": return (config.name ?? "").toLowerCase();
+        case "configType": return (config.configType ?? "").toLowerCase();
+        case "createdBy": return (config.createdBy ?? "").toLowerCase();
+        case "status": return (config.status ?? "").toLowerCase();
+        case "dateCreated":
+        default:
+          return Date.parse(config.createdAt) || 0;
+      }
+    };
+
+    const multiplier = sortDir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      const aVal = getSortValue(a);
+      const bVal = getSortValue(b);
+      if (aVal < bVal) return -1 * multiplier;
+      if (aVal > bVal) return 1 * multiplier;
+      return 0;
+    });
+  }, [configs, configSearch, sortBy, sortDir]);
+
+  // â”€â”€â”€ Config CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   function openNewConfig() {
     setEditingConfig(null);
@@ -697,7 +724,7 @@ const WorkInstructions = () => {
     setViewMode("instructions");
   }
 
-  // ─── Render ───────────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   return (
     <Stack spacing={3}>
@@ -774,7 +801,7 @@ const WorkInstructions = () => {
         </Tabs>
       </Paper>
 
-      {/* ── Instructions table view ── */}
+      {/* â”€â”€ Instructions table view â”€â”€ */}
       {viewMode === "instructions" && (
         <Paper className="glass-card" sx={{ p: 2.5 }}>
           {!activeProduct ? (
@@ -784,20 +811,39 @@ const WorkInstructions = () => {
           ) : (
             <Stack spacing={2}>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <TextField
-                  size="small"
-                  placeholder="Search work instructions…"
-                  value={configSearch}
-                  onChange={(e) => setConfigSearch(e.target.value)}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <SearchOutlined fontSize="small" />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{ maxWidth: 360 }}
-                />
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ md: "center" }} sx={{ width: "100%" }}>
+                  <TextField
+                    size="small"
+                    placeholder="Search work instructionsâ€¦"
+                    value={configSearch}
+                    onChange={(e) => setConfigSearch(e.target.value)}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchOutlined fontSize="small" />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{ maxWidth: 360, width: "100%" }}
+                  />
+                  <FormControl size="small" sx={{ minWidth: 170 }}>
+                    <InputLabel>Sort By</InputLabel>
+                    <Select label="Sort By" value={sortBy} onChange={(e) => setSortBy(e.target.value as WorkInstructionSortKey)}>
+                      <MenuItem value="dateCreated">Date Created</MenuItem>
+                      <MenuItem value="name">Name</MenuItem>
+                      <MenuItem value="configType">Configuration Type</MenuItem>
+                      <MenuItem value="createdBy">Created By</MenuItem>
+                      <MenuItem value="status">Status</MenuItem>
+                    </Select>
+                  </FormControl>
+                  <FormControl size="small" sx={{ minWidth: 150 }}>
+                    <InputLabel>Order</InputLabel>
+                    <Select label="Order" value={sortDir} onChange={(e) => setSortDir(e.target.value as "asc" | "desc")}>
+                      <MenuItem value="asc">Ascending</MenuItem>
+                      <MenuItem value="desc">Descending</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Stack>
                 {can.editForms && (
                   <Button variant="contained" size="small" onClick={openNewConfig}>
                     + New Work Instruction
@@ -839,25 +885,25 @@ const WorkInstructions = () => {
                           </Stack>
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2">{cfg.configType || "—"}</Typography>
+                          <Typography variant="body2">{cfg.configType || "â€”"}</Typography>
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2">{activeProduct.name}</Typography>
                         </TableCell>
                         <TableCell sx={{ maxWidth: 220 }}>
                           <Typography variant="body2" color="text.secondary" noWrap>
-                            {cfg.notes || "—"}
+                            {cfg.notes || "â€”"}
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2">{cfg.createdBy || "—"}</Typography>
+                          <Typography variant="body2">{cfg.createdBy || "â€”"}</Typography>
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2">{formatDate(cfg.createdAt)}</Typography>
                         </TableCell>
                         <TableCell align="right">
                           <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-                            {/* New version — Published/Archived */}
+                            {/* New version â€” Published/Archived */}
                             {can.editForms && (cfg.status === "Published" || cfg.status === "Archived") && (
                               <Tooltip title="Create new version (Draft)">
                                 <span>
@@ -918,7 +964,7 @@ const WorkInstructions = () => {
         </Paper>
       )}
 
-      {/* ── Builder view ── */}
+      {/* â”€â”€ Builder view â”€â”€ */}
       {viewMode === "builder" && activeProduct && (
         <Stack spacing={2}>
           <Stack direction="row" alignItems="center" spacing={1}>
@@ -1093,7 +1139,7 @@ const WorkInstructions = () => {
         <DialogActions>
           <Button onClick={closeConfigDialog} disabled={configSaving}>Cancel</Button>
           <Button variant="contained" onClick={saveConfig} disabled={configSaving}>
-            {configSaving ? "Saving…" : editingConfig ? "Save Changes" : "Create Draft"}
+            {configSaving ? "Savingâ€¦" : editingConfig ? "Save Changes" : "Create Draft"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1119,7 +1165,7 @@ const WorkInstructions = () => {
         <DialogActions>
           <Button onClick={() => setDeleteConfig(null)} disabled={deleting}>Cancel</Button>
           <Button variant="contained" color="error" onClick={confirmDelete} disabled={deleting}>
-            {deleting ? "Deleting…" : "Delete"}
+            {deleting ? "Deletingâ€¦" : "Delete"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1128,3 +1174,4 @@ const WorkInstructions = () => {
 };
 
 export default WorkInstructions;
+

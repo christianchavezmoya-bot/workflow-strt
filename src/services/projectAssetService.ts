@@ -1,11 +1,22 @@
 import api from "./api";
-import type { ProjectAsset, CreateProjectAssetInput } from "../types/projectAsset";
+import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 
 const LS_KEY_PROJECT = (projectId: string) => `project_assets_v1_${projectId}`;
 const LS_KEY_PRODUCT = (productId: string) => `project_assets_prod_v1_${productId}`;
 
+function normalizeStatus(raw: unknown): ProjectAssetStatus {
+  const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  if (value === "inprogress") return "InProgress";
+  if (value === "complete" || value === "completed") return "Complete";
+  if (value === "issue" || value === "issues") return "Issue";
+  return "NotStarted";
+}
+
 function fromDto(dto: ProjectAsset): ProjectAsset {
-  return dto;
+  return {
+    ...dto,
+    status: normalizeStatus(dto.status),
+  };
 }
 
 export const projectAssetService = {
@@ -18,7 +29,7 @@ export const projectAssetService = {
       console.warn("[projectAssetService] API unavailable, falling back to localStorage", err);
       try {
         const raw = localStorage.getItem(LS_KEY_PROJECT(projectId));
-        if (raw) return JSON.parse(raw) as ProjectAsset[];
+        if (raw) return (JSON.parse(raw) as ProjectAsset[]).map(fromDto);
       } catch {}
       return [];
     }
@@ -33,7 +44,7 @@ export const projectAssetService = {
       console.warn("[projectAssetService] API unavailable, falling back to localStorage", err);
       try {
         const raw = localStorage.getItem(LS_KEY_PRODUCT(productId));
-        if (raw) return JSON.parse(raw) as ProjectAsset[];
+        if (raw) return (JSON.parse(raw) as ProjectAsset[]).map(fromDto);
       } catch {}
       return [];
     }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import {
   RefreshOutlined,
   SearchOutlined,
@@ -33,6 +33,8 @@ import { projectAssetService } from "../../services/projectAssetService";
 import { productConfigService, type ProductConfig } from "../../services/productConfigService";
 import type { ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset";
 
+type RegistrySortKey = "assetTag" | "product" | "assetModel" | "manufacturer" | "serialNumber" | "project" | "site" | "configWorkflow" | "status";
+
 const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success" | "error" | "warning"> = {
   NotStarted: "default",
   InProgress: "primary",
@@ -63,6 +65,8 @@ export default function AssetRegistryPage() {
   const [statusFilter, setStatusFilter] = useState<ProjectAssetStatus | "All">("All");
   const [productFilter, setProductFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<RegistrySortKey>("assetTag");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -102,6 +106,36 @@ export default function AssetRegistryPage() {
     });
   }, [assets, statusFilter, productFilter, search]);
 
+  const sortedAssets = useMemo(() => {
+    const getSortValue = (asset: ProjectAsset) => {
+      const proj = projectMap.get(asset.projectId);
+      const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
+      const product = productMap.get(asset.productId);
+      switch (sortBy) {
+        case "assetTag": return (asset.assetTag ?? "").toLowerCase();
+        case "product": return (product?.name ?? "").toLowerCase();
+        case "assetModel": return (asset.assetModel ?? "").toLowerCase();
+        case "manufacturer": return (asset.manufacturer ?? "").toLowerCase();
+        case "serialNumber": return (asset.serialNumber ?? "").toLowerCase();
+        case "project": return (proj?.jobNumber ?? "").toLowerCase();
+        case "site": return (proj?.siteName ?? "").toLowerCase();
+        case "configWorkflow": return (cfg?.name ?? "").toLowerCase();
+        case "status":
+        default:
+          return (asset.status ?? "").toLowerCase();
+      }
+    };
+
+    const multiplier = sortDir === "asc" ? 1 : -1;
+    return [...visibleAssets].sort((a, b) => {
+      const aVal = getSortValue(a);
+      const bVal = getSortValue(b);
+      if (aVal < bVal) return -1 * multiplier;
+      if (aVal > bVal) return 1 * multiplier;
+      return 0;
+    });
+  }, [visibleAssets, sortBy, sortDir, projectMap, configMap, productMap]);
+
   const summary = useMemo(() => ({
     total: assets.length,
     complete: assets.filter((a) => a.status === "Complete").length,
@@ -117,7 +151,7 @@ export default function AssetRegistryPage() {
         <Box>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Asset Registry</Typography>
           <Typography variant="body2" color="text.secondary">
-            Full registry of all project assets across products — model, manufacturer, serial, workflow and config used.
+            Full registry of all project assets across products â€” model, manufacturer, serial, workflow and config used.
           </Typography>
         </Box>
         <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={loadAll}>
@@ -165,7 +199,7 @@ export default function AssetRegistryPage() {
         </FormControl>
         <TextField
           size="small"
-          placeholder="Search tag / serial / model / manufacturer…"
+          placeholder="Search tag / serial / model / manufacturerâ€¦"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           sx={{ minWidth: 280 }}
@@ -173,6 +207,27 @@ export default function AssetRegistryPage() {
             startAdornment: <InputAdornment position="start"><SearchOutlined fontSize="small" /></InputAdornment>,
           }}
         />
+        <FormControl size="small" sx={{ minWidth: 170 }}>
+          <InputLabel>Sort By</InputLabel>
+          <Select label="Sort By" value={sortBy} onChange={(e) => setSortBy(e.target.value as RegistrySortKey)}>
+            <MenuItem value="assetTag">Asset Tag</MenuItem>
+            <MenuItem value="product">Product</MenuItem>
+            <MenuItem value="assetModel">Asset Model</MenuItem>
+            <MenuItem value="manufacturer">Manufacturer</MenuItem>
+            <MenuItem value="serialNumber">Serial #</MenuItem>
+            <MenuItem value="project">Project</MenuItem>
+            <MenuItem value="site">Site</MenuItem>
+            <MenuItem value="configWorkflow">Config / Workflow</MenuItem>
+            <MenuItem value="status">Status</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>Order</InputLabel>
+          <Select label="Order" value={sortDir} onChange={(e) => setSortDir(e.target.value as "asc" | "desc")}>
+            <MenuItem value="asc">Ascending</MenuItem>
+            <MenuItem value="desc">Descending</MenuItem>
+          </Select>
+        </FormControl>
       </Stack>
 
       {/* Registry table */}
@@ -181,7 +236,7 @@ export default function AssetRegistryPage() {
           <Stack alignItems="center" justifyContent="center" sx={{ p: 6 }}>
             <CircularProgress size={32} />
           </Stack>
-        ) : visibleAssets.length === 0 ? (
+        ) : sortedAssets.length === 0 ? (
           <Box sx={{ p: 3 }}>
             <Alert severity="info">
               {assets.length === 0
@@ -205,7 +260,7 @@ export default function AssetRegistryPage() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {visibleAssets.map((asset) => {
+              {sortedAssets.map((asset) => {
                 const proj = projectMap.get(asset.projectId);
                 const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
                 const product = productMap.get(asset.productId);
@@ -216,16 +271,16 @@ export default function AssetRegistryPage() {
                       <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">{product?.name ?? "—"}</Typography>
+                      <Typography variant="body2" color="text.secondary">{product?.name ?? "â€”"}</Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">{asset.assetModel || "—"}</Typography>
+                      <Typography variant="body2" color="text.secondary">{asset.assetModel || "â€”"}</Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">{asset.manufacturer || "—"}</Typography>
+                      <Typography variant="body2" color="text.secondary">{asset.manufacturer || "â€”"}</Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">{asset.serialNumber || "—"}</Typography>
+                      <Typography variant="body2" color="text.secondary">{asset.serialNumber || "â€”"}</Typography>
                     </TableCell>
                     <TableCell>
                       <Tooltip title={proj?.customerName ?? ""}>
@@ -235,14 +290,14 @@ export default function AssetRegistryPage() {
                       </Tooltip>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">{proj?.siteName || "—"}</Typography>
+                      <Typography variant="body2" color="text.secondary">{proj?.siteName || "â€”"}</Typography>
                     </TableCell>
                     <TableCell>
                       <Stack spacing={0.25}>
                         {cfg ? (
                           <Typography variant="body2" color="text.secondary">{cfg.name}</Typography>
                         ) : (
-                          <Typography variant="body2" color="text.disabled">—</Typography>
+                          <Typography variant="body2" color="text.disabled">â€”</Typography>
                         )}
                         {cfg?.configType && (
                           <Typography variant="caption" color="text.disabled">{cfg.configType}</Typography>
@@ -266,3 +321,4 @@ export default function AssetRegistryPage() {
     </Stack>
   );
 }
+

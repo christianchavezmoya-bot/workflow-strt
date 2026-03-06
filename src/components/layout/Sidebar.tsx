@@ -94,6 +94,9 @@ const Sidebar = () => {
             key={item.label}
             component={NavLink}
             to={item.to}
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("app:side-nav-click"));
+            }}
             sx={{
               borderRadius: 2,
               color: "text.primary",
