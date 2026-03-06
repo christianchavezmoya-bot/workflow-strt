@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 
 namespace Commtrac.Api.Controllers;
 
@@ -13,8 +14,13 @@ public class AssetDocumentsController : ControllerBase
 {
     private const int MaxDocsPerAsset = 3;
     private readonly AppDbContext _db;
+    private readonly IDocumentSearchIndexQueue _searchIndexQueue;
 
-    public AssetDocumentsController(AppDbContext db) => _db = db;
+    public AssetDocumentsController(AppDbContext db, IDocumentSearchIndexQueue searchIndexQueue)
+    {
+        _db = db;
+        _searchIndexQueue = searchIndexQueue;
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -88,6 +94,7 @@ public class AssetDocumentsController : ControllerBase
         _db.AssetDocumentRevisions.Add(rev);
 
         await _db.SaveChangesAsync();
+        _searchIndexQueue.EnqueueAssetDocument(doc.Id);
         return CreatedAtAction(nameof(ListByAsset), new { assetId }, await ToDocDto(doc));
     }
 
@@ -110,6 +117,7 @@ public class AssetDocumentsController : ControllerBase
         var rev = await SaveRevisionFile(doc.Id, doc.AssetId, file, nextRevNum, uploadedBy);
         _db.AssetDocumentRevisions.Add(rev);
         await _db.SaveChangesAsync();
+        _searchIndexQueue.EnqueueAssetDocument(doc.Id);
 
         return Ok(await ToDocDto(doc));
     }
@@ -172,6 +180,7 @@ public class AssetDocumentsController : ControllerBase
         _db.AssetDocumentRevisions.RemoveRange(revisions);
         _db.AssetDocuments.Remove(doc);
         await _db.SaveChangesAsync();
+        _searchIndexQueue.RemoveAssetDocument(id);
         return NoContent();
     }
 

@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,11 +21,13 @@ public class AssetDocumentLinksController : ControllerBase
 
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
+    private readonly IDocumentSearchIndexQueue _searchIndexQueue;
 
-    public AssetDocumentLinksController(AppDbContext db, IWebHostEnvironment env)
+    public AssetDocumentLinksController(AppDbContext db, IWebHostEnvironment env, IDocumentSearchIndexQueue searchIndexQueue)
     {
         _db = db;
         _env = env;
+        _searchIndexQueue = searchIndexQueue;
     }
 
     // ── GET /by-asset/{assetId} ───────────────────────────────────────────────
@@ -89,6 +92,7 @@ public class AssetDocumentLinksController : ControllerBase
 
         _db.AssetDocumentLinks.Add(link);
         await _db.SaveChangesAsync();
+        _searchIndexQueue.EnqueueLibraryDocument(doc.Id);
 
         return CreatedAtAction(nameof(GetByAsset), new { assetId = link.AssetId }, ToDto(link, doc));
     }
@@ -148,6 +152,7 @@ public class AssetDocumentLinksController : ControllerBase
 
         _db.AssetDocumentLinks.Add(link);
         await _db.SaveChangesAsync();
+        _searchIndexQueue.EnqueueLibraryDocument(doc.Id);
 
         return CreatedAtAction(nameof(GetByAsset), new { assetId = link.AssetId }, ToDto(link, doc));
     }

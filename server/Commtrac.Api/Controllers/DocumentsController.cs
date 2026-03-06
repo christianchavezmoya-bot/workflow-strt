@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
@@ -16,11 +17,13 @@ public class DocumentsController : ControllerBase
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
+    private readonly IDocumentSearchIndexQueue _searchIndexQueue;
 
-    public DocumentsController(AppDbContext db, IWebHostEnvironment env)
+    public DocumentsController(AppDbContext db, IWebHostEnvironment env, IDocumentSearchIndexQueue searchIndexQueue)
     {
         _db = db;
         _env = env;
+        _searchIndexQueue = searchIndexQueue;
     }
 
     [HttpGet]
@@ -51,6 +54,7 @@ public class DocumentsController : ControllerBase
 
         _db.Documents.Add(doc);
         await _db.SaveChangesAsync();
+        _searchIndexQueue.EnqueueLibraryDocument(doc.Id);
         return CreatedAtAction(nameof(GetAll), new { id = doc.Id }, ToDto(doc, Request));
     }
 
@@ -135,6 +139,7 @@ public class DocumentsController : ControllerBase
 
         _db.Documents.Remove(doc);
         await _db.SaveChangesAsync();
+        _searchIndexQueue.RemoveLibraryDocument(id);
         return NoContent();
     }
 
