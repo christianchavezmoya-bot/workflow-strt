@@ -13,7 +13,7 @@
 
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import type { AssetWorkflowRun, RunIssue, StepResult } from "../types/assetWorkflowRun";
+import type { AssetWorkflowRun, RunIssue, RunTimeEntry, StepResult } from "../types/assetWorkflowRun";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { WorkflowStep } from "../types/workflow";
 
@@ -124,6 +124,14 @@ function parseStepResults(json: string): StepResult[] {
 
 function parseIssues(json: string): RunIssue[] {
   try { return JSON.parse(json) as RunIssue[]; } catch { return []; }
+}
+
+function fmtDur(totalSeconds: number): string {
+  const safe = Math.max(0, totalSeconds || 0);
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 function fmt(date: string | undefined): string {
@@ -289,6 +297,96 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   });
 
   y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+
+  // ── 2b. Time Tracking summary ────────────────────────────────────────────────
+  y = ensureSpace(y, 20);
+  y = drawSectionBar(y, "TIME TRACKING");
+
+  const totalDurationSecs = run.completedAt && run.startedAt
+    ? Math.max(0, Math.floor((new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime()) / 1000))
+    : null;
+
+  const timeRows: [string, string, string, string][] = [
+    ["Started",       fmtFull(run.startedAt),                  "Completed",        run.completedAt ? fmtFull(run.completedAt) : "—"],
+    ["Productive",    fmtDur(run.productiveSeconds ?? 0),       "Downtime",         fmtDur(run.downtimeSeconds ?? 0)],
+    ["Downtime Events", String(run.downtimeEvents ?? 0),        "Total Duration",   totalDurationSecs !== null ? fmtDur(totalDurationSecs) : "—"],
+  ];
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    theme: "plain",
+    styles: { fontSize: 8.5, cellPadding: { top: 1.8, bottom: 1.8, left: 3, right: 3 } },
+    columnStyles: {
+      0: { fontStyle: "bold", textColor: GREY_LABEL, cellWidth: CONTENT_W * 0.18 },
+      1: { textColor: BLACK,                          cellWidth: CONTENT_W * 0.30 },
+      2: { fontStyle: "bold", textColor: GREY_LABEL, cellWidth: CONTENT_W * 0.18 },
+      3: { textColor: BLACK,                          cellWidth: CONTENT_W * 0.30 },
+    },
+    alternateRowStyles: { fillColor: GREY_BG },
+    body: timeRows,
+    didDrawPage: (data) => { drawFooter(data.pageNumber); },
+  });
+
+  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
+
+  // ── 2c. Downtime event breakdown (only if downtime occurred) ─────────────────
+  const allTimeEntries: RunTimeEntry[] = (() => {
+    try {
+      const parsed = JSON.parse(run.timeTrackingJson ?? "[]");
+      return Array.isArray(parsed) ? parsed as RunTimeEntry[] : [];
+    } catch { return []; }
+  })();
+  const downtimeEntries = allTimeEntries.filter((e) => e.category === "downtime");
+
+  if (downtimeEntries.length > 0) {
+    y = ensureSpace(y, 20);
+    y = drawSectionBar(y, `DOWNTIME EVENTS  (${downtimeEntries.length})`);
+
+    const downtimeRows = downtimeEntries.map((e) => {
+      const endMs   = e.endedAtUtc ? new Date(e.endedAtUtc).getTime() : (run.completedAt ? new Date(run.completedAt).getTime() : null);
+      const startMs = new Date(e.startedAtUtc).getTime();
+      const durSecs = endMs ? Math.max(0, Math.floor((endMs - startMs) / 1000)) : null;
+      const startLabel = new Date(e.startedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+      const endLabel   = e.endedAtUtc
+        ? new Date(e.endedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+        : "Open";
+      return [
+        e.reason ?? "—",
+        startLabel,
+        endLabel,
+        durSecs !== null ? fmtDur(durSecs) : "—",
+      ];
+    });
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      theme: "striped",
+      head: [["Reason", "Start", "End", "Duration"]],
+      body: downtimeRows,
+      styles: { fontSize: 8, cellPadding: { top: 1.8, bottom: 1.8, left: 3, right: 3 } },
+      headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
+      alternateRowStyles: { fillColor: GREY_BG },
+      columnStyles: {
+        0: { cellWidth: CONTENT_W * 0.55 },
+        1: { cellWidth: CONTENT_W * 0.15, halign: "center" },
+        2: { cellWidth: CONTENT_W * 0.15, halign: "center" },
+        3: { cellWidth: CONTENT_W * 0.15, halign: "center", textColor: ORANGE },
+      },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.column.index === 2 && String(data.cell.raw) === "Open") {
+          data.cell.styles.textColor = ORANGE;
+          data.cell.styles.fontStyle = "bold";
+        }
+      },
+      didDrawPage: (data) => { drawFooter(data.pageNumber); },
+    });
+
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+  } else {
+    y += 4;
+  }
 
   // ── 3. Workflow Steps — individual cards ──────────────────────────────────────
   // In "full" mode iterate ALL snapshot steps; in standard mode only captured results.
@@ -463,14 +561,24 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         ? `${issue.resolutionNote}${issue.resolvedBy ? `\n— ${issue.resolvedBy}` : ""}${issue.resolvedAt ? `, ${fmt(issue.resolvedAt)}` : ""}`
         : issue.resolved ? `Resolved${issue.resolvedBy ? ` by ${issue.resolvedBy}` : ""}` : "—";
       const commentsCount = (issue.comments ?? []).length;
+      const typeLabel = issue.issueType === "blocking" ? "Blocking"
+        : issue.issueType === "scope-deviation" ? "Scope Dev." : "Observation";
+      const impact = issue.issueType === "scope-deviation"
+        ? [
+            issue.extraHours != null ? `+${issue.extraHours}h` : null,
+            issue.costImpact ?? null,
+            issue.approvedBy ? `Approved: ${issue.approvedBy}` : null,
+          ].filter(Boolean).join(" · ") || "—"
+        : "—";
       return [
         issue.description,
-        issue.issueType === "blocking" ? "Blocking" : "Observation",
+        typeLabel,
         issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1),
         issue.stepTitle ?? "—",
         statusLabel,
         fmt(issue.reportedAt),
         resolution,
+        impact,
         commentsCount > 0 ? String(commentsCount) : "—",
       ];
     });
@@ -479,7 +587,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
       theme: "striped",
-      head: [["Description", "Type", "Severity", "Step", "Status", "Reported", "Resolution / Action Taken", "Notes"]],
+      head: [["Description", "Type", "Severity", "Step", "Status", "Reported", "Resolution / Action Taken", "Impact", "Notes"]],
       body: issueRows,
       styles: {
         fontSize: 7.5,
@@ -496,35 +604,38 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       },
       alternateRowStyles: { fillColor: GREY_BG },
       columnStyles: {
-        0: { cellWidth: CONTENT_W * 0.22 },
+        0: { cellWidth: CONTENT_W * 0.20 },
         1: { cellWidth: CONTENT_W * 0.10 },
-        2: { cellWidth: CONTENT_W * 0.09 },
-        3: { cellWidth: CONTENT_W * 0.11 },
-        4: { cellWidth: CONTENT_W * 0.09 },
-        5: { cellWidth: CONTENT_W * 0.10 },
-        6: { cellWidth: CONTENT_W * 0.22 },
-        7: { cellWidth: CONTENT_W * 0.07, halign: "center" },
+        2: { cellWidth: CONTENT_W * 0.08 },
+        3: { cellWidth: CONTENT_W * 0.10 },
+        4: { cellWidth: CONTENT_W * 0.08 },
+        5: { cellWidth: CONTENT_W * 0.09 },
+        6: { cellWidth: CONTENT_W * 0.18 },
+        7: { cellWidth: CONTENT_W * 0.10 },
+        8: { cellWidth: CONTENT_W * 0.07, halign: "center" },
       },
       didParseCell: (data) => {
         if (data.section !== "body") return;
         // Severity colour
         if (data.column.index === 2) {
           const sev = String(data.cell.raw).toLowerCase();
-          if (sev === "high")   data.cell.styles.textColor = RED;
+          if (sev === "high")        data.cell.styles.textColor = RED;
           else if (sev === "medium") data.cell.styles.textColor = ORANGE;
-          else                  data.cell.styles.textColor = BLUE;
+          else                       data.cell.styles.textColor = BLUE;
           data.cell.styles.fontStyle = "bold";
         }
         // Status colour
         if (data.column.index === 4) {
           const s = String(data.cell.raw);
-          if (s === "Blocking") { data.cell.styles.textColor = RED;   data.cell.styles.fontStyle = "bold"; }
-          else if (s === "Closed") { data.cell.styles.textColor = GREEN; }
-          else if (s === "Open")   { data.cell.styles.textColor = ORANGE; }
+          if (s === "Blocking")     { data.cell.styles.textColor = RED;    data.cell.styles.fontStyle = "bold"; }
+          else if (s === "Closed")  { data.cell.styles.textColor = GREEN; }
+          else if (s === "Open")    { data.cell.styles.textColor = ORANGE; }
         }
         // Type colour
         if (data.column.index === 1) {
-          if (String(data.cell.raw) === "Blocking") data.cell.styles.textColor = RED;
+          const t = String(data.cell.raw);
+          if (t === "Blocking")    data.cell.styles.textColor = RED;
+          if (t === "Scope Dev.")  { data.cell.styles.textColor = ORANGE; data.cell.styles.fontStyle = "bold"; }
         }
       },
       didDrawPage: (data) => { drawFooter(data.pageNumber); },

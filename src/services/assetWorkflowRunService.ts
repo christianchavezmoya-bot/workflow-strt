@@ -58,4 +58,26 @@ export const assetWorkflowRunService = {
     const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/issues`, { issuesJson });
     return res.data;
   },
+
+  /** Replace the full time-entries array and recompute metrics. Works on locked runs. */
+  async patchTimeEntries(runId: string, timeEntriesJson: string): Promise<AssetWorkflowRun> {
+    const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entries`, { timeEntriesJson });
+    return res.data;
+  },
+
+  async trackTimeEntry(
+    runId: string,
+    action: "StartProductive" | "ResumeProductive" | "StartDowntime" | "StopDowntime",
+    reason?: string,
+    startedAtUtc?: string,
+    endedAtUtc?: string
+  ): Promise<AssetWorkflowRun> {
+    const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entry`, {
+      action,
+      reason: reason ?? null,
+      startedAtUtc: startedAtUtc ?? null,
+      endedAtUtc: endedAtUtc ?? null,
+    });
+    return res.data;
+  },
 };

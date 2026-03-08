@@ -12,38 +12,55 @@ namespace Commtrac.Api.Controllers;
 public class AssetWorkflowAssignmentsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    public AssetWorkflowAssignmentsController(AppDbContext db) => _db = db;
+    private readonly ILogger<AssetWorkflowAssignmentsController> _logger;
+    public AssetWorkflowAssignmentsController(AppDbContext db, ILogger<AssetWorkflowAssignmentsController> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
 
     // GET api/asset-workflow-assignments/by-asset/{assetId}
     [HttpGet("by-asset/{assetId}")]
     public async Task<IActionResult> ListByAsset(string assetId)
     {
-        var assignments = await _db.AssetWorkflowAssignments
-            .Where(a => a.AssetId == assetId && a.Active)
-            .OrderBy(a => a.AssignedAt)
-            .ToListAsync();
+        try
+        {
+            var assignments = await _db.AssetWorkflowAssignments
+                .Where(a => a.AssetId == assetId && a.Active)
+                .OrderBy(a => a.AssignedAt)
+                .ToListAsync();
 
-        // Enrich with names via lookup
-        var configIds = assignments.Select(a => a.WorkflowConfigId).Distinct().ToList();
-        var typeIds   = assignments.Select(a => a.WorkflowTypeId).Distinct().ToList();
+            // Enrich with names via lookup
+            var configIds = assignments.Select(a => a.WorkflowConfigId).Distinct().ToList();
+            var typeIds = assignments.Select(a => a.WorkflowTypeId).Distinct().ToList();
 
-        var configs = await _db.WorkflowConfigs
-            .Where(c => configIds.Contains(c.Id))
-            .Select(c => new { c.Id, c.Name })
-            .ToDictionaryAsync(c => c.Id, c => c.Name);
+            var configs = await _db.WorkflowConfigs
+                .Where(c => configIds.Contains(c.Id))
+                .Select(c => new { c.Id, c.Name })
+                .ToDictionaryAsync(c => c.Id, c => c.Name);
 
-        var types = await _db.WorkflowTypes
-            .Where(t => typeIds.Contains(t.Id))
-            .Select(t => new { t.Id, t.Name })
-            .ToDictionaryAsync(t => t.Id, t => t.Name);
+            var types = await _db.WorkflowTypes
+                .Where(t => typeIds.Contains(t.Id))
+                .Select(t => new { t.Id, t.Name })
+                .ToDictionaryAsync(t => t.Id, t => t.Name);
 
-        var dtos = assignments.Select(a => new AssetWorkflowAssignmentDto(
-            a.Id, a.AssetId, a.WorkflowConfigId, a.WorkflowTypeId,
-            types.GetValueOrDefault(a.WorkflowTypeId, a.WorkflowTypeId),
-            configs.GetValueOrDefault(a.WorkflowConfigId, a.WorkflowConfigId),
-            a.Active, a.AssignedBy, a.AssignedAt
-        ));
-        return Ok(dtos);
+            // Hide stale assignments that reference deleted workflow configs.
+            // This avoids repeated 404s when the UI tries to load a missing config.
+            var dtos = assignments
+                .Where(a => configs.ContainsKey(a.WorkflowConfigId))
+                .Select(a => new AssetWorkflowAssignmentDto(
+                    a.Id, a.AssetId, a.WorkflowConfigId, a.WorkflowTypeId,
+                    types.GetValueOrDefault(a.WorkflowTypeId, a.WorkflowTypeId),
+                    configs[a.WorkflowConfigId],
+                    a.Active, a.AssignedBy, a.AssignedAt
+                ));
+            return Ok(dtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list workflow assignments for asset {AssetId}", assetId);
+            return Ok(Array.Empty<AssetWorkflowAssignmentDto>());
+        }
     }
 
     // POST api/asset-workflow-assignments

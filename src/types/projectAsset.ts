@@ -10,8 +10,8 @@ export interface IssueComment {
 export interface AssetIssue {
   id: string;
   description: string;
-  /** "blocking" = prevents workflow completion; "observation" = logged but non-blocking */
-  issueType: "blocking" | "observation";
+  /** "blocking" | "observation" | "scope-deviation" */
+  issueType: "blocking" | "observation" | "scope-deviation";
   isBlocking: boolean;
   severity: "low" | "medium" | "high";
   stepId?: string;

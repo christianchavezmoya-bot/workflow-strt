@@ -1,16 +1,22 @@
 import React, { useEffect, useState } from "react";
 import {
+  AccessTimeOutlined,
   CheckCircleOutlined,
   DownloadOutlined,
+  DrawOutlined,
   ErrorOutlined,
   ExpandLessOutlined,
   ExpandMoreOutlined,
   HourglassEmptyOutlined,
+  LinkOutlined,
   LockOutlined,
   PlayArrowOutlined,
   ReplayOutlined,
   ReportProblemOutlined,
 } from "@mui/icons-material";
+import SignatureBadge from "../../components/ui/SignatureBadge";
+import SignatureDialog from "../../components/ui/SignatureDialog";
+import { signatureService, type CreateTokenPayload } from "../../services/signatureService";
 import {
   Alert,
   Box,
@@ -30,13 +36,15 @@ import {
   TableCell,
   TableHead,
   TableRow,
+  TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
-import type { AssetWorkflowRun, RunIssue, StepResult } from "../../types/assetWorkflowRun";
+import type { AssetWorkflowRun, RunIssue, RunTimeEntry, StepResult } from "../../types/assetWorkflowRun";
+import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowStep, StepInput } from "../../types/workflow";
 import type { ProjectAsset } from "../../types/projectAsset";
@@ -78,6 +86,40 @@ const SEVERITY_COLOR: Record<string, string> = {
   medium: "#ff9800",
   high: "#f44336",
 };
+
+function formatDuration(totalSeconds: number): string {
+  const safe = Math.max(0, totalSeconds || 0);
+  const hours = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
+function parseTimeEntries(json: string): RunTimeEntry[] {
+  try {
+    const raw = JSON.parse(json) as Record<string, unknown>[];
+    if (!Array.isArray(raw)) return [];
+    return raw.map((e) => ({
+      id: String(e.id ?? e.Id ?? ""),
+      category: String(e.category ?? e.Category ?? "productive") as "productive" | "downtime",
+      startedAtUtc: String(e.startedAtUtc ?? e.StartedAtUtc ?? ""),
+      endedAtUtc: (e.endedAtUtc ?? e.EndedAtUtc ?? null) as string | null,
+      reason: (e.reason ?? e.Reason ?? null) as string | null,
+    }));
+  } catch { return []; }
+}
+
+function timeEntryDuration(entry: RunTimeEntry, fallbackEndUtc?: string): number {
+  const end = entry.endedAtUtc ?? fallbackEndUtc;
+  if (!end) return 0;
+  return Math.max(0, Math.floor((new Date(end).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000));
+}
+
+function fmtTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  } catch { return iso; }
+}
 
 function parseSnapshot(snapshotJson: string): WorkflowConfig | null {
   try { return JSON.parse(snapshotJson) as WorkflowConfig; } catch { return null; }
@@ -141,6 +183,40 @@ export default function WorkflowRunHistoryDialog({
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [rerunConfirmOpen, setRerunConfirmOpen] = useState(false);
   const [reportGenerating, setReportGenerating] = useState<string | null>(null);
+  const [timeEditorRun, setTimeEditorRun] = useState<AssetWorkflowRun | null>(null);
+  const [signDialogRun, setSignDialogRun] = useState<AssetWorkflowRun | null>(null);
+  const [tokenDialogRun, setTokenDialogRun] = useState<AssetWorkflowRun | null>(null);
+  const [tokenEmail, setTokenEmail] = useState("");
+  const [tokenName, setTokenName] = useState("");
+  const [tokenSending, setTokenSending] = useState(false);
+  const [tokenLink, setTokenLink] = useState<string | null>(null);
+
+  const handleSignedRefresh = () => {
+    if (!open) return;
+    assetWorkflowRunService.listByAsset(asset.id).then((all) => {
+      const filtered = all
+        .filter((r) => r.workflowConfigId === workflowConfigId)
+        .sort((a, b) => (b.runNumber ?? 0) - (a.runNumber ?? 0));
+      setRuns(filtered);
+    });
+  };
+
+  const handleCreateToken = async () => {
+    if (!tokenDialogRun) return;
+    setTokenSending(true);
+    try {
+      const payload: CreateTokenPayload = {
+        runId: tokenDialogRun.id,
+        recipientEmail: tokenEmail,
+        recipientName: tokenName || undefined,
+        expiresInHours: 72
+      };
+      const token = await signatureService.createToken(payload);
+      const baseUrl = window.location.origin;
+      setTokenLink(`${baseUrl}/sign/${token.id}`);
+    } catch { /* handled inline */ }
+    finally { setTokenSending(false); }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -150,7 +226,7 @@ export default function WorkflowRunHistoryDialog({
       .listByAsset(asset.id)
       .then((all) => {
         const filtered = all
-          .filter((r) => r.workflowConfigId === workflowConfigId)
+          .filter((r) => !workflowConfigId || r.workflowConfigId === workflowConfigId)
           .sort(
             (a, b) =>
               (b.runNumber ?? 0) - (a.runNumber ?? 0) ||
@@ -338,6 +414,20 @@ export default function WorkflowRunHistoryDialog({
                             {stepResults.length} step
                             {stepResults.length !== 1 ? "s" : ""} captured
                           </Typography>
+                          <Chip
+                            size="small"
+                            label={`Productive ${formatDuration(run.productiveSeconds)}`}
+                            color="success"
+                            variant="outlined"
+                            sx={{ height: 16, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
+                          />
+                          <Chip
+                            size="small"
+                            label={`Downtime ${formatDuration(run.downtimeSeconds)}`}
+                            color={run.downtimeSeconds > 0 ? "warning" : "default"}
+                            variant="outlined"
+                            sx={{ height: 16, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
+                          />
                           {openIssues > 0 && (
                             <Chip
                               size="small"
@@ -365,6 +455,17 @@ export default function WorkflowRunHistoryDialog({
                         spacing={0.75}
                         sx={{ flexShrink: 0 }}
                       >
+                        <Tooltip title="Edit / correct time entries">
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTimeEditorRun(run);
+                            }}
+                          >
+                            <AccessTimeOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                         {run.isLocked && (
                           <Tooltip title="Download standard PDF report (completed steps only)">
                             <IconButton
@@ -389,6 +490,43 @@ export default function WorkflowRunHistoryDialog({
                             (STATUS_ICON[run.status] as React.ReactElement) ?? undefined
                           }
                         />
+                        {run.isLocked && (
+                          <SignatureBadge status={run.signatureStatus ?? "None"} />
+                        )}
+                        {run.isLocked && run.signatureStatus === "PendingInstaller" && (
+                          <Tooltip title="Sign as installer">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="primary"
+                              startIcon={<DrawOutlined />}
+                              onClick={(e) => { e.stopPropagation(); setSignDialogRun(run); }}
+                              sx={{ py: 0, minHeight: 26 }}
+                            >
+                              Sign
+                            </Button>
+                          </Tooltip>
+                        )}
+                        {run.isLocked && run.signatureStatus === "PendingCustomer" && (
+                          <Tooltip title="Generate secure link for customer signature">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="info"
+                              startIcon={<LinkOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setTokenLink(null);
+                                setTokenEmail("");
+                                setTokenName("");
+                                setTokenDialogRun(run);
+                              }}
+                              sx={{ py: 0, minHeight: 26 }}
+                            >
+                              Send to customer
+                            </Button>
+                          </Tooltip>
+                        )}
                         {!run.isLocked && run.status === "InProgress" && onContinue && (
                           <Tooltip title="Resume this run">
                             <Button
@@ -448,6 +586,58 @@ export default function WorkflowRunHistoryDialog({
                             </Tooltip>
                           </Stack>
                         )}
+
+                        <Stack direction="row" spacing={1} sx={{ mb: 1.25 }} useFlexGap flexWrap="wrap">
+                          <Chip size="small" color="success" variant="outlined" label={`Productive: ${formatDuration(run.productiveSeconds)}`} />
+                          <Chip size="small" color={run.downtimeSeconds > 0 ? "warning" : "default"} variant="outlined" label={`Downtime: ${formatDuration(run.downtimeSeconds)}`} />
+                          <Chip size="small" variant="outlined" label={`Downtime events: ${run.downtimeEvents ?? 0}`} />
+                        </Stack>
+
+                        {/* Downtime event breakdown */}
+                        {(() => {
+                          const entries = parseTimeEntries(run.timeTrackingJson ?? "[]");
+                          const downtimeEntries = entries.filter((e) => e.category === "downtime");
+                          if (downtimeEntries.length === 0) return null;
+                          return (
+                            <>
+                              <Typography variant="caption" fontWeight={700} color="text.secondary"
+                                sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 0.75 }}>
+                                Downtime Events ({downtimeEntries.length})
+                              </Typography>
+                              <Table size="small" sx={{ mb: 1.5 }}>
+                                <TableHead>
+                                  <TableRow sx={{ bgcolor: "rgba(255,255,255,0.04)" }}>
+                                    <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700 }}>Reason</TableCell>
+                                    <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700, width: 60 }}>Start</TableCell>
+                                    <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700, width: 60 }}>End</TableCell>
+                                    <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700, width: 55 }}>Duration</TableCell>
+                                  </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                  {downtimeEntries.map((e) => {
+                                    const dur = timeEntryDuration(e, run.completedAt ?? undefined);
+                                    return (
+                                      <TableRow key={e.id}>
+                                        <TableCell sx={{ fontSize: 12, py: 0.75 }}>
+                                          {e.reason || <Typography component="span" variant="caption" color="text.disabled">—</Typography>}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: 11, py: 0.75, color: "text.secondary", whiteSpace: "nowrap" }}>
+                                          {fmtTime(e.startedAtUtc)}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: 11, py: 0.75, color: "text.secondary", whiteSpace: "nowrap" }}>
+                                          {e.endedAtUtc ? fmtTime(e.endedAtUtc) : <Typography component="span" variant="caption" color="warning.main">Open</Typography>}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: 11, py: 0.75, color: "warning.main", whiteSpace: "nowrap" }}>
+                                          {dur > 0 ? formatDuration(dur) : "—"}
+                                        </TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            </>
+                          );
+                        })()}
 
                         {/* Step results */}
                         {stepResults.length > 0 ? (
@@ -742,6 +932,90 @@ export default function WorkflowRunHistoryDialog({
           >
             Start Re-run →
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Time entries editor ── */}
+      {timeEditorRun && (
+        <TimeEntriesEditorDialog
+          open={Boolean(timeEditorRun)}
+          run={timeEditorRun}
+          onClose={() => setTimeEditorRun(null)}
+          onSaved={(updated) => {
+            setRuns((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+            setTimeEditorRun(null);
+          }}
+        />
+      )}
+
+      {/* ── Installer Sign Dialog ── */}
+      {signDialogRun && (
+        <SignatureDialog
+          open={Boolean(signDialogRun)}
+          runId={signDialogRun.id}
+          signerRole="Installer"
+          defaultSignerName={assignedTechnician ?? ""}
+          onClose={() => setSignDialogRun(null)}
+          onSigned={() => { setSignDialogRun(null); handleSignedRefresh(); }}
+        />
+      )}
+
+      {/* ── Request Customer Signature Dialog ── */}
+      <Dialog open={Boolean(tokenDialogRun)} onClose={() => setTokenDialogRun(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Request Customer Signature</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {tokenLink ? (
+              <>
+                <Alert severity="success">Secure link generated. Share it with the customer.</Alert>
+                <Box sx={{ p: 1.5, background: "rgba(0,0,0,0.2)", borderRadius: 1, wordBreak: "break-all" }}>
+                  <Typography variant="caption" fontFamily="monospace">{tokenLink}</Typography>
+                </Box>
+                <Button
+                  variant="outlined"
+                  onClick={() => { navigator.clipboard.writeText(tokenLink); }}
+                >
+                  Copy link
+                </Button>
+              </>
+            ) : (
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  A one-time secure link will be generated. Paste it into an email or share directly.
+                  The link expires in 72 hours.
+                </Typography>
+                <TextField
+                  label="Customer email"
+                  value={tokenEmail}
+                  onChange={e => setTokenEmail(e.target.value)}
+                  size="small"
+                  fullWidth
+                  type="email"
+                />
+                <TextField
+                  label="Customer name (optional)"
+                  value={tokenName}
+                  onChange={e => setTokenName(e.target.value)}
+                  size="small"
+                  fullWidth
+                />
+              </>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTokenDialogRun(null)}>
+            {tokenLink ? "Done" : "Cancel"}
+          </Button>
+          {!tokenLink && (
+            <Button
+              variant="contained"
+              onClick={handleCreateToken}
+              disabled={!tokenEmail.trim() || tokenSending}
+            >
+              {tokenSending ? <CircularProgress size={18} /> : "Generate link"}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </>

@@ -14,12 +14,17 @@ public static class DbInitializer
         // wasn't recorded. Detect this and mark it as applied before running migrations.
         FixPartialMigration(db);
 
+        // Fix migrations that were applied via Ensure* helpers before EF migration files existed.
+        FixEnsuredMigrations(db);
+
         db.Database.Migrate();
         EnsureAuditLogTable(db);
         EnsureSessionsTable(db);
         EnsurePasswordChangedAtColumn(db);
         EnsureDocumentTables(db);
+        EnsureAssetDocumentTables(db);
         EnsureAssetDocumentLinksTables(db);
+        EnsureRunTimeTrackingColumns(db);
         EnsureLinkableKeyFieldDefinitions(db);
 
         if (!db.Users.Any())
@@ -324,6 +329,57 @@ public static class DbInitializer
     }
 
     /// <summary>
+    /// Handles migrations that were applied manually via Ensure* helper methods
+    /// before the corresponding EF migration files were created. Inserts the missing
+    /// migration history records so that Migrate() skips them and doesn't try to
+    /// re-apply schema changes that already exist (which would cause duplicate-column errors).
+    /// </summary>
+    private static void FixEnsuredMigrations(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            void EnsureRecorded(string migrationId, string detectSql)
+            {
+                cmd.CommandText = detectSql;
+                var exists = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+                if (!exists) return;
+
+                cmd.CommandText = $"SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId='{migrationId}'";
+                var recorded = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+                if (!recorded)
+                {
+                    cmd.CommandText = $"INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES ('{migrationId}', '8.0.23')";
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            // AssetDocuments/Revisions — created by EnsureAssetDocumentTables before migration existed
+            EnsureRecorded("20260302000000_AssetDocuments",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AssetDocuments'");
+
+            // AssetDocumentLinks — created by EnsureAssetDocumentLinksTables before migration existed
+            EnsureRecorded("20260302100000_AssetDocumentLinks",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AssetDocumentLinks'");
+
+            // RemoveUserIdField — safe to mark as applied; the DELETE is idempotent and harmless
+            EnsureRecorded("20260302120000_RemoveUserIdField",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AssetDocumentLinks'");
+
+            // RunTimeTracking — columns added by EnsureRunTimeTrackingColumns before migration existed
+            EnsureRecorded("20260306090000_RunTimeTracking",
+                "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='TimeTrackingJson'");
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
     /// Handles the case where the Add2faFields migration was partially applied
     /// (columns added to Users table but migration not recorded in history).
     /// Detects this state and inserts the history record so Migrate() skips it.
@@ -447,6 +503,104 @@ public static class DbInitializer
                     FieldsJson TEXT NOT NULL DEFAULT '[]'
                 )";
             cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Creates AssetDocuments and AssetDocumentRevisions if missing.
+    /// This protects environments where migration history drifted and the
+    /// EF migration for these tables was not discovered/applied.
+    /// </summary>
+    private static void EnsureAssetDocumentTables(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS AssetDocuments (
+                    Id        TEXT PRIMARY KEY NOT NULL,
+                    AssetId   TEXT NOT NULL DEFAULT '',
+                    Label     TEXT NOT NULL DEFAULT 'Document',
+                    CreatedBy TEXT NULL,
+                    CreatedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_AssetDocuments_AssetId
+                ON AssetDocuments (AssetId)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS AssetDocumentRevisions (
+                    Id             TEXT PRIMARY KEY NOT NULL,
+                    DocumentId     TEXT NOT NULL DEFAULT '',
+                    RevisionNumber INTEGER NOT NULL DEFAULT 1,
+                    OriginalName   TEXT NOT NULL DEFAULT '',
+                    StoredName     TEXT NOT NULL DEFAULT '',
+                    MimeType       TEXT NOT NULL DEFAULT '',
+                    FileSizeBytes  INTEGER NOT NULL DEFAULT 0,
+                    UploadedBy     TEXT NULL,
+                    UploadedAt     TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_AssetDocumentRevisions_DocumentId
+                ON AssetDocumentRevisions (DocumentId)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Adds run time-tracking columns to AssetWorkflowRuns if missing.
+    /// </summary>
+    private static void EnsureRunTimeTrackingColumns(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='TimeTrackingJson'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE AssetWorkflowRuns ADD COLUMN TimeTrackingJson TEXT NOT NULL DEFAULT '[]'";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='ProductiveSeconds'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE AssetWorkflowRuns ADD COLUMN ProductiveSeconds INTEGER NOT NULL DEFAULT 0";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='DowntimeSeconds'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE AssetWorkflowRuns ADD COLUMN DowntimeSeconds INTEGER NOT NULL DEFAULT 0";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='DowntimeEvents'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE AssetWorkflowRuns ADD COLUMN DowntimeEvents INTEGER NOT NULL DEFAULT 0";
+                cmd.ExecuteNonQuery();
+            }
         }
         finally
         {

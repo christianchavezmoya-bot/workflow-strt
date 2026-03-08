@@ -2,10 +2,19 @@ import type { IssueComment } from "./projectAsset";
 
 export type RunStatus = "InProgress" | "Complete" | "Issue";
 
+export interface RunTimeEntry {
+  id: string;
+  category: "productive" | "downtime";
+  startedAtUtc: string;
+  endedAtUtc?: string | null;
+  reason?: string | null;
+}
+
 export interface RunIssue {
   id: string;
   description: string;
-  issueType: "blocking" | "observation";
+  /** "blocking" | "observation" | "scope-deviation" */
+  issueType: "blocking" | "observation" | "scope-deviation";
   severity: "low" | "medium" | "high";
   stepId?: string;
   stepTitle?: string;
@@ -19,6 +28,11 @@ export interface RunIssue {
   resolutionNote?: string;
   resolvedAt?: string;
   resolvedBy?: string;
+  /** Scope deviation extra fields */
+  extraHours?: number;
+  costImpact?: string;
+  approvedBy?: string;
+  approvedAt?: string;
 }
 
 export interface StepResult {
@@ -39,8 +53,15 @@ export interface AssetWorkflowRun {
   technicianUserId?: string;
   stepResultsJson: string;
   issuesJson: string;
+  timeTrackingJson: string;
+  productiveSeconds: number;
+  downtimeSeconds: number;
+  downtimeEvents: number;
   runNumber: number;
   completedByName?: string;
+  signatureStatus: string;
+  installerSignedAt?: string;
+  customerSignedAt?: string;
   startedAt: string;
   completedAt?: string;
   createdAt: string;

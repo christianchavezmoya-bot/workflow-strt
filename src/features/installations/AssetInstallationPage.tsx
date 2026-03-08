@@ -887,22 +887,47 @@ const AssetInstallationPage = () => {
   // Run history + re-run
   // ------------------------------------------------------------------
 
-  function openRunHistory(asset: ProjectAsset, wfConfigId?: string, wfConfigName?: string) {
-    const configId = wfConfigId ?? asset.productConfigId;
-    if (!configId) {
-      alert("No workflow config associated with this asset.");
+  async function openRunHistory(asset: ProjectAsset, wfConfigId?: string, wfConfigName?: string) {
+    // If a specific config was requested, open immediately
+    if (wfConfigId) {
+      const cached = wfConfigMap.get(wfConfigId);
+      const cfgName = wfConfigName ?? cached?.displayName ?? cached?.name ?? "Workflow";
+      setRunHistoryAsset(asset);
+      setRunHistoryConfigId(wfConfigId);
+      setRunHistoryConfigName(cfgName);
+      _openRunHistoryProjectContext(asset);
+      setRunHistoryOpen(true);
       return;
     }
-    const cached = wfConfigMap.get(configId);
-    const cfgName = wfConfigName ?? cached?.displayName ?? cached?.name ?? "Workflow";
+
+    // No config specified — fetch runs from API to find the correct configId
+    let assetRuns = runsMap[asset.id];
+    if (!assetRuns) {
+      try {
+        assetRuns = await assetWorkflowRunService.listByAsset(asset.id);
+        setRunsMap((prev) => ({ ...prev, [asset.id]: assetRuns! }));
+      } catch {
+        assetRuns = [];
+      }
+    }
+    const latestRun = [...assetRuns].sort((a, b) =>
+      new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    )[0];
+    // Prefer: run's configId > asset.productConfigId > open dialog with no filter (shows all)
+    const configId = latestRun?.workflowConfigId ?? asset.productConfigId ?? "";
+    const cached = configId ? wfConfigMap.get(configId) : undefined;
+    const cfgName = cached?.displayName ?? cached?.name ?? "Run History";
     setRunHistoryAsset(asset);
     setRunHistoryConfigId(configId);
     setRunHistoryConfigName(cfgName);
+    _openRunHistoryProjectContext(asset);
+    setRunHistoryOpen(true);
+  }
 
-    // Populate project / customer context for the PDF report
+  function _openRunHistoryProjectContext(asset: ProjectAsset) {
     const proj = projects.find((p) => p.id === asset.projectId);
     setRunHistoryProject(proj ? { customerName: proj.customerName, jobNumber: proj.jobNumber, siteName: proj.siteName } : null);
-    setRunHistoryCustomerLogo(null); // reset; fetch async below
+    setRunHistoryCustomerLogo(null);
     if (proj?.customerId) {
       customerService.getCustomers()
         .then(async (all) => {
@@ -912,8 +937,6 @@ const AssetInstallationPage = () => {
         })
         .catch(() => setRunHistoryCustomerLogo(null));
     }
-
-    setRunHistoryOpen(true);
   }
 
   async function handleGeneratePdfReport(asset: ProjectAsset) {
@@ -935,7 +958,8 @@ const AssetInstallationPage = () => {
         workflowConfigId: asset.productConfigId ?? "",
         workflowVersion: 1, workflowSnapshotJson: "{}",
         status: "InProgress", isLocked: false,
-        stepResultsJson: "[]", issuesJson: "[]",
+        stepResultsJson: "[]", issuesJson: "[]", timeTrackingJson: "[]",
+        productiveSeconds: 0, downtimeSeconds: 0, downtimeEvents: 0,
         runNumber: 1, startedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
@@ -1146,6 +1170,14 @@ const AssetInstallationPage = () => {
     if (openIssues.some(i => i.severity === "medium")) return "amber";
     if (openIssues.length === 0 && asset.status === "Complete") return "green";
     return "amber";
+  }
+
+  function formatRunDur(totalSeconds: number): string {
+    const safe = Math.max(0, totalSeconds || 0);
+    const h = Math.floor(safe / 3600);
+    const m = Math.floor((safe % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
   }
 
   async function saveInlineAssetIssue(asset: ProjectAsset, updatedIssue: AssetIssue) {
@@ -1691,9 +1723,11 @@ const AssetInstallationPage = () => {
         ) : (
           <Stack spacing={0.5}>
             {assignments.map((asgn) => {
-              const latestRun = runs
-                .filter((r) => r.workflowConfigId === asgn.workflowConfigId)
+              const configRuns = runs.filter((r) => r.workflowConfigId === asgn.workflowConfigId);
+              const latestRun = configRuns
                 .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+              const totalProductive = configRuns.reduce((s, r) => s + (r.productiveSeconds ?? 0), 0);
+              const totalDowntime   = configRuns.reduce((s, r) => s + (r.downtimeSeconds   ?? 0), 0);
               return (
                 <Stack key={asgn.id} direction="row" alignItems="center" spacing={1}
                   sx={{ p: 0.75, borderRadius: 1, border: "1px solid", borderColor: "divider", bgcolor: "rgba(255,255,255,0.02)" }}>
@@ -1702,6 +1736,20 @@ const AssetInstallationPage = () => {
                     <Typography variant="caption" color="text.secondary" display="block" noWrap>
                       {asgn.workflowConfigName || asgn.workflowConfigId}
                     </Typography>
+                    {configRuns.length > 0 && (
+                      <Stack direction="row" spacing={0.5} mt={0.25} useFlexGap flexWrap="wrap">
+                        <Chip size="small" label={`Productive ${formatRunDur(totalProductive)}`} color="success" variant="outlined"
+                          sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }} />
+                        {totalDowntime > 0 && (
+                          <Chip size="small" label={`Downtime ${formatRunDur(totalDowntime)}`} color="warning" variant="outlined"
+                            sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }} />
+                        )}
+                        {configRuns.length > 1 && (
+                          <Chip size="small" label={`${configRuns.length} runs`} variant="outlined"
+                            sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }} />
+                        )}
+                      </Stack>
+                    )}
                   </Box>
                   {latestRun && (
                     <Chip
@@ -1754,10 +1802,105 @@ const AssetInstallationPage = () => {
   }
 
   // ------------------------------------------------------------------
+  // Time tracking summary panel (expanded asset row)
+  // ------------------------------------------------------------------
+
+  function renderTimeTrackingPanel(asset: ProjectAsset) {
+    const runs = runsMap[asset.id] ?? [];
+    if (runs.length === 0) return null;
+
+    const totalProductive = runs.reduce((s, r) => s + (r.productiveSeconds ?? 0), 0);
+    const totalDowntime   = runs.reduce((s, r) => s + (r.downtimeSeconds   ?? 0), 0);
+    const totalDtEvents   = runs.reduce((s, r) => s + (r.downtimeEvents    ?? 0), 0);
+    if (totalProductive === 0 && totalDowntime === 0) return null;
+
+    // Collect all downtime entries across all runs for the breakdown table
+    const allDowntimeEntries: Array<{ runNumber: number; reason: string | null; startedAtUtc: string; endedAtUtc?: string | null; durationSecs: number }> = [];
+    for (const run of runs) {
+      let entries: Array<{ id: string; category: string; startedAtUtc: string; endedAtUtc?: string | null; reason?: string | null }> = [];
+      try { entries = JSON.parse(run.timeTrackingJson ?? "[]"); } catch {}
+      for (const e of entries) {
+        if (e.category !== "downtime") continue;
+        const endMs   = e.endedAtUtc ? new Date(e.endedAtUtc).getTime() : (run.completedAt ? new Date(run.completedAt).getTime() : null);
+        const durSecs = endMs ? Math.max(0, Math.floor((endMs - new Date(e.startedAtUtc).getTime()) / 1000)) : 0;
+        allDowntimeEntries.push({ runNumber: run.runNumber ?? 1, reason: e.reason ?? null, startedAtUtc: e.startedAtUtc, endedAtUtc: e.endedAtUtc, durationSecs: durSecs });
+      }
+    }
+
+    return (
+      <Box>
+        <Typography variant="caption" fontWeight={700} color="text.secondary"
+          sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1 }}>
+          Time Tracking
+        </Typography>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap mb={allDowntimeEntries.length > 0 ? 1.25 : 0}>
+          <Chip size="small" color="success" variant="outlined"
+            label={`Productive ${formatRunDur(totalProductive)}`}
+            sx={{ height: 20, fontSize: 10 }} />
+          <Chip size="small" color={totalDowntime > 0 ? "warning" : "default"} variant="outlined"
+            label={`Downtime ${formatRunDur(totalDowntime)}`}
+            sx={{ height: 20, fontSize: 10 }} />
+          {totalDtEvents > 0 && (
+            <Chip size="small" variant="outlined"
+              label={`${totalDtEvents} downtime event${totalDtEvents !== 1 ? "s" : ""}`}
+              sx={{ height: 20, fontSize: 10 }} />
+          )}
+          <Chip size="small" variant="outlined"
+            label={`${runs.length} run${runs.length !== 1 ? "s" : ""} total`}
+            sx={{ height: 20, fontSize: 10 }} />
+        </Stack>
+
+        {allDowntimeEntries.length > 0 && (
+          <Table size="small" sx={{ maxWidth: 600 }}>
+            <TableHead>
+              <TableRow sx={{ bgcolor: "rgba(255,255,255,0.03)" }}>
+                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 40 }}>Run</TableCell>
+                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary" }}>Reason</TableCell>
+                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 60 }}>Started</TableCell>
+                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 55 }}>Duration</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {allDowntimeEntries.map((e, i) => (
+                <TableRow key={i}>
+                  <TableCell sx={{ fontSize: 11, py: 0.5, color: "text.disabled" }}>#{e.runNumber}</TableCell>
+                  <TableCell sx={{ fontSize: 11, py: 0.5 }}>
+                    {e.reason || <Typography component="span" variant="caption" color="text.disabled">—</Typography>}
+                  </TableCell>
+                  <TableCell sx={{ fontSize: 11, py: 0.5, color: "text.secondary", whiteSpace: "nowrap" }}>
+                    {new Date(e.startedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                  </TableCell>
+                  <TableCell sx={{ fontSize: 11, py: 0.5, color: "warning.main", whiteSpace: "nowrap" }}>
+                    {e.durationSecs > 0 ? formatRunDur(e.durationSecs) : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Box>
+    );
+  }
+
+  // ------------------------------------------------------------------
   // Render
   // ------------------------------------------------------------------
 
   const activeHealth = activeProduct ? healthMap[activeProduct.id] : undefined;
+
+  const activeTimeRollup = useMemo(() => {
+    let productive = 0;
+    let downtime = 0;
+    let downtimeEvents = 0;
+    for (const asset of visibleAssets) {
+      for (const run of runsMap[asset.id] ?? []) {
+        productive      += run.productiveSeconds  ?? 0;
+        downtime        += run.downtimeSeconds    ?? 0;
+        downtimeEvents  += run.downtimeEvents     ?? 0;
+      }
+    }
+    return { productive, downtime, downtimeEvents };
+  }, [visibleAssets, runsMap]);
 
   return (
     <Stack spacing={3}>
@@ -1851,6 +1994,23 @@ const AssetInstallationPage = () => {
             <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
               {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}% complete
             </Typography>
+            {(activeTimeRollup.productive > 0 || activeTimeRollup.downtime > 0) && (
+              <>
+                <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+                <Tooltip title="Total productive time across all visible assets">
+                  <Chip size="small" color="success" variant="outlined"
+                    label={`Productive ${formatRunDur(activeTimeRollup.productive)}`}
+                    sx={{ fontSize: 10, height: 20 }} />
+                </Tooltip>
+                {activeTimeRollup.downtime > 0 && (
+                  <Tooltip title={`${activeTimeRollup.downtimeEvents} downtime event${activeTimeRollup.downtimeEvents !== 1 ? "s" : ""} across all visible assets`}>
+                    <Chip size="small" color="warning" variant="outlined"
+                      label={`Downtime ${formatRunDur(activeTimeRollup.downtime)}`}
+                      sx={{ fontSize: 10, height: 20 }} />
+                  </Tooltip>
+                )}
+              </>
+            )}
           </Stack>
         </Paper>
       )}
@@ -2037,6 +2197,15 @@ const AssetInstallationPage = () => {
                           )}
                           <Divider sx={{ my: 1.5 }} />
                           {renderIssuesPanel(asset)}
+                          {(() => {
+                            const timePanel = renderTimeTrackingPanel(asset);
+                            return timePanel ? (
+                              <>
+                                <Divider sx={{ my: 1.5 }} />
+                                {timePanel}
+                              </>
+                            ) : null;
+                          })()}
                           <Divider sx={{ my: 1.5 }} />
                           {renderWorkflowAssignmentsPanel(asset)}
                         </Box>

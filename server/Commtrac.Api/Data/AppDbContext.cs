@@ -54,6 +54,17 @@ public class AppDbContext : DbContext
     public DbSet<AssetDocumentRevisionEntity> AssetDocumentRevisions => Set<AssetDocumentRevisionEntity>();
     // ─── Asset Document Links (library references per asset) ─────────────────
     public DbSet<AssetDocumentLinkEntity> AssetDocumentLinks => Set<AssetDocumentLinkEntity>();
+    // ─── Project CRM ──────────────────────────────────────────────────────────
+    public DbSet<ProjectContactEntity> ProjectContacts => Set<ProjectContactEntity>();
+    public DbSet<ProjectDeliveryProfileEntity> ProjectDeliveryProfiles => Set<ProjectDeliveryProfileEntity>();
+    public DbSet<ProjectInboundItemEntity> ProjectInboundItems => Set<ProjectInboundItemEntity>();
+    // ─── Signatures ───────────────────────────────────────────────────────────
+    public DbSet<SignatureEventEntity> SignatureEvents => Set<SignatureEventEntity>();
+    public DbSet<SignatureTokenEntity> SignatureTokens => Set<SignatureTokenEntity>();
+    // ─── Dispatch / Logistics ─────────────────────────────────────────────────
+    public DbSet<DispatchOrderEntity> DispatchOrders => Set<DispatchOrderEntity>();
+    public DbSet<DispatchLineEntity> DispatchLines => Set<DispatchLineEntity>();
+    public DbSet<DeliveryEventEntity> DeliveryEvents => Set<DeliveryEventEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -235,6 +246,9 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<AssetWorkflowRunEntity>()
             .Property(r => r.WorkflowSnapshotJson).HasDefaultValue("{}");
 
+        modelBuilder.Entity<AssetWorkflowRunEntity>()
+            .Property(r => r.TimeTrackingJson).HasDefaultValue("[]");
+
         // ─── Asset Document indexes ───────────────────────────────────────────
         modelBuilder.Entity<AssetDocumentEntity>()
             .HasIndex(d => d.AssetId);
@@ -310,5 +324,4 @@ public class AppDbContext : DbContext
             });
     }
 }
-
 

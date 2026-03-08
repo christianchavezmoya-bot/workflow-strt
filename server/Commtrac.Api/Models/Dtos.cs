@@ -655,8 +655,15 @@ public record AssetWorkflowRunDto(
     string? TechnicianUserId,
     string StepResultsJson,
     string IssuesJson,
+    string TimeTrackingJson,
+    int ProductiveSeconds,
+    int DowntimeSeconds,
+    int DowntimeEvents,
     int RunNumber,
     string? CompletedByName,
+    string SignatureStatus,
+    DateTime? InstallerSignedAt,
+    DateTime? CustomerSignedAt,
     DateTime StartedAt,
     DateTime? CompletedAt,
     DateTime CreatedAt,
@@ -682,6 +689,13 @@ public record CompleteRunRequest(
 );
 
 public record PatchIssuesRequest(string IssuesJson);
+public record PatchTimeEntriesRequest(string TimeEntriesJson);
+public record TrackRunTimeRequest(
+    string Action,
+    string? Reason,
+    string? StartedAtUtc,
+    string? EndedAtUtc
+);
 
 public record BrandSettingDto(string? LogoBase64);
 public record UpdateBrandSettingRequest(string? LogoBase64);
@@ -723,4 +737,246 @@ public record CreateAssetDocumentLinkRequest(
     string AssetId,
     string DocumentId,
     string? AttachedBy
+);
+
+// ─── Project CRM — Contacts ────────────────────────────────────────────────────
+public record ProjectContactDto(
+    string Id,
+    string ProjectId,
+    string Name,
+    string? Title,
+    string? Email,
+    string? Phone,
+    string PreferredSignMethod,
+    bool IsPrimarySigner,
+    bool CcReports,
+    DateTime CreatedAt
+);
+
+public record UpsertProjectContactRequest(
+    string Name,
+    string? Title,
+    string? Email,
+    string? Phone,
+    string PreferredSignMethod,
+    bool IsPrimarySigner,
+    bool CcReports
+);
+
+// ─── Project CRM — Delivery Profiles ──────────────────────────────────────────
+public record ProjectDeliveryProfileDto(
+    string Id,
+    string ProjectId,
+    string Label,
+    string? ContactName,
+    string? ContactPhone,
+    string? ContactEmail,
+    string? AddressLine1,
+    string? AddressLine2,
+    string? City,
+    string? State,
+    string? PostCode,
+    string? Country,
+    string? DeliveryNotes,
+    string? AccessHours,
+    bool IsDefault,
+    DateTime CreatedAt
+);
+
+public record UpsertProjectDeliveryProfileRequest(
+    string Label,
+    string? ContactName,
+    string? ContactPhone,
+    string? ContactEmail,
+    string? AddressLine1,
+    string? AddressLine2,
+    string? City,
+    string? State,
+    string? PostCode,
+    string? Country,
+    string? DeliveryNotes,
+    string? AccessHours,
+    bool IsDefault
+);
+
+// ─── Project CRM — Inbound Items ──────────────────────────────────────────────
+public record ProjectInboundItemDto(
+    string Id,
+    string ProjectId,
+    string Description,
+    decimal Quantity,
+    string? Unit,
+    string Condition,
+    string? ReferenceNumber,
+    string? ReceivedDate,
+    string? ReceivedBy,
+    string? Notes,
+    string ItemType,
+    DateTime CreatedAt
+);
+
+public record UpsertProjectInboundItemRequest(
+    string Description,
+    decimal Quantity,
+    string? Unit,
+    string Condition,
+    string? ReferenceNumber,
+    string? ReceivedDate,
+    string? ReceivedBy,
+    string? Notes,
+    string ItemType
+);
+
+// ─── Signatures ───────────────────────────────────────────────────────────────
+public record SignatureEventDto(
+    string Id,
+    string RunId,
+    string SignerRole,
+    string SignerName,
+    string? SignerEmail,
+    string? SignerTitle,
+    DateTime SignedAtUtc,
+    bool HasDrawnSignature,
+    string? DeviceInfo,
+    string? IpAddress,
+    string ReasonCode,
+    string? Notes,
+    string? TokenId
+);
+
+public record SubmitSignatureRequest(
+    string SignerRole,
+    string SignerName,
+    string? SignerEmail,
+    string? SignerTitle,
+    string? SignatureData,
+    string ReasonCode,
+    string? Notes,
+    bool ConsentConfirmed
+);
+
+// ─── Signature Tokens ─────────────────────────────────────────────────────────
+public record SignatureTokenDto(
+    string Id,
+    string RunId,
+    string? ContactId,
+    string RecipientEmail,
+    string? RecipientName,
+    DateTime CreatedAtUtc,
+    DateTime ExpiresAtUtc,
+    DateTime? UsedAtUtc,
+    bool IsRevoked,
+    bool IsExpired
+);
+
+public record CreateSignatureTokenRequest(
+    string RunId,
+    string? ContactId,
+    string RecipientEmail,
+    string? RecipientName,
+    int ExpiresInHours
+);
+
+public record PublicRunSummaryDto(
+    string RunId,
+    string AssetName,
+    string AssetSerial,
+    string WorkflowName,
+    string ProjectJobNumber,
+    string CustomerName,
+    string CompletedByName,
+    DateTime CompletedAt,
+    string SignatureStatus,
+    string RecipientName,
+    string RecipientEmail,
+    bool TokenValid
+);
+
+public record PublicSubmitSignatureRequest(
+    string SignerName,
+    string? SignerTitle,
+    string? SignatureData,
+    string ReasonCode,
+    string? Notes,
+    bool ConsentConfirmed,
+    string? OtpCode
+);
+
+public record RequestOtpRequest(string TokenId);
+
+// ─── Dispatch / Logistics ─────────────────────────────────────────────────────
+public record DispatchOrderDto(
+    string Id,
+    string ProjectId,
+    string? DeliveryProfileId,
+    string? DeliveryProfileLabel,
+    string? RequestedByName,
+    string? NeededByDate,
+    string Priority,
+    string Status,
+    string? Carrier,
+    string? TrackingNumber,
+    string? TrackingUrl,
+    string? InternalNotes,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    List<DispatchLineDto> Lines,
+    List<DeliveryEventDto> Events
+);
+
+public record UpsertDispatchOrderRequest(
+    string ProjectId,
+    string? DeliveryProfileId,
+    string? RequestedByName,
+    string? NeededByDate,
+    string Priority,
+    string Status,
+    string? Carrier,
+    string? TrackingNumber,
+    string? TrackingUrl,
+    string? InternalNotes
+);
+
+public record DispatchLineDto(
+    string Id,
+    string OrderId,
+    string Description,
+    string? PartNumber,
+    decimal QuantityRequested,
+    decimal QuantityShipped,
+    string? Unit,
+    decimal? UnitCost,
+    bool IsBillable,
+    string? TaxCode,
+    string? Notes
+);
+
+public record UpsertDispatchLineRequest(
+    string Description,
+    string? PartNumber,
+    decimal QuantityRequested,
+    decimal QuantityShipped,
+    string? Unit,
+    decimal? UnitCost,
+    bool IsBillable,
+    string? TaxCode,
+    string? Notes
+);
+
+public record DeliveryEventDto(
+    string Id,
+    string OrderId,
+    string EventType,
+    DateTime OccurredAtUtc,
+    string? Location,
+    string? Notes,
+    string? RecordedBy
+);
+
+public record AddDeliveryEventRequest(
+    string EventType,
+    DateTime? OccurredAtUtc,
+    string? Location,
+    string? Notes,
+    string? RecordedBy
 );

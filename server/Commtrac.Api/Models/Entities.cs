@@ -697,11 +697,27 @@ public class AssetWorkflowRunEntity
     public string? TechnicianUserId { get; set; }
     public string StepResultsJson { get; set; } = "[]";
     public string IssuesJson { get; set; } = "[]";
+    /// <summary>
+    /// JSON array of time entries:
+    /// [{ id, category: productive|downtime, startedAtUtc, endedAtUtc, reason }]
+    /// </summary>
+    public string TimeTrackingJson { get; set; } = "[]";
+    /// <summary>Total productive seconds across closed time entries.</summary>
+    public int ProductiveSeconds { get; set; } = 0;
+    /// <summary>Total downtime seconds across closed time entries.</summary>
+    public int DowntimeSeconds { get; set; } = 0;
+    /// <summary>Count of downtime periods recorded for this run.</summary>
+    public int DowntimeEvents { get; set; } = 0;
     /// <summary>Sequential run number per asset+config (1 = first run, 2 = first re-run, …)</summary>
     public int RunNumber { get; set; } = 1;
     /// <summary>Full name of the user who locked/completed the run.</summary>
     [MaxLength(200)]
     public string? CompletedByName { get; set; }
+    /// <summary>None | PendingInstaller | PendingCustomer | Signed | Declined</summary>
+    [MaxLength(40)]
+    public string SignatureStatus { get; set; } = "None";
+    public DateTime? InstallerSignedAt { get; set; }
+    public DateTime? CustomerSignedAt { get; set; }
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -770,4 +786,216 @@ public class AssetDocumentLinkEntity
     [MaxLength(200)]
     public string? AttachedBy { get; set; }
     public DateTime AttachedAt { get; set; } = DateTime.UtcNow;
+}
+
+// ─── Project CRM — Contacts, Delivery Profiles, Inbound Items ─────────────────
+
+public class ProjectContactEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string ProjectId { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? Title { get; set; }
+    [MaxLength(200)]
+    public string? Email { get; set; }
+    [MaxLength(80)]
+    public string? Phone { get; set; }
+    /// <summary>email | sms</summary>
+    [MaxLength(40)]
+    public string PreferredSignMethod { get; set; } = "email";
+    public bool IsPrimarySigner { get; set; }
+    public bool CcReports { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class ProjectDeliveryProfileEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string ProjectId { get; set; } = string.Empty;
+    /// <summary>e.g. "Main Site", "Warehouse"</summary>
+    [MaxLength(100)]
+    public string Label { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string? ContactName { get; set; }
+    [MaxLength(80)]
+    public string? ContactPhone { get; set; }
+    [MaxLength(200)]
+    public string? ContactEmail { get; set; }
+    [MaxLength(500)]
+    public string? AddressLine1 { get; set; }
+    [MaxLength(200)]
+    public string? AddressLine2 { get; set; }
+    [MaxLength(100)]
+    public string? City { get; set; }
+    [MaxLength(80)]
+    public string? State { get; set; }
+    [MaxLength(20)]
+    public string? PostCode { get; set; }
+    [MaxLength(100)]
+    public string? Country { get; set; }
+    [MaxLength(800)]
+    public string? DeliveryNotes { get; set; }
+    [MaxLength(200)]
+    public string? AccessHours { get; set; }
+    public bool IsDefault { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class ProjectInboundItemEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string ProjectId { get; set; } = string.Empty;
+    [MaxLength(400)]
+    public string Description { get; set; } = string.Empty;
+    public decimal Quantity { get; set; } = 1;
+    [MaxLength(40)]
+    public string? Unit { get; set; }
+    /// <summary>Good | Damaged | Needs Assessment</summary>
+    [MaxLength(40)]
+    public string Condition { get; set; } = "Good";
+    /// <summary>PO#, warranty ref, RMA#, etc.</summary>
+    [MaxLength(200)]
+    public string? ReferenceNumber { get; set; }
+    [MaxLength(40)]
+    public string? ReceivedDate { get; set; }
+    [MaxLength(200)]
+    public string? ReceivedBy { get; set; }
+    [MaxLength(800)]
+    public string? Notes { get; set; }
+    /// <summary>Part | Warranty | Return | Other</summary>
+    [MaxLength(40)]
+    public string ItemType { get; set; } = "Part";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+// ─── Dual-Signature Events (append-only audit) ────────────────────────────────
+
+public class SignatureEventEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string RunId { get; set; } = string.Empty;
+    [MaxLength(40)]
+    public string SignerRole { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string SignerName { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string? SignerEmail { get; set; }
+    [MaxLength(100)]
+    public string? SignerTitle { get; set; }
+    public DateTime SignedAtUtc { get; set; } = DateTime.UtcNow;
+    public string? SignatureData { get; set; }
+    [MaxLength(400)]
+    public string? DeviceInfo { get; set; }
+    [MaxLength(60)]
+    public string? IpAddress { get; set; }
+    [MaxLength(40)]
+    public string ReasonCode { get; set; } = "Completed";
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+    [MaxLength(100)]
+    public string? TokenId { get; set; }
+}
+
+// ─── Signature Tokens (external Review & Sign links) ──────────────────────────
+
+public class SignatureTokenEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string RunId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? ContactId { get; set; }
+    [MaxLength(200)]
+    public string RecipientEmail { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string? RecipientName { get; set; }
+    [MaxLength(100)]
+    public string CreatedByUserId { get; set; } = string.Empty;
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime ExpiresAtUtc { get; set; }
+    public DateTime? UsedAtUtc { get; set; }
+    public bool IsRevoked { get; set; }
+    [MaxLength(200)]
+    public string? OtpHash { get; set; }
+    public DateTime? OtpExpiresAtUtc { get; set; }
+}
+
+// ─── Dispatch / Logistics ──────────────────────────────────────────────────────
+
+public class DispatchOrderEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string ProjectId { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string? DeliveryProfileId { get; set; }
+    [MaxLength(200)]
+    public string? RequestedByName { get; set; }
+    [MaxLength(40)]
+    public string? NeededByDate { get; set; }
+    [MaxLength(40)]
+    public string Priority { get; set; } = "Normal";
+    [MaxLength(40)]
+    public string Status { get; set; } = "Draft";
+    [MaxLength(200)]
+    public string? Carrier { get; set; }
+    [MaxLength(200)]
+    public string? TrackingNumber { get; set; }
+    [MaxLength(500)]
+    public string? TrackingUrl { get; set; }
+    [MaxLength(800)]
+    public string? InternalNotes { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class DispatchLineEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string OrderId { get; set; } = string.Empty;
+    [MaxLength(400)]
+    public string Description { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? PartNumber { get; set; }
+    public decimal QuantityRequested { get; set; } = 1;
+    public decimal QuantityShipped { get; set; } = 0;
+    [MaxLength(40)]
+    public string? Unit { get; set; }
+    public decimal? UnitCost { get; set; }
+    public bool IsBillable { get; set; } = true;
+    [MaxLength(100)]
+    public string? TaxCode { get; set; }
+    [MaxLength(400)]
+    public string? Notes { get; set; }
+}
+
+public class DeliveryEventEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string OrderId { get; set; } = string.Empty;
+    [MaxLength(40)]
+    public string EventType { get; set; } = string.Empty;
+    public DateTime OccurredAtUtc { get; set; } = DateTime.UtcNow;
+    [MaxLength(200)]
+    public string? Location { get; set; }
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+    [MaxLength(200)]
+    public string? RecordedBy { get; set; }
 }

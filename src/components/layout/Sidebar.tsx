@@ -21,6 +21,7 @@ import InventoryOutlinedIcon from "@mui/icons-material/InventoryOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
 import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
+import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
 import { NavLink } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
@@ -36,6 +37,7 @@ const navItems = [
   { label: "Installations",   icon: <TableChartOutlinedIcon />,           to: "/installations/assets" },
   { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
   { label: "Documents",       icon: <FolderOutlinedIcon />,               to: "/documents" },
+  { label: "Dispatch",        icon: <LocalShippingOutlinedIcon />,        to: "/dispatch" },
   { label: "Asset Registry",  icon: <InventoryOutlinedIcon />,            to: "/admin/asset-registry" },
   { label: "Admin",           icon: <AdminPanelSettingsOutlinedIcon />,   to: "/admin" },
   { label: "Settings",        icon: <SettingsOutlinedIcon />,             to: "/settings" },

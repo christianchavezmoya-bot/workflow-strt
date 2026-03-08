@@ -15,6 +15,8 @@ import ProfileWizard from "../features/profile/ProfileWizard";
 import Settings from "../features/settings/Settings";
 import Login from "../features/auth/Login";
 import ResetPassword from "../features/auth/ResetPassword";
+import ExternalSignPage from "../features/sign/ExternalSignPage";
+import DispatchBoardPage from "../features/dispatch/DispatchBoardPage";
 
 const SettingsRoute = () => {
   const can = usePermissions();
@@ -24,8 +26,12 @@ const SettingsRoute = () => {
 const AppRoutes = () => {
   return (
     <Routes>
+      {/* ── Public routes (no auth) ── */}
       <Route path="/login" element={<Login />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/sign/:tokenId" element={<ExternalSignPage />} />
+
+      {/* ── Authenticated app shell ── */}
       <Route element={<AppShell />}>
         <Route index element={<Dashboard />} />
         <Route path="/projects" element={<ProjectList />} />
@@ -35,6 +41,7 @@ const AppRoutes = () => {
         <Route path="/installations/assets" element={<AssetInstallationPage />} />
         <Route path="/work-instructions" element={<WorkInstructions />} />
         <Route path="/documents" element={<DocumentsPage />} />
+        <Route path="/dispatch" element={<DispatchBoardPage />} />
         <Route path="/admin" element={<UserManagement />} />
         <Route path="/admin/customers/:customerId/sites" element={<CustomerSites />} />
         <Route path="/admin/asset-registry" element={<AssetRegistryPage />} />

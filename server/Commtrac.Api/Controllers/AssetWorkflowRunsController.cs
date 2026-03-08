@@ -13,13 +13,40 @@ namespace Commtrac.Api.Controllers;
 public class AssetWorkflowRunsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    public AssetWorkflowRunsController(AppDbContext db) => _db = db;
+    private readonly ILogger<AssetWorkflowRunsController> _logger;
+    public AssetWorkflowRunsController(AppDbContext db, ILogger<AssetWorkflowRunsController> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
+
+    private sealed class RunTimeEntry
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+        [System.Text.Json.Serialization.JsonPropertyName("category")]
+        public string Category { get; set; } = "productive";
+        [System.Text.Json.Serialization.JsonPropertyName("startedAtUtc")]
+        public DateTime StartedAtUtc { get; set; } = DateTime.UtcNow;
+        [System.Text.Json.Serialization.JsonPropertyName("endedAtUtc")]
+        public DateTime? EndedAtUtc { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("reason")]
+        public string? Reason { get; set; }
+    }
+
+    private static readonly JsonSerializerOptions _caseInsensitive = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
 
     private static AssetWorkflowRunDto ToDto(AssetWorkflowRunEntity e) => new(
         e.Id, e.AssetId, e.WorkflowConfigId, e.WorkflowVersion,
         e.WorkflowSnapshotJson, e.WorkOrderId, e.Status, e.IsLocked,
         e.TechnicianUserId, e.StepResultsJson, e.IssuesJson,
+        e.TimeTrackingJson, e.ProductiveSeconds, e.DowntimeSeconds, e.DowntimeEvents,
         e.RunNumber, e.CompletedByName,
+        e.SignatureStatus, e.InstallerSignedAt, e.CustomerSignedAt,
         e.StartedAt, e.CompletedAt, e.CreatedAt, e.UpdatedAt
     );
 
@@ -27,11 +54,19 @@ public class AssetWorkflowRunsController : ControllerBase
     [HttpGet("by-asset/{assetId}")]
     public async Task<IActionResult> ListByAsset(string assetId)
     {
-        var runs = await _db.AssetWorkflowRuns
-            .Where(r => r.AssetId == assetId)
-            .OrderByDescending(r => r.StartedAt)
-            .ToListAsync();
-        return Ok(runs.Select(ToDto));
+        try
+        {
+            var runs = await _db.AssetWorkflowRuns
+                .Where(r => r.AssetId == assetId)
+                .OrderByDescending(r => r.StartedAt)
+                .ToListAsync();
+            return Ok(runs.Select(ToDto));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list workflow runs for asset {AssetId}", assetId);
+            return Ok(Array.Empty<AssetWorkflowRunDto>());
+        }
     }
 
     // GET api/asset-workflow-runs/{id}
@@ -88,11 +123,16 @@ public class AssetWorkflowRunsController : ControllerBase
             TechnicianUserId     = req.TechnicianUserId,
             StepResultsJson      = "[]",
             IssuesJson           = "[]",
+            TimeTrackingJson     = "[]",
+            ProductiveSeconds    = 0,
+            DowntimeSeconds      = 0,
+            DowntimeEvents       = 0,
             RunNumber            = runCount + 1,
             StartedAt            = now,
             CreatedAt            = now,
             UpdatedAt            = now,
         };
+        StartProductivePeriod(run, now, "Run started");
         _db.AssetWorkflowRuns.Add(run);
 
         // Update asset status to InProgress whenever a new run is created
@@ -120,6 +160,8 @@ public class AssetWorkflowRunsController : ControllerBase
         if (req.IssuesJson is not null) run.IssuesJson = req.IssuesJson;
         if (req.Status is not null)     run.Status     = req.Status;
         run.UpdatedAt = DateTime.UtcNow;
+        ApplyStatusDrivenTimeTracking(run, req.Status, run.UpdatedAt);
+        RecomputeRunTimeMetrics(run, run.UpdatedAt);
 
         // Update asset status based on current open issues in this run
         if (req.IssuesJson is not null)
@@ -167,8 +209,11 @@ public class AssetWorkflowRunsController : ControllerBase
         run.Status           = "Complete";
         run.IsLocked         = true;
         run.CompletedByName  = req.CompletedByName;
+        run.SignatureStatus  = "PendingInstaller";
         run.CompletedAt      = now;
         run.UpdatedAt        = now;
+        CloseAnyOpenTimeEntry(run, now);
+        RecomputeRunTimeMetrics(run, now);
 
         // Update asset status — Complete only if no open blocking issues remain across all runs
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
@@ -222,6 +267,21 @@ public class AssetWorkflowRunsController : ControllerBase
         return Ok(ToDto(run));
     }
 
+    // PATCH api/asset-workflow-runs/{id}/time-entries — replace time entries (works on locked runs for retroactive correction)
+    [HttpPatch("{id}/time-entries")]
+    public async Task<IActionResult> PatchTimeEntries(string id, [FromBody] PatchTimeEntriesRequest req)
+    {
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
+        if (run is null) return NotFound();
+
+        run.TimeTrackingJson = req.TimeEntriesJson;
+        run.UpdatedAt = DateTime.UtcNow;
+        RecomputeRunTimeMetrics(run, DateTime.UtcNow);
+
+        await _db.SaveChangesAsync();
+        return Ok(ToDto(run));
+    }
+
     // POST api/asset-workflow-runs/{id}/reopen  — Admin creates a new run from a locked run
     [HttpPost("{id}/reopen")]
     [Authorize(Roles = "Admin,Project Manager")]
@@ -229,6 +289,9 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var source = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (source is null) return NotFound();
+
+        var runCount = await _db.AssetWorkflowRuns
+            .CountAsync(r => r.AssetId == source.AssetId && r.WorkflowConfigId == source.WorkflowConfigId);
 
         var now = DateTime.UtcNow;
         var newRun = new AssetWorkflowRunEntity
@@ -242,10 +305,16 @@ public class AssetWorkflowRunsController : ControllerBase
             IsLocked             = false,
             StepResultsJson      = "[]",
             IssuesJson           = "[]",
+            TimeTrackingJson     = "[]",
+            ProductiveSeconds    = 0,
+            DowntimeSeconds      = 0,
+            DowntimeEvents       = 0,
+            RunNumber            = runCount + 1,
             StartedAt            = now,
             CreatedAt            = now,
             UpdatedAt            = now,
         };
+        StartProductivePeriod(newRun, now, "Re-run started");
         _db.AssetWorkflowRuns.Add(newRun);
 
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == source.AssetId);
@@ -259,10 +328,164 @@ public class AssetWorkflowRunsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = newRun.Id }, ToDto(newRun));
     }
 
+    // POST api/asset-workflow-runs/{id}/time-entry
+    [HttpPost("{id}/time-entry")]
+    public async Task<IActionResult> TrackTimeEntry(string id, [FromBody] TrackRunTimeRequest req)
+    {
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
+        if (run is null) return NotFound();
+        if (run.IsLocked)
+            return BadRequest(new { message = "This run is locked (completed)." });
+
+        var now = DateTime.UtcNow;
+        var startAt = ParseUtcOr(req.StartedAtUtc, now);
+        var endAt = ParseUtcOr(req.EndedAtUtc, now);
+        var action = (req.Action ?? string.Empty).Trim().ToLowerInvariant();
+
+        switch (action)
+        {
+            case "startproductive":
+            case "resumeproductive":
+                CloseOpenCategory(run, "downtime", endAt);
+                StartProductivePeriod(run, startAt, req.Reason ?? "Resumed");
+                run.Status = "InProgress";
+                break;
+            case "startdowntime":
+            case "stopproductive":
+                CloseOpenCategory(run, "productive", endAt);
+                StartDowntimePeriod(run, startAt, req.Reason ?? "Paused");
+                break;
+            case "stopdowntime":
+                CloseOpenCategory(run, "downtime", endAt);
+                break;
+            default:
+                return BadRequest(new { message = "Unknown action. Use StartProductive, ResumeProductive, StartDowntime, StopDowntime." });
+        }
+
+        run.UpdatedAt = now;
+        RecomputeRunTimeMetrics(run, now);
+        await _db.SaveChangesAsync();
+        return Ok(ToDto(run));
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
     private static List<JsonElement> ParseIssues(string json)
     {
         try { return JsonSerializer.Deserialize<List<JsonElement>>(json) ?? new(); }
         catch { return new(); }
+    }
+
+    private static DateTime ParseUtcOr(string? value, DateTime fallbackUtc)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return fallbackUtc;
+        if (!DateTime.TryParse(value, out var parsed)) return fallbackUtc;
+        return parsed.Kind == DateTimeKind.Utc ? parsed : DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+    }
+
+    private static List<RunTimeEntry> ParseTimeEntries(string json)
+    {
+        try { return JsonSerializer.Deserialize<List<RunTimeEntry>>(json, _caseInsensitive) ?? new(); }
+        catch { return new(); }
+    }
+
+    private static void SaveTimeEntries(AssetWorkflowRunEntity run, List<RunTimeEntry> entries)
+    {
+        run.TimeTrackingJson = JsonSerializer.Serialize(entries.OrderBy(e => e.StartedAtUtc).ToList(), _caseInsensitive);
+    }
+
+    private static void CloseAnyOpenTimeEntry(AssetWorkflowRunEntity run, DateTime atUtc)
+    {
+        var entries = ParseTimeEntries(run.TimeTrackingJson);
+        var open = entries.LastOrDefault(e => e.EndedAtUtc is null);
+        if (open is null) return;
+        open.EndedAtUtc = atUtc;
+        SaveTimeEntries(run, entries);
+    }
+
+    private static void CloseOpenCategory(AssetWorkflowRunEntity run, string category, DateTime atUtc)
+    {
+        var entries = ParseTimeEntries(run.TimeTrackingJson);
+        var open = entries.LastOrDefault(e => e.EndedAtUtc is null && e.Category == category);
+        if (open is null) return;
+        open.EndedAtUtc = atUtc;
+        SaveTimeEntries(run, entries);
+    }
+
+    private static bool HasOpenCategory(AssetWorkflowRunEntity run, string category)
+    {
+        return ParseTimeEntries(run.TimeTrackingJson).Any(e => e.EndedAtUtc is null && e.Category == category);
+    }
+
+    private static void StartProductivePeriod(AssetWorkflowRunEntity run, DateTime atUtc, string? reason)
+    {
+        if (HasOpenCategory(run, "productive")) return;
+        var entries = ParseTimeEntries(run.TimeTrackingJson);
+        entries.Add(new RunTimeEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            Category = "productive",
+            StartedAtUtc = atUtc,
+            EndedAtUtc = null,
+            Reason = reason
+        });
+        SaveTimeEntries(run, entries);
+    }
+
+    private static void StartDowntimePeriod(AssetWorkflowRunEntity run, DateTime atUtc, string? reason)
+    {
+        if (HasOpenCategory(run, "downtime")) return;
+        var entries = ParseTimeEntries(run.TimeTrackingJson);
+        entries.Add(new RunTimeEntry
+        {
+            Id = Guid.NewGuid().ToString(),
+            Category = "downtime",
+            StartedAtUtc = atUtc,
+            EndedAtUtc = null,
+            Reason = reason
+        });
+        SaveTimeEntries(run, entries);
+    }
+
+    private static void ApplyStatusDrivenTimeTracking(AssetWorkflowRunEntity run, string? incomingStatus, DateTime nowUtc)
+    {
+        if (string.IsNullOrWhiteSpace(incomingStatus)) return;
+        if (incomingStatus.Equals("Issue", StringComparison.OrdinalIgnoreCase))
+        {
+            CloseOpenCategory(run, "productive", nowUtc);
+            StartDowntimePeriod(run, nowUtc, "Issue status");
+            return;
+        }
+        if (incomingStatus.Equals("InProgress", StringComparison.OrdinalIgnoreCase))
+        {
+            CloseOpenCategory(run, "downtime", nowUtc);
+            StartProductivePeriod(run, nowUtc, "In progress");
+        }
+    }
+
+    private static void RecomputeRunTimeMetrics(AssetWorkflowRunEntity run, DateTime nowUtc)
+    {
+        var entries = ParseTimeEntries(run.TimeTrackingJson);
+        var productive = 0;
+        var downtime = 0;
+        var downtimeEvents = 0;
+        foreach (var entry in entries)
+        {
+            var end = entry.EndedAtUtc ?? nowUtc;
+            var seconds = (int)Math.Max(0, (end - entry.StartedAtUtc).TotalSeconds);
+            if (entry.Category == "downtime")
+            {
+                downtime += seconds;
+                downtimeEvents++;
+            }
+            else
+            {
+                productive += seconds;
+            }
+        }
+
+        run.ProductiveSeconds = productive;
+        run.DowntimeSeconds = downtime;
+        run.DowntimeEvents = downtimeEvents;
+        SaveTimeEntries(run, entries);
     }
 }

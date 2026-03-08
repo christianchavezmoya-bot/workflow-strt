@@ -3,6 +3,7 @@ import {
   Box,
   Button,
   Checkbox,
+  Collapse,
   IconButton,
   ListItemText,
   Menu,
@@ -17,7 +18,8 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { ArrowDropDown, DeleteOutline, EditOutlined } from "@mui/icons-material";
+import { ArrowDropDown, DeleteOutline, EditOutlined, ExpandLess, ExpandMore } from "@mui/icons-material";
+import ProjectChevronPanel from "./ProjectChevronPanel";
 import { Link } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
@@ -246,6 +248,7 @@ const ProjectList = () => {
     anchorEl: null,
     key: ""
   });
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
@@ -519,6 +522,7 @@ const ProjectList = () => {
           <Table sx={{ minWidth: 2000 }} size="small">
           <TableHead>
             <TableRow>
+              <TableCell sx={{ width: 40, padding: '8px 12px' }} />
               <TableCell sx={{ minWidth: 50, padding: '8px 12px' }}>#</TableCell>
               {orderedColumns.map((column) => (
                 <TableCell
@@ -545,46 +549,66 @@ const ProjectList = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {pagedProjects.map((project) => (
-              <TableRow key={project.id} hover>
-                <TableCell sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>{project.seq}</TableCell>
-                {orderedColumns.map((column) => (
-                  <TableCell
-                    key={`${project.id}-${column.id}`}
-                    sx={{
-                      maxWidth: column.maxWidth,
-                      whiteSpace: column.maxWidth ? 'normal' : 'nowrap',
-                      overflow: column.maxWidth ? 'hidden' : 'visible',
-                      textOverflow: column.maxWidth ? 'ellipsis' : 'clip',
-                      padding: '8px 12px'
-                    }}
-                  >
-                    {column.renderCell(project, products)}
-                  </TableCell>
-                ))}
-                <TableCell sx={{ padding: '8px 12px' }}>
-                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
-                    {renderActions(project)}
-                    {can.modifyData && (
-                      <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
-                        <EditOutlined fontSize="small" />
-                      </IconButton>
-                    )}
-                    {canDeleteProjects && (
+            {pagedProjects.map((project) => {
+              const isExpanded = expandedProjectId === project.id;
+              const colSpan = orderedColumns.length + 3; // chevron + seq + actions
+              return (
+                <React.Fragment key={project.id}>
+                  <TableRow hover selected={isExpanded}>
+                    <TableCell sx={{ width: 40, padding: '4px 8px' }}>
                       <IconButton
                         size="small"
-                        disabled={deleteSavingId === project.id}
-                        onClick={() => {
-                          setDeleteTarget(project);
+                        onClick={() => setExpandedProjectId(isExpanded ? null : project.id)}
+                        sx={{ color: isExpanded ? 'primary.main' : 'text.secondary' }}
+                      >
+                        {isExpanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+                      </IconButton>
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>{project.seq}</TableCell>
+                    {orderedColumns.map((column) => (
+                      <TableCell
+                        key={`${project.id}-${column.id}`}
+                        sx={{
+                          maxWidth: column.maxWidth,
+                          whiteSpace: column.maxWidth ? 'normal' : 'nowrap',
+                          overflow: column.maxWidth ? 'hidden' : 'visible',
+                          textOverflow: column.maxWidth ? 'ellipsis' : 'clip',
+                          padding: '8px 12px'
                         }}
                       >
-                        <DeleteOutline fontSize="small" />
-                      </IconButton>
-                    )}
-                  </Stack>
-                </TableCell>
-            </TableRow>
-          ))}
+                        {column.renderCell(project, products)}
+                      </TableCell>
+                    ))}
+                    <TableCell sx={{ padding: '8px 12px' }}>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
+                        {renderActions(project)}
+                        {can.modifyData && (
+                          <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
+                            <EditOutlined fontSize="small" />
+                          </IconButton>
+                        )}
+                        {canDeleteProjects && (
+                          <IconButton
+                            size="small"
+                            disabled={deleteSavingId === project.id}
+                            onClick={() => setDeleteTarget(project)}
+                          >
+                            <DeleteOutline fontSize="small" />
+                          </IconButton>
+                        )}
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell colSpan={colSpan} sx={{ p: 0, border: 0 }}>
+                      <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                        <ProjectChevronPanel projectId={project.id} />
+                      </Collapse>
+                    </TableCell>
+                  </TableRow>
+                </React.Fragment>
+              );
+            })}
         </TableBody>
           </Table>
         </Box>
