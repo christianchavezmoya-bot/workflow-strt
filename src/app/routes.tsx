@@ -2,21 +2,19 @@
 import AppShell from "../components/layout/AppShell";
 import { usePermissions } from "../hooks/usePermissions";
 import Dashboard from "../features/dashboard/Dashboard";
-import ProjectList from "../features/projects/ProjectList";
+import ProjectsPage from "../features/projects/ProjectsPage";
 import ProjectForm from "../features/projects/ProjectForm";
 import ProjectDetail from "../features/projects/ProjectDetail";
 import AssetInstallationPage from "../features/installations/AssetInstallationPage";
 import WorkInstructions from "../features/workInstructions/WorkInstructions";
 import UserManagement from "../features/admin/UserManagement";
 import CustomerSites from "../features/admin/CustomerSites";
-import AssetRegistryPage from "../features/admin/AssetRegistryPage";
 import DocumentsPage from "../features/documents/DocumentsPage";
 import ProfileWizard from "../features/profile/ProfileWizard";
 import Settings from "../features/settings/Settings";
 import Login from "../features/auth/Login";
 import ResetPassword from "../features/auth/ResetPassword";
 import ExternalSignPage from "../features/sign/ExternalSignPage";
-import DispatchBoardPage from "../features/dispatch/DispatchBoardPage";
 
 const SettingsRoute = () => {
   const can = usePermissions();
@@ -34,17 +32,16 @@ const AppRoutes = () => {
       {/* ── Authenticated app shell ── */}
       <Route element={<AppShell />}>
         <Route index element={<Dashboard />} />
-        <Route path="/projects" element={<ProjectList />} />
+        <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/new" element={<ProjectForm />} />
         <Route path="/projects/:id" element={<ProjectDetail />} />
         <Route path="/projects/:id/edit" element={<ProjectForm />} />
         <Route path="/installations/assets" element={<AssetInstallationPage />} />
         <Route path="/work-instructions" element={<WorkInstructions />} />
         <Route path="/documents" element={<DocumentsPage />} />
-        <Route path="/dispatch" element={<DispatchBoardPage />} />
         <Route path="/admin" element={<UserManagement />} />
         <Route path="/admin/customers/:customerId/sites" element={<CustomerSites />} />
-        <Route path="/admin/asset-registry" element={<AssetRegistryPage />} />
+        <Route path="/admin/asset-registry" element={<Navigate to="/projects" replace />} />
         <Route path="/settings" element={<SettingsRoute />} />
         <Route path="/profile" element={<ProfileWizard />} />
       </Route>

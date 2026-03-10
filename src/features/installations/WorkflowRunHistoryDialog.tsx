@@ -4,6 +4,7 @@ import {
   CheckCircleOutlined,
   DownloadOutlined,
   DrawOutlined,
+  EditOutlined,
   ErrorOutlined,
   ExpandLessOutlined,
   ExpandMoreOutlined,
@@ -17,10 +18,13 @@ import {
 import SignatureBadge from "../../components/ui/SignatureBadge";
 import SignatureDialog from "../../components/ui/SignatureDialog";
 import { signatureService, type CreateTokenPayload } from "../../services/signatureService";
+import { projectContactService } from "../../services/projectContactService";
+import type { ProjectContact } from "../../types/projectContact";
 import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Collapse,
@@ -29,6 +33,7 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControlLabel,
   IconButton,
   Stack,
   Table,
@@ -188,8 +193,43 @@ export default function WorkflowRunHistoryDialog({
   const [tokenDialogRun, setTokenDialogRun] = useState<AssetWorkflowRun | null>(null);
   const [tokenEmail, setTokenEmail] = useState("");
   const [tokenName, setTokenName] = useState("");
+  const [tokenMessage, setTokenMessage] = useState("");
   const [tokenSending, setTokenSending] = useState(false);
   const [tokenLink, setTokenLink] = useState<string | null>(null);
+  const [projectContacts, setProjectContacts] = useState<ProjectContact[]>([]);
+  const [autoContact, setAutoContact] = useState<ProjectContact | null>(null);
+  const [tokenEditMode, setTokenEditMode] = useState(false);
+  const [tokenSaveAsNew, setTokenSaveAsNew] = useState(false);
+
+  const DEFAULT_MESSAGE = "We are pleased to inform you that the installation work has been completed. Please use the link below to review the completed workflow documentation and provide your sign-off.";
+
+  const openTokenDialog = async (run: AssetWorkflowRun) => {
+    setTokenLink(null);
+    setTokenEditMode(false);
+    setTokenSaveAsNew(false);
+    setTokenMessage(DEFAULT_MESSAGE);
+    try {
+      const contacts = await projectContactService.listContacts(asset.projectId);
+      setProjectContacts(contacts);
+      const primary = contacts.find(c => c.isPrimarySigner) ?? contacts[0] ?? null;
+      setAutoContact(primary);
+      setTokenEmail(primary?.email ?? "");
+      setTokenName(primary?.name ?? "");
+    } catch {
+      setProjectContacts([]);
+      setAutoContact(null);
+      setTokenEmail("");
+      setTokenName("");
+    }
+    setTokenDialogRun(run);
+  };
+
+  const closeTokenDialog = () => {
+    setTokenDialogRun(null);
+    setTokenLink(null);
+    setTokenEditMode(false);
+    setTokenSaveAsNew(false);
+  };
 
   const handleSignedRefresh = () => {
     if (!open) return;
@@ -205,15 +245,53 @@ export default function WorkflowRunHistoryDialog({
     if (!tokenDialogRun) return;
     setTokenSending(true);
     try {
+      // Determine contactId: if using the auto-populated contact and not editing, link it
+      const isUsingAutoContact = !tokenEditMode && autoContact != null;
       const payload: CreateTokenPayload = {
         runId: tokenDialogRun.id,
+        contactId: isUsingAutoContact ? autoContact!.id : undefined,
         recipientEmail: tokenEmail,
         recipientName: tokenName || undefined,
-        expiresInHours: 72
+        expiresInHours: 72,
+        customMessage: tokenMessage.trim() || undefined
       };
       const token = await signatureService.createToken(payload);
       const baseUrl = window.location.origin;
       setTokenLink(`${baseUrl}/sign/${token.id}`);
+
+      // Save as new contact (Customer 2) if requested
+      if (tokenSaveAsNew && tokenEmail.trim()) {
+        try {
+          await projectContactService.createContact(asset.projectId, {
+            name: tokenName || tokenEmail,
+            email: tokenEmail,
+            phone: "",
+            title: "",
+            preferredSignMethod: "email",
+            isPrimarySigner: false,
+            ccReports: false,
+            address: ""
+          });
+        } catch { /* silently fail — token was already created */ }
+      }
+
+      // If no contacts existed, save as Customer 1
+      if (projectContacts.length === 0 && tokenEmail.trim()) {
+        try {
+          const saved = await projectContactService.createContact(asset.projectId, {
+            name: tokenName || tokenEmail,
+            email: tokenEmail,
+            phone: "",
+            title: "",
+            preferredSignMethod: "email",
+            isPrimarySigner: true,
+            ccReports: false,
+            address: ""
+          });
+          setProjectContacts([saved]);
+          setAutoContact(saved);
+        } catch { /* silently fail */ }
+      }
     } catch { /* handled inline */ }
     finally { setTokenSending(false); }
   };
@@ -244,9 +322,10 @@ export default function WorkflowRunHistoryDialog({
   async function handleDownloadReport(run: AssetWorkflowRun, includeAllSteps = false) {
     setReportGenerating(run.id);
     try {
-      const [brandSettings, resolvedCustLogo] = await Promise.all([
+      const [brandSettings, resolvedCustLogo, signatureEvents] = await Promise.all([
         brandSettingsService.get(),
         customerLogoBase64 ? resolveImageToDataUrl(customerLogoBase64) : Promise.resolve(null),
+        run.isLocked ? signatureService.listEvents(run.id) : Promise.resolve([]),
       ]);
       const bizLogoResolved = brandSettings.logoBase64
         ? await resolveImageToDataUrl(brandSettings.logoBase64)
@@ -263,6 +342,7 @@ export default function WorkflowRunHistoryDialog({
         siteLocation: asset.location ?? undefined,
         assignedTechnician,
         includeAllSteps,
+        signatureEvents,
       });
     } catch (err) {
       console.error("[WorkflowRunHistoryDialog] Report generation failed", err);
@@ -516,10 +596,7 @@ export default function WorkflowRunHistoryDialog({
                               startIcon={<LinkOutlined />}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setTokenLink(null);
-                                setTokenEmail("");
-                                setTokenName("");
-                                setTokenDialogRun(run);
+                                void openTokenDialog(run);
                               }}
                               sx={{ py: 0, minHeight: 26 }}
                             >
@@ -961,50 +1038,112 @@ export default function WorkflowRunHistoryDialog({
       )}
 
       {/* ── Request Customer Signature Dialog ── */}
-      <Dialog open={Boolean(tokenDialogRun)} onClose={() => setTokenDialogRun(null)} maxWidth="sm" fullWidth>
+      <Dialog open={Boolean(tokenDialogRun)} onClose={closeTokenDialog} maxWidth="sm" fullWidth>
         <DialogTitle>Request Customer Signature</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             {tokenLink ? (
               <>
-                <Alert severity="success">Secure link generated. Share it with the customer.</Alert>
+                <Alert severity="success">
+                  Secure link generated and email sent to {tokenEmail}.
+                </Alert>
                 <Box sx={{ p: 1.5, background: "rgba(0,0,0,0.2)", borderRadius: 1, wordBreak: "break-all" }}>
                   <Typography variant="caption" fontFamily="monospace">{tokenLink}</Typography>
                 </Box>
                 <Button
                   variant="outlined"
-                  onClick={() => { navigator.clipboard.writeText(tokenLink); }}
+                  onClick={() => { navigator.clipboard.writeText(tokenLink!); }}
                 >
                   Copy link
                 </Button>
               </>
             ) : (
               <>
-                <Typography variant="body2" color="text.secondary">
-                  A one-time secure link will be generated. Paste it into an email or share directly.
-                  The link expires in 72 hours.
+                {/* ── Recipient section ── */}
+                <Typography variant="subtitle2">Recipient</Typography>
+                {autoContact && !tokenEditMode ? (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1,
+                    p: 1, borderRadius: 1, background: "rgba(45,212,191,0.08)",
+                    border: "1px solid rgba(45,212,191,0.25)" }}>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2" fontWeight="bold">{tokenName || autoContact.name}</Typography>
+                      <Typography variant="caption" color="text.secondary">{tokenEmail || autoContact.email}</Typography>
+                      {autoContact.address && (
+                        <Typography variant="caption" color="text.disabled" sx={{ display: "block" }}>{autoContact.address}</Typography>
+                      )}
+                    </Box>
+                    <Tooltip title="Send to a different person">
+                      <IconButton size="small" onClick={() => setTokenEditMode(true)}>
+                        <EditOutlined fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                ) : (
+                  <>
+                    {projectContacts.length === 0 && (
+                      <Alert severity="info" sx={{ py: 0.5, fontSize: "0.8rem" }}>
+                        No contacts on file for this project. Enter details below — they will be saved as Customer 1.
+                      </Alert>
+                    )}
+                    {tokenEditMode && autoContact && (
+                      <Alert severity="info" sx={{ py: 0.5, fontSize: "0.8rem" }}>
+                        Sending to a different person. Check the box below to save them as a project contact.
+                      </Alert>
+                    )}
+                    <TextField
+                      label="Customer name"
+                      value={tokenName}
+                      onChange={e => setTokenName(e.target.value)}
+                      size="small"
+                      fullWidth
+                    />
+                    <TextField
+                      label="Customer email *"
+                      value={tokenEmail}
+                      onChange={e => setTokenEmail(e.target.value)}
+                      size="small"
+                      fullWidth
+                      type="email"
+                    />
+                    {tokenEditMode && autoContact && (
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            size="small"
+                            checked={tokenSaveAsNew}
+                            onChange={e => setTokenSaveAsNew(e.target.checked)}
+                          />
+                        }
+                        label={<Typography variant="body2">Save as Customer 2 in project contacts</Typography>}
+                      />
+                    )}
+                  </>
+                )}
+
+                <Divider />
+
+                {/* ── Message to customer ── */}
+                <Typography variant="subtitle2">Message to customer</Typography>
+                <TextField
+                  label="Invitation message"
+                  value={tokenMessage}
+                  onChange={e => setTokenMessage(e.target.value)}
+                  size="small"
+                  fullWidth
+                  multiline
+                  minRows={4}
+                  helperText="Included in the email sent to the customer. Leave as default or customise."
+                />
+
+                <Typography variant="caption" color="text.disabled">
+                  A one-time secure link valid for 72 hours will be generated and sent automatically.
                 </Typography>
-                <TextField
-                  label="Customer email"
-                  value={tokenEmail}
-                  onChange={e => setTokenEmail(e.target.value)}
-                  size="small"
-                  fullWidth
-                  type="email"
-                />
-                <TextField
-                  label="Customer name (optional)"
-                  value={tokenName}
-                  onChange={e => setTokenName(e.target.value)}
-                  size="small"
-                  fullWidth
-                />
               </>
             )}
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setTokenDialogRun(null)}>
+          <Button onClick={closeTokenDialog}>
             {tokenLink ? "Done" : "Cancel"}
           </Button>
           {!tokenLink && (
@@ -1013,7 +1152,7 @@ export default function WorkflowRunHistoryDialog({
               onClick={handleCreateToken}
               disabled={!tokenEmail.trim() || tokenSending}
             >
-              {tokenSending ? <CircularProgress size={18} /> : "Generate link"}
+              {tokenSending ? <CircularProgress size={18} /> : "Send to customer"}
             </Button>
           )}
         </DialogActions>

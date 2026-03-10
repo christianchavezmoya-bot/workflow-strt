@@ -16,6 +16,7 @@ import autoTable from "jspdf-autotable";
 import type { AssetWorkflowRun, RunIssue, RunTimeEntry, StepResult } from "../types/assetWorkflowRun";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { WorkflowStep } from "../types/workflow";
+import type { SignatureEvent } from "../types/signature";
 
 // ─── Colour palette ──────────────────────────────────────────────────────────
 const NAVY: [number, number, number]       = [26,  39,  68];   // header band / step card header
@@ -167,6 +168,8 @@ export interface GenerateReportParams {
   assignedTechnician?: string;
   /** If true, renders ALL steps defined in the workflow snapshot (not just captured ones). */
   includeAllSteps?: boolean;
+  /** Installer and/or customer signature events — used to render the sign-off block. */
+  signatureEvents?: SignatureEvent[];
 }
 
 export async function generateWorkflowReport(params: GenerateReportParams): Promise<void> {
@@ -175,6 +178,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     businessLogoBase64, customerLogoBase64, companyName = "Commtrac",
     customerName, jobNumber, siteName, siteLocation, assignedTechnician,
     includeAllSteps = false,
+    signatureEvents = [],
   } = params;
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -645,53 +649,116 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   }
 
   // ── 5. Signature block ───────────────────────────────────────────────────────
-  const sigBlockH = 34;
-  const sigY = PAGE_H - FOOTER_H - 6 - sigBlockH;
+  const installer = signatureEvents.find((e) => e.signerRole === "Installer") ?? null;
+  const customer  = signatureEvents.find((e) => e.signerRole === "Customer")  ?? null;
+  const sigBlockH = 58;
 
-  if (y > sigY) {
-    doc.addPage();
-    drawFooter(totalPages());
+  y = ensureSpace(y, sigBlockH + 10);
+
+  const sy0 = y;
+  y = drawSectionBar(sy0, "SIGN-OFF");
+
+  const sigColW = (CONTENT_W - 8) / 2;
+  const sigCol1 = MARGIN;
+  const sigCol2 = MARGIN + sigColW + 8;
+  const imgH    = 22;   // height of the drawn-signature image box
+  const imgW    = sigColW;
+
+  // Helper: draw one signature column
+  async function drawSigColumn(
+    colX: number,
+    title: string,
+    event: SignatureEvent | null,
+    sigStatus: string,
+  ): Promise<void> {
+    let cy = y;
+
+    // Column title
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...NAVY);
+    doc.text(title, colX, cy);
+    cy += 5;
+
+    // Signature image box or blank rectangle
+    doc.setDrawColor(180, 180, 190);
+    doc.setLineWidth(0.3);
+    doc.rect(colX, cy, imgW, imgH);
+
+    if (event?.signatureData && event.hasDrawnSignature) {
+      const fmt = detectImageFormat(event.signatureData);
+      if (fmt) {
+        try {
+          const size = await getImageNaturalSize(event.signatureData);
+          let dw = imgW - 4, dh = imgH - 4;
+          if (size && size.w > 0 && size.h > 0) {
+            const scale = Math.min((imgW - 4) / size.w, (imgH - 4) / size.h);
+            dw = size.w * scale;
+            dh = size.h * scale;
+          }
+          doc.addImage(
+            event.signatureData, fmt,
+            colX + (imgW - dw) / 2,
+            cy  + (imgH - dh) / 2,
+            dw, dh, undefined, "FAST",
+          );
+        } catch { /* leave box blank */ }
+      }
+    } else if (!event) {
+      // Blank — label inside box for manual signing
+      doc.setFontSize(7.5);
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(180, 180, 190);
+      doc.text("Sign here", colX + imgW / 2, cy + imgH / 2 + 1.5, { align: "center" });
+    } else if (event && !event.hasDrawnSignature) {
+      // Name typed, no drawing
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(...GREY_LABEL);
+      doc.text(event.signerName, colX + imgW / 2, cy + imgH / 2 + 2, { align: "center" });
+    }
+
+    cy += imgH + 3;
+
+    // Info rows below the box
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...GREY_LABEL);
+
+    if (event) {
+      const dateStr = new Date(event.signedAtUtc).toLocaleString(undefined, {
+        year: "numeric", month: "short", day: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+      const lines: string[] = [
+        `Name: ${event.signerName}`,
+        event.signerTitle ? `Title: ${event.signerTitle}` : "",
+        `Date: ${dateStr}`,
+        `Outcome: ${event.reasonCode}`,
+        event.notes ? `Notes: ${event.notes}` : "",
+      ].filter(Boolean);
+      for (const line of lines) {
+        doc.text(line, colX, cy);
+        cy += 4.5;
+      }
+    } else {
+      // Blank lines for manual fill
+      const blankLineW = imgW * 0.7;
+      doc.setDrawColor(160, 160, 160);
+      doc.setLineWidth(0.25);
+      doc.line(colX, cy + 3,  colX + blankLineW, cy + 3);  cy += 8;
+      doc.text("Name / Date", colX, cy);
+      // Check waived status
+      if (sigStatus === "WaivedCustomer" && title.includes("Customer")) {
+        doc.setFont("helvetica", "italic");
+        doc.setTextColor(...ORANGE);
+        doc.text("Customer signature waived", colX, cy - 4);
+      }
+    }
   }
 
-  const sy0 = sigY;
-  doc.setFillColor(...GREY_BG);
-  doc.rect(MARGIN, sy0, CONTENT_W, 6.5, "F");
-  doc.setFontSize(8.5);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(...GREY_LABEL);
-  doc.text("SIGN-OFF", MARGIN + 3, sy0 + 4.4);
-
-  const sigColW  = (CONTENT_W - 8) / 2;
-  const sigCol1  = MARGIN;
-  const sigCol2  = MARGIN + sigColW + 8;
-  const sigLineW = sigColW * 0.64;
-  const dateGap  = sigColW * 0.06;
-  const dateStart = sigLineW + dateGap;
-  const dateLineW = sigColW - dateStart;
-
-  doc.setDrawColor(160, 160, 160);
-  doc.setLineWidth(0.3);
-
-  let sy = sy0 + 13;
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(...BLACK);
-  doc.text("Technician", sigCol1, sy);
-  doc.text("Customer Approval", sigCol2, sy);
-
-  sy += 10;
-  doc.line(sigCol1,             sy, sigCol1 + sigLineW,              sy);
-  doc.line(sigCol1 + dateStart, sy, sigCol1 + dateStart + dateLineW, sy);
-  doc.line(sigCol2,             sy, sigCol2 + sigLineW,              sy);
-  doc.line(sigCol2 + dateStart, sy, sigCol2 + dateStart + dateLineW, sy);
-
-  sy += 4;
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(...GREY_LABEL);
-  doc.text("Signature", sigCol1, sy);
-  doc.text("Date:", sigCol1 + dateStart, sy);
-  doc.text("Signature", sigCol2, sy);
-  doc.text("Date:", sigCol2 + dateStart, sy);
+  await drawSigColumn(sigCol1, "TECHNICIAN SIGN-OFF",  installer, run.signatureStatus);
+  await drawSigColumn(sigCol2, "CUSTOMER APPROVAL",    customer,  run.signatureStatus);
 
   // ── Draw footer on every page ─────────────────────────────────────────────────
   const numPages = totalPages();

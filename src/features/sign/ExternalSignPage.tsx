@@ -4,10 +4,10 @@
  *
  * Flow:
  *   1. Load summary via GET /api/public/sign/{tokenId}
- *   2. If OTP required → show OTP input (handled in submit payload)
- *   3. Customer reviews, draws/types signature, ticks consent
+ *   2. "review" stage — customer sees work summary + can download PDF report
+ *   3. "sign" stage — customer fills in name, draws/types signature, ticks consent
  *   4. POST /api/public/sign/{tokenId}/submit
- *   5. Show confirmation or error
+ *   5. "done" stage — confirmation screen
  */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -17,6 +17,7 @@ import {
   Box,
   Button,
   Checkbox,
+  Chip,
   CircularProgress,
   Divider,
   FormControl,
@@ -28,9 +29,18 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { CheckCircleOutlined, GestureOutlined, KeyboardOutlined } from "@mui/icons-material";
+import {
+  ArrowForwardOutlined,
+  CheckCircleOutlined,
+  DownloadOutlined,
+  GestureOutlined,
+  KeyboardOutlined
+} from "@mui/icons-material";
 import api from "../../services/api";
-import type { PublicRunSummary } from "../../types/signature";
+import type { PublicRunSummary, SignatureEvent } from "../../types/signature";
+import { generateWorkflowReport } from "../../utils/generateWorkflowReport";
+import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
+import type { ProjectAsset } from "../../types/projectAsset";
 
 // ─── Signature canvas ──────────────────────────────────────────────────────────
 
@@ -121,7 +131,7 @@ function SignaturePad({
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
 type InputMode = "typed" | "drawn";
-type Stage = "loading" | "error" | "review" | "otp" | "done";
+type Stage = "loading" | "error" | "review" | "sign" | "done";
 
 export default function ExternalSignPage() {
   const { tokenId } = useParams<{ tokenId: string }>();
@@ -141,6 +151,7 @@ export default function ExternalSignPage() {
   const [needsOtp, setNeedsOtp] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [downloadingReport, setDownloadingReport] = useState(false);
 
   useEffect(() => {
     if (!tokenId) return;
@@ -157,12 +168,84 @@ export default function ExternalSignPage() {
       });
   }, [tokenId]);
 
+  const handleDownloadReport = async () => {
+    if (!summary) return;
+    setDownloadingReport(true);
+    try {
+      // Build minimal run + asset objects for the report generator
+      const run: AssetWorkflowRun = {
+        id: summary.runId,
+        assetId: "",
+        workflowConfigId: "",
+        workflowVersion: 1,
+        workflowSnapshotJson: summary.workflowSnapshotJson,
+        status: "Complete",
+        isLocked: true,
+        stepResultsJson: summary.stepResultsJson,
+        issuesJson: summary.issuesJson,
+        timeTrackingJson: "[]",
+        productiveSeconds: 0,
+        downtimeSeconds: 0,
+        downtimeEvents: 0,
+        runNumber: 1,
+        completedByName: summary.completedByName,
+        signatureStatus: summary.signatureStatus,
+        completedAt: summary.completedAt,
+        startedAt: summary.completedAt,
+        createdAt: summary.completedAt,
+        updatedAt: summary.completedAt,
+      };
+      const asset: ProjectAsset = {
+        id: "",
+        projectId: "",
+        productId: "",
+        assetTag: summary.assetTag ?? summary.assetName,
+        assetName: summary.assetName,
+        serialNumber: summary.assetSerial || undefined,
+        location: summary.assetLocation,
+        status: "Complete",
+        featureValuesJson: "{}",
+        issuesJson: "[]",
+        createdAt: summary.completedAt,
+        updatedAt: summary.completedAt,
+      };
+
+      // Build installer signature event if available
+      const signatureEvents: SignatureEvent[] = [];
+      if (summary.installerSignerName) {
+        signatureEvents.push({
+          id: "installer",
+          runId: summary.runId,
+          signerRole: "Installer",
+          signerName: summary.installerSignerName,
+          signedAtUtc: summary.installerSignedAt ?? summary.completedAt,
+          hasDrawnSignature: !!summary.installerSignatureData,
+          signatureData: summary.installerSignatureData,
+          reasonCode: (summary.installerReasonCode ?? "Completed") as SignatureEvent["reasonCode"],
+          notes: summary.installerNotes,
+        });
+      }
+
+      await generateWorkflowReport({
+        run,
+        asset,
+        workflowConfigName: summary.workflowName,
+        customerName: summary.customerName,
+        jobNumber: summary.projectJobNumber,
+        signatureEvents,
+        includeAllSteps: true,
+      });
+    } finally {
+      setDownloadingReport(false);
+    }
+  };
+
   const handleRequestOtp = async () => {
     try {
       await api.post(`/public/sign/${tokenId}/request-otp`);
       setNeedsOtp(true);
     } catch {
-      setSubmitError("Failed to send OTP. Please try again.");
+      setSubmitError("Failed to send OTP code. Please try again.");
     }
   };
 
@@ -213,12 +296,12 @@ export default function ExternalSignPage() {
 
   if (stage === "done") {
     return (
-      <Box sx={{ maxWidth: 500, mx: "auto", mt: 8, p: 3, textAlign: "center" }}>
-        <CheckCircleOutlined sx={{ fontSize: 64, color: "#4caf50", mb: 2 }} />
+      <Box sx={{ maxWidth: 500, mx: "auto", mt: 10, p: 3, textAlign: "center" }}>
+        <CheckCircleOutlined sx={{ fontSize: 72, color: "#4caf50", mb: 2 }} />
         <Typography variant="h5" fontWeight={700} gutterBottom>
           {reasonCode === "Declined" ? "Document Declined" : "Signature Recorded"}
         </Typography>
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 360, mx: "auto" }}>
           {reasonCode === "Declined"
             ? "Your decline has been recorded and the team has been notified."
             : "Thank you. Your signature has been recorded and the installation certificate is now complete."}
@@ -227,46 +310,92 @@ export default function ExternalSignPage() {
     );
   }
 
+  // ─── Summary card (shared between review + sign stages) ────────────────────
+  const SummaryCard = () => summary ? (
+    <Box sx={{ border: "1px solid #e0e0e0", borderRadius: 2, p: 2, mb: 3, background: "#fafafa" }}>
+      <Typography variant="subtitle2" fontWeight={700} gutterBottom>{summary.workflowName}</Typography>
+      <Stack spacing={0.5}>
+        <Typography variant="body2" color="text.secondary">
+          Asset: <strong>{summary.assetName}</strong>{summary.assetSerial ? ` (${summary.assetSerial})` : ""}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Project: {summary.projectJobNumber} — {summary.customerName}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Completed by: {summary.completedByName}
+        </Typography>
+        {summary.completedAt && (
+          <Typography variant="body2" color="text.secondary">
+            Completed: {new Date(summary.completedAt).toLocaleDateString(undefined, {
+              year: "numeric", month: "long", day: "numeric"
+            })}
+          </Typography>
+        )}
+        {summary.installerSignerName && (
+          <Chip
+            size="small"
+            color="success"
+            label={`Installer signed: ${summary.installerSignerName}`}
+            sx={{ alignSelf: "flex-start", mt: 0.5 }}
+          />
+        )}
+      </Stack>
+    </Box>
+  ) : null;
+
+  // ─── Stage: review ─────────────────────────────────────────────────────────
+  if (stage === "review") {
+    return (
+      <Box sx={{ maxWidth: 560, mx: "auto", mt: 4, p: 3 }}>
+        <Typography variant="h5" fontWeight={700} gutterBottom>
+          Installation Record
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Please review the work completed below. You can download the full report before signing.
+        </Typography>
+
+        <SummaryCard />
+
+        <Stack spacing={1.5}>
+          <Button
+            variant="outlined"
+            startIcon={downloadingReport ? <CircularProgress size={16} /> : <DownloadOutlined />}
+            onClick={handleDownloadReport}
+            disabled={downloadingReport}
+            fullWidth
+          >
+            {downloadingReport ? "Generating report…" : "Download Full Report (PDF)"}
+          </Button>
+
+          <Button
+            variant="contained"
+            size="large"
+            endIcon={<ArrowForwardOutlined />}
+            onClick={() => setStage("sign")}
+            fullWidth
+          >
+            Proceed to Sign
+          </Button>
+        </Stack>
+
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2, textAlign: "center" }}>
+          By proceeding, you acknowledge you have reviewed the information above.
+        </Typography>
+      </Box>
+    );
+  }
+
+  // ─── Stage: sign ───────────────────────────────────────────────────────────
   return (
     <Box sx={{ maxWidth: 560, mx: "auto", mt: 4, p: 3 }}>
-      {/* Header */}
+      <Button size="small" variant="text" onClick={() => setStage("review")} sx={{ mb: 1, ml: -1 }}>
+        ← Back to review
+      </Button>
       <Typography variant="h5" fontWeight={700} gutterBottom>
-        Review & Sign
-      </Typography>
-      <Typography variant="body2" color="text.secondary" gutterBottom>
-        You have been asked to review and sign the installation document below.
+        Sign Document
       </Typography>
 
-      {/* Install summary card */}
-      {summary && (
-        <Box sx={{
-          border: "1px solid #e0e0e0",
-          borderRadius: 2,
-          p: 2,
-          mb: 3,
-          background: "#fafafa"
-        }}>
-          <Stack spacing={0.5}>
-            <Typography variant="subtitle2">{summary.workflowName}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Asset: {summary.assetName} {summary.assetSerial && `(${summary.assetSerial})`}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Project: {summary.projectJobNumber} — {summary.customerName}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Completed by: {summary.completedByName}
-            </Typography>
-            {summary.completedAt && (
-              <Typography variant="body2" color="text.secondary">
-                Completed: {new Date(summary.completedAt).toLocaleDateString(undefined, {
-                  year: "numeric", month: "long", day: "numeric"
-                })}
-              </Typography>
-            )}
-          </Stack>
-        </Box>
-      )}
+      <SummaryCard />
 
       <Divider sx={{ mb: 3 }} />
 

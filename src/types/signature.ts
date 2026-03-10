@@ -17,6 +17,7 @@ export interface SignatureEvent {
   signerTitle?: string;
   signedAtUtc: string;
   hasDrawnSignature: boolean;
+  signatureData?: string;   // base64 PNG — present when a drawn signature was captured
   deviceInfo?: string;
   ipAddress?: string;
   reasonCode: ReasonCode;
@@ -50,4 +51,16 @@ export interface PublicRunSummary {
   recipientName: string;
   recipientEmail: string;
   tokenValid: boolean;
+  // Report generation fields
+  workflowSnapshotJson: string;
+  stepResultsJson: string;
+  issuesJson: string;
+  assetTag?: string;
+  assetLocation?: string;
+  // Installer signature (already captured)
+  installerSignerName?: string;
+  installerSignatureData?: string;
+  installerReasonCode?: string;
+  installerNotes?: string;
+  installerSignedAt?: string;
 }

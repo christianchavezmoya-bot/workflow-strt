@@ -50,6 +50,7 @@ public class ProjectContactsController : ControllerBase
             PreferredSignMethod = request.PreferredSignMethod,
             IsPrimarySigner     = request.IsPrimarySigner,
             CcReports           = request.CcReports,
+            Address             = request.Address,
             CreatedAt           = DateTime.UtcNow
         };
 
@@ -73,6 +74,7 @@ public class ProjectContactsController : ControllerBase
         entity.PreferredSignMethod = request.PreferredSignMethod;
         entity.IsPrimarySigner     = request.IsPrimarySigner;
         entity.CcReports           = request.CcReports;
+        entity.Address             = request.Address;
 
         await _db.SaveChangesAsync();
         return Ok(ToDto(entity));
@@ -100,6 +102,7 @@ public class ProjectContactsController : ControllerBase
         e.PreferredSignMethod,
         e.IsPrimarySigner,
         e.CcReports,
+        e.Address,
         e.CreatedAt
     );
 }

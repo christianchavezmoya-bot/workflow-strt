@@ -304,7 +304,23 @@ public record QuickbaseSettingsDto(
     string ProjectsTableId,
     string InstallationsTableId,
     Dictionary<string, int> ProjectsFieldMap,
-    Dictionary<string, int> InstallationsFieldMap
+    Dictionary<string, int> InstallationsFieldMap,
+    string GoodsMovementsTableId,
+    int GoodsMovementsJobFid,
+    int GoodsMovementsDirectionFid
+);
+
+public record GoodsMovementDto(
+    string Direction,
+    string MovementRef,
+    string Date,
+    string ToFrom,
+    string ConsignmentRef,
+    string JobNumber,
+    string OrderRef,
+    string Goods,
+    string HandledBy,
+    string NavPoNumber
 );
 
 public record InspectionDto(
@@ -750,6 +766,7 @@ public record ProjectContactDto(
     string PreferredSignMethod,
     bool IsPrimarySigner,
     bool CcReports,
+    string? Address,
     DateTime CreatedAt
 );
 
@@ -760,7 +777,8 @@ public record UpsertProjectContactRequest(
     string? Phone,
     string PreferredSignMethod,
     bool IsPrimarySigner,
-    bool CcReports
+    bool CcReports,
+    string? Address
 );
 
 // ─── Project CRM — Delivery Profiles ──────────────────────────────────────────
@@ -837,6 +855,7 @@ public record SignatureEventDto(
     string? SignerTitle,
     DateTime SignedAtUtc,
     bool HasDrawnSignature,
+    string? SignatureData,   // base64 PNG — included for report generation
     string? DeviceInfo,
     string? IpAddress,
     string ReasonCode,
@@ -874,7 +893,8 @@ public record CreateSignatureTokenRequest(
     string? ContactId,
     string RecipientEmail,
     string? RecipientName,
-    int ExpiresInHours
+    int ExpiresInHours,
+    string? CustomMessage
 );
 
 public record PublicRunSummaryDto(
@@ -889,7 +909,19 @@ public record PublicRunSummaryDto(
     string SignatureStatus,
     string RecipientName,
     string RecipientEmail,
-    bool TokenValid
+    bool TokenValid,
+    // Fields needed to generate the PDF report on the client
+    string WorkflowSnapshotJson,
+    string StepResultsJson,
+    string IssuesJson,
+    string? AssetTag,
+    string? AssetLocation,
+    // Installer signature (already captured; customer can see it in the report)
+    string? InstallerSignerName,
+    string? InstallerSignatureData,
+    string? InstallerReasonCode,
+    string? InstallerNotes,
+    DateTime? InstallerSignedAt
 );
 
 public record PublicSubmitSignatureRequest(

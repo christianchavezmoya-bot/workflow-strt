@@ -1016,7 +1016,9 @@ export const UserManagement: React.FC = () => {
       try {
         const data = await adminTabsService.getAll();
         if (data.length > 0) {
-          setAdminTabsConfig(data);
+          // Strip dispatch tab if it was previously injected (now lives in Projects page)
+          const cleaned = data.filter((t) => t.type !== "dispatch");
+          setAdminTabsConfig(cleaned);
           setAdminTabsLoaded(true);
           return;
         }
@@ -5835,7 +5837,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" color="text.secondary">
-                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "customers" ? "Customers" : item.type === "products" ? "Products" : item.type === "assets" ? "Assets" : "Default"}
+                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "dispatch" ? "Dispatch" : item.type === "customers" ? "Customers" : item.type === "products" ? "Products" : item.type === "assets" ? "Assets" : "Default"}
                       </Typography>
                     </TableCell>
                     <TableCell>

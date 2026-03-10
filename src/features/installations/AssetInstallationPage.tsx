@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AddOutlined,
   ArchiveOutlined,
@@ -229,6 +229,11 @@ const AssetInstallationPage = () => {
   const users = useAppSelector((s) => s.users.items);
   const [searchParams] = useSearchParams();
 
+  // Stale-load guard: incremented every time activeProduct changes so that
+  // results from a superseded fetch (triggered before the tab restoration
+  // effect corrects the tab) are silently discarded.
+  const assetLoadIdRef = useRef(0);
+
   const [tab, setTab] = useState(0);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     () => { try { return sessionStorage.getItem("installations_selected_project_id") ?? ""; } catch { return ""; } }
@@ -386,12 +391,15 @@ const AssetInstallationPage = () => {
 
   useEffect(() => {
     if (!activeProduct?.id) { setAssets([]); setConfigs([]); setPublishedWfConfigs([]); return; }
+    // Increment the load ID so any in-flight load from a previous product is ignored
+    const loadId = ++assetLoadIdRef.current;
     setLoadingAssets(true);
     Promise.all([
       projectAssetService.listByProduct(activeProduct.id),
       productConfigService.listByProduct(activeProduct.id),
       workflowConfigService.listByProduct(activeProduct.id, "Published"),
     ]).then(([a, c, wc]) => {
+      if (loadId !== assetLoadIdRef.current) return; // Stale — a newer load is in flight
       setAssets(a);
       setConfigs(c);
       setPublishedWfConfigs(wc);
@@ -401,8 +409,13 @@ const AssetInstallationPage = () => {
       Promise.all(a.map(async (asset) => {
         const docs = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
         countMap[asset.id] = docs.length;
-      })).then(() => setDocsCountMap(countMap));
-    }).finally(() => setLoadingAssets(false));
+      })).then(() => {
+        if (loadId !== assetLoadIdRef.current) return; // Stale
+        setDocsCountMap(countMap);
+      });
+    }).finally(() => {
+      if (loadId === assetLoadIdRef.current) setLoadingAssets(false);
+    });
   }, [activeProduct?.id]);
 
   const refreshAssets = () => {

@@ -6,6 +6,9 @@
   installationsTableId: string;
   projectsFieldMap: string;
   installationsFieldMap: string;
+  goodsMovementsTableId: string;
+  goodsMovementsJobFid: string;
+  goodsMovementsDirectionFid: string;
 }
 
 export interface QuickbaseSettingsPayload {
@@ -16,6 +19,9 @@ export interface QuickbaseSettingsPayload {
   installationsTableId: string;
   projectsFieldMap: Record<string, number>;
   installationsFieldMap: Record<string, number>;
+  goodsMovementsTableId: string;
+  goodsMovementsJobFid: number;
+  goodsMovementsDirectionFid: number;
 }
 
 export interface NotificationSettingsPayload {

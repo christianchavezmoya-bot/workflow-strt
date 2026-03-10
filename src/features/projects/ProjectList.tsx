@@ -602,7 +602,9 @@ const ProjectList = () => {
                   <TableRow>
                     <TableCell colSpan={colSpan} sx={{ p: 0, border: 0 }}>
                       <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                        <ProjectChevronPanel projectId={project.id} />
+                        <Box sx={{ position: "sticky", left: 0, width: "calc(100vw - 20px)", maxWidth: "100%", overflow: "hidden" }}>
+                          <ProjectChevronPanel projectId={project.id} />
+                        </Box>
                       </Collapse>
                     </TableCell>
                   </TableRow>

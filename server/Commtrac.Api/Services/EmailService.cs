@@ -19,7 +19,9 @@ public interface IEmailSender
     Task SendInviteAsync(string toEmail, string inviteLink);
     Task SendPasswordResetAsync(string toEmail, string resetLink);
     Task SendNotificationAsync(string toEmail, string subject, string body);
+    Task SendSignatureLinkAsync(string toEmail, string recipientName, string signLink, string assetName, DateTime expiresAtUtc, string? customMessage = null);
 }
+
 
 public sealed class EmailSender : IEmailSender
 {
@@ -40,6 +42,23 @@ public sealed class EmailSender : IEmailSender
 
     public Task SendNotificationAsync(string toEmail, string subject, string body)
         => SendAsync(toEmail, subject, body);
+
+    public Task SendSignatureLinkAsync(string toEmail, string recipientName, string signLink, string assetName, DateTime expiresAtUtc, string? customMessage = null)
+    {
+        var name = string.IsNullOrWhiteSpace(recipientName) ? "Customer" : recipientName;
+        var expires = expiresAtUtc.ToString("dddd, MMMM d yyyy 'at' h:mm tt 'UTC'");
+        var defaultMsg = $"We are pleased to inform you that the installation work for the following asset has been completed: {assetName}.\n\n" +
+                         $"Please use the link below to review the completed workflow documentation and provide your sign-off:";
+        var invitation = string.IsNullOrWhiteSpace(customMessage) ? defaultMsg : customMessage.Trim();
+        var body =
+            $"Hello {name},\n\n" +
+            $"{invitation}\n\n" +
+            $"{signLink}\n\n" +
+            $"This link will expire on {expires}.\n\n" +
+            $"If you did not expect this email, please disregard it.\n\n" +
+            $"— Commtrac";
+        return SendAsync(toEmail, $"Signature Required — {assetName}", body);
+    }
 
     private async Task SendAsync(string toEmail, string subject, string body)
     {

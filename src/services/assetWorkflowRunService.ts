@@ -65,6 +65,12 @@ export const assetWorkflowRunService = {
     return res.data;
   },
 
+  /** Mark customer signature as waived — run stays complete but skips customer sign-off. */
+  async waiveCustomerSignature(runId: string): Promise<AssetWorkflowRun> {
+    const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/waive-customer-signature`);
+    return res.data;
+  },
+
   async trackTimeEntry(
     runId: string,
     action: "StartProductive" | "ResumeProductive" | "StartDowntime" | "StopDowntime",

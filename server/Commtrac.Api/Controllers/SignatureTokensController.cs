@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,8 +14,15 @@ namespace Commtrac.Api.Controllers;
 public class SignatureTokensController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IEmailSender _email;
+    private readonly IConfiguration _config;
 
-    public SignatureTokensController(AppDbContext db) => _db = db;
+    public SignatureTokensController(AppDbContext db, IEmailSender email, IConfiguration config)
+    {
+        _db = db;
+        _email = email;
+        _config = config;
+    }
 
     // GET /api/signature-tokens?runId=xxx
     [HttpGet]
@@ -56,14 +64,26 @@ public class SignatureTokensController : ControllerBase
         _db.SignatureTokens.Add(token);
         await _db.SaveChangesAsync();
 
-        // Advance run status to PendingCustomer if installer has already signed
-        if (run.SignatureStatus == "PendingCustomer")
-        {
-            // already correct
-        }
-        else if (run.SignatureStatus == "Signed" || run.SignatureStatus == "Declined")
-        {
+        if (run.SignatureStatus == "Signed" || run.SignatureStatus == "Declined")
             return BadRequest(new { message = "Run is already fully signed or declined." });
+
+        // Auto-send the sign link to the recipient if an email address was provided
+        if (!string.IsNullOrWhiteSpace(token.RecipientEmail))
+        {
+            var baseUrl = _config["Email:FrontendBaseUrl"]?.TrimEnd('/') ?? "http://localhost:5173";
+            var signLink = $"{baseUrl}/sign/{token.Id}";
+
+            // Resolve the asset name from the run's asset
+            var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+            var assetName = asset?.AssetName ?? asset?.AssetTag ?? asset?.SerialNumber ?? "Asset";
+
+            _ = _email.SendSignatureLinkAsync(
+                token.RecipientEmail,
+                token.RecipientName ?? "",
+                signLink,
+                assetName,
+                token.ExpiresAtUtc,
+                req.CustomMessage);
         }
 
         return CreatedAtAction(nameof(List), new { runId = req.RunId }, ToDto(token));

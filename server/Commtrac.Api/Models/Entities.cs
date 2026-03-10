@@ -405,6 +405,10 @@ public class QuickbaseSettingsEntity
     public string InstallationsTableId { get; set; } = string.Empty;
     public string ProjectsFieldMapJson { get; set; } = "{}";
     public string InstallationsFieldMapJson { get; set; } = "{}";
+    [MaxLength(80)]
+    public string GoodsMovementsTableId { get; set; } = string.Empty;
+    public int GoodsMovementsJobFid { get; set; }
+    public int GoodsMovementsDirectionFid { get; set; }
 }
 
 public class NotificationSettingsEntity
@@ -809,6 +813,7 @@ public class ProjectContactEntity
     public string PreferredSignMethod { get; set; } = "email";
     public bool IsPrimarySigner { get; set; }
     public bool CcReports { get; set; }
+    public string? Address { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

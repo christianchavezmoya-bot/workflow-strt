@@ -10,6 +10,7 @@ export interface ProjectContact {
   preferredSignMethod: SignMethod;
   isPrimarySigner: boolean;
   ccReports: boolean;
+  address?: string;
   createdAt: string;
 }
 

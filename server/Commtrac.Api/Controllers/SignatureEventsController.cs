@@ -101,6 +101,7 @@ public class SignatureEventsController : ControllerBase
         e.SignerTitle,
         e.SignedAtUtc,
         !string.IsNullOrEmpty(e.SignatureData),
+        e.SignatureData,
         e.DeviceInfo,
         e.IpAddress,
         e.ReasonCode,

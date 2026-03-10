@@ -55,7 +55,7 @@ const TAB_LABELS: Record<string, string> = {
   offices: "Global Offices",
   products: "Products",
   // Settings tabs
-  quickbase: "Quickbase",
+  quickbase: "Integrations",
   sms: "SMS/SMTP",
   fields: "Fields/Data",
   "workflow-types": "Workflow Types",
@@ -268,10 +268,23 @@ const Topbar = () => {
         </Stack>
       </Stack>
       <Stack direction="row" spacing={2} alignItems="center">
-        <Box className="status-chip">
-          <span className="status-dot" />
-          Quickbase connected
-        </Box>
+        {(() => {
+          try {
+            const s = JSON.parse(localStorage.getItem("qb_settings") ?? "{}");
+            if (!s?.enabled) return null;
+            const host: string = s.realmHostname ?? "";
+            const provider = host.includes("quickbase") ? "Quickbase"
+              : host.includes("salesforce") ? "Salesforce"
+              : host ? new URL(`https://${host}`).hostname.split(".").slice(-2, -1)[0] ?? "API"
+              : "API";
+            return (
+              <Box className="status-chip">
+                <span className="status-dot" />
+                {provider} connected
+              </Box>
+            );
+          } catch { return null; }
+        })()}
         {isAdminUser && (
           <>
             <Chip

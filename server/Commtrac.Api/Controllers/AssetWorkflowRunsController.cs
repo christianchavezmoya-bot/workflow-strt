@@ -488,4 +488,20 @@ public class AssetWorkflowRunsController : ControllerBase
         run.DowntimeEvents = downtimeEvents;
         SaveTimeEntries(run, entries);
     }
+
+    // POST api/asset-workflow-runs/{id}/waive-customer-signature
+    [HttpPost("{id}/waive-customer-signature")]
+    public async Task<ActionResult<AssetWorkflowRunDto>> WaiveCustomerSignature(string id)
+    {
+        var run = await _db.AssetWorkflowRuns.FindAsync(id);
+        if (run is null) return NotFound();
+        if (!run.IsLocked) return BadRequest(new { message = "Run must be completed before waiving customer signature." });
+        if (run.SignatureStatus != "PendingCustomer")
+            return UnprocessableEntity(new { message = "Run is not currently awaiting customer signature." });
+
+        run.SignatureStatus = "WaivedCustomer";
+        run.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ToDto(run));
+    }
 }

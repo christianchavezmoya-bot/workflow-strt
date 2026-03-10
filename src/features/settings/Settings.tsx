@@ -191,7 +191,10 @@ const defaultSettings: QuickbaseSettingsForm = {
   projectsTableId: "",
   installationsTableId: "",
   projectsFieldMap: "{}",
-  installationsFieldMap: "{}"
+  installationsFieldMap: "{}",
+  goodsMovementsTableId: "",
+  goodsMovementsJobFid: "",
+  goodsMovementsDirectionFid: ""
 };
 
 const loadSettings = (): QuickbaseSettingsForm => {
@@ -367,7 +370,10 @@ const Settings = () => {
       projectsTableId: settings.projectsTableId.trim(),
       installationsTableId: settings.installationsTableId.trim(),
       projectsFieldMap: projectsMap.value || {},
-      installationsFieldMap: installationsMap.value || {}
+      installationsFieldMap: installationsMap.value || {},
+      goodsMovementsTableId: settings.goodsMovementsTableId.trim(),
+      goodsMovementsJobFid: parseInt(settings.goodsMovementsJobFid, 10) || 0,
+      goodsMovementsDirectionFid: parseInt(settings.goodsMovementsDirectionFid, 10) || 0
     }),
     [settings, projectsMap.value, installationsMap.value]
   );
@@ -904,7 +910,7 @@ const Settings = () => {
           Settings
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Configure optional Quickbase integration and notification providers.
+          Configure external integrations and notification providers.
         </Typography>
       </Box>
 
@@ -914,7 +920,7 @@ const Settings = () => {
           const key = SETTINGS_TAB_KEYS[next] ?? "";
           if (key) setSearchParams({ tab: key }, { replace: true });
         }}>
-          <Tab label="Quickbase" />
+          <Tab label="Integrations" />
           <Tab label="SMS/SMTP" />
           <Tab label="Fields/Data" />
           <Tab label="Workflow Types" onClick={() => { if (wfTypes.length === 0) loadWfTypes(); }} />
@@ -924,7 +930,7 @@ const Settings = () => {
 
         {tab === 0 && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
-            <Typography variant="h6">Quickbase integration (optional)</Typography>
+            <Typography variant="h6">External integrations (optional)</Typography>
             <Stack direction="row" spacing={2} alignItems="center">
               <Switch
                 checked={settings.enabled}
@@ -933,17 +939,17 @@ const Settings = () => {
                 }
               />
               <Typography variant="body2">
-                Enable Quickbase integration for the backend
+                Enable external API integration
               </Typography>
             </Stack>
             <Typography variant="body2" color="text.secondary">
               Step-by-step
             </Typography>
             <ol style={{ margin: 0, paddingLeft: 18 }}>
-              <li>Generate a Quickbase user token in your realm.</li>
-              <li>Paste your realm hostname (example: company.quickbase.com).</li>
-              <li>Enter Projects and Installations table IDs (dbids).</li>
-              <li>Provide field maps so the backend can map app fields to Quickbase FIDs.</li>
+              <li>Generate an API user token in your external service (e.g. Quickbase realm).</li>
+              <li>Paste the service hostname (example: company.quickbase.com).</li>
+              <li>Enter Projects and Installations table IDs.</li>
+              <li>Provide field maps so the backend can map app fields to the external service.</li>
               <li>Click Save settings to store locally for testing.</li>
               <li>Use Copy JSON or Send to backend for integration handoff.</li>
             </ol>
@@ -1010,6 +1016,43 @@ const Settings = () => {
               minRows={4}
               fullWidth
             />
+
+            <Divider sx={{ my: 1, borderColor: "rgba(255,255,255,0.08)" }} />
+            <Typography variant="subtitle2" color="text.secondary">
+              Goods Movements (optional)
+            </Typography>
+            <Typography variant="caption" color="text.disabled">
+              Set up to sync despatched and received goods into project panels. Open a record in Quickbase
+              to find the Table DBID in the URL (e.g. <code>…/db/XXXXXXXX</code>). Field IDs are numeric
+              — hover a field label in Quickbase app settings to reveal them.
+            </Typography>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+              <TextField
+                label="Goods Movements table ID (dbid)"
+                value={settings.goodsMovementsTableId}
+                onChange={(e) => setSettings((p) => ({ ...p, goodsMovementsTableId: e.target.value }))}
+                fullWidth
+                placeholder="e.g. bpqxy123"
+              />
+            </Stack>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+              <TextField
+                label='Job Number field ID (FID)'
+                value={settings.goodsMovementsJobFid}
+                onChange={(e) => setSettings((p) => ({ ...p, goodsMovementsJobFid: e.target.value }))}
+                fullWidth
+                type="number"
+                helperText='FID of "Order Reference Number" or "Purchased for Job Number"'
+              />
+              <TextField
+                label='Direction field ID (FID)'
+                value={settings.goodsMovementsDirectionFid}
+                onChange={(e) => setSettings((p) => ({ ...p, goodsMovementsDirectionFid: e.target.value }))}
+                fullWidth
+                type="number"
+                helperText='FID of "Incoming/Outgoing" field'
+              />
+            </Stack>
 
             {!isValid && (
               <Alert severity="warning">

@@ -18,6 +18,7 @@ export interface CreateTokenPayload {
   recipientEmail: string;
   recipientName?: string;
   expiresInHours: number;
+  customMessage?: string;
 }
 
 export const signatureService = {

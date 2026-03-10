@@ -39,6 +39,9 @@ public class SettingsController : ControllerBase
         settings.InstallationsTableId = request.InstallationsTableId;
         settings.ProjectsFieldMapJson = JsonSerializer.Serialize(request.ProjectsFieldMap ?? new Dictionary<string, int>());
         settings.InstallationsFieldMapJson = JsonSerializer.Serialize(request.InstallationsFieldMap ?? new Dictionary<string, int>());
+        settings.GoodsMovementsTableId = request.GoodsMovementsTableId ?? "";
+        settings.GoodsMovementsJobFid = request.GoodsMovementsJobFid;
+        settings.GoodsMovementsDirectionFid = request.GoodsMovementsDirectionFid;
 
         await _db.SaveChangesAsync();
         return Ok(request);

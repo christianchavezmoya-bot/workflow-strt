@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
 
@@ -45,11 +46,27 @@ public class PublicSignController : ControllerBase
             ? await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId)
             : null;
 
+        // Fetch installer signature event for the report preview
+        var installerEvt = await _db.SignatureEvents
+            .Where(e => e.RunId == run.Id && e.SignerRole == "Installer")
+            .OrderByDescending(e => e.SignedAtUtc)
+            .FirstOrDefaultAsync();
+
+        // Extract workflow name from snapshot
+        var workflowName = run.WorkflowConfigId;
+        try
+        {
+            var snap = JsonSerializer.Deserialize<JsonElement>(run.WorkflowSnapshotJson ?? "{}");
+            if (snap.TryGetProperty("name", out var nameProp))
+                workflowName = nameProp.GetString() ?? workflowName;
+        }
+        catch { /* fallback to configId */ }
+
         return Ok(new PublicRunSummaryDto(
             run.Id,
             asset?.AssetName ?? asset?.AssetTag ?? "Asset",
             asset?.SerialNumber ?? "",
-            run.CompletedByName ?? "",
+            workflowName,
             project?.JobNumber ?? "",
             project?.CustomerName ?? "",
             run.CompletedByName ?? "",
@@ -57,7 +74,17 @@ public class PublicSignController : ControllerBase
             run.SignatureStatus,
             token.RecipientName ?? "",
             token.RecipientEmail,
-            true
+            true,
+            run.WorkflowSnapshotJson ?? "{}",
+            run.StepResultsJson ?? "[]",
+            run.IssuesJson ?? "[]",
+            asset?.AssetTag,
+            asset?.Location,
+            installerEvt?.SignerName,
+            installerEvt?.SignatureData,
+            installerEvt?.ReasonCode,
+            installerEvt?.Notes,
+            installerEvt?.SignedAtUtc
         ));
     }
 
