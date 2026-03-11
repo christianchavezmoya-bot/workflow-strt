@@ -8,6 +8,7 @@
   installationsFieldMap: string;
   goodsMovementsTableId: string;
   goodsMovementsJobFid: string;
+  goodsMovementsOrderRefFid: string;
   goodsMovementsDirectionFid: string;
 }
 
@@ -21,6 +22,7 @@ export interface QuickbaseSettingsPayload {
   installationsFieldMap: Record<string, number>;
   goodsMovementsTableId: string;
   goodsMovementsJobFid: number;
+  goodsMovementsOrderRefFid: number;
   goodsMovementsDirectionFid: number;
 }
 

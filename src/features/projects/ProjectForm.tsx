@@ -62,6 +62,7 @@ const schema = z
     customerId: z.string().optional(),
     siteId: z.string().optional(),
     jobNumber: z.string().optional(),
+    purchaseOrderNumber: z.string().optional(),
     description: z.string().optional(),
     startDate: z.string().optional(),
     finishDate: z.string().optional(),
@@ -158,6 +159,7 @@ const ProjectForm = () => {
       customerId: "",
       siteId: "",
       jobNumber: "",
+      purchaseOrderNumber: "",
       description: "",
       startDate: "",
       finishDate: "",
@@ -192,6 +194,7 @@ const ProjectForm = () => {
         customerId: localProject.customerId,
         siteId: localProject.siteId || "",
         jobNumber: localProject.jobNumber,
+        purchaseOrderNumber: localProject.purchaseOrderNumber || "",
         description: localProject.description,
         startDate: localProject.startDate,
         finishDate: localProject.finishDate,
@@ -214,6 +217,7 @@ const ProjectForm = () => {
         customerId: project.customerId,
         siteId: project.siteId || "",
         jobNumber: project.jobNumber,
+        purchaseOrderNumber: project.purchaseOrderNumber || "",
         description: project.description,
         startDate: project.startDate,
         finishDate: project.finishDate,
@@ -545,6 +549,7 @@ const ProjectForm = () => {
       customerId: selected?.customerId || "",
       siteId: data.siteId || undefined,
       jobNumber: data.jobNumber || "",
+      purchaseOrderNumber: data.purchaseOrderNumber || "",
       description: data.description || "",
       startDate: data.startDate || "",
       finishDate: data.finishDate || "",
@@ -684,6 +689,7 @@ const ProjectForm = () => {
   const labelSite = builtInLabel("siteName", "Site");
   const labelProducts = builtInLabel("products", "Product name");
   const labelJobNumber = builtInLabel("jobNumber", "Job Number");
+  const labelPurchaseOrderNumber = builtInLabel("purchaseOrderNumber", "Purchase Order Number");
   const labelOffice = builtInLabel("office", "Office");
   const labelRegion = builtInLabel("region", "Country");
   const labelProjectManager = builtInLabel("projectManager", "Project Manager");
@@ -695,6 +701,7 @@ const ProjectForm = () => {
   const baseFieldIds = useMemo(
     () => [
       "jobNumber",
+      "purchaseOrderNumber",
       "customerName",
       "siteName",
       "customerId",
@@ -952,6 +959,23 @@ const ProjectForm = () => {
                   helperText={
                     errors.jobNumber?.message || "Internal job number used for installations and reporting."
                   }
+                />
+              )}
+            />
+          </Grid>
+        );
+      case "purchaseOrderNumber":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="purchaseOrderNumber"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label={labelWithRequired("purchaseOrderNumber", labelPurchaseOrderNumber)}
+                  fullWidth
+                  helperText="Customer PO or order reference number (used for Quickbase goods movements lookup)."
                 />
               )}
             />
@@ -1310,6 +1334,7 @@ const ProjectForm = () => {
           <LocalizationProvider dateAdapter={AdapterDayjs}>
           <Grid container spacing={2}>
             {visibleIdSet.has("jobNumber") && renderFormField("jobNumber")}
+            {visibleIdSet.has("purchaseOrderNumber") && renderFormField("purchaseOrderNumber")}
             {visibleIdSet.has("customerName") ? renderFormField("customerName") : <Grid item xs={12} md={6} />}
 
             {visibleIdSet.has("siteName") && renderFormField("siteName")}
@@ -1587,6 +1612,7 @@ const ProjectForm = () => {
         onChange={projectsTableConfig.setConfig}
         builtInColumns={[
           { id: "jobNumber", name: "Job Number", type: "text", required: true },
+          { id: "purchaseOrderNumber", name: "Purchase Order Number", type: "text", required: false },
           { id: "customerName", name: "Customer name", type: "text", required: false },
           { id: "siteName", name: "Site", type: "text", required: false },
           { id: "customerId", name: "Customer ID", type: "text", required: true },

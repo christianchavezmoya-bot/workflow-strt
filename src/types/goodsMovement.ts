@@ -9,9 +9,14 @@ export interface GoodsMovement {
   goods: string;
   handledBy: string;
   navPoNumber: string;
+  recordId: string;
+  rawFields: Record<string, string>;
 }
 
 export interface GoodsMovementsResult {
   despatched: GoodsMovement[];
   received: GoodsMovement[];
+  realmHostname: string;
+  tableId: string;
+  filterQuery: string;
 }

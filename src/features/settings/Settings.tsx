@@ -27,7 +27,8 @@ import {
   Tooltip,
   Typography
 } from "@mui/material";
-import { AddOutlined, DeleteOutline, EditOutlined, Print, Download } from "@mui/icons-material";
+import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined } from "@mui/icons-material";
+import { quickbaseService, type QbFieldInfo } from "../../services/quickbaseService";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
@@ -194,6 +195,7 @@ const defaultSettings: QuickbaseSettingsForm = {
   installationsFieldMap: "{}",
   goodsMovementsTableId: "",
   goodsMovementsJobFid: "",
+  goodsMovementsOrderRefFid: "",
   goodsMovementsDirectionFid: ""
 };
 
@@ -259,6 +261,12 @@ const Settings = () => {
 
   const [settings, setSettings] = useState<QuickbaseSettingsForm>(() => loadSettings());
   const [status, setStatus] = useState<"" | "saved" | "sent" | "error">("");
+  const [discoverOpen,   setDiscoverOpen]   = useState(false);
+  const [discoverFields, setDiscoverFields] = useState<QbFieldInfo[]>([]);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverError,  setDiscoverError]  = useState<string | null>(null);
+  const [testLoading,  setTestLoading]  = useState(false);
+  const [testResult,   setTestResult]   = useState<{ success: boolean; message: string } | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [apiStatus, setApiStatus] = useState<"running" | "stopped" | "unknown">("unknown");
@@ -373,6 +381,7 @@ const Settings = () => {
       installationsFieldMap: installationsMap.value || {},
       goodsMovementsTableId: settings.goodsMovementsTableId.trim(),
       goodsMovementsJobFid: parseInt(settings.goodsMovementsJobFid, 10) || 0,
+      goodsMovementsOrderRefFid: parseInt(settings.goodsMovementsOrderRefFid, 10) || 0,
       goodsMovementsDirectionFid: parseInt(settings.goodsMovementsDirectionFid, 10) || 0
     }),
     [settings, projectsMap.value, installationsMap.value]
@@ -385,8 +394,6 @@ const Settings = () => {
     return (
       !!payload.realmHostname &&
       !!payload.userToken &&
-      !!payload.projectsTableId &&
-      !!payload.installationsTableId &&
       !projectsMap.error &&
       !installationsMap.error
     );
@@ -395,6 +402,42 @@ const Settings = () => {
   const handleSave = () => {
     localStorage.setItem("qb_settings", JSON.stringify(settings));
     setStatus("saved");
+  };
+
+  const handleDiscoverFields = async () => {
+    const tableId = settings.goodsMovementsTableId.trim();
+    if (!tableId) return;
+    setDiscoverLoading(true);
+    setDiscoverError(null);
+    setDiscoverFields([]);
+    setDiscoverOpen(true);
+    try {
+      const fields = await quickbaseService.discoverFields(tableId, settings.realmHostname.trim(), settings.userToken.trim());
+      setDiscoverFields(fields);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        ?? "Failed to load fields. Make sure settings are saved to the backend first.";
+      setDiscoverError(msg);
+    } finally {
+      setDiscoverLoading(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setTestLoading(true);
+    setTestResult(null);
+    try {
+      const result = await quickbaseService.testConnection(
+        settings.realmHostname.trim(),
+        settings.userToken.trim(),
+        settings.goodsMovementsTableId.trim() || undefined
+      );
+      setTestResult(result);
+    } catch {
+      setTestResult({ success: false, message: "Request failed — check that settings are saved to the backend." });
+    } finally {
+      setTestLoading(false);
+    }
   };
 
   const handleCopy = async () => {
@@ -974,6 +1017,25 @@ const Settings = () => {
               placeholder="QB-USER-TOKEN"
               fullWidth
             />
+            <Stack direction="row" alignItems="center" spacing={1.5}>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleTestConnection}
+                disabled={testLoading || !settings.realmHostname.trim() || !settings.userToken.trim()}
+                startIcon={testLoading ? <CircularProgress size={14} /> : undefined}
+              >
+                Test connection
+              </Button>
+              {testResult && (
+                <Chip
+                  label={testResult.message}
+                  color={testResult.success ? "success" : "error"}
+                  size="small"
+                  variant="outlined"
+                />
+              )}
+            </Stack>
             <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
               <TextField
                 label="Projects table ID (dbid)"
@@ -1022,11 +1084,11 @@ const Settings = () => {
               Goods Movements (optional)
             </Typography>
             <Typography variant="caption" color="text.disabled">
-              Set up to sync despatched and received goods into project panels. Open a record in Quickbase
-              to find the Table DBID in the URL (e.g. <code>…/db/XXXXXXXX</code>). Field IDs are numeric
-              — hover a field label in Quickbase app settings to reveal them.
+              Sync despatched and received goods into project panels. Find the Table DBID in the
+              Quickbase URL: <code>…/db/XXXXXXXX</code>. Enter it below, save to backend, then
+              click "Discover fields" to auto-fill the FIDs.
             </Typography>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="flex-start">
               <TextField
                 label="Goods Movements table ID (dbid)"
                 value={settings.goodsMovementsTableId}
@@ -1034,18 +1096,36 @@ const Settings = () => {
                 fullWidth
                 placeholder="e.g. bpqxy123"
               />
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<SearchOutlined />}
+                disabled={!settings.goodsMovementsTableId.trim()}
+                onClick={handleDiscoverFields}
+                sx={{ whiteSpace: "nowrap", mt: "8px !important", flexShrink: 0 }}
+              >
+                Discover fields
+              </Button>
             </Stack>
             <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
               <TextField
-                label='Job Number field ID (FID)'
+                label="Job Number field ID (FID)"
                 value={settings.goodsMovementsJobFid}
                 onChange={(e) => setSettings((p) => ({ ...p, goodsMovementsJobFid: e.target.value }))}
                 fullWidth
                 type="number"
-                helperText='FID of "Order Reference Number" or "Purchased for Job Number"'
+                helperText='FID of "Purchased for Job Number" field'
               />
               <TextField
-                label='Direction field ID (FID)'
+                label="Order Reference field ID (FID)"
+                value={settings.goodsMovementsOrderRefFid}
+                onChange={(e) => setSettings((p) => ({ ...p, goodsMovementsOrderRefFid: e.target.value }))}
+                fullWidth
+                type="number"
+                helperText='FID of "Order Reference Number" field (OR fallback)'
+              />
+              <TextField
+                label="Direction field ID (FID)"
                 value={settings.goodsMovementsDirectionFid}
                 onChange={(e) => setSettings((p) => ({ ...p, goodsMovementsDirectionFid: e.target.value }))}
                 fullWidth
@@ -1053,6 +1133,61 @@ const Settings = () => {
                 helperText='FID of "Incoming/Outgoing" field'
               />
             </Stack>
+
+            {/* ── Discover Fields Dialog ── */}
+            <Dialog open={discoverOpen} onClose={() => setDiscoverOpen(false)} maxWidth="sm" fullWidth>
+              <DialogTitle>Fields in table: {settings.goodsMovementsTableId}</DialogTitle>
+              <DialogContent dividers sx={{ p: 0 }}>
+                {discoverLoading && (
+                  <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+                    <CircularProgress size={28} />
+                  </Box>
+                )}
+                {discoverError && (
+                  <Alert severity="error" sx={{ m: 2 }}>{discoverError}</Alert>
+                )}
+                {!discoverLoading && !discoverError && discoverFields.length > 0 && (
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ width: 60 }}>FID</TableCell>
+                        <TableCell>Field name</TableCell>
+                        <TableCell sx={{ width: 90 }}>Type</TableCell>
+                        <TableCell sx={{ width: 140 }} />
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {discoverFields.map(f => (
+                        <TableRow key={f.id} hover>
+                          <TableCell sx={{ fontWeight: 600 }}>{f.id}</TableCell>
+                          <TableCell>{f.label}</TableCell>
+                          <TableCell sx={{ color: "text.secondary", fontSize: "0.75rem" }}>{f.fieldType}</TableCell>
+                          <TableCell>
+                            <Stack direction="row" spacing={0.5}>
+                              <Button size="small" sx={{ fontSize: "0.68rem", py: 0.25, px: 0.75 }}
+                                onClick={() => setSettings(p => ({ ...p, goodsMovementsJobFid: String(f.id) }))}>
+                                → Job FID
+                              </Button>
+                              <Button size="small" sx={{ fontSize: "0.68rem", py: 0.25, px: 0.75 }}
+                                onClick={() => setSettings(p => ({ ...p, goodsMovementsOrderRefFid: String(f.id) }))}>
+                                → Ref FID
+                              </Button>
+                              <Button size="small" sx={{ fontSize: "0.68rem", py: 0.25, px: 0.75 }}
+                                onClick={() => setSettings(p => ({ ...p, goodsMovementsDirectionFid: String(f.id) }))}>
+                                → Dir FID
+                              </Button>
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setDiscoverOpen(false)}>Close</Button>
+              </DialogActions>
+            </Dialog>
 
             {!isValid && (
               <Alert severity="warning">

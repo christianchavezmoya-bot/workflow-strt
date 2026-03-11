@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Box,
   Button,
   Chip,
   CircularProgress,
+  Collapse,
   Divider,
   FormControlLabel,
   IconButton,
@@ -26,8 +27,10 @@ import {
 import {
   DeleteOutline,
   EmailOutlined,
+  ExpandMoreOutlined,
   LocalShippingOutlined,
   MoveToInboxOutlined,
+  OpenInNewOutlined,
   RefreshOutlined,
   SettingsOutlined
 } from "@mui/icons-material";
@@ -80,8 +83,7 @@ const emptyInbound = (): InboundFormState => ({
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
-const PANEL_MAX_W = 760;
-const BODY_H      = 420;
+const PANEL_MAX_W = 900;
 
 // ─── QB enabled check ─────────────────────────────────────────────────────────
 
@@ -104,7 +106,18 @@ const GM_COLS: { key: keyof GoodsMovement; label: string; width?: number | strin
   { key: "consignmentRef", label: "Consignment", width: 110 }
 ];
 
-function GoodsMovementsTable({ rows }: { rows: GoodsMovement[] }) {
+function GoodsMovementsTable({ rows, realmHostname, tableId }: {
+  rows: GoodsMovement[];
+  realmHostname: string;
+  tableId: string;
+}) {
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+
+  const qbRecordUrl = (recordId: string) =>
+    realmHostname && tableId && recordId
+      ? `https://${realmHostname}/db/${tableId}?a=er&rid=${recordId}`
+      : null;
+
   if (rows.length === 0) {
     return (
       <Typography variant="caption" color="text.disabled" sx={{ display: "block", mt: 2, textAlign: "center" }}>
@@ -122,22 +135,70 @@ function GoodsMovementsTable({ rows }: { rows: GoodsMovement[] }) {
                 {c.label}
               </TableCell>
             ))}
+            <TableCell sx={{ width: 52, py: 0.5 }} />
           </TableRow>
         </TableHead>
         <TableBody>
-          {rows.map((row, i) => (
-            <TableRow key={i} sx={{ "&:hover": { background: "rgba(255,255,255,0.03)" } }}>
-              {GM_COLS.map(c => (
-                <TableCell key={c.key} sx={{ py: 0.5, fontSize: "0.72rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  <Tooltip title={String(row[c.key] ?? "")} disableHoverListener={String(row[c.key] ?? "").length < 20}>
-                    <span>
-                      {c.key === "date" ? fmtDate(row[c.key]) : String(row[c.key] ?? "")}
-                    </span>
-                  </Tooltip>
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
+          {rows.map((row, i) => {
+            const url = qbRecordUrl(row.recordId);
+            const isExpanded = expandedRow === i;
+            return (
+              <React.Fragment key={i}>
+                <TableRow sx={{ "&:hover": { background: "rgba(255,255,255,0.03)" } }}>
+                  {GM_COLS.map(c => (
+                    <TableCell key={c.key} sx={{ py: 0.5, fontSize: "0.72rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <Tooltip title={String(row[c.key] ?? "")} disableHoverListener={String(row[c.key] ?? "").length < 20}>
+                        <span>
+                          {c.key === "date" ? fmtDate(row[c.key] as string) : String(row[c.key] ?? "")}
+                        </span>
+                      </Tooltip>
+                    </TableCell>
+                  ))}
+                  <TableCell sx={{ py: 0, px: 0.5 }}>
+                    <Stack direction="row" spacing={0}>
+                      <Tooltip title="Show all QB fields">
+                        <IconButton size="small" onClick={() => setExpandedRow(isExpanded ? null : i)}
+                          sx={{ p: 0.25 }}>
+                          <ExpandMoreOutlined sx={{ fontSize: 14, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+                        </IconButton>
+                      </Tooltip>
+                      {url && (
+                        <Tooltip title="Open record in Quickbase">
+                          <IconButton size="small" component="a" href={url} target="_blank" rel="noopener" sx={{ p: 0.25 }}>
+                            <OpenInNewOutlined sx={{ fontSize: 13 }} />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Stack>
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell colSpan={GM_COLS.length + 1} sx={{ py: 0, border: 0 }}>
+                    <Collapse in={isExpanded} unmountOnExit>
+                      <Box sx={{ px: 1, py: 0.75, background: "rgba(255,255,255,0.02)", borderRadius: 1, mb: 0.5 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5, fontWeight: 600 }}>
+                          All QB fields (raw)
+                        </Typography>
+                        <Stack direction="row" flexWrap="wrap" gap={0.5}>
+                          {Object.entries(row.rawFields ?? {}).map(([name, val]) => (
+                            <Chip
+                              key={name}
+                              label={`${name}: ${val || "—"}`}
+                              size="small"
+                              variant="outlined"
+                              sx={{ height: 18, fontSize: "0.62rem", maxWidth: 260,
+                                    "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" },
+                                    opacity: val ? 1 : 0.4 }}
+                            />
+                          ))}
+                        </Stack>
+                      </Box>
+                    </Collapse>
+                  </TableCell>
+                </TableRow>
+              </React.Fragment>
+            );
+          })}
         </TableBody>
       </Table>
     </Box>
@@ -183,11 +244,14 @@ export default function ProjectChevronPanel({ projectId }: Props) {
   }, [projectId]);
 
   // ── Goods Movements (QB) ───────────────────────────────────────────────────
-  const [despatched, setDespatched] = useState<GoodsMovement[]>([]);
-  const [received,   setReceived]   = useState<GoodsMovement[]>([]);
-  const [qbLoading,  setQbLoading]  = useState(false);
-  const [qbError,    setQbError]    = useState<string | null>(null);
-  const [qbLoaded,   setQbLoaded]   = useState(false);
+  const [despatched,    setDespatched]    = useState<GoodsMovement[]>([]);
+  const [received,      setReceived]      = useState<GoodsMovement[]>([]);
+  const [qbLoading,     setQbLoading]     = useState(false);
+  const [qbError,       setQbError]       = useState<string | null>(null);
+  const [qbLoaded,      setQbLoaded]      = useState(false);
+  const [qbRealmHost,   setQbRealmHost]   = useState("");
+  const [qbTableId,     setQbTableId]     = useState("");
+  const [qbFilterQuery, setQbFilterQuery] = useState("");
 
   const syncQb = useCallback(async () => {
     if (!isQbEnabled()) {
@@ -200,6 +264,9 @@ export default function ProjectChevronPanel({ projectId }: Props) {
       const result = await quickbaseService.getGoodsMovements(projectId);
       setDespatched(result.despatched);
       setReceived(result.received);
+      setQbRealmHost(result.realmHostname ?? "");
+      setQbTableId(result.tableId ?? "");
+      setQbFilterQuery(result.filterQuery ?? "");
       setQbLoaded(true);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
@@ -288,33 +355,42 @@ export default function ProjectChevronPanel({ projectId }: Props) {
   // ── Shared spinner ─────────────────────────────────────────────────────────
   const Spinner = () => <CircularProgress size={20} sx={{ display: "block", mx: "auto", mt: 6 }} />;
 
-  // ── QB header row (sync button + status) ──────────────────────────────────
+  // ── QB header row (sync button + filter info) ─────────────────────────────
   const QbHeader = ({ count }: { count: number }) => (
-    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-      {qbLoaded && (
-        <Chip
-          label={`${count} record${count !== 1 ? "s" : ""} from QB`}
+    <Stack spacing={0.5} sx={{ mb: 1 }}>
+      <Stack direction="row" alignItems="center" spacing={1}>
+        {qbLoaded && (
+          <Chip
+            label={`${count} record${count !== 1 ? "s" : ""} from QB`}
+            size="small"
+            variant="outlined"
+            sx={{ height: 20, fontSize: "0.68rem" }}
+          />
+        )}
+        <Box sx={{ flex: 1 }} />
+        <Button
           size="small"
           variant="outlined"
-          sx={{ height: 20, fontSize: "0.68rem" }}
-        />
+          startIcon={qbLoading ? <CircularProgress size={12} /> : <RefreshOutlined sx={{ fontSize: 14 }} />}
+          onClick={syncQb}
+          disabled={qbLoading}
+          sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}
+        >
+          Sync from QB
+        </Button>
+        <Tooltip title="Configure in Settings → Integrations">
+          <IconButton size="small" href="/settings?tab=quickbase" component="a">
+            <SettingsOutlined sx={{ fontSize: 14 }} />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+      {qbLoaded && qbFilterQuery && (
+        <Tooltip title={`QB filter: ${qbFilterQuery}`} placement="bottom-start">
+          <Typography variant="caption" color="text.disabled" noWrap sx={{ cursor: "help", fontSize: "0.65rem" }}>
+            Filter: <code style={{ fontSize: "0.65rem" }}>{qbFilterQuery}</code>
+          </Typography>
+        </Tooltip>
       )}
-      <Box sx={{ flex: 1 }} />
-      <Button
-        size="small"
-        variant="outlined"
-        startIcon={qbLoading ? <CircularProgress size={12} /> : <RefreshOutlined sx={{ fontSize: 14 }} />}
-        onClick={syncQb}
-        disabled={qbLoading}
-        sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}
-      >
-        Sync from QB
-      </Button>
-      <Tooltip title="Configure in Settings → Integrations">
-        <IconButton size="small" href="/settings?tab=quickbase" component="a">
-          <SettingsOutlined sx={{ fontSize: 14 }} />
-        </IconButton>
-      </Tooltip>
     </Stack>
   );
 
@@ -334,14 +410,14 @@ export default function ProjectChevronPanel({ projectId }: Props) {
         <Tab value="contacts" icon={<EmailOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
           label={`Contacts${contacts.length ? ` (${contacts.length})` : ""}`} />
         <Tab value="goodsMovements" icon={<LocalShippingOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
-          label={`Good Movements${despatched.length ? ` (${despatched.length})` : ""}`} />
+          label={`Dispatched${despatched.length ? ` (${despatched.length})` : ""}`} />
         <Tab value="inbound" icon={<MoveToInboxOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
           label={`Inbound${received.length ? ` (${received.length})` : ""}`} />
       </Tabs>
 
       {/* ── CONTACTS ──────────────────────────────────────────────────────── */}
       {tab === "contacts" && (
-        <Box sx={{ height: BODY_H, overflowY: "auto", pr: 0.5 }}>
+        <Box sx={{ maxHeight: "65vh", overflowY: "auto", pr: 0.5 }}>
           {contactsLoading ? <Spinner /> : (
             <Stack spacing={1}>
               <TextField label="Full name *" size="small" fullWidth
@@ -417,23 +493,23 @@ export default function ProjectChevronPanel({ projectId }: Props) {
 
       {/* ── GOOD MOVEMENTS (QB Despatched) ────────────────────────────────── */}
       {tab === "goodsMovements" && (
-        <Box sx={{ height: BODY_H, overflowY: "auto", pr: 0.5 }}>
+        <Box sx={{ maxHeight: "65vh", overflowY: "auto", pr: 0.5 }}>
           <QbHeader count={despatched.length} />
           {qbError && (
             <Alert severity="warning" sx={{ mb: 1, fontSize: "0.75rem" }}>{qbError}</Alert>
           )}
-          {qbLoading ? <Spinner /> : <GoodsMovementsTable rows={despatched} />}
+          {qbLoading ? <Spinner /> : <GoodsMovementsTable rows={despatched} realmHostname={qbRealmHost} tableId={qbTableId} />}
         </Box>
       )}
 
       {/* ── INBOUND (QB Received + local manual entries) ───────────────────── */}
       {tab === "inbound" && (
-        <Box sx={{ height: BODY_H, overflowY: "auto", pr: 0.5 }}>
+        <Box sx={{ maxHeight: "65vh", overflowY: "auto", pr: 0.5 }}>
           <QbHeader count={received.length} />
           {qbError && (
             <Alert severity="warning" sx={{ mb: 1, fontSize: "0.75rem" }}>{qbError}</Alert>
           )}
-          {qbLoading ? <Spinner /> : <GoodsMovementsTable rows={received} />}
+          {qbLoading ? <Spinner /> : <GoodsMovementsTable rows={received} realmHostname={qbRealmHost} tableId={qbTableId} />}
 
           {!qbLoading && (
             <>

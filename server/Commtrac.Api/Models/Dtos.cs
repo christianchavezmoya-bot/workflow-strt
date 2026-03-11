@@ -246,6 +246,7 @@ public record ProjectDto(
     string? SiteId,
     string? SiteName,
     string JobNumber,
+    string PurchaseOrderNumber,
     string Description,
     string StartDate,
     string FinishDate,
@@ -307,6 +308,7 @@ public record QuickbaseSettingsDto(
     Dictionary<string, int> InstallationsFieldMap,
     string GoodsMovementsTableId,
     int GoodsMovementsJobFid,
+    int GoodsMovementsOrderRefFid,
     int GoodsMovementsDirectionFid
 );
 
@@ -320,7 +322,9 @@ public record GoodsMovementDto(
     string OrderRef,
     string Goods,
     string HandledBy,
-    string NavPoNumber
+    string NavPoNumber,
+    string RecordId,
+    Dictionary<string, string> RawFields
 );
 
 public record InspectionDto(

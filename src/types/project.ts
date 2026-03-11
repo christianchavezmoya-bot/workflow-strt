@@ -25,6 +25,7 @@ export interface Project {
   siteId?: string;
   siteName?: string;
   jobNumber: string;
+  purchaseOrderNumber?: string;
   description: string;
   startDate: string;
   finishDate: string;

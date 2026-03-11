@@ -117,6 +117,8 @@ public class ProjectEntity
     public string? SiteId { get; set; }
     [MaxLength(80)]
     public string JobNumber { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string PurchaseOrderNumber { get; set; } = string.Empty;
     [MaxLength(800)]
     public string Description { get; set; } = string.Empty;
     [MaxLength(40)]
@@ -408,6 +410,7 @@ public class QuickbaseSettingsEntity
     [MaxLength(80)]
     public string GoodsMovementsTableId { get; set; } = string.Empty;
     public int GoodsMovementsJobFid { get; set; }
+    public int GoodsMovementsOrderRefFid { get; set; }
     public int GoodsMovementsDirectionFid { get; set; }
 }
 

@@ -156,6 +156,7 @@ public class ProjectsController : ControllerBase
             CustomerId = request.CustomerId,
             SiteId = request.SiteId,
             JobNumber = request.JobNumber,
+            PurchaseOrderNumber = request.PurchaseOrderNumber ?? string.Empty,
             Description = request.Description,
             StartDate = request.StartDate,
             FinishDate = request.FinishDate,
@@ -201,6 +202,7 @@ public class ProjectsController : ControllerBase
         project.CustomerId = request.CustomerId;
         project.SiteId = request.SiteId;
         project.JobNumber = request.JobNumber;
+        project.PurchaseOrderNumber = request.PurchaseOrderNumber ?? string.Empty;
         project.Description = request.Description;
         project.StartDate = request.StartDate;
         project.FinishDate = request.FinishDate;
@@ -279,6 +281,7 @@ public class ProjectsController : ControllerBase
             project.SiteId,
             siteName,
             project.JobNumber,
+            project.PurchaseOrderNumber,
             project.Description,
             project.StartDate,
             project.FinishDate,

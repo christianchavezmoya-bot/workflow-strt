@@ -31,8 +31,10 @@ public class QuickbaseGoodsMovementsController : ControllerBase
         if (project is null) return NotFound(new { message = "Project not found." });
 
         var jobNumber = project.JobNumber;
-        if (string.IsNullOrWhiteSpace(jobNumber))
-            return BadRequest(new { message = "Project has no job number." });
+        var purchaseOrderNumber = project.PurchaseOrderNumber;
+
+        if (string.IsNullOrWhiteSpace(jobNumber) && string.IsNullOrWhiteSpace(purchaseOrderNumber))
+            return BadRequest(new { message = "Project has no job number or purchase order number." });
 
         // Load QB settings
         var settings = await _db.QuickbaseSettings.FirstOrDefaultAsync(s => s.Id == 1);
@@ -40,16 +42,29 @@ public class QuickbaseGoodsMovementsController : ControllerBase
             return BadRequest(new { message = "Quickbase integration is not enabled." });
         if (string.IsNullOrWhiteSpace(settings.GoodsMovementsTableId))
             return BadRequest(new { message = "Goods Movements table ID is not configured." });
-        if (settings.GoodsMovementsJobFid == 0)
-            return BadRequest(new { message = "Goods Movements job number field ID is not configured." });
+        if (settings.GoodsMovementsJobFid == 0 && settings.GoodsMovementsOrderRefFid == 0)
+            return BadRequest(new { message = "Configure at least one filter field (Job Number FID or Order Reference FID) for Goods Movements." });
 
-        // Build the QB records query
-        var whereClause = $"{{{settings.GoodsMovementsJobFid}.CT.'{jobNumber}'}}";
+        // Build QB filter clauses:
+        //   Job Number FID  → filtered by project.JobNumber
+        //   Order Ref FID   → filtered by project.PurchaseOrderNumber
+        // Only include each clause if the FID is configured and the corresponding project value is non-empty.
+        var clauses = new List<string>();
+        if (settings.GoodsMovementsJobFid > 0 && !string.IsNullOrWhiteSpace(jobNumber))
+            clauses.Add($"{{{settings.GoodsMovementsJobFid}.EX.'{jobNumber}'}}");
+        if (settings.GoodsMovementsOrderRefFid > 0 && !string.IsNullOrWhiteSpace(purchaseOrderNumber))
+            clauses.Add($"{{{settings.GoodsMovementsOrderRefFid}.EX.'{purchaseOrderNumber}'}}");
+
+        if (clauses.Count == 0)
+            return BadRequest(new { message = "No filter values available: set a job number or purchase order number on the project." });
+
+        var whereClause = string.Join("OR", clauses);
+        var sortFid = settings.GoodsMovementsJobFid > 0 ? settings.GoodsMovementsJobFid : settings.GoodsMovementsOrderRefFid;
         var body = JsonSerializer.Serialize(new
         {
             from = settings.GoodsMovementsTableId,
             where = whereClause,
-            sortBy = new[] { new { fieldId = settings.GoodsMovementsJobFid, order = "ASC" } },
+            sortBy = new[] { new { fieldId = sortFid, order = "ASC" } },
             options = new { top = 500 }
         });
 
@@ -85,7 +100,7 @@ public class QuickbaseGoodsMovementsController : ControllerBase
             var doc = JsonDocument.Parse(json);
             if (!doc.RootElement.TryGetProperty("data", out var dataArr) ||
                 !doc.RootElement.TryGetProperty("fields", out var fieldsArr))
-                return Ok(new QbGoodsMovementsResult(despatched, received));
+                return Ok(new QbGoodsMovementsResult(despatched, received, settings.RealmHostname, settings.GoodsMovementsTableId, whereClause));
 
             // Build FID → field name map
             var fidToName = new Dictionary<int, string>();
@@ -98,14 +113,21 @@ public class QuickbaseGoodsMovementsController : ControllerBase
             foreach (var row in dataArr.EnumerateArray())
             {
                 var vals = new Dictionary<string, string>();
+                var rawByFid = new Dictionary<int, string>(); // FID → raw value (for record ID lookup)
                 foreach (var prop in row.EnumerateObject())
                 {
-                    if (int.TryParse(prop.Name, out var fid) && fidToName.TryGetValue(fid, out var fieldName))
+                    if (int.TryParse(prop.Name, out var fid))
                     {
                         var v = prop.Value.TryGetProperty("value", out var vProp) ? vProp.ToString() : "";
-                        vals[fieldName] = v ?? "";
+                        rawByFid[fid] = v ?? "";
+                        if (fidToName.TryGetValue(fid, out var fieldName))
+                            vals[fieldName] = v ?? "";
                     }
                 }
+
+                // FID 3 is the QB Record ID (always present)
+                rawByFid.TryGetValue(3, out var recordId);
+                recordId ??= "";
 
                 // Determine direction from configured FID, else fall back to field name search
                 var direction = "";
@@ -131,18 +153,22 @@ public class QuickbaseGoodsMovementsController : ControllerBase
 
                 var dto = new GoodsMovementDto(
                     Direction:      direction,
-                    MovementRef:    GetVal(vals, "Movement_Reference_#", "Movement Reference"),
+                    MovementRef:    GetVal(vals, "Movement_Reference_#", "Movement Reference", "Movement Ref"),
                     Date:           GetVal(vals, "Date"),
-                    ToFrom:         GetVal(vals, "To/From"),
-                    ConsignmentRef: GetVal(vals, "Consignment Note/Delivery Reference", "Consignment Note"),
-                    JobNumber:      GetVal(vals, "Purchased for Job Number", "Job Number"),
-                    OrderRef:       GetVal(vals, "Order Reference Number", "Order Reference"),
+                    ToFrom:         GetVal(vals, "To/From", "To / From", "ToFrom", "Customer / Supplier"),
+                    ConsignmentRef: GetVal(vals, "Consignment Note/Delivery Reference", "Consignment Note", "Delivery Reference", "Consignment Ref"),
+                    JobNumber:      GetVal(vals, "Purchased for Job Number", "Job Number", "Job #"),
+                    OrderRef:       GetVal(vals, "Order Reference Number", "Order Reference", "Order Ref", "PO Number"),
                     Goods:          CombineGoods(
                                         GetVal(vals, "Non-inventory Goods"),
                                         GetVal(vals, "Inventory Goods"),
-                                        GetVal(vals, "Inventory items")),
-                    HandledBy:      GetVal(vals, "Received or Despatched by", "Handled by"),
-                    NavPoNumber:    GetVal(vals, "Navision PO Number", "PO Number")
+                                        GetVal(vals, "Inventory items"),
+                                        GetVal(vals, "Goods Description"),
+                                        GetVal(vals, "Description")),
+                    HandledBy:      GetVal(vals, "Received or Despatched by", "Handled by", "Handled By", "Received By", "Despatched By"),
+                    NavPoNumber:    GetVal(vals, "Navision PO Number", "PO Number", "NAV PO", "NAV PO Number"),
+                    RecordId:       recordId,
+                    RawFields:      vals
                 );
 
                 if (direction.Contains("Despatched", StringComparison.OrdinalIgnoreCase) ||
@@ -157,7 +183,7 @@ public class QuickbaseGoodsMovementsController : ControllerBase
             return StatusCode(500, new { message = $"Failed to parse Quickbase response: {ex.Message}" });
         }
 
-        return Ok(new QbGoodsMovementsResult(despatched, received));
+        return Ok(new QbGoodsMovementsResult(despatched, received, settings.RealmHostname, settings.GoodsMovementsTableId, whereClause));
     }
 
     private static string GetVal(Dictionary<string, string> vals, params string[] keys)
@@ -173,5 +199,8 @@ public class QuickbaseGoodsMovementsController : ControllerBase
 
 public record QbGoodsMovementsResult(
     List<GoodsMovementDto> Despatched,
-    List<GoodsMovementDto> Received
+    List<GoodsMovementDto> Received,
+    string RealmHostname,
+    string TableId,
+    string FilterQuery
 );
