@@ -14,6 +14,7 @@ import {
   PlayArrowOutlined,
   PublishOutlined,
   QrCodeScannerOutlined,
+  RemoveOutlined,
   RestartAltOutlined,
   SwapHorizOutlined,
   UploadOutlined,
@@ -48,7 +49,8 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import type { Decision, MediaItem, StepInput, StepInputType, Workflow, WorkflowStep } from "../../types/workflow";
+import type { CaptureField, CaptureFieldType, Decision, MediaItem, StepInput, StepInputType, StepType, Workflow, WorkflowStep } from "../../types/workflow";
+import { STEP_TYPE_LABELS } from "../../types/workflow";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
@@ -208,9 +210,11 @@ interface WorkflowBuilderProps {
   onConfigSaved?: (config: WorkflowConfig) => void;
   /** Called when user publishes the config from the builder. Navigates back to list. */
   onConfigPublished?: (config: WorkflowConfig) => void;
+  /** Called when user clicks "New Work Instruction" from inside the builder. */
+  onNewConfig?: () => void;
 }
 
-const WorkflowBuilder = ({ productId, productName, productFeatures = [], initialConfigId, configName, onConfigSaved, onConfigPublished }: WorkflowBuilderProps) => {
+const WorkflowBuilder = ({ productId, productName, productFeatures = [], initialConfigId, configName, onConfigSaved, onConfigPublished, onNewConfig }: WorkflowBuilderProps) => {
   const [workflow, setWorkflow] = useState<Workflow>(() => createDefaultWorkflow(productId, productName));
   const [runnerOpen, setRunnerOpen] = useState(false);
   const [currentConfig, setCurrentConfig] = useState<WorkflowConfig | null>(null);
@@ -218,6 +222,16 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const justLoadedRef = useRef(true); // prevents save from firing on load-triggered state changes
   const importedRef = useRef(false);  // blocks async API load from overwriting a user import
+  const productFeaturesRef = useRef<ProductFeatureDefinition[]>(productFeatures);
+  productFeaturesRef.current = productFeatures;
+
+  // Feature selections — managed in the builder (not just the publish dialog)
+  const [featureSelections, setFeatureSelections] = useState<FeatureSelection[]>(() =>
+    productFeatures.map((f) => ({ featureId: f.id, included: false, activeCount: 0 }))
+  );
+  const featureSelectionsRef = useRef<FeatureSelection[]>(featureSelections);
+  featureSelectionsRef.current = featureSelections;
+  const featureSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [publishSaving, setPublishSaving] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
@@ -278,6 +292,21 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             const media = JSON.parse(cfg.mediaJson);
             if (Array.isArray(media)) wf.media = media;
           } catch {}
+          // Restore feature selections
+          let parsedSels: FeatureSelection[] = [];
+          try {
+            const sels = JSON.parse(cfg.featureSelectionsJson) as FeatureSelection[];
+            parsedSels = sels;
+            const selMap = new Map(sels.map((s) => [s.featureId, s]));
+            setFeatureSelections(productFeatures.map((f) =>
+              selMap.get(f.id) ?? { featureId: f.id, included: false, activeCount: 0 }
+            ));
+          } catch {}
+          // Auto-populate steps when config is brand new (empty)
+          if (wf.steps.length === 0 && parsedSels.some((s) => s.activeCount > 0)) {
+            const autoSteps = buildAutoSteps(parsedSels, productFeaturesRef.current);
+            wf = { ...wf, steps: enforceSequentialNextSteps(normalizeOrders(autoSteps)) };
+          }
           justLoadedRef.current = true;
           setWorkflow(wf);
         } catch {
@@ -329,12 +358,140 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [workflow]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Debounced save for feature selections (separate from workflow steps)
+  useEffect(() => {
+    const activeConfigId = resolvedConfigIdRef.current ?? initialConfigId;
+    if (!activeConfigId) return;
+    if (currentConfig?.status === "Published" || currentConfig?.status === "Archived") return;
+    if (featureSaveTimerRef.current) clearTimeout(featureSaveTimerRef.current);
+    featureSaveTimerRef.current = setTimeout(async () => {
+      try {
+        await workflowConfigService.update(activeConfigId, {
+          featureSelectionsJson: JSON.stringify(featureSelections),
+        });
+      } catch { /* silent */ }
+    }, 800);
+    return () => { if (featureSaveTimerRef.current) clearTimeout(featureSaveTimerRef.current); };
+  }, [featureSelections]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const selectedStep = useMemo(
     () => workflow.steps.find((s) => s.id === selectedStepId) || null,
     [workflow.steps, selectedStepId]
   );
 
   const reachable = useMemo(() => computeReachability(workflow), [workflow]);
+
+  // Step type confirm dialog state
+  const [stepTypeConfirm, setStepTypeConfirm] = useState<{
+    stepId: string; type: StepType; featureId: string; unitIndex: number;
+  } | null>(null);
+
+  // Build a step patch from a type template
+  function buildStepTemplate(type: StepType, featureId: string, unitIndex: number): Partial<WorkflowStep> {
+    const feat = productFeatures.find((f) => f.id === featureId);
+    const featName = feat?.name ?? "Unit";
+    const deps = feat?.subProperties ?? [];
+    const u = uid;
+    const mkCheck = (label: string, fid?: string): StepInput =>
+      ({ id: u(), type: "checkbox", label, required: true, ...(fid ? { featureId: fid } : {}) });
+
+    switch (type) {
+      case "preparation":
+        return {
+          stepType: type, stepFeatureId: undefined, stepUnitIndex: undefined,
+          title: "Preparation & Permits",
+          description: "Verify site readiness and obtain all required permits before commencing work. Inspect the work area for hazards, confirm access arrangements, document pre-existing conditions with photographs, and ensure all tools and materials are on site and accounted for.",
+          inputs: [
+            mkCheck("Work area is clear and safe"),
+            mkCheck("Permits and authorizations obtained"),
+            { id: u(), type: "photo", label: "Pre-installation site photo", required: true },
+            mkCheck("Tools and materials verified on site"),
+          ],
+          captureFields: [],
+        };
+
+      case "installation":
+        return {
+          stepType: type, stepFeatureId: featureId || undefined, stepUnitIndex: unitIndex,
+          title: featureId ? `${featName} ${unitIndex} — Installation` : "Installation",
+          description: featureId
+            ? `Install ${featName} ${unitIndex} per manufacturer specifications and project drawings. Follow safe work practices and applicable torque specifications. Verify all mechanical and electrical connections are secure. Record any deviations from the installation plan before proceeding.`
+            : "Install equipment per manufacturer specifications and project drawings. Follow safe work practices and applicable torque specifications. Verify all mechanical and electrical connections are secure. Record any deviations before proceeding.",
+          inputs: [
+            ...deps.map((dep) => mkCheck(`${dep.name} installed and connected`, featureId || undefined)),
+            mkCheck(featureId ? `${featName} ${unitIndex} — Installation complete and verified` : "Installation complete and verified"),
+          ],
+          captureFields: [],
+        };
+
+      case "data-collection":
+        return {
+          stepType: type, stepFeatureId: featureId || undefined, stepUnitIndex: unitIndex,
+          title: featureId ? `${featName} ${unitIndex} — Data Collection` : "Data Collection",
+          description: featureId
+            ? `Record all required technical data for ${featName} ${unitIndex}. Capture serial numbers, model numbers, firmware versions and measured values. Photograph the installed unit showing nameplate and installed condition. Ensure all fields are completed accurately as this forms the as-built record.`
+            : "Record all required technical data for the installed equipment. Capture serial numbers, model numbers, firmware versions and measured values. Photograph installed units and ensure all fields are completed accurately as this forms the as-built record.",
+          inputs: [
+            { id: u(), type: "photo", label: featureId ? `${featName} ${unitIndex} — Installed unit photograph` : "Installed unit photograph", required: true },
+          ],
+          captureFields: deps.map((dep) => ({
+            id: u(),
+            key: labelToKey(featureId ? `${featName}_${unitIndex}_${dep.name}` : dep.name),
+            label: dep.name,
+            type: ((dep.valueType as string) === "number" ? "number" : (dep.valueType as string) === "date" ? "date" : "text") as CaptureFieldType,
+            required: true,
+            featureId: featureId || undefined,
+          })),
+        };
+
+      case "test-acceptance":
+        return {
+          stepType: type, stepFeatureId: undefined, stepUnitIndex: undefined,
+          title: "Test & Acceptance",
+          description: "Perform functional testing of all installed equipment per the acceptance test procedure. Verify each unit operates within specified parameters. Record test results and note any deficiencies. All items must pass before proceeding to final inspection.",
+          inputs: [
+            mkCheck("All installed equipment — Functional test passed"),
+            mkCheck("System operates within specified parameters"),
+            mkCheck("Test results documented"),
+          ],
+          captureFields: [],
+        };
+
+      case "final-inspection": {
+        const boxes: StepInput[] = [];
+        featureSelections.filter((s) => s.activeCount > 0).forEach((sel) => {
+          const f = productFeatures.find((pf) => pf.id === sel.featureId);
+          if (!f) return;
+          for (let i = 1; i <= sel.activeCount; i++)
+            boxes.push(mkCheck(`${f.name} ${i} — Final inspection passed`));
+        });
+        if (boxes.length === 0) boxes.push(mkCheck("All equipment — Final inspection passed"));
+        return {
+          stepType: type, stepFeatureId: undefined, stepUnitIndex: undefined,
+          title: "Final Inspection",
+          description: "Conduct a comprehensive final inspection of all installed equipment and the surrounding work area. Verify all units are correctly labelled, secured and connected. Confirm the site is clean, all temporary works are removed and the installation meets the required quality standards.",
+          inputs: boxes, captureFields: [],
+        };
+      }
+
+      case "return-to-service":
+        return {
+          stepType: type, stepFeatureId: undefined, stepUnitIndex: undefined,
+          title: "Return to Service",
+          description: "Complete all documentation and formally return the asset to operational service. Notify relevant stakeholders of completion, hand over as-built records and operational instructions. Confirm the system is live and operating normally before closing out the work order.",
+          inputs: [
+            mkCheck("All documentation completed"),
+            mkCheck("Stakeholders notified of completion"),
+            mkCheck("System confirmed operational"),
+            mkCheck("Work order ready to close"),
+          ],
+          captureFields: [],
+        };
+
+      default: // custom
+        return { stepType: "custom" };
+    }
+  }
 
   // ------------------------------------------------------------------
   // Workflow mutators
@@ -502,6 +659,60 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     });
   }
 
+  // Capture fields
+  function addCaptureField(stepId: string) {
+    updateWorkflow((wf) => {
+      const step = wf.steps.find((s) => s.id === stepId);
+      if (!step) return wf;
+      step.captureFields = step.captureFields || [];
+      step.captureFields.push({
+        id: uid(),
+        key: "",
+        label: "",
+        type: "text",
+        required: false,
+      });
+      return wf;
+    });
+  }
+
+  function updateCaptureField(stepId: string, fieldId: string, patch: Partial<CaptureField>) {
+    updateWorkflow((wf) => {
+      const step = wf.steps.find((s) => s.id === stepId);
+      if (!step) return wf;
+      step.captureFields = (step.captureFields || []).map((f) => (f.id === fieldId ? { ...f, ...patch } : f));
+      return wf;
+    });
+  }
+
+  function deleteCaptureField(stepId: string, fieldId: string) {
+    updateWorkflow((wf) => {
+      const step = wf.steps.find((s) => s.id === stepId);
+      if (!step) return wf;
+      step.captureFields = (step.captureFields || []).filter((f) => f.id !== fieldId);
+      return wf;
+    });
+  }
+
+  function addCaptureFieldsFromFeatures(stepId: string, features: ProductFeatureDefinition[]) {
+    updateWorkflow((wf) => {
+      const step = wf.steps.find((s) => s.id === stepId);
+      if (!step) return wf;
+      step.captureFields = step.captureFields || [];
+      const existingKeys = new Set(step.captureFields.map((f) => f.key));
+      features.forEach((feat) => {
+        const key = labelToKey(feat.name);
+        if (existingKeys.has(key)) return;
+        const type: CaptureFieldType =
+          feat.valueType === "number" ? "number" :
+          feat.valueType === "date"   ? "date"   : "text";
+        step.captureFields!.push({ id: uid(), key, label: feat.name, type, required: false, featureId: feat.id });
+        existingKeys.add(key);
+      });
+      return wf;
+    });
+  }
+
   // Export / Import
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -615,18 +826,11 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   // ------------------------------------------------------------------
 
   function openPublishDialog() {
-    let featureSels: FeatureSelection[] = [];
-    if (currentConfig) {
-      try { featureSels = JSON.parse(currentConfig.featureSelectionsJson) as FeatureSelection[]; } catch {}
-    }
-    const selMap = new Map(featureSels.map((s) => [s.featureId, s]));
     setPublishForm({
       name: currentConfig?.name ?? workflow.name,
       configType: currentConfig?.configType ?? "",
       notes: currentConfig?.notes ?? "",
-      featureSelections: productFeatures.map(
-        (f) => selMap.get(f.id) ?? { featureId: f.id, included: false, activeCount: 0 },
-      ),
+      featureSelections, // already managed in builder state
     });
     setPublishDialogOpen(true);
   }
@@ -706,6 +910,11 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           </Stack>
         </Stack>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {onNewConfig && (
+            <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={onNewConfig}>
+              New Work Instruction
+            </Button>
+          )}
           <Button
             size="small"
             variant="contained"
@@ -766,8 +975,64 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
 
       {/* 3-column layout */}
       <Grid container spacing={2}>
-        {/* Left: step list */}
+        {/* Left: feature qty panel + step list */}
         <Grid item xs={12} md={3}>
+          {productFeatures.length > 0 && (
+            <Paper className="glass-card" sx={{ p: 1.5, mb: 1.5 }}>
+              <Typography variant="caption" fontWeight={700} color="text.secondary"
+                sx={{ textTransform: "uppercase", letterSpacing: 0.8, display: "block", mb: 1 }}>
+                Installed Features
+              </Typography>
+              <Stack spacing={0.75}>
+                {productFeatures.map((feat) => {
+                  const sel = featureSelections.find((s) => s.featureId === feat.id)
+                    ?? { featureId: feat.id, included: false, activeCount: 0 };
+                  return (
+                    <Stack key={feat.id} direction="row" alignItems="center" spacing={1}>
+                      <Typography variant="body2" sx={{ flexGrow: 1, fontSize: 13 }}>{feat.name}</Typography>
+                      <Stack direction="row" alignItems="center" spacing={0.25}
+                        sx={{ border: 1, borderColor: sel.activeCount > 0 ? "primary.main" : "divider", borderRadius: 1, px: 0.5, py: 0.25 }}>
+                        <IconButton size="small" disabled={isReadOnly || sel.activeCount <= 0}
+                          onClick={() => { const n = Math.max(0, sel.activeCount - 1); setFeatureSelections((p) => p.map((s) => s.featureId === feat.id ? { ...s, activeCount: n, included: n > 0 } : s)); }}
+                          sx={{ p: 0.25 }}>
+                          <RemoveOutlined sx={{ fontSize: 13 }} />
+                        </IconButton>
+                        <Typography variant="body2" fontWeight={700}
+                          color={sel.activeCount > 0 ? "primary.main" : "text.disabled"}
+                          sx={{ minWidth: 18, textAlign: "center", fontSize: 13 }}>
+                          {sel.activeCount}
+                        </Typography>
+                        <IconButton size="small" disabled={isReadOnly}
+                          onClick={() => setFeatureSelections((p) => p.map((s) => s.featureId === feat.id ? { ...s, activeCount: s.activeCount + 1, included: true } : s))}
+                          sx={{ p: 0.25 }}>
+                          <AddOutlined sx={{ fontSize: 13 }} />
+                        </IconButton>
+                      </Stack>
+                    </Stack>
+                  );
+                })}
+              </Stack>
+              {!isReadOnly && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  fullWidth
+                  sx={{ mt: 1.5 }}
+                  disabled={!featureSelections.some((s) => s.activeCount > 0)}
+                  onClick={() => {
+                    const hasSteps = workflow.steps.length > 0;
+                    if (hasSteps && !window.confirm("This will replace all current steps with a new auto-generated workflow. Continue?")) return;
+                    const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current);
+                    importedRef.current = true;
+                    updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
+                    importedRef.current = false;
+                  }}
+                >
+                  {workflow.steps.length > 0 ? "Regenerate Workflow" : "Create Workflow"}
+                </Button>
+              )}
+            </Paper>
+          )}
           <StepListPanel
             stepsSorted={stepsSorted}
             selectedStepId={selectedStepId}
@@ -790,6 +1055,20 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               templateId={resolvedConfigId}
               ensureConfigId={ensureConfigId}
               productFeatures={productFeatures}
+              featureSelections={featureSelections}
+              onApplyStepTemplate={(type, featureId, unitIndex) => {
+                const step = workflow.steps.find((s) => s.id === selectedStep.id);
+                const hasContent = step && (
+                  (step.inputs?.length ?? 0) > 0 ||
+                  (step.captureFields?.length ?? 0) > 0 ||
+                  (step.title && step.title !== `Step ${step.order}`)
+                );
+                if (hasContent && type !== "custom") {
+                  setStepTypeConfirm({ stepId: selectedStep.id, type, featureId: featureId ?? "", unitIndex: unitIndex ?? 1 });
+                } else {
+                  updateStep(selectedStep.id, buildStepTemplate(type, featureId ?? "", unitIndex ?? 1));
+                }
+              }}
               onStepChange={(patch) => updateStep(selectedStep.id, patch)}
               onAddDecision={() => addDecision(selectedStep.id)}
               onUpdateDecision={(dId, patch) => updateDecision(selectedStep.id, dId, patch)}
@@ -798,6 +1077,9 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               onAddFeatureInput={(feat) => addInput(selectedStep.id, feat.type, feat.options, feat.featureId, feat.label, feat.subFields)}
               onUpdateInput={(iId, patch) => updateInput(selectedStep.id, iId, patch)}
               onDeleteInput={(iId) => deleteInput(selectedStep.id, iId)}
+              onAddCaptureField={() => addCaptureField(selectedStep.id)}
+              onUpdateCaptureField={(fId, patch) => updateCaptureField(selectedStep.id, fId, patch)}
+              onDeleteCaptureField={(fId) => deleteCaptureField(selectedStep.id, fId)}
               onWorkflowUpdate={(wf) => { justLoadedRef.current = true; setWorkflow(wf); }}
             />
           ) : (
@@ -809,9 +1091,17 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           )}
         </Grid>
 
-        {/* Right: worker preview */}
+        {/* Right: worker preview + BOM */}
         <Grid item xs={12} md={4}>
-          <WorkerPreviewPanel workflow={workflow} stepsSorted={stepsSorted} />
+          <RightPanel
+            workflow={workflow}
+            stepsSorted={stepsSorted}
+            isReadOnly={isReadOnly}
+            onWorkflowUpdate={(wf) => { justLoadedRef.current = true; setWorkflow(wf); }}
+            productFeatures={productFeatures}
+            featureSelections={featureSelections}
+            onFeatureSelectionsChange={setFeatureSelections}
+          />
         </Grid>
       </Grid>
 
@@ -821,7 +1111,33 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
         workflow={workflow}
         productId={productId}
         productName={productName}
+        productFeatures={productFeatures}
+        featureSelections={featureSelections}
       />
+
+      {/* Step type overwrite confirmation dialog */}
+      <Dialog open={!!stepTypeConfirm} onClose={() => setStepTypeConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Replace step content?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            This will replace the current title, description, inputs and capture fields with the
+            <strong> {stepTypeConfirm ? STEP_TYPE_LABELS[stepTypeConfirm.type] : ""}</strong> template.
+            Your existing content will be lost.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStepTypeConfirm(null)}>Cancel</Button>
+          <Button variant="contained" color="warning"
+            onClick={() => {
+              if (stepTypeConfirm) {
+                updateStep(stepTypeConfirm.stepId, buildStepTemplate(stepTypeConfirm.type, stepTypeConfirm.featureId, stepTypeConfirm.unitIndex));
+              }
+              setStepTypeConfirm(null);
+            }}>
+            Replace
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Publish dialog */}
       <Dialog
@@ -861,54 +1177,9 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               </Typography>
             </Box>
             {productFeatures.length > 0 && (
-              <Stack spacing={1}>
-                <Typography variant="subtitle2">Product Feature Inclusions</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Specify which features are active for this configuration and how many are installed.
-                </Typography>
-                {productFeatures.map((feat) => {
-                  const sel = publishForm.featureSelections.find((s) => s.featureId === feat.id);
-                  const included = sel?.included ?? false;
-                  const count = sel?.activeCount ?? 0;
-                  const update = (patch: Partial<FeatureSelection>) =>
-                    setPublishForm((p) => ({
-                      ...p,
-                      featureSelections: p.featureSelections.map((s) =>
-                        s.featureId === feat.id ? { ...s, ...patch } : s,
-                      ),
-                    }));
-                  return (
-                    <Paper key={feat.id} variant="outlined" sx={{ p: 1.5 }}>
-                      <Stack direction="row" alignItems="center" spacing={2}>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              size="small"
-                              checked={included}
-                              onChange={(e) => update({ included: e.target.checked })}
-                            />
-                          }
-                          label={<Typography variant="body2">{feat.name}</Typography>}
-                          sx={{ flexGrow: 1, m: 0 }}
-                        />
-                        {included && (
-                          <TextField
-                            label="Qty"
-                            type="number"
-                            size="small"
-                            value={count}
-                            onChange={(e) =>
-                              update({ activeCount: Math.max(0, parseInt(e.target.value) || 0) })
-                            }
-                            inputProps={{ min: 0 }}
-                            sx={{ width: 80 }}
-                          />
-                        )}
-                      </Stack>
-                    </Paper>
-                  );
-                })}
-              </Stack>
+              <Alert severity="info" sx={{ fontSize: 12 }}>
+                Feature quantities are configured in the <strong>Features</strong> tab of the builder.
+              </Alert>
             )}
             <TextField
               label="Description"
@@ -1173,6 +1444,8 @@ interface StepEditorPanelProps {
   templateId: string | null;
   ensureConfigId: () => Promise<string | null>;
   productFeatures: ProductFeatureDefinition[];
+  featureSelections?: FeatureSelection[];
+  onApplyStepTemplate: (type: StepType, featureId?: string, unitIndex?: number) => void;
   onStepChange: (patch: Partial<WorkflowStep>) => void;
   onAddDecision: () => void;
   onUpdateDecision: (id: string, patch: Partial<Decision>) => void;
@@ -1181,6 +1454,9 @@ interface StepEditorPanelProps {
   onAddFeatureInput: (feat: { type: StepInputType; options?: string[]; featureId: string; label: string; subFields?: { id: string; name: string }[] }) => void;
   onUpdateInput: (id: string, patch: Partial<StepInput>) => void;
   onDeleteInput: (id: string) => void;
+  onAddCaptureField: () => void;
+  onUpdateCaptureField: (id: string, patch: Partial<CaptureField>) => void;
+  onDeleteCaptureField: (id: string) => void;
   onWorkflowUpdate: (wf: Workflow) => void;
 }
 
@@ -1191,6 +1467,8 @@ function StepEditorPanel({
   templateId,
   ensureConfigId,
   productFeatures,
+  featureSelections,
+  onApplyStepTemplate,
   onStepChange,
   onAddDecision,
   onUpdateDecision,
@@ -1199,14 +1477,41 @@ function StepEditorPanel({
   onAddFeatureInput,
   onUpdateInput,
   onDeleteInput,
+  onAddCaptureField,
+  onUpdateCaptureField,
+  onDeleteCaptureField,
   onWorkflowUpdate,
 }: StepEditorPanelProps) {
   const [editorTab, setEditorTab] = useState(0);
   const [showReportText, setShowReportText] = useState(false);
+  // Pending step type selection (before applying)
+  const [pendingType, setPendingType] = useState<StepType | "">("");
+  const [pendingFeatureId, setPendingFeatureId] = useState("");
+  const [pendingUnit, setPendingUnit] = useState(1);
+
+  // Reset pending when switching steps
+  useEffect(() => { setPendingType(""); setPendingFeatureId(""); setPendingUnit(1); }, [step.id]);
 
   useEffect(() => {
     setShowReportText(step.overrideInReport);
   }, [step.id, step.overrideInReport]);
+
+  const includedFeatures = (featureSelections ?? [])
+    .filter((s) => s.activeCount > 0)
+    .map((s) => {
+      const feat = productFeatures.find((f) => f.id === s.featureId);
+      return feat ? { id: feat.id, name: feat.name, qty: s.activeCount } : null;
+    })
+    .filter(Boolean) as { id: string; name: string; qty: number }[];
+
+  const needsFeaturePicker = pendingType === "installation" || pendingType === "data-collection";
+  const maxUnits = includedFeatures.find((f) => f.id === pendingFeatureId)?.qty ?? 1;
+
+  function handleApply() {
+    if (!pendingType) return;
+    onApplyStepTemplate(pendingType as StepType, pendingFeatureId || undefined, pendingUnit);
+    setPendingType("");
+  }
 
   return (
     <Paper className="glass-card" sx={{ p: 2 }}>
@@ -1220,6 +1525,67 @@ function StepEditorPanel({
             <Chip label={`ID: ${step.id.slice(0, 8)}…`} size="small" variant="outlined" />
           </Stack>
         </Stack>
+
+        {/* Step type selector */}
+        <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "action.hover" }}>
+          <Stack spacing={1}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              {step.stepType && step.stepType !== "custom" && (
+                <Chip size="small" color="primary" label={STEP_TYPE_LABELS[step.stepType]} sx={{ fontWeight: 600 }} />
+              )}
+              <FormControl size="small" sx={{ minWidth: 200 }}>
+                <InputLabel>Apply step template</InputLabel>
+                <Select
+                  label="Apply step template"
+                  value={pendingType}
+                  onChange={(e) => {
+                    const t = e.target.value as StepType | "";
+                    setPendingType(t);
+                    setPendingFeatureId("");
+                    setPendingUnit(1);
+                  }}
+                >
+                  <MenuItem value=""><em>— choose type —</em></MenuItem>
+                  {(Object.keys(STEP_TYPE_LABELS) as StepType[]).map((t) => (
+                    <MenuItem key={t} value={t}>{STEP_TYPE_LABELS[t]}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+            {needsFeaturePicker && (
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <FormControl size="small" sx={{ minWidth: 150 }}>
+                  <InputLabel>Feature</InputLabel>
+                  <Select label="Feature" value={pendingFeatureId} onChange={(e) => { setPendingFeatureId(e.target.value); setPendingUnit(1); }}>
+                    <MenuItem value=""><em>No feature</em></MenuItem>
+                    {includedFeatures.map((f) => (
+                      <MenuItem key={f.id} value={f.id}>{f.name} ×{f.qty}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                {pendingFeatureId && (
+                  <FormControl size="small" sx={{ minWidth: 80 }}>
+                    <InputLabel>Unit #</InputLabel>
+                    <Select label="Unit #" value={pendingUnit} onChange={(e) => setPendingUnit(Number(e.target.value))}>
+                      {Array.from({ length: maxUnits }, (_, i) => i + 1).map((n) => (
+                        <MenuItem key={n} value={n}>{n}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                )}
+              </Stack>
+            )}
+            {pendingType && (
+              <Stack direction="row" spacing={1}>
+                <Button size="small" variant="contained" onClick={handleApply}
+                  disabled={needsFeaturePicker && !pendingFeatureId && includedFeatures.length > 0}>
+                  Apply template
+                </Button>
+                <Button size="small" onClick={() => setPendingType("")}>Cancel</Button>
+              </Stack>
+            )}
+          </Stack>
+        </Paper>
 
         {/* Title */}
         <TextField
@@ -1299,12 +1665,14 @@ function StepEditorPanel({
           </FormControl>
         </Stack>
 
+
         {/* Tabs */}
         <Box>
           <Tabs value={editorTab} onChange={(_, v) => setEditorTab(v)} variant="fullWidth">
             <Tab label="Decisions" />
             <Tab label="Inputs" />
             <Tab label="Content" />
+            <Tab label="Capture" />
           </Tabs>
 
           <TabPanel value={editorTab} index={0}>
@@ -1322,6 +1690,7 @@ function StepEditorPanel({
             <InputsSection
               step={step}
               productFeatures={productFeatures}
+              featureSelections={featureSelections}
               onAddInput={onAddInput}
               onAddFeatureInput={onAddFeatureInput}
               onUpdateInput={onUpdateInput}
@@ -1337,6 +1706,17 @@ function StepEditorPanel({
               ensureConfigId={ensureConfigId}
               onStepChange={onStepChange}
               onWorkflowUpdate={onWorkflowUpdate}
+            />
+          </TabPanel>
+
+          <TabPanel value={editorTab} index={3}>
+            <CaptureFieldsSection
+              step={step}
+              productFeatures={productFeatures}
+              featureSelections={featureSelections}
+              onAddCaptureField={onAddCaptureField}
+              onUpdateCaptureField={onUpdateCaptureField}
+              onDeleteCaptureField={onDeleteCaptureField}
             />
           </TabPanel>
         </Box>
@@ -1480,6 +1860,7 @@ function featureToInputType(valueType: string): StepInputType {
 function InputsSection({
   step,
   productFeatures,
+  featureSelections,
   onAddInput,
   onAddFeatureInput,
   onUpdateInput,
@@ -1487,6 +1868,7 @@ function InputsSection({
 }: {
   step: WorkflowStep;
   productFeatures: ProductFeatureDefinition[];
+  featureSelections?: FeatureSelection[];
   onAddInput: (type: StepInputType) => void;
   onAddFeatureInput: (feat: { type: StepInputType; options?: string[]; featureId: string; label: string; subFields?: { id: string; name: string }[] }) => void;
   onUpdateInput: (id: string, patch: Partial<StepInput>) => void;
@@ -1519,9 +1901,20 @@ function InputsSection({
                 <Stack direction="row" alignItems="center" justifyContent="space-between">
                   <Stack direction="row" spacing={0.75} alignItems="center">
                     <Chip label={inp.type.toUpperCase()} size="small" variant="outlined" />
-                    {inp.featureId && (
-                      <Chip label="Feature" size="small" color="info" variant="outlined" sx={{ height: 18, fontSize: 10 }} />
-                    )}
+                    {inp.featureId && (() => {
+                      const feat = productFeatures.find((f) => f.id === inp.featureId);
+                      const sel = (featureSelections ?? []).find((s) => s.featureId === inp.featureId);
+                      const qty = sel?.activeCount ?? 0;
+                      return (
+                        <Chip
+                          size="small"
+                          color={qty > 0 ? "primary" : "default"}
+                          variant="outlined"
+                          label={qty > 0 ? `${feat?.name ?? "Feature"} ×${qty}` : (feat?.name ?? "Feature")}
+                          sx={{ height: 18, fontSize: 10 }}
+                        />
+                      );
+                    })()}
                   </Stack>
                   <Tooltip title="Delete input">
                     <IconButton size="small" color="error" onClick={() => onDeleteInput(inp.id)}>
@@ -1584,35 +1977,18 @@ function InputsSection({
                 {label}
               </Button>
             ))}
-            {productFeatures.length > 0 && (
+            {false && productFeatures.length > 0 && (
               <>
-                <Divider sx={{ my: 0.5 }}>
-                  <Typography variant="caption" color="text.secondary">From product features (select multiple)</Typography>
-                </Divider>
                 {productFeatures.map((feat) => {
                   const alreadyAdded = usedFeatureIds.has(feat.id);
                   const checked = selectedFeatIds.has(feat.id);
                   return (
                     <Stack key={feat.id} direction="row" spacing={0.5} alignItems="center" sx={{ opacity: alreadyAdded ? 0.5 : 1 }}>
-                      <Checkbox
-                        size="small"
-                        disabled={alreadyAdded}
-                        checked={checked}
-                        onChange={(e) => {
-                          setSelectedFeatIds((prev) => {
-                            const next = new Set(prev);
-                            if (e.target.checked) next.add(feat.id);
-                            else next.delete(feat.id);
-                            return next;
-                          });
-                        }}
-                        sx={{ p: 0.5 }}
-                      />
+                      <Checkbox size="small" disabled={alreadyAdded} checked={checked}
+                        onChange={(e) => { setSelectedFeatIds((prev) => { const next = new Set(prev); if (e.target.checked) next.add(feat.id); else next.delete(feat.id); return next; }); }}
+                        sx={{ p: 0.5 }} />
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="body2" noWrap>{feat.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {feat.valueType}{alreadyAdded ? " · already added" : ""}
-                        </Typography>
                       </Box>
                     </Stack>
                   );
@@ -1653,6 +2029,291 @@ function InputsSection({
           <Button onClick={() => { setPickerOpen(false); setSelectedFeatIds(new Set()); }}>Cancel</Button>
         </DialogActions>
       </Dialog>
+    </Stack>
+  );
+}
+
+// ------------------------------------------------------------------
+// CaptureFieldsSection
+// ------------------------------------------------------------------
+
+/** Convert a human label to a camelCase machine key, e.g. "Serial Number" → "serialNumber" */
+function labelToKey(label: string): string {
+  const words = label.trim().replace(/[^a-zA-Z0-9\s]/g, "").split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "field";
+  return words[0].toLowerCase() + words.slice(1).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join("");
+}
+
+/** Build the full standard step set from feature selections. Called when a new config is opened empty. */
+function buildAutoSteps(
+  featureSelections: FeatureSelection[],
+  productFeatures: ProductFeatureDefinition[],
+): WorkflowStep[] {
+  const u = uid;
+  const mkCheck = (label: string, fid?: string): StepInput =>
+    ({ id: u(), type: "checkbox", label, required: true, ...(fid ? { featureId: fid } : {}) });
+
+  const steps: WorkflowStep[] = [];
+  let order = 1;
+
+  const base: Omit<WorkflowStep, "id" | "order" | "title" | "description" | "inputs" | "captureFields" | "stepType" | "stepFeatureId" | "stepUnitIndex"> = {
+    overrideInReport: false, overrideReportText: "", includeDescriptionInReport: true,
+    mediaIds: [], decisionsEnabled: false, decisions: [], nextStepId: null,
+  };
+
+  const activeFeatures = featureSelections
+    .filter((s) => s.activeCount > 0)
+    .flatMap((s) => {
+      const feat = productFeatures.find((f) => f.id === s.featureId);
+      return feat ? [{ sel: s, feat }] : [];
+    });
+
+  // 1 — Preparation & Permits
+  steps.push({
+    ...base, id: u(), order: order++,
+    stepType: "preparation",
+    title: "Preparation & Permits",
+    description: "Verify site readiness and obtain all required permits before commencing work. Inspect the work area for hazards, confirm access arrangements, document pre-existing conditions with photographs, and ensure all tools and materials are on site and accounted for.",
+    inputs: [
+      mkCheck("Work area is clear and safe"),
+      mkCheck("Permits and authorizations obtained"),
+      { id: u(), type: "photo", label: "Pre-installation site photo", required: true },
+      mkCheck("Tools and materials verified on site"),
+    ],
+    captureFields: [],
+  });
+
+  // 2 — Installation steps (one per feature × unit)
+  for (const { sel, feat } of activeFeatures) {
+    for (let unit = 1; unit <= sel.activeCount; unit++) {
+      const deps = feat.subProperties ?? [];
+      steps.push({
+        ...base, id: u(), order: order++,
+        stepType: "installation", stepFeatureId: feat.id, stepUnitIndex: unit,
+        title: `${feat.name} ${unit} — Installation`,
+        description: `Install ${feat.name} unit ${unit} per manufacturer specifications and project drawings. Follow safe work practices and applicable torque specifications. Verify all mechanical and electrical connections are secure. Record any deviations from the installation plan before proceeding.`,
+        inputs: [
+          ...deps.map((dep) => mkCheck(`${dep.name} installed and connected`, feat.id)),
+          mkCheck(`${feat.name} ${unit} — Installation complete and verified`),
+        ],
+        captureFields: [],
+      });
+    }
+  }
+
+  // 3 — Data Collection steps (one per feature × unit)
+  for (const { sel, feat } of activeFeatures) {
+    for (let unit = 1; unit <= sel.activeCount; unit++) {
+      const deps = feat.subProperties ?? [];
+      steps.push({
+        ...base, id: u(), order: order++,
+        stepType: "data-collection", stepFeatureId: feat.id, stepUnitIndex: unit,
+        title: `${feat.name} ${unit} — Data Collection`,
+        description: `Record all required technical data for ${feat.name} ${unit}. Capture serial numbers, model numbers, firmware versions and measured values. Photograph the installed unit showing nameplate and installed condition. Ensure all fields are completed accurately as this forms the as-built record.`,
+        inputs: [
+          { id: u(), type: "photo", label: `${feat.name} ${unit} — Installed unit photograph`, required: true },
+        ],
+        captureFields: deps.map((dep) => ({
+          id: u(),
+          key: labelToKey(`${feat.name}_${unit}_${dep.name}`),
+          label: dep.name,
+          type: ((dep.valueType as string) === "number" ? "number" : (dep.valueType as string) === "date" ? "date" : "text") as CaptureFieldType,
+          required: true,
+          featureId: feat.id,
+        })),
+      });
+    }
+  }
+
+  // 4 — Test & Acceptance (global, not per feature)
+  steps.push({
+    ...base, id: u(), order: order++,
+    stepType: "test-acceptance",
+    title: "Test & Acceptance",
+    description: "Perform functional testing of all installed equipment per the acceptance test procedure. Verify each unit operates within specified parameters. Record test results and note any deficiencies. All items must pass before proceeding to final inspection.",
+    inputs: [
+      mkCheck("All installed equipment — Functional test passed"),
+      mkCheck("System operates within specified parameters"),
+      mkCheck("Test results documented"),
+    ],
+    captureFields: [],
+  });
+
+  // 5 — Final Inspection
+  const inspBoxes: StepInput[] = activeFeatures.flatMap(({ sel, feat }) =>
+    Array.from({ length: sel.activeCount }, (_, i) => mkCheck(`${feat.name} ${i + 1} — Final inspection passed`))
+  );
+  if (inspBoxes.length === 0) inspBoxes.push(mkCheck("All equipment — Final inspection passed"));
+  steps.push({
+    ...base, id: u(), order: order++,
+    stepType: "final-inspection",
+    title: "Final Inspection",
+    description: "Conduct a comprehensive final inspection of all installed equipment and the surrounding work area. Verify all units are correctly labelled, secured and connected. Confirm the site is clean, all temporary works are removed and the installation meets the required quality standards.",
+    inputs: inspBoxes, captureFields: [],
+  });
+
+  // 6 — Return to Service
+  steps.push({
+    ...base, id: u(), order: order++,
+    stepType: "return-to-service",
+    title: "Return to Service",
+    description: "Complete all documentation and formally return the asset to operational service. Notify relevant stakeholders of completion, hand over as-built records and operational instructions. Confirm the system is live and operating normally before closing out the work order.",
+    inputs: [
+      mkCheck("All documentation completed"),
+      mkCheck("Stakeholders notified of completion"),
+      mkCheck("System confirmed operational"),
+      mkCheck("Work order ready to close"),
+    ],
+    captureFields: [],
+  });
+
+  return steps;
+}
+
+const CAPTURE_FIELD_TYPES: { type: CaptureFieldType; label: string }[] = [
+  { type: "text", label: "Text" },
+  { type: "number", label: "Number" },
+  { type: "scan", label: "Scan / QR" },
+  { type: "date", label: "Date" },
+];
+
+function CaptureFieldsSection({
+  step,
+  productFeatures,
+  featureSelections,
+  onAddCaptureField,
+  onUpdateCaptureField,
+  onDeleteCaptureField,
+}: {
+  step: WorkflowStep;
+  productFeatures: ProductFeatureDefinition[];
+  featureSelections?: FeatureSelection[];
+  onAddCaptureField: () => void;
+  onUpdateCaptureField: (id: string, patch: Partial<CaptureField>) => void;
+  onDeleteCaptureField: (id: string) => void;
+}) {
+  const fields = step.captureFields || [];
+
+  return (
+    <Stack spacing={2}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={0.75}>
+        <Typography variant="body2" color="text.secondary">
+          Structured data captured into the as-built document.
+        </Typography>
+        <Stack direction="row" spacing={0.75}>
+          <Button size="small" variant="contained" startIcon={<AddOutlined />} onClick={onAddCaptureField}>
+            Add field
+          </Button>
+        </Stack>
+      </Stack>
+
+      {fields.length === 0 ? (
+        <Alert severity="info" sx={{ fontSize: 12 }}>
+          No capture fields yet. Add fields like Serial Number, Firmware Version, or measured values.
+        </Alert>
+      ) : (
+        <Stack spacing={1.5}>
+          {fields.map((field) => (
+            <Paper key={field.id} variant="outlined" sx={{ p: 1.5 }}>
+              <Stack spacing={1.5}>
+                <Stack direction="row" alignItems="center" justifyContent="space-between">
+                  <Stack direction="row" spacing={0.75} alignItems="center">
+                    <Chip label={field.type.toUpperCase()} size="small" variant="outlined" color="secondary" />
+                    {field.featureId && (() => {
+                      const feat = productFeatures.find((f) => f.id === field.featureId);
+                      const sel = (featureSelections ?? []).find((s) => s.featureId === field.featureId);
+                      const qty = sel?.activeCount ?? 0;
+                      return (
+                        <Chip
+                          size="small"
+                          color={qty > 0 ? "primary" : "default"}
+                          variant="outlined"
+                          label={qty > 0 ? `${feat?.name ?? "Feature"} ×${qty}` : (feat?.name ?? "Feature")}
+                          sx={{ height: 18, fontSize: 10 }}
+                        />
+                      );
+                    })()}
+                  </Stack>
+                  <Tooltip title="Delete field">
+                    <IconButton size="small" color="error" onClick={() => onDeleteCaptureField(field.id)}>
+                      <DeleteOutline fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                  <TextField
+                    label="Label"
+                    size="small"
+                    fullWidth
+                    autoFocus
+                    value={field.label}
+                    onChange={(e) => {
+                      const newLabel = e.target.value;
+                      // Auto-sync key from label as long as key matches the previous auto-derived value
+                      const autoKey = labelToKey(field.label);
+                      const keyIsAuto = field.key === "" || field.key === autoKey;
+                      onUpdateCaptureField(field.id, {
+                        label: newLabel,
+                        ...(keyIsAuto ? { key: labelToKey(newLabel) } : {}),
+                      });
+                    }}
+                    placeholder="e.g. Serial Number"
+                  />
+                  <TextField
+                    label="Key (auto)"
+                    size="small"
+                    sx={{ minWidth: 160 }}
+                    value={field.key}
+                    onChange={(e) => onUpdateCaptureField(field.id, { key: e.target.value.replace(/[^a-zA-Z0-9_]/g, "") })}
+                    placeholder="serialNumber"
+                    helperText="Auto-generated · edit to override"
+                  />
+                </Stack>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
+                  <FormControl size="small" sx={{ minWidth: 120 }}>
+                    <InputLabel>Type</InputLabel>
+                    <Select
+                      label="Type"
+                      value={field.type}
+                      onChange={(e) => onUpdateCaptureField(field.id, { type: e.target.value as CaptureFieldType })}
+                    >
+                      {CAPTURE_FIELD_TYPES.map(({ type, label }) => (
+                        <MenuItem key={type} value={type}>{label}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <TextField
+                    label="Unit (optional)"
+                    size="small"
+                    sx={{ width: 110 }}
+                    value={field.unit || ""}
+                    onChange={(e) => onUpdateCaptureField(field.id, { unit: e.target.value || undefined })}
+                    placeholder="dBm, V, °C"
+                  />
+                  <TextField
+                    label="Hint (optional)"
+                    size="small"
+                    fullWidth
+                    value={field.hint || ""}
+                    onChange={(e) => onUpdateCaptureField(field.id, { hint: e.target.value || undefined })}
+                    placeholder="Placeholder hint for the technician"
+                  />
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
+                    <Switch
+                      size="small"
+                      checked={field.required}
+                      onChange={(e) => onUpdateCaptureField(field.id, { required: e.target.checked })}
+                    />
+                    <Typography variant="caption" sx={{ whiteSpace: "nowrap" }}>
+                      {field.required ? "Required" : "Optional"}
+                    </Typography>
+                  </Stack>
+                </Stack>
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+      )}
     </Stack>
   );
 }
@@ -1830,6 +2491,227 @@ function WorkerPreviewPanel({ workflow, stepsSorted }: { workflow: Workflow; ste
         )}
       </Stack>
     </Paper>
+  );
+}
+
+// ------------------------------------------------------------------
+// RightPanel — Preview tab + BOM tab
+// ------------------------------------------------------------------
+
+const uid2 = () => typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `id_${Math.random().toString(16).slice(2)}`;
+
+function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, productFeatures, featureSelections, onFeatureSelectionsChange }: {
+  workflow: Workflow;
+  stepsSorted: WorkflowStep[];
+  isReadOnly: boolean;
+  onWorkflowUpdate: (wf: Workflow) => void;
+  productFeatures?: ProductFeatureDefinition[];
+  featureSelections?: FeatureSelection[];
+  onFeatureSelectionsChange?: (sels: FeatureSelection[]) => void;
+}) {
+  const [tab, setTab] = React.useState(0);
+  const features = productFeatures ?? [];
+  const sels = featureSelections ?? [];
+  const includedCount = sels.filter((s) => s.activeCount > 0).length;
+
+  function updateSel(featureId: string, patch: Partial<FeatureSelection>) {
+    onFeatureSelectionsChange?.(sels.map((s) => s.featureId === featureId ? { ...s, ...patch } : s));
+  }
+
+  function updateBom(fn: (items: import("../../types/workflow").BomItem[]) => import("../../types/workflow").BomItem[]) {
+    const next = JSON.parse(JSON.stringify(workflow)) as Workflow;
+    next.bomItems = fn(next.bomItems ?? []);
+    onWorkflowUpdate(next);
+  }
+
+  const bomItems = workflow.bomItems ?? [];
+
+  return (
+    <Stack spacing={0}>
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="fullWidth" sx={{ mb: 1 }}>
+        <Tab label="Preview" />
+        <Tab label={`BOM${bomItems.length ? ` (${bomItems.length})` : ""}`} />
+        {features.length > 0 && <Tab label={`Features${includedCount > 0 ? ` (${includedCount})` : ""}`} />}
+      </Tabs>
+
+      {tab === 0 && <WorkerPreviewPanel workflow={workflow} stepsSorted={stepsSorted} />}
+
+      {tab === 1 && (
+        <Paper className="glass-card" sx={{ p: 2 }}>
+          <Stack spacing={2}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Typography variant="body2" color="text.secondary">
+                Expected parts for this workflow.
+              </Typography>
+              {!isReadOnly && (
+                <Button size="small" variant="contained" startIcon={<AddOutlined />}
+                  onClick={() => updateBom((items) => [...items, {
+                    id: uid2(), description: "", partNumber: "", isInventory: false,
+                    expectedQty: 1, unitOfMeasure: "ea", notes: "",
+                  }])}>
+                  Add item
+                </Button>
+              )}
+            </Stack>
+
+            {bomItems.length === 0 ? (
+              <Alert severity="info" sx={{ fontSize: 12 }}>
+                No BOM items yet. Add inventory parts (tracked by serial) or consumables (tracked by qty).
+              </Alert>
+            ) : (
+              <Stack spacing={1.5}>
+                {bomItems.map((item) => (
+                  <Paper key={item.id} variant="outlined" sx={{ p: 1.5 }}>
+                    <Stack spacing={1.5}>
+                      <Stack direction="row" alignItems="center" justifyContent="space-between">
+                        <Chip
+                          label={item.isInventory ? "Inventory" : "Consumable"}
+                          size="small"
+                          color={item.isInventory ? "primary" : "default"}
+                          variant="outlined"
+                        />
+                        {!isReadOnly && (
+                          <IconButton size="small" color="error"
+                            onClick={() => updateBom((items) => items.filter((i) => i.id !== item.id))}>
+                            <DeleteOutline fontSize="small" />
+                          </IconButton>
+                        )}
+                      </Stack>
+                      <TextField
+                        label="Description"
+                        size="small"
+                        fullWidth
+                        disabled={isReadOnly}
+                        value={item.description}
+                        onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, description: e.target.value } : i))}
+                        placeholder="e.g. IP Camera, BNC Cable"
+                      />
+                      <Stack direction="row" spacing={1}>
+                        <TextField
+                          label="Part No."
+                          size="small"
+                          sx={{ flex: 1 }}
+                          disabled={isReadOnly}
+                          value={item.partNumber || ""}
+                          onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, partNumber: e.target.value } : i))}
+                          placeholder="SKU / part number"
+                        />
+                        <TextField
+                          label="Qty"
+                          size="small"
+                          type="number"
+                          sx={{ width: 70 }}
+                          disabled={isReadOnly}
+                          value={item.expectedQty}
+                          onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, expectedQty: Number(e.target.value) || 1 } : i))}
+                        />
+                        <TextField
+                          label="UOM"
+                          size="small"
+                          sx={{ width: 70 }}
+                          disabled={isReadOnly}
+                          value={item.unitOfMeasure}
+                          onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, unitOfMeasure: e.target.value } : i))}
+                          placeholder="ea"
+                        />
+                      </Stack>
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <Switch
+                          size="small"
+                          disabled={isReadOnly}
+                          checked={item.isInventory}
+                          onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, isInventory: e.target.checked } : i))}
+                        />
+                        <Typography variant="caption">
+                          {item.isInventory ? "Tracked — capture serial per unit" : "Consumable — confirm qty only"}
+                        </Typography>
+                      </Stack>
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+          </Stack>
+        </Paper>
+      )}
+
+      {tab === 2 && features.length > 0 && (
+        <Paper className="glass-card" sx={{ p: 2 }}>
+          <Stack spacing={2}>
+            <Typography variant="body2" color="text.secondary">
+              Select which features are used in this workflow configuration and set the quantity for each.
+            </Typography>
+            {features.length === 0 ? (
+              <Alert severity="info" sx={{ fontSize: 12 }}>
+                No features defined on this product.
+              </Alert>
+            ) : (
+              <Stack spacing={1}>
+                {features.map((feat) => {
+                  const sel = sels.find((s) => s.featureId === feat.id) ?? { featureId: feat.id, included: false, activeCount: 0 };
+                  return (
+                    <Paper
+                      key={feat.id}
+                      variant="outlined"
+                      sx={{ p: 1.5, borderColor: sel.activeCount > 0 ? "primary.main" : "divider", opacity: sel.activeCount === 0 ? 0.6 : 1 }}
+                    >
+                      <Stack direction="row" alignItems="center" spacing={1.5}>
+                        <Typography variant="body2" sx={{ flexGrow: 1 }}>{feat.name}</Typography>
+                        {/* Qty stepper — 0 = not included in this config */}
+                        <Stack direction="row" alignItems="center" spacing={0.5}
+                          sx={{ border: 1, borderColor: sel.activeCount > 0 ? "primary.main" : "divider", borderRadius: 1, px: 0.5, py: 0.25, flexShrink: 0 }}>
+                          <IconButton
+                            size="small"
+                            disabled={isReadOnly || sel.activeCount <= 0}
+                            onClick={() => {
+                              const next = Math.max(0, sel.activeCount - 1);
+                              updateSel(feat.id, { activeCount: next, included: next > 0 });
+                            }}
+                            sx={{ p: 0.25 }}
+                          >
+                            <RemoveOutlined sx={{ fontSize: 14 }} />
+                          </IconButton>
+                          <Typography
+                            variant="body2"
+                            fontWeight={600}
+                            color={sel.activeCount > 0 ? "primary" : "text.disabled"}
+                            sx={{ minWidth: 20, textAlign: "center" }}
+                          >
+                            {sel.activeCount}
+                          </Typography>
+                          <IconButton
+                            size="small"
+                            disabled={isReadOnly}
+                            onClick={() => updateSel(feat.id, { activeCount: sel.activeCount + 1, included: true })}
+                            sx={{ p: 0.25 }}
+                          >
+                            <AddOutlined sx={{ fontSize: 14 }} />
+                          </IconButton>
+                        </Stack>
+                      </Stack>
+                      {sel.activeCount > 0 && feat.subProperties && feat.subProperties.length > 0 && (
+                        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1, pl: 0.5 }}>
+                          {feat.subProperties.map((dep) => (
+                            <Chip
+                              key={dep.id}
+                              size="small"
+                              label={`${dep.name}${dep.unit ? ` (${dep.unit})` : ""}`}
+                              color={dep.isInventory ? "primary" : "default"}
+                              variant="outlined"
+                              sx={{ fontSize: 10 }}
+                            />
+                          ))}
+                        </Stack>
+                      )}
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            )}
+          </Stack>
+        </Paper>
+      )}
+    </Stack>
   );
 }
 

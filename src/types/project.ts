@@ -41,4 +41,5 @@ export interface Project {
   probabilityStage?: string;
   productIds?: string[];
   productFeatureValues?: Record<string, string>;
+  assetCount?: number;
 }

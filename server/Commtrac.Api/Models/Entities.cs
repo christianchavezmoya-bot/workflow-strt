@@ -600,6 +600,16 @@ public class ProjectAssetEntity
     public string? Notes { get; set; }
     public string FeatureValuesJson { get; set; } = "{}";
     public string IssuesJson { get; set; } = "[]";
+    /// <summary>Human-readable label for what was installed, e.g. "Strata AI / 2 Cameras + Reverse Input"</summary>
+    [MaxLength(400)]
+    public string? ConfigLabel { get; set; }
+    /// <summary>Timestamp when the installation workflow was completed</summary>
+    public DateTime? InstalledAt { get; set; }
+    /// <summary>Name of the technician who completed the installation</summary>
+    [MaxLength(200)]
+    public string? InstalledBy { get; set; }
+    /// <summary>JSON snapshot of all captured data-capture field values from completed workflow runs (as-built document)</summary>
+    public string AsBuiltJson { get; set; } = "{}";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -727,6 +737,8 @@ public class AssetWorkflowRunEntity
     public DateTime? CustomerSignedAt { get; set; }
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
+    /// <summary>JSON array of confirmed BOM items (BomActualItem[]) recorded at run completion.</summary>
+    public string BomActualJson { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -261,7 +261,8 @@ public record ProjectDto(
     decimal? ContractValue,
     string? ProbabilityStage,
     List<string>? ProductIds,
-    Dictionary<string, string>? ProductFeatureValues
+    Dictionary<string, string>? ProductFeatureValues,
+    int AssetCount = 0
 );
 
 public record UpdateProjectStatusRequest(
@@ -571,6 +572,10 @@ public record ProjectAssetDto(
     string? Notes,
     string FeatureValuesJson,
     string IssuesJson,
+    string? ConfigLabel,
+    DateTime? InstalledAt,
+    string? InstalledBy,
+    string AsBuiltJson,
     DateTime CreatedAt,
     DateTime UpdatedAt
 );
@@ -591,7 +596,8 @@ public record UpsertProjectAssetRequest(
     string? WorkOrderId,
     string? Notes,
     string? FeatureValuesJson,
-    string? IssuesJson
+    string? IssuesJson,
+    string? ConfigLabel
 );
 
 public record BulkCreateProjectAssetsRequest(
@@ -687,7 +693,8 @@ public record AssetWorkflowRunDto(
     DateTime StartedAt,
     DateTime? CompletedAt,
     DateTime CreatedAt,
-    DateTime UpdatedAt
+    DateTime UpdatedAt,
+    string BomActualJson
 );
 
 public record StartRunRequest(
@@ -705,7 +712,8 @@ public record SaveRunProgressRequest(
 public record CompleteRunRequest(
     string StepResultsJson,
     string IssuesJson,
-    string? CompletedByName
+    string? CompletedByName,
+    string? BomActualJson
 );
 
 public record PatchIssuesRequest(string IssuesJson);

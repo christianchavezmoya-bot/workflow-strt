@@ -45,6 +45,14 @@ export interface ProjectAsset {
   featureValuesJson: string;
   /** JSON string: AssetIssue[] */
   issuesJson: string;
+  /** Human-readable label for what was installed, e.g. "Strata AI / 2 Cameras + Reverse Input" */
+  configLabel?: string;
+  /** ISO timestamp when the installation workflow was completed */
+  installedAt?: string;
+  /** Name of the technician who completed the installation */
+  installedBy?: string;
+  /** JSON snapshot of all captured data-capture field values from completed workflow runs */
+  asBuiltJson?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -64,4 +72,5 @@ export interface CreateProjectAssetInput {
   notes?: string;
   featureValuesJson?: string;
   issuesJson?: string;
+  configLabel?: string;
 }

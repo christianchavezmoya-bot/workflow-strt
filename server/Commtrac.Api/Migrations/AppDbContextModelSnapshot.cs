@@ -1402,6 +1402,10 @@ namespace Commtrac.Api.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AsBuiltJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AssetModel")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
@@ -1419,11 +1423,22 @@ namespace Commtrac.Api.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ConfigLabel")
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FeatureValuesJson")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("InstalledAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InstalledBy")
+                        .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("IssuesJson")

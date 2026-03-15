@@ -2,6 +2,15 @@ import api from "./api";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 
 export const assetWorkflowRunService = {
+  async listLatestByProject(projectId: string): Promise<AssetWorkflowRun[]> {
+    try {
+      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
+      return res.data;
+    } catch {
+      return [];
+    }
+  },
+
   async listByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
     try {
       const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
@@ -39,11 +48,12 @@ export const assetWorkflowRunService = {
     return res.data;
   },
 
-  async completeRun(runId: string, stepResultsJson: string, issuesJson: string, completedByName?: string): Promise<AssetWorkflowRun> {
+  async completeRun(runId: string, stepResultsJson: string, issuesJson: string, completedByName?: string, bomActualJson?: string): Promise<AssetWorkflowRun> {
     const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/complete`, {
       stepResultsJson,
       issuesJson,
       completedByName: completedByName ?? null,
+      bomActualJson: bomActualJson ?? null,
     });
     return res.data;
   },

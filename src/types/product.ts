@@ -16,6 +16,10 @@ export interface FeatureSubProperty {
   id: string;
   name: string;
   valueType: "text";
+  /** true = inventory item: tracks serial numbers per unit; false = non-inventory: tracks qty + unit price */
+  isInventory?: boolean;
+  /** unit of measure, e.g. "ea", "m", "kg" */
+  unit?: string;
 }
 
 export interface ProductFeatureDefinition {

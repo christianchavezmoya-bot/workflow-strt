@@ -41,7 +41,9 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import type { StepInput, Workflow, WorkflowStep } from "../../types/workflow";
+import type { BomActualItem, BomItem, CaptureField, StepInput, Workflow, WorkflowStep } from "../../types/workflow";
+import type { ProductFeatureDefinition } from "../../types/product";
+import type { FeatureSelection } from "../../services/productConfigService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { signatureService } from "../../services/signatureService";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
@@ -56,6 +58,7 @@ interface StepCapture {
   stepId: string;
   values: Record<string, string>;
   completedAt: string;
+  iterationIndex?: number;
 }
 
 interface RunTimeEntry {
@@ -86,9 +89,13 @@ interface WorkOrderRunnerProps {
   onPause?: (progress: { done: number; total: number; completedTitles: string[]; partialFeatureValues: Record<string, string> }) => void;
   /** Full name of the currently logged-in user, stored on each issue. */
   currentUserName?: string;
+  /** Product feature definitions — used to look up feature names for repeatFeatureId steps. */
+  productFeatures?: ProductFeatureDefinition[];
+  /** Feature selections from the workflow config — provides expected qty per feature. */
+  featureSelections?: FeatureSelection[];
 }
 
-type Stage = "setup" | "running" | "summary" | "installer-sign" | "customer-sign";
+type Stage = "setup" | "running" | "summary" | "bom" | "installer-sign" | "customer-sign";
 
 function parseRunTimeEntries(json: string): RunTimeEntry[] {
   try {
@@ -129,6 +136,8 @@ export default function WorkOrderRunner({
   onComplete,
   onPause,
   currentUserName,
+  productFeatures,
+  featureSelections,
 }: WorkOrderRunnerProps) {
   const stepsSorted = useMemo(
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
@@ -163,6 +172,21 @@ export default function WorkOrderRunner({
   const [issueDetailId, setIssueDetailId] = useState<string | null>(null);
   // Right-click context menu anchor for the issues chip
   const [issueMenuAnchor, setIssueMenuAnchor] = useState<Element | null>(null);
+
+  // Repeatable steps — how many iterations per step, current iteration, picker input value
+  const [repeatCounts, setRepeatCounts] = useState<Record<string, number>>({});
+  const [repeatIter, setRepeatIter] = useState<Record<string, number>>({});
+  const [repeatPickerCount, setRepeatPickerCount] = useState(1);
+  // Feature-linked repeatable steps — qty modifications made by installer
+  interface QtyModification { stepId: string; featureId: string; featureName: string; expectedQty: number; actualQty: number; reason: string; modifiedAt: string; }
+  const [qtyModifications, setQtyModifications] = useState<Record<string, QtyModification>>({});
+  const [modifyQtyOpen, setModifyQtyOpen] = useState(false);
+  const [modifyQtyStepId, setModifyQtyStepId] = useState<string | null>(null);
+  const [modifyQtyValue, setModifyQtyValue] = useState(1);
+  const [modifyQtyReason, setModifyQtyReason] = useState("");
+
+  // BOM confirmation
+  const [bomActual, setBomActual] = useState<BomActualItem[]>([]);
 
   // Run tracking
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
@@ -283,6 +307,7 @@ export default function WorkOrderRunner({
     setTrackingCategory(null);
     setTrackingStartedAt(null);
     setTickNow(Date.now());
+    setRepeatPickerCount(1);
   }
 
   function syncRunTimeState(run: {
@@ -530,6 +555,19 @@ export default function WorkOrderRunner({
     setRequiredWarning(!checkRequired(currentStep));
     setFlagOpen(false);
     setFlagSubmitted(false);
+
+    // Repeatable step: advance iteration before leaving the step
+    const stepHasFeatureLink = (currentStep.inputs ?? []).some((i) => i.featureId && (featureSelections ?? []).some((s) => s.featureId === i.featureId && s.activeCount > 0))
+      || (currentStep.captureFields ?? []).some((cf) => cf.featureId && (featureSelections ?? []).some((s) => s.featureId === cf.featureId && s.activeCount > 0));
+    if ((stepHasFeatureLink || currentStep.repeatable) && repeatCounts[currentStep.id]) {
+      const count = repeatCounts[currentStep.id];
+      const cur = repeatIter[currentStep.id] ?? 0;
+      if (cur + 1 < count) {
+        setRepeatIter((prev) => ({ ...prev, [currentStep.id]: cur + 1 }));
+        return;
+      }
+    }
+
     if (isLastStep || !currentStep.nextStepId) {
       autosaveProgress();
       setStage("summary");
@@ -538,6 +576,8 @@ export default function WorkOrderRunner({
       const nextHistory = [...history, currentStep.id];
       setHistory(nextHistory);
       setCurrentStepId(nextStepId);
+      // Reset iteration for the next step if it's repeatable
+      setRepeatIter((prev) => ({ ...prev, [nextStepId]: 0 }));
       autosaveProgress(nextStepId, nextHistory);
     }
   }
@@ -559,13 +599,24 @@ export default function WorkOrderRunner({
   }
 
   function buildStepsData(navStepId?: string, navHistory?: string[]): StepCapture[] {
-    const dataSteps = stepsSorted
-      .map((step) => ({
-        stepId: step.id,
-        values: values[step.id] ?? {},
-        completedAt: new Date().toISOString(),
-      }))
-      .filter((sc) => Object.keys(sc.values).length > 0);
+    const dataSteps: StepCapture[] = [];
+    for (const step of stepsSorted) {
+      const hasFeatureLink = (step.inputs ?? []).some((i) => i.featureId && (featureSelections ?? []).some((s) => s.featureId === i.featureId && s.activeCount > 0))
+        || (step.captureFields ?? []).some((cf) => cf.featureId && (featureSelections ?? []).some((s) => s.featureId === cf.featureId && s.activeCount > 0));
+      if ((hasFeatureLink || step.repeatable) && repeatCounts[step.id]) {
+        const count = repeatCounts[step.id];
+        for (let i = 0; i < count; i++) {
+          const iterKey = `${step.id}__iter__${i}`;
+          const iterValues = values[iterKey] ?? {};
+          if (Object.keys(iterValues).length > 0)
+            dataSteps.push({ stepId: step.id, values: iterValues, completedAt: new Date().toISOString(), iterationIndex: i });
+        }
+      } else {
+        const v = values[step.id] ?? {};
+        if (Object.keys(v).length > 0)
+          dataSteps.push({ stepId: step.id, values: v, completedAt: new Date().toISOString() });
+      }
+    }
 
     // Navigation marker — always saved so exact step + history can be restored on resume.
     // When navigating forward we pass the NEXT step explicitly (state updates are async,
@@ -613,10 +664,24 @@ export default function WorkOrderRunner({
     setBlockingError(null);
     try {
       const stepsJson = JSON.stringify(buildStepsData());
-      const issuesJson = JSON.stringify(issues);
+      // Include qty modifications as observation issues so they appear in reports
+      const qtyModIssues: RunIssue[] = Object.values(qtyModifications).map((mod) => ({
+        id: `qty-mod-${mod.stepId}`,
+        description: `[Qty Modification] ${mod.featureName}: expected ${mod.expectedQty}, installed ${mod.actualQty}. Reason: ${mod.reason}`,
+        issueType: "observation" as const,
+        severity: "low" as const,
+        stepId: mod.stepId,
+        reportedAt: mod.modifiedAt,
+        resolved: true,
+        isBlocking: false,
+        createdBy: currentUserName,
+      }));
+      const allIssues = [...issues, ...qtyModIssues];
+      const issuesJson = JSON.stringify(allIssues);
+      const bomJson = bomActual.length > 0 ? JSON.stringify(bomActual) : undefined;
 
       if (activeRunId) {
-        const lockedRun = await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName);
+        const lockedRun = await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName, bomJson);
         setActiveRun(lockedRun);
       }
       // Note: if no activeRunId (preview mode), skip signature stages
@@ -723,9 +788,10 @@ export default function WorkOrderRunner({
   // ---------------------------------------------------------------
   // Render input
   // ---------------------------------------------------------------
-  function renderInput(step: WorkflowStep, inp: StepInput) {
-    const val = getInputValue(step.id, inp.id);
-    const onChange = (v: string) => setInputValue(step.id, inp.id, v);
+  function renderInput(step: WorkflowStep, inp: StepInput, stepIdOverride?: string) {
+    const sid = stepIdOverride ?? step.id;
+    const val = getInputValue(sid, inp.id);
+    const onChange = (v: string) => setInputValue(sid, inp.id, v);
     const isReq = inp.required && !val.trim();
 
     if (inp.type === "checkbox") {
@@ -820,6 +886,44 @@ export default function WorkOrderRunner({
     );
   }
 
+  function renderCaptureField(step: WorkflowStep, field: CaptureField, stepIdOverride?: string) {
+    const sid = stepIdOverride ?? step.id;
+    const val = getInputValue(sid, field.id);
+    const onChange = (v: string) => setInputValue(sid, field.id, v);
+    const isReq = field.required && !val.trim();
+
+    if (field.type === "scan") {
+      return (
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Tooltip title="Scan barcode / QR (or type manually)">
+            <IconButton size="small"><QrCodeScannerOutlined fontSize="small" /></IconButton>
+          </Tooltip>
+          <TextField size="small" fullWidth error={isReq}
+            placeholder={field.hint || "Scan or enter value"}
+            value={val} onChange={(e) => onChange(e.target.value)} />
+        </Stack>
+      );
+    }
+    if (field.type === "date") {
+      return (
+        <TextField size="small" type="date" fullWidth error={isReq}
+          value={val} onChange={(e) => onChange(e.target.value)} InputLabelProps={{ shrink: true }} />
+      );
+    }
+    if (field.type === "number") {
+      return (
+        <TextField size="small" fullWidth type="number" error={isReq}
+          placeholder={field.hint || field.unit || ""}
+          value={val} onChange={(e) => onChange(e.target.value)} />
+      );
+    }
+    return (
+      <TextField size="small" fullWidth error={isReq}
+        placeholder={field.hint || "Enter value"}
+        value={val} onChange={(e) => onChange(e.target.value)} />
+    );
+  }
+
   // ---------------------------------------------------------------
   // Stage: setup
   // ---------------------------------------------------------------
@@ -891,9 +995,49 @@ export default function WorkOrderRunner({
     if (!currentStep) return null;
     const progress = stepsSorted.length > 0 ? ((currentIndex + 1) / stepsSorted.length) * 100 : 0;
     const hasInputs = (currentStep.inputs ?? []).length > 0;
+    const hasCaptureFields = (currentStep.captureFields ?? []).length > 0;
     const hasDecisions = currentStep.decisionsEnabled && (currentStep.decisions ?? []).length > 0;
     const isLast = !hasDecisions && !currentStep.nextStepId;
     const blockingCount = issues.filter((i) => i.isBlocking && !i.resolved).length;
+
+    // Feature-linked repeatable step — derived from inputs or capture fields with featureId
+    const derivedFeatureLink = (() => {
+      // Check inputs first
+      for (const inp of currentStep.inputs ?? []) {
+        if (inp.featureId) {
+          const sel = (featureSelections ?? []).find((s) => s.featureId === inp.featureId && s.activeCount > 0);
+          const feat = (productFeatures ?? []).find((f) => f.id === inp.featureId);
+          if (sel && feat) return { feature: feat, sel };
+        }
+      }
+      // Then capture fields
+      for (const cf of currentStep.captureFields ?? []) {
+        if (cf.featureId) {
+          const sel = (featureSelections ?? []).find((s) => s.featureId === cf.featureId && s.activeCount > 0);
+          const feat = (productFeatures ?? []).find((f) => f.id === cf.featureId);
+          if (sel && feat) return { feature: feat, sel };
+        }
+      }
+      return null;
+    })();
+    const linkedFeature = derivedFeatureLink?.feature ?? null;
+    const linkedFeatureSel = derivedFeatureLink?.sel ?? null;
+    const expectedQty = linkedFeatureSel?.activeCount ?? 1;
+    const activeQtyMod = linkedFeature ? qtyModifications[currentStep.id] : undefined;
+    const confirmedQty = activeQtyMod?.actualQty ?? expectedQty;
+
+    // Repeatable step: derive effective step ID (iteration-scoped values key)
+    const isFeatureRepeatable = !!linkedFeature;
+    const isLegacyRepeatable = !isFeatureRepeatable && !!currentStep.repeatable;
+    const repeatCount = (isFeatureRepeatable || isLegacyRepeatable) ? (repeatCounts[currentStep.id] ?? 0) : 0;
+    const repeatIdx = (isFeatureRepeatable || isLegacyRepeatable) ? (repeatIter[currentStep.id] ?? 0) : 0;
+    // For feature-linked: needsCountPicker = needs confirmation (not a free count entry)
+    const needsConfirmation = isFeatureRepeatable && repeatCount === 0;
+    const needsCountPicker = isLegacyRepeatable && repeatCount === 0;
+    const unitLabel = linkedFeature?.name ?? currentStep.repeatLabel ?? "Unit";
+    const effectiveStepId = (isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0
+      ? `${currentStep.id}__iter__${repeatIdx}`
+      : currentStep.id;
 
     const attachedMedia = (currentStep.mediaIds ?? [])
       .map((id) => (workflow.media ?? []).find((m) => m.id === id))
@@ -1063,67 +1207,216 @@ export default function WorkOrderRunner({
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2.5} sx={{ mt: 1 }}>
-            <Box>
-              <Typography variant="h6" fontWeight={600}>{currentStep.title || "(Untitled step)"}</Typography>
-              {currentStep.description && (
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  {currentStep.description}
-                </Typography>
-              )}
-            </Box>
 
-            {/* Media thumbnails */}
-            {attachedMedia.length > 0 && (
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                {attachedMedia.map((m) => (
-                  <Tooltip key={m.id} title={m.name}>
-                    <Box
-                      component="a"
-                      href={m.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      sx={{
-                        width: 72, height: 72, borderRadius: 1, overflow: "hidden",
-                        border: "1px solid", borderColor: "divider",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        bgcolor: "action.hover", cursor: "pointer",
-                        "&:hover": { borderColor: "primary.main" },
+            {/* Feature-linked repeatable step — qty confirmation panel */}
+            {needsConfirmation && (
+              <Paper variant="outlined" sx={{ p: 2, borderColor: "primary.light" }}>
+                <Stack spacing={1.5}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Chip size="small" color="primary" label={unitLabel} />
+                    <Typography variant="subtitle2">
+                      Confirm installed quantity
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" alignItems="center" spacing={1.5}>
+                    <Typography variant="body2">
+                      Expected: <strong>{confirmedQty} {unitLabel}{confirmedQty !== 1 ? "s" : ""}</strong>
+                    </Typography>
+                    {activeQtyMod && (
+                      <Chip
+                        size="small"
+                        color="warning"
+                        label={`Modified: ${activeQtyMod.actualQty} (was ${activeQtyMod.expectedQty})`}
+                      />
+                    )}
+                  </Stack>
+                  <Stack direction="row" spacing={1.5}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={() => {
+                        setRepeatCounts((p) => ({ ...p, [currentStep.id]: confirmedQty }));
+                        setRepeatIter((p) => ({ ...p, [currentStep.id]: 0 }));
                       }}
                     >
-                      {m.type === "image" ? (
-                        <img src={m.url} alt={m.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      ) : (
-                        <Typography variant="caption" color="text.secondary">🎥</Typography>
-                      )}
-                    </Box>
-                  </Tooltip>
-                ))}
-              </Stack>
+                      Confirm {confirmedQty} {unitLabel}{confirmedQty !== 1 ? "s" : ""}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      color="warning"
+                      onClick={() => {
+                        setModifyQtyStepId(currentStep.id);
+                        setModifyQtyValue(confirmedQty);
+                        setModifyQtyReason(activeQtyMod?.reason ?? "");
+                        setModifyQtyOpen(true);
+                      }}
+                    >
+                      Modify qty
+                    </Button>
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">
+                    You'll capture data once for each {unitLabel.toLowerCase()}.
+                    If there is a discrepancy, use "Modify qty" to record the actual count.
+                  </Typography>
+                </Stack>
+              </Paper>
             )}
 
-            {/* Inputs */}
-            {hasInputs && (
-              <Stack spacing={1.5}>
-                {(currentStep.inputs ?? []).map((inp) => (
-                  <Paper key={inp.id} variant="outlined" sx={{ p: 1.5 }}>
-                    <Stack spacing={1}>
-                      <Typography variant="caption" color="text.secondary">
-                        {inp.label || "Input"}
-                        {inp.required && (
-                          <Typography component="span" variant="caption" color="error" sx={{ ml: 0.5 }}>*</Typography>
-                        )}
+            {/* Legacy repeatable step — count picker */}
+            {needsCountPicker && (
+              <Paper variant="outlined" sx={{ p: 2, borderColor: "primary.light" }}>
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2">
+                    How many {unitLabel}s are you installing?
+                  </Typography>
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <TextField
+                      size="small"
+                      type="number"
+                      label={`${unitLabel} count`}
+                      value={repeatPickerCount}
+                      onChange={(e) => setRepeatPickerCount(Math.max(1, Number(e.target.value) || 1))}
+                      inputProps={{ min: 1, max: 99 }}
+                      sx={{ width: 130 }}
+                    />
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={() => {
+                        setRepeatCounts((p) => ({ ...p, [currentStep.id]: repeatPickerCount }));
+                        setRepeatIter((p) => ({ ...p, [currentStep.id]: 0 }));
+                      }}
+                    >
+                      Start
+                    </Button>
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">
+                    You'll complete this step once for each {unitLabel.toLowerCase()}.
+                  </Typography>
+                </Stack>
+              </Paper>
+            )}
+
+            {/* Repeatable step — iteration header */}
+            {(isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0 && (
+              <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "primary.50", borderColor: "primary.light" }}>
+                <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Chip
+                    size="small"
+                    color="primary"
+                    label={`${unitLabel} ${repeatIdx + 1} of ${repeatCount}`}
+                    sx={{ fontWeight: 600 }}
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    Complete fields for this {unitLabel.toLowerCase()}, then press Next to continue.
+                  </Typography>
+                  {isFeatureRepeatable && activeQtyMod && (
+                    <Chip size="small" color="warning" variant="outlined"
+                      label={`Qty modified (was ${activeQtyMod.expectedQty})`} />
+                  )}
+                </Stack>
+              </Paper>
+            )}
+
+            {/* Step content — hidden until count is confirmed for repeatable steps */}
+            {!needsConfirmation && !needsCountPicker && (
+              <>
+                <Box>
+                  <Typography variant="h6" fontWeight={600}>{currentStep.title || "(Untitled step)"}</Typography>
+                  {currentStep.description && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      {currentStep.description}
+                    </Typography>
+                  )}
+                </Box>
+
+                {/* Media thumbnails */}
+                {attachedMedia.length > 0 && (
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    {attachedMedia.map((m) => (
+                      <Tooltip key={m.id} title={m.name}>
+                        <Box
+                          component="a"
+                          href={m.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          sx={{
+                            width: 72, height: 72, borderRadius: 1, overflow: "hidden",
+                            border: "1px solid", borderColor: "divider",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            bgcolor: "action.hover", cursor: "pointer",
+                            "&:hover": { borderColor: "primary.main" },
+                          }}
+                        >
+                          {m.type === "image" ? (
+                            <img src={m.url} alt={m.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          ) : (
+                            <Typography variant="caption" color="text.secondary">🎥</Typography>
+                          )}
+                        </Box>
+                      </Tooltip>
+                    ))}
+                  </Stack>
+                )}
+
+                {/* Inputs */}
+                {hasInputs && (
+                  <Stack spacing={1.5}>
+                    {(currentStep.inputs ?? []).map((inp) => (
+                      <Paper key={inp.id} variant="outlined" sx={{ p: 1.5 }}>
+                        <Stack spacing={1}>
+                          <Typography variant="caption" color="text.secondary">
+                            {inp.label || "Input"}
+                            {inp.required && (
+                              <Typography component="span" variant="caption" color="error" sx={{ ml: 0.5 }}>*</Typography>
+                            )}
+                          </Typography>
+                          {renderInput(currentStep, inp, effectiveStepId)}
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Stack>
+                )}
+
+                {/* Capture fields — structured data for the as-built document */}
+                {hasCaptureFields && (
+                  <Stack spacing={1}>
+                    <Stack direction="row" alignItems="center" spacing={0.75}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "secondary.main", flexShrink: 0 }} />
+                      <Typography variant="caption" fontWeight={700} color="secondary.main" sx={{ letterSpacing: 0.5 }}>
+                        AS-BUILT DATA CAPTURE
                       </Typography>
-                      {renderInput(currentStep, inp)}
                     </Stack>
-                  </Paper>
-                ))}
-              </Stack>
-            )}
+                    <Stack spacing={1.5}>
+                      {(currentStep.captureFields ?? []).map((field) => (
+                        <Paper key={field.id} variant="outlined" sx={{ p: 1.5, borderColor: "secondary.main", borderStyle: "dashed", opacity: 0.9 }}>
+                          <Stack spacing={1}>
+                            <Typography variant="caption" color="text.secondary">
+                              {field.label || "Capture Field"}
+                              {field.unit && (
+                                <Typography component="span" variant="caption" color="text.disabled" sx={{ ml: 0.5 }}>
+                                  ({field.unit})
+                                </Typography>
+                              )}
+                              {field.required && (
+                                <Typography component="span" variant="caption" color="error" sx={{ ml: 0.5 }}>*</Typography>
+                              )}
+                            </Typography>
+                            {renderCaptureField(currentStep, field, effectiveStepId)}
+                          </Stack>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  </Stack>
+                )}
 
-            {requiredWarning && (
-              <Alert severity="warning" sx={{ fontSize: 12 }}>
-                Some required fields are empty — you can still proceed and save.
-              </Alert>
+                {requiredWarning && (
+                  <Alert severity="warning" sx={{ fontSize: 12 }}>
+                    Some required fields are empty — you can still proceed and save.
+                  </Alert>
+                )}
+              </>
             )}
           </Stack>
         </DialogContent>
@@ -1334,7 +1627,7 @@ export default function WorkOrderRunner({
                 Cancel
               </Button>
             </Tooltip>
-            {hasDecisions ? (
+            {!needsConfirmation && !needsCountPicker && (hasDecisions ? (
               (currentStep.decisions ?? []).map((d) => (
                 <Button
                   key={d.id}
@@ -1352,9 +1645,11 @@ export default function WorkOrderRunner({
                 size="small"
                 onClick={handleNext}
               >
-                {isLast ? "Complete ✓" : "Next step →"}
+                {(isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0 && repeatIdx + 1 < repeatCount
+                  ? `Next ${unitLabel} →`
+                  : isLast ? "Complete ✓" : "Next step →"}
               </Button>
-            )}
+            ))}
           </Stack>
         </DialogActions>
       </>
@@ -1475,6 +1770,30 @@ export default function WorkOrderRunner({
               </Stack>
             )}
 
+            {/* Qty modifications summary */}
+            {Object.keys(qtyModifications).length > 0 && (
+              <Stack spacing={1}>
+                <Divider />
+                <Typography variant="subtitle2" color="warning.main">
+                  Qty modifications ({Object.keys(qtyModifications).length})
+                </Typography>
+                {Object.values(qtyModifications).map((mod) => (
+                  <Paper key={mod.stepId} variant="outlined" sx={{ p: 1.25, borderColor: "warning.main" }}>
+                    <Stack spacing={0.25}>
+                      <Stack direction="row" spacing={0.75} alignItems="center">
+                        <Chip size="small" color="warning" label="Qty Modified" />
+                        <Typography variant="caption" fontWeight={600}>{mod.featureName}</Typography>
+                      </Stack>
+                      <Typography variant="caption">
+                        Expected: <strong>{mod.expectedQty}</strong> → Installed: <strong>{mod.actualQty}</strong>
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">Reason: {mod.reason}</Typography>
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+
             {hasBlockingIssues && !blockingError && (
               <Alert severity="error" sx={{ fontSize: 12 }}>
                 {blockingIssues.length} blocking issue{blockingIssues.length === 1 ? "" : "s"} must be closed before locking this run.
@@ -1530,13 +1849,120 @@ export default function WorkOrderRunner({
           {!saved && (
             <Button
               variant="contained"
-              onClick={handleSave}
+              onClick={() => {
+                const hasBom = (workflow.bomItems ?? []).length > 0;
+                if (hasBom && activeRunId) {
+                  // Initialise BOM actual from expected qty if not already set
+                  setBomActual((workflow.bomItems ?? []).map((item) => ({
+                    bomItemId: item.id,
+                    description: item.description,
+                    isInventory: item.isInventory,
+                    expectedQty: item.expectedQty,
+                    actualQty: item.expectedQty,
+                    unitOfMeasure: item.unitOfMeasure,
+                    serialNumbers: item.isInventory ? Array(item.expectedQty).fill("") : undefined,
+                  })));
+                  setStage("bom");
+                } else {
+                  handleSave();
+                }
+              }}
               disabled={saving || (hasBlockingIssues && Boolean(activeRunId))}
               startIcon={saving ? <CircularProgress size={14} /> : undefined}
             >
               {saving ? "Saving…" : activeRunId ? "Lock run ✓" : "Done (preview)"}
             </Button>
           )}
+        </DialogActions>
+      </>
+    );
+  }
+
+  // ── Stage: BOM confirmation ───────────────────────────────────────────────
+  function renderBom() {
+    const bomItems = workflow.bomItems ?? [];
+    return (
+      <>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <CheckCircleOutlined color="primary" />
+            <Typography variant="subtitle1" fontWeight={600}>Confirm Parts Used</Typography>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Verify the parts installed. Adjust quantities and enter serial numbers where required.
+            </Typography>
+            {bomItems.map((item) => {
+              const actual = bomActual.find((a) => a.bomItemId === item.id);
+              if (!actual) return null;
+              return (
+                <Paper key={item.id} variant="outlined" sx={{ p: 1.5 }}>
+                  <Stack spacing={1.5}>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Chip label={item.isInventory ? "Inventory" : "Consumable"} size="small"
+                        color={item.isInventory ? "primary" : "default"} variant="outlined" />
+                      <Typography variant="body2" fontWeight={600}>{item.description}</Typography>
+                      {item.partNumber && (
+                        <Typography variant="caption" color="text.secondary">· {item.partNumber}</Typography>
+                      )}
+                    </Stack>
+                    <Stack direction="row" spacing={1.5} alignItems="center">
+                      <TextField
+                        label="Actual qty"
+                        size="small"
+                        type="number"
+                        sx={{ width: 100 }}
+                        value={actual.actualQty}
+                        onChange={(e) => {
+                          const qty = Math.max(0, Number(e.target.value) || 0);
+                          setBomActual((prev) => prev.map((a) => a.bomItemId !== item.id ? a : {
+                            ...a, actualQty: qty,
+                            serialNumbers: item.isInventory ? Array(qty).fill("").map((_, i) => a.serialNumbers?.[i] ?? "") : undefined,
+                          }));
+                        }}
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        of {item.expectedQty} {item.unitOfMeasure} expected
+                      </Typography>
+                    </Stack>
+                    {item.isInventory && (actual.serialNumbers ?? []).map((sn, i) => (
+                      <Stack key={i} direction="row" spacing={1} alignItems="center">
+                        <Tooltip title="Scan barcode / QR">
+                          <IconButton size="small"><QrCodeScannerOutlined fontSize="small" /></IconButton>
+                        </Tooltip>
+                        <TextField
+                          label={`Unit ${i + 1} serial`}
+                          size="small"
+                          fullWidth
+                          placeholder="Scan or enter serial number"
+                          value={sn}
+                          onChange={(e) => setBomActual((prev) => prev.map((a) => {
+                            if (a.bomItemId !== item.id) return a;
+                            const sns = [...(a.serialNumbers ?? [])];
+                            sns[i] = e.target.value;
+                            return { ...a, serialNumbers: sns };
+                          }))}
+                        />
+                      </Stack>
+                    ))}
+                  </Stack>
+                </Paper>
+              );
+            })}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStage("summary")} disabled={saving}>Back</Button>
+          <Button
+            variant="contained"
+            onClick={handleSave}
+            disabled={saving}
+            startIcon={saving ? <CircularProgress size={14} /> : undefined}
+          >
+            {saving ? "Saving…" : "Complete & sign"}
+          </Button>
         </DialogActions>
       </>
     );
@@ -1732,6 +2158,7 @@ export default function WorkOrderRunner({
         {stage === "setup"          && renderSetup()}
         {stage === "running"        && renderRunning()}
         {stage === "summary"        && renderSummary()}
+        {stage === "bom"            && renderBom()}
         {stage === "installer-sign" && renderInstallerSign()}
         {stage === "customer-sign"  && renderCustomerSign()}
       </Dialog>
@@ -1755,6 +2182,83 @@ export default function WorkOrderRunner({
           }}
         />
       )}
+
+      {/* Modify qty dialog — for feature-linked repeatable steps */}
+      <Dialog open={modifyQtyOpen} onClose={() => setModifyQtyOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Modify installed quantity</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="info" sx={{ fontSize: 12 }}>
+              This modification will be recorded in the run report for review.
+            </Alert>
+            <TextField
+              size="small"
+              type="number"
+              label="Actual qty installed"
+              value={modifyQtyValue}
+              onChange={(e) => setModifyQtyValue(Math.max(1, Number(e.target.value) || 1))}
+              inputProps={{ min: 1, max: 99 }}
+              fullWidth
+            />
+            <TextField
+              size="small"
+              label="Reason for modification"
+              value={modifyQtyReason}
+              onChange={(e) => setModifyQtyReason(e.target.value)}
+              placeholder="e.g. Only 3 cameras were delivered on site…"
+              multiline
+              rows={2}
+              fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setModifyQtyOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="warning"
+            disabled={!modifyQtyReason.trim()}
+            onClick={() => {
+              if (!modifyQtyStepId) return;
+              const step = stepsSorted.find((s) => s.id === modifyQtyStepId);
+              // Derive feature from inputs or capture fields
+              let feat: (typeof productFeatures extends undefined ? never : NonNullable<typeof productFeatures>[0]) | undefined;
+              let expQty = 1;
+              for (const inp of step?.inputs ?? []) {
+                if (inp.featureId) {
+                  const sel = (featureSelections ?? []).find((s) => s.featureId === inp.featureId && s.activeCount > 0);
+                  const f = (productFeatures ?? []).find((f) => f.id === inp.featureId);
+                  if (sel && f) { feat = f; expQty = sel.activeCount; break; }
+                }
+              }
+              if (!feat) {
+                for (const cf of step?.captureFields ?? []) {
+                  if (cf.featureId) {
+                    const sel = (featureSelections ?? []).find((s) => s.featureId === cf.featureId && s.activeCount > 0);
+                    const f = (productFeatures ?? []).find((f) => f.id === cf.featureId);
+                    if (sel && f) { feat = f; expQty = sel.activeCount; break; }
+                  }
+                }
+              }
+              setQtyModifications((prev) => ({
+                ...prev,
+                [modifyQtyStepId]: {
+                  stepId: modifyQtyStepId,
+                  featureId: feat?.id ?? "",
+                  featureName: feat?.name ?? "Unknown",
+                  expectedQty: expQty,
+                  actualQty: modifyQtyValue,
+                  reason: modifyQtyReason.trim(),
+                  modifiedAt: new Date().toISOString(),
+                },
+              }));
+              setModifyQtyOpen(false);
+            }}
+          >
+            Save modification
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }

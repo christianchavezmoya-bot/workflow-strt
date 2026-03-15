@@ -111,16 +111,30 @@ public class ProjectsController : ControllerBase
         }
 
         var items = await query.ToListAsync();
+        var projectIds = items.Select(p => p.Id).ToList();
+
         var siteIds = items.Select(p => p.SiteId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToList();
         var sitesById = await _db.Sites
             .Where(s => siteIds.Contains(s.Id))
             .Select(s => new { s.Id, s.Name })
             .ToDictionaryAsync(s => s.Id, s => s.Name);
 
+        // Count assets per (project, product) so the badge matches the installation page
+        // which shows assets for the first product only.
+        var assetCountsByProjectProduct = await _db.ProjectAssets
+            .Where(a => projectIds.Contains(a.ProjectId))
+            .GroupBy(a => new { a.ProjectId, a.ProductId })
+            .Select(g => new { g.Key.ProjectId, g.Key.ProductId, Count = g.Count() })
+            .ToListAsync();
+
         return Ok(new ProjectListResponse(items.Select(p =>
         {
             var siteName = p.SiteId != null && sitesById.TryGetValue(p.SiteId, out var name) ? name : null;
-            return ToDto(p, siteName);
+            var firstProduct = p.ProductIds?.FirstOrDefault();
+            var assetCount = assetCountsByProjectProduct
+                .Where(x => x.ProjectId == p.Id && (firstProduct == null || x.ProductId == firstProduct))
+                .Sum(x => x.Count);
+            return ToDto(p, siteName, assetCount);
         }).ToList(), total));
     }
 
@@ -273,7 +287,7 @@ public class ProjectsController : ControllerBase
         return NoContent();
     }
 
-    private static ProjectDto ToDto(ProjectEntity project, string? siteName)
+    private static ProjectDto ToDto(ProjectEntity project, string? siteName, int assetCount = 0)
         => new(
             project.Id,
             project.CustomerName,
@@ -298,7 +312,8 @@ public class ProjectsController : ControllerBase
             project.ProductIds,
             string.IsNullOrWhiteSpace(project.ProductFeatureValuesJson)
                 ? new Dictionary<string, string>()
-                : JsonSerializer.Deserialize<Dictionary<string, string>>(project.ProductFeatureValuesJson, JsonOptions) ?? new Dictionary<string, string>()
+                : JsonSerializer.Deserialize<Dictionary<string, string>>(project.ProductFeatureValuesJson, JsonOptions) ?? new Dictionary<string, string>(),
+            assetCount
         );
 }
 

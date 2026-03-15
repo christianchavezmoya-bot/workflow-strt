@@ -275,6 +275,7 @@ const AssetInstallationPage = () => {
   const [runnerLoading, setRunnerLoading] = useState<string | null>(null);
   const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>(undefined);
   const [runnerExistingRunId, setRunnerExistingRunId] = useState<string | undefined>(undefined);
+  const [runnerFeatureSelections, setRunnerFeatureSelections] = useState<import("../../services/productConfigService").FeatureSelection[] | undefined>(undefined);
   // Tracks paused workflow progress per asset: { done, total, completedTitles }
   const [pausedProgress, setPausedProgress] = useState<Record<string, { done: number; total: number; completedTitles: string[] }>>({});
   // Popover anchor for the paused progress badge
@@ -404,6 +405,23 @@ const AssetInstallationPage = () => {
       setConfigs(c);
       setPublishedWfConfigs(wc);
       setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+      // Pre-load latest run per asset (for signature status in status chip) — fire-and-forget
+      const uniqueProjectIds = [...new Set(a.map(asset => asset.projectId).filter(Boolean))];
+      Promise.all(uniqueProjectIds.map(pid => assetWorkflowRunService.listLatestByProject(pid)))
+        .then(results => {
+          if (loadId !== assetLoadIdRef.current) return;
+          const runMap: Record<string, AssetWorkflowRun[]> = {};
+          results.flat().forEach(run => {
+            if (!runMap[run.assetId]) runMap[run.assetId] = [];
+            runMap[run.assetId].push(run);
+          });
+          setRunsMap(prev => {
+            const merged = { ...runMap };
+            // Don't overwrite assets that already have full run lists loaded
+            Object.keys(prev).forEach(id => { merged[id] = prev[id]; });
+            return merged;
+          });
+        }).catch(() => {/* non-blocking */});
       // Load document counts per asset (fire-and-forget, non-blocking)
       const countMap: Record<string, number> = {};
       Promise.all(a.map(async (asset) => {
@@ -645,6 +663,13 @@ const AssetInstallationPage = () => {
   // Work order runner
   // ------------------------------------------------------------------
 
+  function parseFeatureSelectionsForConfig(configId: string | undefined) {
+    if (!configId) return undefined;
+    const cfg = workflowConfigs.find((c) => c.id === configId);
+    if (!cfg?.featureSelectionsJson) return undefined;
+    try { return JSON.parse(cfg.featureSelectionsJson) as import("../../services/productConfigService").FeatureSelection[]; } catch { return undefined; }
+  }
+
   async function handleStartWorkOrder(asset: ProjectAsset) {
     setRunnerLoading(asset.id);
     try {
@@ -683,6 +708,7 @@ const AssetInstallationPage = () => {
                     setRunnerAsset(asset);
                     setRunnerWorkflow(activeWf);
                     setRunnerWorkflowConfigId(activeCfg.id);
+                    setRunnerFeatureSelections(parseFeatureSelectionsForConfig(activeCfg.id));
                     setRunnerOpen(true);
                     return;
                   }
@@ -699,6 +725,7 @@ const AssetInstallationPage = () => {
         setRunnerAsset(asset);
         setRunnerWorkflow(wf);
         setRunnerWorkflowConfigId(wfConfig.id);
+        setRunnerFeatureSelections(parseFeatureSelectionsForConfig(wfConfig.id));
         setRunnerOpen(true);
         return;
       }
@@ -890,6 +917,7 @@ const AssetInstallationPage = () => {
       setRunnerAsset(asset);
       setRunnerWorkflow(wf);
       setRunnerWorkflowConfigId(assignment.workflowConfigId);
+      setRunnerFeatureSelections(parseFeatureSelectionsForConfig(assignment.workflowConfigId));
       setRunnerOpen(true);
     } catch { alert("Failed to load workflow."); } finally {
       setRunnerLoading(null);
@@ -1048,6 +1076,7 @@ const AssetInstallationPage = () => {
       setRunnerAsset(asset);
       setRunnerWorkflow(wf);
       setRunnerWorkflowConfigId(configId);
+      setRunnerFeatureSelections(parseFeatureSelectionsForConfig(configId));
       setRunnerOpen(true);
       // Optimistically mark asset as InProgress so the Continue button shows if the user pauses
       setAssets(prev => prev.map(a => a.id === asset.id ? { ...a, status: "InProgress" as const } : a));
@@ -1075,6 +1104,7 @@ const AssetInstallationPage = () => {
       setRunnerAsset(asset);
       setRunnerWorkflow(wf);
       setRunnerWorkflowConfigId(run.workflowConfigId);
+      setRunnerFeatureSelections(parseFeatureSelectionsForConfig(run.workflowConfigId));
       setRunnerOpen(true);
     } catch { alert("Failed to load workflow."); } finally {
       setRunnerLoading(null);
@@ -1172,7 +1202,6 @@ const AssetInstallationPage = () => {
   };
 
   function computeAssetHealth(asset: ProjectAsset, runs?: AssetWorkflowRun[]): "green" | "amber" | "red" | null {
-    if (asset.status === "NotStarted") return null;
     let assetIssuesList: AssetIssue[] = [];
     try { assetIssuesList = JSON.parse(asset.issuesJson || "[]"); } catch {}
     const runIssuesList: RunIssue[] = (runs ?? []).flatMap(r => {
@@ -1182,7 +1211,7 @@ const AssetInstallationPage = () => {
     if (openIssues.some(i => i.severity === "high" || i.isBlocking)) return "red";
     if (openIssues.some(i => i.severity === "medium")) return "amber";
     if (openIssues.length === 0 && asset.status === "Complete") return "green";
-    return "amber";
+    return null; // no open issues → use default status color
   }
 
   function formatRunDur(totalSeconds: number): string {
@@ -1678,20 +1707,30 @@ const AssetInstallationPage = () => {
       case "status":
         const status = asset.status as ProjectAssetStatus;
         const baseColor = STATUS_COLORS[status] ?? "default";
-        const issueHealth = status === "Issue" ? computeAssetHealth(asset, runsMap[asset.id] ?? []) : null;
-        const issueColor =
-          issueHealth === "green" ? "success"
-          : issueHealth === "amber" ? "warning"
-          : issueHealth === "red" ? "error"
-          : baseColor;
+        const issueHealth = computeAssetHealth(asset, runsMap[asset.id] ?? []);
+        // Check if complete but awaiting customer signature
+        const latestRuns = runsMap[asset.id] ?? [];
+        const latestLocked = latestRuns.find(r => r.isLocked);
+        const awaitingCustomerSig = status === "Complete" && !!latestLocked
+          && !latestLocked.customerSignedAt
+          && latestLocked.signatureStatus !== "Waived";
+        const chipColor =
+          issueHealth === "red"   ? "error"   :
+          issueHealth === "amber" ? "warning" :
+          awaitingCustomerSig     ? "warning" :
+          issueHealth === "green" ? "success" :
+          baseColor;
+        const chipLabel =
+          awaitingCustomerSig && issueHealth !== "red" && issueHealth !== "amber" ? "Awaiting Signature" :
+          STATUS_LABELS[status] ?? asset.status;
         return (
           <Chip
             size="small"
-            label={STATUS_LABELS[status] ?? asset.status}
-            color={issueColor}
+            label={chipLabel}
+            color={chipColor}
             icon={
               asset.status === "InProgress" ? <HourglassEmptyOutlined sx={{ fontSize: "0.9rem !important" }} /> :
-              asset.status === "Complete" ? <CheckCircleOutlined sx={{ fontSize: "0.9rem !important" }} /> :
+              asset.status === "Complete" && !awaitingCustomerSig ? <CheckCircleOutlined sx={{ fontSize: "0.9rem !important" }} /> :
               asset.status === "Issue" ? <ErrorOutlined sx={{ fontSize: "0.9rem !important" }} /> :
               undefined
             }
@@ -2881,6 +2920,7 @@ const AssetInstallationPage = () => {
             setRunnerAsset(null);
             setRunnerWorkflow(null);
             setRunnerWorkflowConfigId(undefined);
+            setRunnerFeatureSelections(undefined);
             setRunnerExistingRunId(undefined);
             setRunnerPrefillValues(undefined);
             refreshAssets();
@@ -2894,6 +2934,8 @@ const AssetInstallationPage = () => {
           existingRunId={runnerExistingRunId}
           prefillValues={runnerPrefillValues}
           currentUserName={currentUser.fullName}
+          productFeatures={activeProduct.features}
+          featureSelections={runnerFeatureSelections}
           onComplete={(vals) => {
             // Clear paused progress badge on completion
             if (runnerAsset) setPausedProgress((prev) => { const n = { ...prev }; delete n[runnerAsset.id]; return n; });

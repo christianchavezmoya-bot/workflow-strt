@@ -112,7 +112,7 @@ public class QuickbaseGoodsMovementsController : ControllerBase
 
             foreach (var row in dataArr.EnumerateArray())
             {
-                var vals = new Dictionary<string, string>();
+                var vals = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 var rawByFid = new Dictionary<int, string>(); // FID → raw value (for record ID lookup)
                 foreach (var prop in row.EnumerateObject())
                 {

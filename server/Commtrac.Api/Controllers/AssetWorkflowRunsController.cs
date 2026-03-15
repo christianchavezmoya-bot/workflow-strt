@@ -47,8 +47,40 @@ public class AssetWorkflowRunsController : ControllerBase
         e.TimeTrackingJson, e.ProductiveSeconds, e.DowntimeSeconds, e.DowntimeEvents,
         e.RunNumber, e.CompletedByName,
         e.SignatureStatus, e.InstallerSignedAt, e.CustomerSignedAt,
-        e.StartedAt, e.CompletedAt, e.CreatedAt, e.UpdatedAt
+        e.StartedAt, e.CompletedAt, e.CreatedAt, e.UpdatedAt,
+        e.BomActualJson
     );
+
+    // GET api/asset-workflow-runs/by-project/{projectId} — latest run per asset for a project
+    [HttpGet("by-project/{projectId}")]
+    public async Task<IActionResult> ListByProject(string projectId)
+    {
+        try
+        {
+            var assetIds = await _db.ProjectAssets
+                .Where(a => a.ProjectId == projectId)
+                .Select(a => a.Id)
+                .ToListAsync();
+
+            var runs = await _db.AssetWorkflowRuns
+                .Where(r => assetIds.Contains(r.AssetId))
+                .OrderByDescending(r => r.StartedAt)
+                .ToListAsync();
+
+            // Return only the latest run per asset
+            var latest = runs
+                .GroupBy(r => r.AssetId)
+                .Select(g => g.First())
+                .ToList();
+
+            return Ok(latest.Select(ToDto));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list workflow runs for project {ProjectId}", projectId);
+            return Ok(Array.Empty<AssetWorkflowRunDto>());
+        }
+    }
 
     // GET api/asset-workflow-runs/by-asset/{assetId}
     [HttpGet("by-asset/{assetId}")]
@@ -212,6 +244,8 @@ public class AssetWorkflowRunsController : ControllerBase
         run.SignatureStatus  = "PendingInstaller";
         run.CompletedAt      = now;
         run.UpdatedAt        = now;
+        if (!string.IsNullOrWhiteSpace(req.BomActualJson))
+            run.BomActualJson = req.BomActualJson;
         CloseAnyOpenTimeEntry(run, now);
         RecomputeRunTimeMetrics(run, now);
 
@@ -228,6 +262,17 @@ public class AssetWorkflowRunsController : ControllerBase
 
             asset.Status    = anyBlock ? "Issue" : "Complete";
             asset.UpdatedAt = now;
+            // Record who completed the installation and when (only on first successful completion)
+            if (!anyBlock && asset.InstalledAt is null)
+            {
+                asset.InstalledAt = now;
+                asset.InstalledBy = req.CompletedByName;
+            }
+            // Build as-built JSON from capture fields defined in the workflow snapshot
+            if (!anyBlock)
+            {
+                asset.AsBuiltJson = BuildAsBuiltJson(run.WorkflowSnapshotJson, req.StepResultsJson, now);
+            }
         }
 
         await _db.SaveChangesAsync();
@@ -487,6 +532,141 @@ public class AssetWorkflowRunsController : ControllerBase
         run.DowntimeSeconds = downtime;
         run.DowntimeEvents = downtimeEvents;
         SaveTimeEntries(run, entries);
+    }
+
+    // ── as-built builder ─────────────────────────────────────────────────────
+
+    private sealed class CaptureFieldDef
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("key")]
+        public string Key { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("label")]
+        public string Label { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("type")]
+        public string Type { get; set; } = "text";
+        [System.Text.Json.Serialization.JsonPropertyName("unit")]
+        public string? Unit { get; set; }
+    }
+
+    private sealed class SnapshotStep
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("title")]
+        public string Title { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("captureFields")]
+        public List<CaptureFieldDef>? CaptureFields { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("repeatable")]
+        public bool Repeatable { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("repeatLabel")]
+        public string? RepeatLabel { get; set; }
+    }
+
+    private sealed class StepResultEntry
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("stepId")]
+        public string StepId { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("values")]
+        public Dictionary<string, string>? Values { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("iterationIndex")]
+        public int? IterationIndex { get; set; }
+    }
+
+    private sealed class AsBuiltEntry
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("key")]
+        public string Key { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("label")]
+        public string Label { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public string Value { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("unit")]
+        public string? Unit { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("stepTitle")]
+        public string StepTitle { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("iterationIndex")]
+        public int? IterationIndex { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("capturedAt")]
+        public string CapturedAt { get; set; } = string.Empty;
+    }
+
+    private static string BuildAsBuiltJson(string snapshotJson, string stepResultsJson, DateTime completedAt)
+    {
+        try
+        {
+            // Parse snapshot — stepsJson contains the full serialized Workflow object
+            var snapshotDoc = JsonDocument.Parse(snapshotJson);
+            if (!snapshotDoc.RootElement.TryGetProperty("stepsJson", out var stepsJsonEl))
+                return "{}";
+
+            var stepsRaw = stepsJsonEl.GetString() ?? "[]";
+
+            // stepsJson may be either a bare steps array OR a full Workflow object
+            List<SnapshotStep> steps;
+            try
+            {
+                var wfDoc = JsonDocument.Parse(stepsRaw);
+                if (wfDoc.RootElement.ValueKind == JsonValueKind.Object &&
+                    wfDoc.RootElement.TryGetProperty("steps", out var stepsEl))
+                {
+                    steps = JsonSerializer.Deserialize<List<SnapshotStep>>(stepsEl.GetRawText(), _caseInsensitive) ?? new();
+                }
+                else
+                {
+                    steps = JsonSerializer.Deserialize<List<SnapshotStep>>(stepsRaw, _caseInsensitive) ?? new();
+                }
+            }
+            catch { steps = new(); }
+
+            var stepResults = JsonSerializer.Deserialize<List<StepResultEntry>>(stepResultsJson, _caseInsensitive) ?? new();
+
+            // Group results by stepId (repeatable steps have multiple entries with different iterationIndex)
+            var resultsByStep = stepResults
+                .GroupBy(r => r.StepId)
+                .ToDictionary(g => g.Key, g => g.OrderBy(r => r.IterationIndex ?? 0).ToList());
+
+            var entries = new List<AsBuiltEntry>();
+            foreach (var step in steps)
+            {
+                if (step.CaptureFields is null || step.CaptureFields.Count == 0) continue;
+                var stepLabel = step.RepeatLabel ?? "Unit";
+                var iterations = resultsByStep.TryGetValue(step.Id, out var rs) ? rs : new();
+
+                if (!iterations.Any())
+                {
+                    // No results for this step — skip
+                    continue;
+                }
+
+                foreach (var result in iterations)
+                {
+                    var values = result.Values ?? new Dictionary<string, string>();
+                    foreach (var field in step.CaptureFields)
+                    {
+                        if (!values.TryGetValue(field.Id, out var raw) || string.IsNullOrWhiteSpace(raw))
+                            continue;
+                        entries.Add(new AsBuiltEntry
+                        {
+                            Key            = step.Repeatable ? $"{field.Key}_{stepLabel.ToLower()}_{(result.IterationIndex ?? 0) + 1}" : field.Key,
+                            Label          = step.Repeatable ? $"{field.Label} — {stepLabel} {(result.IterationIndex ?? 0) + 1}" : field.Label,
+                            Value          = raw,
+                            Unit           = field.Unit,
+                            StepTitle      = step.Title,
+                            IterationIndex = result.IterationIndex,
+                            CapturedAt     = completedAt.ToString("O"),
+                        });
+                    }
+                }
+            }
+
+            return JsonSerializer.Serialize(new { fields = entries, completedAt = completedAt.ToString("O") }, _caseInsensitive);
+        }
+        catch
+        {
+            return "{}";
+        }
     }
 
     // POST api/asset-workflow-runs/{id}/waive-customer-signature

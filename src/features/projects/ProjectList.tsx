@@ -99,6 +99,26 @@ const builtInColumnConfigs: ColumnConfig[] = [
         >
           {project.jobNumber}
         </Button>
+        {(project.assetCount ?? 0) > 0 && (
+          <Box
+            component="span"
+            sx={{
+              ml: 0.75,
+              px: 0.75,
+              py: 0.1,
+              borderRadius: 999,
+              fontSize: "0.6rem",
+              fontWeight: 700,
+              lineHeight: 1.6,
+              background: "rgba(45,212,191,0.25)",
+              color: "rgba(45,212,191,1)",
+              border: "1px solid rgba(45,212,191,0.4)",
+              letterSpacing: "0.02em",
+            }}
+          >
+            {project.assetCount}
+          </Box>
+        )}
       </Box>
     )
   },
@@ -603,7 +623,7 @@ const ProjectList = () => {
                     <TableCell colSpan={colSpan} sx={{ p: 0, border: 0 }}>
                       <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                         <Box sx={{ position: "sticky", left: 0, width: "calc(100vw - 20px)", maxWidth: "100%", overflow: "hidden" }}>
-                          <ProjectChevronPanel projectId={project.id} />
+                          <ProjectChevronPanel projectId={project.id} productId={project.productIds?.[0]} />
                         </Box>
                       </Collapse>
                     </TableCell>

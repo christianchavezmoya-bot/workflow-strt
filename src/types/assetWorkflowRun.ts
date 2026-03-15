@@ -39,6 +39,8 @@ export interface StepResult {
   stepId: string;
   values: Record<string, string>;
   completedAt: string;
+  /** 0-based iteration index for repeatable steps */
+  iterationIndex?: number;
 }
 
 export interface AssetWorkflowRun {
@@ -66,4 +68,6 @@ export interface AssetWorkflowRun {
   completedAt?: string;
   createdAt: string;
   updatedAt: string;
+  /** JSON array of BomActualItem — confirmed parts used during this run */
+  bomActualJson?: string;
 }

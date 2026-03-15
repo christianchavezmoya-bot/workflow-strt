@@ -132,6 +132,7 @@ public class ProjectAssetsController : ControllerBase
         if (request.WorkOrderId is not null)                asset.WorkOrderId      = string.IsNullOrWhiteSpace(request.WorkOrderId) ? null : request.WorkOrderId;
         if (request.FeatureValuesJson is not null)          asset.FeatureValuesJson = string.IsNullOrWhiteSpace(request.FeatureValuesJson) ? "{}" : request.FeatureValuesJson;
         if (request.IssuesJson is not null)                 asset.IssuesJson       = string.IsNullOrWhiteSpace(request.IssuesJson) ? "[]" : request.IssuesJson;
+        if (request.ConfigLabel is not null)                asset.ConfigLabel      = string.IsNullOrWhiteSpace(request.ConfigLabel) ? null : request.ConfigLabel.Trim();
         asset.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -166,5 +167,6 @@ public class ProjectAssetsController : ControllerBase
         new(a.Id, a.ProjectId, a.ProductId, a.ProductConfigId, a.WorkflowTemplateId,
             a.AssetTag, a.AssetName, a.SerialNumber, a.AssetModel, a.Manufacturer,
             a.Location, a.AssignedUserId, a.Status, a.WorkOrderId, a.Notes,
-            a.FeatureValuesJson, a.IssuesJson, a.CreatedAt, a.UpdatedAt);
+            a.FeatureValuesJson, a.IssuesJson, a.ConfigLabel, a.InstalledAt, a.InstalledBy,
+            a.AsBuiltJson, a.CreatedAt, a.UpdatedAt);
 }

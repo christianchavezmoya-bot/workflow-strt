@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -25,6 +26,7 @@ import {
   Typography
 } from "@mui/material";
 import {
+  BuildOutlined,
   DeleteOutline,
   EmailOutlined,
   ExpandMoreOutlined,
@@ -34,7 +36,10 @@ import {
   RefreshOutlined,
   SettingsOutlined
 } from "@mui/icons-material";
+import { useAppSelector } from "../../store/hooks";
 import { projectContactService } from "../../services/projectContactService";
+import { projectAssetService } from "../../services/projectAssetService";
+import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { quickbaseService } from "../../services/quickbaseService";
 import type {
   InboundCondition,
@@ -44,6 +49,8 @@ import type {
   SignMethod
 } from "../../types/projectContact";
 import type { GoodsMovement } from "../../types/goodsMovement";
+import type { ProjectAsset } from "../../types/projectAsset";
+import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -102,7 +109,7 @@ const GM_COLS: { key: keyof GoodsMovement; label: string; width?: number | strin
   { key: "toFrom",         label: "To / From",   width: 120 },
   { key: "goods",          label: "Goods",       width: "auto" },
   { key: "handledBy",      label: "By",          width: 110 },
-  { key: "navPoNumber",    label: "PO #",        width: 90 },
+  { key: "orderRef",       label: "PO #",        width: 90 },
   { key: "consignmentRef", label: "Consignment", width: 110 }
 ];
 
@@ -207,10 +214,13 @@ function GoodsMovementsTable({ rows, realmHostname, tableId }: {
 
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
-interface Props { projectId: string; }
-type TabId = "contacts" | "goodsMovements" | "inbound";
+interface Props { projectId: string; productId?: string; }
+type TabId = "contacts" | "installations" | "goodsMovements" | "inbound";
 
-export default function ProjectChevronPanel({ projectId }: Props) {
+export default function ProjectChevronPanel({ projectId, productId }: Props) {
+  const navigate = useNavigate();
+  const users = useAppSelector((s) => s.users.items);
+  const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const [tab, setTab] = useState<TabId>("contacts");
 
   // ── Contacts ───────────────────────────────────────────────────────────────
@@ -277,6 +287,33 @@ export default function ProjectChevronPanel({ projectId }: Props) {
     }
   }, [projectId]);
 
+  // ── Installations ──────────────────────────────────────────────────────────
+  const [installAssets,        setInstallAssets]        = useState<ProjectAsset[]>([]);
+  const [installAssetsLoading, setInstallAssetsLoading] = useState(false);
+  const [latestRuns,           setLatestRuns]           = useState<AssetWorkflowRun[]>([]);
+
+  const runByAsset = useMemo(
+    () => new Map(latestRuns.map(r => [r.assetId, r])),
+    [latestRuns]
+  );
+
+  const loadInstallAssets = useCallback(async () => {
+    setInstallAssetsLoading(true);
+    try {
+      let assets: ProjectAsset[];
+      if (productId) {
+        const all = await projectAssetService.listByProduct(productId);
+        assets = all.filter(a => a.projectId === projectId);
+      } else {
+        assets = await projectAssetService.listByProject(projectId);
+      }
+      setInstallAssets(assets);
+      const runs = await assetWorkflowRunService.listLatestByProject(projectId);
+      setLatestRuns(runs);
+    } catch { /* silently fail */ }
+    finally { setInstallAssetsLoading(false); }
+  }, [projectId, productId]);
+
   // ── Inbound (local) ────────────────────────────────────────────────────────
   const [inbounds,        setInbounds]        = useState<ProjectInboundItem[]>([]);
   const [inboundsLoading, setInboundsLoading] = useState(false);
@@ -293,6 +330,7 @@ export default function ProjectChevronPanel({ projectId }: Props) {
   // ── Load on tab switch (lazy) ──────────────────────────────────────────────
   useEffect(() => {
     if (tab === "contacts" && contacts.length === 0 && !contactsLoading) loadContacts();
+    if (tab === "installations" && installAssets.length === 0 && !installAssetsLoading) loadInstallAssets();
     if ((tab === "goodsMovements" || tab === "inbound") && !qbLoaded && !qbLoading) syncQb();
     if (tab === "inbound" && inbounds.length === 0 && !inboundsLoading) loadInbounds();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -356,6 +394,10 @@ export default function ProjectChevronPanel({ projectId }: Props) {
   const Spinner = () => <CircularProgress size={20} sx={{ display: "block", mx: "auto", mt: 6 }} />;
 
   // ── QB header row (sync button + filter info) ─────────────────────────────
+  const qbTableUrl = qbRealmHost && qbTableId
+    ? `https://${qbRealmHost}/db/${qbTableId}`
+    : null;
+
   const QbHeader = ({ count }: { count: number }) => (
     <Stack spacing={0.5} sx={{ mb: 1 }}>
       <Stack direction="row" alignItems="center" spacing={1}>
@@ -368,6 +410,13 @@ export default function ProjectChevronPanel({ projectId }: Props) {
           />
         )}
         <Box sx={{ flex: 1 }} />
+        {qbTableUrl && (
+          <Tooltip title="Open table in Quickbase">
+            <IconButton size="small" component="a" href={qbTableUrl} target="_blank" rel="noopener">
+              <OpenInNewOutlined sx={{ fontSize: 14 }} />
+            </IconButton>
+          </Tooltip>
+        )}
         <Button
           size="small"
           variant="outlined"
@@ -409,11 +458,113 @@ export default function ProjectChevronPanel({ projectId }: Props) {
       >
         <Tab value="contacts" icon={<EmailOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
           label={`Contacts${contacts.length ? ` (${contacts.length})` : ""}`} />
+        <Tab value="installations" icon={<BuildOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
+          label={`Installations${installAssets.length ? ` (${installAssets.length})` : ""}`} />
         <Tab value="goodsMovements" icon={<LocalShippingOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
           label={`Dispatched${despatched.length ? ` (${despatched.length})` : ""}`} />
         <Tab value="inbound" icon={<MoveToInboxOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
           label={`Inbound${received.length ? ` (${received.length})` : ""}`} />
       </Tabs>
+
+      {/* ── INSTALLATIONS ─────────────────────────────────────────────────── */}
+      {tab === "installations" && (
+        <Box sx={{ maxHeight: "65vh", overflowY: "auto", pr: 0.5 }}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              Asset installation status for this project
+            </Typography>
+            <Box sx={{ flex: 1 }} />
+            <Tooltip title="Refresh">
+              <IconButton size="small" onClick={loadInstallAssets} disabled={installAssetsLoading}>
+                <RefreshOutlined sx={{ fontSize: 14 }} />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+          {installAssetsLoading ? <Spinner /> : installAssets.length === 0 ? (
+            <Stack spacing={1} alignItems="flex-start" sx={{ py: 2 }}>
+              <Typography variant="caption" color="text.disabled">No assets added to this project yet.</Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<BuildOutlined sx={{ fontSize: 13 }} />}
+                onClick={() => navigate(`/installations/assets?project=${encodeURIComponent(projectId)}${productId ? `&product=${encodeURIComponent(productId)}` : ""}`)}
+                sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}
+              >
+                Go to Asset Installations
+              </Button>
+            </Stack>
+          ) : (
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontSize: "0.7rem", py: 0.5, color: "text.secondary" }}>Asset</TableCell>
+                  <TableCell sx={{ fontSize: "0.7rem", py: 0.5, color: "text.secondary" }}>Tag</TableCell>
+                  <TableCell sx={{ fontSize: "0.7rem", py: 0.5, color: "text.secondary" }}>Status</TableCell>
+                  <TableCell sx={{ fontSize: "0.7rem", py: 0.5, color: "text.secondary" }}>Assigned Tech</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {installAssets.map(a => {
+                  // Compute highest open issue severity across asset + latest run issues
+                  let openIssues: Array<{ severity?: string; isBlocking?: boolean; resolved?: boolean }> = [];
+                  try { openIssues = (JSON.parse(a.issuesJson || "[]") as typeof openIssues).filter(i => !i.resolved); } catch {}
+                  const run = runByAsset.get(a.id);
+                  try {
+                    if (run) {
+                      const runIssues = (JSON.parse(run.issuesJson || "[]") as typeof openIssues).filter(i => !i.resolved);
+                      openIssues = [...openIssues, ...runIssues];
+                    }
+                  } catch {}
+                  const hasHigh   = openIssues.some(i => i.severity === "high" || i.isBlocking);
+                  const hasMedium = openIssues.some(i => i.severity === "medium");
+                  const awaitingSignature = a.status === "Complete" && !!run
+                    && run.isLocked && !run.customerSignedAt && run.signatureStatus !== "Waived";
+                  const statusColor: "error" | "warning" | "success" | "primary" | "default" =
+                    hasHigh            ? "error"   :
+                    hasMedium          ? "warning" :
+                    awaitingSignature  ? "warning" :
+                    a.status === "Complete"   ? "success" :
+                    a.status === "InProgress" ? "primary" :
+                    a.status === "Issue"      ? "error"   : "default";
+                  const statusLabel =
+                    awaitingSignature && !hasHigh && !hasMedium ? "Awaiting Signature" :
+                    a.status === "Complete"   ? "Complete"   :
+                    a.status === "InProgress" ? "In Progress" :
+                    a.status === "Issue"      ? "Issue"      : a.status;
+                  const tech = a.assignedUserId ? userMap.get(a.assignedUserId) : null;
+                  return (
+                    <TableRow key={a.id} hover sx={{ cursor: "default" }}>
+                      <TableCell sx={{ fontSize: "0.72rem", py: 0.4 }}>
+                        <Typography variant="caption" fontWeight={600}>{a.assetName ?? a.assetTag}</Typography>
+                        {a.serialNumber && (
+                          <Typography variant="caption" color="text.disabled" display="block">{a.serialNumber}</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: "0.72rem", py: 0.4 }}>
+                        <Typography variant="caption" color="text.secondary">{a.assetTag || "—"}</Typography>
+                      </TableCell>
+                      <TableCell sx={{ py: 0.4 }}>
+                        <Chip
+                          label={statusLabel}
+                          size="small"
+                          color={statusColor}
+                          variant="outlined"
+                          sx={{ height: 18, fontSize: "0.65rem" }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ fontSize: "0.72rem", py: 0.4 }}>
+                        {tech
+                          ? <Typography variant="caption">{tech.fullName || tech.email}</Typography>
+                          : <Typography variant="caption" color="text.disabled">—</Typography>}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </Box>
+      )}
 
       {/* ── CONTACTS ──────────────────────────────────────────────────────── */}
       {tab === "contacts" && (

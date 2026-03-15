@@ -1,6 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  AddOutlined,
   ArticleOutlined,
   ArrowBackOutlined,
   BuildOutlined,
@@ -9,6 +10,7 @@ import {
   DownloadOutlined,
   FormatListBulletedOutlined,
   PublishOutlined,
+  RemoveOutlined,
   SearchOutlined,
   SettingsOutlined,
 } from "@mui/icons-material";
@@ -657,6 +659,9 @@ const WorkInstructions = () => {
       } else {
         const created = await workflowConfigService.create(payload);
         setConfigs((prev) => [created, ...prev]);
+        closeConfigDialog();
+        openBuilder(created);
+        return;
       }
       closeConfigDialog();
     } catch {
@@ -993,6 +998,7 @@ const WorkInstructions = () => {
             configName={selectedConfig?.name}
             onConfigSaved={handleConfigSaved}
             onConfigPublished={handleConfigPublished}
+            onNewConfig={openNewConfig}
           />
         </Stack>
       )}
@@ -1083,50 +1089,35 @@ const WorkInstructions = () => {
             />
             {activeFeatures.length > 0 && (
               <Stack spacing={1}>
-                <Typography variant="subtitle2">Feature inclusions</Typography>
+                <Typography variant="subtitle2">Installed Features</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Specify which features are active for this configuration and how many are installed.
+                  Set how many of each feature are installed. 0 = not included.
                 </Typography>
                 {activeFeatures.map((feat) => {
                   const sel = configForm.featureSelections.find((s) => s.featureId === feat.id);
-                  const included = sel?.included ?? false;
                   const count = sel?.activeCount ?? 0;
-                  const update = (patch: Partial<FeatureSelection>) =>
+                  const setCount = (n: number) =>
                     setConfigForm((p) => ({
                       ...p,
                       featureSelections: p.featureSelections.map((s) =>
-                        s.featureId === feat.id ? { ...s, ...patch } : s,
+                        s.featureId === feat.id ? { ...s, activeCount: Math.max(0, n), included: n > 0 } : s,
                       ),
                     }));
                   return (
-                    <Paper key={feat.id} variant="outlined" sx={{ p: 1.5 }}>
-                      <Stack direction="row" alignItems="center" spacing={2}>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              size="small"
-                              checked={included}
-                              onChange={(e) => update({ included: e.target.checked })}
-                            />
-                          }
-                          label={<Typography variant="body2">{feat.name}</Typography>}
-                          sx={{ flexGrow: 1, m: 0 }}
-                        />
-                        {included && (
-                          <TextField
-                            label="Qty"
-                            type="number"
-                            size="small"
-                            value={count}
-                            onChange={(e) =>
-                              update({ activeCount: Math.max(0, parseInt(e.target.value) || 0) })
-                            }
-                            inputProps={{ min: 0 }}
-                            sx={{ width: 80 }}
-                          />
-                        )}
+                    <Stack key={feat.id} direction="row" alignItems="center" spacing={1}>
+                      <Typography variant="body2" sx={{ flex: 1 }}>{feat.name}</Typography>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <IconButton size="small" onClick={() => setCount(count - 1)} disabled={count === 0}>
+                          <RemoveOutlined fontSize="small" />
+                        </IconButton>
+                        <Typography variant="body2" sx={{ minWidth: 24, textAlign: "center", color: count > 0 ? "primary.main" : "text.disabled", fontWeight: 600 }}>
+                          {count}
+                        </Typography>
+                        <IconButton size="small" onClick={() => setCount(count + 1)}>
+                          <AddOutlined fontSize="small" />
+                        </IconButton>
                       </Stack>
-                    </Paper>
+                    </Stack>
                   );
                 })}
               </Stack>

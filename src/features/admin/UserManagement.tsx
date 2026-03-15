@@ -29,6 +29,7 @@ import {
   Tooltip,
   Chip,
   ListItemText,
+  Switch,
   ToggleButton,
   ToggleButtonGroup,
 } from "@mui/material";
@@ -426,7 +427,7 @@ export const UserManagement: React.FC = () => {
       { id: "base-description", name: baseFieldNames.products?.["base-description"] || "Description", type: "text" },
       ...productsDynamic.definitions.map((field) => ({
         id: field.id,
-        name: field.id === "field-products" ? "Divisions" : field.name,
+        name: field.id === "field-products" ? "Division" : field.name,
         type: field.fieldType,
         linkToFieldId: field.linkToFieldId,
         actionType: field.actionType
@@ -476,6 +477,14 @@ export const UserManagement: React.FC = () => {
   const orderedProductsDefinitions = useMemo(
     () => getOrderedDefinitions(productsDynamic.definitions, productsTableConfig.config),
     [productsDynamic.definitions, productsTableConfig.config]
+  );
+
+  // Same list but with the division field renamed consistently for use inside forms
+  const productsDefinitionsForForm = useMemo(
+    () => orderedProductsDefinitions.map((d) =>
+      d.id === "field-products" ? { ...d, name: "Division" } : d
+    ),
+    [orderedProductsDefinitions]
   );
 
   const orderedAssetsDefinitions = useMemo(
@@ -5182,7 +5191,7 @@ export const UserManagement: React.FC = () => {
             />
             <Stack spacing={1}>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="subtitle2">Product Features Definition</Typography>
+                <Typography variant="subtitle2">Features</Typography>
                 <Button size="small" onClick={() => setProductFeatures((prev) => [...prev, createFeature()])}>
                   Add feature
                 </Button>
@@ -5250,54 +5259,92 @@ export const UserManagement: React.FC = () => {
                   {feature.valueType === "component" && (
                     <Box sx={{ pl: 2, borderLeft: "2px solid", borderColor: "divider" }}>
                       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
-                        <Typography variant="caption" color="text.secondary">Sub-fields</Typography>
+                        <Typography variant="caption" color="text.secondary">Dependencies</Typography>
                         <Button
                           size="small"
                           onClick={() =>
                             setProductFeatures((prev) =>
                               prev.map((f) =>
                                 f.id === feature.id
-                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: crypto.randomUUID(), name: "", valueType: "text" as const }] }
+                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: crypto.randomUUID(), name: "", valueType: "text" as const, isInventory: false }] }
                                   : f
                               )
                             )
                           }
                         >
-                          + Add sub-field
+                          + Add dependency
                         </Button>
                       </Stack>
                       {(feature.subProperties ?? []).map((sf) => (
-                        <Stack key={sf.id} direction="row" spacing={1} alignItems="center" mb={0.5}>
-                          <TextField
-                            size="small"
-                            label="Sub-field name"
-                            value={sf.name}
-                            sx={{ flex: 1 }}
-                            onChange={(e) =>
-                              setProductFeatures((prev) =>
-                                prev.map((f) =>
-                                  f.id === feature.id
-                                    ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, name: e.target.value } : s)) }
-                                    : f
+                        <Stack key={sf.id} spacing={0.5} mb={1}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <TextField
+                              size="small"
+                              label="Name"
+                              value={sf.name}
+                              sx={{ flex: 1 }}
+                              onChange={(e) =>
+                                setProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, name: e.target.value } : s)) }
+                                      : f
+                                  )
                                 )
-                              )
-                            }
-                          />
-                          <Button
-                            color="error"
-                            size="small"
-                            onClick={() =>
-                              setProductFeatures((prev) =>
-                                prev.map((f) =>
-                                  f.id === feature.id
-                                    ? { ...f, subProperties: (f.subProperties ?? []).filter((s) => s.id !== sf.id) }
-                                    : f
+                              }
+                            />
+                            <TextField
+                              size="small"
+                              label="Unit"
+                              value={sf.unit ?? ""}
+                              sx={{ width: 80 }}
+                              placeholder="ea, m…"
+                              onChange={(e) =>
+                                setProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, unit: e.target.value } : s)) }
+                                      : f
+                                  )
                                 )
-                              )
-                            }
-                          >
-                            Remove
-                          </Button>
+                              }
+                            />
+                            <Tooltip title={sf.isInventory ? "Inventory — tracks serial numbers per unit" : "Non-inventory — tracks quantity + unit price"}>
+                              <Stack direction="row" alignItems="center" spacing={0.25}>
+                                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap", fontSize: 10 }}>
+                                  {sf.isInventory ? "Inventory" : "Non-inv."}
+                                </Typography>
+                                <Switch
+                                  size="small"
+                                  checked={!!sf.isInventory}
+                                  onChange={(e) =>
+                                    setProductFeatures((prev) =>
+                                      prev.map((f) =>
+                                        f.id === feature.id
+                                          ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, isInventory: e.target.checked } : s)) }
+                                          : f
+                                      )
+                                    )
+                                  }
+                                />
+                              </Stack>
+                            </Tooltip>
+                            <Button
+                              color="error"
+                              size="small"
+                              onClick={() =>
+                                setProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).filter((s) => s.id !== sf.id) }
+                                      : f
+                                  )
+                                )
+                              }
+                            >
+                              Remove
+                            </Button>
+                          </Stack>
                         </Stack>
                       ))}
                     </Box>
@@ -5306,7 +5353,7 @@ export const UserManagement: React.FC = () => {
               ))}
             </Stack>
             <DynamicFieldsForm
-              definitions={orderedProductsDefinitions}
+              definitions={productsDefinitionsForForm}
               values={productDynamicValues}
               onChange={setProductDynamicValues}
             />
@@ -5449,7 +5496,7 @@ export const UserManagement: React.FC = () => {
             />
             <Stack spacing={1}>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="subtitle2">Product Features Definition</Typography>
+                <Typography variant="subtitle2">Features</Typography>
                 <Button size="small" onClick={() => setEditProductFeatures((prev) => [...prev, createFeature()])}>
                   Add feature
                 </Button>
@@ -5517,54 +5564,92 @@ export const UserManagement: React.FC = () => {
                   {feature.valueType === "component" && (
                     <Box sx={{ pl: 2, borderLeft: "2px solid", borderColor: "divider" }}>
                       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
-                        <Typography variant="caption" color="text.secondary">Sub-fields</Typography>
+                        <Typography variant="caption" color="text.secondary">Dependencies</Typography>
                         <Button
                           size="small"
                           onClick={() =>
                             setEditProductFeatures((prev) =>
                               prev.map((f) =>
                                 f.id === feature.id
-                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: crypto.randomUUID(), name: "", valueType: "text" as const }] }
+                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: crypto.randomUUID(), name: "", valueType: "text" as const, isInventory: false }] }
                                   : f
                               )
                             )
                           }
                         >
-                          + Add sub-field
+                          + Add dependency
                         </Button>
                       </Stack>
                       {(feature.subProperties ?? []).map((sf) => (
-                        <Stack key={sf.id} direction="row" spacing={1} alignItems="center" mb={0.5}>
-                          <TextField
-                            size="small"
-                            label="Sub-field name"
-                            value={sf.name}
-                            sx={{ flex: 1 }}
-                            onChange={(e) =>
-                              setEditProductFeatures((prev) =>
-                                prev.map((f) =>
-                                  f.id === feature.id
-                                    ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, name: e.target.value } : s)) }
-                                    : f
+                        <Stack key={sf.id} spacing={0.5} mb={1}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <TextField
+                              size="small"
+                              label="Name"
+                              value={sf.name}
+                              sx={{ flex: 1 }}
+                              onChange={(e) =>
+                                setEditProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, name: e.target.value } : s)) }
+                                      : f
+                                  )
                                 )
-                              )
-                            }
-                          />
-                          <Button
-                            color="error"
-                            size="small"
-                            onClick={() =>
-                              setEditProductFeatures((prev) =>
-                                prev.map((f) =>
-                                  f.id === feature.id
-                                    ? { ...f, subProperties: (f.subProperties ?? []).filter((s) => s.id !== sf.id) }
-                                    : f
+                              }
+                            />
+                            <TextField
+                              size="small"
+                              label="Unit"
+                              value={sf.unit ?? ""}
+                              sx={{ width: 80 }}
+                              placeholder="ea, m…"
+                              onChange={(e) =>
+                                setEditProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, unit: e.target.value } : s)) }
+                                      : f
+                                  )
                                 )
-                              )
-                            }
-                          >
-                            Remove
-                          </Button>
+                              }
+                            />
+                            <Tooltip title={sf.isInventory ? "Inventory — tracks serial numbers per unit" : "Non-inventory — tracks quantity + unit price"}>
+                              <Stack direction="row" alignItems="center" spacing={0.25}>
+                                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap", fontSize: 10 }}>
+                                  {sf.isInventory ? "Inventory" : "Non-inv."}
+                                </Typography>
+                                <Switch
+                                  size="small"
+                                  checked={!!sf.isInventory}
+                                  onChange={(e) =>
+                                    setEditProductFeatures((prev) =>
+                                      prev.map((f) =>
+                                        f.id === feature.id
+                                          ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, isInventory: e.target.checked } : s)) }
+                                          : f
+                                      )
+                                    )
+                                  }
+                                />
+                              </Stack>
+                            </Tooltip>
+                            <Button
+                              color="error"
+                              size="small"
+                              onClick={() =>
+                                setEditProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).filter((s) => s.id !== sf.id) }
+                                      : f
+                                  )
+                                )
+                              }
+                            >
+                              Remove
+                            </Button>
+                          </Stack>
                         </Stack>
                       ))}
                     </Box>
@@ -5573,7 +5658,7 @@ export const UserManagement: React.FC = () => {
               ))}
             </Stack>
             <DynamicFieldsForm
-              definitions={orderedProductsDefinitions}
+              definitions={productsDefinitionsForForm}
               values={editProductDynamicValues}
               onChange={setEditProductDynamicValues}
             />
