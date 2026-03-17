@@ -69,8 +69,12 @@ import { createProduct, deleteProduct, fetchProducts, updateProduct } from "../.
 import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, reset2fa, updateUser } from "../../store/usersSlice";
 import { Customer } from "../../types/customer";
 import { Product } from "../../types/product";
-import type { ProductFeatureDefinition, ProductFeatureValueType } from "../../types/product";
+import type { FeatureSubProperty as ProductFeatureSubProperty, ProductFeatureDefinition, ProductFeatureValueType } from "../../types/product";
 import { User, UserRole } from "../../types/user";
+import { divisionService } from "../../services/divisionService";
+import type { Division } from "../../types/division";
+import { featureService } from "../../services/featureService";
+import type { Feature } from "../../types/feature";
 
 // Style for field definition labels (yellow bold)
 const fieldLabelStyle = {
@@ -235,6 +239,9 @@ export const UserManagement: React.FC = () => {
   const usersState = useAppSelector((state) => state.users);
   const customersState = useAppSelector((state) => state.customers);
   const productsState = useAppSelector((state) => state.products);
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [libraryFeatures, setLibraryFeatures] = useState<Feature[]>([]);
+  const [featurePickerOpen, setFeaturePickerOpen] = useState<"create" | "edit" | null>(null);
   const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
 
   // Derive offices dropdown list from globalOffices (City, Country format)
@@ -324,7 +331,8 @@ export const UserManagement: React.FC = () => {
 
   const [productForm, setProductForm] = useState({
     name: "",
-    description: ""
+    description: "",
+    divisionId: ""
   });
   const [productFeatures, setProductFeatures] = useState<ProductFeatureDefinition[]>([]);
   const [editUserForm, setEditUserForm] = useState({
@@ -344,7 +352,8 @@ export const UserManagement: React.FC = () => {
   const [editProductForm, setEditProductForm] = useState({
     id: "",
     name: "",
-    description: ""
+    description: "",
+    divisionId: ""
   });
   const [editProductFeatures, setEditProductFeatures] = useState<ProductFeatureDefinition[]>([]);
   const [assetForm, setAssetForm] = useState({
@@ -609,6 +618,8 @@ export const UserManagement: React.FC = () => {
     dispatch(fetchUsers());
     dispatch(fetchCustomers());
     dispatch(fetchProducts());
+    divisionService.getAll().then(setDivisions).catch(() => {});
+    featureService.getAll().then(setLibraryFeatures).catch(() => {});
   }, [dispatch]);
 
   useEffect(() => {
@@ -1707,7 +1718,8 @@ export const UserManagement: React.FC = () => {
     const payload: Omit<Product, "id"> = {
       name: productForm.name,
       description: productForm.description || undefined,
-      features: normalizedFeatures
+      features: normalizedFeatures,
+      divisionId: productForm.divisionId || undefined
     };
     try {
       setActionError(null);
@@ -1721,7 +1733,7 @@ export const UserManagement: React.FC = () => {
       setActionError(resolveErrorMessage(error, "Failed to create product."));
     }
     setProductOpen(false);
-    setProductForm({ name: "", description: "" });
+    setProductForm({ name: "", description: "", divisionId: "" });
     setProductFeatures([]);
     setProductDynamicValues({});
   };
@@ -1748,7 +1760,8 @@ export const UserManagement: React.FC = () => {
     setEditProductForm({
       id: product.id,
       name: product.name,
-      description: product.description || ""
+      description: product.description || "",
+      divisionId: product.divisionId || ""
     });
     setEditProductFeatures(product.features || []);
     const existing = productsDynamic.valuesByEntity[product.id] || {};
@@ -1829,7 +1842,8 @@ export const UserManagement: React.FC = () => {
           payload: {
             name: editProductForm.name,
             description: editProductForm.description || undefined,
-            features: normalizedFeatures
+            features: normalizedFeatures,
+            divisionId: editProductForm.divisionId || ""
           }
         })
       ).unwrap();
@@ -3326,7 +3340,8 @@ export const UserManagement: React.FC = () => {
                                 setEditProductForm({
                                   id: product.id,
                                   name: product.name,
-                                  description: product.description || ""
+                                  description: product.description || "",
+                                  divisionId: product.divisionId || ""
                                 });
                                 const dynamicVals = productsDynamic.valuesByEntity[product.id] || {};
                                 const stringVals: Record<string, string> = {};
@@ -5189,12 +5204,30 @@ export const UserManagement: React.FC = () => {
               multiline
               rows={2}
             />
+            <FormControl fullWidth size="small">
+              <InputLabel>Division (optional)</InputLabel>
+              <Select
+                value={productForm.divisionId}
+                label="Division (optional)"
+                onChange={(event) => setProductForm((prev) => ({ ...prev, divisionId: event.target.value }))}
+              >
+                <MenuItem value=""><em>None</em></MenuItem>
+                {divisions.map((d) => (
+                  <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <Stack spacing={1}>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Typography variant="subtitle2">Features</Typography>
-                <Button size="small" onClick={() => setProductFeatures((prev) => [...prev, createFeature()])}>
-                  Add feature
-                </Button>
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" variant="outlined" onClick={() => setFeaturePickerOpen("create")}>
+                    Link from library
+                  </Button>
+                  <Button size="small" onClick={() => setProductFeatures((prev) => [...prev, createFeature()])}>
+                    Add new
+                  </Button>
+                </Stack>
               </Stack>
               {productFeatures.map((feature) => (
                 <Stack key={feature.id} spacing={0.5}>
@@ -5494,12 +5527,30 @@ export const UserManagement: React.FC = () => {
               multiline
               rows={2}
             />
+            <FormControl fullWidth size="small">
+              <InputLabel>Division (optional)</InputLabel>
+              <Select
+                value={editProductForm.divisionId}
+                label="Division (optional)"
+                onChange={(event) => setEditProductForm((prev) => ({ ...prev, divisionId: event.target.value }))}
+              >
+                <MenuItem value=""><em>None</em></MenuItem>
+                {divisions.map((d) => (
+                  <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <Stack spacing={1}>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Typography variant="subtitle2">Features</Typography>
-                <Button size="small" onClick={() => setEditProductFeatures((prev) => [...prev, createFeature()])}>
-                  Add feature
-                </Button>
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" variant="outlined" onClick={() => setFeaturePickerOpen("edit")}>
+                    Link from library
+                  </Button>
+                  <Button size="small" onClick={() => setEditProductFeatures((prev) => [...prev, createFeature()])}>
+                    Add new
+                  </Button>
+                </Stack>
               </Stack>
               {editProductFeatures.map((feature) => (
                 <Stack key={feature.id} spacing={0.5}>
@@ -6352,6 +6403,83 @@ export const UserManagement: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Feature Library Picker */}
+      <Dialog
+        open={featurePickerOpen !== null}
+        onClose={() => setFeaturePickerOpen(null)}
+        maxWidth="sm"
+        fullWidth
+        PaperComponent={DraggablePaper}
+      >
+        <DialogTitle>Link Feature from Library</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1} sx={{ mt: 1 }}>
+            {libraryFeatures.length === 0 ? (
+              <Typography color="text.secondary" variant="body2">
+                No features in library yet. Use "Add new" to create inline features, or add features via Settings → Features.
+              </Typography>
+            ) : (
+              libraryFeatures.map((lf) => {
+                const alreadyLinked =
+                  featurePickerOpen === "create"
+                    ? productFeatures.some((pf) => pf.id === lf.id)
+                    : editProductFeatures.some((pf) => pf.id === lf.id);
+                return (
+                  <Stack
+                    key={lf.id}
+                    direction="row"
+                    alignItems="center"
+                    justifyContent="space-between"
+                    sx={{
+                      px: 1.5,
+                      py: 1,
+                      border: "1px solid",
+                      borderColor: "divider",
+                      borderRadius: 1,
+                      opacity: alreadyLinked ? 0.5 : 1,
+                    }}
+                  >
+                    <Stack spacing={0.25}>
+                      <Typography variant="body2" fontWeight={500}>
+                        {lf.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {lf.valueType}{lf.description ? ` · ${lf.description}` : ""}
+                      </Typography>
+                    </Stack>
+                    <Button
+                      size="small"
+                      disabled={alreadyLinked}
+                      onClick={() => {
+                        const linked: ProductFeatureDefinition = {
+                          id: lf.id,
+                          name: lf.name,
+                          valueType: lf.valueType as ProductFeatureValueType,
+                          options: lf.options ?? [],
+                          subProperties: lf.subProperties as ProductFeatureSubProperty[] | undefined,
+                        };
+                        if (featurePickerOpen === "create") {
+                          setProductFeatures((prev) => [...prev, linked]);
+                        } else {
+                          setEditProductFeatures((prev) => [...prev, linked]);
+                        }
+                        setFeaturePickerOpen(null);
+                      }}
+                    >
+                      {alreadyLinked ? "Linked" : "Add"}
+                    </Button>
+                  </Stack>
+                );
+              })
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFeaturePickerOpen(null)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
     </Stack>
   );
 };

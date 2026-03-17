@@ -77,6 +77,77 @@ public class SiteEntity
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
+public class DivisionEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(500)]
+    public string? Description { get; set; }
+    public int SortOrder { get; set; } = 99;
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// Global feature definition — reusable across products.
+/// IDs are preserved from existing FeaturesJson to keep workflow step references intact.
+/// </summary>
+public class FeatureEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(500)]
+    public string? Description { get; set; }
+    /// <summary>ValueType: text, number, single-select, multi-select, component, etc.</summary>
+    [MaxLength(80)]
+    public string ValueType { get; set; } = "text";
+    /// <summary>JSON array of option strings for select-type features.</summary>
+    public string OptionsJson { get; set; } = "[]";
+    /// <summary>JSON array of FeatureSubPropertyDto for component/inventory features.</summary>
+    public string SubPropertiesJson { get; set; } = "[]";
+}
+
+/// <summary>
+/// A physical dependency of a Feature — either inventory (serialized per unit)
+/// or non-inventory (quantity + unit + price).
+/// </summary>
+public class FeatureDependencyEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string FeatureId { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+    /// <summary>true = inventory (tracked serial/IP/MAC/firmware), false = non-inventory (qty+price)</summary>
+    public bool IsInventory { get; set; } = false;
+    /// <summary>Inventory only: JSON array of capture field names e.g. ["serialNo","firmware","ipAddress","macAddress"]</summary>
+    public string CaptureFieldsJson { get; set; } = "[]";
+    /// <summary>Non-inventory only: default quantity pre-filled in BOM.</summary>
+    public decimal DefaultQty { get; set; } = 1;
+    /// <summary>Non-inventory only: unit label e.g. "m", "pcs", "kg".</summary>
+    [MaxLength(40)]
+    public string? Unit { get; set; }
+    /// <summary>Non-inventory only: default unit price.</summary>
+    public decimal UnitPrice { get; set; } = 0;
+    public int SortOrder { get; set; } = 0;
+}
+
+/// <summary>Many-to-many join: Product ↔ Feature.</summary>
+public class ProductFeatureEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string ProductId { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string FeatureId { get; set; } = string.Empty;
+    public int SortOrder { get; set; } = 0;
+}
+
 public class ProductEntity
 {
     [Key]
@@ -86,6 +157,8 @@ public class ProductEntity
     [MaxLength(500)]
     public string? Description { get; set; }
     public string FeaturesJson { get; set; } = "[]";
+    [MaxLength(80)]
+    public string? DivisionId { get; set; }
 }
 
 public class AssetEntity
@@ -648,6 +721,25 @@ public class WorkflowConfigEntity
     public string? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Links a WorkflowConfig to a Feature with a quantity and per-dependency step inclusion flags.
+/// InclusionsJson: { [dependencyId: string]: boolean } — true = generate a BOM step at publish.
+/// </summary>
+public class WorkflowConfigFeatureEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string WorkflowConfigId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string FeatureId { get; set; } = string.Empty;
+    /// <summary>Number of instances of this feature in this workflow (e.g. 3 cameras).</summary>
+    public int Quantity { get; set; } = 1;
+    /// <summary>JSON object: { [dependencyId]: bool } — whether each dep generates a step on Publish.</summary>
+    public string InclusionsJson { get; set; } = "{}";
+    public int SortOrder { get; set; } = 0;
 }
 
 /// <summary>

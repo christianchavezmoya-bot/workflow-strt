@@ -35,4 +35,5 @@ export interface Product {
   name: string;
   description?: string;
   features?: ProductFeatureDefinition[];
+  divisionId?: string;
 }

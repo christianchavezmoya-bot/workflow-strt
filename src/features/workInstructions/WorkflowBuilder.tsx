@@ -55,6 +55,10 @@ import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import type { WorkflowConfig } from "../../types/workflowConfig";
+import { workflowConfigFeatureService } from "../../services/workflowConfigFeatureService";
+import type { WorkflowConfigFeature } from "../../types/workflowConfigFeature";
+import { featureDependencyService } from "../../services/featureDependencyService";
+import type { FeatureDependency } from "../../types/featureDependency";
 import WorkOrderRunner from "./WorkOrderRunner";
 
 // ------------------------------------------------------------------
@@ -1101,6 +1105,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             productFeatures={productFeatures}
             featureSelections={featureSelections}
             onFeatureSelectionsChange={setFeatureSelections}
+            configId={currentConfig?.id ?? null}
           />
         </Grid>
       </Grid>
@@ -2500,7 +2505,7 @@ function WorkerPreviewPanel({ workflow, stepsSorted }: { workflow: Workflow; ste
 
 const uid2 = () => typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `id_${Math.random().toString(16).slice(2)}`;
 
-function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, productFeatures, featureSelections, onFeatureSelectionsChange }: {
+function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, productFeatures, featureSelections, onFeatureSelectionsChange, configId }: {
   workflow: Workflow;
   stepsSorted: WorkflowStep[];
   isReadOnly: boolean;
@@ -2508,14 +2513,85 @@ function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, produ
   productFeatures?: ProductFeatureDefinition[];
   featureSelections?: FeatureSelection[];
   onFeatureSelectionsChange?: (sels: FeatureSelection[]) => void;
+  /** Active WorkflowConfig id — enables BOM step inclusion management. */
+  configId?: string | null;
 }) {
   const [tab, setTab] = React.useState(0);
   const features = productFeatures ?? [];
   const sels = featureSelections ?? [];
   const includedCount = sels.filter((s) => s.activeCount > 0).length;
 
+  // ── BOM Step Inclusion state ───────────────────────────────────────────────
+  const [configFeatures, setConfigFeatures] = React.useState<WorkflowConfigFeature[]>([]);
+  const [cfLoading, setCfLoading] = React.useState(false);
+  const [featureDeps, setFeatureDeps] = React.useState<Record<string, FeatureDependency[]>>({});
+  const [depsLoadingMap, setDepsLoadingMap] = React.useState<Record<string, boolean>>({});
+  const [cfSaving, setCfSaving] = React.useState<Record<string, boolean>>({});
+
+  // Load WorkflowConfigFeature rows when Features tab opens with a configId
+  React.useEffect(() => {
+    if (tab !== 2 || !configId) return;
+    setCfLoading(true);
+    workflowConfigFeatureService.getByConfig(configId)
+      .then((data) => { setConfigFeatures(data); })
+      .catch(() => {})
+      .finally(() => setCfLoading(false));
+  }, [tab, configId]);
+
+  async function ensureFeatureDeps(featureId: string) {
+    if (featureDeps[featureId] !== undefined || depsLoadingMap[featureId]) return;
+    setDepsLoadingMap((prev) => ({ ...prev, [featureId]: true }));
+    try {
+      const data = await featureDependencyService.getByFeature(featureId);
+      setFeatureDeps((prev) => ({ ...prev, [featureId]: data }));
+    } catch { /* ignore */ } finally {
+      setDepsLoadingMap((prev) => ({ ...prev, [featureId]: false }));
+    }
+  }
+
+  async function syncConfigFeature(featureId: string, qty: number, inclusionsJson?: string) {
+    if (!configId || isReadOnly) return;
+    const existing = configFeatures.find((cf) => cf.featureId === featureId);
+    try {
+      const result = await workflowConfigFeatureService.upsert({
+        workflowConfigId: configId,
+        featureId,
+        quantity: qty,
+        inclusionsJson: inclusionsJson ?? existing?.inclusionsJson ?? "{}",
+        sortOrder: existing?.sortOrder ?? 0,
+      });
+      setConfigFeatures((prev) => {
+        const idx = prev.findIndex((cf) => cf.featureId === featureId);
+        return idx >= 0 ? prev.map((cf, i) => (i === idx ? result : cf)) : [...prev, result];
+      });
+    } catch { /* ignore */ }
+  }
+
+  async function toggleInclusion(featureId: string, depId: string, included: boolean) {
+    if (!configId || isReadOnly) return;
+    const existing = configFeatures.find((cf) => cf.featureId === featureId);
+    const inclusions: Record<string, boolean> = existing?.inclusionsJson
+      ? JSON.parse(existing.inclusionsJson)
+      : {};
+    inclusions[depId] = included;
+    const inclusionsJson = JSON.stringify(inclusions);
+    const qty = existing?.quantity ?? (sels.find((s) => s.featureId === featureId)?.activeCount ?? 1);
+    setCfSaving((prev) => ({ ...prev, [featureId]: true }));
+    try {
+      await syncConfigFeature(featureId, qty, inclusionsJson);
+    } finally {
+      setCfSaving((prev) => ({ ...prev, [featureId]: false }));
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   function updateSel(featureId: string, patch: Partial<FeatureSelection>) {
     onFeatureSelectionsChange?.(sels.map((s) => s.featureId === featureId ? { ...s, ...patch } : s));
+    // Also sync qty to WorkflowConfigFeature table
+    if (patch.activeCount !== undefined && configId && !isReadOnly) {
+      void syncConfigFeature(featureId, patch.activeCount);
+      if (patch.activeCount > 0) void ensureFeatureDeps(featureId);
+    }
   }
 
   function updateBom(fn: (items: import("../../types/workflow").BomItem[]) => import("../../types/workflow").BomItem[]) {
@@ -2638,76 +2714,143 @@ function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, produ
       {tab === 2 && features.length > 0 && (
         <Paper className="glass-card" sx={{ p: 2 }}>
           <Stack spacing={2}>
-            <Typography variant="body2" color="text.secondary">
-              Select which features are used in this workflow configuration and set the quantity for each.
-            </Typography>
-            {features.length === 0 ? (
-              <Alert severity="info" sx={{ fontSize: 12 }}>
-                No features defined on this product.
-              </Alert>
-            ) : (
-              <Stack spacing={1}>
-                {features.map((feat) => {
-                  const sel = sels.find((s) => s.featureId === feat.id) ?? { featureId: feat.id, included: false, activeCount: 0 };
-                  return (
-                    <Paper
-                      key={feat.id}
-                      variant="outlined"
-                      sx={{ p: 1.5, borderColor: sel.activeCount > 0 ? "primary.main" : "divider", opacity: sel.activeCount === 0 ? 0.6 : 1 }}
-                    >
-                      <Stack direction="row" alignItems="center" spacing={1.5}>
-                        <Typography variant="body2" sx={{ flexGrow: 1 }}>{feat.name}</Typography>
-                        {/* Qty stepper — 0 = not included in this config */}
-                        <Stack direction="row" alignItems="center" spacing={0.5}
-                          sx={{ border: 1, borderColor: sel.activeCount > 0 ? "primary.main" : "divider", borderRadius: 1, px: 0.5, py: 0.25, flexShrink: 0 }}>
-                          <IconButton
-                            size="small"
-                            disabled={isReadOnly || sel.activeCount <= 0}
-                            onClick={() => {
-                              const next = Math.max(0, sel.activeCount - 1);
-                              updateSel(feat.id, { activeCount: next, included: next > 0 });
-                            }}
-                            sx={{ p: 0.25 }}
-                          >
-                            <RemoveOutlined sx={{ fontSize: 14 }} />
-                          </IconButton>
-                          <Typography
-                            variant="body2"
-                            fontWeight={600}
-                            color={sel.activeCount > 0 ? "primary" : "text.disabled"}
-                            sx={{ minWidth: 20, textAlign: "center" }}
-                          >
-                            {sel.activeCount}
-                          </Typography>
-                          <IconButton
-                            size="small"
-                            disabled={isReadOnly}
-                            onClick={() => updateSel(feat.id, { activeCount: sel.activeCount + 1, included: true })}
-                            sx={{ p: 0.25 }}
-                          >
-                            <AddOutlined sx={{ fontSize: 14 }} />
-                          </IconButton>
-                        </Stack>
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Typography variant="body2" color="text.secondary">
+                Set quantities and choose which dependencies generate steps on publish.
+              </Typography>
+              {cfLoading && <CircularProgress size={14} />}
+            </Stack>
+            <Stack spacing={1}>
+              {features.map((feat) => {
+                const sel = sels.find((s) => s.featureId === feat.id) ?? { featureId: feat.id, included: false, activeCount: 0 };
+                const cfRow = configFeatures.find((cf) => cf.featureId === feat.id);
+                const inclusions: Record<string, boolean> = cfRow?.inclusionsJson
+                  ? (() => { try { return JSON.parse(cfRow.inclusionsJson); } catch { return {}; } })()
+                  : {};
+                const deps = featureDeps[feat.id];
+                const includedDepCount = deps ? deps.filter((d) => inclusions[d.id]).length : 0;
+
+                return (
+                  <Paper
+                    key={feat.id}
+                    variant="outlined"
+                    sx={{ p: 1.5, borderColor: sel.activeCount > 0 ? "primary.main" : "divider", opacity: sel.activeCount === 0 ? 0.6 : 1 }}
+                  >
+                    <Stack direction="row" alignItems="center" spacing={1.5}>
+                      <Typography variant="body2" sx={{ flexGrow: 1 }}>{feat.name}</Typography>
+                      {/* Qty stepper — 0 = not included in this config */}
+                      <Stack direction="row" alignItems="center" spacing={0.5}
+                        sx={{ border: 1, borderColor: sel.activeCount > 0 ? "primary.main" : "divider", borderRadius: 1, px: 0.5, py: 0.25, flexShrink: 0 }}>
+                        <IconButton
+                          size="small"
+                          disabled={isReadOnly || sel.activeCount <= 0}
+                          onClick={() => {
+                            const next = Math.max(0, sel.activeCount - 1);
+                            updateSel(feat.id, { activeCount: next, included: next > 0 });
+                          }}
+                          sx={{ p: 0.25 }}
+                        >
+                          <RemoveOutlined sx={{ fontSize: 14 }} />
+                        </IconButton>
+                        <Typography
+                          variant="body2"
+                          fontWeight={600}
+                          color={sel.activeCount > 0 ? "primary" : "text.disabled"}
+                          sx={{ minWidth: 20, textAlign: "center" }}
+                        >
+                          {sel.activeCount}
+                        </Typography>
+                        <IconButton
+                          size="small"
+                          disabled={isReadOnly}
+                          onClick={() => {
+                            updateSel(feat.id, { activeCount: sel.activeCount + 1, included: true });
+                            void ensureFeatureDeps(feat.id);
+                          }}
+                          sx={{ p: 0.25 }}
+                        >
+                          <AddOutlined sx={{ fontSize: 14 }} />
+                        </IconButton>
                       </Stack>
-                      {sel.activeCount > 0 && feat.subProperties && feat.subProperties.length > 0 && (
-                        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1, pl: 0.5 }}>
-                          {feat.subProperties.map((dep) => (
-                            <Chip
-                              key={dep.id}
-                              size="small"
-                              label={`${dep.name}${dep.unit ? ` (${dep.unit})` : ""}`}
-                              color={dep.isInventory ? "primary" : "default"}
-                              variant="outlined"
-                              sx={{ fontSize: 10 }}
-                            />
-                          ))}
+                    </Stack>
+
+                    {/* Sub-properties chips (backward compat) */}
+                    {sel.activeCount > 0 && feat.subProperties && feat.subProperties.length > 0 && (
+                      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1, pl: 0.5 }}>
+                        {feat.subProperties.map((sp) => (
+                          <Chip
+                            key={sp.id}
+                            size="small"
+                            label={`${sp.name}${sp.unit ? ` (${sp.unit})` : ""}`}
+                            color={sp.isInventory ? "primary" : "default"}
+                            variant="outlined"
+                            sx={{ fontSize: 10 }}
+                          />
+                        ))}
+                      </Stack>
+                    )}
+
+                    {/* BOM step inclusion panel — only when qty > 0 and configId present */}
+                    {sel.activeCount > 0 && configId && (
+                      <Stack spacing={0.75} sx={{ mt: 1.5, pl: 0.5 }}>
+                        <Stack direction="row" alignItems="center" justifyContent="space-between">
+                          <Typography variant="caption" fontWeight={700} color="text.secondary">
+                            BOM STEPS ON PUBLISH
+                          </Typography>
+                          {cfSaving[feat.id] && <CircularProgress size={12} />}
                         </Stack>
-                      )}
-                    </Paper>
-                  );
-                })}
-              </Stack>
-            )}
+
+                        {depsLoadingMap[feat.id] ? (
+                          <CircularProgress size={14} />
+                        ) : !deps ? (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ cursor: "pointer", textDecoration: "underline" }}
+                            onClick={() => ensureFeatureDeps(feat.id)}
+                          >
+                            Load dependencies…
+                          </Typography>
+                        ) : deps.length === 0 ? (
+                          <Typography variant="caption" color="text.secondary">
+                            No dependencies defined. Go to Settings → Features to add them.
+                          </Typography>
+                        ) : (
+                          <>
+                            <Stack spacing={0.5}>
+                              {deps.map((dep) => (
+                                <Stack key={dep.id} direction="row" alignItems="center" spacing={1}>
+                                  <Checkbox
+                                    size="small"
+                                    disabled={isReadOnly}
+                                    checked={!!inclusions[dep.id]}
+                                    onChange={(e) => toggleInclusion(feat.id, dep.id, e.target.checked)}
+                                    sx={{ p: 0.25 }}
+                                  />
+                                  <Typography variant="caption" sx={{ flexGrow: 1 }}>{dep.name}</Typography>
+                                  <Chip
+                                    size="small"
+                                    label={dep.isInventory ? "Inventory" : "Non-inv."}
+                                    color={dep.isInventory ? "primary" : "default"}
+                                    variant="outlined"
+                                    sx={{ fontSize: 9, height: 18 }}
+                                  />
+                                </Stack>
+                              ))}
+                            </Stack>
+                            {includedDepCount > 0 && (
+                              <Alert severity="success" sx={{ fontSize: 11, py: 0.25, mt: 0.5 }}>
+                                Will generate {includedDepCount} BOM step{includedDepCount > 1 ? "s" : ""} on publish.
+                              </Alert>
+                            )}
+                          </>
+                        )}
+                      </Stack>
+                    )}
+                  </Paper>
+                );
+              })}
+            </Stack>
           </Stack>
         </Paper>
       )}

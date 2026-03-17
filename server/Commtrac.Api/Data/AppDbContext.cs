@@ -15,6 +15,10 @@ public class AppDbContext : DbContext
     public DbSet<UserEntity> Users => Set<UserEntity>();
     public DbSet<CustomerEntity> Customers => Set<CustomerEntity>();
     public DbSet<SiteEntity> Sites => Set<SiteEntity>();
+    public DbSet<DivisionEntity> Divisions => Set<DivisionEntity>();
+    public DbSet<FeatureEntity> Features => Set<FeatureEntity>();
+    public DbSet<FeatureDependencyEntity> FeatureDependencies => Set<FeatureDependencyEntity>();
+    public DbSet<ProductFeatureEntity> ProductFeatures => Set<ProductFeatureEntity>();
     public DbSet<ProductEntity> Products => Set<ProductEntity>();
     public DbSet<AssetEntity> Assets => Set<AssetEntity>();
     public DbSet<ProjectEntity> Projects => Set<ProjectEntity>();
@@ -45,6 +49,7 @@ public class AppDbContext : DbContext
     public DbSet<ProjectAssetEntity> ProjectAssets => Set<ProjectAssetEntity>();
     // ─── v2 Workflow Config Unification ───────────────────────────────────────
     public DbSet<WorkflowConfigEntity> WorkflowConfigs => Set<WorkflowConfigEntity>();
+    public DbSet<WorkflowConfigFeatureEntity> WorkflowConfigFeatures => Set<WorkflowConfigFeatureEntity>();
     public DbSet<WorkflowTypeEntity> WorkflowTypes => Set<WorkflowTypeEntity>();
     public DbSet<AssetWorkflowAssignmentEntity> AssetWorkflowAssignments => Set<AssetWorkflowAssignmentEntity>();
     public DbSet<AssetWorkflowRunEntity> AssetWorkflowRuns => Set<AssetWorkflowRunEntity>();
@@ -82,6 +87,27 @@ public class AppDbContext : DbContext
             .Property(p => p.ProductIds)
             .HasConversion(listConverter)
             .Metadata.SetValueComparer(listComparer);
+
+        modelBuilder.Entity<FeatureDependencyEntity>()
+            .HasIndex(d => d.FeatureId);
+
+        modelBuilder.Entity<FeatureDependencyEntity>()
+            .Property(d => d.CaptureFieldsJson)
+            .HasDefaultValue("[]");
+
+        modelBuilder.Entity<FeatureEntity>()
+            .Property(f => f.OptionsJson)
+            .HasDefaultValue("[]");
+
+        modelBuilder.Entity<FeatureEntity>()
+            .Property(f => f.SubPropertiesJson)
+            .HasDefaultValue("[]");
+
+        modelBuilder.Entity<ProductFeatureEntity>()
+            .HasIndex(pf => pf.ProductId);
+
+        modelBuilder.Entity<ProductFeatureEntity>()
+            .HasIndex(pf => pf.FeatureId);
 
         modelBuilder.Entity<ProductEntity>()
             .Property(p => p.FeaturesJson)
@@ -208,6 +234,17 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<ProjectAssetEntity>()
             .HasIndex(a => a.ProductConfigId);
+
+        // ─── WorkflowConfigFeature indexes ───────────────────────────────────
+        modelBuilder.Entity<WorkflowConfigFeatureEntity>()
+            .HasIndex(f => f.WorkflowConfigId);
+
+        modelBuilder.Entity<WorkflowConfigFeatureEntity>()
+            .HasIndex(f => f.FeatureId);
+
+        modelBuilder.Entity<WorkflowConfigFeatureEntity>()
+            .Property(f => f.InclusionsJson)
+            .HasDefaultValue("{}");
 
         // ─── v2 WorkflowConfig indexes ────────────────────────────────────────
         modelBuilder.Entity<WorkflowConfigEntity>()

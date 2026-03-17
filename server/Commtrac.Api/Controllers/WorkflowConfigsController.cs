@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
 
@@ -13,6 +14,7 @@ public class WorkflowConfigsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
+    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
     public WorkflowConfigsController(AppDbContext db, IWebHostEnvironment env)
     {
@@ -108,6 +110,133 @@ public class WorkflowConfigsController : ControllerBase
         if (entity is null) return NotFound();
         if (entity.Status == "Archived")
             return BadRequest(new { message = "Archived configurations cannot be published." });
+
+        // ── Inject BOM steps from WorkflowConfigFeatures ──────────────────────
+        var configFeatures = await _db.WorkflowConfigFeatures
+            .Where(f => f.WorkflowConfigId == id)
+            .OrderBy(f => f.SortOrder)
+            .ToListAsync();
+
+        if (configFeatures.Count > 0)
+        {
+            // Load the current steps array
+            var steps = JsonSerializer.Deserialize<List<JsonElement>>(entity.StepsJson, JsonOpts) ?? new();
+
+            // Determine highest existing order value
+            int maxOrder = 0;
+            foreach (var s in steps)
+                if (s.TryGetProperty("order", out var ordProp) && ordProp.TryGetInt32(out var ord))
+                    if (ord > maxOrder) maxOrder = ord;
+
+            // Remove any previously-injected BOM steps (safe re-publish guard)
+            steps = steps.Where(s =>
+                !(s.TryGetProperty("bomSource", out _))).ToList();
+
+            int nextOrder = maxOrder + 1;
+
+            foreach (var cf in configFeatures)
+            {
+                var inclusions = string.IsNullOrWhiteSpace(cf.InclusionsJson) || cf.InclusionsJson == "{}"
+                    ? new Dictionary<string, bool>()
+                    : JsonSerializer.Deserialize<Dictionary<string, bool>>(cf.InclusionsJson, JsonOpts) ?? new();
+
+                if (!inclusions.Any(kv => kv.Value)) continue; // nothing included
+
+                // Load the feature and its included dependencies
+                var feature = await _db.Features.FirstOrDefaultAsync(f => f.Id == cf.FeatureId);
+                if (feature is null) continue;
+
+                var depIds = inclusions.Where(kv => kv.Value).Select(kv => kv.Key).ToList();
+                var deps = await _db.FeatureDependencies
+                    .Where(d => d.FeatureId == cf.FeatureId && depIds.Contains(d.Id))
+                    .OrderBy(d => d.SortOrder)
+                    .ToListAsync();
+
+                foreach (var dep in deps)
+                {
+                    var captureFields = string.IsNullOrWhiteSpace(dep.CaptureFieldsJson) || dep.CaptureFieldsJson == "[]"
+                        ? new List<string>()
+                        : JsonSerializer.Deserialize<List<string>>(dep.CaptureFieldsJson, JsonOpts) ?? new();
+
+                    object stepObj;
+                    if (dep.IsInventory)
+                    {
+                        var cfList = captureFields.Select(key => new
+                        {
+                            id = Guid.NewGuid().ToString(),
+                            key,
+                            label = key switch {
+                                "serialNo"   => "Serial Number",
+                                "firmware"   => "Firmware Version",
+                                "ipAddress"  => "IP Address",
+                                "macAddress" => "MAC Address",
+                                "model"      => "Model",
+                                "location"   => "Location",
+                                _            => key
+                            },
+                            type = "text",
+                            required = true,
+                            featureId = cf.FeatureId
+                        }).ToList();
+
+                        stepObj = new
+                        {
+                            id = Guid.NewGuid().ToString(),
+                            order = nextOrder++,
+                            title = $"Install {dep.Name} ({feature.Name})",
+                            description = $"Capture details for each {dep.Name}. Quantity: {cf.Quantity}.",
+                            overrideInReport = false,
+                            overrideReportText = "",
+                            includeDescriptionInReport = true,
+                            mediaIds = Array.Empty<string>(),
+                            decisionsEnabled = false,
+                            decisions = Array.Empty<object>(),
+                            inputs = Array.Empty<object>(),
+                            nextStepId = (string?)null,
+                            captureFields = cfList,
+                            stepType = "installation",
+                            repeatFeatureId = cf.FeatureId,
+                            bomSource = new { dependencyId = dep.Id, featureId = cf.FeatureId, isInventory = true }
+                        };
+                    }
+                    else
+                    {
+                        stepObj = new
+                        {
+                            id = Guid.NewGuid().ToString(),
+                            order = nextOrder++,
+                            title = $"Confirm {dep.Name} ({feature.Name})",
+                            description = $"Confirm quantity of {dep.Name} used. Expected: {dep.DefaultQty}{(dep.Unit != null ? " " + dep.Unit : "")}.",
+                            overrideInReport = false,
+                            overrideReportText = "",
+                            includeDescriptionInReport = true,
+                            mediaIds = Array.Empty<string>(),
+                            decisionsEnabled = false,
+                            decisions = Array.Empty<object>(),
+                            inputs = new[]
+                            {
+                                new
+                                {
+                                    id = Guid.NewGuid().ToString(),
+                                    type = "number",
+                                    label = $"Actual qty ({(dep.Unit ?? "units")})",
+                                    required = true,
+                                    featureId = cf.FeatureId
+                                }
+                            },
+                            nextStepId = (string?)null,
+                            captureFields = Array.Empty<object>(),
+                            stepType = "data-collection",
+                            bomSource = new { dependencyId = dep.Id, featureId = cf.FeatureId, isInventory = false }
+                        };
+                    }
+
+                    steps.Add(JsonSerializer.SerializeToElement(stepObj, JsonOpts));
+                }
+            }
+
+            entity.StepsJson = JsonSerializer.Serialize(steps, JsonOpts);
+        }
 
         entity.Status    = "Published";
         entity.UpdatedAt = DateTime.UtcNow;

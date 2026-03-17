@@ -34,6 +34,12 @@ import { useSearchParams } from "react-router-dom";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import type { WorkflowType } from "../../types/workflowType";
+import { divisionService } from "../../services/divisionService";
+import type { Division } from "../../types/division";
+import { featureService } from "../../services/featureService";
+import type { Feature } from "../../types/feature";
+import { featureDependencyService } from "../../services/featureDependencyService";
+import type { FeatureDependency } from "../../types/featureDependency";
 import api from "../../services/api";
 import { settingsService } from "../../services/settingsService";
 import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/settings";
@@ -233,7 +239,7 @@ interface AuditLogEntry {
   timestamp: string;
 }
 
-const SETTINGS_TAB_KEYS = ["quickbase", "sms", "fields", "workflow-types", "logo", "audit"];
+const SETTINGS_TAB_KEYS = ["quickbase", "sms", "fields", "divisions", "features", "workflow-types", "logo", "audit"];
 
 const Settings = () => {
   const { addNotification } = useFieldNotifications();
@@ -309,6 +315,193 @@ const Settings = () => {
   const [notifySending, setNotifySending] = useState(false);
   const [notifyStatus, setNotifyStatus] = useState<"" | "saved" | "sent" | "error">("");
   const [notifyError, setNotifyError] = useState<string | null>(null);
+
+  // Divisions manager
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [divisionsLoading, setDivisionsLoading] = useState(false);
+  const [divisionDialog, setDivisionDialog] = useState(false);
+  const [divisionEditId, setDivisionEditId] = useState<string | null>(null);
+  const [divisionForm, setDivisionForm] = useState({ name: "", description: "", sortOrder: "99" });
+  const [divisionSaving, setDivisionSaving] = useState(false);
+  const [divisionError, setDivisionError] = useState<string | null>(null);
+
+  async function loadDivisions() {
+    setDivisionsLoading(true);
+    try {
+      const data = await divisionService.getAll();
+      setDivisions(data.sort((a, b) => a.sortOrder - b.sortOrder));
+    } catch { console.warn("Failed to load divisions"); } finally {
+      setDivisionsLoading(false);
+    }
+  }
+
+  async function saveDivision() {
+    if (!divisionForm.name.trim()) { setDivisionError("Name is required."); return; }
+    setDivisionSaving(true);
+    setDivisionError(null);
+    try {
+      const sortOrder = parseInt(divisionForm.sortOrder, 10) || 99;
+      if (divisionEditId) {
+        await divisionService.update(divisionEditId, { name: divisionForm.name.trim(), description: divisionForm.description || undefined, sortOrder });
+      } else {
+        await divisionService.create({ name: divisionForm.name.trim(), description: divisionForm.description || undefined, sortOrder });
+      }
+      await loadDivisions();
+      setDivisionDialog(false);
+    } catch { setDivisionError("Failed to save division."); } finally {
+      setDivisionSaving(false);
+    }
+  }
+
+  async function removeDivision(id: string) {
+    if (!confirm("Delete this division? Products assigned to it will keep their data but lose the association.")) return;
+    try {
+      await divisionService.remove(id);
+      setDivisions((prev) => prev.filter((d) => d.id !== id));
+    } catch { alert("Failed to delete division."); }
+  }
+
+  // Feature library manager
+  const [features, setFeatures] = useState<Feature[]>([]);
+  const [featuresLoading, setFeaturesLoading] = useState(false);
+  const [featureDialog, setFeatureDialog] = useState(false);
+  const [featureEditId, setFeatureEditId] = useState<string | null>(null);
+  const [featureForm, setFeatureForm] = useState({ name: "", description: "", valueType: "text" });
+  const [featureSaving, setFeatureSaving] = useState(false);
+  const [featureError, setFeatureError] = useState<string | null>(null);
+
+  async function loadFeatures() {
+    setFeaturesLoading(true);
+    try {
+      const data = await featureService.getAll();
+      setFeatures(data.sort((a, b) => a.name.localeCompare(b.name)));
+    } catch { console.warn("Failed to load features"); } finally {
+      setFeaturesLoading(false);
+    }
+  }
+
+  async function saveFeature() {
+    if (!featureForm.name.trim()) { setFeatureError("Name is required."); return; }
+    setFeatureSaving(true);
+    setFeatureError(null);
+    try {
+      if (featureEditId) {
+        await featureService.update(featureEditId, {
+          name: featureForm.name.trim(),
+          description: featureForm.description || undefined,
+          valueType: featureForm.valueType
+        });
+      } else {
+        await featureService.create({
+          name: featureForm.name.trim(),
+          description: featureForm.description || undefined,
+          valueType: featureForm.valueType
+        });
+      }
+      await loadFeatures();
+      setFeatureDialog(false);
+    } catch { setFeatureError("Failed to save feature."); } finally {
+      setFeatureSaving(false);
+    }
+  }
+
+  async function removeFeature(id: string) {
+    if (!confirm("Delete this feature? It will be unlinked from all products.")) return;
+    try {
+      await featureService.remove(id);
+      setFeatures((prev) => prev.filter((f) => f.id !== id));
+      if (expandedFeatureId === id) setExpandedFeatureId(null);
+    } catch { alert("Failed to delete feature."); }
+  }
+
+  // Feature dependencies
+  const [expandedFeatureId, setExpandedFeatureId] = useState<string | null>(null);
+  const [dependencies, setDependencies] = useState<Record<string, FeatureDependency[]>>({});
+  const [depsLoading, setDepsLoading] = useState<Record<string, boolean>>({});
+  const [depDialog, setDepDialog] = useState(false);
+  const [depEditId, setDepEditId] = useState<string | null>(null);
+  const [depFeatureId, setDepFeatureId] = useState<string | null>(null);
+  const [depForm, setDepForm] = useState({
+    name: "",
+    isInventory: false,
+    captureFields: [] as string[],
+    defaultQty: 1,
+    unit: "",
+    unitPrice: 0,
+  });
+  const [depSaving, setDepSaving] = useState(false);
+  const [depError, setDepError] = useState<string | null>(null);
+
+  const CAPTURE_FIELD_OPTIONS = ["serialNo", "firmware", "ipAddress", "macAddress", "model", "location", "notes"];
+
+  async function loadDeps(featureId: string) {
+    setDepsLoading((prev) => ({ ...prev, [featureId]: true }));
+    try {
+      const data = await featureDependencyService.getByFeature(featureId);
+      setDependencies((prev) => ({ ...prev, [featureId]: data }));
+    } catch { console.warn("Failed to load dependencies"); } finally {
+      setDepsLoading((prev) => ({ ...prev, [featureId]: false }));
+    }
+  }
+
+  function openDepDialog(featureId: string, dep?: FeatureDependency) {
+    setDepFeatureId(featureId);
+    setDepEditId(dep?.id ?? null);
+    setDepForm({
+      name: dep?.name ?? "",
+      isInventory: dep?.isInventory ?? false,
+      captureFields: dep?.captureFields ?? [],
+      defaultQty: dep?.defaultQty ?? 1,
+      unit: dep?.unit ?? "",
+      unitPrice: dep?.unitPrice ?? 0,
+    });
+    setDepError(null);
+    setDepDialog(true);
+  }
+
+  async function saveDep() {
+    if (!depFeatureId || !depForm.name.trim()) { setDepError("Name is required."); return; }
+    setDepSaving(true);
+    setDepError(null);
+    try {
+      if (depEditId) {
+        await featureDependencyService.update(depEditId, {
+          name: depForm.name.trim(),
+          isInventory: depForm.isInventory,
+          captureFields: depForm.captureFields,
+          defaultQty: depForm.defaultQty,
+          unit: depForm.unit || undefined,
+          unitPrice: depForm.unitPrice,
+        });
+      } else {
+        await featureDependencyService.create({
+          featureId: depFeatureId,
+          name: depForm.name.trim(),
+          isInventory: depForm.isInventory,
+          captureFields: depForm.captureFields,
+          defaultQty: depForm.defaultQty,
+          unit: depForm.unit || undefined,
+          unitPrice: depForm.unitPrice,
+          sortOrder: (dependencies[depFeatureId]?.length ?? 0),
+        });
+      }
+      await loadDeps(depFeatureId);
+      setDepDialog(false);
+    } catch { setDepError("Failed to save dependency."); } finally {
+      setDepSaving(false);
+    }
+  }
+
+  async function removeDep(featureId: string, depId: string) {
+    if (!confirm("Delete this dependency?")) return;
+    try {
+      await featureDependencyService.remove(depId);
+      setDependencies((prev) => ({
+        ...prev,
+        [featureId]: (prev[featureId] ?? []).filter((d) => d.id !== depId),
+      }));
+    } catch { alert("Failed to delete dependency."); }
+  }
 
   // Workflow types manager
   const [wfTypes, setWfTypes] = useState<WorkflowType[]>([]);
@@ -966,6 +1159,8 @@ const Settings = () => {
           <Tab label="Integrations" />
           <Tab label="SMS/SMTP" />
           <Tab label="Fields/Data" />
+          <Tab label="Divisions" onClick={() => { if (divisions.length === 0) loadDivisions(); }} />
+          <Tab label="Features" onClick={() => { if (features.length === 0) loadFeatures(); }} />
           <Tab label="Workflow Types" onClick={() => { if (wfTypes.length === 0) loadWfTypes(); }} />
           <Tab label="Business Logo" />
           {isAdmin && <Tab label="Audit Log" />}
@@ -1310,6 +1505,241 @@ const Settings = () => {
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
               <Box>
+                <Typography variant="h6">Divisions</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Manage top-level business divisions (e.g. Strata AI, Strata Connect, Strata Protect).
+                </Typography>
+              </Box>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AddOutlined />}
+                onClick={() => {
+                  setDivisionEditId(null);
+                  setDivisionForm({ name: "", description: "", sortOrder: String((divisions.length + 1) * 10) });
+                  setDivisionError(null);
+                  setDivisionDialog(true);
+                }}
+              >
+                Add division
+              </Button>
+            </Stack>
+            <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            {divisionsLoading ? (
+              <Stack alignItems="center" sx={{ py: 3 }}>
+                <CircularProgress size={28} />
+              </Stack>
+            ) : divisions.length === 0 ? (
+              <Alert severity="info">
+                No divisions found.{" "}
+                <Button size="small" onClick={loadDivisions}>Refresh</Button>
+              </Alert>
+            ) : (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Description</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Sort</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Status</Typography></TableCell>
+                    <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {divisions.map((d) => (
+                    <TableRow key={d.id} hover>
+                      <TableCell><Typography variant="body2" fontWeight={600}>{d.name}</Typography></TableCell>
+                      <TableCell><Typography variant="body2" color="text.secondary">{d.description || "—"}</Typography></TableCell>
+                      <TableCell><Typography variant="body2" color="text.secondary">{d.sortOrder}</Typography></TableCell>
+                      <TableCell>
+                        <Chip size="small" label={d.isActive ? "Active" : "Inactive"} color={d.isActive ? "success" : "default"} variant="outlined" />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                          <Tooltip title="Edit">
+                            <IconButton size="small" onClick={() => {
+                              setDivisionEditId(d.id);
+                              setDivisionForm({ name: d.name, description: d.description ?? "", sortOrder: String(d.sortOrder) });
+                              setDivisionError(null);
+                              setDivisionDialog(true);
+                            }}>
+                              <EditOutlined fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete">
+                            <IconButton size="small" color="error" onClick={() => removeDivision(d.id)}>
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            <Button size="small" variant="outlined" onClick={loadDivisions} disabled={divisionsLoading}>
+              {divisionsLoading ? "Refreshing…" : "Refresh"}
+            </Button>
+          </Stack>
+        )}
+
+        {tab === 4 && (
+          <Stack spacing={2} sx={{ marginTop: 2 }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Box>
+                <Typography variant="h6">Feature Library</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Global reusable features that can be linked to any product (e.g. IP Camera, Room, NVR).
+                </Typography>
+              </Box>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AddOutlined />}
+                onClick={() => {
+                  setFeatureEditId(null);
+                  setFeatureForm({ name: "", description: "", valueType: "text" });
+                  setFeatureError(null);
+                  setFeatureDialog(true);
+                }}
+              >
+                Add feature
+              </Button>
+            </Stack>
+            <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            {featuresLoading ? (
+              <Stack alignItems="center" sx={{ py: 3 }}>
+                <CircularProgress size={28} />
+              </Stack>
+            ) : features.length === 0 ? (
+              <Alert severity="info">
+                No features in the library yet.{" "}
+                <Button size="small" onClick={loadFeatures}>Refresh</Button>
+              </Alert>
+            ) : (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Type</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Description</Typography></TableCell>
+                    <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {features.map((f) => {
+                    const isExpanded = expandedFeatureId === f.id;
+                    const featureDeps = dependencies[f.id] ?? [];
+                    const featureDepsLoading = depsLoading[f.id] ?? false;
+                    return (
+                      <>
+                        <TableRow key={f.id} hover sx={{ cursor: "pointer" }} onClick={() => {
+                          if (isExpanded) {
+                            setExpandedFeatureId(null);
+                          } else {
+                            setExpandedFeatureId(f.id);
+                            if (!dependencies[f.id]) loadDeps(f.id);
+                          }
+                        }}>
+                          <TableCell>
+                            <Stack direction="row" alignItems="center" spacing={1}>
+                              <Typography variant="body2" sx={{ fontSize: "0.75rem", opacity: 0.5, userSelect: "none" }}>
+                                {isExpanded ? "▼" : "▶"}
+                              </Typography>
+                              <Typography variant="body2" fontWeight={600}>{f.name}</Typography>
+                            </Stack>
+                          </TableCell>
+                          <TableCell><Chip size="small" label={f.valueType} variant="outlined" /></TableCell>
+                          <TableCell><Typography variant="body2" color="text.secondary">{f.description || "—"}</Typography></TableCell>
+                          <TableCell align="right">
+                            <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                              <Tooltip title="Edit">
+                                <IconButton size="small" onClick={(e) => {
+                                  e.stopPropagation();
+                                  setFeatureEditId(f.id);
+                                  setFeatureForm({ name: f.name, description: f.description ?? "", valueType: f.valueType });
+                                  setFeatureError(null);
+                                  setFeatureDialog(true);
+                                }}>
+                                  <EditOutlined fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Delete">
+                                <IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); removeFeature(f.id); }}>
+                                  <DeleteOutline fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && (
+                          <TableRow key={`${f.id}-deps`}>
+                            <TableCell colSpan={4} sx={{ py: 0, px: 2, bgcolor: "action.hover" }}>
+                              <Stack spacing={1} sx={{ py: 1.5 }}>
+                                <Stack direction="row" alignItems="center" justifyContent="space-between">
+                                  <Typography variant="caption" fontWeight={700} color="text.secondary">
+                                    DEPENDENCIES ({featureDeps.length})
+                                  </Typography>
+                                  <Button size="small" startIcon={<AddOutlined />} onClick={(e) => { e.stopPropagation(); openDepDialog(f.id); }}>
+                                    Add dependency
+                                  </Button>
+                                </Stack>
+                                {featureDepsLoading ? (
+                                  <CircularProgress size={18} />
+                                ) : featureDeps.length === 0 ? (
+                                  <Typography variant="caption" color="text.secondary">No dependencies yet.</Typography>
+                                ) : (
+                                  featureDeps.map((dep) => (
+                                    <Stack key={dep.id} direction="row" alignItems="center" justifyContent="space-between"
+                                      sx={{ px: 1, py: 0.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                                      <Stack spacing={0.25}>
+                                        <Stack direction="row" spacing={1} alignItems="center">
+                                          <Typography variant="body2" fontWeight={500}>{dep.name}</Typography>
+                                          <Chip size="small" label={dep.isInventory ? "Inventory" : "Non-inventory"}
+                                            color={dep.isInventory ? "primary" : "default"} variant="outlined" />
+                                        </Stack>
+                                        <Typography variant="caption" color="text.secondary">
+                                          {dep.isInventory
+                                            ? `Capture: ${dep.captureFields.join(", ") || "none"}`
+                                            : `Qty: ${dep.defaultQty}${dep.unit ? " " + dep.unit : ""} · $${dep.unitPrice}`}
+                                        </Typography>
+                                      </Stack>
+                                      <Stack direction="row" spacing={0.5}>
+                                        <Tooltip title="Edit">
+                                          <IconButton size="small" onClick={(e) => { e.stopPropagation(); openDepDialog(f.id, dep); }}>
+                                            <EditOutlined fontSize="small" />
+                                          </IconButton>
+                                        </Tooltip>
+                                        <Tooltip title="Delete">
+                                          <IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); removeDep(f.id, dep.id); }}>
+                                            <DeleteOutline fontSize="small" />
+                                          </IconButton>
+                                        </Tooltip>
+                                      </Stack>
+                                    </Stack>
+                                  ))
+                                )}
+                              </Stack>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+            <Button size="small" variant="outlined" onClick={loadFeatures} disabled={featuresLoading}>
+              {featuresLoading ? "Refreshing…" : "Refresh"}
+            </Button>
+          </Stack>
+        )}
+
+        {tab === 5 && (
+          <Stack spacing={2} sx={{ marginTop: 2 }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Box>
                 <Typography variant="h6">Workflow Types</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Manage the workflow categories used in the installation workflow system (Installation, Commissioning, Inspection, etc.).
@@ -1394,9 +1824,9 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 4 && <BusinessLogoTab />}
+        {tab === 6 && <BusinessLogoTab />}
 
-        {tab === 5 && isAdmin && (
+        {tab === 7 && isAdmin && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Typography variant="h6">2FA Audit Log</Typography>
             <Typography variant="body2" color="text.secondary">
@@ -1996,6 +2426,199 @@ const Settings = () => {
         <DialogActions>
           <Button variant="outlined" onClick={() => setLookupFieldId(null)}>
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add / Edit Division dialog */}
+      <Dialog open={divisionDialog} onClose={() => !divisionSaving && setDivisionDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{divisionEditId ? "Edit Division" : "Add Division"}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Name *"
+              size="small"
+              fullWidth
+              value={divisionForm.name}
+              onChange={(e) => setDivisionForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="e.g. Strata AI, Strata Connect"
+            />
+            <TextField
+              label="Description (optional)"
+              size="small"
+              fullWidth
+              value={divisionForm.description}
+              onChange={(e) => setDivisionForm((p) => ({ ...p, description: e.target.value }))}
+              multiline
+              rows={2}
+            />
+            <TextField
+              label="Sort Order"
+              size="small"
+              fullWidth
+              type="number"
+              value={divisionForm.sortOrder}
+              onChange={(e) => setDivisionForm((p) => ({ ...p, sortOrder: e.target.value }))}
+              helperText="Lower numbers appear first"
+            />
+            {divisionError && <Alert severity="error" sx={{ fontSize: 12 }}>{divisionError}</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDivisionDialog(false)} disabled={divisionSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={saveDivision}
+            disabled={divisionSaving || !divisionForm.name.trim()}
+            startIcon={divisionSaving ? <CircularProgress size={14} /> : undefined}
+          >
+            {divisionSaving ? "Saving…" : divisionEditId ? "Save changes" : "Add division"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add / Edit Feature dialog */}
+      <Dialog open={featureDialog} onClose={() => !featureSaving && setFeatureDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{featureEditId ? "Edit Feature" : "Add Feature"}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Name *"
+              size="small"
+              fullWidth
+              value={featureForm.name}
+              onChange={(e) => setFeatureForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="e.g. IP Camera, Room, NVR"
+            />
+            <TextField
+              label="Description (optional)"
+              size="small"
+              fullWidth
+              value={featureForm.description}
+              onChange={(e) => setFeatureForm((p) => ({ ...p, description: e.target.value }))}
+              multiline
+              rows={2}
+            />
+            <FormControl size="small" fullWidth>
+              <Select
+                value={featureForm.valueType}
+                onChange={(e) => setFeatureForm((p) => ({ ...p, valueType: e.target.value }))}
+              >
+                {["text","number","single-select","multi-select","component","tri-state","date","rating","percentage"].map((vt) => (
+                  <MenuItem key={vt} value={vt}>{vt}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {featureError && <Alert severity="error" sx={{ fontSize: 12 }}>{featureError}</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFeatureDialog(false)} disabled={featureSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={saveFeature}
+            disabled={featureSaving || !featureForm.name.trim()}
+            startIcon={featureSaving ? <CircularProgress size={14} /> : undefined}
+          >
+            {featureSaving ? "Saving…" : featureEditId ? "Save changes" : "Add feature"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add / Edit Dependency dialog */}
+      <Dialog open={depDialog} onClose={() => !depSaving && setDepDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{depEditId ? "Edit Dependency" : "Add Dependency"}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Name *"
+              size="small"
+              fullWidth
+              value={depForm.name}
+              onChange={(e) => setDepForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="e.g. Camera Body, Cat6 Cable, Bracket"
+            />
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="body2">Type:</Typography>
+              <Chip
+                size="small"
+                label="Non-inventory"
+                variant={depForm.isInventory ? "outlined" : "filled"}
+                onClick={() => setDepForm((p) => ({ ...p, isInventory: false }))}
+              />
+              <Chip
+                size="small"
+                label="Inventory"
+                color="primary"
+                variant={depForm.isInventory ? "filled" : "outlined"}
+                onClick={() => setDepForm((p) => ({ ...p, isInventory: true }))}
+              />
+            </Stack>
+            {depForm.isInventory ? (
+              <FormControl size="small" fullWidth>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
+                  Capture fields (select all that apply)
+                </Typography>
+                <Stack direction="row" flexWrap="wrap" gap={0.5}>
+                  {CAPTURE_FIELD_OPTIONS.map((field) => (
+                    <Chip
+                      key={field}
+                      size="small"
+                      label={field}
+                      variant={depForm.captureFields.includes(field) ? "filled" : "outlined"}
+                      color={depForm.captureFields.includes(field) ? "primary" : "default"}
+                      onClick={() => setDepForm((p) => ({
+                        ...p,
+                        captureFields: p.captureFields.includes(field)
+                          ? p.captureFields.filter((f) => f !== field)
+                          : [...p.captureFields, field],
+                      }))}
+                    />
+                  ))}
+                </Stack>
+              </FormControl>
+            ) : (
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="Default Qty"
+                  size="small"
+                  type="number"
+                  sx={{ width: 110 }}
+                  value={depForm.defaultQty}
+                  onChange={(e) => setDepForm((p) => ({ ...p, defaultQty: parseFloat(e.target.value) || 0 }))}
+                  inputProps={{ min: 0, step: 0.1 }}
+                />
+                <TextField
+                  label="Unit"
+                  size="small"
+                  sx={{ width: 90 }}
+                  value={depForm.unit}
+                  onChange={(e) => setDepForm((p) => ({ ...p, unit: e.target.value }))}
+                  placeholder="m, pcs, kg"
+                />
+                <TextField
+                  label="Unit Price"
+                  size="small"
+                  type="number"
+                  sx={{ flex: 1 }}
+                  value={depForm.unitPrice}
+                  onChange={(e) => setDepForm((p) => ({ ...p, unitPrice: parseFloat(e.target.value) || 0 }))}
+                  inputProps={{ min: 0, step: 0.01 }}
+                />
+              </Stack>
+            )}
+            {depError && <Alert severity="error" sx={{ fontSize: 12 }}>{depError}</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDepDialog(false)} disabled={depSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={saveDep}
+            disabled={depSaving || !depForm.name.trim()}
+            startIcon={depSaving ? <CircularProgress size={14} /> : undefined}
+          >
+            {depSaving ? "Saving…" : depEditId ? "Save changes" : "Add dependency"}
           </Button>
         </DialogActions>
       </Dialog>

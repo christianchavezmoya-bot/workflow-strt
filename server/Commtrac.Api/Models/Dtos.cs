@@ -151,11 +151,99 @@ public record UpdateSiteRequest(
     string? Notes
 );
 
+public record DivisionDto(
+    string Id,
+    string Name,
+    string? Description,
+    int SortOrder,
+    bool IsActive
+);
+
+public record CreateDivisionRequest(string Name, string? Description, int SortOrder = 99);
+public record UpdateDivisionRequest(string? Name, string? Description, int? SortOrder, bool? IsActive);
+
+public record FeatureDto(
+    string Id,
+    string Name,
+    string? Description,
+    string ValueType,
+    List<string>? Options,
+    List<FeatureSubPropertyDto>? SubProperties
+);
+
+public record CreateFeatureRequest(
+    string Name,
+    string? Description,
+    string ValueType = "text",
+    List<string>? Options = null,
+    List<FeatureSubPropertyDto>? SubProperties = null
+);
+
+public record UpdateFeatureRequest(
+    string? Name,
+    string? Description,
+    string? ValueType,
+    List<string>? Options,
+    List<FeatureSubPropertyDto>? SubProperties
+);
+
+public record FeatureDependencyDto(
+    string Id,
+    string FeatureId,
+    string Name,
+    bool IsInventory,
+    List<string> CaptureFields,
+    decimal DefaultQty,
+    string? Unit,
+    decimal UnitPrice,
+    int SortOrder
+);
+
+public record CreateFeatureDependencyRequest(
+    string FeatureId,
+    string Name,
+    bool IsInventory = false,
+    List<string>? CaptureFields = null,
+    decimal DefaultQty = 1,
+    string? Unit = null,
+    decimal UnitPrice = 0,
+    int SortOrder = 0
+);
+
+public record UpdateFeatureDependencyRequest(
+    string? Name,
+    bool? IsInventory,
+    List<string>? CaptureFields,
+    decimal? DefaultQty,
+    string? Unit,
+    decimal? UnitPrice,
+    int? SortOrder
+);
+
+public record WorkflowConfigFeatureDto(
+    string Id,
+    string WorkflowConfigId,
+    string FeatureId,
+    int Quantity,
+    /// <summary>JSON string: { [dependencyId]: bool }</summary>
+    string InclusionsJson,
+    int SortOrder
+);
+
+public record UpsertWorkflowConfigFeatureRequest(
+    string WorkflowConfigId,
+    string FeatureId,
+    int Quantity = 1,
+    string? InclusionsJson = null,
+    int SortOrder = 0
+);
+
 public record ProductDto(
     string Id,
     string Name,
     string? Description,
-    List<ProductFeatureDefinitionDto>? Features
+    List<ProductFeatureDefinitionDto>? Features,
+    string? DivisionId = null
 );
 
 public record FeatureSubPropertyDto(
@@ -204,13 +292,15 @@ public record SaveAsRequest(string Name);
 public record CreateProductRequest(
     string Name,
     string? Description,
-    List<ProductFeatureDefinitionDto>? Features
+    List<ProductFeatureDefinitionDto>? Features,
+    string? DivisionId = null
 );
 
 public record UpdateProductRequest(
     string? Name,
     string? Description,
-    List<ProductFeatureDefinitionDto>? Features
+    List<ProductFeatureDefinitionDto>? Features,
+    string? DivisionId = null
 );
 
 public record AssetDto(

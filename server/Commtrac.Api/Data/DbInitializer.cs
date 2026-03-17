@@ -75,6 +75,8 @@ public static class DbInitializer
         db.SaveChanges(); // flush products before feature patch so LINQ queries can find them
 
         EnsureAim100Features(db);
+        MigrateProductFeaturesToGlobalLibrary(db);
+        db.SaveChanges();
 
         if (!db.Projects.Any())
         {
@@ -596,6 +598,88 @@ public static class DbInitializer
         finally
         {
             conn.Close();
+        }
+    }
+
+    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
+
+    private class RawFeature
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string ValueType { get; set; } = "text";
+        public List<string>? Options { get; set; }
+        public List<JsonElement>? SubProperties { get; set; }
+    }
+
+    /// <summary>
+    /// One-time migration: reads each product's FeaturesJson and promotes features
+    /// to the global Features table, preserving original IDs so that workflow step
+    /// featureId references remain valid. Idempotent — skips features already in the table.
+    /// </summary>
+    private static void MigrateProductFeaturesToGlobalLibrary(AppDbContext db)
+    {
+        var products = db.Products.ToList();
+        if (!products.Any()) return;
+
+        var existingFeatureIds = db.Features.Select(f => f.Id).ToHashSet();
+        var existingLinks = db.ProductFeatures
+            .Select(pf => new { pf.ProductId, pf.FeatureId })
+            .ToHashSet(EqualityComparer<dynamic>.Default);
+
+        // Build a stable set of existing (productId, featureId) pairs for dedup
+        var existingLinkSet = db.ProductFeatures
+            .Select(pf => pf.ProductId + "|" + pf.FeatureId)
+            .ToHashSet();
+
+        int sortOrder = 0;
+        foreach (var product in products)
+        {
+            if (string.IsNullOrWhiteSpace(product.FeaturesJson) || product.FeaturesJson == "[]")
+                continue;
+
+            List<RawFeature> features;
+            try
+            {
+                features = JsonSerializer.Deserialize<List<RawFeature>>(product.FeaturesJson, JsonOpts)
+                           ?? new List<RawFeature>();
+            }
+            catch { continue; }
+
+            sortOrder = 0;
+            foreach (var f in features)
+            {
+                if (string.IsNullOrWhiteSpace(f.Id) || string.IsNullOrWhiteSpace(f.Name)) continue;
+
+                // Create global Feature row if not already present
+                if (!existingFeatureIds.Contains(f.Id))
+                {
+                    db.Features.Add(new FeatureEntity
+                    {
+                        Id = f.Id,
+                        Name = f.Name,
+                        ValueType = string.IsNullOrWhiteSpace(f.ValueType) ? "text" : f.ValueType,
+                        OptionsJson = f.Options is { Count: > 0 }
+                            ? JsonSerializer.Serialize(f.Options, JsonOpts) : "[]",
+                        SubPropertiesJson = f.SubProperties is { Count: > 0 }
+                            ? JsonSerializer.Serialize(f.SubProperties, JsonOpts) : "[]"
+                    });
+                    existingFeatureIds.Add(f.Id);
+                }
+
+                // Create product↔feature link if not already present
+                var linkKey = product.Id + "|" + f.Id;
+                if (!existingLinkSet.Contains(linkKey))
+                {
+                    db.ProductFeatures.Add(new ProductFeatureEntity
+                    {
+                        ProductId = product.Id,
+                        FeatureId = f.Id,
+                        SortOrder = sortOrder++
+                    });
+                    existingLinkSet.Add(linkKey);
+                }
+            }
         }
     }
 
