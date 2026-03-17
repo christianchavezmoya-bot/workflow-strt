@@ -25,6 +25,7 @@ public static class DbInitializer
         EnsureAssetDocumentTables(db);
         EnsureAssetDocumentLinksTables(db);
         EnsureRunTimeTrackingColumns(db);
+        EnsureMarch15Columns(db);
         EnsureLinkableKeyFieldDefinitions(db);
 
         if (!db.Users.Any())
@@ -556,6 +557,41 @@ public static class DbInitializer
                 CREATE INDEX IF NOT EXISTS IX_AssetDocumentRevisions_DocumentId
                 ON AssetDocumentRevisions (DocumentId)";
             cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Adds columns from the March-15 migrations that may be missing when the database
+    /// was restored from a pre-March-15 backup but the migration history already records
+    /// those migrations as applied (schema/history mismatch after a restore).
+    /// </summary>
+    private static void EnsureMarch15Columns(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            // 20260315120000_ProjectAssetAsBuiltJson
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('ProjectAssets') WHERE name='AsBuiltJson'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE ProjectAssets ADD COLUMN AsBuiltJson TEXT NOT NULL DEFAULT '{}'";
+                cmd.ExecuteNonQuery();
+            }
+
+            // 20260315130000_AssetWorkflowRunBomActualJson
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='BomActualJson'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE AssetWorkflowRuns ADD COLUMN BomActualJson TEXT NOT NULL DEFAULT '[]'";
+                cmd.ExecuteNonQuery();
+            }
         }
         finally
         {

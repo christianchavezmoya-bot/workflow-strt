@@ -67,9 +67,9 @@ public class AssetWorkflowRunsController : ControllerBase
                 .OrderByDescending(r => r.StartedAt)
                 .ToListAsync();
 
-            // Return only the latest run per asset
+            // Return only the latest run per asset per workflow config
             var latest = runs
-                .GroupBy(r => r.AssetId)
+                .GroupBy(r => new { r.AssetId, r.WorkflowConfigId })
                 .Select(g => g.First())
                 .ToList();
 

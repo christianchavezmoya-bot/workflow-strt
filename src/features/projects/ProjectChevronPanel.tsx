@@ -518,7 +518,7 @@ export default function ProjectChevronPanel({ projectId, productId }: Props) {
                   const hasHigh   = openIssues.some(i => i.severity === "high" || i.isBlocking);
                   const hasMedium = openIssues.some(i => i.severity === "medium");
                   const awaitingSignature = a.status === "Complete" && !!run
-                    && run.isLocked && !run.customerSignedAt && run.signatureStatus !== "Waived";
+                    && run.isLocked && !run.customerSignedAt && run.signatureStatus !== "WaivedCustomer";
                   const statusColor: "error" | "warning" | "success" | "primary" | "default" =
                     hasHigh            ? "error"   :
                     hasMedium          ? "warning" :

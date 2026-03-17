@@ -3,6 +3,7 @@ import {
   CheckCircleOutlined,
   ErrorOutlined,
   HourglassEmptyOutlined,
+  NotInterestedOutlined,
   PendingOutlined
 } from "@mui/icons-material";
 import type { SignatureStatus } from "../../types/signature";
@@ -12,7 +13,8 @@ const configs: Record<SignatureStatus, { label: string; color: "default" | "warn
   PendingInstaller: { label: "Pending Installer",  color: "warning",  icon: <HourglassEmptyOutlined />   },
   PendingCustomer:  { label: "Pending Customer",   color: "info",     icon: <HourglassEmptyOutlined />   },
   Signed:           { label: "Signed",             color: "success",  icon: <CheckCircleOutlined />       },
-  Declined:         { label: "Declined",           color: "error",    icon: <ErrorOutlined />             }
+  Declined:         { label: "Declined",           color: "error",    icon: <ErrorOutlined />             },
+  WaivedCustomer:   { label: "Sig. Waived",        color: "default",  icon: <NotInterestedOutlined />     }
 };
 
 interface Props {

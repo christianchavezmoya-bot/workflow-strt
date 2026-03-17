@@ -3,7 +3,8 @@ export type SignatureStatus =
   | "PendingInstaller"
   | "PendingCustomer"
   | "Signed"
-  | "Declined";
+  | "Declined"
+  | "WaivedCustomer";
 
 export type SignerRole = "Installer" | "Customer";
 export type ReasonCode = "Completed" | "Conditional" | "ReworkAccepted" | "Declined";

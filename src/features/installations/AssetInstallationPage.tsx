@@ -1713,7 +1713,7 @@ const AssetInstallationPage = () => {
         const latestLocked = latestRuns.find(r => r.isLocked);
         const awaitingCustomerSig = status === "Complete" && !!latestLocked
           && !latestLocked.customerSignedAt
-          && latestLocked.signatureStatus !== "Waived";
+          && latestLocked.signatureStatus !== "WaivedCustomer";
         const chipColor =
           issueHealth === "red"   ? "error"   :
           issueHealth === "amber" ? "warning" :
@@ -2183,7 +2183,7 @@ const AssetInstallationPage = () => {
                     ))}
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-                        {can.modifyData && actionButton(asset)}
+                        {(can.modifyData || asset.status === "Complete") && actionButton(asset)}
                         {!can.viewOnly && (
                           <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
                             <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
