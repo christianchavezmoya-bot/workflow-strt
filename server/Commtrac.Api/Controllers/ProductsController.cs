@@ -37,7 +37,13 @@ public class ProductsController : ControllerBase
             .GroupBy(l => l.ProductId)
             .ToDictionary(g => g.Key, g => g.ToList());
 
-        return Ok(products.Select(p => ToDto(p, linksByProduct, featureMap)));
+        // Load divisions so we can embed the name in the DTO
+        var divisionIds = products.Select(p => p.DivisionId).Where(id => id != null).Distinct().ToList();
+        var divisionMap = await _db.Divisions
+            .Where(d => divisionIds.Contains(d.Id))
+            .ToDictionaryAsync(d => d.Id, d => d.Name);
+
+        return Ok(products.Select(p => ToDto(p, linksByProduct, featureMap, divisionMap)));
     }
 
     [HttpPost]
@@ -104,7 +110,7 @@ public class ProductsController : ControllerBase
     private async Task SyncFeaturesToLibrary(string productId, List<ProductFeatureDefinitionDto> features)
     {
         // Upsert each feature into the global library
-        var existingIds = await _db.Features.Select(f => f.Id).ToHashSetAsync();
+        var existingIds = (await _db.Features.Select(f => f.Id).ToListAsync()).ToHashSet();
         foreach (var f in features.Where(f => !string.IsNullOrWhiteSpace(f.Id) && !string.IsNullOrWhiteSpace(f.Name)))
         {
             if (existingIds.Contains(f.Id))
@@ -154,7 +160,8 @@ public class ProductsController : ControllerBase
     private static ProductDto ToDto(
         ProductEntity product,
         Dictionary<string, List<ProductFeatureEntity>>? linksByProduct,
-        Dictionary<string, FeatureEntity>? featureMap)
+        Dictionary<string, FeatureEntity>? featureMap,
+        Dictionary<string, string>? divisionMap = null)
     {
         List<ProductFeatureDefinitionDto> features;
 
@@ -176,7 +183,10 @@ public class ProductsController : ControllerBase
                   ?? new List<ProductFeatureDefinitionDto>();
         }
 
-        return new(product.Id, product.Name, product.Description, features, product.DivisionId);
+        var divisionName = product.DivisionId != null && divisionMap != null
+            && divisionMap.TryGetValue(product.DivisionId, out var dn) ? dn : null;
+
+        return new(product.Id, product.Name, product.Description, features, product.DivisionId, divisionName);
     }
 
     private static ProductFeatureDefinitionDto FeatureEntityToDefinitionDto(FeatureEntity f)

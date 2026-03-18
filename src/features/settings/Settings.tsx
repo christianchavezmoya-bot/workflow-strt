@@ -27,7 +27,7 @@ import {
   Tooltip,
   Typography
 } from "@mui/material";
-import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined } from "@mui/icons-material";
+import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined, CheckCircleOutline, BlockOutlined } from "@mui/icons-material";
 import { quickbaseService, type QbFieldInfo } from "../../services/quickbaseService";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -40,6 +40,8 @@ import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import type { FeatureDependency } from "../../types/featureDependency";
+import { productService } from "../../services/productService";
+import type { Product } from "../../types/product";
 import api from "../../services/api";
 import { settingsService } from "../../services/settingsService";
 import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/settings";
@@ -239,7 +241,7 @@ interface AuditLogEntry {
   timestamp: string;
 }
 
-const SETTINGS_TAB_KEYS = ["quickbase", "sms", "fields", "divisions", "features", "workflow-types", "logo", "audit"];
+const SETTINGS_TAB_KEYS = ["quickbase", "sms", "fields", "divisions", "products", "features", "workflow-types", "logo", "audit"];
 
 const Settings = () => {
   const { addNotification } = useFieldNotifications();
@@ -361,12 +363,110 @@ const Settings = () => {
     } catch { alert("Failed to delete division."); }
   }
 
+  async function toggleDivisionActive(id: string, currentIsActive: boolean) {
+    try {
+      await divisionService.update(id, { isActive: !currentIsActive });
+      setDivisions((prev) => prev.map((d) => d.id === id ? { ...d, isActive: !currentIsActive } : d));
+    } catch { alert("Failed to update division status."); }
+  }
+
+  // Product catalog manager
+  const [products, setProducts] = useState<Product[]>([]);
+  // Start as true if landing directly on Products tab so spinner shows immediately, not "No products yet."
+  const [productsLoading, setProductsLoading] = useState(() => {
+    const urlKey = new URLSearchParams(window.location.search).get("tab");
+    const stored = localStorage.getItem("settings_active_tab");
+    const activeIdx = urlKey ? SETTINGS_TAB_KEYS.indexOf(urlKey) : stored ? parseInt(stored, 10) : 0;
+    return activeIdx === 4;
+  });
+  const [productDialog, setProductDialog] = useState(false);
+  const [productEditId, setProductEditId] = useState<string | null>(null);
+  const [productForm, setProductForm] = useState({ name: "", description: "", divisionId: "" });
+  const [productSaving, setProductSaving] = useState(false);
+  const [productError, setProductError] = useState<string | null>(null);
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
+  const [featurePickerProductId, setFeaturePickerProductId] = useState<string | null>(null);
+  const [featurePickerAnchor, setFeaturePickerAnchor] = useState<HTMLElement | null>(null);
+
+  async function loadProducts() {
+    setProductsLoading(true);
+    try {
+      const data = await productService.getProducts();
+      setProducts(data.sort((a, b) => a.name.localeCompare(b.name)));
+    } catch { console.warn("Failed to load products"); } finally {
+      setProductsLoading(false);
+    }
+  }
+
+  // Load products + divisions when Products tab becomes active (tab === 4).
+  // This covers direct URL navigation and localStorage-restored tab — not just click events.
+  useEffect(() => {
+    if (tab === 4) {
+      if (products.length === 0) loadProducts();
+      if (divisions.length === 0) loadDivisions();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  async function saveProduct() {
+    if (!productForm.name.trim()) { setProductError("Name is required."); return; }
+    setProductSaving(true);
+    setProductError(null);
+    try {
+      if (productEditId) {
+        await productService.updateProduct(productEditId, {
+          name: productForm.name.trim(),
+          description: productForm.description || undefined,
+          divisionId: productForm.divisionId || undefined,
+        });
+      } else {
+        await productService.createProduct({
+          name: productForm.name.trim(),
+          description: productForm.description || undefined,
+          divisionId: productForm.divisionId || undefined,
+        });
+      }
+      await loadProducts();
+      setProductDialog(false);
+    } catch { setProductError("Failed to save product."); } finally {
+      setProductSaving(false);
+    }
+  }
+
+  async function removeProduct(id: string) {
+    if (!confirm("Delete this product? Assets using this product will keep their existing data.")) return;
+    try {
+      await productService.deleteProduct(id);
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+      if (expandedProductId === id) setExpandedProductId(null);
+    } catch { alert("Failed to delete product."); }
+  }
+
+  // After link/unlink, re-fetch products so p.features reflects the change.
+  async function linkFeatureToProduct(productId: string, featureId: string) {
+    try {
+      await featureService.linkToProduct(productId, featureId);
+      await loadProducts();
+      setFeaturePickerAnchor(null);
+      setFeaturePickerProductId(null);
+    } catch { alert("Failed to link feature."); }
+  }
+
+  async function unlinkFeatureFromProduct(productId: string, featureId: string) {
+    if (!confirm("Remove this feature from the product?")) return;
+    try {
+      await featureService.unlinkFromProduct(productId, featureId);
+      await loadProducts();
+    } catch { alert("Failed to unlink feature."); }
+  }
+
   // Feature library manager
   const [features, setFeatures] = useState<Feature[]>([]);
   const [featuresLoading, setFeaturesLoading] = useState(false);
   const [featureDialog, setFeatureDialog] = useState(false);
   const [featureEditId, setFeatureEditId] = useState<string | null>(null);
-  const [featureForm, setFeatureForm] = useState({ name: "", description: "", valueType: "text" });
+  const [featureJustCreatedId, setFeatureJustCreatedId] = useState<string | null>(null);
+  const [featureForm, setFeatureForm] = useState({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] as string[] });
   const [featureSaving, setFeatureSaving] = useState(false);
   const [featureError, setFeatureError] = useState<string | null>(null);
 
@@ -389,17 +489,26 @@ const Settings = () => {
         await featureService.update(featureEditId, {
           name: featureForm.name.trim(),
           description: featureForm.description || undefined,
-          valueType: featureForm.valueType
+          valueType: featureForm.valueType,
+          isInventory: featureForm.isInventory,
+          captureFields: featureForm.captureFields,
         });
+        await loadFeatures();
+        setFeatureDialog(false);
       } else {
-        await featureService.create({
+        const created = await featureService.create({
           name: featureForm.name.trim(),
           description: featureForm.description || undefined,
-          valueType: featureForm.valueType
+          valueType: featureForm.valueType,
+          isInventory: featureForm.isInventory,
+          captureFields: featureForm.captureFields,
         });
+        await loadFeatures();
+        // Stay open so user can add dependencies immediately
+        setFeatureJustCreatedId(created.id);
+        setExpandedFeatureId(created.id);
+        loadDeps(created.id);
       }
-      await loadFeatures();
-      setFeatureDialog(false);
     } catch { setFeatureError("Failed to save feature."); } finally {
       setFeatureSaving(false);
     }
@@ -433,6 +542,8 @@ const Settings = () => {
   const [depError, setDepError] = useState<string | null>(null);
 
   const CAPTURE_FIELD_OPTIONS = ["serialNo", "firmware", "ipAddress", "macAddress", "model", "location", "notes"];
+  const [featureCustomField, setFeatureCustomField] = useState("");
+  const [depCustomField, setDepCustomField] = useState("");
 
   async function loadDeps(featureId: string) {
     setDepsLoading((prev) => ({ ...prev, [featureId]: true }));
@@ -1160,6 +1271,7 @@ const Settings = () => {
           <Tab label="SMS/SMTP" />
           <Tab label="Fields/Data" />
           <Tab label="Divisions" onClick={() => { if (divisions.length === 0) loadDivisions(); }} />
+          <Tab label="Products" onClick={() => { if (products.length === 0) loadProducts(); if (divisions.length === 0) loadDivisions(); }} />
           <Tab label="Features" onClick={() => { if (features.length === 0) loadFeatures(); }} />
           <Tab label="Workflow Types" onClick={() => { if (wfTypes.length === 0) loadWfTypes(); }} />
           <Tab label="Business Logo" />
@@ -1556,6 +1668,11 @@ const Settings = () => {
                       </TableCell>
                       <TableCell align="right">
                         <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                          <Tooltip title={d.isActive ? "Deactivate" : "Activate"}>
+                            <IconButton size="small" color={d.isActive ? "success" : "default"} onClick={() => toggleDivisionActive(d.id, d.isActive)}>
+                              {d.isActive ? <CheckCircleOutline fontSize="small" /> : <BlockOutlined fontSize="small" />}
+                            </IconButton>
+                          </Tooltip>
                           <Tooltip title="Edit">
                             <IconButton size="small" onClick={() => {
                               setDivisionEditId(d.id);
@@ -1588,6 +1705,155 @@ const Settings = () => {
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
               <Box>
+                <Typography variant="h6">Product Catalog</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Manage products (equipment types). Assign a division and link features from the library.
+                </Typography>
+              </Box>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AddOutlined />}
+                onClick={() => {
+                  setProductEditId(null);
+                  setProductForm({ name: "", description: "", divisionId: "" });
+                  setProductError(null);
+                  setProductDialog(true);
+                }}
+              >
+                Add product
+              </Button>
+            </Stack>
+            <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            {productsLoading ? (
+              <Stack alignItems="center" sx={{ py: 3 }}>
+                <CircularProgress size={28} />
+              </Stack>
+            ) : products.length === 0 ? (
+              <Alert severity="info">
+                No products yet.{" "}
+                <Button size="small" onClick={loadProducts}>Refresh</Button>
+              </Alert>
+            ) : (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Division</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Features</Typography></TableCell>
+                    <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {products.map((p) => {
+                    const isExpanded = expandedProductId === p.id;
+                    // p.features comes directly from the API response — no separate load needed.
+                    const linked = p.features ?? [];
+                    const unlinkedFeatures = features.filter((f) => !linked.some((l) => l.id === f.id));
+                    return (
+                      <>
+                        <TableRow key={p.id} hover sx={{ cursor: "pointer" }} onClick={() => {
+                          if (isExpanded) {
+                            setExpandedProductId(null);
+                          } else {
+                            setExpandedProductId(p.id);
+                            if (features.length === 0) loadFeatures();
+                          }
+                        }}>
+                          <TableCell>
+                            <Stack direction="row" alignItems="center" spacing={1}>
+                              <Typography variant="body2" sx={{ fontSize: "0.75rem", opacity: 0.5, userSelect: "none" }}>
+                                {isExpanded ? "▼" : "▶"}
+                              </Typography>
+                              <Stack>
+                                <Typography variant="body2" fontWeight={600}>{p.name}</Typography>
+                                {p.description && <Typography variant="caption" color="text.secondary">{p.description}</Typography>}
+                              </Stack>
+                            </Stack>
+                          </TableCell>
+                          <TableCell>
+                            {p.divisionName
+                              ? <Chip size="small" label={p.divisionName} variant="outlined" />
+                              : <Typography variant="body2" color="text.secondary">—</Typography>}
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" color="text.secondary">
+                              {`${linked.length} feature${linked.length !== 1 ? "s" : ""}`}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                              <Tooltip title="Edit">
+                                <IconButton size="small" onClick={(e) => {
+                                  e.stopPropagation();
+                                  setProductEditId(p.id);
+                                  setProductForm({ name: p.name, description: p.description ?? "", divisionId: p.divisionId ?? "" });
+                                  setProductError(null);
+                                  setProductDialog(true);
+                                }}>
+                                  <EditOutlined fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Delete">
+                                <IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); removeProduct(p.id); }}>
+                                  <DeleteOutline fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && (
+                          <TableRow key={`${p.id}-features`}>
+                            <TableCell colSpan={4} sx={{ py: 0, px: 2, bgcolor: "action.hover" }}>
+                              <Stack spacing={1} sx={{ py: 1.5 }}>
+                                <Stack direction="row" alignItems="center" justifyContent="space-between">
+                                  <Typography variant="caption" fontWeight={700} color="text.secondary">
+                                    LINKED FEATURES ({linked.length})
+                                  </Typography>
+                                  <Button
+                                    size="small"
+                                    startIcon={<AddOutlined />}
+                                    disabled={unlinkedFeatures.length === 0}
+                                    onClick={(e) => { setFeaturePickerProductId(p.id); setFeaturePickerAnchor(e.currentTarget); }}
+                                  >
+                                    Link feature
+                                  </Button>
+                                </Stack>
+                                {linked.length === 0 ? (
+                                  <Typography variant="caption" color="text.secondary">No features linked. Click "Link feature" to add.</Typography>
+                                ) : (
+                                  <Stack direction="row" flexWrap="wrap" gap={0.75}>
+                                    {linked.map((f) => (
+                                      <Chip
+                                        key={f.id}
+                                        size="small"
+                                        label={f.name}
+                                        variant="outlined"
+                                        onDelete={() => unlinkFeatureFromProduct(p.id, f.id)}
+                                      />
+                                    ))}
+                                  </Stack>
+                                )}
+                              </Stack>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+            <Button size="small" variant="outlined" onClick={loadProducts} disabled={productsLoading}>
+              {productsLoading ? "Refreshing…" : "Refresh"}
+            </Button>
+          </Stack>
+        )}
+
+        {tab === 5 && (
+          <Stack spacing={2} sx={{ marginTop: 2 }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Box>
                 <Typography variant="h6">Feature Library</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Global reusable features that can be linked to any product (e.g. IP Camera, Room, NVR).
@@ -1599,7 +1865,8 @@ const Settings = () => {
                 startIcon={<AddOutlined />}
                 onClick={() => {
                   setFeatureEditId(null);
-                  setFeatureForm({ name: "", description: "", valueType: "text" });
+                  setFeatureJustCreatedId(null);
+                  setFeatureForm({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] });
                   setFeatureError(null);
                   setFeatureDialog(true);
                 }}
@@ -1658,7 +1925,8 @@ const Settings = () => {
                                 <IconButton size="small" onClick={(e) => {
                                   e.stopPropagation();
                                   setFeatureEditId(f.id);
-                                  setFeatureForm({ name: f.name, description: f.description ?? "", valueType: f.valueType });
+                                  setFeatureJustCreatedId(null);
+                                  setFeatureForm({ name: f.name, description: f.description ?? "", valueType: f.valueType, isInventory: f.isInventory ?? false, captureFields: f.captureFields ?? [] });
                                   setFeatureError(null);
                                   setFeatureDialog(true);
                                 }}>
@@ -1736,7 +2004,7 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 5 && (
+        {tab === 6 && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
               <Box>
@@ -1824,9 +2092,9 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 6 && <BusinessLogoTab />}
+        {tab === 7 && <BusinessLogoTab />}
 
-        {tab === 7 && isAdmin && (
+        {tab === 8 && isAdmin && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Typography variant="h6">2FA Audit Log</Typography>
             <Typography variant="body2" color="text.secondary">
@@ -2430,6 +2698,81 @@ const Settings = () => {
         </DialogActions>
       </Dialog>
 
+      {/* Add / Edit Product dialog */}
+      <Dialog open={productDialog} onClose={() => !productSaving && setProductDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{productEditId ? "Edit Product" : "Add Product"}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Name *"
+              size="small"
+              fullWidth
+              value={productForm.name}
+              onChange={(e) => setProductForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="e.g. AIM-100 Camera, NVR-4000"
+            />
+            <TextField
+              label="Description (optional)"
+              size="small"
+              fullWidth
+              value={productForm.description}
+              onChange={(e) => setProductForm((p) => ({ ...p, description: e.target.value }))}
+              multiline
+              rows={2}
+            />
+            <FormControl size="small" fullWidth>
+              <Select
+                displayEmpty
+                value={productForm.divisionId}
+                onChange={(e) => setProductForm((p) => ({ ...p, divisionId: e.target.value }))}
+                renderValue={(v) => v ? (divisions.find((d) => d.id === v)?.name ?? v) : <em style={{ color: "rgba(255,255,255,0.4)" }}>No division</em>}
+              >
+                <MenuItem value=""><em>No division</em></MenuItem>
+                {divisions.filter((d) => d.isActive).map((d) => (
+                  <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {productError && <Alert severity="error" sx={{ fontSize: 12 }}>{productError}</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setProductDialog(false)} disabled={productSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={saveProduct}
+            disabled={productSaving || !productForm.name.trim()}
+            startIcon={productSaving ? <CircularProgress size={14} /> : undefined}
+          >
+            {productSaving ? "Saving…" : productEditId ? "Save changes" : "Add product"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Feature picker for product linking */}
+      <Menu
+        anchorEl={featurePickerAnchor}
+        open={Boolean(featurePickerAnchor) && featurePickerProductId !== null}
+        onClose={() => { setFeaturePickerAnchor(null); setFeaturePickerProductId(null); }}
+        slotProps={{ paper: { sx: { maxHeight: 300 } } }}
+      >
+        {featurePickerProductId && (() => {
+          const pickerProduct = products.find((p) => p.id === featurePickerProductId);
+          const alreadyLinked = pickerProduct?.features ?? [];
+          const available = features.filter((f) => !alreadyLinked.some((l) => l.id === f.id));
+          return available.length === 0
+            ? <MenuItem disabled><Typography variant="caption">All features already linked</Typography></MenuItem>
+            : available.map((f) => (
+              <MenuItem key={f.id} onClick={() => linkFeatureToProduct(featurePickerProductId!, f.id)}>
+                <Stack spacing={0.25}>
+                  <Typography variant="body2">{f.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">{f.valueType}{f.isInventory ? " · inventory" : ""}</Typography>
+                </Stack>
+              </MenuItem>
+            ));
+        })()}
+      </Menu>
+
       {/* Add / Edit Division dialog */}
       <Dialog open={divisionDialog} onClose={() => !divisionSaving && setDivisionDialog(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{divisionEditId ? "Edit Division" : "Add Division"}</DialogTitle>
@@ -2478,50 +2821,194 @@ const Settings = () => {
       </Dialog>
 
       {/* Add / Edit Feature dialog */}
-      <Dialog open={featureDialog} onClose={() => !featureSaving && setFeatureDialog(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>{featureEditId ? "Edit Feature" : "Add Feature"}</DialogTitle>
+      <Dialog open={featureDialog} onClose={() => { if (!featureSaving) { setFeatureDialog(false); setFeatureJustCreatedId(null); setFeatureCustomField(""); } }} maxWidth="sm" fullWidth>
+        <DialogTitle>{featureEditId ? "Edit Feature" : featureJustCreatedId ? "Feature Created" : "Add Feature"}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              label="Name *"
-              size="small"
-              fullWidth
-              value={featureForm.name}
-              onChange={(e) => setFeatureForm((p) => ({ ...p, name: e.target.value }))}
-              placeholder="e.g. IP Camera, Room, NVR"
-            />
-            <TextField
-              label="Description (optional)"
-              size="small"
-              fullWidth
-              value={featureForm.description}
-              onChange={(e) => setFeatureForm((p) => ({ ...p, description: e.target.value }))}
-              multiline
-              rows={2}
-            />
-            <FormControl size="small" fullWidth>
-              <Select
-                value={featureForm.valueType}
-                onChange={(e) => setFeatureForm((p) => ({ ...p, valueType: e.target.value }))}
-              >
-                {["text","number","single-select","multi-select","component","tri-state","date","rating","percentage"].map((vt) => (
-                  <MenuItem key={vt} value={vt}>{vt}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            {featureError && <Alert severity="error" sx={{ fontSize: 12 }}>{featureError}</Alert>}
-          </Stack>
+          {featureJustCreatedId ? (
+            /* ── Created state: show deps section ── */
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <Alert severity="success" sx={{ fontSize: 12 }}>
+                <strong>{featureForm.name}</strong> created. Add dependencies below (optional), then click Done.
+              </Alert>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Typography variant="caption" fontWeight={700} color="text.secondary">
+                  DEPENDENCIES ({(dependencies[featureJustCreatedId] ?? []).length})
+                </Typography>
+                <Button size="small" startIcon={<AddOutlined />} onClick={() => openDepDialog(featureJustCreatedId)}>
+                  Add dependency
+                </Button>
+              </Stack>
+              {(depsLoading[featureJustCreatedId]) ? (
+                <CircularProgress size={18} />
+              ) : (dependencies[featureJustCreatedId] ?? []).length === 0 ? (
+                <Typography variant="caption" color="text.secondary">No dependencies yet.</Typography>
+              ) : (
+                (dependencies[featureJustCreatedId] ?? []).map((dep) => (
+                  <Stack key={dep.id} direction="row" alignItems="center" justifyContent="space-between"
+                    sx={{ px: 1, py: 0.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                    <Stack spacing={0.25}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Typography variant="body2" fontWeight={500}>{dep.name}</Typography>
+                        <Chip size="small" label={dep.isInventory ? "Inventory" : "Non-inventory"}
+                          color={dep.isInventory ? "primary" : "default"} variant="outlined" />
+                      </Stack>
+                      <Typography variant="caption" color="text.secondary">
+                        {dep.isInventory
+                          ? `Capture: ${dep.captureFields.join(", ") || "none"}`
+                          : `Qty: ${dep.defaultQty}${dep.unit ? " " + dep.unit : ""} · $${dep.unitPrice}`}
+                      </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={0.5}>
+                      <Tooltip title="Edit">
+                        <IconButton size="small" onClick={() => openDepDialog(featureJustCreatedId, dep)}>
+                          <EditOutlined fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Delete">
+                        <IconButton size="small" color="error" onClick={() => removeDep(featureJustCreatedId, dep.id)}>
+                          <DeleteOutline fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
+                  </Stack>
+                ))
+              )}
+            </Stack>
+          ) : (
+            /* ── Create / Edit form ── */
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField
+                label="Name *"
+                size="small"
+                fullWidth
+                value={featureForm.name}
+                onChange={(e) => setFeatureForm((p) => ({ ...p, name: e.target.value }))}
+                placeholder="e.g. IP Camera, Room, NVR"
+              />
+              <TextField
+                label="Description (optional)"
+                size="small"
+                fullWidth
+                value={featureForm.description}
+                onChange={(e) => setFeatureForm((p) => ({ ...p, description: e.target.value }))}
+                multiline
+                rows={2}
+              />
+              <FormControl size="small" fullWidth>
+                <Select
+                  value={featureForm.valueType}
+                  onChange={(e) => setFeatureForm((p) => ({ ...p, valueType: e.target.value }))}
+                >
+                  {["text","number","single-select","multi-select","component","tri-state","date","rating","percentage"].map((vt) => (
+                    <MenuItem key={vt} value={vt}>{vt}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {/* Inventory toggle */}
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Typography variant="body2">This feature is:</Typography>
+                <Chip
+                  size="small"
+                  label="Non-inventory"
+                  variant={!featureForm.isInventory ? "filled" : "outlined"}
+                  color={!featureForm.isInventory ? "primary" : "default"}
+                  onClick={() => setFeatureForm((p) => ({ ...p, isInventory: false, captureFields: [] }))}
+                />
+                <Chip
+                  size="small"
+                  label="Inventory item"
+                  variant={featureForm.isInventory ? "filled" : "outlined"}
+                  color={featureForm.isInventory ? "primary" : "default"}
+                  onClick={() => setFeatureForm((p) => ({ ...p, isInventory: true }))}
+                />
+              </Stack>
+              {featureForm.isInventory && (
+                <FormControl size="small" fullWidth>
+                  <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
+                    Capture fields (select all that apply, or add custom)
+                  </Typography>
+                  <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ mb: 1 }}>
+                    {CAPTURE_FIELD_OPTIONS.map((field) => (
+                      <Chip
+                        key={field}
+                        size="small"
+                        label={field}
+                        variant={featureForm.captureFields.includes(field) ? "filled" : "outlined"}
+                        color={featureForm.captureFields.includes(field) ? "primary" : "default"}
+                        onClick={() => setFeatureForm((p) => ({
+                          ...p,
+                          captureFields: p.captureFields.includes(field)
+                            ? p.captureFields.filter((f) => f !== field)
+                            : [...p.captureFields, field],
+                        }))}
+                      />
+                    ))}
+                    {featureForm.captureFields.filter((f) => !CAPTURE_FIELD_OPTIONS.includes(f)).map((field) => (
+                      <Chip
+                        key={field}
+                        size="small"
+                        label={field}
+                        variant="filled"
+                        color="secondary"
+                        onDelete={() => setFeatureForm((p) => ({ ...p, captureFields: p.captureFields.filter((f) => f !== field) }))}
+                      />
+                    ))}
+                  </Stack>
+                  <Stack direction="row" spacing={1}>
+                    <TextField
+                      size="small"
+                      placeholder="Custom field name…"
+                      value={featureCustomField}
+                      onChange={(e) => setFeatureCustomField(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          const val = featureCustomField.trim();
+                          if (val && !featureForm.captureFields.includes(val)) {
+                            setFeatureForm((p) => ({ ...p, captureFields: [...p.captureFields, val] }));
+                          }
+                          setFeatureCustomField("");
+                        }
+                      }}
+                      sx={{ flex: 1 }}
+                    />
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={!featureCustomField.trim() || featureForm.captureFields.includes(featureCustomField.trim())}
+                      onClick={() => {
+                        const val = featureCustomField.trim();
+                        if (val && !featureForm.captureFields.includes(val)) {
+                          setFeatureForm((p) => ({ ...p, captureFields: [...p.captureFields, val] }));
+                        }
+                        setFeatureCustomField("");
+                      }}
+                    >
+                      Add
+                    </Button>
+                  </Stack>
+                </FormControl>
+              )}
+              {featureError && <Alert severity="error" sx={{ fontSize: 12 }}>{featureError}</Alert>}
+            </Stack>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setFeatureDialog(false)} disabled={featureSaving}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={saveFeature}
-            disabled={featureSaving || !featureForm.name.trim()}
-            startIcon={featureSaving ? <CircularProgress size={14} /> : undefined}
-          >
-            {featureSaving ? "Saving…" : featureEditId ? "Save changes" : "Add feature"}
-          </Button>
+          {featureJustCreatedId ? (
+            <Button variant="contained" onClick={() => { setFeatureDialog(false); setFeatureJustCreatedId(null); }}>Done</Button>
+          ) : (
+            <>
+              <Button onClick={() => setFeatureDialog(false)} disabled={featureSaving}>Cancel</Button>
+              <Button
+                variant="contained"
+                onClick={saveFeature}
+                disabled={featureSaving || !featureForm.name.trim()}
+                startIcon={featureSaving ? <CircularProgress size={14} /> : undefined}
+              >
+                {featureSaving ? "Saving…" : featureEditId ? "Save changes" : "Add feature"}
+              </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -2543,23 +3030,24 @@ const Settings = () => {
               <Chip
                 size="small"
                 label="Non-inventory"
-                variant={depForm.isInventory ? "outlined" : "filled"}
+                variant={!depForm.isInventory ? "filled" : "outlined"}
+                color={!depForm.isInventory ? "primary" : "default"}
                 onClick={() => setDepForm((p) => ({ ...p, isInventory: false }))}
               />
               <Chip
                 size="small"
                 label="Inventory"
-                color="primary"
                 variant={depForm.isInventory ? "filled" : "outlined"}
+                color={depForm.isInventory ? "primary" : "default"}
                 onClick={() => setDepForm((p) => ({ ...p, isInventory: true }))}
               />
             </Stack>
             {depForm.isInventory ? (
               <FormControl size="small" fullWidth>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
-                  Capture fields (select all that apply)
+                  Capture fields (select all that apply, or add custom)
                 </Typography>
-                <Stack direction="row" flexWrap="wrap" gap={0.5}>
+                <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ mb: 1 }}>
                   {CAPTURE_FIELD_OPTIONS.map((field) => (
                     <Chip
                       key={field}
@@ -2575,6 +3063,49 @@ const Settings = () => {
                       }))}
                     />
                   ))}
+                  {depForm.captureFields.filter((f) => !CAPTURE_FIELD_OPTIONS.includes(f)).map((field) => (
+                    <Chip
+                      key={field}
+                      size="small"
+                      label={field}
+                      variant="filled"
+                      color="secondary"
+                      onDelete={() => setDepForm((p) => ({ ...p, captureFields: p.captureFields.filter((f) => f !== field) }))}
+                    />
+                  ))}
+                </Stack>
+                <Stack direction="row" spacing={1}>
+                  <TextField
+                    size="small"
+                    placeholder="Custom field name…"
+                    value={depCustomField}
+                    onChange={(e) => setDepCustomField(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const val = depCustomField.trim();
+                        if (val && !depForm.captureFields.includes(val)) {
+                          setDepForm((p) => ({ ...p, captureFields: [...p.captureFields, val] }));
+                        }
+                        setDepCustomField("");
+                      }
+                    }}
+                    sx={{ flex: 1 }}
+                  />
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={!depCustomField.trim() || depForm.captureFields.includes(depCustomField.trim())}
+                    onClick={() => {
+                      const val = depCustomField.trim();
+                      if (val && !depForm.captureFields.includes(val)) {
+                        setDepForm((p) => ({ ...p, captureFields: [...p.captureFields, val] }));
+                      }
+                      setDepCustomField("");
+                    }}
+                  >
+                    Add
+                  </Button>
                 </Stack>
               </FormControl>
             ) : (

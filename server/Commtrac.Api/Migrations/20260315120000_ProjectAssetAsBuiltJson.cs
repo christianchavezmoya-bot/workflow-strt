@@ -1,10 +1,14 @@
+using Commtrac.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace Commtrac.Api.Migrations
 {
-    /// <inheritdoc />
+    [DbContext(typeof(AppDbContext))]
+    [Migration("20260315120000_ProjectAssetAsBuiltJson")]
     public partial class ProjectAssetAsBuiltJson : Migration
     {
         /// <inheritdoc />

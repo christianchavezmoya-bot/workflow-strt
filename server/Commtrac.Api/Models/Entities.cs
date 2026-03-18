@@ -108,6 +108,10 @@ public class FeatureEntity
     public string OptionsJson { get; set; } = "[]";
     /// <summary>JSON array of FeatureSubPropertyDto for component/inventory features.</summary>
     public string SubPropertiesJson { get; set; } = "[]";
+    /// <summary>true = this feature is itself a tracked inventory item (captures serial/IP/MAC/etc.)</summary>
+    public bool IsInventory { get; set; } = false;
+    /// <summary>Inventory only: JSON array of capture field names e.g. ["serialNo","firmware","ipAddress"]</summary>
+    public string CaptureFieldsJson { get; set; } = "[]";
 }
 
 /// <summary>

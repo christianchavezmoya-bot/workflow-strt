@@ -375,6 +375,13 @@ public static class DbInitializer
             // RunTimeTracking — columns added by EnsureRunTimeTrackingColumns before migration existed
             EnsureRecorded("20260306090000_RunTimeTracking",
                 "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='TimeTrackingJson'");
+
+            // March-15 columns — added by EnsureMarch15Columns before migration files existed
+            EnsureRecorded("20260315120000_ProjectAssetAsBuiltJson",
+                "SELECT COUNT(*) FROM pragma_table_info('ProjectAssets') WHERE name='AsBuiltJson'");
+
+            EnsureRecorded("20260315130000_AssetWorkflowRunBomActualJson",
+                "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='BomActualJson'");
         }
         finally
         {

@@ -266,10 +266,8 @@ export const UserManagement: React.FC = () => {
   const [roles, setRoles] = useState<string[]>(["Admin", "Project Manager", "Engineer", "Viewer"]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
-  const [productOpen, setProductOpen] = useState(false);
   const [editUserOpen, setEditUserOpen] = useState(false);
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
-  const [editProductOpen, setEditProductOpen] = useState(false);
   const [assetOpen, setAssetOpen] = useState(false);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
@@ -329,12 +327,6 @@ export const UserManagement: React.FC = () => {
     customerId?: string | number;
   }>({});
 
-  const [productForm, setProductForm] = useState({
-    name: "",
-    description: "",
-    divisionId: ""
-  });
-  const [productFeatures, setProductFeatures] = useState<ProductFeatureDefinition[]>([]);
   const [editUserForm, setEditUserForm] = useState({
     id: "",
     fullName: "",
@@ -356,6 +348,10 @@ export const UserManagement: React.FC = () => {
     divisionId: ""
   });
   const [editProductFeatures, setEditProductFeatures] = useState<ProductFeatureDefinition[]>([]);
+  const [productOpen, setProductOpen] = useState(false);
+  const [productForm, setProductForm] = useState({ name: "", description: "", divisionId: "" });
+  const [productFeatures, setProductFeatures] = useState<ProductFeatureDefinition[]>([]);
+  const [editProductOpen, setEditProductOpen] = useState(false);
   const [assetForm, setAssetForm] = useState({
     machineType: "",
     machineId: "",
@@ -1069,15 +1065,6 @@ export const UserManagement: React.FC = () => {
           label: "Global Offices",
           type: "offices",
           position: 2,
-          columns: [],
-          fieldIds: [],
-          config: { order: [], hidden: [] }
-        },
-        {
-          id: "admin-products",
-          label: "Products",
-          type: "products",
-          position: 3,
           columns: [],
           fieldIds: [],
           config: { order: [], hidden: [] }
@@ -3269,176 +3256,6 @@ export const UserManagement: React.FC = () => {
             onDeleteOffice={handleDeleteOffice}
           />
         </Box>
-      )}
-
-      {/* Products Tab */}
-      {adminTabsConfig[tab]?.type === "products" && (
-        <Stack spacing={2}>
-          <Stack direction="row">
-            {can.modifyData && (
-              <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setProductOpen(true)}>
-                New Product
-              </Button>
-            )}
-          </Stack>
-
-          {actionError && <Alert severity="error">{actionError}</Alert>}
-
-          <Paper className="glass-card" sx={{ overflow: 'hidden' }}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>#</TableCell>
-                {productsTableConfig.visibleFields.map((field) => (
-                  <TableCell key={`products-header-${field.id}`}>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span style={fieldLabelStyle}>{field.name}</span>
-                      <IconButton
-                        size="small"
-                        onClick={(event) => setProductMenu({ anchorEl: event.currentTarget, key: field.id })}
-                      >
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                ))}
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredProducts.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={2 + productsTableConfig.visibleFields.length} align="center">
-                    <Typography variant="body2" color="text.secondary">
-                      {products.length === 0 ? "No products yet" : "No products match the current filters"}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredProducts.map((product, index) => {
-                  const getProductFieldValue = (fieldId: string) => {
-                    if (fieldId === "base-name") return product.name;
-                    if (fieldId === "base-description") return product.description || "-";
-                    return productsDynamic.valuesByEntity[product.id]?.[fieldId]?.value || "-";
-                  };
-
-                  return (
-                    <TableRow key={product.id} hover>
-                      <TableCell>{index + 1}</TableCell>
-                      {productsTableConfig.visibleFields.map((field) => (
-                        <TableCell key={`${product.id}-${field.id}`}>
-                          {getProductFieldValue(field.id)}
-                        </TableCell>
-                      ))}
-                      {can.modifyData && (
-                      <TableCell>
-                        <Stack direction="row" spacing={1}>
-                          <Tooltip title="Edit product">
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setEditProductForm({
-                                  id: product.id,
-                                  name: product.name,
-                                  description: product.description || "",
-                                  divisionId: product.divisionId || ""
-                                });
-                                const dynamicVals = productsDynamic.valuesByEntity[product.id] || {};
-                                const stringVals: Record<string, string> = {};
-                                for (const [k, v] of Object.entries(dynamicVals)) {
-                                  stringVals[k] = typeof v === 'string' ? v : v.value;
-                                }
-                                setEditProductDynamicValues(stringVals);
-                                setEditProductFeatures(product.features || []);
-                                setEditProductOpen(true);
-                              }}
-                            >
-                              <EditOutlined fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Delete product">
-                            <IconButton
-                              size="small"
-                              onClick={() =>
-                                setDeleteTarget({ type: "product", id: product.id, label: product.name })
-                              }
-                            >
-                              <DeleteOutline fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </Stack>
-                      </TableCell>
-                      )}
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-          </Paper>
-          <Menu
-            anchorEl={productMenu.anchorEl}
-            open={Boolean(productMenu.anchorEl)}
-            onClose={() => setProductMenu({ anchorEl: null, key: "" })}
-            slotProps={{
-              paper: {
-                sx: { maxHeight: 400 }
-              }
-            }}
-          >
-            <MenuItem
-              dense
-              sx={{ fontSize: "0.875rem", py: 0.5 }}
-              onClick={() => {
-                if (productMenu.key) setProductSort({ key: productMenu.key, dir: "asc" });
-                setProductMenu({ anchorEl: null, key: "" });
-              }}
-            >
-              Sort A → Z
-            </MenuItem>
-            <MenuItem
-              dense
-              sx={{ fontSize: "0.875rem", py: 0.5 }}
-              onClick={() => {
-                if (productMenu.key) setProductSort({ key: productMenu.key, dir: "desc" });
-                setProductMenu({ anchorEl: null, key: "" });
-              }}
-            >
-              Sort Z → A
-            </MenuItem>
-            <MenuItem
-              dense
-              sx={{ fontSize: "0.875rem", py: 0.5 }}
-              onClick={() => {
-                setProductSort({ key: "", dir: "asc" });
-                setProductMenu({ anchorEl: null, key: "" });
-              }}
-            >
-              Clear sort
-            </MenuItem>
-            {(productFilterOptions[productMenu.key as keyof typeof productFilterOptions] || []).map((option) => {
-              const label = option || "(Blank)";
-              const selected = !!productFilters[productMenu.key]?.has(option);
-              return (
-                <MenuItem
-                  dense
-                  key={`${productMenu.key}-${option}`}
-                  sx={{ py: 0.25, minHeight: "unset" }}
-                  onClick={() => {
-                    if (!productMenu.key) return;
-                    toggleFilterValue(setProductFilters, productMenu.key, option);
-                  }}
-                >
-                  <Checkbox checked={selected} size="small" sx={{ py: 0 }} />
-                  <ListItemText
-                    primary={label}
-                    primaryTypographyProps={{ fontSize: "0.8125rem" }}
-                  />
-                </MenuItem>
-              );
-            })}
-          </Menu>
-        </Stack>
       )}
 
       {/* Assets Tab */}
@@ -5844,7 +5661,6 @@ export const UserManagement: React.FC = () => {
               }
               if (selected.type === "users") setTableConfigTarget("users");
               if (selected.type === "roles") setTableConfigTarget("roles");
-              if (selected.type === "products") setTableConfigTarget("products");
               if (selected.type === "assets") setTableConfigTarget("assets");
               setTableConfigOpen(true);
             }}
@@ -5863,10 +5679,6 @@ export const UserManagement: React.FC = () => {
             }
             if (selected.type === "customers") {
               setCustomerOpen(true);
-              return;
-            }
-            if (selected.type === "products") {
-              setProductOpen(true);
               return;
             }
             if (selected.type === "assets") {
@@ -5973,7 +5785,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" color="text.secondary">
-                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "dispatch" ? "Dispatch" : item.type === "customers" ? "Customers" : item.type === "products" ? "Products" : item.type === "assets" ? "Assets" : "Default"}
+                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "dispatch" ? "Dispatch" : item.type === "customers" ? "Customers" : item.type === "assets" ? "Assets" : "Default"}
                       </Typography>
                     </TableCell>
                     <TableCell>

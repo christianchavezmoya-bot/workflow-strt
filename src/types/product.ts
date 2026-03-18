@@ -36,4 +36,5 @@ export interface Product {
   description?: string;
   features?: ProductFeatureDefinition[];
   divisionId?: string;
+  divisionName?: string;
 }

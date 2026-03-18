@@ -82,7 +82,9 @@ import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/p
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
-import type { StepInput, Workflow } from "../../types/workflow";
+import type { BomItem, StepInput, Workflow } from "../../types/workflow";
+import { featureService } from "../../services/featureService";
+import { featureDependencyService } from "../../services/featureDependencyService";
 import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
@@ -669,6 +671,49 @@ const AssetInstallationPage = () => {
     if (!cfg?.featureSelectionsJson) return undefined;
     try { return JSON.parse(cfg.featureSelectionsJson) as import("../../services/productConfigService").FeatureSelection[]; } catch { return undefined; }
   }
+
+  /** Build BomItem list from a product's feature dependencies for auto-populating the BOM. */
+  async function fetchProductBomItems(productId: string): Promise<BomItem[]> {
+    try {
+      const productFeatures = await featureService.getByProduct(productId);
+      if (productFeatures.length === 0) return [];
+      const depLists = await Promise.all(productFeatures.map((f) => featureDependencyService.getByFeature(f.id)));
+      const items: BomItem[] = [];
+      depLists.forEach((deps, idx) => {
+        const feature = productFeatures[idx];
+        deps.forEach((dep) => {
+          items.push({
+            id: `dep-${dep.id}`,
+            description: `${feature.name}: ${dep.name}`,
+            isInventory: dep.isInventory,
+            expectedQty: dep.defaultQty,
+            unitOfMeasure: dep.unit || "ea",
+            notes: dep.isInventory && dep.captureFields.length > 0
+              ? `Capture: ${dep.captureFields.join(", ")}`
+              : undefined,
+          });
+        });
+      });
+      return items;
+    } catch {
+      return [];
+    }
+  }
+
+  // Auto-enrich the workflow BOM with product feature dependencies when the runner opens.
+  useEffect(() => {
+    if (!runnerOpen || !runnerWorkflow || !runnerAsset?.productId) return;
+    // Skip if we already injected auto-items to avoid re-fetching on re-renders.
+    if (runnerWorkflow.bomItems?.some((b) => b.id.startsWith("dep-"))) return;
+    fetchProductBomItems(runnerAsset.productId).then((autoBomItems) => {
+      if (autoBomItems.length > 0) {
+        setRunnerWorkflow((prev) =>
+          prev ? { ...prev, bomItems: [...(prev.bomItems ?? []), ...autoBomItems] } : prev
+        );
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runnerOpen, runnerAsset?.productId, runnerWorkflow?.id]);
 
   async function handleStartWorkOrder(asset: ProjectAsset) {
     setRunnerLoading(asset.id);

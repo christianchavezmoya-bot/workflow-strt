@@ -8,26 +8,30 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Commtrac.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260315130000_AssetWorkflowRunBomActualJson")]
-    public partial class AssetWorkflowRunBomActualJson : Migration
+    [Migration("20260318100000_FeatureInventoryFields")]
+    public partial class FeatureInventoryFields : Migration
     {
-        /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<bool>(
+                name: "IsInventory",
+                table: "Features",
+                type: "INTEGER",
+                nullable: false,
+                defaultValue: false);
+
             migrationBuilder.AddColumn<string>(
-                name: "BomActualJson",
-                table: "AssetWorkflowRuns",
+                name: "CaptureFieldsJson",
+                table: "Features",
                 type: "TEXT",
                 nullable: false,
                 defaultValue: "[]");
         }
 
-        /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "BomActualJson",
-                table: "AssetWorkflowRuns");
+            migrationBuilder.DropColumn(name: "IsInventory", table: "Features");
+            migrationBuilder.DropColumn(name: "CaptureFieldsJson", table: "Features");
         }
     }
 }

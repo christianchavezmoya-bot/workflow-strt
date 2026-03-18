@@ -44,7 +44,9 @@ public class FeaturesController : ControllerBase
             Description = request.Description,
             ValueType = string.IsNullOrWhiteSpace(request.ValueType) ? "text" : request.ValueType,
             OptionsJson = JsonSerializer.Serialize(request.Options ?? new List<string>(), JsonOptions),
-            SubPropertiesJson = JsonSerializer.Serialize(request.SubProperties ?? new List<FeatureSubPropertyDto>(), JsonOptions)
+            SubPropertiesJson = JsonSerializer.Serialize(request.SubProperties ?? new List<FeatureSubPropertyDto>(), JsonOptions),
+            IsInventory = request.IsInventory,
+            CaptureFieldsJson = JsonSerializer.Serialize(request.CaptureFields ?? new List<string>(), JsonOptions)
         };
         _db.Features.Add(feature);
         await _db.SaveChangesAsync();
@@ -63,6 +65,8 @@ public class FeaturesController : ControllerBase
         if (!string.IsNullOrWhiteSpace(request.ValueType)) feature.ValueType = request.ValueType;
         if (request.Options is not null) feature.OptionsJson = JsonSerializer.Serialize(request.Options, JsonOptions);
         if (request.SubProperties is not null) feature.SubPropertiesJson = JsonSerializer.Serialize(request.SubProperties, JsonOptions);
+        if (request.IsInventory.HasValue) feature.IsInventory = request.IsInventory.Value;
+        if (request.CaptureFields is not null) feature.CaptureFieldsJson = JsonSerializer.Serialize(request.CaptureFields, JsonOptions);
 
         await _db.SaveChangesAsync();
         return Ok(ToDto(feature));
@@ -156,6 +160,10 @@ public class FeaturesController : ControllerBase
             ? null
             : JsonSerializer.Deserialize<List<FeatureSubPropertyDto>>(f.SubPropertiesJson, JsonOptions);
 
-        return new(f.Id, f.Name, f.Description, f.ValueType, options, subProps);
+        var captureFields = string.IsNullOrWhiteSpace(f.CaptureFieldsJson) || f.CaptureFieldsJson == "[]"
+            ? null
+            : JsonSerializer.Deserialize<List<string>>(f.CaptureFieldsJson, JsonOptions);
+
+        return new(f.Id, f.Name, f.Description, f.ValueType, options, subProps, f.IsInventory, captureFields);
     }
 }

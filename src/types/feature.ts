@@ -7,6 +7,10 @@ export interface Feature {
   valueType: string;
   options?: string[];
   subProperties?: FeatureSubProperty[];
+  /** true = this feature is itself a tracked inventory item */
+  isInventory?: boolean;
+  /** Inventory only: fields to capture per unit e.g. serialNo, firmware, ipAddress */
+  captureFields?: string[];
 }
 
 export interface FeatureSubProperty {
