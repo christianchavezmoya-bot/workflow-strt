@@ -4,9 +4,11 @@
  * asks the user to explicitly accept the integration before live records
  * are written.
  */
+import { useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Button, Typography, Stack, Divider, Alert, Chip, Box,
+  FormControlLabel, Checkbox,
 } from "@mui/material";
 import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
 import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined";
@@ -26,6 +28,11 @@ interface Props {
 export default function PublishConfirmDialog({
   open, draft, customerName, jobNumber, onConfirm, onCancel,
 }: Props) {
+  const [accepted, setAccepted] = useState(false);
+
+  // Reset checkbox each time dialog opens
+  const handleEnter = () => setAccepted(false);
+
   const assetCount = draft.assets.length;
   const componentCount = draft.assets.reduce((s, a) => s + a.components.length, 0);
   const workflowCount = draft.assets.filter((a) => a.workflowTemplateCandidate).length;
@@ -35,7 +42,7 @@ export default function PublishConfirmDialog({
   );
 
   return (
-    <Dialog open={open} maxWidth="sm" fullWidth>
+    <Dialog open={open} maxWidth="sm" fullWidth TransitionProps={{ onEnter: handleEnter }}>
       <DialogTitle sx={{ pb: 1 }}>
         <Stack direction="row" alignItems="center" spacing={1}>
           <WarningAmberOutlinedIcon color="warning" />
@@ -102,13 +109,48 @@ export default function PublishConfirmDialog({
           )}
           <Chip label="BOM Import Run (status → published)" size="small" variant="outlined" />
         </Stack>
+
+        <Divider sx={{ my: 2.5 }} />
+
+        {/* Explicit acceptance gate */}
+        <Box
+          sx={{
+            p: 1.5,
+            borderRadius: 1,
+            border: "1px solid",
+            borderColor: accepted ? "success.main" : "divider",
+            bgcolor: accepted ? "success.50" : "background.paper",
+            transition: "border-color 0.2s, background-color 0.2s",
+          }}
+        >
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={accepted}
+                onChange={(e) => setAccepted(e.target.checked)}
+                color="success"
+              />
+            }
+            label={
+              <Typography variant="body2">
+                I understand that this will create <strong>live project records</strong> visible
+                to all users and I accept responsibility for this integration.
+              </Typography>
+            }
+          />
+        </Box>
       </DialogContent>
 
       <DialogActions sx={{ px: 3, pb: 2, gap: 1 }}>
         <Button onClick={onCancel} color="inherit">
           Cancel — go back and review
         </Button>
-        <Button variant="contained" color="success" onClick={onConfirm}>
+        <Button
+          variant="contained"
+          color="success"
+          onClick={onConfirm}
+          disabled={!accepted}
+        >
           Accept & Publish
         </Button>
       </DialogActions>
