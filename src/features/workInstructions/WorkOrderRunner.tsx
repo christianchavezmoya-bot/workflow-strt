@@ -50,6 +50,7 @@ import { assetWorkflowRunService } from "../../services/assetWorkflowRunService"
 import { signatureService } from "../../services/signatureService";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
+import MediaCapture from "../../components/ui/MediaCapture";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
@@ -166,6 +167,7 @@ export default function WorkOrderRunner({
   const [flagExtraHours, setFlagExtraHours] = useState("");
   const [flagCostImpact, setFlagCostImpact] = useState("");
   const [flagSubmitted, setFlagSubmitted] = useState(false);
+  const [flagMedia, setFlagMedia] = useState<string[]>([]);
   // Issue editing
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [editIssueDesc, setEditIssueDesc] = useState("");
@@ -296,6 +298,7 @@ export default function WorkOrderRunner({
     setFlagIssueType("observation");
     setFlagExtraHours("");
     setFlagCostImpact("");
+    setFlagMedia([]);
     setFlagSubmitted(false);
     setIssues([]);
     setActiveRunId(existingRunId ?? null);
@@ -384,6 +387,7 @@ export default function WorkOrderRunner({
       reportedAt: new Date().toISOString(),
       resolved: false,
       createdBy: currentUserName,
+      reportMedia: flagMedia.length > 0 ? flagMedia : undefined,
       ...(isScopeDev && {
         extraHours: flagExtraHours ? parseFloat(flagExtraHours) : undefined,
         costImpact: flagCostImpact.trim() || undefined,
@@ -393,6 +397,7 @@ export default function WorkOrderRunner({
     setFlagDescription("");
     setFlagExtraHours("");
     setFlagCostImpact("");
+    setFlagMedia([]);
     setFlagSubmitted(true);
   }
 
@@ -1628,6 +1633,11 @@ export default function WorkOrderRunner({
                   />
                 </Stack>
               )}
+              <MediaCapture
+                media={flagMedia}
+                onChange={setFlagMedia}
+                label="Attach Photo / Video (optional)"
+              />
               <Stack direction="row" spacing={1} alignItems="center">
                 <Button
                   size="small"

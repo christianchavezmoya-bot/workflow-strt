@@ -25,6 +25,10 @@ export interface RunIssue {
   createdBy?: string;
   internalOnly?: boolean;  // if true, not included in customer-facing reports
   comments?: IssueComment[];
+  /** Base64 data URLs attached when the issue was reported */
+  reportMedia?: string[];
+  /** Base64 data URLs attached when the issue was closed (evidence of fix) */
+  resolutionMedia?: string[];
   resolutionNote?: string;
   resolvedAt?: string;
   resolvedBy?: string;

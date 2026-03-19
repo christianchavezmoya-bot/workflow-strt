@@ -106,6 +106,7 @@ import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
 import AssetDocumentsDialog from "./AssetDocumentsDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
+import MediaCapture from "../../components/ui/MediaCapture";
 
 // ------------------------------------------------------------------
 // Column configuration
@@ -319,6 +320,7 @@ const AssetInstallationPage = () => {
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
   const [issueDialogAsset, setIssueDialogAsset] = useState<ProjectAsset | null>(null);
   const [issueForm, setIssueForm] = useState<{ description: string; severity: "low" | "medium" | "high" }>({ description: "", severity: "medium" });
+  const [issueMedia, setIssueMedia] = useState<string[]>([]);
   // Issue detail dialog (comments / close)
   const [issueDetailAsset, setIssueDetailAsset] = useState<ProjectAsset | null>(null);
   const [issueDetailIssueId, setIssueDetailIssueId] = useState<string | null>(null);
@@ -972,6 +974,7 @@ const AssetInstallationPage = () => {
       isBlocking: false,
       reportedAt: new Date().toISOString(),
       resolved: false,
+      reportMedia: issueMedia.length > 0 ? issueMedia : undefined,
     };
     issues.push(newIssue);
     try {
@@ -981,6 +984,7 @@ const AssetInstallationPage = () => {
     setIssueDialogOpen(false);
     setIssueDialogAsset(null);
     setIssueForm({ description: "", severity: "medium" });
+    setIssueMedia([]);
   }
 
   async function handleToggleIssueResolved(asset: ProjectAsset, issueId: string) {
@@ -2890,7 +2894,7 @@ const AssetInstallationPage = () => {
       </Dialog>
 
       {/* Add issue dialog */}
-      <Dialog open={issueDialogOpen} onClose={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); }} maxWidth="xs" fullWidth>
+      <Dialog open={issueDialogOpen} onClose={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); setIssueMedia([]); }} maxWidth="xs" fullWidth>
         <DialogTitle>
           <Stack direction="row" alignItems="center" spacing={1}>
             <ReportProblemOutlined color="error" fontSize="small" />
@@ -2921,10 +2925,15 @@ const AssetInstallationPage = () => {
                 <MenuItem value="high">High</MenuItem>
               </Select>
             </FormControl>
+            <MediaCapture
+              media={issueMedia}
+              onChange={setIssueMedia}
+              label="Attach Photo / Video (optional)"
+            />
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); }}>Cancel</Button>
+          <Button onClick={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); setIssueMedia([]); }}>Cancel</Button>
           <Button variant="contained" color="error" onClick={handleAddIssue} disabled={!issueForm.description.trim()}>
             Add issue
           </Button>

@@ -21,6 +21,7 @@ import {
 } from "@mui/icons-material";
 import type { AssetIssue, IssueComment } from "../../types/projectAsset";
 import type { RunIssue } from "../../types/assetWorkflowRun";
+import MediaCapture from "./MediaCapture";
 
 type AnyIssue = AssetIssue | RunIssue;
 
@@ -63,6 +64,8 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
   const [commentText, setCommentText] = useState("");
   const [resolutionNote, setResolutionNote] = useState(issue.resolutionNote ?? "");
   const [resolutionError, setResolutionError] = useState(false);
+  const [reportMedia, setReportMedia] = useState<string[]>(issue.reportMedia ?? []);
+  const [resolutionMedia, setResolutionMedia] = useState<string[]>(issue.resolutionMedia ?? []);
 
   const comments: IssueComment[] = issue.comments ?? [];
 
@@ -75,7 +78,7 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
       author: currentUser,
       createdAt: new Date().toISOString(),
     };
-    onSave({ ...issue, comments: [...comments, newComment] });
+    onSave({ ...issue, reportMedia, comments: [...comments, newComment] });
     setCommentText("");
   }
 
@@ -88,8 +91,10 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
     setResolutionError(false);
     onSave({
       ...issue,
+      reportMedia,
       resolved: true,
       resolutionNote: note,
+      resolutionMedia,
       resolvedAt: new Date().toISOString(),
       resolvedBy: currentUser,
     });
@@ -154,6 +159,39 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
                 </Typography>
               )}
             </Alert>
+            {/* Resolution media (read-only thumbnails) */}
+            {(issue.resolutionMedia ?? []).length > 0 && (
+              <Box sx={{ mt: 1.5 }}>
+                <MediaCapture
+                  media={issue.resolutionMedia ?? []}
+                  onChange={() => {}}
+                  label="Resolution Evidence"
+                  disabled
+                />
+              </Box>
+            )}
+            {/* Report media (read-only thumbnails) */}
+            {(issue.reportMedia ?? []).length > 0 && (
+              <Box sx={{ mt: 1.5 }}>
+                <MediaCapture
+                  media={issue.reportMedia ?? []}
+                  onChange={() => {}}
+                  label="Reported Media"
+                  disabled
+                />
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {/* Report media — capture when opening / viewing an open issue */}
+        {!issue.resolved && !readOnly && (
+          <Box sx={{ px: 2.5, pt: 2 }}>
+            <MediaCapture
+              media={reportMedia}
+              onChange={setReportMedia}
+              label="Attach Photo / Video (optional)"
+            />
           </Box>
         )}
 
@@ -263,6 +301,11 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
                   onChange={(e) => { setResolutionNote(e.target.value); setResolutionError(false); }}
                   error={resolutionError}
                   helperText={resolutionError ? "Resolution note is required to close this issue." : undefined}
+                />
+                <MediaCapture
+                  media={resolutionMedia}
+                  onChange={setResolutionMedia}
+                  label="Resolution Evidence — Photo / Video (optional)"
                 />
                 <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                   <Button
