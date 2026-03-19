@@ -1115,3 +1115,71 @@ public class DeliveryEventEntity
     [MaxLength(200)]
     public string? RecordedBy { get; set; }
 }
+
+// ─── BOM-to-Project Module (removable — additive only) ───────────────────────
+
+public class BomImportRunEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(500)]
+    public string FileName { get; set; } = string.Empty;
+    public long FileSizeBytes { get; set; }
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+    [MaxLength(200)]
+    public string UploadedBy { get; set; } = string.Empty;
+    [MaxLength(40)]
+    public string Status { get; set; } = "uploading";
+    [MaxLength(500)]
+    public string? StatusMessage { get; set; }
+    public string SheetNamesJson { get; set; } = "[]";
+    public string SelectedSheetsJson { get; set; } = "[]";
+    [MaxLength(100)]
+    public string? MappingProfileId { get; set; }
+    [MaxLength(100)]
+    public string? RuleProfileId { get; set; }
+    public int TotalRawRows { get; set; }
+    public int NormalizedRows { get; set; }
+    public int ClassifiedRows { get; set; }
+    public int ValidationErrors { get; set; }
+    public int ValidationWarnings { get; set; }
+    [MaxLength(100)]
+    public string? PublishedProjectId { get; set; }
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    // Staging data stored as JSON blobs for isolation
+    public string? RawRowsJson { get; set; }
+    public string? NormalizedRowsJson { get; set; }
+    public string? ClassificationsJson { get; set; }
+    public string? MappingsJson { get; set; }
+    public string? DraftProjectJson { get; set; }
+    public string? ValidationResultJson { get; set; }
+    public string? CommitLogsJson { get; set; }
+}
+
+public class BomMappingProfileEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+    public string MappingsJson { get; set; } = "[]";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    [MaxLength(200)]
+    public string? CreatedBy { get; set; }
+}
+
+public class BomRuleProfileEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+    public string RulesJson { get; set; } = "[]";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    [MaxLength(200)]
+    public string? CreatedBy { get; set; }
+}

@@ -70,6 +70,10 @@ public class AppDbContext : DbContext
     public DbSet<DispatchOrderEntity> DispatchOrders => Set<DispatchOrderEntity>();
     public DbSet<DispatchLineEntity> DispatchLines => Set<DispatchLineEntity>();
     public DbSet<DeliveryEventEntity> DeliveryEvents => Set<DeliveryEventEntity>();
+    // ─── BOM-to-Project Module (removable) ────────────────────────────────────
+    public DbSet<BomImportRunEntity> BomImportRuns => Set<BomImportRunEntity>();
+    public DbSet<BomMappingProfileEntity> BomMappingProfiles => Set<BomMappingProfileEntity>();
+    public DbSet<BomRuleProfileEntity> BomRuleProfiles => Set<BomRuleProfileEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

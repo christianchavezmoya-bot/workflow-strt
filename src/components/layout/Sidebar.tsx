@@ -21,6 +21,7 @@ import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettin
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
 import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
+import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
 import { NavLink } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
@@ -29,6 +30,7 @@ import { officesService } from "../../services/officesService";
 import type { Office } from "../../components/GlobalOfficeMap";
 import strataLogo from "../../assets/strata_transparent.png";
 import FavoritesSection from "./FavoritesSection";
+import { BOM_MODULE_ENABLED } from "../../modules/bom-project";
 
 const navItems = [
   { label: "Dashboard",         icon: <DashboardOutlinedIcon />,          to: "/" },
@@ -37,6 +39,7 @@ const navItems = [
   { label: "Installations",     icon: <TableChartOutlinedIcon />,         to: "/installations/assets" },
   { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
   { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents" },
+  ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project" }] : []),
   { label: "Admin",             icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin" },
   { label: "Settings",          icon: <SettingsOutlinedIcon />,           to: "/settings" },
   { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,      to: "/profile" },

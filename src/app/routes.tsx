@@ -16,6 +16,18 @@ import Login from "../features/auth/Login";
 import ResetPassword from "../features/auth/ResetPassword";
 import ExternalSignPage from "../features/sign/ExternalSignPage";
 import IssuesBoard from "../features/issues/IssuesBoard";
+// ── BOM Module (feature-flagged, conditionally imported) ──────────────────────
+import {
+  BOM_MODULE_ENABLED,
+  BomProjectProvider,
+  BomDashboard,
+  BomUploadPage,
+  BomMappingPage,
+  BomClassificationPage,
+  BomComparisonPage,
+  BomPreviewPage,
+  BomCommitPage,
+} from "../modules/bom-project";
 
 const SettingsRoute = () => {
   const can = usePermissions();
@@ -46,6 +58,18 @@ const AppRoutes = () => {
         <Route path="/issues" element={<IssuesBoard />} />
         <Route path="/settings" element={<SettingsRoute />} />
         <Route path="/profile" element={<ProfileWizard />} />
+        {/* ── BOM Module routes (only when feature flag enabled) ── */}
+        {BOM_MODULE_ENABLED && (
+          <>
+            <Route path="/admin/bom-project" element={<BomProjectProvider><BomDashboard /></BomProjectProvider>} />
+            <Route path="/admin/bom-project/upload" element={<BomProjectProvider><BomUploadPage /></BomProjectProvider>} />
+            <Route path="/admin/bom-project/imports/:id/mapping" element={<BomProjectProvider><BomMappingPage /></BomProjectProvider>} />
+            <Route path="/admin/bom-project/imports/:id/classification" element={<BomProjectProvider><BomClassificationPage /></BomProjectProvider>} />
+            <Route path="/admin/bom-project/imports/:id/compare" element={<BomProjectProvider><BomComparisonPage /></BomProjectProvider>} />
+            <Route path="/admin/bom-project/imports/:id/preview" element={<BomProjectProvider><BomPreviewPage /></BomProjectProvider>} />
+            <Route path="/admin/bom-project/imports/:id/commit" element={<BomProjectProvider><BomCommitPage /></BomProjectProvider>} />
+          </>
+        )}
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
