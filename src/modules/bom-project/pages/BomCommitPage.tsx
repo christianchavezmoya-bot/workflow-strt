@@ -2,13 +2,14 @@ import { useState } from "react";
 import {
   Box, Typography, Button, Stack, Alert, Paper, Divider,
   FormControlLabel, Radio, RadioGroup, CircularProgress,
-  TextField,
+  TextField, Collapse,
 } from "@mui/material";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import { useNavigate, useParams } from "react-router-dom";
 import { useBomProject } from "../store/BomProjectContext";
-import { commitDraft, type CommitMode } from "../services/bomCommitService";
+import { commitDraft, type CommitMode, type PublishDetails } from "../services/bomCommitService";
 import CommitSummary from "../components/CommitSummary";
+import PublishConfirmDialog from "../components/PublishConfirmDialog";
 import type { CommitResult } from "../services/bomCommitService";
 
 export default function BomCommitPage() {
@@ -20,23 +21,63 @@ export default function BomCommitPage() {
   const [projectName, setProjectName] = useState(
     state.draftProject?.projectName ?? ""
   );
+  const [customerName, setCustomerName] = useState(state.draftProject?.customerName ?? "");
+  const [jobNumber, setJobNumber] = useState(
+    `BOM-${(id ?? "").slice(0, 8).toUpperCase()}`
+  );
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CommitResult | null>(null);
 
-  const handleCommit = async () => {
+  // Guard: session lost on refresh
+  if (!state.draftProject) {
+    return (
+      <Box sx={{ textAlign: "center", py: 6 }}>
+        <Alert severity="warning" sx={{ mb: 2, maxWidth: 480, mx: "auto" }}>
+          Session data not found. Please start from the dashboard and complete all previous steps first.
+        </Alert>
+        <Button variant="outlined" onClick={() => navigate("/admin/bom-project")}>
+          Back to Dashboard
+        </Button>
+      </Box>
+    );
+  }
+
+  const handlePublishClick = () => {
+    // For publish mode, open the confirm dialog first
+    if (mode === "publish") {
+      setConfirmOpen(true);
+    } else {
+      void runCommit();
+    }
+  };
+
+  const runCommit = async (details?: PublishDetails) => {
     if (!state.draftProject || !state.validationResult) return;
     setCommitting(true);
     setError(null);
     try {
       const updatedDraft = { ...state.draftProject, projectName };
-      const res = await commitDraft(id ?? "", updatedDraft, state.validationResult, mode);
+      const res = await commitDraft(
+        id ?? "",
+        updatedDraft,
+        state.validationResult,
+        mode,
+        details
+      );
       setResult(res);
     } catch (e) {
       setError(String(e));
     } finally {
       setCommitting(false);
     }
+  };
+
+  const handleConfirmAccept = () => {
+    setConfirmOpen(false);
+    void runCommit({ customerName, jobNumber, office: "" });
   };
 
   if (result) {
@@ -86,7 +127,7 @@ export default function BomCommitPage() {
               <Box>
                 <Typography variant="body2" fontWeight={500}>Preview Only</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  No records written. Shows what would be created.
+                  No records written. Shows exactly what would be created.
                 </Typography>
               </Box>
             }
@@ -98,7 +139,7 @@ export default function BomCommitPage() {
               <Box>
                 <Typography variant="body2" fontWeight={500}>Save Draft</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Saves to BOM module staging tables. No live project created.
+                  Saves to BOM module staging tables only. No live project created.
                 </Typography>
               </Box>
             }
@@ -118,12 +159,39 @@ export default function BomCommitPage() {
                   )}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Creates live project, assets, and workflow assignments.
+                  Creates a live project and assets. You will be asked to confirm before anything is written.
                 </Typography>
               </Box>
             }
           />
         </RadioGroup>
+
+        {/* Extra fields — only shown in publish mode */}
+        <Collapse in={mode === "publish"}>
+          <Divider sx={{ mt: 2, mb: 2 }} />
+          <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+            Project Details
+          </Typography>
+          <Stack spacing={1.5}>
+            <TextField
+              fullWidth
+              size="small"
+              label="Customer Name"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder="e.g. Acme Corp"
+            />
+            <TextField
+              fullWidth
+              size="small"
+              label="Job Number"
+              value={jobNumber}
+              onChange={(e) => setJobNumber(e.target.value)}
+              placeholder="e.g. BOM-A1B2C3D4"
+              helperText="Auto-generated from the import run ID — edit if needed."
+            />
+          </Stack>
+        </Collapse>
       </Paper>
 
       <Stack direction="row" justifyContent="flex-end" spacing={1}>
@@ -131,13 +199,31 @@ export default function BomCommitPage() {
         <Button
           variant="contained"
           color={mode === "publish" ? "success" : "primary"}
-          onClick={handleCommit}
+          onClick={handlePublishClick}
           disabled={committing || !projectName.trim()}
           startIcon={committing ? <CircularProgress size={16} /> : <CheckCircleOutlineIcon />}
         >
-          {committing ? "Processing…" : mode === "publish" ? "Publish Project" : mode === "draft" ? "Save Draft" : "Run Preview"}
+          {committing
+            ? "Processing…"
+            : mode === "publish"
+            ? "Publish Project…"
+            : mode === "draft"
+            ? "Save Draft"
+            : "Run Preview"}
         </Button>
       </Stack>
+
+      {/* Confirmation dialog — only shown before publish */}
+      {state.draftProject && (
+        <PublishConfirmDialog
+          open={confirmOpen}
+          draft={{ ...state.draftProject, projectName }}
+          customerName={customerName}
+          jobNumber={jobNumber}
+          onConfirm={handleConfirmAccept}
+          onCancel={() => setConfirmOpen(false)}
+        />
+      )}
     </Box>
   );
 }
