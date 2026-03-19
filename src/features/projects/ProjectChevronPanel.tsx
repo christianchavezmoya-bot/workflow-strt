@@ -4,12 +4,18 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Collapse,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   FormControlLabel,
   IconButton,
+  LinearProgress,
   MenuItem,
   Select,
   Stack,
@@ -26,21 +32,34 @@ import {
   Typography
 } from "@mui/material";
 import {
+  AssessmentOutlined,
   BuildOutlined,
+  CheckCircleOutlineOutlined,
   DeleteOutline,
+  DrawOutlined,
   EmailOutlined,
+  ErrorOutlineOutlined,
   ExpandMoreOutlined,
+  FileDownloadOutlined,
+  GridOnOutlined,
+  HistoryOutlined,
   LocalShippingOutlined,
   MoveToInboxOutlined,
+  InventoryOutlined,
   OpenInNewOutlined,
+  PendingActionsOutlined,
+  PictureAsPdfOutlined,
   RefreshOutlined,
-  SettingsOutlined
+  SendOutlined,
+  SettingsOutlined,
+  WarningAmberOutlined,
 } from "@mui/icons-material";
 import { useAppSelector } from "../../store/hooks";
 import { projectContactService } from "../../services/projectContactService";
 import { projectAssetService } from "../../services/projectAssetService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { quickbaseService } from "../../services/quickbaseService";
+import { brandSettingsService } from "../../services/brandSettingsService";
 import type {
   InboundCondition,
   InboundItemType,
@@ -51,6 +70,22 @@ import type {
 import type { GoodsMovement } from "../../types/goodsMovement";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
+import type { BomActualItem } from "../../types/workflow";
+import {
+  exportBomPdf,
+  exportBomExcel,
+  exportBomCsv,
+  type BomExportRow,
+  type BomCaptureDetail,
+  type MissingBomAsset,
+  type BomExportData,
+} from "../../utils/generateBomReport";
+import {
+  generateProjectReport,
+  type ProjectReportData,
+} from "../../utils/generateProjectReport";
+import { signatureService } from "../../services/signatureService";
+import type { SignatureToken } from "../../types/signature";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -214,10 +249,20 @@ function GoodsMovementsTable({ rows, realmHostname, tableId }: {
 
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
-interface Props { projectId: string; productId?: string; }
-type TabId = "contacts" | "installations" | "goodsMovements" | "inbound";
+interface Props {
+  projectId: string;
+  productId?: string;
+  projectJobNumber?: string;
+  projectCustomer?: string;
+  projectSite?: string;
+  projectManager?: string;
+}
+type TabId = "contacts" | "installations" | "goodsMovements" | "inbound" | "bom" | "history";
 
-export default function ProjectChevronPanel({ projectId, productId }: Props) {
+export default function ProjectChevronPanel({
+  projectId, productId,
+  projectJobNumber = "", projectCustomer = "", projectSite = "", projectManager = ""
+}: Props) {
   const navigate = useNavigate();
   const users = useAppSelector((s) => s.users.items);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
@@ -229,6 +274,44 @@ export default function ProjectChevronPanel({ projectId, productId }: Props) {
   const [contactForm,      setContactForm]      = useState<ContactFormState>(emptyContact());
   const [primaryContactId, setPrimaryContactId] = useState<string | null>(null);
   const [contactSaving,    setContactSaving]    = useState(false);
+
+  // ── Signature Tokens (send + track customer signature requests) ────────────
+  const [sigTokens,        setSigTokens]        = useState<Record<string, SignatureToken[]>>({});
+  const [sigTokenLoading,  setSigTokenLoading]  = useState<string | null>(null);
+  const [sigSendRunId,     setSigSendRunId]     = useState<string | null>(null);
+  const [sigRecipEmail,    setSigRecipEmail]    = useState("");
+  const [sigRecipName,     setSigRecipName]     = useState("");
+  const [sigMessage,       setSigMessage]       = useState("");
+  const [sigSending,       setSigSending]       = useState(false);
+
+  const loadTokensForRun = useCallback(async (runId: string) => {
+    setSigTokenLoading(runId);
+    try {
+      const tokens = await signatureService.listTokens(runId);
+      setSigTokens(prev => ({ ...prev, [runId]: tokens }));
+    } catch { /* ignore */ }
+    finally { setSigTokenLoading(null); }
+  }, []);
+
+  const handleSendSignatureRequest = async () => {
+    if (!sigSendRunId || !sigRecipEmail.trim()) return;
+    setSigSending(true);
+    try {
+      await signatureService.createToken({
+        runId:          sigSendRunId,
+        recipientEmail: sigRecipEmail.trim(),
+        recipientName:  sigRecipName.trim() || undefined,
+        expiresInHours: 72,
+        customMessage:  sigMessage.trim() || undefined,
+      });
+      await loadTokensForRun(sigSendRunId);
+      setSigSendRunId(null);
+      setSigRecipEmail("");
+      setSigRecipName("");
+      setSigMessage("");
+    } catch { /* ignore */ }
+    finally { setSigSending(false); }
+  };
 
   const loadContacts = useCallback(async () => {
     setContactsLoading(true);
@@ -297,6 +380,136 @@ export default function ProjectChevronPanel({ projectId, productId }: Props) {
     [latestRuns]
   );
 
+  // Aggregate BOM across all latest runs for this project → BomExportRow[]
+  const bomSummary = useMemo((): BomExportRow[] => {
+    const map: Record<string, BomExportRow> = {};
+    for (const run of latestRuns) {
+      if (!run.bomActualJson) continue;
+      let items: BomActualItem[] = [];
+      try { items = JSON.parse(run.bomActualJson) as BomActualItem[]; } catch { continue; }
+      const asset = installAssets.find(a => a.id === run.assetId);
+      for (const item of items) {
+        if (!map[item.description]) {
+          map[item.description] = {
+            description: item.description,
+            isInventory: item.isInventory,
+            unitOfMeasure: item.unitOfMeasure,
+            totalExpected: 0,
+            totalActual: 0,
+            captures: [],
+          };
+        }
+        map[item.description].totalExpected += item.expectedQty;
+        map[item.description].totalActual   += item.actualQty;
+        if (item.isInventory) {
+          (item.unitCaptures ?? []).forEach((fields, i) => {
+            if (Object.values(fields).some(Boolean)) {
+              const cap: BomCaptureDetail = {
+                assetTag:      asset?.assetTag ?? run.assetId,
+                assetLocation: asset?.location ?? "",
+                unitIdx:       i + 1,
+                fields,
+                installedBy:  run.completedByName ?? "",
+                installedAt:  run.completedAt    ?? "",
+              };
+              map[item.description].captures.push(cap);
+            }
+          });
+        }
+      }
+    }
+    return Object.values(map).sort((a, b) => a.description.localeCompare(b.description));
+  }, [latestRuns, installAssets]);
+
+  // Assets with completed runs but no BOM recorded
+  const missingBomAssets = useMemo((): MissingBomAsset[] => {
+    return installAssets
+      .filter(a => {
+        const run = latestRuns.find(r => r.assetId === a.id);
+        return run && run.isLocked && !run.bomActualJson;
+      })
+      .map(a => ({
+        assetTag: a.assetTag,
+        location: a.location ?? "",
+        status:   a.status,
+      }));
+  }, [latestRuns, installAssets]);
+
+  // ── Export state ───────────────────────────────────────────────────────────
+  const [pdfLogoOpen,      setPdfLogoOpen]      = useState(false);
+  const [includeLogo,      setIncludeLogo]       = useState(true);
+  const [exportingPdf,     setExportingPdf]      = useState(false);
+  const [reportLogoOpen,   setReportLogoOpen]   = useState(false);
+  const [reportLogo,       setReportLogo]        = useState(true);
+  const [exportingReport,  setExportingReport]   = useState(false);
+
+  const buildExportData = async (withLogo: boolean): Promise<BomExportData> => {
+    let logoBase64: string | null = null;
+    if (withLogo) {
+      try { logoBase64 = (await brandSettingsService.get()).logoBase64 ?? null; } catch { /* ignore */ }
+    }
+    return {
+      projectJobNumber:   projectJobNumber,
+      projectCustomer:    projectCustomer,
+      projectSite:        projectSite,
+      projectManager:     projectManager,
+      exportDate:         new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
+      totalAssets:        installAssets.length,
+      assetsWithBom:      latestRuns.filter(r => r.isLocked && r.bomActualJson).length,
+      rows:               bomSummary,
+      missingBomAssets,
+      businessLogoBase64: logoBase64,
+    };
+  };
+
+  const handleGenerateProjectReport = async (withLogo: boolean) => {
+    setExportingReport(true);
+    try {
+      let logoBase64: string | null = null;
+      if (withLogo) {
+        try { logoBase64 = (await brandSettingsService.get()).logoBase64 ?? null; } catch { /* ignore */ }
+      }
+      const data: ProjectReportData = {
+        jobNumber:          projectJobNumber,
+        customerName:       projectCustomer,
+        siteName:           projectSite,
+        projectManager:     projectManager,
+        status:             "",           // caller can enrich if needed
+        startDate:          "",
+        finishDate:         "",
+        description:        "",
+        assets:             installAssets,
+        latestRuns,
+        bomRows:            bomSummary,
+        missingBomAssets,
+        businessLogoBase64: logoBase64,
+        exportDate:         new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
+      };
+      await generateProjectReport(data);
+    } finally {
+      setExportingReport(false);
+      setReportLogoOpen(false);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    exportBomCsv(await buildExportData(false));
+  };
+
+  const handleExportExcel = async () => {
+    exportBomExcel(await buildExportData(false));
+  };
+
+  const handleExportPdfConfirm = async () => {
+    setExportingPdf(true);
+    try {
+      await exportBomPdf(await buildExportData(includeLogo));
+    } finally {
+      setExportingPdf(false);
+      setPdfLogoOpen(false);
+    }
+  };
+
   const loadInstallAssets = useCallback(async () => {
     setInstallAssetsLoading(true);
     try {
@@ -327,10 +540,12 @@ export default function ProjectChevronPanel({ projectId, productId }: Props) {
     finally { setInboundsLoading(false); }
   }, [projectId]);
 
-  // ── Load on tab switch (lazy) ──────────────────────────────────────────────
+  // ── Eager load on mount (health bar always needs this data) ───────────────
+  useEffect(() => { loadInstallAssets(); }, [loadInstallAssets]);
+
+  // ── Lazy load per tab ──────────────────────────────────────────────────────
   useEffect(() => {
     if (tab === "contacts" && contacts.length === 0 && !contactsLoading) loadContacts();
-    if (tab === "installations" && installAssets.length === 0 && !installAssetsLoading) loadInstallAssets();
     if ((tab === "goodsMovements" || tab === "inbound") && !qbLoaded && !qbLoading) syncQb();
     if (tab === "inbound" && inbounds.length === 0 && !inboundsLoading) loadInbounds();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -443,12 +658,101 @@ export default function ProjectChevronPanel({ projectId, productId }: Props) {
     </Stack>
   );
 
+  // ── Health KPIs (computed from eagerly-loaded data) ────────────────────────
+  const healthKpis = useMemo(() => {
+    const total    = installAssets.length;
+    const complete = installAssets.filter(a => a.status === "Complete").length;
+    const pct      = total > 0 ? Math.round((complete / total) * 100) : 0;
+
+    let blocking = 0;
+    for (const run of latestRuns) {
+      try {
+        const iss = JSON.parse(run.issuesJson || "[]") as Array<{ resolved: boolean; isBlocking: boolean }>;
+        blocking += iss.filter(i => !i.resolved && i.isBlocking).length;
+      } catch { /* skip */ }
+    }
+
+    const pendingSig = latestRuns.filter(
+      r => r.isLocked && !r.customerSignedAt && r.signatureStatus !== "WaivedCustomer"
+    ).length;
+
+    const locked   = latestRuns.filter(r => r.isLocked).length;
+    const bomDone  = latestRuns.filter(r => r.isLocked && r.bomActualJson).length;
+
+    return { total, complete, pct, blocking, pendingSig, locked, bomDone };
+  }, [installAssets, latestRuns]);
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Box sx={{
       p: 1.5, background: "rgba(0,0,0,0.18)", borderRadius: 1,
       maxWidth: PANEL_MAX_W, minWidth: 0, overflow: "hidden", boxSizing: "border-box"
     }}>
+
+      {/* ── Project Health Bar ─────────────────────────────────────────────── */}
+      {installAssets.length > 0 && (
+        <Stack
+          direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap
+          sx={{ mb: 1.5, pb: 1.5, borderBottom: "1px solid", borderColor: "divider" }}
+        >
+          {/* Completion */}
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            <CheckCircleOutlineOutlined sx={{ fontSize: 14, color: healthKpis.pct === 100 ? "success.main" : "text.secondary" }} />
+            <Typography variant="caption" fontWeight={700} color={healthKpis.pct === 100 ? "success.main" : "text.primary"}>
+              {healthKpis.complete}/{healthKpis.total}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">complete ({healthKpis.pct}%)</Typography>
+          </Stack>
+
+          {/* Blocking issues */}
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            <ErrorOutlineOutlined sx={{ fontSize: 14, color: healthKpis.blocking > 0 ? "error.main" : "success.main" }} />
+            <Typography variant="caption" fontWeight={700} color={healthKpis.blocking > 0 ? "error.main" : "text.secondary"}>
+              {healthKpis.blocking}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">blocking</Typography>
+          </Stack>
+
+          {/* Pending signatures */}
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            <PendingActionsOutlined sx={{ fontSize: 14, color: healthKpis.pendingSig > 0 ? "warning.main" : "text.secondary" }} />
+            <Typography variant="caption" fontWeight={700} color={healthKpis.pendingSig > 0 ? "warning.main" : "text.secondary"}>
+              {healthKpis.pendingSig}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">pending sig</Typography>
+          </Stack>
+
+          {/* BOM */}
+          {healthKpis.locked > 0 && (
+            <Stack direction="row" alignItems="center" spacing={0.5}>
+              <InventoryOutlined sx={{ fontSize: 14, color: "text.secondary" }} />
+              <Typography variant="caption" fontWeight={700}>
+                {healthKpis.bomDone}/{healthKpis.locked}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">BOM recorded</Typography>
+            </Stack>
+          )}
+
+          <Box sx={{ flex: 1 }} />
+
+          {/* Project Report button */}
+          <Tooltip title="Generate Project Completion Report (PDF)">
+            <span>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={exportingReport ? <CircularProgress size={12} /> : <AssessmentOutlined sx={{ fontSize: 14 }} />}
+                disabled={exportingReport || installAssets.length === 0}
+                onClick={() => setReportLogoOpen(true)}
+                sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}
+              >
+                Project Report
+              </Button>
+            </span>
+          </Tooltip>
+        </Stack>
+      )}
+
       <Tabs
         value={tab}
         onChange={(_, v) => setTab(v as TabId)}
@@ -464,6 +768,10 @@ export default function ProjectChevronPanel({ projectId, productId }: Props) {
           label={`Dispatched${despatched.length ? ` (${despatched.length})` : ""}`} />
         <Tab value="inbound" icon={<MoveToInboxOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
           label={`Inbound${received.length ? ` (${received.length})` : ""}`} />
+        <Tab value="bom" icon={<InventoryOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
+          label={`Parts${bomSummary.length ? ` (${bomSummary.length})` : ""}`} />
+        <Tab value="history" icon={<HistoryOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
+          label="History" />
       </Tabs>
 
       {/* ── INSTALLATIONS ─────────────────────────────────────────────────── */}
@@ -637,9 +945,117 @@ export default function ProjectChevronPanel({ projectId, productId }: Props) {
                   </IconButton>
                 </Box>
               ))}
+
+              {/* ── Signature Requests ──────────────────────────────────────── */}
+              {latestRuns.filter(r => r.isLocked && r.signatureStatus === "PendingCustomer").length > 0 && (
+                <>
+                  <Divider sx={{ my: 0.5 }}>
+                    <Typography variant="caption" color="warning.main" fontWeight={700}>
+                      Pending Customer Signatures
+                    </Typography>
+                  </Divider>
+                  {latestRuns
+                    .filter(r => r.isLocked && r.signatureStatus === "PendingCustomer")
+                    .map(run => {
+                      const asset  = installAssets.find(a => a.id === run.assetId);
+                      const tokens = sigTokens[run.id] ?? [];
+                      const latest = tokens[0];
+                      return (
+                        <Box key={run.id} sx={{
+                          px: 1.25, py: 1, borderRadius: 1, border: "1px solid",
+                          borderColor: "warning.main", background: "rgba(230,119,0,0.06)"
+                        }}>
+                          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                            <PendingActionsOutlined sx={{ fontSize: 14, color: "warning.main" }} />
+                            <Typography variant="caption" fontWeight={700}>
+                              {asset?.assetName ?? asset?.assetTag ?? run.assetId}
+                            </Typography>
+                            {latest && !latest.isRevoked && !latest.isExpired && (
+                              <Chip label="Request sent" size="small" color="warning" variant="outlined"
+                                sx={{ height: 16, fontSize: "0.6rem" }} />
+                            )}
+                            {latest?.isExpired && (
+                              <Chip label="Expired" size="small" color="error" variant="outlined"
+                                sx={{ height: 16, fontSize: "0.6rem" }} />
+                            )}
+                            <Box sx={{ flex: 1 }} />
+                            {/* Load tokens on demand */}
+                            {!(run.id in sigTokens) && (
+                              <Tooltip title="Load token status">
+                                <IconButton size="small" onClick={() => loadTokensForRun(run.id)}
+                                  disabled={sigTokenLoading === run.id}>
+                                  {sigTokenLoading === run.id
+                                    ? <CircularProgress size={12} />
+                                    : <RefreshOutlined sx={{ fontSize: 13 }} />}
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                            <Tooltip title="Send / resend signature link">
+                              <IconButton size="small" color="warning"
+                                onClick={() => {
+                                  setSigSendRunId(run.id);
+                                  const primary = contacts.find(c => c.isPrimarySigner) ?? contacts[0];
+                                  setSigRecipEmail(primary?.email ?? "");
+                                  setSigRecipName(primary?.name ?? "");
+                                  setSigMessage("");
+                                }}>
+                                <SendOutlined sx={{ fontSize: 13 }} />
+                              </IconButton>
+                            </Tooltip>
+                          </Stack>
+                          {latest && (
+                            <Typography variant="caption" color="text.disabled">
+                              Last sent to {latest.recipientEmail}
+                              {latest.usedAtUtc
+                                ? ` · opened ${new Date(latest.usedAtUtc).toLocaleDateString()}`
+                                : " · not yet opened"}
+                            </Typography>
+                          )}
+                        </Box>
+                      );
+                    })}
+                </>
+              )}
             </Stack>
           )}
         </Box>
+      )}
+
+      {/* ── Send Signature Request dialog ─────────────────────────────────────── */}
+      {sigSendRunId && (
+        <Dialog open onClose={() => setSigSendRunId(null)} maxWidth="xs" fullWidth>
+          <DialogTitle sx={{ fontSize: "0.95rem", pb: 1 }}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <SendOutlined sx={{ fontSize: 16 }} />
+              <span>Send Signature Request</span>
+            </Stack>
+          </DialogTitle>
+          <DialogContent>
+            <Stack spacing={1.5} sx={{ pt: 0.5 }}>
+              <TextField label="Recipient email *" size="small" fullWidth type="email"
+                value={sigRecipEmail} onChange={e => setSigRecipEmail(e.target.value)} />
+              <TextField label="Recipient name" size="small" fullWidth
+                value={sigRecipName} onChange={e => setSigRecipName(e.target.value)} />
+              <TextField label="Custom message (optional)" size="small" fullWidth multiline minRows={2}
+                placeholder="Add a personal note to the email…"
+                value={sigMessage} onChange={e => setSigMessage(e.target.value)} />
+              <Typography variant="caption" color="text.secondary">
+                A secure signing link will be emailed to the recipient. Link expires in 72 hours.
+              </Typography>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button size="small" onClick={() => setSigSendRunId(null)}>Cancel</Button>
+            <Button
+              size="small" variant="contained" color="warning"
+              disabled={sigSending || !sigRecipEmail.trim()}
+              startIcon={sigSending ? <CircularProgress size={12} /> : <SendOutlined sx={{ fontSize: 14 }} />}
+              onClick={handleSendSignatureRequest}
+            >
+              {sigSending ? "Sending…" : "Send Link"}
+            </Button>
+          </DialogActions>
+        </Dialog>
       )}
 
       {/* ── GOOD MOVEMENTS (QB Despatched) ────────────────────────────────── */}
@@ -745,6 +1161,324 @@ export default function ProjectChevronPanel({ projectId, productId }: Props) {
           )}
         </Box>
       )}
+
+      {/* ── PARTS & MATERIALS ─────────────────────────────────────────────── */}
+      {tab === "bom" && (
+        <Box sx={{ maxHeight: "65vh", overflowY: "auto", pr: 0.5 }}>
+          {/* toolbar */}
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap>
+            <Typography variant="caption" color="text.secondary">
+              Aggregated parts from all completed workflow runs in this project
+            </Typography>
+            <Box sx={{ flex: 1 }} />
+            <Tooltip title="Refresh">
+              <IconButton size="small" onClick={loadInstallAssets} disabled={installAssetsLoading}>
+                <RefreshOutlined sx={{ fontSize: 14 }} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Export CSV">
+              <span>
+                <IconButton size="small" onClick={handleExportCsv} disabled={bomSummary.length === 0}>
+                  <FileDownloadOutlined sx={{ fontSize: 14 }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Export Excel">
+              <span>
+                <IconButton size="small" onClick={handleExportExcel} disabled={bomSummary.length === 0}>
+                  <GridOnOutlined sx={{ fontSize: 14 }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Export PDF">
+              <span>
+                <IconButton size="small" onClick={() => setPdfLogoOpen(true)} disabled={bomSummary.length === 0}>
+                  <PictureAsPdfOutlined sx={{ fontSize: 14 }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+
+          {installAssetsLoading ? (
+            <CircularProgress size={20} />
+          ) : bomSummary.length === 0 ? (
+            <Typography variant="caption" color="text.secondary">
+              No parts recorded yet. Parts are captured when technicians complete workflow runs with BOM steps.
+            </Typography>
+          ) : (
+            <>
+              {/* Summary table */}
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: "rgba(255,255,255,0.04)" }}>
+                    <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700 }}>Item</TableCell>
+                    <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700 }}>Type</TableCell>
+                    <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700, textAlign: "center" }}>Expected</TableCell>
+                    <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700, textAlign: "center" }}>Actual</TableCell>
+                    <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700, textAlign: "center" }}>Variance</TableCell>
+                    <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700 }}>Inventory Capture</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {bomSummary.map((row) => {
+                    const diff = row.totalActual - row.totalExpected;
+                    return (
+                      <TableRow key={row.description} sx={{ verticalAlign: "top" }}>
+                        <TableCell sx={{ fontSize: 12, py: 0.75 }}>{row.description}</TableCell>
+                        <TableCell sx={{ fontSize: 11, py: 0.75 }}>
+                          <Chip size="small" label={row.isInventory ? "Inventory" : "Consumable"}
+                            color={row.isInventory ? "primary" : "default"} variant="outlined"
+                            sx={{ fontSize: 10, height: 18 }} />
+                        </TableCell>
+                        <TableCell sx={{ fontSize: 12, py: 0.75, textAlign: "center" }}>
+                          {row.totalExpected > 0 ? `${row.totalExpected} ${row.unitOfMeasure}` : "—"}
+                        </TableCell>
+                        <TableCell sx={{ fontSize: 12, py: 0.75, fontWeight: 600, textAlign: "center" }}>
+                          {row.totalActual} {row.unitOfMeasure}
+                        </TableCell>
+                        <TableCell sx={{
+                          fontSize: 12, py: 0.75, fontWeight: 700, textAlign: "center",
+                          color: diff === 0 ? "text.secondary" : diff > 0 ? "success.main" : "error.main"
+                        }}>
+                          {diff === 0 ? "—" : diff > 0 ? `+${diff}` : `${diff}`}
+                        </TableCell>
+                        <TableCell sx={{ fontSize: 11, py: 0.75 }}>
+                          {row.captures.length === 0 ? (
+                            <Typography variant="caption" color="text.disabled">—</Typography>
+                          ) : (
+                            <Stack spacing={0.75}>
+                              {row.captures.map((cap, i) => (
+                                <Box key={i} sx={{ pl: 0.5, borderLeft: "2px solid", borderColor: "divider" }}>
+                                  <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                                    <Typography variant="caption" fontWeight={700} color="text.primary">
+                                      {cap.assetTag}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                      Unit {cap.unitIdx}
+                                    </Typography>
+                                    {cap.assetLocation && (
+                                      <Typography variant="caption" color="text.disabled">· {cap.assetLocation}</Typography>
+                                    )}
+                                  </Stack>
+                                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                                    {Object.entries(cap.fields).filter(([, v]) => v).map(([k, v]) => (
+                                      <Typography key={k} variant="caption">
+                                        <strong>{k}:</strong> {v}
+                                      </Typography>
+                                    ))}
+                                  </Stack>
+                                  {(cap.installedBy || cap.installedAt) && (
+                                    <Typography variant="caption" color="text.disabled" sx={{ display: "block" }}>
+                                      {cap.installedBy && `By ${cap.installedBy}`}
+                                      {cap.installedAt && ` · ${new Date(cap.installedAt).toLocaleDateString()}`}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              ))}
+                            </Stack>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+
+              {/* Missing BOM assets */}
+              {missingBomAssets.length > 0 && (
+                <>
+                  <Divider sx={{ my: 1.5 }}>
+                    <Typography variant="caption" color="error.main" fontWeight={700}>
+                      BOM Not Recorded ({missingBomAssets.length})
+                    </Typography>
+                  </Divider>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: "rgba(211,47,47,0.06)" }}>
+                        <TableCell sx={{ fontSize: 11, py: 0.4, fontWeight: 700 }}>Asset Tag</TableCell>
+                        <TableCell sx={{ fontSize: 11, py: 0.4, fontWeight: 700 }}>Location</TableCell>
+                        <TableCell sx={{ fontSize: 11, py: 0.4, fontWeight: 700 }}>Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {missingBomAssets.map((a) => (
+                        <TableRow key={a.assetTag}>
+                          <TableCell sx={{ fontSize: 12, py: 0.5 }}>{a.assetTag}</TableCell>
+                          <TableCell sx={{ fontSize: 12, py: 0.5, color: "text.secondary" }}>{a.location || "—"}</TableCell>
+                          <TableCell sx={{ fontSize: 12, py: 0.5 }}>
+                            <Chip size="small" label={a.status} color="warning" variant="outlined"
+                              sx={{ fontSize: 10, height: 18 }} />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </>
+              )}
+            </>
+          )}
+        </Box>
+      )}
+
+      {/* ── HISTORY ───────────────────────────────────────────────────────── */}
+      {tab === "history" && (() => {
+        type ActivityEvent = {
+          key: string;
+          ts: Date;
+          icon: React.ReactNode;
+          color: string;
+          label: string;
+          detail: string;
+        };
+
+        const events: ActivityEvent[] = [];
+        for (const run of latestRuns) {
+          const asset = installAssets.find(a => a.id === run.assetId);
+          const name  = asset?.assetName ?? asset?.assetTag ?? run.assetId;
+          if (run.startedAt) events.push({
+            key: `${run.id}-start`, ts: new Date(run.startedAt),
+            icon: <BuildOutlined sx={{ fontSize: 14 }} />, color: "primary.main",
+            label: `Run started — ${name}`,
+            detail: run.completedByName ? `by ${run.completedByName}` : "",
+          });
+          if (run.completedAt) events.push({
+            key: `${run.id}-complete`, ts: new Date(run.completedAt),
+            icon: <CheckCircleOutlineOutlined sx={{ fontSize: 14 }} />, color: "success.main",
+            label: `Run completed — ${name}`,
+            detail: run.completedByName ? `by ${run.completedByName}` : "",
+          });
+          if (run.installerSignedAt) events.push({
+            key: `${run.id}-inst-sign`, ts: new Date(run.installerSignedAt),
+            icon: <DrawOutlined sx={{ fontSize: 14 }} />, color: "info.main",
+            label: `Installer signed off — ${name}`,
+            detail: run.completedByName ?? "",
+          });
+          if (run.customerSignedAt) events.push({
+            key: `${run.id}-cust-sign`, ts: new Date(run.customerSignedAt),
+            icon: <CheckCircleOutlineOutlined sx={{ fontSize: 14 }} />, color: "success.main",
+            label: `Customer signed off — ${name}`,
+            detail: "",
+          });
+          try {
+            const issues = JSON.parse(run.issuesJson || "[]") as Array<{
+              id: string; description: string; reportedAt: string; isBlocking: boolean; severity: string;
+            }>;
+            for (const iss of issues) {
+              if (!iss.reportedAt) continue;
+              events.push({
+                key: `${run.id}-iss-${iss.id}`, ts: new Date(iss.reportedAt),
+                icon: <ErrorOutlineOutlined sx={{ fontSize: 14 }} />,
+                color: iss.isBlocking ? "error.main" : iss.severity === "high" ? "warning.main" : "text.secondary",
+                label: `${iss.isBlocking ? "Blocking issue" : "Issue"} flagged — ${name}`,
+                detail: iss.description.slice(0, 80),
+              });
+            }
+          } catch { /* skip */ }
+        }
+        events.sort((a, b) => b.ts.getTime() - a.ts.getTime());
+
+        return (
+          <Box sx={{ maxHeight: "65vh", overflowY: "auto", pr: 0.5 }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Project activity — newest first
+              </Typography>
+              <Box sx={{ flex: 1 }} />
+              <Tooltip title="Refresh">
+                <IconButton size="small" onClick={loadInstallAssets} disabled={installAssetsLoading}>
+                  <RefreshOutlined sx={{ fontSize: 14 }} />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+            {installAssetsLoading ? <CircularProgress size={20} sx={{ display: "block", mx: "auto", mt: 4 }} /> :
+              events.length === 0 ? (
+                <Typography variant="caption" color="text.disabled">No activity recorded yet.</Typography>
+              ) : (
+                <Stack spacing={0}>
+                  {events.map((ev, idx) => (
+                    <Stack key={ev.key} direction="row" spacing={1.25} alignItems="flex-start">
+                      {/* Timeline line */}
+                      <Stack alignItems="center" sx={{ pt: 0.75 }}>
+                        <Box sx={{ color: ev.color, display: "flex" }}>{ev.icon}</Box>
+                        {idx < events.length - 1 && (
+                          <Box sx={{ width: 1, flex: 1, minHeight: 16, background: "rgba(255,255,255,0.08)", my: 0.25 }} />
+                        )}
+                      </Stack>
+                      <Stack sx={{ pb: 1.5, flex: 1, minWidth: 0 }}>
+                        <Stack direction="row" spacing={1} alignItems="baseline">
+                          <Typography variant="caption" fontWeight={600} sx={{ color: ev.color }}>{ev.label}</Typography>
+                          <Typography variant="caption" color="text.disabled" noWrap sx={{ flexShrink: 0 }}>
+                            {ev.ts.toLocaleDateString()} {ev.ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </Typography>
+                        </Stack>
+                        {ev.detail && (
+                          <Typography variant="caption" color="text.secondary">{ev.detail}</Typography>
+                        )}
+                      </Stack>
+                    </Stack>
+                  ))}
+                </Stack>
+              )
+            }
+          </Box>
+        );
+      })()}
+
+      {/* ── Project Report dialog ──────────────────────────────────────────── */}
+      <Dialog open={reportLogoOpen} onClose={() => setReportLogoOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontSize: "0.95rem", pb: 1 }}>Project Completion Report</DialogTitle>
+        <DialogContent>
+          <FormControlLabel
+            control={<Checkbox checked={reportLogo} onChange={e => setReportLogo(e.target.checked)} size="small" />}
+            label={<Typography variant="body2">Include business logo in header</Typography>}
+          />
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+            Includes assets, open issues, BOM, and signature status.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button size="small" onClick={() => setReportLogoOpen(false)}>Cancel</Button>
+          <Button
+            size="small" variant="contained"
+            disabled={exportingReport}
+            startIcon={exportingReport ? <CircularProgress size={12} /> : <AssessmentOutlined sx={{ fontSize: 14 }} />}
+            onClick={() => handleGenerateProjectReport(reportLogo)}
+          >
+            {exportingReport ? "Generating…" : "Generate PDF"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── PDF logo dialog ────────────────────────────────────────────────── */}
+      <Dialog open={pdfLogoOpen} onClose={() => setPdfLogoOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontSize: "0.95rem", pb: 1 }}>Export BOM as PDF</DialogTitle>
+        <DialogContent>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={includeLogo}
+                onChange={e => setIncludeLogo(e.target.checked)}
+                size="small"
+              />
+            }
+            label={<Typography variant="body2">Include business logo in header</Typography>}
+          />
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+            Logo is configured in Settings → Brand.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button size="small" onClick={() => setPdfLogoOpen(false)}>Cancel</Button>
+          <Button
+            size="small" variant="contained"
+            disabled={exportingPdf}
+            startIcon={exportingPdf ? <CircularProgress size={12} /> : <PictureAsPdfOutlined sx={{ fontSize: 14 }} />}
+            onClick={handleExportPdfConfirm}
+          >
+            {exportingPdf ? "Generating…" : "Export PDF"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

@@ -1969,7 +1969,7 @@ const Settings = () => {
                                         </Stack>
                                         <Typography variant="caption" color="text.secondary">
                                           {dep.isInventory
-                                            ? `Capture: ${dep.captureFields.join(", ") || "none"}`
+                                            ? `Qty: ${dep.defaultQty}${dep.unit ? " " + dep.unit : ""} · Capture: ${dep.captureFields.join(", ") || "none"}`
                                             : `Qty: ${dep.defaultQty}${dep.unit ? " " + dep.unit : ""} · $${dep.unitPrice}`}
                                         </Typography>
                                       </Stack>
@@ -3042,10 +3042,40 @@ const Settings = () => {
                 onClick={() => setDepForm((p) => ({ ...p, isInventory: true }))}
               />
             </Stack>
-            {depForm.isInventory ? (
+            <Stack direction="row" spacing={1}>
+              <TextField
+                label="Default Qty"
+                size="small"
+                type="number"
+                sx={{ width: 110 }}
+                value={depForm.defaultQty}
+                onChange={(e) => setDepForm((p) => ({ ...p, defaultQty: parseFloat(e.target.value) || 0 }))}
+                inputProps={{ min: 0, step: 0.1 }}
+              />
+              <TextField
+                label="Unit"
+                size="small"
+                sx={{ width: 90 }}
+                value={depForm.unit}
+                onChange={(e) => setDepForm((p) => ({ ...p, unit: e.target.value }))}
+                placeholder="ea, m, kg"
+              />
+              {!depForm.isInventory && (
+                <TextField
+                  label="Unit Price"
+                  size="small"
+                  type="number"
+                  sx={{ flex: 1 }}
+                  value={depForm.unitPrice}
+                  onChange={(e) => setDepForm((p) => ({ ...p, unitPrice: parseFloat(e.target.value) || 0 }))}
+                  inputProps={{ min: 0, step: 0.01 }}
+                />
+              )}
+            </Stack>
+            {depForm.isInventory && (
               <FormControl size="small" fullWidth>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
-                  Capture fields (select all that apply, or add custom)
+                  Capture fields per unit (select all that apply, or add custom)
                 </Typography>
                 <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ mb: 1 }}>
                   {CAPTURE_FIELD_OPTIONS.map((field) => (
@@ -3108,35 +3138,6 @@ const Settings = () => {
                   </Button>
                 </Stack>
               </FormControl>
-            ) : (
-              <Stack direction="row" spacing={1}>
-                <TextField
-                  label="Default Qty"
-                  size="small"
-                  type="number"
-                  sx={{ width: 110 }}
-                  value={depForm.defaultQty}
-                  onChange={(e) => setDepForm((p) => ({ ...p, defaultQty: parseFloat(e.target.value) || 0 }))}
-                  inputProps={{ min: 0, step: 0.1 }}
-                />
-                <TextField
-                  label="Unit"
-                  size="small"
-                  sx={{ width: 90 }}
-                  value={depForm.unit}
-                  onChange={(e) => setDepForm((p) => ({ ...p, unit: e.target.value }))}
-                  placeholder="m, pcs, kg"
-                />
-                <TextField
-                  label="Unit Price"
-                  size="small"
-                  type="number"
-                  sx={{ flex: 1 }}
-                  value={depForm.unitPrice}
-                  onChange={(e) => setDepForm((p) => ({ ...p, unitPrice: parseFloat(e.target.value) || 0 }))}
-                  inputProps={{ min: 0, step: 0.01 }}
-                />
-              </Stack>
             )}
             {depError && <Alert severity="error" sx={{ fontSize: 12 }}>{depError}</Alert>}
           </Stack>

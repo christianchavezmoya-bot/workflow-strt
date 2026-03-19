@@ -12,12 +12,14 @@ import {
   ErrorOutlined,
   ExpandLessOutlined,
   ExpandMoreOutlined,
+  FileDownloadOutlined,
   FileUploadOutlined,
   FolderOutlined,
   HistoryOutlined,
   HourglassEmptyOutlined,
   DragIndicatorOutlined,
   PlayArrowOutlined,
+  PrintOutlined,
   RefreshOutlined,
   ReportProblemOutlined,
   ViewColumnOutlined,
@@ -37,6 +39,9 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormControlLabel,
+  FormGroup,
+  FormLabel,
   IconButton,
   InputLabel,
   LinearProgress,
@@ -46,8 +51,11 @@ import {
   MenuItem,
   Paper,
   Popover,
+  Radio,
+  RadioGroup,
   Select,
   Stack,
+  Switch,
   Tab,
   Table,
   TableBody,
@@ -56,6 +64,8 @@ import {
   TableRow,
   Tabs,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -78,6 +88,12 @@ import { brandSettingsService } from "../../services/brandSettingsService";
 import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
+import {
+  generateAssetListReport,
+  ALL_PRINT_COLUMNS,
+  type PrintRow,
+  type GroupByKey,
+} from "../../utils/generateAssetListReport";
 import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
@@ -250,6 +266,7 @@ const AssetInstallationPage = () => {
   const [healthMap, setHealthMap] = useState<Record<string, AssetHealth>>({});
 
   const [expandedAssetId, setExpandedAssetId] = useState<string | null>(null);
+  const [expandedBomAsgnId, setExpandedBomAsgnId] = useState<string | null>(null);
 
   // Add dialog
   const [addOpen, setAddOpen] = useState(false);
@@ -335,6 +352,43 @@ const AssetInstallationPage = () => {
   const [csvImportOpen, setCsvImportOpen] = useState(false);
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
   const [csvImporting, setCsvImporting] = useState(false);
+
+  // Bulk selection
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
+  const [bulkTechOpen, setBulkTechOpen] = useState(false);
+  const [bulkTechId, setBulkTechId] = useState("");
+  const [bulkTechSaving, setBulkTechSaving] = useState(false);
+  const [bulkWfOpen, setBulkWfOpen] = useState(false);
+  const [bulkWfConfigId, setBulkWfConfigId] = useState("");
+  const [bulkWfTypeId, setBulkWfTypeId] = useState("");
+  const [bulkWfSaving, setBulkWfSaving] = useState(false);
+  // Bulk documents
+  const [bulkDocsOpen, setBulkDocsOpen] = useState(false);
+  const [bulkDocsFile, setBulkDocsFile] = useState<File | null>(null);
+  const [bulkDocsType, setBulkDocsType] = useState("Technical");
+  const [bulkDocsName, setBulkDocsName] = useState("");
+  const [bulkDocsSaving, setBulkDocsSaving] = useState(false);
+  const [bulkDocsResult, setBulkDocsResult] = useState<string | null>(null);
+  // Print / PDF dialog
+  const [printOpen, setPrintOpen]         = useState(false);
+  const [printScope, setPrintScope]       = useState<"selection" | "visible" | "custom">("visible");
+  const [printTechId, setPrintTechId]     = useState("");
+  const [printModel, setPrintModel]       = useState("");
+  const [printStatuses, setPrintStatuses] = useState<string[]>(["NotStarted", "InProgress", "Complete", "Issue"]);
+  const [printPendingSig, setPrintPendingSig] = useState(false);
+  const [printColumns, setPrintColumns]   = useState<(keyof PrintRow)[]>([
+    "assetTag", "assetName", "serialNumber", "assetModel", "location",
+    "assignedTech", "status", "project", "sigStatus",
+  ]);
+  const [printGroupBy, setPrintGroupBy]   = useState<GroupByKey>("none");
+  const [printGenerating, setPrintGenerating] = useState(false);
+
+  // Override warning — fires before any bulk action when existing data would be affected
+  const [bulkWarnOpen, setBulkWarnOpen] = useState(false);
+  const [bulkWarnTitle, setBulkWarnTitle] = useState("");
+  const [bulkWarnBody, setBulkWarnBody] = useState("");
+  const [bulkWarnRows, setBulkWarnRows] = useState<{ assetTag: string; current: string }[]>([]);
+  const bulkWarnProceedRef = useRef<(() => void) | null>(null);
 
   // PDF report
   const [reportGenerating, setReportGenerating] = useState<string | null>(null);
@@ -504,6 +558,74 @@ const AssetInstallationPage = () => {
     );
   }, [publishedWfConfigs]);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
+
+  // ── Print scope computation (needs userMap / projectMap / configMap / runsMap) ──
+  const printRows = useMemo((): PrintRow[] => {
+    let pool = assets;
+    if (printScope === "selection") {
+      pool = assets.filter((a) => selectedAssetIds.has(a.id));
+    } else if (printScope === "visible") {
+      pool = visibleAssets;
+    } else {
+      pool = assets.filter((a) => {
+        if (printTechId && a.assignedUserId !== printTechId) return false;
+        if (printModel && !(a.assetModel ?? "").toLowerCase().includes(printModel.toLowerCase())) return false;
+        if (!printStatuses.includes(a.status)) return false;
+        if (printPendingSig) {
+          const runs = runsMap[a.id] ?? [];
+          if (!runs[0] || runs[0].signatureStatus !== "PendingCustomer") return false;
+        }
+        return true;
+      });
+    }
+    const statusLabel: Record<string, string> = {
+      NotStarted: "Not Started", InProgress: "In Progress", Complete: "Complete", Issue: "Issue",
+    };
+    return pool.map((a): PrintRow => {
+      const tech        = a.assignedUserId ? userMap.get(a.assignedUserId) : undefined;
+      const proj        = projectMap.get(a.projectId);
+      const runs        = runsMap[a.id] ?? [];
+      const latestRun   = runs[0];
+      const assignments = assignmentsMap[a.id] ?? [];
+      let wfStatus = "—";
+      if (assignments.length > 0) {
+        const names = assignments.map((x) => x.workflowTypeName || "Workflow").join(", ");
+        wfStatus = latestRun
+          ? `${latestRun.status === "Complete" ? "Done" : "In Progress"} (${names})`
+          : `Assigned (${names})`;
+      }
+      let sigStatus = "—";
+      if (latestRun) {
+        const ss = latestRun.signatureStatus ?? "";
+        if (ss === "PendingCustomer") sigStatus = "Pending Customer";
+        else if (ss === "Signed")     sigStatus = "Signed";
+        else if (ss === "Waived")     sigStatus = "Waived";
+      }
+      return {
+        assetTag:     a.assetTag     ?? "",
+        assetName:    a.assetName    ?? "",
+        serialNumber: a.serialNumber ?? "",
+        assetModel:   a.assetModel   ?? "",
+        manufacturer: a.manufacturer ?? "",
+        location:     a.location     ?? "",
+        assignedTech: tech?.fullName ?? "",
+        status:       statusLabel[a.status] ?? a.status,
+        project:      proj ? `${proj.jobNumber} — ${proj.customerName}` : "",
+        siteName:     (proj as unknown as Record<string, unknown>)?.siteName as string ?? "",
+        notes:        a.notes        ?? "",
+        configType:   a.configLabel  ?? "",
+        wfStatus,
+        sigStatus,
+        _techId:    a.assignedUserId ?? "",
+        _statusRaw: a.status,
+        _projectId: a.projectId      ?? "",
+      };
+    });
+  }, [
+    printScope, assets, visibleAssets, selectedAssetIds,
+    printTechId, printModel, printStatuses, printPendingSig,
+    userMap, projectMap, runsMap, assignmentsMap,
+  ]);
 
   const visibleColumns = useMemo(() => {
     if (archiveMode) {
@@ -688,9 +810,7 @@ const AssetInstallationPage = () => {
             isInventory: dep.isInventory,
             expectedQty: dep.defaultQty,
             unitOfMeasure: dep.unit || "ea",
-            notes: dep.isInventory && dep.captureFields.length > 0
-              ? `Capture: ${dep.captureFields.join(", ")}`
-              : undefined,
+            captureFields: dep.isInventory && dep.captureFields.length > 0 ? dep.captureFields : undefined,
           });
         });
       });
@@ -1845,8 +1965,53 @@ const AssetInstallationPage = () => {
                           <Chip size="small" label={`${configRuns.length} runs`} variant="outlined"
                             sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }} />
                         )}
+                        {(() => {
+                          // Collect all BOM items from completed runs for this assignment
+                          const allBom: import("../../types/workflow").BomActualItem[] = [];
+                          for (const r of configRuns) {
+                            if (!r.bomActualJson) continue;
+                            try { allBom.push(...JSON.parse(r.bomActualJson)); } catch { /* ignore */ }
+                          }
+                          if (allBom.length === 0) return null;
+                          const invCount = allBom.filter(b => b.isInventory).reduce((s, b) => s + b.actualQty, 0);
+                          const bomKey = `${asgn.id}`;
+                          const isBomOpen = expandedBomAsgnId === bomKey;
+                          return (
+                            <Chip size="small"
+                              label={`${allBom.length} part${allBom.length !== 1 ? "s" : ""}${invCount > 0 ? ` · ${invCount} inventory` : ""}`}
+                              color="info" variant="outlined" clickable
+                              sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }}
+                              onClick={(e) => { e.stopPropagation(); setExpandedBomAsgnId(isBomOpen ? null : bomKey); }}
+                            />
+                          );
+                        })()}
                       </Stack>
                     )}
+                    {/* BOM expandable detail */}
+                    {expandedBomAsgnId === asgn.id && (() => {
+                      const allBom: import("../../types/workflow").BomActualItem[] = [];
+                      for (const r of configRuns) {
+                        if (!r.bomActualJson) continue;
+                        try { allBom.push(...JSON.parse(r.bomActualJson)); } catch { /* ignore */ }
+                      }
+                      return allBom.length === 0 ? null : (
+                        <Stack spacing={0.5} sx={{ mt: 0.5, pl: 0.5, borderLeft: "2px solid", borderColor: "info.main" }}>
+                          {allBom.map((item, idx) => (
+                            <Box key={idx}>
+                              <Stack direction="row" spacing={0.75} alignItems="center">
+                                <Typography variant="caption" fontWeight={600}>{item.description}</Typography>
+                                <Typography variant="caption" color="text.secondary">× {item.actualQty} {item.unitOfMeasure}</Typography>
+                              </Stack>
+                              {item.isInventory && (item.unitCaptures ?? []).map((fields, i) => (
+                                <Typography key={i} variant="caption" color="text.secondary" display="block" sx={{ pl: 1 }}>
+                                  u{i + 1}: {Object.entries(fields).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(" · ") || "—"}
+                                </Typography>
+                              ))}
+                            </Box>
+                          ))}
+                        </Stack>
+                      );
+                    })()}
                   </Box>
                   {latestRun && (
                     <Chip
@@ -2135,20 +2300,153 @@ const AssetInstallationPage = () => {
           value={search} onChange={(e) => setSearch(e.target.value)} sx={{ minWidth: 260 }} />
       </Stack>
 
-      {/* Table toolbar */}
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <Tooltip title={archiveMode ? "Exit archive view" : "Show completed assets archive"}>
+      {/* Bulk actions toolbar — visible when ≥1 asset is selected */}
+      {selectedAssetIds.size > 0 && (
+        <Paper className="glass-card" sx={{ px: 2, py: 1, display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+          <Typography variant="body2" fontWeight={600}>
+            {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""} selected
+          </Typography>
+
+          {/* Assign workflow */}
           <Button
             size="small"
-            variant={archiveMode ? "contained" : "outlined"}
-            color={archiveMode ? "success" : "inherit"}
-            startIcon={<ArchiveOutlined fontSize="small" />}
-            onClick={() => setArchiveMode((v) => !v)}
-            sx={{ fontSize: 12 }}
+            variant="outlined"
+            onClick={() => {
+              setBulkWfConfigId(""); setBulkWfTypeId("");
+              const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
+              const withWf = sel.filter((a) =>
+                (assignmentsMap[a.id] && assignmentsMap[a.id].length > 0) ||
+                a.status === "InProgress" || a.status === "Complete"
+              );
+              if (withWf.length === 0) { setBulkWfOpen(true); return; }
+              setBulkWarnTitle("Some assets already have workflow assignments");
+              setBulkWarnBody(
+                "These assets already have one or more workflow assignments. Adding a new assignment will not remove existing ones. Assets that are In Progress or Completed may behave unexpectedly with additional assignments."
+              );
+              setBulkWarnRows(withWf.map((a) => ({
+                assetTag: a.assetTag,
+                current: assignmentsMap[a.id]?.map((x) => x.workflowTypeName || x.workflowTypeId).join(", ")
+                  || a.status,
+              })));
+              bulkWarnProceedRef.current = () => setBulkWfOpen(true);
+              setBulkWarnOpen(true);
+            }}
           >
-            {archiveMode ? "Archive View — Exit" : "Archive"}
+            Assign workflow
           </Button>
-        </Tooltip>
+
+          {/* Assign technician */}
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => {
+              setBulkTechId("");
+              const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
+              const withTech = sel.filter((a) => !!a.assignedUserId);
+              if (withTech.length === 0) { setBulkTechOpen(true); return; }
+              setBulkWarnTitle("Some assets already have a technician assigned");
+              setBulkWarnBody(
+                "These assets already have a technician assigned. Proceeding will replace their current assignment."
+              );
+              setBulkWarnRows(withTech.map((a) => ({
+                assetTag: a.assetTag,
+                current: userMap.get(a.assignedUserId!)?.fullName ?? "Unknown",
+              })));
+              bulkWarnProceedRef.current = () => setBulkTechOpen(true);
+              setBulkWarnOpen(true);
+            }}
+          >
+            Assign technician
+          </Button>
+
+          {/* Upload documents */}
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => {
+              setBulkDocsFile(null); setBulkDocsType("Technical"); setBulkDocsName(""); setBulkDocsResult(null);
+              const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
+              const atLimit = sel.filter((a) => (docsCountMap[a.id] ?? 0) >= 3);
+              const withDocs = sel.filter((a) => (docsCountMap[a.id] ?? 0) > 0 && (docsCountMap[a.id] ?? 0) < 3);
+              const affected = [
+                ...atLimit.map((a) => ({ assetTag: a.assetTag, current: "3/3 docs — will be skipped" })),
+                ...withDocs.map((a) => ({ assetTag: a.assetTag, current: `${docsCountMap[a.id]}/3 docs (existing kept)` })),
+              ];
+              if (affected.length === 0) { setBulkDocsOpen(true); return; }
+              setBulkWarnTitle("Some assets already have documents");
+              setBulkWarnBody(
+                "Assets at the 3-document limit will be skipped. For assets with fewer than 3 documents, existing documents will NOT be deleted — the new document will be added alongside them."
+              );
+              setBulkWarnRows(affected);
+              bulkWarnProceedRef.current = () => setBulkDocsOpen(true);
+              setBulkWarnOpen(true);
+            }}
+          >
+            Upload documents
+          </Button>
+
+          {/* Export CSV */}
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => {
+              const selected = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
+              const headers = ["assetTag", "assetName", "serialNumber", "assetModel", "manufacturer", "location", "status"];
+              const csv = [
+                headers.join(","),
+                ...selected.map((a) =>
+                  headers.map((h) => `"${String((a as unknown as Record<string, unknown>)[h] ?? "").replace(/"/g, '""')}"`).join(",")
+                ),
+              ].join("\n");
+              const blob = new Blob([csv], { type: "text/csv" });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = `assets-export-${new Date().toISOString().slice(0, 10)}.csv`;
+              link.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            Export CSV
+          </Button>
+
+          <Button size="small" color="inherit" onClick={() => setSelectedAssetIds(new Set())}>
+            Clear
+          </Button>
+        </Paper>
+      )}
+
+      {/* Table toolbar */}
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Tooltip title={archiveMode ? "Exit archive view" : "Show completed assets archive"}>
+            <Button
+              size="small"
+              variant={archiveMode ? "contained" : "outlined"}
+              color={archiveMode ? "success" : "inherit"}
+              startIcon={<ArchiveOutlined fontSize="small" />}
+              onClick={() => setArchiveMode((v) => !v)}
+              sx={{ fontSize: 12 }}
+            >
+              {archiveMode ? "Archive View — Exit" : "Archive"}
+            </Button>
+          </Tooltip>
+          <Tooltip title="Print / Save PDF">
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<PrintOutlined fontSize="small" />}
+              onClick={() => {
+                // Pre-scope to selection if any are selected
+                setPrintScope(selectedAssetIds.size > 0 ? "selection" : "visible");
+                setPrintOpen(true);
+              }}
+              sx={{ fontSize: 12 }}
+            >
+              Print / PDF
+            </Button>
+          </Tooltip>
+        </Stack>
         {!archiveMode && can.editFields && (
           <Tooltip title="Column settings">
             <IconButton size="small" onClick={openColumnSettings} sx={{ opacity: 0.7, "&:hover": { opacity: 1 } }}>
@@ -2181,6 +2479,17 @@ const AssetInstallationPage = () => {
           <Table size="small">
             <TableHead>
               <TableRow>
+                <TableCell sx={{ width: 28, px: 0.5 }}>
+                  <Checkbox
+                    size="small"
+                    indeterminate={selectedAssetIds.size > 0 && selectedAssetIds.size < visibleAssets.length}
+                    checked={visibleAssets.length > 0 && selectedAssetIds.size === visibleAssets.length}
+                    onChange={(e) => {
+                      if (e.target.checked) setSelectedAssetIds(new Set(visibleAssets.map((a) => a.id)));
+                      else setSelectedAssetIds(new Set());
+                    }}
+                  />
+                </TableCell>
                 <TableCell sx={{ width: 36, px: 1 }} />
                 <TableCell><Typography variant="caption" fontWeight={700}>Asset Tag</Typography></TableCell>
                 {visibleColumns.map((col) => (
@@ -2203,8 +2512,22 @@ const AssetInstallationPage = () => {
                   <TableRow
                     key={asset.id}
                     hover
-                    sx={{ bgcolor: hasIssue ? "rgba(211,47,47,0.04)" : undefined }}
+                    sx={{ bgcolor: hasIssue ? "rgba(211,47,47,0.04)" : selectedAssetIds.has(asset.id) ? "rgba(var(--primary-rgb,25,118,210),0.08)" : undefined }}
                   >
+                    <TableCell sx={{ px: 0.5 }}>
+                      <Checkbox
+                        size="small"
+                        checked={selectedAssetIds.has(asset.id)}
+                        onChange={(e) => {
+                          setSelectedAssetIds((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(asset.id);
+                            else next.delete(asset.id);
+                            return next;
+                          });
+                        }}
+                      />
+                    </TableCell>
                     <TableCell sx={{ px: 1 }}>
                       <IconButton size="small" onClick={() => {
                         const nextId = isExpanded ? null : asset.id;
@@ -3013,6 +3336,467 @@ const AssetInstallationPage = () => {
           />
         ) : null;
       })()}
+      {/* Override warning dialog — appears before any destructive bulk action */}
+      <Dialog
+        open={bulkWarnOpen}
+        onClose={() => setBulkWarnOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { border: "1px solid", borderColor: "warning.main" } }}
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, color: "warning.main" }}>
+          <ReportProblemOutlined fontSize="small" />
+          {bulkWarnTitle}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>{bulkWarnBody}</Typography>
+          <Box
+            sx={{
+              maxHeight: 220,
+              overflowY: "auto",
+              borderRadius: 1,
+              border: "1px solid var(--stroke)",
+              bgcolor: "rgba(0,0,0,0.04)",
+            }}
+          >
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 700, py: 0.5 }}>Asset Tag</TableCell>
+                  <TableCell sx={{ fontWeight: 700, py: 0.5 }}>Current state</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {bulkWarnRows.map((row) => (
+                  <TableRow key={row.assetTag}>
+                    <TableCell sx={{ py: 0.5 }}>{row.assetTag}</TableCell>
+                    <TableCell sx={{ py: 0.5, color: "text.secondary" }}>{row.current}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => setBulkWarnOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={() => {
+              setBulkWarnOpen(false);
+              bulkWarnProceedRef.current?.();
+            }}
+          >
+            Understood — continue
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk: Assign technician dialog */}
+      <Dialog open={bulkTechOpen} onClose={() => setBulkTechOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Assign technician to {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""}</DialogTitle>
+        <DialogContent>
+          <FormControl fullWidth sx={{ mt: 1 }}>
+            <InputLabel>Technician</InputLabel>
+            <Select label="Technician" value={bulkTechId} onChange={(e) => setBulkTechId(e.target.value)}>
+              <MenuItem value="">(Unassign)</MenuItem>
+              {users.filter((u) => u.isActive).map((u) => (
+                <MenuItem key={u.id} value={u.id}>{u.fullName}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => setBulkTechOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={bulkTechSaving}
+            onClick={async () => {
+              setBulkTechSaving(true);
+              try {
+                await Promise.all(
+                  [...selectedAssetIds].map((assetId) =>
+                    projectAssetService.update(assetId, { assignedUserId: bulkTechId || null } as Parameters<typeof projectAssetService.update>[1])
+                  )
+                );
+                refreshAssets();
+                setSelectedAssetIds(new Set());
+                setBulkTechOpen(false);
+              } finally {
+                setBulkTechSaving(false);
+              }
+            }}
+          >
+            {bulkTechSaving ? "Saving…" : "Apply"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk: Assign workflow dialog */}
+      <Dialog open={bulkWfOpen} onClose={() => setBulkWfOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Assign workflow to {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl fullWidth>
+              <InputLabel>Workflow type</InputLabel>
+              <Select label="Workflow type" value={bulkWfTypeId} onChange={(e) => setBulkWfTypeId(e.target.value)}>
+                {workflowTypes.map((wt) => (
+                  <MenuItem key={wt.id} value={wt.id}>{wt.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>Workflow config</InputLabel>
+              <Select label="Workflow config" value={bulkWfConfigId} onChange={(e) => setBulkWfConfigId(e.target.value)}>
+                {latestPublishedWfConfigs.map((wc) => (
+                  <MenuItem key={wc.id} value={wc.id}>{wc.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => setBulkWfOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={bulkWfSaving || !bulkWfTypeId || !bulkWfConfigId}
+            onClick={async () => {
+              setBulkWfSaving(true);
+              try {
+                await Promise.all(
+                  [...selectedAssetIds].map((assetId) =>
+                    assetWorkflowAssignmentService.create(assetId, bulkWfConfigId, bulkWfTypeId)
+                  )
+                );
+                setSelectedAssetIds(new Set());
+                setBulkWfOpen(false);
+              } finally {
+                setBulkWfSaving(false);
+              }
+            }}
+          >
+            {bulkWfSaving ? "Saving…" : "Apply"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      {/* ── Print / PDF dialog ─────────────────────────────────────────────── */}
+      <Dialog
+        open={printOpen}
+        onClose={() => setPrintOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{ className: "glass-card", sx: { bgcolor: "var(--panel)", border: "1px solid var(--stroke)" } }}
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <PrintOutlined fontSize="small" />
+          Print / Save PDF
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={3} sx={{ pt: 1 }}>
+
+            {/* ── Scope ── */}
+            <Box>
+              <FormLabel component="legend" sx={{ fontWeight: 700, mb: 1, fontSize: 13 }}>Scope</FormLabel>
+              <RadioGroup
+                row
+                value={printScope}
+                onChange={(e) => setPrintScope(e.target.value as typeof printScope)}
+              >
+                <FormControlLabel
+                  value="selection"
+                  control={<Radio size="small" />}
+                  label={`Current selection (${selectedAssetIds.size})`}
+                  disabled={selectedAssetIds.size === 0}
+                />
+                <FormControlLabel value="visible" control={<Radio size="small" />} label={`All visible (${visibleAssets.length})`} />
+                <FormControlLabel value="custom"  control={<Radio size="small" />} label="Custom filter" />
+              </RadioGroup>
+            </Box>
+
+            {/* ── Custom filters ── */}
+            {printScope === "custom" && (
+              <Box sx={{ pl: 2, borderLeft: "3px solid var(--stroke)" }}>
+                <Typography variant="subtitle2" sx={{ mb: 1.5 }}>Custom filters</Typography>
+                <Stack spacing={2}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                    <FormControl size="small" sx={{ minWidth: 200 }}>
+                      <InputLabel>Technician</InputLabel>
+                      <Select label="Technician" value={printTechId} onChange={(e) => setPrintTechId(e.target.value)}>
+                        <MenuItem value="">(All technicians)</MenuItem>
+                        {users.filter((u) => u.isActive).map((u) => (
+                          <MenuItem key={u.id} value={u.id}>{u.fullName}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <TextField
+                      size="small"
+                      label="Asset model contains"
+                      value={printModel}
+                      onChange={(e) => setPrintModel(e.target.value)}
+                      sx={{ minWidth: 200 }}
+                    />
+                  </Stack>
+
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>Statuses to include</Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      {(["NotStarted", "InProgress", "Complete", "Issue"] as const).map((s) => {
+                        const labels: Record<string, string> = {
+                          NotStarted: "Not Started", InProgress: "In Progress", Complete: "Complete", Issue: "Issue",
+                        };
+                        const checked = printStatuses.includes(s);
+                        return (
+                          <FormControlLabel
+                            key={s}
+                            control={
+                              <Checkbox
+                                size="small"
+                                checked={checked}
+                                onChange={() =>
+                                  setPrintStatuses((prev) =>
+                                    checked ? prev.filter((x) => x !== s) : [...prev, s]
+                                  )
+                                }
+                              />
+                            }
+                            label={labels[s]}
+                          />
+                        );
+                      })}
+                    </Stack>
+                  </Box>
+
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        size="small"
+                        checked={printPendingSig}
+                        onChange={(e) => setPrintPendingSig(e.target.checked)}
+                      />
+                    }
+                    label="Pending customer signature only"
+                  />
+                </Stack>
+              </Box>
+            )}
+
+            {/* ── Column picker ── */}
+            <Box>
+              <FormLabel component="legend" sx={{ fontWeight: 700, mb: 1, fontSize: 13 }}>Columns to include</FormLabel>
+              <FormGroup row>
+                {ALL_PRINT_COLUMNS.filter((c) => !c.id.startsWith("_")).map((col) => {
+                  const checked = printColumns.includes(col.id);
+                  const isAlways = col.id === "assetTag";
+                  return (
+                    <FormControlLabel
+                      key={col.id}
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={checked || isAlways}
+                          disabled={isAlways}
+                          onChange={() =>
+                            setPrintColumns((prev) =>
+                              checked ? prev.filter((x) => x !== col.id) : [...prev, col.id]
+                            )
+                          }
+                        />
+                      }
+                      label={col.label}
+                      sx={{ mr: 2, mb: 0.5 }}
+                    />
+                  );
+                })}
+              </FormGroup>
+            </Box>
+
+            {/* ── Group by ── */}
+            <Box>
+              <FormLabel component="legend" sx={{ fontWeight: 700, mb: 1, fontSize: 13 }}>Group by</FormLabel>
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={printGroupBy}
+                onChange={(_, v) => { if (v) setPrintGroupBy(v as GroupByKey); }}
+              >
+                <ToggleButton value="none">None</ToggleButton>
+                <ToggleButton value="technician">Technician</ToggleButton>
+                <ToggleButton value="status">Status</ToggleButton>
+                <ToggleButton value="project">Project</ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
+
+            {/* ── Preview count ── */}
+            <Alert
+              severity={printRows.length === 0 ? "warning" : "info"}
+              sx={{ py: 0.5 }}
+            >
+              {printRows.length === 0
+                ? "No assets match the current filters."
+                : `${printRows.length} asset${printRows.length !== 1 ? "s" : ""} will be included · ${printColumns.length} column${printColumns.length !== 1 ? "s" : ""} · grouped by ${printGroupBy}`}
+            </Alert>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2, gap: 1 }}>
+          <Button variant="outlined" onClick={() => setPrintOpen(false)}>Cancel</Button>
+          <Button
+            variant="outlined"
+            startIcon={<FileDownloadOutlined fontSize="small" />}
+            disabled={printRows.length === 0 || printGenerating}
+            onClick={async () => {
+              setPrintGenerating(true);
+              try {
+                const logoBase64 = await brandSettingsService.get().then((s) => s?.logoBase64 ?? null).catch(() => null);
+                await generateAssetListReport({
+                  rows: printRows,
+                  columns: printColumns.includes("assetTag") ? printColumns : ["assetTag", ...printColumns],
+                  groupBy: printGroupBy,
+                  meta: {
+                    productName: activeProduct?.name ?? "",
+                    filterSummary: printScope === "selection"
+                      ? `${printRows.length} selected assets`
+                      : printScope === "custom"
+                      ? [printTechId ? `Tech: ${userMap.get(printTechId)?.fullName}` : "", printModel ? `Model: ${printModel}` : "", printPendingSig ? "Pending Sig" : ""].filter(Boolean).join(" · ")
+                      : "All visible assets",
+                    exportDate: new Date().toLocaleDateString(),
+                    logoBase64,
+                  },
+                  mode: "download",
+                  filename: `assets-${activeProduct?.name ?? "report"}-${new Date().toISOString().slice(0, 10)}.pdf`,
+                });
+              } finally {
+                setPrintGenerating(false);
+              }
+            }}
+          >
+            {printGenerating ? "Generating…" : "Download PDF"}
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<PrintOutlined fontSize="small" />}
+            disabled={printRows.length === 0 || printGenerating}
+            onClick={async () => {
+              setPrintGenerating(true);
+              try {
+                const logoBase64 = await brandSettingsService.get().then((s) => s?.logoBase64 ?? null).catch(() => null);
+                await generateAssetListReport({
+                  rows: printRows,
+                  columns: printColumns.includes("assetTag") ? printColumns : ["assetTag", ...printColumns],
+                  groupBy: printGroupBy,
+                  meta: {
+                    productName: activeProduct?.name ?? "",
+                    filterSummary: printScope === "selection"
+                      ? `${printRows.length} selected assets`
+                      : printScope === "custom"
+                      ? [printTechId ? `Tech: ${userMap.get(printTechId)?.fullName}` : "", printModel ? `Model: ${printModel}` : "", printPendingSig ? "Pending Sig" : ""].filter(Boolean).join(" · ")
+                      : "All visible assets",
+                    exportDate: new Date().toLocaleDateString(),
+                    logoBase64,
+                  },
+                  mode: "print",
+                });
+              } finally {
+                setPrintGenerating(false);
+              }
+            }}
+          >
+            {printGenerating ? "Generating…" : "Print"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk: Upload documents dialog */}
+      <Dialog open={bulkDocsOpen} onClose={() => setBulkDocsOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Upload document to {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="info" sx={{ fontSize: 12 }}>
+              The same file will be linked to every selected asset. Assets already at 3 documents will be skipped automatically.
+            </Alert>
+            <Button variant="outlined" component="label" sx={{ justifyContent: "flex-start", textTransform: "none" }}>
+              {bulkDocsFile ? bulkDocsFile.name : "Choose file…"}
+              <input
+                type="file"
+                hidden
+                accept=".pdf,.xlsx,.xls,.docx,.doc,.json,.png,.jpg,.jpeg"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null;
+                  setBulkDocsFile(f);
+                  if (f && !bulkDocsName) setBulkDocsName(f.name.replace(/\.[^.]+$/, ""));
+                }}
+              />
+            </Button>
+            <TextField
+              label="Document name"
+              size="small"
+              fullWidth
+              value={bulkDocsName}
+              onChange={(e) => setBulkDocsName(e.target.value)}
+            />
+            <FormControl fullWidth size="small">
+              <InputLabel>Type</InputLabel>
+              <Select label="Type" value={bulkDocsType} onChange={(e) => setBulkDocsType(e.target.value)}>
+                {["Technical", "Drawings", "Procedures", "Authority to Work", "Tips & Tricks", "Tech Bulletins", "Informative", "Other"].map((t) => (
+                  <MenuItem key={t} value={t}>{t}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {bulkDocsSaving && <LinearProgress />}
+            {bulkDocsResult && (
+              <Alert severity={bulkDocsResult.startsWith("Done") ? "success" : "error"} sx={{ fontSize: 12 }}>
+                {bulkDocsResult}
+              </Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => setBulkDocsOpen(false)} disabled={bulkDocsSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={!bulkDocsFile || bulkDocsSaving}
+            onClick={async () => {
+              if (!bulkDocsFile) return;
+              setBulkDocsSaving(true);
+              setBulkDocsResult(null);
+              let skipped = 0;
+              let failed = 0;
+              let uploaded = 0;
+              const ids = [...selectedAssetIds];
+              await Promise.all(ids.map(async (assetId) => {
+                if ((docsCountMap[assetId] ?? 0) >= 3) { skipped++; return; }
+                try {
+                  await assetDocumentLinkService.uploadAndLink(
+                    assetId,
+                    bulkDocsFile,
+                    bulkDocsType,
+                    bulkDocsName || bulkDocsFile.name.replace(/\.[^.]+$/, ""),
+                    undefined,
+                    undefined,
+                    currentUser?.fullName ?? undefined,
+                  );
+                  uploaded++;
+                  setDocsCountMap((prev) => ({ ...prev, [assetId]: (prev[assetId] ?? 0) + 1 }));
+                } catch {
+                  failed++;
+                }
+              }));
+              setBulkDocsSaving(false);
+              const parts: string[] = [];
+              if (uploaded) parts.push(`${uploaded} uploaded`);
+              if (skipped) parts.push(`${skipped} skipped (at limit)`);
+              if (failed)  parts.push(`${failed} failed`);
+              setBulkDocsResult(`Done — ${parts.join(", ")}.`);
+              if (failed === 0) {
+                setSelectedAssetIds(new Set());
+              }
+            }}
+          >
+            {bulkDocsSaving ? "Uploading…" : "Upload to all"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 };

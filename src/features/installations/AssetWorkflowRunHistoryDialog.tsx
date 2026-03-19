@@ -37,6 +37,7 @@ import {
 } from "@mui/material";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import type { AssetWorkflowRun, RunIssue, StepResult } from "../../types/assetWorkflowRun";
+import type { BomActualItem } from "../../types/workflow";
 import type { WorkflowAssignment } from "../../types/workflowType";
 import type { ProjectAsset } from "../../types/projectAsset";
 
@@ -490,6 +491,52 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
                           No step data captured.
                         </Typography>
                       )}
+
+                      {/* BOM — Parts installed */}
+                      {(() => {
+                        let bomItems: BomActualItem[] = [];
+                        try { bomItems = JSON.parse(run.bomActualJson ?? "[]") as BomActualItem[]; } catch { /* ignore */ }
+                        const inventoryItems = bomItems.filter((b) => b.isInventory && (b.unitCaptures ?? []).some((uc) => Object.values(uc).some(Boolean)));
+                        if (inventoryItems.length === 0) return null;
+                        return (
+                          <>
+                            <Typography variant="caption" fontWeight={700} color="text.secondary"
+                              sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 0.75, mt: 0.5 }}>
+                              Parts Installed — Inventory Capture
+                            </Typography>
+                            <Table size="small" sx={{ mb: 1.5 }}>
+                              <TableHead>
+                                <TableRow sx={{ bgcolor: "rgba(255,255,255,0.04)" }}>
+                                  <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700 }}>Item</TableCell>
+                                  <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700 }}>Unit</TableCell>
+                                  <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700 }}>Captured Data</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {inventoryItems.flatMap((item) =>
+                                  (item.unitCaptures ?? []).map((fields, i) => (
+                                    <TableRow key={`${item.bomItemId}-${i}`}>
+                                      {i === 0 && (
+                                        <TableCell rowSpan={(item.unitCaptures ?? []).length}
+                                          sx={{ fontSize: 12, py: 0.5, verticalAlign: "top" }}>
+                                          {item.description}
+                                        </TableCell>
+                                      )}
+                                      <TableCell sx={{ fontSize: 11, py: 0.5, color: "text.secondary" }}>
+                                        Unit {i + 1}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: 12, py: 0.5 }}>
+                                        {Object.entries(fields).filter(([, v]) => v)
+                                          .map(([k, v]) => `${k}: ${v}`).join(" · ") || "—"}
+                                      </TableCell>
+                                    </TableRow>
+                                  ))
+                                )}
+                              </TableBody>
+                            </Table>
+                          </>
+                        );
+                      })()}
 
                       {/* Issues */}
                       {issues.length > 0 && (

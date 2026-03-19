@@ -1,6 +1,37 @@
 import api from "./api";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 
+export interface PendingSignatureRecord {
+  runId:        string;
+  assetId:      string;
+  assetTag:     string;
+  assetName:    string;
+  projectId:    string;
+  jobNumber:    string;
+  customerName: string;
+  completedAt:  string;
+  completedBy:  string;
+}
+
+export interface OpenIssueRecord {
+  issueId:      string;
+  description:  string;
+  issueType:    "blocking" | "observation" | "scope-deviation";
+  severity:     "low" | "medium" | "high";
+  isBlocking:   boolean;
+  reportedAt:   string;
+  createdBy:    string | null;
+  stepTitle:    string | null;
+  runId:        string;
+  assetId:      string;
+  assetTag:     string;
+  assetName:    string;
+  assetLocation: string;
+  projectId:    string;
+  jobNumber:    string;
+  customerName: string;
+}
+
 export const assetWorkflowRunService = {
   async listLatestByProject(projectId: string): Promise<AssetWorkflowRun[]> {
     try {
@@ -95,5 +126,23 @@ export const assetWorkflowRunService = {
       endedAtUtc: endedAtUtc ?? null,
     });
     return res.data;
+  },
+
+  async listPendingSignatures(): Promise<PendingSignatureRecord[]> {
+    try {
+      const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures");
+      return res.data;
+    } catch {
+      return [];
+    }
+  },
+
+  async listOpenIssues(): Promise<OpenIssueRecord[]> {
+    try {
+      const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues");
+      return res.data;
+    } catch {
+      return [];
+    }
   },
 };

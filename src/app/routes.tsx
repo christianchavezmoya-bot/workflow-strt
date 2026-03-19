@@ -15,6 +15,7 @@ import Settings from "../features/settings/Settings";
 import Login from "../features/auth/Login";
 import ResetPassword from "../features/auth/ResetPassword";
 import ExternalSignPage from "../features/sign/ExternalSignPage";
+import IssuesBoard from "../features/issues/IssuesBoard";
 
 const SettingsRoute = () => {
   const can = usePermissions();
@@ -42,6 +43,7 @@ const AppRoutes = () => {
         <Route path="/admin" element={<UserManagement />} />
         <Route path="/admin/customers/:customerId/sites" element={<CustomerSites />} />
         <Route path="/admin/asset-registry" element={<Navigate to="/projects" replace />} />
+        <Route path="/issues" element={<IssuesBoard />} />
         <Route path="/settings" element={<SettingsRoute />} />
         <Route path="/profile" element={<ProfileWizard />} />
       </Route>

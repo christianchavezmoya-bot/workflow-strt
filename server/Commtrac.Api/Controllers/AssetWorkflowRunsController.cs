@@ -82,6 +82,82 @@ public class AssetWorkflowRunsController : ControllerBase
         }
     }
 
+    // GET api/asset-workflow-runs/open-issues — all unresolved issues across every run, with project context
+    [HttpGet("open-issues")]
+    public async Task<IActionResult> GetOpenIssues()
+    {
+        try
+        {
+            var runs = await _db.AssetWorkflowRuns
+                .Where(r => r.IssuesJson != null && r.IssuesJson != "[]" && r.IssuesJson != "")
+                .ToListAsync();
+
+            var assetIds = runs.Select(r => r.AssetId).Distinct().ToList();
+            var assets   = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
+
+            var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
+            var projects   = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
+
+            var result = new List<OpenIssueDto>();
+            var opts   = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+            foreach (var run in runs)
+            {
+                var asset   = assets.FirstOrDefault(a => a.Id == run.AssetId);
+                if (asset is null) continue;
+                var project = projects.FirstOrDefault(p => p.Id == asset.ProjectId);
+
+                List<JsonElement> issues;
+                try { issues = JsonSerializer.Deserialize<List<JsonElement>>(run.IssuesJson, opts) ?? []; }
+                catch { continue; }
+
+                foreach (var iss in issues)
+                {
+                    if (iss.TryGetProperty("resolved", out var resolvedEl) && resolvedEl.GetBoolean()) continue;
+
+                    string Get(string key) => iss.TryGetProperty(key, out var el) ? el.GetString() ?? "" : "";
+                    bool   GetBool(string key) => iss.TryGetProperty(key, out var el) && el.GetBoolean();
+
+                    result.Add(new OpenIssueDto(
+                        IssueId:      Get("id"),
+                        Description:  Get("description"),
+                        IssueType:    Get("issueType"),
+                        Severity:     Get("severity"),
+                        IsBlocking:   GetBool("isBlocking"),
+                        ReportedAt:   Get("reportedAt"),
+                        CreatedBy:    Get("createdBy"),
+                        StepTitle:    Get("stepTitle"),
+                        RunId:        run.Id,
+                        AssetId:      asset.Id,
+                        AssetTag:     asset.AssetTag,
+                        AssetName:    asset.AssetName ?? asset.AssetTag,
+                        AssetLocation: asset.Location ?? "",
+                        ProjectId:    asset.ProjectId,
+                        JobNumber:    project?.JobNumber ?? "",
+                        CustomerName: project?.CustomerName ?? ""
+                    ));
+                }
+            }
+
+            var severityOrder = new Dictionary<string, int> { ["high"] = 0, ["medium"] = 1, ["low"] = 2 };
+            result.Sort((a, b) =>
+            {
+                if (a.IsBlocking != b.IsBlocking) return a.IsBlocking ? -1 : 1;
+                var sa = severityOrder.GetValueOrDefault(a.Severity, 3);
+                var sb = severityOrder.GetValueOrDefault(b.Severity, 3);
+                if (sa != sb) return sa.CompareTo(sb);
+                return string.Compare(b.ReportedAt, a.ReportedAt, StringComparison.Ordinal);
+            });
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to aggregate open issues");
+            return Ok(Array.Empty<OpenIssueDto>());
+        }
+    }
+
     // GET api/asset-workflow-runs/by-asset/{assetId}
     [HttpGet("by-asset/{assetId}")]
     public async Task<IActionResult> ListByAsset(string assetId)
@@ -666,6 +742,48 @@ public class AssetWorkflowRunsController : ControllerBase
         catch
         {
             return "{}";
+        }
+    }
+
+    // GET api/asset-workflow-runs/pending-signatures — locked runs awaiting customer sign-off, with project context
+    [HttpGet("pending-signatures")]
+    public async Task<IActionResult> GetPendingSignatures()
+    {
+        try
+        {
+            var runs = await _db.AssetWorkflowRuns
+                .Where(r => r.IsLocked && r.SignatureStatus == "PendingCustomer")
+                .OrderByDescending(r => r.CompletedAt)
+                .ToListAsync();
+
+            var assetIds  = runs.Select(r => r.AssetId).Distinct().ToList();
+            var assets    = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
+            var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
+            var projects  = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
+
+            var result = runs.Select(r =>
+            {
+                var asset   = assets.FirstOrDefault(a => a.Id == r.AssetId);
+                var project = asset is null ? null : projects.FirstOrDefault(p => p.Id == asset.ProjectId);
+                return new PendingSignatureDto(
+                    RunId:        r.Id,
+                    AssetId:      r.AssetId,
+                    AssetTag:     asset?.AssetTag ?? "",
+                    AssetName:    asset?.AssetName ?? asset?.AssetTag ?? "",
+                    ProjectId:    asset?.ProjectId ?? "",
+                    JobNumber:    project?.JobNumber ?? "",
+                    CustomerName: project?.CustomerName ?? "",
+                    CompletedAt:  r.CompletedAt?.ToString("O") ?? "",
+                    CompletedBy:  r.CompletedByName ?? ""
+                );
+            });
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get pending signatures");
+            return Ok(Array.Empty<PendingSignatureDto>());
         }
     }
 

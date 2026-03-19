@@ -287,6 +287,72 @@ public class ProjectsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Copies all assets (and their workflow assignments) from <paramref name="sourceId"/>
+    /// into <paramref name="targetId"/>. Runs are NOT cloned — each asset starts fresh.
+    /// </summary>
+    [HttpPost("{targetId}/clone-assets-from/{sourceId}")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<ActionResult<CloneAssetsResult>> CloneAssetsFrom(string targetId, string sourceId)
+    {
+        if (!await _db.Projects.AnyAsync(p => p.Id == targetId))
+            return NotFound("Target project not found.");
+        if (!await _db.Projects.AnyAsync(p => p.Id == sourceId))
+            return NotFound("Source project not found.");
+
+        var sourceAssets = await _db.ProjectAssets
+            .Where(a => a.ProjectId == sourceId)
+            .ToListAsync();
+
+        var oldToNew = new Dictionary<string, string>(sourceAssets.Count);
+
+        foreach (var src in sourceAssets)
+        {
+            var newId = Guid.NewGuid().ToString();
+            oldToNew[src.Id] = newId;
+            _db.ProjectAssets.Add(new ProjectAssetEntity
+            {
+                Id                = newId,
+                ProjectId         = targetId,
+                ProductId         = src.ProductId,
+                ProductConfigId   = src.ProductConfigId,
+                WorkflowTemplateId = src.WorkflowTemplateId,
+                AssetTag          = src.AssetTag,
+                AssetName         = src.AssetName,
+                SerialNumber      = src.SerialNumber,
+                AssetModel        = src.AssetModel,
+                Manufacturer      = src.Manufacturer,
+                Location          = src.Location,
+                Notes             = src.Notes,
+                ConfigLabel       = src.ConfigLabel,
+                FeatureValuesJson = src.FeatureValuesJson,
+                Status            = "NotStarted",
+                IssuesJson        = "[]",
+            });
+        }
+        await _db.SaveChangesAsync();
+
+        var sourceAssignments = await _db.AssetWorkflowAssignments
+            .Where(a => oldToNew.Keys.Contains(a.AssetId))
+            .ToListAsync();
+
+        foreach (var asgn in sourceAssignments)
+        {
+            if (!oldToNew.TryGetValue(asgn.AssetId, out var newAssetId)) continue;
+            _db.AssetWorkflowAssignments.Add(new AssetWorkflowAssignmentEntity
+            {
+                Id               = Guid.NewGuid().ToString(),
+                AssetId          = newAssetId,
+                WorkflowTypeId   = asgn.WorkflowTypeId,
+                WorkflowConfigId = asgn.WorkflowConfigId,
+                Active           = true,
+            });
+        }
+        await _db.SaveChangesAsync();
+
+        return Ok(new CloneAssetsResult(sourceAssets.Count, sourceAssignments.Count));
+    }
+
     private static ProjectDto ToDto(ProjectEntity project, string? siteName, int assetCount = 0)
         => new(
             project.Id,

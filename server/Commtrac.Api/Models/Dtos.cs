@@ -1121,3 +1121,45 @@ public record AddDeliveryEventRequest(
     string? Notes,
     string? RecordedBy
 );
+
+public record PendingSignatureDto(
+    string RunId,
+    string AssetId,
+    string AssetTag,
+    string AssetName,
+    string ProjectId,
+    string JobNumber,
+    string CustomerName,
+    string CompletedAt,
+    string CompletedBy
+);
+
+/// <summary>
+/// Flat projection of a single unresolved issue surfaced in the cross-project Issues Board.
+/// Issues are embedded as JSON blobs on AssetWorkflowRun.IssuesJson; this DTO extracts them
+/// with the surrounding project / asset context so the board can render without N+1 calls.
+/// </summary>
+public record OpenIssueDto(
+    string IssueId,
+    string Description,
+    string IssueType,   // "blocking" | "observation" | "scope-deviation"
+    string Severity,    // "low" | "medium" | "high"
+    bool IsBlocking,
+    string ReportedAt,
+    string? CreatedBy,
+    string? StepTitle,
+    string RunId,
+    string AssetId,
+    string AssetTag,
+    string AssetName,
+    string AssetLocation,
+    string ProjectId,
+    string JobNumber,
+    string CustomerName
+);
+
+/// <summary>Result returned after cloning assets from one project into another.</summary>
+public record CloneAssetsResult(int AssetsCloned, int AssignmentsCloned);
+
+/// <summary>Per-technician open-asset counts for the Dashboard workload panel.</summary>
+public record WorkloadSummaryDto(string UserId, string FullName, int NotStarted, int InProgress, int TotalAssigned);

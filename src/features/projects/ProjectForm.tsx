@@ -579,6 +579,18 @@ const ProjectForm = () => {
           dynamicValuesToSave,
           projectsDynamic.valuesByEntity[result.id]
         );
+        // Clone assets from selected source project if PM chose one
+        if (pendingCloneSourceId) {
+          try {
+            setCloning(true);
+            await projectService.cloneAssetsFrom(result.id, pendingCloneSourceId);
+          } catch {
+            // Non-fatal: project was created; log but don't block navigation
+            console.warn("[ProjectForm] Clone assets failed — project was still created successfully.");
+          } finally {
+            setCloning(false);
+          }
+        }
       }
       navigate("/projects");
     } catch {
@@ -684,6 +696,50 @@ const ProjectForm = () => {
   }, [selectedCustomerId, allSites, siteId, setValue]);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Clone suggestion — shows when a new project shares a customer or site with existing ones
+  const [cloneSuggestOpen, setCloneSuggestOpen] = useState(false);
+  const [cloneCandidates, setCloneCandidates] = useState<{ id: string; jobNumber: string; customerName: string; siteName?: string; assetCount: number }[]>([]);
+  const [pendingCloneSourceId, setPendingCloneSourceId] = useState<string | null>(null);
+  const [cloning, setCloning] = useState(false);
+
+  // Detect matching projects whenever customer or site changes on a NEW project
+  useEffect(() => {
+    if (id) return; // only on create
+    const cid = watch("customerId");
+    const sid = watch("siteId");
+    if (!cid && !sid) { setCloneCandidates([]); return; }
+    const matches = items.filter((p) => {
+      if (p.id === id) return false;
+      if (cid && p.customerId === cid) return true;
+      if (sid && p.siteId && p.siteId === sid) return true;
+      return false;
+    });
+    setCloneCandidates(
+      matches.map((p) => ({
+        id: p.id,
+        jobNumber: p.jobNumber,
+        customerName: p.customerName,
+        siteName: (p as any).siteName || undefined,
+        assetCount: (p as any).assetCount || 0,
+      }))
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomerId, siteId, id, items]);
+
+  // Open the suggestion dialog once when candidates first appear (new project).
+  // useRef gives a stable mutable box — avoids spurious re-opens on re-render.
+  const cloneSuggestShownRef = { shown: false };
+  useEffect(() => {
+    if (id) return;
+    if (cloneCandidates.length === 0) return;
+    setCloneSuggestOpen((prev) => {
+      if (prev) return prev; // already open
+      return true;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloneCandidates.length > 0, id]);
+
   const labelCustomer = builtInLabel("customerName", "Customer");
   const labelCustomerId = builtInLabel("customerId", "Customer ID");
   const labelSite = builtInLabel("siteName", "Site");
@@ -1583,13 +1639,44 @@ const ProjectForm = () => {
               {submitError}
             </Typography>
           )}
+          {!id && cloneCandidates.length > 0 && (
+            <Box
+              sx={{
+                mt: 2,
+                p: 1.5,
+                borderRadius: 1,
+                border: "1px solid",
+                borderColor: pendingCloneSourceId ? "primary.main" : "var(--stroke)",
+                bgcolor: pendingCloneSourceId ? "primary.main" : "transparent",
+                color: pendingCloneSourceId ? "primary.contrastText" : "text.secondary",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 2,
+              }}
+            >
+              <Typography variant="body2">
+                {pendingCloneSourceId
+                  ? `Will copy assets from: ${cloneCandidates.find((c) => c.id === pendingCloneSourceId)?.jobNumber}`
+                  : `${cloneCandidates.length} similar project${cloneCandidates.length !== 1 ? "s" : ""} found — start from scratch or copy assets`}
+              </Typography>
+              <Button
+                size="small"
+                variant={pendingCloneSourceId ? "outlined" : "contained"}
+                sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                onClick={() => setCloneSuggestOpen(true)}
+              >
+                {pendingCloneSourceId ? "Change selection" : "Copy assets"}
+              </Button>
+            </Box>
+          )}
           <Stack direction="row" spacing={2} sx={{ marginTop: 3 }}>
             <Button variant="outlined" onClick={() => navigate("/projects")}>
               Cancel
             </Button>
             <Button variant="outlined">Save draft</Button>
-            <Button variant="contained" type="submit">
-              {id ? "Save changes" : "Submit project"}
+            <Button variant="contained" type="submit" disabled={cloning}>
+              {cloning ? "Copying assets…" : id ? "Save changes" : "Submit project"}
             </Button>
           </Stack>
         </form>
@@ -1676,6 +1763,71 @@ const ProjectForm = () => {
           await projectsDynamic.reload();
         }}
       />
+      {/* Clone suggestion dialog */}
+      <Dialog
+        open={cloneSuggestOpen}
+        onClose={() => setCloneSuggestOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          className: "glass-card",
+          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)" }
+        }}
+      >
+        <DialogTitle>Copy from an existing project?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            We found {cloneCandidates.length} existing project{cloneCandidates.length !== 1 ? "s" : ""} for the same customer or site.
+            Would you like to copy the asset list and workflow assignments into this new project?
+          </Typography>
+          <Stack spacing={1}>
+            {cloneCandidates.map((p) => (
+              <Box
+                key={p.id}
+                onClick={() => setPendingCloneSourceId((prev) => (prev === p.id ? null : p.id))}
+                sx={{
+                  p: 1.5,
+                  borderRadius: 1,
+                  border: "1px solid",
+                  borderColor: pendingCloneSourceId === p.id ? "primary.main" : "var(--stroke)",
+                  cursor: "pointer",
+                  bgcolor: pendingCloneSourceId === p.id ? "primary.main" : "transparent",
+                  color: pendingCloneSourceId === p.id ? "primary.contrastText" : "text.primary",
+                  transition: "all 0.15s",
+                }}
+              >
+                <Typography variant="subtitle2">{p.jobNumber} — {p.customerName}</Typography>
+                {p.siteName && (
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>{p.siteName}</Typography>
+                )}
+                {p.assetCount > 0 && (
+                  <Typography variant="caption" sx={{ display: "block", opacity: 0.7 }}>
+                    {p.assetCount} asset{p.assetCount !== 1 ? "s" : ""}
+                  </Typography>
+                )}
+              </Box>
+            ))}
+          </Stack>
+          {pendingCloneSourceId && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
+              Assets will be copied with status reset to Not Started. Workflow runs are not copied.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => { setPendingCloneSourceId(null); setCloneSuggestOpen(false); }}>
+            Start fresh
+          </Button>
+          <Button
+            variant="contained"
+            disabled={!pendingCloneSourceId}
+            onClick={() => setCloneSuggestOpen(false)}
+          >
+            Copy assets after save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog
         open={!!globalOfficePrompt}
         onClose={() => setGlobalOfficePrompt(null)}

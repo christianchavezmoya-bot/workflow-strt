@@ -18,6 +18,35 @@ public class ProjectAssetsController : ControllerBase
         _db = db;
     }
 
+    // GET api/project-assets/workload-summary
+    [HttpGet("workload-summary")]
+    public async Task<ActionResult<IEnumerable<WorkloadSummaryDto>>> WorkloadSummary()
+    {
+        var assets = await _db.ProjectAssets
+            .Where(a => a.AssignedUserId != null && a.AssignedUserId != ""
+                     && (a.Status == "NotStarted" || a.Status == "InProgress"))
+            .ToListAsync();
+
+        var userIds = assets.Select(a => a.AssignedUserId!).Distinct().ToList();
+        var users = await _db.Users
+            .Where(u => userIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.FullName })
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        var summary = assets
+            .GroupBy(a => a.AssignedUserId!)
+            .Select(g => new WorkloadSummaryDto(
+                g.Key,
+                users.TryGetValue(g.Key, out var name) ? name : "Unknown",
+                g.Count(a => a.Status == "NotStarted"),
+                g.Count(a => a.Status == "InProgress"),
+                g.Count()))
+            .OrderByDescending(w => w.TotalAssigned)
+            .ToList();
+
+        return Ok(summary);
+    }
+
     // GET api/project-assets/by-project/{projectId}
     [HttpGet("by-project/{projectId}")]
     public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProject(string projectId)

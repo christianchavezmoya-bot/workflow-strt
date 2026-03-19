@@ -72,4 +72,21 @@ export const projectAssetService = {
   async remove(id: string): Promise<void> {
     await api.delete(`/project-assets/${id}`);
   },
+
+  async workloadSummary(): Promise<WorkloadSummaryItem[]> {
+    try {
+      const res = await api.get<WorkloadSummaryItem[]>("/project-assets/workload-summary");
+      return res.data;
+    } catch {
+      return [];
+    }
+  },
 };
+
+export interface WorkloadSummaryItem {
+  userId: string;
+  fullName: string;
+  notStarted: number;
+  inProgress: number;
+  totalAssigned: number;
+}

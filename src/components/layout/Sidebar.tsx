@@ -14,6 +14,7 @@ import {
 } from "@mui/material";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import AssignmentOutlinedIcon from "@mui/icons-material/AssignmentOutlined";
+import ErrorOutlineOutlinedIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
 import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
 import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
@@ -30,14 +31,15 @@ import strataLogo from "../../assets/strata_transparent.png";
 import FavoritesSection from "./FavoritesSection";
 
 const navItems = [
-  { label: "Dashboard",       icon: <DashboardOutlinedIcon />,            to: "/" },
-  { label: "Projects",        icon: <AssignmentOutlinedIcon />,           to: "/projects" },
-  { label: "Installations",   icon: <TableChartOutlinedIcon />,           to: "/installations/assets" },
+  { label: "Dashboard",         icon: <DashboardOutlinedIcon />,          to: "/" },
+  { label: "Projects",          icon: <AssignmentOutlinedIcon />,         to: "/projects" },
+  { label: "Issues Board",      icon: <ErrorOutlineOutlinedIcon />,       to: "/issues" },
+  { label: "Installations",     icon: <TableChartOutlinedIcon />,         to: "/installations/assets" },
   { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
-  { label: "Documents",       icon: <FolderOutlinedIcon />,               to: "/documents" },
-  { label: "Admin",           icon: <AdminPanelSettingsOutlinedIcon />,   to: "/admin" },
-  { label: "Settings",        icon: <SettingsOutlinedIcon />,             to: "/settings" },
-  { label: "Profile",         icon: <PersonOutlineOutlinedIcon />,        to: "/profile" },
+  { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents" },
+  { label: "Admin",             icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin" },
+  { label: "Settings",          icon: <SettingsOutlinedIcon />,           to: "/settings" },
+  { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,      to: "/profile" },
 ];
 
 const Sidebar = () => {

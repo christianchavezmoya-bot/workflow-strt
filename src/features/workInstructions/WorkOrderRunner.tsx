@@ -243,7 +243,7 @@ export default function WorkOrderRunner({
     syncRunTimeState(run);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { pendingCount, syncing, isOnline, queueOrSend } = useOfflineTimeQueue({
+  const { pendingCount, syncing, isOnline, queueOrSend, flush: flushTimeQueue } = useOfflineTimeQueue({
     runId: isRealRun ? activeRunId : null,
     onSynced: syncRunTimeStateRef,
   });
@@ -267,11 +267,16 @@ export default function WorkOrderRunner({
     if (!open) reset();
   }, [open, existingRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Tick every second while the runner is in the "running" stage so both
+  // productiveSecondsLive and downtimeSecondsLive update in real time.
+  // Deliberately does NOT include trackingCategory/trackingStartedAt so the
+  // interval is never torn down mid-switch — avoids the clock freezing when
+  // transitioning from productive to downtime.
   useEffect(() => {
-    if (stage !== "running" || !trackingCategory || !trackingStartedAt) return;
+    if (stage !== "running") return;
     const t = window.setInterval(() => setTickNow(Date.now()), 1000);
     return () => window.clearInterval(t);
-  }, [stage, trackingCategory, trackingStartedAt]);
+  }, [stage]);
 
   function reset() {
     setStage("setup");
@@ -681,6 +686,8 @@ export default function WorkOrderRunner({
       const bomJson = bomActual.length > 0 ? JSON.stringify(bomActual) : undefined;
 
       if (activeRunId) {
+        // Flush any queued time-tracking actions before locking — run rejects changes once locked.
+        await flushTimeQueue();
         const lockedRun = await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName, bomJson);
         setActiveRun(lockedRun);
       }
@@ -1860,7 +1867,10 @@ export default function WorkOrderRunner({
                     expectedQty: item.expectedQty,
                     actualQty: item.expectedQty,
                     unitOfMeasure: item.unitOfMeasure,
-                    serialNumbers: item.isInventory ? Array(item.expectedQty).fill("") : undefined,
+                    unitCaptures: item.isInventory
+                      ? Array.from({ length: item.expectedQty }, () =>
+                          Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
+                      : undefined,
                   })));
                   setStage("bom");
                 } else {
@@ -1919,7 +1929,10 @@ export default function WorkOrderRunner({
                           const qty = Math.max(0, Number(e.target.value) || 0);
                           setBomActual((prev) => prev.map((a) => a.bomItemId !== item.id ? a : {
                             ...a, actualQty: qty,
-                            serialNumbers: item.isInventory ? Array(qty).fill("").map((_, i) => a.serialNumbers?.[i] ?? "") : undefined,
+                            unitCaptures: item.isInventory
+                              ? Array.from({ length: qty }, (_, i) =>
+                                  a.unitCaptures?.[i] ?? Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
+                              : undefined,
                           }));
                         }}
                       />
@@ -1927,24 +1940,33 @@ export default function WorkOrderRunner({
                         of {item.expectedQty} {item.unitOfMeasure} expected
                       </Typography>
                     </Stack>
-                    {item.isInventory && (actual.serialNumbers ?? []).map((sn, i) => (
-                      <Stack key={i} direction="row" spacing={1} alignItems="center">
-                        <Tooltip title="Scan barcode / QR">
-                          <IconButton size="small"><QrCodeScannerOutlined fontSize="small" /></IconButton>
-                        </Tooltip>
-                        <TextField
-                          label={`Unit ${i + 1} serial`}
-                          size="small"
-                          fullWidth
-                          placeholder="Scan or enter serial number"
-                          value={sn}
-                          onChange={(e) => setBomActual((prev) => prev.map((a) => {
-                            if (a.bomItemId !== item.id) return a;
-                            const sns = [...(a.serialNumbers ?? [])];
-                            sns[i] = e.target.value;
-                            return { ...a, serialNumbers: sns };
-                          }))}
-                        />
+                    {item.isInventory && (actual.unitCaptures ?? []).map((fields, unitIdx) => (
+                      <Stack key={unitIdx} spacing={0.75} sx={{ pl: 1, borderLeft: "2px solid", borderColor: "divider" }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                          Unit {unitIdx + 1}
+                        </Typography>
+                        {(item.captureFields ?? ["Serial No"]).map((fieldName) => (
+                          <Stack key={fieldName} direction="row" spacing={1} alignItems="center">
+                            {fieldName.toLowerCase().includes("serial") && (
+                              <Tooltip title="Scan barcode / QR">
+                                <IconButton size="small"><QrCodeScannerOutlined fontSize="small" /></IconButton>
+                              </Tooltip>
+                            )}
+                            <TextField
+                              label={fieldName}
+                              size="small"
+                              fullWidth
+                              placeholder={`Enter ${fieldName}`}
+                              value={fields[fieldName] ?? ""}
+                              onChange={(e) => setBomActual((prev) => prev.map((a) => {
+                                if (a.bomItemId !== item.id) return a;
+                                const caps = [...(a.unitCaptures ?? [])];
+                                caps[unitIdx] = { ...caps[unitIdx], [fieldName]: e.target.value };
+                                return { ...a, unitCaptures: caps };
+                              }))}
+                            />
+                          </Stack>
+                        ))}
                       </Stack>
                     ))}
                   </Stack>
@@ -1983,6 +2005,37 @@ export default function WorkOrderRunner({
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {bomActual.length > 0 && (
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Parts installed</Typography>
+                {bomActual.map((item) => (
+                  <Stack key={item.bomItemId} spacing={0.5}
+                    sx={{ p: 1.25, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Chip size="small" label={item.isInventory ? "Inventory" : "Consumable"}
+                        color={item.isInventory ? "primary" : "default"} variant="outlined" />
+                      <Typography variant="body2" fontWeight={600}>{item.description}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        · {item.actualQty} {item.unitOfMeasure}
+                      </Typography>
+                    </Stack>
+                    {item.isInventory && (item.unitCaptures ?? []).map((fields, i) => (
+                      <Stack key={i} direction="row" flexWrap="wrap" gap={1} sx={{ pl: 1 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ minWidth: 50 }}>
+                          Unit {i + 1}:
+                        </Typography>
+                        {Object.entries(fields).filter(([, v]) => v).map(([field, val]) => (
+                          <Typography key={field} variant="caption">
+                            <strong>{field}:</strong> {val}
+                          </Typography>
+                        ))}
+                      </Stack>
+                    ))}
+                  </Stack>
+                ))}
+                <Divider />
+              </Stack>
+            )}
             <TextField label="Your name *" size="small" fullWidth
               value={instName} onChange={e => setInstName(e.target.value)} />
             <Stack direction="row" spacing={1}>

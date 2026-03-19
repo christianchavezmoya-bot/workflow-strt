@@ -114,11 +114,13 @@ export interface BomItem {
   id: string;
   description: string;
   partNumber?: string;
-  /** true = tracked inventory (capture serial per unit), false = consumable (capture qty only) */
+  /** true = tracked inventory (capture fields per unit), false = consumable (capture qty only) */
   isInventory: boolean;
   expectedQty: number;
   /** Unit of measure: "ea", "m", "kg", etc. */
   unitOfMeasure: string;
+  /** Field names to capture per unit for inventory items, e.g. ["Serial No","Firmware","IP Address"] */
+  captureFields?: string[];
   notes?: string;
 }
 
@@ -130,8 +132,8 @@ export interface BomActualItem {
   expectedQty: number;
   actualQty: number;
   unitOfMeasure: string;
-  /** One entry per unit for inventory items */
-  serialNumbers?: string[];
+  /** Per-unit captured values: one Record per unit, keyed by field name */
+  unitCaptures?: Array<Record<string, string>>;
   notes?: string;
 }
 
