@@ -102,6 +102,46 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
     try { return JSON.parse(json) as StepResult[]; } catch { return []; }
   }
 
+  /** Render a single captured input value — handles photos, signatures, and plain text */
+  function renderValue(val: string): React.ReactNode {
+    if (!val) return <Typography variant="caption" color="text.disabled">—</Typography>;
+
+    // Signature: single base64 image
+    if (val.startsWith("data:image/")) {
+      return (
+        <Box component="img" src={val}
+          sx={{ maxHeight: 48, maxWidth: 120, borderRadius: 0.5, border: "1px solid rgba(255,255,255,0.12)", display: "block" }} />
+      );
+    }
+
+    // Photo array: JSON array of base64 images
+    if (val.startsWith("[")) {
+      try {
+        const imgs = JSON.parse(val) as string[];
+        const photos = imgs.filter((s) => typeof s === "string" && s.startsWith("data:image/"));
+        if (photos.length > 0) {
+          return (
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              {photos.slice(0, 6).map((src, i) => (
+                <Box key={i} component="img" src={src}
+                  sx={{ width: 48, height: 36, objectFit: "cover", borderRadius: 0.5, border: "1px solid rgba(255,255,255,0.12)" }} />
+              ))}
+              {photos.length > 6 && (
+                <Typography variant="caption" color="text.secondary" sx={{ alignSelf: "center" }}>
+                  +{photos.length - 6} more
+                </Typography>
+              )}
+            </Stack>
+          );
+        }
+      } catch { /* fall through */ }
+    }
+
+    // Plain text (including booleans)
+    const display = val === "true" ? "✓ Yes" : val === "false" ? "✗ No" : val;
+    return <Typography variant="caption">{display}</Typography>;
+  }
+
   function parseIssues(json: string): RunIssue[] {
     try { return JSON.parse(json) as RunIssue[]; } catch { return []; }
   }
@@ -464,17 +504,27 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
                               {stepResults.map((sr) => {
                                 const entries = Object.entries(sr.values ?? {}).filter(([, v]) => v);
                                 return (
-                                  <TableRow key={sr.stepId}>
-                                    <TableCell sx={{ fontSize: 12, py: 0.5, color: "text.secondary", fontFamily: "monospace" }}>
+                                  <TableRow key={sr.stepId} sx={{ verticalAlign: "top" }}>
+                                    <TableCell sx={{ fontSize: 12, py: 0.75, color: "text.secondary", fontFamily: "monospace", whiteSpace: "nowrap" }}>
                                       {sr.stepId.slice(0, 8)}…
                                     </TableCell>
-                                    <TableCell sx={{ fontSize: 12, py: 0.5 }}>
-                                      {entries.length > 0
-                                        ? entries.map(([k, v]) => `${k}: ${v}`).join(", ")
-                                        : <Typography variant="caption" color="text.disabled">—</Typography>
-                                      }
+                                    <TableCell sx={{ py: 0.75 }}>
+                                      {entries.length > 0 ? (
+                                        <Stack spacing={0.75}>
+                                          {entries.map(([k, v]) => (
+                                            <Stack key={k} direction="row" spacing={1} alignItems="flex-start">
+                                              <Typography variant="caption" color="text.secondary" sx={{ minWidth: 80, flexShrink: 0, pt: 0.2 }}>
+                                                {k}
+                                              </Typography>
+                                              {renderValue(v)}
+                                            </Stack>
+                                          ))}
+                                        </Stack>
+                                      ) : (
+                                        <Typography variant="caption" color="text.disabled">—</Typography>
+                                      )}
                                     </TableCell>
-                                    <TableCell sx={{ fontSize: 11, py: 0.5, color: "text.secondary" }}>
+                                    <TableCell sx={{ fontSize: 11, py: 0.75, color: "text.secondary", whiteSpace: "nowrap" }}>
                                       {sr.completedAt
                                         ? new Date(sr.completedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
                                         : "—"
