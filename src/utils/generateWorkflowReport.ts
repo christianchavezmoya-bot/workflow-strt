@@ -468,6 +468,9 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
 
       y += hdrH;
 
+      // Collect media (photo/signature) entries to render after the text table
+      const stepMediaItems: Array<{ label: string; photos: string[]; isSig: boolean }> = [];
+
       // Card body rows
       const bodyRows: string[][] = [];
       if (desc) bodyRows.push(["Description", desc]);
@@ -487,6 +490,29 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         for (const [inputId, val] of entries) {
           const inputDef = inputDefs.find((i) => i.id === inputId);
           const label    = inputDef?.label ?? inputId;
+          const isMedia  = inputDef?.type === "photo" || inputDef?.type === "signature" || inputDef?.type === "video";
+
+          if (isMedia) {
+            if (inputDef?.type === "video") {
+              bodyRows.push([label, "(video — not renderable in PDF)"]);
+            } else {
+              // photo: JSON array of base64 / signature: single base64
+              let photos: string[] = [];
+              if (inputDef?.type === "signature") {
+                if (val && detectImageFormat(val)) photos = [val];
+              } else {
+                try { photos = (JSON.parse(val) as string[]).filter((s) => detectImageFormat(s)); } catch {}
+                if (photos.length === 0 && detectImageFormat(val)) photos = [val];
+              }
+              if (photos.length > 0) {
+                stepMediaItems.push({ label, photos, isSig: inputDef?.type === "signature" });
+                bodyRows.push([label, `(${photos.length} image${photos.length !== 1 ? "s" : ""} — see below)`]);
+              } else {
+                bodyRows.push([label, "—"]);
+              }
+            }
+            continue;
+          }
 
           if (inputDef?.type === "component" && inputDef.subFields?.length && val) {
             try {
@@ -533,6 +559,58 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       });
 
       y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+
+      // ── Render photo / signature images captured in this step ──────────────
+      if (stepMediaItems.length > 0) {
+        const IMG_H = 28;           // mm height per image
+        const IMG_GAP = 2;          // mm gap between thumbnails
+        const COLS = 4;             // max images per row
+        const imgW = (cardW - IMG_GAP * (COLS - 1)) / COLS;
+
+        for (const media of stepMediaItems) {
+          y = ensureSpace(y, IMG_H + 10);
+
+          // Section label (italic)
+          doc.setFontSize(7.5);
+          doc.setFont("helvetica", "bolditalic");
+          doc.setTextColor(...GREY_LABEL);
+          doc.text(media.label, cardX + 2, y + 4);
+          y += 6;
+
+          let imgX = cardX;
+          let colIdx = 0;
+
+          for (const src of media.photos.slice(0, 8)) {
+            const fmt = detectImageFormat(src);
+            if (!fmt) continue;
+            const size = await getImageNaturalSize(src);
+            if (!size) continue;
+
+            const aspect = size.w / size.h;
+            const drawW  = media.isSig ? Math.min(60, IMG_H * aspect) : imgW;
+            const drawH  = media.isSig ? Math.min(IMG_H, drawW / aspect) : IMG_H;
+
+            y = ensureSpace(y, drawH + 4);
+            doc.addImage(src, fmt, imgX, y, drawW, drawH, undefined, "FAST");
+            // Thin border around image
+            doc.setDrawColor(...BORDER);
+            doc.setLineWidth(0.2);
+            doc.rect(imgX, y, drawW, drawH);
+
+            colIdx++;
+            if (colIdx >= COLS || media.isSig) {
+              imgX = cardX;
+              colIdx = 0;
+              y += drawH + IMG_GAP;
+            } else {
+              imgX += imgW + IMG_GAP;
+            }
+          }
+          if (colIdx > 0) y += IMG_H + IMG_GAP;
+          y += 2;
+        }
+      }
+      // ── end media ───────────────────────────────────────────────────────────
 
       // Thin bottom border to close the card
       doc.setDrawColor(...BORDER);

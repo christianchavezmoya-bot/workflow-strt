@@ -380,8 +380,20 @@ const Dashboard = () => {
       {/* ── Technician Workload Panel ── */}
       <Box className="glass-card" sx={{ p: 3 }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-          <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Technician Workload</Typography>
-          <Typography variant="caption" color="text.secondary">Open assets (Not Started + In Progress)</Typography>
+          <Box>
+            <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Technician Workload</Typography>
+            <Typography variant="caption" color="text.secondary">Open assets — click to view in installations</Typography>
+          </Box>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Stack direction="row" spacing={0.5} alignItems="center">
+              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "primary.main" }} />
+              <Typography variant="caption" color="text.secondary">In progress</Typography>
+            </Stack>
+            <Stack direction="row" spacing={0.5} alignItems="center">
+              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "action.disabled" }} />
+              <Typography variant="caption" color="text.secondary">Queued</Typography>
+            </Stack>
+          </Stack>
         </Stack>
         {workloadLoading ? (
           <LinearProgress />
@@ -390,30 +402,45 @@ const Dashboard = () => {
         ) : (
           <Stack spacing={1.5}>
             {workload.map((w) => {
-              const pct = w.totalAssigned > 0 ? Math.round((w.inProgress / w.totalAssigned) * 100) : 0;
+              const inPct  = w.totalAssigned > 0 ? (w.inProgress  / w.totalAssigned) * 100 : 0;
+              const notPct = w.totalAssigned > 0 ? (w.notStarted  / w.totalAssigned) * 100 : 0;
+              const load   = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
+              const loadLabel = w.totalAssigned >= 10 ? "Heavy" : w.totalAssigned >= 5 ? "Moderate" : "Light";
               return (
-                <Paper key={w.userId} elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+                <Paper
+                  key={w.userId}
+                  elevation={0}
+                  onClick={() => navigate("/installations/assets")}
+                  sx={{
+                    p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5,
+                    cursor: "pointer", transition: "all 0.15s",
+                    "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
+                  }}
+                >
                   <Stack direction="row" alignItems="center" spacing={2}>
-                    <Box sx={{ flex: "0 0 160px" }}>
-                      <Typography variant="body2" fontWeight={600} noWrap>{w.fullName}</Typography>
+                    <Box sx={{ flex: "0 0 160px", minWidth: 0 }}>
+                      <Stack direction="row" spacing={0.75} alignItems="center">
+                        <Typography variant="body2" fontWeight={600} noWrap>{w.fullName}</Typography>
+                        <Chip label={loadLabel} size="small" color={load} variant="outlined" sx={{ height: 16, fontSize: "0.6rem", flexShrink: 0 }} />
+                      </Stack>
                       <Typography variant="caption" color="text.secondary">
-                        {w.inProgress} in progress · {w.notStarted} queued
+                        {w.inProgress} active · {w.notStarted} queued · {w.totalAssigned} total
                       </Typography>
                     </Box>
-                    <Box sx={{ flex: 1 }}>
-                      <Tooltip title={`${w.inProgress} of ${w.totalAssigned} in progress (${pct}%)`}>
-                        <LinearProgress
-                          variant="determinate"
-                          value={pct}
-                          color="primary"
-                          sx={{ height: 8, borderRadius: 4 }}
-                        />
-                      </Tooltip>
-                    </Box>
+                    <Tooltip title={`${w.inProgress} in progress · ${w.notStarted} not started`} arrow>
+                      <Box sx={{ flex: 1, height: 10, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.08)", display: "flex" }}>
+                        {inPct > 0 && (
+                          <Box sx={{ width: `${inPct}%`, bgcolor: "primary.main", transition: "width 0.4s" }} />
+                        )}
+                        {notPct > 0 && (
+                          <Box sx={{ width: `${notPct}%`, bgcolor: "action.disabled", transition: "width 0.4s" }} />
+                        )}
+                      </Box>
+                    </Tooltip>
                     <Chip
                       label={w.totalAssigned}
                       size="small"
-                      color={w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "default"}
+                      color={load}
                       sx={{ fontWeight: 700, minWidth: 40 }}
                     />
                   </Stack>
