@@ -1377,6 +1377,19 @@ export default function ProjectChevronPanel({
         }
         events.sort((a, b) => b.ts.getTime() - a.ts.getTime());
 
+        // Time analytics — runs with any time tracked
+        const runsWithTime = latestRuns.filter(r => r.productiveSeconds > 0 || r.downtimeSeconds > 0);
+        const totalProd = runsWithTime.reduce((s, r) => s + r.productiveSeconds, 0);
+        const totalDown = runsWithTime.reduce((s, r) => s + r.downtimeSeconds, 0);
+        const totalAll  = totalProd + totalDown;
+
+        const fmtSecs = (s: number) => {
+          if (s <= 0) return "0m";
+          const h = Math.floor(s / 3600);
+          const m = Math.floor((s % 3600) / 60);
+          return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        };
+
         return (
           <Box sx={{ maxHeight: "65vh", overflowY: "auto", pr: 0.5 }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
@@ -1390,36 +1403,111 @@ export default function ProjectChevronPanel({
                 </IconButton>
               </Tooltip>
             </Stack>
-            {installAssetsLoading ? <CircularProgress size={20} sx={{ display: "block", mx: "auto", mt: 4 }} /> :
-              events.length === 0 ? (
-                <Typography variant="caption" color="text.disabled">No activity recorded yet.</Typography>
-              ) : (
-                <Stack spacing={0}>
-                  {events.map((ev, idx) => (
-                    <Stack key={ev.key} direction="row" spacing={1.25} alignItems="flex-start">
-                      {/* Timeline line */}
-                      <Stack alignItems="center" sx={{ pt: 0.75 }}>
-                        <Box sx={{ color: ev.color, display: "flex" }}>{ev.icon}</Box>
-                        {idx < events.length - 1 && (
-                          <Box sx={{ width: 1, flex: 1, minHeight: 16, background: "rgba(255,255,255,0.08)", my: 0.25 }} />
-                        )}
-                      </Stack>
-                      <Stack sx={{ pb: 1.5, flex: 1, minWidth: 0 }}>
-                        <Stack direction="row" spacing={1} alignItems="baseline">
-                          <Typography variant="caption" fontWeight={600} sx={{ color: ev.color }}>{ev.label}</Typography>
-                          <Typography variant="caption" color="text.disabled" noWrap sx={{ flexShrink: 0 }}>
-                            {ev.ts.toLocaleDateString()} {ev.ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                          </Typography>
+            {installAssetsLoading ? <CircularProgress size={20} sx={{ display: "block", mx: "auto", mt: 4 }} /> : (
+              <>
+                {events.length === 0 ? (
+                  <Typography variant="caption" color="text.disabled">No activity recorded yet.</Typography>
+                ) : (
+                  <Stack spacing={0}>
+                    {events.map((ev, idx) => (
+                      <Stack key={ev.key} direction="row" spacing={1.25} alignItems="flex-start">
+                        <Stack alignItems="center" sx={{ pt: 0.75 }}>
+                          <Box sx={{ color: ev.color, display: "flex" }}>{ev.icon}</Box>
+                          {idx < events.length - 1 && (
+                            <Box sx={{ width: 1, flex: 1, minHeight: 16, background: "rgba(255,255,255,0.08)", my: 0.25 }} />
+                          )}
                         </Stack>
-                        {ev.detail && (
-                          <Typography variant="caption" color="text.secondary">{ev.detail}</Typography>
-                        )}
+                        <Stack sx={{ pb: 1.5, flex: 1, minWidth: 0 }}>
+                          <Stack direction="row" spacing={1} alignItems="baseline">
+                            <Typography variant="caption" fontWeight={600} sx={{ color: ev.color }}>{ev.label}</Typography>
+                            <Typography variant="caption" color="text.disabled" noWrap sx={{ flexShrink: 0 }}>
+                              {ev.ts.toLocaleDateString()} {ev.ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </Typography>
+                          </Stack>
+                          {ev.detail && (
+                            <Typography variant="caption" color="text.secondary">{ev.detail}</Typography>
+                          )}
+                        </Stack>
+                      </Stack>
+                    ))}
+                  </Stack>
+                )}
+
+                {/* ── Time Analytics ── */}
+                {runsWithTime.length > 0 && (
+                  <>
+                    <Divider sx={{ my: 1.5 }}>
+                      <Typography variant="caption" color="text.secondary" fontWeight={600}>Time Analytics</Typography>
+                    </Divider>
+
+                    {/* Summary KPIs */}
+                    <Stack direction="row" spacing={2} sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
+                      <Box>
+                        <Typography variant="caption" color="text.disabled" display="block">Productive</Typography>
+                        <Typography variant="body2" fontWeight={700} color="success.main">{fmtSecs(totalProd)}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" color="text.disabled" display="block">Downtime</Typography>
+                        <Typography variant="body2" fontWeight={700} color="warning.main">{fmtSecs(totalDown)}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" color="text.disabled" display="block">Efficiency</Typography>
+                        <Typography variant="body2" fontWeight={700}>
+                          {totalAll > 0 ? `${Math.round((totalProd / totalAll) * 100)}%` : "—"}
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" color="text.disabled" display="block">Runs tracked</Typography>
+                        <Typography variant="body2" fontWeight={700}>{runsWithTime.length}</Typography>
+                      </Box>
+                    </Stack>
+
+                    {/* Per-run stacked bars */}
+                    <Stack spacing={0.75}>
+                      {runsWithTime.map(run => {
+                        const asset   = installAssets.find(a => a.id === run.assetId);
+                        const name    = asset?.assetName ?? asset?.assetTag ?? run.assetId;
+                        const total   = run.productiveSeconds + run.downtimeSeconds;
+                        const prodPct = total > 0 ? (run.productiveSeconds / total) * 100 : 0;
+                        const downPct = total > 0 ? (run.downtimeSeconds  / total) * 100 : 0;
+                        return (
+                          <Box key={run.id}>
+                            <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.25 }}>
+                              <Typography variant="caption" noWrap sx={{ maxWidth: "60%" }}>{name}</Typography>
+                              <Typography variant="caption" color="text.disabled">{fmtSecs(total)} total</Typography>
+                            </Stack>
+                            <Box sx={{ display: "flex", height: 10, borderRadius: 1, overflow: "hidden", background: "rgba(255,255,255,0.06)" }}>
+                              {prodPct > 0 && (
+                                <Tooltip title={`Productive: ${fmtSecs(run.productiveSeconds)}`}>
+                                  <Box sx={{ width: `${prodPct}%`, background: "rgba(45,212,191,0.7)", transition: "width 0.4s" }} />
+                                </Tooltip>
+                              )}
+                              {downPct > 0 && (
+                                <Tooltip title={`Downtime: ${fmtSecs(run.downtimeSeconds)} (${run.downtimeEvents} event${run.downtimeEvents !== 1 ? "s" : ""})`}>
+                                  <Box sx={{ width: `${downPct}%`, background: "rgba(255,152,0,0.7)", transition: "width 0.4s" }} />
+                                </Tooltip>
+                              )}
+                            </Box>
+                          </Box>
+                        );
+                      })}
+                    </Stack>
+
+                    {/* Legend */}
+                    <Stack direction="row" spacing={1.5} sx={{ mt: 1 }}>
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Box sx={{ width: 10, height: 10, borderRadius: 0.5, background: "rgba(45,212,191,0.7)" }} />
+                        <Typography variant="caption" color="text.secondary">Productive</Typography>
+                      </Stack>
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Box sx={{ width: 10, height: 10, borderRadius: 0.5, background: "rgba(255,152,0,0.7)" }} />
+                        <Typography variant="caption" color="text.secondary">Downtime</Typography>
                       </Stack>
                     </Stack>
-                  ))}
-                </Stack>
-              )
-            }
+                  </>
+                )}
+              </>
+            )}
           </Box>
         );
       })()}

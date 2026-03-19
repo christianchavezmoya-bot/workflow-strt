@@ -4,11 +4,14 @@ import {
   TableCell, TableHead, TableRow, Chip, Select, MenuItem, FormControl,
   CircularProgress, Tooltip,
 } from "@mui/material";
+import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
 import { useNavigate, useParams } from "react-router-dom";
 import { useBomProject } from "../store/BomProjectContext";
 import { classifyAllRows } from "../services/bomClassifier";
 import { generateDraftProject } from "../services/bomProjectGenerator";
-import type { ClassificationResult, ItemType } from "../types/classification";
+import { bomApiService } from "../services/bomApiService";
+import type { ClassificationRule, ItemType } from "../types/classification";
+import RulesEditor from "../components/RulesEditor";
 
 const ITEM_TYPES: ItemType[] = ["asset", "component", "consumable", "reference", "ignore"];
 
@@ -26,14 +29,27 @@ export default function BomClassificationPage() {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [customRules, setCustomRules] = useState<ClassificationRule[]>([]);
 
   // Auto-classify on mount if not yet classified
   useEffect(() => {
     if (state.normalizedRows.length > 0 && state.classifications.length === 0) {
-      const cls = classifyAllRows(state.normalizedRows, [], id ?? "");
+      const cls = classifyAllRows(state.normalizedRows, customRules, id ?? "");
       dispatch({ type: "SET_CLASSIFICATIONS", payload: cls });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.normalizedRows, state.classifications.length, dispatch, id]);
+
+  const handleApplyRules = (rules: ClassificationRule[]) => {
+    setCustomRules(rules);
+    const cls = classifyAllRows(state.normalizedRows, rules, id ?? "");
+    dispatch({ type: "SET_CLASSIFICATIONS", payload: cls });
+  };
+
+  const handleSaveRuleProfile = async (name: string, rules: ClassificationRule[]) => {
+    await bomApiService.saveRuleProfile({ name, rules });
+  };
 
   const classMap = new Map(state.classifications.map((c) => [c.sourceRowId, c]));
 
@@ -79,10 +95,18 @@ export default function BomClassificationPage() {
             Review and override how each BOM row is classified before generating assets.
           </Typography>
         </Box>
-        <Stack direction="row" spacing={0.5}>
+        <Stack direction="row" spacing={1} alignItems="center">
           {ITEM_TYPES.map((t) => (
             <Chip key={t} label={`${counts[t]} ${t}`} size="small" color={TYPE_COLOR[t]} variant="outlined" />
           ))}
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<TuneOutlinedIcon />}
+            onClick={() => setRulesOpen(true)}
+          >
+            Rules{customRules.length > 0 ? ` (${customRules.length})` : ""}
+          </Button>
         </Stack>
       </Stack>
 
@@ -184,6 +208,14 @@ export default function BomClassificationPage() {
           {generating ? "Generating…" : "Generate Draft & Compare →"}
         </Button>
       </Stack>
+
+      <RulesEditor
+        open={rulesOpen}
+        initialRules={customRules}
+        onClose={() => setRulesOpen(false)}
+        onApply={handleApplyRules}
+        onSaveProfile={handleSaveRuleProfile}
+      />
     </Box>
   );
 }

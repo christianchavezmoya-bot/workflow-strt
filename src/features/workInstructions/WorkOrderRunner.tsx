@@ -9,9 +9,11 @@ import {
   EmailOutlined,
   LockOutlined,
   PauseOutlined,
+  PhotoCameraOutlined,
   QrCodeScannerOutlined,
   ReportProblemOutlined,
   SyncOutlined,
+  VideocamOutlined,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -879,12 +881,68 @@ export default function WorkOrderRunner({
         </Stack>
       );
     }
-    if (inp.type === "photo" || inp.type === "video" || inp.type === "signature") {
+    if (inp.type === "photo" || inp.type === "video") {
+      const isVideo = inp.type === "video";
+      let media: string[] = [];
+      try { media = JSON.parse(val || "[]"); } catch {}
       return (
-        <Button size="small" variant="outlined" disabled>
-          {inp.type === "photo" ? "📷 Capture photo" : inp.type === "video" ? "🎥 Capture video" : "✍ Capture signature"}
-          &nbsp;<Typography variant="caption" color="text.secondary">(not available in browser)</Typography>
-        </Button>
+        <Box>
+          <Button
+            size="small"
+            variant="outlined"
+            component="label"
+            startIcon={isVideo ? <VideocamOutlined /> : <PhotoCameraOutlined />}
+          >
+            {media.length > 0 ? (isVideo ? "Add video" : "Add photo") : (isVideo ? "Capture video" : "Capture photo")}
+            <input
+              type="file"
+              accept={isVideo ? "video/*" : "image/*"}
+              capture="environment"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => { onChange(JSON.stringify([...media, reader.result as string])); };
+                reader.readAsDataURL(file);
+                e.target.value = "";
+              }}
+            />
+          </Button>
+          {media.length > 0 && (
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1 }}>
+              {media.map((src, idx) => (
+                <Box key={idx} sx={{ position: "relative" }}>
+                  {isVideo
+                    ? <Box component="video" src={src} controls sx={{ width: 160, height: 90, borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)" }} />
+                    : <Box component="img" src={src} sx={{ width: 80, height: 60, objectFit: "cover", borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)" }} />
+                  }
+                  <IconButton
+                    size="small"
+                    onClick={() => onChange(JSON.stringify(media.filter((_, i) => i !== idx)))}
+                    sx={{ position: "absolute", top: -8, right: -8, background: "rgba(0,0,0,0.7)", padding: "2px" }}
+                  >
+                    <DeleteOutlineOutlined sx={{ fontSize: 14 }} />
+                  </IconButton>
+                </Box>
+              ))}
+            </Box>
+          )}
+        </Box>
+      );
+    }
+    if (inp.type === "signature") {
+      return (
+        <Box>
+          {val ? (
+            <Box>
+              <Box component="img" src={val} sx={{ maxWidth: "100%", height: 100, borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)", display: "block", mb: 1 }} />
+              <Button size="small" variant="outlined" onClick={() => onChange("")}>Clear signature</Button>
+            </Box>
+          ) : (
+            <SignaturePad onChange={(dataUrl) => onChange(dataUrl ?? "")} height={120} label="Sign here" />
+          )}
+        </Box>
       );
     }
     return (
@@ -2214,6 +2272,31 @@ export default function WorkOrderRunner({
         {stage === "bom"            && renderBom()}
         {stage === "installer-sign" && renderInstallerSign()}
         {stage === "customer-sign"  && renderCustomerSign()}
+        {/* ── Persistent offline / sync bar ── */}
+        {isRealRun && (!isOnline || pendingCount > 0 || syncing) && (
+          <Box sx={{
+            px: 2, py: 0.75,
+            display: "flex", alignItems: "center", gap: 1,
+            borderTop: "1px solid",
+            borderColor: !isOnline ? "warning.dark" : "info.dark",
+            background: !isOnline ? "rgba(237,108,2,0.13)" : syncing ? "rgba(2,136,209,0.1)" : "rgba(255,152,0,0.08)",
+          }}>
+            {syncing
+              ? <SyncOutlined sx={{ fontSize: 16, color: "info.main", animation: "spin 1s linear infinite", "@keyframes spin": { from: { transform: "rotate(0deg)" }, to: { transform: "rotate(360deg)" } } }} />
+              : <CloudOffOutlined sx={{ fontSize: 16, color: "warning.main" }} />
+            }
+            <Typography variant="caption" fontWeight={600} color={!isOnline ? "warning.main" : "info.main"} sx={{ flex: 1 }}>
+              {syncing
+                ? `Syncing ${pendingCount} queued action${pendingCount !== 1 ? "s" : ""}…`
+                : !isOnline
+                  ? `Offline${pendingCount > 0 ? ` — ${pendingCount} action${pendingCount !== 1 ? "s" : ""} queued` : ""}`
+                  : `${pendingCount} action${pendingCount !== 1 ? "s" : ""} pending sync`}
+            </Typography>
+            <Typography variant="caption" color="text.disabled">
+              {!isOnline ? "Will sync when reconnected" : ""}
+            </Typography>
+          </Box>
+        )}
       </Dialog>
       {issueForDetail && (
         <IssueDetailDialog
