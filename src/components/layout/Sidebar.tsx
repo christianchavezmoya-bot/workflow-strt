@@ -1,4 +1,5 @@
-﻿import {
+﻿import { useEffect, useState } from "react";
+import {
   Box,
   Divider,
   FormControl,
@@ -13,29 +14,56 @@
 } from "@mui/material";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import AssignmentOutlinedIcon from "@mui/icons-material/AssignmentOutlined";
-import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
+import ErrorOutlineOutlinedIcon from "@mui/icons-material/ErrorOutlineOutlined";
+import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
+import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
 import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
+import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
+import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
 import { NavLink } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
+import { officesService } from "../../services/officesService";
+import type { Office } from "../../components/GlobalOfficeMap";
 import strataLogo from "../../assets/strata_transparent.png";
+import FavoritesSection from "./FavoritesSection";
+import { BOM_MODULE_ENABLED } from "../../modules/bom-project";
 
 const navItems = [
-  { label: "Dashboard", icon: <DashboardOutlinedIcon />, to: "/" },
-  { label: "Projects", icon: <AssignmentOutlinedIcon />, to: "/projects" },
-  { label: "Installations", icon: <AccountTreeOutlinedIcon />, to: "/installations" },
-  { label: "Admin", icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin" },
-  { label: "Settings", icon: <SettingsOutlinedIcon />, to: "/settings" },
-  { label: "Profile", icon: <PersonOutlineOutlinedIcon />, to: "/profile" }
+  { label: "Dashboard",         icon: <DashboardOutlinedIcon />,          to: "/" },
+  { label: "Projects",          icon: <AssignmentOutlinedIcon />,         to: "/projects" },
+  { label: "Issues Board",      icon: <ErrorOutlineOutlinedIcon />,       to: "/issues" },
+  { label: "Installations",     icon: <TableChartOutlinedIcon />,         to: "/installations/assets" },
+  { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
+  { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents" },
+  ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project" }] : []),
+  { label: "Admin",             icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin" },
+  { label: "Settings",          icon: <SettingsOutlinedIcon />,           to: "/settings" },
+  { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,      to: "/profile" },
 ];
-
-const officeOptions = ["USA", "Australia", "South Africa", "All"] as const;
 
 const Sidebar = () => {
   const { user } = useAuth();
+  const can = usePermissions();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.to === "/settings" && can.viewOnly) return false;
+    return true;
+  });
+  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
+  const [officeOptions, setOfficeOptions] = useState<string[]>(["All"]);
+
+  useEffect(() => {
+    officesService.getAll().then((offices) => {
+      setGlobalOffices(offices);
+      // Extract unique countries from global offices
+      const countries = Array.from(new Set(offices.map((office) => office.country).filter(Boolean)));
+      setOfficeOptions([...countries.sort(), "All"]);
+    });
+  }, []);
 
   return (
     <Box className="sidebar">
@@ -45,7 +73,7 @@ const Sidebar = () => {
       <Stack spacing={2}>
         <Box className="glass-card" sx={{ padding: "12px 14px" }}>
           <Typography variant="caption" color="text.secondary">
-            Active office
+            Active global office
           </Typography>
           <FormControl size="small" fullWidth>
             <Select value={activeOffice} onChange={(event) => updateActiveOffice(event.target.value as typeof activeOffice)}>
@@ -62,12 +90,16 @@ const Sidebar = () => {
         </Box>
         <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
       </Stack>
+      <FavoritesSection />
       <List sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <ListItemButton
             key={item.label}
             component={NavLink}
             to={item.to}
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("app:side-nav-click"));
+            }}
             sx={{
               borderRadius: 2,
               color: "text.primary",

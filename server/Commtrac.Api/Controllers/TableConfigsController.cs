@@ -31,7 +31,13 @@ public class TableConfigsController : ControllerBase
         var config = await _db.TableConfigs.FirstOrDefaultAsync(c => c.TableName == tableName);
         if (config == null)
         {
-            return Ok(new GlobalTableConfigDto(tableName, new List<string>(), new List<string>(), new Dictionary<string, string>()));
+            return Ok(new GlobalTableConfigDto(
+                tableName,
+                new List<string>(),
+                new List<string>(),
+                new Dictionary<string, string>(),
+                new Dictionary<string, BaseFieldMetaDto>()
+            ));
         }
         return MapToDto(config);
     }
@@ -49,6 +55,7 @@ public class TableConfigsController : ControllerBase
         config.OrderJson = JsonSerializer.Serialize(dto.Order, JsonOptions);
         config.HiddenJson = JsonSerializer.Serialize(dto.Hidden, JsonOptions);
         config.BaseFieldNamesJson = JsonSerializer.Serialize(dto.BaseFieldNames, JsonOptions);
+        config.BaseFieldMetaJson = JsonSerializer.Serialize(dto.BaseFieldMeta, JsonOptions);
 
         await _db.SaveChangesAsync();
         return MapToDto(config);
@@ -60,7 +67,8 @@ public class TableConfigsController : ControllerBase
             entity.TableName,
             JsonSerializer.Deserialize<List<string>>(entity.OrderJson, JsonOptions) ?? new List<string>(),
             JsonSerializer.Deserialize<List<string>>(entity.HiddenJson, JsonOptions) ?? new List<string>(),
-            JsonSerializer.Deserialize<Dictionary<string, string>>(entity.BaseFieldNamesJson, JsonOptions) ?? new Dictionary<string, string>()
+            JsonSerializer.Deserialize<Dictionary<string, string>>(entity.BaseFieldNamesJson, JsonOptions) ?? new Dictionary<string, string>(),
+            JsonSerializer.Deserialize<Dictionary<string, BaseFieldMetaDto>>(entity.BaseFieldMetaJson, JsonOptions) ?? new Dictionary<string, BaseFieldMetaDto>()
         );
     }
 }

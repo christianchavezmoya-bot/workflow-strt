@@ -1,0 +1,852 @@
+/**
+ * generateWorkflowReport
+ * Builds a professional A4 PDF installation record and triggers a browser download.
+ *
+ * Sections:
+ *  1. Header band — business logo (left) + title (centre) + customer logo (right)
+ *  2. Asset & run metadata — 2-column table
+ *  3. Workflow steps — individual rounded-corner cards per step with input tables
+ *  4. Issues — always included; table with resolution notes
+ *  5. Signature block
+ *  6. Footer (every page) — page number, company name, date generated
+ */
+
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+import type { AssetWorkflowRun, RunIssue, RunTimeEntry, StepResult } from "../types/assetWorkflowRun";
+import type { ProjectAsset } from "../types/projectAsset";
+import type { WorkflowStep } from "../types/workflow";
+import type { SignatureEvent } from "../types/signature";
+
+// ─── Colour palette ──────────────────────────────────────────────────────────
+const NAVY: [number, number, number]       = [26,  39,  68];   // header band / step card header
+const TEAL: [number, number, number]       = [0,   128, 128];  // accent — section bars
+const TEAL_LIGHT: [number, number, number] = [224, 242, 242];  // step card body bg
+const GREY_BG: [number, number, number]    = [241, 243, 246];  // alternate row / meta table bg
+const GREY_LABEL: [number, number, number] = [100, 110, 125];  // label text
+const BLACK: [number, number, number]      = [20,  20,  20];
+const WHITE: [number, number, number]      = [255, 255, 255];
+const RED: [number, number, number]        = [211, 47,  47];
+const ORANGE: [number, number, number]     = [230, 119, 0];
+const BLUE: [number, number, number]       = [25,  118, 210];
+const GREEN: [number, number, number]      = [46,  125, 50];
+const BORDER: [number, number, number]     = [200, 208, 218];
+
+// ─── Page geometry (all in mm) ───────────────────────────────────────────────
+const PAGE_W   = 210;
+const PAGE_H   = 297;
+const MARGIN   = 14;
+const CONTENT_W = PAGE_W - MARGIN * 2;
+const HEADER_H = 26;
+const FOOTER_H = 8;
+const SAFE_BOTTOM = PAGE_H - FOOTER_H - 10;
+
+// Logo slot in header
+const LOGO_W = 38;
+const LOGO_H = 16;
+const LOGO_Y = (HEADER_H - LOGO_H) / 2;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function detectImageFormat(dataUrl: string): string | null {
+  if (dataUrl.startsWith("data:image/png"))  return "PNG";
+  if (dataUrl.startsWith("data:image/jpeg") || dataUrl.startsWith("data:image/jpg")) return "JPEG";
+  if (dataUrl.startsWith("data:image/webp")) return "WEBP";
+  if (dataUrl.startsWith("data:image/gif"))  return "GIF";
+  return null;
+}
+
+export async function resolveImageToDataUrl(src: string): Promise<string | null> {
+  if (!src) return null;
+  if (detectImageFormat(src)) return src;
+  if (src.startsWith("data:image/svg")) return svgDataUrlToPng(src);
+  try {
+    const resp = await fetch(src, { mode: "cors" });
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    if (blob.type.includes("svg")) {
+      const text = await blob.text();
+      const svgDataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(text)));
+      return svgDataUrlToPng(svgDataUrl);
+    }
+    return new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch { return null; }
+}
+
+function svgDataUrlToPng(svgDataUrl: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width  = img.naturalWidth  || 300;
+        canvas.height = img.naturalHeight || 100;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { resolve(null); return; }
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.onerror = () => resolve(null);
+      img.src = svgDataUrl;
+    } catch { resolve(null); }
+  });
+}
+
+function getImageNaturalSize(dataUrl: string): Promise<{ w: number; h: number } | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload  = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
+function parseSteps(snapshotJson: string): WorkflowStep[] {
+  try {
+    const snap = JSON.parse(snapshotJson) as { stepsJson?: string };
+    if (snap?.stepsJson) {
+      const parsed = JSON.parse(snap.stepsJson);
+      if (Array.isArray(parsed)) return parsed as WorkflowStep[];
+      if (parsed?.steps && Array.isArray(parsed.steps)) return parsed.steps as WorkflowStep[];
+    }
+  } catch {}
+  return [];
+}
+
+function parseStepResults(json: string): StepResult[] {
+  try { return (JSON.parse(json) as StepResult[]).filter((r) => r.stepId !== "__nav__"); }
+  catch { return []; }
+}
+
+function parseIssues(json: string): RunIssue[] {
+  try { return JSON.parse(json) as RunIssue[]; } catch { return []; }
+}
+
+function fmtDur(totalSeconds: number): string {
+  const safe = Math.max(0, totalSeconds || 0);
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function fmt(date: string | undefined): string {
+  if (!date) return "—";
+  return new Date(date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function fmtFull(date: string | undefined): string {
+  if (!date) return "—";
+  return new Date(date).toLocaleString(undefined, {
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function fmtTime(date: string | undefined): string {
+  if (!date) return "";
+  return new Date(date).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+// ─── PDF generator ───────────────────────────────────────────────────────────
+
+export interface GenerateReportParams {
+  run: AssetWorkflowRun;
+  asset: ProjectAsset;
+  workflowConfigName: string;
+  businessLogoBase64?: string | null;
+  customerLogoBase64?: string | null;
+  companyName?: string;
+  customerName?: string;
+  jobNumber?: string;
+  siteName?: string;
+  siteLocation?: string;
+  assignedTechnician?: string;
+  /** If true, renders ALL steps defined in the workflow snapshot (not just captured ones). */
+  includeAllSteps?: boolean;
+  /** Installer and/or customer signature events — used to render the sign-off block. */
+  signatureEvents?: SignatureEvent[];
+}
+
+export async function generateWorkflowReport(params: GenerateReportParams): Promise<void> {
+  const {
+    run, asset, workflowConfigName,
+    businessLogoBase64, customerLogoBase64, companyName = "Commtrac",
+    customerName, jobNumber, siteName, siteLocation, assignedTechnician,
+    includeAllSteps = false,
+    signatureEvents = [],
+  } = params;
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const totalPages = () => (doc.internal as unknown as { getNumberOfPages: () => number }).getNumberOfPages();
+
+  const steps       = parseSteps(run.workflowSnapshotJson ?? "");
+  const stepMap     = new Map(steps.map((s) => [s.id, s]));
+  const stepResults = parseStepResults(run.stepResultsJson);
+  const issues      = parseIssues(run.issuesJson);
+  const openIssues  = issues.filter((i) => !i.resolved);
+
+  const generated = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+
+  // ── Footer helper ────────────────────────────────────────────────────────────
+  function drawFooter(pageNum: number) {
+    const total = totalPages();
+    doc.setFontSize(7.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...GREY_LABEL);
+    const footY = PAGE_H - 4;
+    // light rule
+    doc.setDrawColor(...BORDER);
+    doc.line(MARGIN, PAGE_H - FOOTER_H, PAGE_W - MARGIN, PAGE_H - FOOTER_H);
+    doc.text(`Page ${pageNum} of ${total}`, MARGIN, footY);
+    doc.text(companyName, PAGE_W / 2, footY, { align: "center" });
+    doc.text(`Generated: ${generated}`, PAGE_W - MARGIN, footY, { align: "right" });
+  }
+
+  // ── Section header bar helper ────────────────────────────────────────────────
+  function drawSectionBar(y: number, label: string): number {
+    doc.setFillColor(...TEAL);
+    doc.rect(MARGIN, y, CONTENT_W, 6.5, "F");
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...WHITE);
+    doc.text(label, MARGIN + 3, y + 4.4);
+    return y + 8.5;
+  }
+
+  // ── Page break helper ────────────────────────────────────────────────────────
+  function ensureSpace(y: number, needed: number): number {
+    if (y + needed > SAFE_BOTTOM) {
+      doc.addPage();
+      return 14;
+    }
+    return y;
+  }
+
+  // ── 1. Header band ───────────────────────────────────────────────────────────
+  doc.setFillColor(...NAVY);
+  doc.rect(0, 0, PAGE_W, HEADER_H, "F");
+
+  const addLogoOrText = async (logoSrc: string | null | undefined, slotX: number, textLabel: string) => {
+    const fmtType = logoSrc ? detectImageFormat(logoSrc) : null;
+    if (logoSrc && fmtType) {
+      try {
+        const size = await getImageNaturalSize(logoSrc);
+        let drawW = LOGO_W, drawH = LOGO_H;
+        if (size && size.w > 0 && size.h > 0) {
+          const scaleByH = LOGO_H / size.h;
+          drawH = LOGO_H;
+          drawW = Math.min(size.w * scaleByH, LOGO_W);
+        }
+        const offsetX = (LOGO_W - drawW) / 2;
+        doc.addImage(logoSrc, fmtType, slotX + offsetX, LOGO_Y, drawW, drawH, undefined, "FAST");
+        return;
+      } catch (e) { console.warn("[generateWorkflowReport] addImage failed:", e); }
+    }
+    if (textLabel) {
+      doc.setTextColor(...WHITE);
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.text(textLabel, slotX, HEADER_H / 2 + 2);
+    }
+  };
+
+  await addLogoOrText(businessLogoBase64, MARGIN, companyName.toUpperCase());
+
+  doc.setTextColor(...WHITE);
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("INSTALLATION RECORD", PAGE_W / 2, HEADER_H / 2 - 1, { align: "center" });
+  doc.setFontSize(8.5);
+  doc.setFont("helvetica", "normal");
+  doc.text(asset.assetTag ?? "", PAGE_W / 2, HEADER_H / 2 + 4.5, { align: "center" });
+
+  await addLogoOrText(customerLogoBase64, PAGE_W - MARGIN - LOGO_W, "");
+
+  let y = HEADER_H + 6;
+
+  // ── 2. Asset & run metadata ──────────────────────────────────────────────────
+  y = ensureSpace(y, 40);
+  y = drawSectionBar(y, "ASSET & RUN DETAILS");
+
+  const metaRows: [string, string, string, string][] = [
+    ["Asset Tag",     asset.assetTag     ?? "—", "Date Completed",  run.completedAt ? fmtFull(run.completedAt) : "—"],
+    ["Asset Name",    asset.assetName    ?? "—", "Completed By",    run.completedByName ?? "—"],
+    ["Model",         asset.assetModel   ?? "—", "Workflow",        workflowConfigName],
+    ["Manufacturer",  asset.manufacturer ?? "—", "Run #",           String(run.runNumber ?? 1)],
+    ["Serial #",      (asset.serialNumber ?? "—"), "Status",        run.status],
+  ];
+  if (customerName || jobNumber) metaRows.push(["Customer", customerName ?? "—", "Job #", jobNumber ?? "—"]);
+  if (siteName || siteLocation)  metaRows.push(["Site",     siteName    ?? "—", "Location", siteLocation ?? "—"]);
+  if (assignedTechnician)        metaRows.push(["Technician", assignedTechnician, "", ""]);
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    theme: "plain",
+    styles: { fontSize: 8.5, cellPadding: { top: 1.8, bottom: 1.8, left: 3, right: 3 } },
+    columnStyles: {
+      0: { fontStyle: "bold", textColor: GREY_LABEL, cellWidth: CONTENT_W * 0.18 },
+      1: { textColor: BLACK,                          cellWidth: CONTENT_W * 0.30 },
+      2: { fontStyle: "bold", textColor: GREY_LABEL, cellWidth: CONTENT_W * 0.18 },
+      3: { textColor: BLACK,                          cellWidth: CONTENT_W * 0.30 },
+    },
+    alternateRowStyles: { fillColor: GREY_BG },
+    body: metaRows,
+    didDrawPage: (data) => { drawFooter(data.pageNumber); },
+  });
+
+  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+
+  // ── 2b. Time Tracking summary ────────────────────────────────────────────────
+  y = ensureSpace(y, 20);
+  y = drawSectionBar(y, "TIME TRACKING");
+
+  const totalDurationSecs = run.completedAt && run.startedAt
+    ? Math.max(0, Math.floor((new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime()) / 1000))
+    : null;
+
+  const timeRows: [string, string, string, string][] = [
+    ["Started",       fmtFull(run.startedAt),                  "Completed",        run.completedAt ? fmtFull(run.completedAt) : "—"],
+    ["Productive",    fmtDur(run.productiveSeconds ?? 0),       "Downtime",         fmtDur(run.downtimeSeconds ?? 0)],
+    ["Downtime Events", String(run.downtimeEvents ?? 0),        "Total Duration",   totalDurationSecs !== null ? fmtDur(totalDurationSecs) : "—"],
+  ];
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    theme: "plain",
+    styles: { fontSize: 8.5, cellPadding: { top: 1.8, bottom: 1.8, left: 3, right: 3 } },
+    columnStyles: {
+      0: { fontStyle: "bold", textColor: GREY_LABEL, cellWidth: CONTENT_W * 0.18 },
+      1: { textColor: BLACK,                          cellWidth: CONTENT_W * 0.30 },
+      2: { fontStyle: "bold", textColor: GREY_LABEL, cellWidth: CONTENT_W * 0.18 },
+      3: { textColor: BLACK,                          cellWidth: CONTENT_W * 0.30 },
+    },
+    alternateRowStyles: { fillColor: GREY_BG },
+    body: timeRows,
+    didDrawPage: (data) => { drawFooter(data.pageNumber); },
+  });
+
+  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
+
+  // ── 2c. Downtime event breakdown (only if downtime occurred) ─────────────────
+  const allTimeEntries: RunTimeEntry[] = (() => {
+    try {
+      const parsed = JSON.parse(run.timeTrackingJson ?? "[]");
+      return Array.isArray(parsed) ? parsed as RunTimeEntry[] : [];
+    } catch { return []; }
+  })();
+  const downtimeEntries = allTimeEntries.filter((e) => e.category === "downtime");
+
+  if (downtimeEntries.length > 0) {
+    y = ensureSpace(y, 20);
+    y = drawSectionBar(y, `DOWNTIME EVENTS  (${downtimeEntries.length})`);
+
+    const downtimeRows = downtimeEntries.map((e) => {
+      const endMs   = e.endedAtUtc ? new Date(e.endedAtUtc).getTime() : (run.completedAt ? new Date(run.completedAt).getTime() : null);
+      const startMs = new Date(e.startedAtUtc).getTime();
+      const durSecs = endMs ? Math.max(0, Math.floor((endMs - startMs) / 1000)) : null;
+      const startLabel = new Date(e.startedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+      const endLabel   = e.endedAtUtc
+        ? new Date(e.endedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+        : "Open";
+      return [
+        e.reason ?? "—",
+        startLabel,
+        endLabel,
+        durSecs !== null ? fmtDur(durSecs) : "—",
+      ];
+    });
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      theme: "striped",
+      head: [["Reason", "Start", "End", "Duration"]],
+      body: downtimeRows,
+      styles: { fontSize: 8, cellPadding: { top: 1.8, bottom: 1.8, left: 3, right: 3 } },
+      headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
+      alternateRowStyles: { fillColor: GREY_BG },
+      columnStyles: {
+        0: { cellWidth: CONTENT_W * 0.55 },
+        1: { cellWidth: CONTENT_W * 0.15, halign: "center" },
+        2: { cellWidth: CONTENT_W * 0.15, halign: "center" },
+        3: { cellWidth: CONTENT_W * 0.15, halign: "center", textColor: ORANGE },
+      },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.column.index === 2 && String(data.cell.raw) === "Open") {
+          data.cell.styles.textColor = ORANGE;
+          data.cell.styles.fontStyle = "bold";
+        }
+      },
+      didDrawPage: (data) => { drawFooter(data.pageNumber); },
+    });
+
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+  } else {
+    y += 4;
+  }
+
+  // ── 3. Workflow Steps — individual cards ──────────────────────────────────────
+  // In "full" mode iterate ALL snapshot steps; in standard mode only captured results.
+  const stepResultMap = new Map(stepResults.map((sr) => [sr.stepId, sr]));
+  const stepsToRender: Array<{ step: WorkflowStep; sr: StepResult | undefined }> = includeAllSteps
+    ? [...steps].sort((a, b) => a.order - b.order).map((s) => ({ step: s, sr: stepResultMap.get(s.id) }))
+    : stepResults.map((sr) => ({ step: stepMap.get(sr.stepId) ?? ({ id: sr.stepId, title: sr.stepId, order: 0, inputs: [] } as unknown as WorkflowStep), sr }));
+
+  const completedCount = stepResults.length;
+  const totalCount     = steps.length;
+  const sectionLabel   = includeAllSteps
+    ? `WORKFLOW STEPS  (${completedCount} of ${totalCount} completed)`
+    : `WORKFLOW STEPS  (${completedCount} completed)`;
+
+  y = ensureSpace(y, 20);
+  y = drawSectionBar(y, sectionLabel);
+
+  if (stepsToRender.length === 0) {
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(...GREY_LABEL);
+    doc.text("No step data available for this run.", MARGIN + 2, y + 5);
+    y += 10;
+  } else {
+    for (let idx = 0; idx < stepsToRender.length; idx++) {
+      const { step, sr } = stepsToRender[idx];
+      const stepNumber  = includeAllSteps ? step.order : idx + 1;
+      const title       = step.title ?? `Step ${stepNumber}`;
+      const inputDefs   = step.inputs ?? [];
+      const entries     = sr ? Object.entries(sr.values ?? {}).filter(([, v]) => v) : [];
+      const time        = sr?.completedAt ? fmtTime(sr.completedAt) : "";
+      const desc        = step.description ?? "";
+      const isCompleted = Boolean(sr);
+
+      const estRows = Math.max(entries.length, 1) + (desc ? 1 : 0);
+      const estH    = 8 + estRows * 6.5 + 6;
+      y = ensureSpace(y, estH + 4);
+
+      const cardX = MARGIN;
+      const cardW = CONTENT_W;
+      const hdrH  = 8;
+
+      // Card header — navy (completed) or muted grey (not completed)
+      const hdrColor: [number, number, number] = isCompleted ? NAVY : [90, 100, 115];
+      doc.setFillColor(...hdrColor);
+      doc.roundedRect(cardX, y, cardW, hdrH, 2, 2, "F");
+
+      // Step number badge — teal (completed) or grey (not completed)
+      const badgeColor: [number, number, number] = isCompleted ? TEAL : [130, 140, 155];
+      const badgeCX = cardX + 5;
+      const badgeCY = y + hdrH / 2;
+      doc.setFillColor(...badgeColor);
+      doc.circle(badgeCX, badgeCY, 3, "F");
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...WHITE);
+      doc.text(String(stepNumber).padStart(2, "0"), badgeCX, badgeCY + 2.5, { align: "center" });
+
+      // Step title
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...WHITE);
+      doc.text(title, cardX + 12, y + hdrH / 2 + 1.5);
+
+      // Right label: time (completed) or "Not completed" badge
+      doc.setFontSize(7.5);
+      doc.setFont("helvetica", "normal");
+      if (isCompleted && time) {
+        doc.setTextColor(180, 200, 220);
+        doc.text(time, cardX + cardW - 3, y + hdrH / 2 + 1.5, { align: "right" });
+      } else if (!isCompleted) {
+        doc.setTextColor(200, 210, 220);
+        doc.text("Not completed", cardX + cardW - 3, y + hdrH / 2 + 1.5, { align: "right" });
+      }
+
+      y += hdrH;
+
+      // Collect media (photo/signature) entries to render after the text table
+      const stepMediaItems: Array<{ label: string; photos: string[]; isSig: boolean }> = [];
+
+      // Card body rows
+      const bodyRows: string[][] = [];
+      if (desc) bodyRows.push(["Description", desc]);
+
+      if (!isCompleted) {
+        // Show expected inputs as blank rows
+        if (inputDefs.length > 0) {
+          for (const inp of inputDefs) {
+            bodyRows.push([inp.label ?? inp.id, "—"]);
+          }
+        } else {
+          bodyRows.push(["(Step not completed)", ""]);
+        }
+      } else if (entries.length === 0) {
+        bodyRows.push(["(No inputs captured)", ""]);
+      } else {
+        for (const [inputId, val] of entries) {
+          const inputDef = inputDefs.find((i) => i.id === inputId);
+          const label    = inputDef?.label ?? inputId;
+          const isMedia  = inputDef?.type === "photo" || inputDef?.type === "signature" || inputDef?.type === "video";
+
+          if (isMedia) {
+            if (inputDef?.type === "video") {
+              bodyRows.push([label, "(video — not renderable in PDF)"]);
+            } else {
+              // photo: JSON array of base64 / signature: single base64
+              let photos: string[] = [];
+              if (inputDef?.type === "signature") {
+                if (val && detectImageFormat(val)) photos = [val];
+              } else {
+                try { photos = (JSON.parse(val) as string[]).filter((s) => detectImageFormat(s)); } catch {}
+                if (photos.length === 0 && detectImageFormat(val)) photos = [val];
+              }
+              if (photos.length > 0) {
+                stepMediaItems.push({ label, photos, isSig: inputDef?.type === "signature" });
+                bodyRows.push([label, `(${photos.length} image${photos.length !== 1 ? "s" : ""} — see below)`]);
+              } else {
+                bodyRows.push([label, "—"]);
+              }
+            }
+            continue;
+          }
+
+          if (inputDef?.type === "component" && inputDef.subFields?.length && val) {
+            try {
+              const sub: Record<string, string> = JSON.parse(val);
+              const parts = inputDef.subFields.filter((sf) => sub[sf.id]);
+              if (parts.length > 0) {
+                bodyRows.push([label, ""]);
+                for (const sf of parts) {
+                  bodyRows.push([`  › ${sf.name}`, sub[sf.id]]);
+                }
+                continue;
+              }
+            } catch { /* fall through */ }
+          }
+
+          const display = val === "true" ? "✓ Yes" : val === "false" ? "✗ No" : val;
+          bodyRows.push([label, display]);
+        }
+      }
+
+      // Card body background rect (drawn before table so table renders on top)
+      const bodyBg: [number, number, number] = isCompleted ? TEAL_LIGHT : [245, 246, 248];
+      const altBg:  [number, number, number] = isCompleted ? [232, 243, 243] : [238, 240, 243];
+
+      autoTable(doc, {
+        startY: y,
+        margin: { left: cardX, right: MARGIN },
+        theme: "plain",
+        tableWidth: cardW,
+        styles: {
+          fontSize: 8.5,
+          cellPadding: { top: 2, bottom: 2, left: 4, right: 4 },
+          fillColor: bodyBg,
+          textColor: BLACK,
+          lineWidth: 0,       // no cell borders — prevents first-row line overlap
+        },
+        columnStyles: {
+          0: { fontStyle: "bold", textColor: GREY_LABEL, cellWidth: cardW * 0.38 },
+          1: { textColor: isCompleted ? BLACK : GREY_LABEL },
+        },
+        alternateRowStyles: { fillColor: altBg },
+        body: bodyRows,
+        didDrawPage: (data) => { drawFooter(data.pageNumber); },
+      });
+
+      y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+
+      // ── Render photo / signature images captured in this step ──────────────
+      if (stepMediaItems.length > 0) {
+        const IMG_H = 28;           // mm height per image
+        const IMG_GAP = 2;          // mm gap between thumbnails
+        const COLS = 4;             // max images per row
+        const imgW = (cardW - IMG_GAP * (COLS - 1)) / COLS;
+
+        for (const media of stepMediaItems) {
+          y = ensureSpace(y, IMG_H + 10);
+
+          // Section label (italic)
+          doc.setFontSize(7.5);
+          doc.setFont("helvetica", "bolditalic");
+          doc.setTextColor(...GREY_LABEL);
+          doc.text(media.label, cardX + 2, y + 4);
+          y += 6;
+
+          let imgX = cardX;
+          let colIdx = 0;
+
+          for (const src of media.photos.slice(0, 8)) {
+            const fmt = detectImageFormat(src);
+            if (!fmt) continue;
+            const size = await getImageNaturalSize(src);
+            if (!size) continue;
+
+            const aspect = size.w / size.h;
+            const drawW  = media.isSig ? Math.min(60, IMG_H * aspect) : imgW;
+            const drawH  = media.isSig ? Math.min(IMG_H, drawW / aspect) : IMG_H;
+
+            y = ensureSpace(y, drawH + 4);
+            doc.addImage(src, fmt, imgX, y, drawW, drawH, undefined, "FAST");
+            // Thin border around image
+            doc.setDrawColor(...BORDER);
+            doc.setLineWidth(0.2);
+            doc.rect(imgX, y, drawW, drawH);
+
+            colIdx++;
+            if (colIdx >= COLS || media.isSig) {
+              imgX = cardX;
+              colIdx = 0;
+              y += drawH + IMG_GAP;
+            } else {
+              imgX += imgW + IMG_GAP;
+            }
+          }
+          if (colIdx > 0) y += IMG_H + IMG_GAP;
+          y += 2;
+        }
+      }
+      // ── end media ───────────────────────────────────────────────────────────
+
+      // Thin bottom border to close the card
+      doc.setDrawColor(...BORDER);
+      doc.setLineWidth(0.3);
+      doc.line(cardX, y, cardX + cardW, y);
+
+      y += 5;
+    }
+  }
+
+  // ── 4. Issues — always included ───────────────────────────────────────────────
+  y = ensureSpace(y, 30);
+  const issueLabel = issues.length === 0
+    ? "ISSUES  (none recorded)"
+    : `ISSUES  (${issues.length} total · ${openIssues.length} open · ${issues.length - openIssues.length} resolved)`;
+  y = drawSectionBar(y, issueLabel);
+
+  if (issues.length === 0) {
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(...GREY_LABEL);
+    doc.text("No issues were recorded for this run.", MARGIN + 2, y + 5);
+    y += 10;
+  } else {
+    const issueRows = issues.map((issue) => {
+      const statusLabel = issue.resolved
+        ? "Closed"
+        : issue.isBlocking ? "Blocking" : "Open";
+      const resolution = issue.resolved && issue.resolutionNote
+        ? `${issue.resolutionNote}${issue.resolvedBy ? `\n— ${issue.resolvedBy}` : ""}${issue.resolvedAt ? `, ${fmt(issue.resolvedAt)}` : ""}`
+        : issue.resolved ? `Resolved${issue.resolvedBy ? ` by ${issue.resolvedBy}` : ""}` : "—";
+      const commentsCount = (issue.comments ?? []).length;
+      const typeLabel = issue.issueType === "blocking" ? "Blocking"
+        : issue.issueType === "scope-deviation" ? "Scope Dev." : "Observation";
+      const impact = issue.issueType === "scope-deviation"
+        ? [
+            issue.extraHours != null ? `+${issue.extraHours}h` : null,
+            issue.costImpact ?? null,
+            issue.approvedBy ? `Approved: ${issue.approvedBy}` : null,
+          ].filter(Boolean).join(" · ") || "—"
+        : "—";
+      return [
+        issue.description,
+        typeLabel,
+        issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1),
+        issue.stepTitle ?? "—",
+        statusLabel,
+        fmt(issue.reportedAt),
+        resolution,
+        impact,
+        commentsCount > 0 ? String(commentsCount) : "—",
+      ];
+    });
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      theme: "striped",
+      head: [["Description", "Type", "Severity", "Step", "Status", "Reported", "Resolution / Action Taken", "Impact", "Notes"]],
+      body: issueRows,
+      styles: {
+        fontSize: 7.5,
+        cellPadding: { top: 2, bottom: 2, left: 3, right: 3 },
+        overflow: "linebreak",
+        lineColor: BORDER,
+        lineWidth: 0.2,
+      },
+      headStyles: {
+        fillColor: NAVY,
+        textColor: WHITE,
+        fontStyle: "bold",
+        fontSize: 7.5,
+      },
+      alternateRowStyles: { fillColor: GREY_BG },
+      columnStyles: {
+        0: { cellWidth: CONTENT_W * 0.20 },
+        1: { cellWidth: CONTENT_W * 0.10 },
+        2: { cellWidth: CONTENT_W * 0.08 },
+        3: { cellWidth: CONTENT_W * 0.10 },
+        4: { cellWidth: CONTENT_W * 0.08 },
+        5: { cellWidth: CONTENT_W * 0.09 },
+        6: { cellWidth: CONTENT_W * 0.18 },
+        7: { cellWidth: CONTENT_W * 0.10 },
+        8: { cellWidth: CONTENT_W * 0.07, halign: "center" },
+      },
+      didParseCell: (data) => {
+        if (data.section !== "body") return;
+        // Severity colour
+        if (data.column.index === 2) {
+          const sev = String(data.cell.raw).toLowerCase();
+          if (sev === "high")        data.cell.styles.textColor = RED;
+          else if (sev === "medium") data.cell.styles.textColor = ORANGE;
+          else                       data.cell.styles.textColor = BLUE;
+          data.cell.styles.fontStyle = "bold";
+        }
+        // Status colour
+        if (data.column.index === 4) {
+          const s = String(data.cell.raw);
+          if (s === "Blocking")     { data.cell.styles.textColor = RED;    data.cell.styles.fontStyle = "bold"; }
+          else if (s === "Closed")  { data.cell.styles.textColor = GREEN; }
+          else if (s === "Open")    { data.cell.styles.textColor = ORANGE; }
+        }
+        // Type colour
+        if (data.column.index === 1) {
+          const t = String(data.cell.raw);
+          if (t === "Blocking")    data.cell.styles.textColor = RED;
+          if (t === "Scope Dev.")  { data.cell.styles.textColor = ORANGE; data.cell.styles.fontStyle = "bold"; }
+        }
+      },
+      didDrawPage: (data) => { drawFooter(data.pageNumber); },
+    });
+
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+  }
+
+  // ── 5. Signature block ───────────────────────────────────────────────────────
+  const installer = signatureEvents.find((e) => e.signerRole === "Installer") ?? null;
+  const customer  = signatureEvents.find((e) => e.signerRole === "Customer")  ?? null;
+  const sigBlockH = 58;
+
+  y = ensureSpace(y, sigBlockH + 10);
+
+  const sy0 = y;
+  y = drawSectionBar(sy0, "SIGN-OFF");
+
+  const sigColW = (CONTENT_W - 8) / 2;
+  const sigCol1 = MARGIN;
+  const sigCol2 = MARGIN + sigColW + 8;
+  const imgH    = 22;   // height of the drawn-signature image box
+  const imgW    = sigColW;
+
+  // Helper: draw one signature column
+  async function drawSigColumn(
+    colX: number,
+    title: string,
+    event: SignatureEvent | null,
+    sigStatus: string,
+  ): Promise<void> {
+    let cy = y;
+
+    // Column title
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...NAVY);
+    doc.text(title, colX, cy);
+    cy += 5;
+
+    // Signature image box or blank rectangle
+    doc.setDrawColor(180, 180, 190);
+    doc.setLineWidth(0.3);
+    doc.rect(colX, cy, imgW, imgH);
+
+    if (event?.signatureData && event.hasDrawnSignature) {
+      const fmt = detectImageFormat(event.signatureData);
+      if (fmt) {
+        try {
+          const size = await getImageNaturalSize(event.signatureData);
+          let dw = imgW - 4, dh = imgH - 4;
+          if (size && size.w > 0 && size.h > 0) {
+            const scale = Math.min((imgW - 4) / size.w, (imgH - 4) / size.h);
+            dw = size.w * scale;
+            dh = size.h * scale;
+          }
+          doc.addImage(
+            event.signatureData, fmt,
+            colX + (imgW - dw) / 2,
+            cy  + (imgH - dh) / 2,
+            dw, dh, undefined, "FAST",
+          );
+        } catch { /* leave box blank */ }
+      }
+    } else if (!event) {
+      // Blank — label inside box for manual signing
+      doc.setFontSize(7.5);
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(180, 180, 190);
+      doc.text("Sign here", colX + imgW / 2, cy + imgH / 2 + 1.5, { align: "center" });
+    } else if (event && !event.hasDrawnSignature) {
+      // Name typed, no drawing
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(...GREY_LABEL);
+      doc.text(event.signerName, colX + imgW / 2, cy + imgH / 2 + 2, { align: "center" });
+    }
+
+    cy += imgH + 3;
+
+    // Info rows below the box
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...GREY_LABEL);
+
+    if (event) {
+      const dateStr = new Date(event.signedAtUtc).toLocaleString(undefined, {
+        year: "numeric", month: "short", day: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+      const lines: string[] = [
+        `Name: ${event.signerName}`,
+        event.signerTitle ? `Title: ${event.signerTitle}` : "",
+        `Date: ${dateStr}`,
+        `Outcome: ${event.reasonCode}`,
+        event.notes ? `Notes: ${event.notes}` : "",
+      ].filter(Boolean);
+      for (const line of lines) {
+        doc.text(line, colX, cy);
+        cy += 4.5;
+      }
+    } else {
+      // Blank lines for manual fill
+      const blankLineW = imgW * 0.7;
+      doc.setDrawColor(160, 160, 160);
+      doc.setLineWidth(0.25);
+      doc.line(colX, cy + 3,  colX + blankLineW, cy + 3);  cy += 8;
+      doc.text("Name / Date", colX, cy);
+      // Check waived status
+      if (sigStatus === "WaivedCustomer" && title.includes("Customer")) {
+        doc.setFont("helvetica", "italic");
+        doc.setTextColor(...ORANGE);
+        doc.text("Customer signature waived", colX, cy - 4);
+      }
+    }
+  }
+
+  await drawSigColumn(sigCol1, "TECHNICIAN SIGN-OFF",  installer, run.signatureStatus);
+  await drawSigColumn(sigCol2, "CUSTOMER APPROVAL",    customer,  run.signatureStatus);
+
+  // ── Draw footer on every page ─────────────────────────────────────────────────
+  const numPages = totalPages();
+  for (let p = 1; p <= numPages; p++) {
+    doc.setPage(p);
+    drawFooter(p);
+  }
+
+  // ── Save ──────────────────────────────────────────────────────────────────────
+  const safeName = (asset.assetTag ?? "asset").replace(/[^a-zA-Z0-9-_]/g, "_");
+  const runNum   = run.runNumber ?? 1;
+  doc.save(`installation-record_${safeName}_run${runNum}.pdf`);
+}

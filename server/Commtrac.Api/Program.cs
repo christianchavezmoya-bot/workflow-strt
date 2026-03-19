@@ -10,25 +10,39 @@ using Commtrac.Api.Swagger;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+builder.Services.AddHttpClient();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+builder.Services.AddScoped<NotificationSettingsService>();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.AddScoped<IEmailSender, EmailSender>();
 builder.Services.Configure<SmsSettings>(builder.Configuration.GetSection("Sms"));
 builder.Services.AddScoped<ISmsSender, SmsSender>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<IDocumentContentSearchService, DocumentContentSearchService>();
+builder.Services.AddSingleton<DocumentSearchIndexStatusStore>();
+builder.Services.AddSingleton<IDocumentSearchIndexMonitor>(sp => sp.GetRequiredService<DocumentSearchIndexStatusStore>());
+builder.Services.AddSingleton<DocumentSearchIndexQueue>();
+builder.Services.AddSingleton<IDocumentSearchIndexQueue>(sp => sp.GetRequiredService<DocumentSearchIndexQueue>());
+builder.Services.AddSingleton<IDocumentSearchIndexChannel>(sp => sp.GetRequiredService<DocumentSearchIndexQueue>());
+builder.Services.AddSingleton<IDocumentSearchIndexQueueMetrics>(sp => sp.GetRequiredService<DocumentSearchIndexQueue>());
+builder.Services.AddHostedService<DocumentSearchIndexWorker>();
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", policy =>
     {
         policy
-            .WithOrigins(
-                "http://localhost:5173",
-                "http://10.7.15.52:5173"
-            )
+            .SetIsOriginAllowed(origin =>
+            {
+                var host = new Uri(origin).Host;
+                return host == "localhost"
+                    || host == "127.0.0.1"
+                    || host.StartsWith("10.")
+                    || host.StartsWith("192.168.");
+            })
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -102,7 +116,11 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
 app.UseCors("frontend");
 app.UseAuthentication();
 app.UseAuthorization();

@@ -39,6 +39,15 @@ body {
   flex-direction: column;
   flex: 1;
   min-height: 100vh;
+  margin-left: 264px;
+  transition: margin-left 0.3s ease;
+  overflow-x: hidden;
+  max-width: calc(100vw - 264px);
+}
+
+.app-main.minimal-view {
+  margin-left: 0;
+  max-width: 100vw;
 }
 
 .app-content {
@@ -46,6 +55,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  overflow-x: hidden;
+  max-width: 100%;
 }
 
 .glass-card {
@@ -56,6 +67,10 @@ body {
 }
 
 .sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100vh;
   width: 264px;
   padding: 24px 18px;
   background: rgba(8, 12, 16, 0.92);
@@ -63,6 +78,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  overflow-y: auto;
+  z-index: 100;
 }
 
 .sidebar .brand {
@@ -112,9 +129,31 @@ body {
   background: #2dd4bf;
 }
 
+.app-main.minimal-view .pagination-bar {
+  left: 0 !important;
+}
+
 @media (max-width: 1024px) {
   .sidebar {
     width: 210px;
+  }
+
+  .app-main {
+    margin-left: 210px;
+    max-width: calc(100vw - 210px);
+  }
+
+  .app-main.minimal-view {
+    margin-left: 0;
+    max-width: 100vw;
+  }
+
+  .pagination-bar {
+    left: 210px !important;
+  }
+
+  .app-main.minimal-view .pagination-bar {
+    left: 0 !important;
   }
 }
 
@@ -124,13 +163,24 @@ body {
   }
 
   .sidebar {
+    position: relative;
     width: 100%;
+    height: auto;
     flex-direction: row;
     flex-wrap: wrap;
     gap: 12px;
   }
 
+  .app-main {
+    margin-left: 0;
+    max-width: 100vw;
+  }
+
   .app-content {
     padding: 20px;
+  }
+
+  .pagination-bar {
+    left: 0 !important;
   }
 }

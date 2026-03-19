@@ -1,9 +1,10 @@
-﻿import { Alert, Box, Button, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import StatusStepper from "../../components/ui/StatusStepper";
 import { demoProducts } from "../../data/demo";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import { projectService } from "../../services/projectService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { updateProjectStatus } from "../../store/projectSlice";
@@ -12,7 +13,9 @@ import { Project } from "../../types/project";
 
 const ProjectDetail = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
+  const can = usePermissions();
   const dispatch = useAppDispatch();
   const { items } = useAppSelector((state) => state.projects);
   const productsState = useAppSelector((state) => state.products);
@@ -53,10 +56,10 @@ const ProjectDetail = () => {
     if (project.status === "Pending Approval" && user?.role === "Admin") {
       list.push("Approve", "Request Info", "Reject");
     }
-    if (project.status === "Approved" && user?.role !== "Viewer") {
+    if (project.status === "Approved" && can.modifyData) {
       list.push("Start Work");
     }
-    if (project.status === "In Progress" && user?.role !== "Viewer") {
+    if (project.status === "In Progress" && can.modifyData) {
       list.push("Mark Completed");
     }
     return list;
@@ -127,11 +130,29 @@ const ProjectDetail = () => {
     <Stack spacing={3}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center">
         <Box>
-          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-            Project detail - {project.jobNumber}
-          </Typography>
+          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+            <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
+              Project detail —
+            </Typography>
+            <Chip
+              label={project.jobNumber}
+              size="small"
+              clickable
+              onClick={() =>
+                navigate(
+                  `/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`
+                )
+              }
+              sx={{
+                background: "linear-gradient(135deg, rgba(45,212,191,0.2), rgba(45,212,191,0.1))",
+                border: "1px solid rgba(45,212,191,0.3)",
+                fontWeight: 600,
+                fontSize: "0.875rem",
+              }}
+            />
+          </Stack>
           <Typography variant="body2" color="text.secondary">
-            {project.customerName} • {project.office}
+            {project.customerName} � {project.office}
           </Typography>
         </Box>
         <Button variant="outlined" component={Link} to={`/projects/${project.id}/edit`}>
@@ -184,3 +205,5 @@ const ProjectDetail = () => {
 };
 
 export default ProjectDetail;
+
+

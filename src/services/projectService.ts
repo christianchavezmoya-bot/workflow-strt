@@ -3,6 +3,7 @@ import { Project, ProjectStatus, ProjectType } from "../types/project";
 
 export interface ProjectFilters {
   office?: string;
+  country?: string;
   status?: ProjectStatus | "All";
   type?: ProjectType | "All";
   search?: string;
@@ -51,5 +52,12 @@ export const projectService = {
   async deleteProject(id: string) {
     await api.delete(`/projects/${id}`);
     return id;
-  }
+  },
+
+  async cloneAssetsFrom(targetId: string, sourceId: string): Promise<{ assetsCloned: number; assignmentsCloned: number }> {
+    const res = await api.post<{ assetsCloned: number; assignmentsCloned: number }>(
+      `/projects/${targetId}/clone-assets-from/${sourceId}`
+    );
+    return res.data;
+  },
 };

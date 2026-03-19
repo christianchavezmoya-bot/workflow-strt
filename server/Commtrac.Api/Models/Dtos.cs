@@ -1,14 +1,38 @@
 namespace Commtrac.Api.Models;
 
-public record LoginRequest(string Email, string Password);
+public record LoginRequest(string Email, string Password, string? TrustedDeviceToken = null);
 
-public record LoginResponse(string Token, UserDto User, bool IsFirstLogin);
+public record LoginResponse(string? Token, UserDto? User, bool IsFirstLogin, bool Requires2fa = false, string? TwoFactorToken = null, string? TrustedDeviceToken = null, bool PasswordExpired = false);
 
 public record ForgotPasswordRequest(string Email);
 
 public record ResetPasswordRequest(string Token, string NewPassword);
 
 public record UpdateProfileRequest(string FullName, string Office);
+
+public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+// 2FA DTOs
+public record TwoFactorLoginRequest(string TwoFactorToken, string Code, bool RememberDevice = false);
+public record TwoFactorSetupResponse(string Secret, string QrCodeUri);
+public record TwoFactorVerifyRequest(string Code);
+public record TwoFactorDisableRequest(string Password);
+public record TwoFactorRecoveryRequest(string TwoFactorToken, string RecoveryCode, bool RememberDevice = false);
+public record TwoFactorRegenerateRequest(string Password);
+public record RecoveryCodesResponse(List<string> Codes);
+
+public record NotificationSettingsDto(
+    string SmtpHost,
+    int SmtpPort,
+    bool SmtpUseSsl,
+    string SmtpUser,
+    string SmtpPass,
+    string SmtpFrom,
+    string FrontendBaseUrl,
+    string SmsProvider,
+    string SmsApiKey,
+    string SmsSender
+);
 
 public record UserDto(
     string Id,
@@ -17,7 +41,19 @@ public record UserDto(
     string Role,
     string Office,
     bool IsActive,
-    bool IsFirstLogin
+    bool IsFirstLogin,
+    bool Is2faEnabled = false,
+    int RecoveryCodesRemaining = 0,
+    bool PasswordExpired = false
+);
+
+public record SessionDto(
+    string Id,
+    string IpAddress,
+    string UserAgent,
+    DateTime CreatedAt,
+    DateTime LastActiveAt,
+    bool IsCurrent
 );
 
 public record CreateUserRequest(
@@ -78,6 +114,7 @@ public record SiteDto(
     string? Address,
     string? City,
     string? State,
+    string? Country,
     string? ZipCode,
     string? ContactName,
     string? ContactPhone,
@@ -87,11 +124,12 @@ public record SiteDto(
 );
 
 public record CreateSiteRequest(
-    string CustomerId,
+    string? CustomerId,
     string Name,
     string? Address,
     string? City,
     string? State,
+    string? Country,
     string? ZipCode,
     string? ContactName,
     string? ContactPhone,
@@ -100,10 +138,12 @@ public record CreateSiteRequest(
 );
 
 public record UpdateSiteRequest(
+    string? CustomerId,
     string? Name,
     string? Address,
     string? City,
     string? State,
+    string? Country,
     string? ZipCode,
     string? ContactName,
     string? ContactPhone,
@@ -111,20 +151,163 @@ public record UpdateSiteRequest(
     string? Notes
 );
 
+public record DivisionDto(
+    string Id,
+    string Name,
+    string? Description,
+    int SortOrder,
+    bool IsActive
+);
+
+public record CreateDivisionRequest(string Name, string? Description, int SortOrder = 99);
+public record UpdateDivisionRequest(string? Name, string? Description, int? SortOrder, bool? IsActive);
+
+public record FeatureDto(
+    string Id,
+    string Name,
+    string? Description,
+    string ValueType,
+    List<string>? Options,
+    List<FeatureSubPropertyDto>? SubProperties,
+    bool IsInventory,
+    List<string>? CaptureFields
+);
+
+public record CreateFeatureRequest(
+    string Name,
+    string? Description,
+    string ValueType = "text",
+    List<string>? Options = null,
+    List<FeatureSubPropertyDto>? SubProperties = null,
+    bool IsInventory = false,
+    List<string>? CaptureFields = null
+);
+
+public record UpdateFeatureRequest(
+    string? Name,
+    string? Description,
+    string? ValueType,
+    List<string>? Options,
+    List<FeatureSubPropertyDto>? SubProperties,
+    bool? IsInventory,
+    List<string>? CaptureFields
+);
+
+public record FeatureDependencyDto(
+    string Id,
+    string FeatureId,
+    string Name,
+    bool IsInventory,
+    List<string> CaptureFields,
+    decimal DefaultQty,
+    string? Unit,
+    decimal UnitPrice,
+    int SortOrder
+);
+
+public record CreateFeatureDependencyRequest(
+    string FeatureId,
+    string Name,
+    bool IsInventory = false,
+    List<string>? CaptureFields = null,
+    decimal DefaultQty = 1,
+    string? Unit = null,
+    decimal UnitPrice = 0,
+    int SortOrder = 0
+);
+
+public record UpdateFeatureDependencyRequest(
+    string? Name,
+    bool? IsInventory,
+    List<string>? CaptureFields,
+    decimal? DefaultQty,
+    string? Unit,
+    decimal? UnitPrice,
+    int? SortOrder
+);
+
+public record WorkflowConfigFeatureDto(
+    string Id,
+    string WorkflowConfigId,
+    string FeatureId,
+    int Quantity,
+    /// <summary>JSON string: { [dependencyId]: bool }</summary>
+    string InclusionsJson,
+    int SortOrder
+);
+
+public record UpsertWorkflowConfigFeatureRequest(
+    string WorkflowConfigId,
+    string FeatureId,
+    int Quantity = 1,
+    string? InclusionsJson = null,
+    int SortOrder = 0
+);
+
 public record ProductDto(
     string Id,
     string Name,
-    string? Description
+    string? Description,
+    List<ProductFeatureDefinitionDto>? Features,
+    string? DivisionId = null,
+    string? DivisionName = null
 );
+
+public record FeatureSubPropertyDto(
+    string Id,
+    string Name,
+    string ValueType
+);
+
+public record ProductFeatureDefinitionDto(
+    string Id,
+    string Name,
+    string ValueType,
+    List<string>? Options,
+    int Quantity,
+    List<FeatureSubPropertyDto>? SubProperties
+);
+
+public record FeatureSelectionDto(string FeatureId, bool Included, int ActiveCount);
+
+public record WorkInstructionTemplateDto(
+    string Id,
+    string Name,
+    string ProductId,
+    string Status,
+    List<FeatureSelectionDto> FeatureSelections,
+    string? Notes,
+    string? WorkflowTemplateId,
+    string? ConfigType,
+    string? CreatedBy,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertWITemplateRequest(
+    string Name,
+    string ProductId,
+    string Status,
+    List<FeatureSelectionDto> FeatureSelections,
+    string? Notes,
+    string? WorkflowTemplateId,
+    string? ConfigType
+);
+
+public record SaveAsRequest(string Name);
 
 public record CreateProductRequest(
     string Name,
-    string? Description
+    string? Description,
+    List<ProductFeatureDefinitionDto>? Features,
+    string? DivisionId = null
 );
 
 public record UpdateProductRequest(
     string? Name,
-    string? Description
+    string? Description,
+    List<ProductFeatureDefinitionDto>? Features,
+    string? DivisionId = null
 );
 
 public record AssetDto(
@@ -157,7 +340,10 @@ public record ProjectDto(
     string Id,
     string CustomerName,
     string CustomerId,
+    string? SiteId,
+    string? SiteName,
     string JobNumber,
+    string PurchaseOrderNumber,
     string Description,
     string StartDate,
     string FinishDate,
@@ -171,7 +357,9 @@ public record ProjectDto(
     string? ProjectManager,
     decimal? ContractValue,
     string? ProbabilityStage,
-    List<string>? ProductIds
+    List<string>? ProductIds,
+    Dictionary<string, string>? ProductFeatureValues,
+    int AssetCount = 0
 );
 
 public record UpdateProjectStatusRequest(
@@ -215,7 +403,26 @@ public record QuickbaseSettingsDto(
     string ProjectsTableId,
     string InstallationsTableId,
     Dictionary<string, int> ProjectsFieldMap,
-    Dictionary<string, int> InstallationsFieldMap
+    Dictionary<string, int> InstallationsFieldMap,
+    string GoodsMovementsTableId,
+    int GoodsMovementsJobFid,
+    int GoodsMovementsOrderRefFid,
+    int GoodsMovementsDirectionFid
+);
+
+public record GoodsMovementDto(
+    string Direction,
+    string MovementRef,
+    string Date,
+    string ToFrom,
+    string ConsignmentRef,
+    string JobNumber,
+    string OrderRef,
+    string Goods,
+    string HandledBy,
+    string NavPoNumber,
+    string RecordId,
+    Dictionary<string, string> RawFields
 );
 
 public record InspectionDto(
@@ -285,7 +492,14 @@ public record GlobalTableConfigDto(
     string TableName,
     List<string> Order,
     List<string> Hidden,
-    Dictionary<string, string> BaseFieldNames
+    Dictionary<string, string> BaseFieldNames,
+    Dictionary<string, BaseFieldMetaDto> BaseFieldMeta
+);
+
+public record BaseFieldMetaDto(
+    string? FieldType,
+    bool Required,
+    List<string>? Options
 );
 
 public record InstallationTabDto(
@@ -310,8 +524,13 @@ public record DocumentDto(
     string UploadedAt,
     string? ContentType,
     long? FileSize,
-    string? DownloadUrl
+    string? DownloadUrl,
+    string? CreatedBy,
+    string? Notes,
+    string? CustomValuesJson
 );
+
+public record DocumentConfigDto(string TabsJson, string FieldsJson);
 
 public record InspectionPhotoDto(
     string Id,
@@ -346,3 +565,601 @@ public record RolePermissions(
 public record RoleConfigDto(
     Dictionary<string, RolePermissions> Roles
 );
+
+public record OfficeDto(
+    string Id,
+    string Country,
+    string State,
+    string City,
+    double Lat,
+    double Lng
+);
+
+public record CreateOfficeRequest(
+    string Country,
+    string State,
+    string City,
+    double Lat,
+    double Lng
+);
+
+public record UpdateOfficeRequest(
+    string? Country,
+    string? State,
+    string? City,
+    double? Lat,
+    double? Lng
+);
+
+public record WorkflowTemplateDto(
+    string Id,
+    string Name,
+    string ProductId,
+    string StepsJson,
+    string MediaJson,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertWorkflowTemplateRequest(
+    string Name,
+    string ProductId,
+    string StepsJson,
+    string? MediaJson
+);
+
+public record WorkInstructionDto(
+    string Id,
+    string ProductId,
+    string Title,
+    string? Summary,
+    string StepsJson,
+    string Status,
+    string FeatureValuesJson,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertWorkInstructionRequest(
+    string Title,
+    string? Summary,
+    string StepsJson,
+    string Status,
+    string? FeatureValuesJson
+);
+
+public record WorkOrderDto(
+    string Id,
+    string WorkflowTemplateId,
+    string ProductId,
+    string JobReference,
+    string Status,
+    string StepsDataJson,
+    string? ProjectAssetId,
+    string? Notes,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertWorkOrderRequest(
+    string? WorkflowTemplateId,
+    string? ProductId,
+    string? JobReference,
+    string? Status,
+    string? StepsDataJson,
+    string? ProjectAssetId,
+    string? Notes
+);
+
+public record ProjectAssetDto(
+    string Id,
+    string ProjectId,
+    string ProductId,
+    string? ProductConfigId,
+    string? WorkflowTemplateId,
+    string AssetTag,
+    string? AssetName,
+    string? SerialNumber,
+    string? AssetModel,
+    string? Manufacturer,
+    string? Location,
+    string? AssignedUserId,
+    string Status,
+    string? WorkOrderId,
+    string? Notes,
+    string FeatureValuesJson,
+    string IssuesJson,
+    string? ConfigLabel,
+    DateTime? InstalledAt,
+    string? InstalledBy,
+    string AsBuiltJson,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertProjectAssetRequest(
+    string? ProjectId,
+    string? ProductId,
+    string? ProductConfigId,
+    string? WorkflowTemplateId,
+    string? AssetTag,
+    string? AssetName,
+    string? SerialNumber,
+    string? AssetModel,
+    string? Manufacturer,
+    string? Location,
+    string? AssignedUserId,
+    string? Status,
+    string? WorkOrderId,
+    string? Notes,
+    string? FeatureValuesJson,
+    string? IssuesJson,
+    string? ConfigLabel
+);
+
+public record BulkCreateProjectAssetsRequest(
+    string ProjectId,
+    string ProductId,
+    List<UpsertProjectAssetRequest> Assets
+);
+
+// ─── v2 Workflow Config Unification DTOs ──────────────────────────────────────
+
+public record WorkflowConfigDto(
+    string Id,
+    string ProductId,
+    string Name,
+    string? DisplayName,
+    string? ConfigType,
+    string Status,
+    int Version,
+    string? TemplateSourceId,
+    string StepsJson,
+    string MediaJson,
+    string FeatureSelectionsJson,
+    string? Notes,
+    string? CreatedBy,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+public record UpsertWorkflowConfigRequest(
+    string? Name,
+    string? ProductId,
+    string? DisplayName,
+    string? ConfigType,
+    string? Notes,
+    string? StepsJson,
+    string? MediaJson,
+    string? FeatureSelectionsJson
+);
+
+public record WorkflowTypeDto(
+    string Id,
+    string Name,
+    string? Icon,
+    int SortOrder,
+    bool IsActive
+);
+
+public record UpsertWorkflowTypeRequest(
+    string Name,
+    string? Icon,
+    int SortOrder
+);
+
+public record AssetWorkflowAssignmentDto(
+    string Id,
+    string AssetId,
+    string WorkflowConfigId,
+    string WorkflowTypeId,
+    string WorkflowTypeName,
+    string WorkflowConfigName,
+    bool Active,
+    string? AssignedBy,
+    DateTime AssignedAt
+);
+
+public record CreateAssignmentRequest(
+    string AssetId,
+    string WorkflowConfigId,
+    string WorkflowTypeId
+);
+
+public record AssetWorkflowRunDto(
+    string Id,
+    string AssetId,
+    string WorkflowConfigId,
+    int WorkflowVersion,
+    string WorkflowSnapshotJson,
+    string? WorkOrderId,
+    string Status,
+    bool IsLocked,
+    string? TechnicianUserId,
+    string StepResultsJson,
+    string IssuesJson,
+    string TimeTrackingJson,
+    int ProductiveSeconds,
+    int DowntimeSeconds,
+    int DowntimeEvents,
+    int RunNumber,
+    string? CompletedByName,
+    string SignatureStatus,
+    DateTime? InstallerSignedAt,
+    DateTime? CustomerSignedAt,
+    DateTime StartedAt,
+    DateTime? CompletedAt,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    string BomActualJson
+);
+
+public record StartRunRequest(
+    string AssetId,
+    string WorkflowConfigId,
+    string? TechnicianUserId
+);
+
+public record SaveRunProgressRequest(
+    string StepResultsJson,
+    string? IssuesJson,
+    string? Status
+);
+
+public record CompleteRunRequest(
+    string StepResultsJson,
+    string IssuesJson,
+    string? CompletedByName,
+    string? BomActualJson
+);
+
+public record PatchIssuesRequest(string IssuesJson);
+public record PatchTimeEntriesRequest(string TimeEntriesJson);
+public record TrackRunTimeRequest(
+    string Action,
+    string? Reason,
+    string? StartedAtUtc,
+    string? EndedAtUtc
+);
+
+public record BrandSettingDto(string? LogoBase64);
+public record UpdateBrandSettingRequest(string? LogoBase64);
+
+// ─── Asset Documents ──────────────────────────────────────────────────────────
+public record AssetDocumentRevisionDto(
+    string Id,
+    int RevisionNumber,
+    string OriginalName,
+    string MimeType,
+    long FileSizeBytes,
+    string? UploadedBy,
+    DateTime UploadedAt
+);
+
+public record AssetDocumentDto(
+    string Id,
+    string AssetId,
+    string Label,
+    string? CreatedBy,
+    DateTime CreatedAt,
+    AssetDocumentRevisionDto? CurrentRevision,
+    IEnumerable<AssetDocumentRevisionDto> History
+);
+
+public record PatchDocumentLabelRequest(string Label);
+
+// ─── Asset Document Links (bridge: asset ↔ library document) ─────────────────
+public record AssetDocumentLinkDto(
+    string Id,
+    string AssetId,
+    string DocumentId,
+    string? AttachedBy,
+    DateTime AttachedAt,
+    DocumentDto Document
+);
+
+public record CreateAssetDocumentLinkRequest(
+    string AssetId,
+    string DocumentId,
+    string? AttachedBy
+);
+
+// ─── Project CRM — Contacts ────────────────────────────────────────────────────
+public record ProjectContactDto(
+    string Id,
+    string ProjectId,
+    string Name,
+    string? Title,
+    string? Email,
+    string? Phone,
+    string PreferredSignMethod,
+    bool IsPrimarySigner,
+    bool CcReports,
+    string? Address,
+    DateTime CreatedAt
+);
+
+public record UpsertProjectContactRequest(
+    string Name,
+    string? Title,
+    string? Email,
+    string? Phone,
+    string PreferredSignMethod,
+    bool IsPrimarySigner,
+    bool CcReports,
+    string? Address
+);
+
+// ─── Project CRM — Delivery Profiles ──────────────────────────────────────────
+public record ProjectDeliveryProfileDto(
+    string Id,
+    string ProjectId,
+    string Label,
+    string? ContactName,
+    string? ContactPhone,
+    string? ContactEmail,
+    string? AddressLine1,
+    string? AddressLine2,
+    string? City,
+    string? State,
+    string? PostCode,
+    string? Country,
+    string? DeliveryNotes,
+    string? AccessHours,
+    bool IsDefault,
+    DateTime CreatedAt
+);
+
+public record UpsertProjectDeliveryProfileRequest(
+    string Label,
+    string? ContactName,
+    string? ContactPhone,
+    string? ContactEmail,
+    string? AddressLine1,
+    string? AddressLine2,
+    string? City,
+    string? State,
+    string? PostCode,
+    string? Country,
+    string? DeliveryNotes,
+    string? AccessHours,
+    bool IsDefault
+);
+
+// ─── Project CRM — Inbound Items ──────────────────────────────────────────────
+public record ProjectInboundItemDto(
+    string Id,
+    string ProjectId,
+    string Description,
+    decimal Quantity,
+    string? Unit,
+    string Condition,
+    string? ReferenceNumber,
+    string? ReceivedDate,
+    string? ReceivedBy,
+    string? Notes,
+    string ItemType,
+    DateTime CreatedAt
+);
+
+public record UpsertProjectInboundItemRequest(
+    string Description,
+    decimal Quantity,
+    string? Unit,
+    string Condition,
+    string? ReferenceNumber,
+    string? ReceivedDate,
+    string? ReceivedBy,
+    string? Notes,
+    string ItemType
+);
+
+// ─── Signatures ───────────────────────────────────────────────────────────────
+public record SignatureEventDto(
+    string Id,
+    string RunId,
+    string SignerRole,
+    string SignerName,
+    string? SignerEmail,
+    string? SignerTitle,
+    DateTime SignedAtUtc,
+    bool HasDrawnSignature,
+    string? SignatureData,   // base64 PNG — included for report generation
+    string? DeviceInfo,
+    string? IpAddress,
+    string ReasonCode,
+    string? Notes,
+    string? TokenId
+);
+
+public record SubmitSignatureRequest(
+    string SignerRole,
+    string SignerName,
+    string? SignerEmail,
+    string? SignerTitle,
+    string? SignatureData,
+    string ReasonCode,
+    string? Notes,
+    bool ConsentConfirmed
+);
+
+// ─── Signature Tokens ─────────────────────────────────────────────────────────
+public record SignatureTokenDto(
+    string Id,
+    string RunId,
+    string? ContactId,
+    string RecipientEmail,
+    string? RecipientName,
+    DateTime CreatedAtUtc,
+    DateTime ExpiresAtUtc,
+    DateTime? UsedAtUtc,
+    bool IsRevoked,
+    bool IsExpired
+);
+
+public record CreateSignatureTokenRequest(
+    string RunId,
+    string? ContactId,
+    string RecipientEmail,
+    string? RecipientName,
+    int ExpiresInHours,
+    string? CustomMessage
+);
+
+public record PublicRunSummaryDto(
+    string RunId,
+    string AssetName,
+    string AssetSerial,
+    string WorkflowName,
+    string ProjectJobNumber,
+    string CustomerName,
+    string CompletedByName,
+    DateTime CompletedAt,
+    string SignatureStatus,
+    string RecipientName,
+    string RecipientEmail,
+    bool TokenValid,
+    // Fields needed to generate the PDF report on the client
+    string WorkflowSnapshotJson,
+    string StepResultsJson,
+    string IssuesJson,
+    string? AssetTag,
+    string? AssetLocation,
+    // Installer signature (already captured; customer can see it in the report)
+    string? InstallerSignerName,
+    string? InstallerSignatureData,
+    string? InstallerReasonCode,
+    string? InstallerNotes,
+    DateTime? InstallerSignedAt
+);
+
+public record PublicSubmitSignatureRequest(
+    string SignerName,
+    string? SignerTitle,
+    string? SignatureData,
+    string ReasonCode,
+    string? Notes,
+    bool ConsentConfirmed,
+    string? OtpCode
+);
+
+public record RequestOtpRequest(string TokenId);
+
+// ─── Dispatch / Logistics ─────────────────────────────────────────────────────
+public record DispatchOrderDto(
+    string Id,
+    string ProjectId,
+    string? DeliveryProfileId,
+    string? DeliveryProfileLabel,
+    string? RequestedByName,
+    string? NeededByDate,
+    string Priority,
+    string Status,
+    string? Carrier,
+    string? TrackingNumber,
+    string? TrackingUrl,
+    string? InternalNotes,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    List<DispatchLineDto> Lines,
+    List<DeliveryEventDto> Events
+);
+
+public record UpsertDispatchOrderRequest(
+    string ProjectId,
+    string? DeliveryProfileId,
+    string? RequestedByName,
+    string? NeededByDate,
+    string Priority,
+    string Status,
+    string? Carrier,
+    string? TrackingNumber,
+    string? TrackingUrl,
+    string? InternalNotes
+);
+
+public record DispatchLineDto(
+    string Id,
+    string OrderId,
+    string Description,
+    string? PartNumber,
+    decimal QuantityRequested,
+    decimal QuantityShipped,
+    string? Unit,
+    decimal? UnitCost,
+    bool IsBillable,
+    string? TaxCode,
+    string? Notes
+);
+
+public record UpsertDispatchLineRequest(
+    string Description,
+    string? PartNumber,
+    decimal QuantityRequested,
+    decimal QuantityShipped,
+    string? Unit,
+    decimal? UnitCost,
+    bool IsBillable,
+    string? TaxCode,
+    string? Notes
+);
+
+public record DeliveryEventDto(
+    string Id,
+    string OrderId,
+    string EventType,
+    DateTime OccurredAtUtc,
+    string? Location,
+    string? Notes,
+    string? RecordedBy
+);
+
+public record AddDeliveryEventRequest(
+    string EventType,
+    DateTime? OccurredAtUtc,
+    string? Location,
+    string? Notes,
+    string? RecordedBy
+);
+
+public record PendingSignatureDto(
+    string RunId,
+    string AssetId,
+    string AssetTag,
+    string AssetName,
+    string ProjectId,
+    string JobNumber,
+    string CustomerName,
+    string CompletedAt,
+    string CompletedBy
+);
+
+/// <summary>
+/// Flat projection of a single unresolved issue surfaced in the cross-project Issues Board.
+/// Issues are embedded as JSON blobs on AssetWorkflowRun.IssuesJson; this DTO extracts them
+/// with the surrounding project / asset context so the board can render without N+1 calls.
+/// </summary>
+public record OpenIssueDto(
+    string IssueId,
+    string Description,
+    string IssueType,   // "blocking" | "observation" | "scope-deviation"
+    string Severity,    // "low" | "medium" | "high"
+    bool IsBlocking,
+    string ReportedAt,
+    string? CreatedBy,
+    string? StepTitle,
+    string RunId,
+    string AssetId,
+    string AssetTag,
+    string AssetName,
+    string AssetLocation,
+    string ProjectId,
+    string JobNumber,
+    string CustomerName
+);
+
+/// <summary>Result returned after cloning assets from one project into another.</summary>
+public record CloneAssetsResult(int AssetsCloned, int AssignmentsCloned);
+
+/// <summary>Per-technician open-asset counts for the Dashboard workload panel.</summary>
+public record WorkloadSummaryDto(string UserId, string FullName, int NotStarted, int InProgress, int TotalAssigned);

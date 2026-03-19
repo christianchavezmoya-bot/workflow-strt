@@ -9,7 +9,24 @@ public static class DbInitializer
 {
     public static void Initialize(AppDbContext db, IConfiguration config)
     {
+        // Fix partially-applied Add2faFields migration:
+        // The 2FA columns may already exist from a failed run, but the migration
+        // wasn't recorded. Detect this and mark it as applied before running migrations.
+        FixPartialMigration(db);
+
+        // Fix migrations that were applied via Ensure* helpers before EF migration files existed.
+        FixEnsuredMigrations(db);
+
         db.Database.Migrate();
+        EnsureAuditLogTable(db);
+        EnsureSessionsTable(db);
+        EnsurePasswordChangedAtColumn(db);
+        EnsureDocumentTables(db);
+        EnsureAssetDocumentTables(db);
+        EnsureAssetDocumentLinksTables(db);
+        EnsureRunTimeTrackingColumns(db);
+        EnsureMarch15Columns(db);
+        EnsureLinkableKeyFieldDefinitions(db);
 
         if (!db.Users.Any())
         {
@@ -51,22 +68,15 @@ public static class DbInitializer
             }
         }
 
-        if (!db.Customers.Any())
-        {
-            db.Customers.AddRange(
-                new CustomerEntity { Name = "Strata Worldwide", CustomerId = "CUST-1001", Office = "USA" },
-                new CustomerEntity { Name = "OmniBuild", CustomerId = "CUST-1002", Office = "Australia" },
-                new CustomerEntity { Name = "Westline Partners", CustomerId = "CUST-1003", Office = "All" }
-            );
-        }
+        // Customer seed data is now handled by migrations (SeedDemoCustomerAndSite)
+        // Removed default customers to avoid conflicts
 
-        if (!db.Products.Any())
-        {
-            db.Products.AddRange(
-                new ProductEntity { Name = "Tracker Alpha", Description = "Core tracking suite." },
-                new ProductEntity { Name = "Tracker Pro", Description = "Advanced reporting and alerts." }
-            );
-        }
+        SeedProducts(db);
+        db.SaveChanges(); // flush products before feature patch so LINQ queries can find them
+
+        EnsureAim100Features(db);
+        MigrateProductFeaturesToGlobalLibrary(db);
+        db.SaveChanges();
 
         if (!db.Projects.Any())
         {
@@ -124,6 +134,604 @@ public static class DbInitializer
             });
         }
 
+        if (!db.NotificationSettings.Any())
+        {
+            // Seed a single row so admin can edit notification settings from the UI.
+            // Real values can also come from appsettings/env vars until configured.
+            db.NotificationSettings.Add(new NotificationSettingsEntity
+            {
+                Id = 1,
+                SmtpHost = "",
+                SmtpPort = 25,
+                SmtpUseSsl = false,
+                SmtpUser = "",
+                SmtpPass = "",
+                SmtpFrom = config["Email:FromAddress"] ?? "no-reply@commtrac.local",
+                FrontendBaseUrl = config["Email:FrontendBaseUrl"] ?? "",
+                SmsProvider = config["Sms:Provider"] ?? "",
+                SmsApiKey = config["Sms:ApiKey"] ?? "",
+                SmsSender = config["Sms:Sender"] ?? ""
+            });
+        }
+
         db.SaveChanges();
+    }
+
+    // TableConfigDialog only allows linking to fields that are typed as "primary key"/"composite key"/"lookup field".
+    // Seed lightweight PK definitions for Customers/Sites so "Link to" can target those tables.
+    private static void EnsureLinkableKeyFieldDefinitions(AppDbContext db)
+    {
+        if (!db.FieldDefinitions.Any(f => f.Id == "field-customer-key"))
+        {
+            db.FieldDefinitions.Add(new FieldDefinitionEntity
+            {
+                Id = "field-customer-key",
+                Name = "Customer Key",
+                FieldType = "primary key",
+                LinkToFieldId = null,
+                ActionType = null,
+                TablesJson = JsonSerializer.Serialize(new[] { "customers" }),
+                SortOrder = 46,
+                IsActive = true
+            });
+        }
+
+        if (!db.FieldDefinitions.Any(f => f.Id == "field-site-key"))
+        {
+            db.FieldDefinitions.Add(new FieldDefinitionEntity
+            {
+                Id = "field-site-key",
+                Name = "Site Key",
+                FieldType = "primary key",
+                LinkToFieldId = null,
+                ActionType = null,
+                TablesJson = JsonSerializer.Serialize(new[] { "sites" }),
+                SortOrder = 47,
+                IsActive = true
+            });
+        }
+    }
+
+    /// <summary>
+    /// Creates the AuditLogs table if it doesn't exist (no migration needed).
+    /// </summary>
+    private static void EnsureAuditLogTable(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS AuditLogs (
+                    Id TEXT PRIMARY KEY NOT NULL,
+                    UserId TEXT NOT NULL DEFAULT '',
+                    UserEmail TEXT NOT NULL DEFAULT '',
+                    Action TEXT NOT NULL DEFAULT '',
+                    Details TEXT,
+                    IpAddress TEXT,
+                    Timestamp TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_AuditLogs_UserId ON AuditLogs (UserId)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_AuditLogs_Timestamp ON AuditLogs (Timestamp)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureSessionsTable(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS Sessions (
+                    Id TEXT PRIMARY KEY NOT NULL,
+                    UserId TEXT NOT NULL DEFAULT '',
+                    UserEmail TEXT NOT NULL DEFAULT '',
+                    IpAddress TEXT,
+                    UserAgent TEXT,
+                    CreatedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                    LastActiveAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                    IsRevoked INTEGER NOT NULL DEFAULT 0
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_Sessions_UserId ON Sessions (UserId)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsurePasswordChangedAtColumn(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Users') WHERE name='PasswordChangedAt'";
+            var exists = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+            if (!exists)
+            {
+                cmd.CommandText = "ALTER TABLE Users ADD COLUMN PasswordChangedAt TEXT";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Product seeding
+    // -----------------------------------------------------------------------
+
+    // All known products. Add new products here — they will be inserted on
+    // first startup if the name doesn't already exist in the database.
+    private static readonly (string Name, string? Description)[] KnownProducts =
+    [
+        ("AIM-100",               "AIM-100 field device"),
+        ("Commtrac",              "Commtrac core platform"),
+        ("EDGE AI",               "EDGE AI processing module"),
+        ("Hazard Avert",          "Hazard detection and avoidance"),
+        ("Hazard Avert - Gen 2",  "Hazard Avert second generation"),
+        ("Ping Alert",            "Personnel alerting system"),
+        ("New Ice Cream",         null),
+        ("Coffee",                null),
+    ];
+
+    private static void SeedProducts(AppDbContext db)
+    {
+        var existingNames = db.Products.Select(p => p.Name).ToHashSet();
+        foreach (var (name, desc) in KnownProducts)
+        {
+            if (!existingNames.Contains(name))
+                db.Products.Add(new ProductEntity { Name = name, Description = desc });
+        }
+    }
+
+    // AIM-100 feature definitions reconstructed from the AIM-100 Workflow StepsJson.
+    // The IDs are kept identical so existing workflow step featureId references stay intact.
+    private const string Aim100FeaturesJson =
+        """[{"id":"088aa75d-fd13-4d99-bf18-07c4c95c21c9","name":"Front Camera","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"5b2f3511-9a13-4fb3-86f1-1b30d132bce6","name":"Router","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"b3eef625-8bf1-4488-8af8-0699bd0e9ad9","name":"Wi-Fi Antenna","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"c6b4b1d8-4b03-44c6-9225-779850febcde","name":"IP","valueType":"text","options":[],"quantity":0,"subProperties":null},""" +
+        """{"id":"7b267e0a-9c42-4b3d-8aa9-4cea574cf57e","name":"CAN BUS","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"87e9f6ad-b0f8-4cd4-ae8f-4c816932f57d","name":"Park Brake Signal","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"d8369777-e271-4f21-ba83-4512be0347d1","name":"Reverse Signal","valueType":"single-select","options":["Yes","No","N/A"],"quantity":0,"subProperties":null},""" +
+        """{"id":"2f579496-94d3-4bd3-b834-0934653a4fd4","name":"AIM-100","valueType":"component","options":[],"quantity":0,"subProperties":[""" +
+            """{"id":"404335f9-7aa8-4eae-9a38-eb97617b76e6","name":"Part Number","valueType":"text"},""" +
+            """{"id":"9e9efc4a-ad1c-4263-827e-2bd2d620ff48","name":"Serial Number","valueType":"text"},""" +
+            """{"id":"af17eb48-4286-4cbb-b567-c7bc87880301","name":"IP","valueType":"text"},""" +
+            """{"id":"92366f8e-1561-4dc3-915f-b597037d5d82","name":"Firmware","valueType":"text"}]}]""";
+
+    /// <summary>
+    /// Restores AIM-100 feature definitions if they are missing (FeaturesJson == "[]").
+    /// Only patches the row when empty so any UI edits to features are never overwritten.
+    /// </summary>
+    private static void EnsureAim100Features(AppDbContext db)
+    {
+        var aim100 = db.Products.FirstOrDefault(p => p.Name == "AIM-100");
+        if (aim100 is null || aim100.FeaturesJson != "[]") return;
+        aim100.FeaturesJson = Aim100FeaturesJson;
+    }
+
+    /// <summary>
+    /// Handles migrations that were applied manually via Ensure* helper methods
+    /// before the corresponding EF migration files were created. Inserts the missing
+    /// migration history records so that Migrate() skips them and doesn't try to
+    /// re-apply schema changes that already exist (which would cause duplicate-column errors).
+    /// </summary>
+    private static void FixEnsuredMigrations(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            void EnsureRecorded(string migrationId, string detectSql)
+            {
+                cmd.CommandText = detectSql;
+                var exists = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+                if (!exists) return;
+
+                cmd.CommandText = $"SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId='{migrationId}'";
+                var recorded = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+                if (!recorded)
+                {
+                    cmd.CommandText = $"INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES ('{migrationId}', '8.0.23')";
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            // AssetDocuments/Revisions — created by EnsureAssetDocumentTables before migration existed
+            EnsureRecorded("20260302000000_AssetDocuments",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AssetDocuments'");
+
+            // AssetDocumentLinks — created by EnsureAssetDocumentLinksTables before migration existed
+            EnsureRecorded("20260302100000_AssetDocumentLinks",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AssetDocumentLinks'");
+
+            // RemoveUserIdField — safe to mark as applied; the DELETE is idempotent and harmless
+            EnsureRecorded("20260302120000_RemoveUserIdField",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AssetDocumentLinks'");
+
+            // RunTimeTracking — columns added by EnsureRunTimeTrackingColumns before migration existed
+            EnsureRecorded("20260306090000_RunTimeTracking",
+                "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='TimeTrackingJson'");
+
+            // March-15 columns — added by EnsureMarch15Columns before migration files existed
+            EnsureRecorded("20260315120000_ProjectAssetAsBuiltJson",
+                "SELECT COUNT(*) FROM pragma_table_info('ProjectAssets') WHERE name='AsBuiltJson'");
+
+            EnsureRecorded("20260315130000_AssetWorkflowRunBomActualJson",
+                "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='BomActualJson'");
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Handles the case where the Add2faFields migration was partially applied
+    /// (columns added to Users table but migration not recorded in history).
+    /// Detects this state and inserts the history record so Migrate() skips it.
+    /// </summary>
+    private static void FixPartialMigration(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            // Check if the 2FA column exists on the Users table
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Users') WHERE name='Is2faEnabled'";
+            var colExists = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+
+            if (!colExists) return; // Fresh DB or columns not yet added — let Migrate() handle it
+
+            // Check if the migration is already recorded
+            cmd.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId='20260212035001_Add2faFields'";
+            var migRecorded = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+
+            if (!migRecorded)
+            {
+                // Columns exist but migration not recorded — fix it
+                cmd.CommandText = "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES ('20260212035001_Add2faFields', '8.0.23')";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Creates the AssetDocumentLinks bridge table (asset ↔ library document) if it
+    /// doesn't exist. This table is created here rather than via an EF migration so
+    /// it follows the same idempotent Ensure* pattern used by all other post-initial
+    /// tables in this project.
+    /// </summary>
+    private static void EnsureAssetDocumentLinksTables(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS AssetDocumentLinks (
+                    Id         TEXT PRIMARY KEY NOT NULL,
+                    AssetId    TEXT NOT NULL DEFAULT '',
+                    DocumentId TEXT NOT NULL DEFAULT '',
+                    AttachedBy TEXT NULL,
+                    AttachedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_AssetDocumentLinks_AssetId
+                ON AssetDocumentLinks (AssetId)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_AssetDocumentLinks_DocumentId
+                ON AssetDocumentLinks (DocumentId)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureDocumentTables(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            // Add CreatedBy column to Documents if missing
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='CreatedBy'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN CreatedBy TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            // Add Notes column to Documents if missing
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='Notes'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN Notes TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            // Add CustomValuesJson column to Documents if missing
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='CustomValuesJson'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN CustomValuesJson TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            // Add DownloadUrl column to Documents if missing
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='DownloadUrl'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN DownloadUrl TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            // Create DocumentConfigs table if missing
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS DocumentConfigs (
+                    Id INTEGER PRIMARY KEY NOT NULL,
+                    TabsJson TEXT NOT NULL DEFAULT '[]',
+                    FieldsJson TEXT NOT NULL DEFAULT '[]'
+                )";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Creates AssetDocuments and AssetDocumentRevisions if missing.
+    /// This protects environments where migration history drifted and the
+    /// EF migration for these tables was not discovered/applied.
+    /// </summary>
+    private static void EnsureAssetDocumentTables(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS AssetDocuments (
+                    Id        TEXT PRIMARY KEY NOT NULL,
+                    AssetId   TEXT NOT NULL DEFAULT '',
+                    Label     TEXT NOT NULL DEFAULT 'Document',
+                    CreatedBy TEXT NULL,
+                    CreatedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_AssetDocuments_AssetId
+                ON AssetDocuments (AssetId)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS AssetDocumentRevisions (
+                    Id             TEXT PRIMARY KEY NOT NULL,
+                    DocumentId     TEXT NOT NULL DEFAULT '',
+                    RevisionNumber INTEGER NOT NULL DEFAULT 1,
+                    OriginalName   TEXT NOT NULL DEFAULT '',
+                    StoredName     TEXT NOT NULL DEFAULT '',
+                    MimeType       TEXT NOT NULL DEFAULT '',
+                    FileSizeBytes  INTEGER NOT NULL DEFAULT 0,
+                    UploadedBy     TEXT NULL,
+                    UploadedAt     TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_AssetDocumentRevisions_DocumentId
+                ON AssetDocumentRevisions (DocumentId)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Adds columns from the March-15 migrations that may be missing when the database
+    /// was restored from a pre-March-15 backup but the migration history already records
+    /// those migrations as applied (schema/history mismatch after a restore).
+    /// </summary>
+    private static void EnsureMarch15Columns(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            // 20260315120000_ProjectAssetAsBuiltJson
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('ProjectAssets') WHERE name='AsBuiltJson'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE ProjectAssets ADD COLUMN AsBuiltJson TEXT NOT NULL DEFAULT '{}'";
+                cmd.ExecuteNonQuery();
+            }
+
+            // 20260315130000_AssetWorkflowRunBomActualJson
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='BomActualJson'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE AssetWorkflowRuns ADD COLUMN BomActualJson TEXT NOT NULL DEFAULT '[]'";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
+
+    private class RawFeature
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string ValueType { get; set; } = "text";
+        public List<string>? Options { get; set; }
+        public List<JsonElement>? SubProperties { get; set; }
+    }
+
+    /// <summary>
+    /// One-time migration: reads each product's FeaturesJson and promotes features
+    /// to the global Features table, preserving original IDs so that workflow step
+    /// featureId references remain valid. Idempotent — skips features already in the table.
+    /// </summary>
+    private static void MigrateProductFeaturesToGlobalLibrary(AppDbContext db)
+    {
+        var products = db.Products.ToList();
+        if (!products.Any()) return;
+
+        var existingFeatureIds = db.Features.Select(f => f.Id).ToHashSet();
+        var existingLinks = db.ProductFeatures
+            .Select(pf => new { pf.ProductId, pf.FeatureId })
+            .ToHashSet(EqualityComparer<dynamic>.Default);
+
+        // Build a stable set of existing (productId, featureId) pairs for dedup
+        var existingLinkSet = db.ProductFeatures
+            .Select(pf => pf.ProductId + "|" + pf.FeatureId)
+            .ToHashSet();
+
+        int sortOrder = 0;
+        foreach (var product in products)
+        {
+            if (string.IsNullOrWhiteSpace(product.FeaturesJson) || product.FeaturesJson == "[]")
+                continue;
+
+            List<RawFeature> features;
+            try
+            {
+                features = JsonSerializer.Deserialize<List<RawFeature>>(product.FeaturesJson, JsonOpts)
+                           ?? new List<RawFeature>();
+            }
+            catch { continue; }
+
+            sortOrder = 0;
+            foreach (var f in features)
+            {
+                if (string.IsNullOrWhiteSpace(f.Id) || string.IsNullOrWhiteSpace(f.Name)) continue;
+
+                // Create global Feature row if not already present
+                if (!existingFeatureIds.Contains(f.Id))
+                {
+                    db.Features.Add(new FeatureEntity
+                    {
+                        Id = f.Id,
+                        Name = f.Name,
+                        ValueType = string.IsNullOrWhiteSpace(f.ValueType) ? "text" : f.ValueType,
+                        OptionsJson = f.Options is { Count: > 0 }
+                            ? JsonSerializer.Serialize(f.Options, JsonOpts) : "[]",
+                        SubPropertiesJson = f.SubProperties is { Count: > 0 }
+                            ? JsonSerializer.Serialize(f.SubProperties, JsonOpts) : "[]"
+                    });
+                    existingFeatureIds.Add(f.Id);
+                }
+
+                // Create product↔feature link if not already present
+                var linkKey = product.Id + "|" + f.Id;
+                if (!existingLinkSet.Contains(linkKey))
+                {
+                    db.ProductFeatures.Add(new ProductFeatureEntity
+                    {
+                        ProductId = product.Id,
+                        FeatureId = f.Id,
+                        SortOrder = sortOrder++
+                    });
+                    existingLinkSet.Add(linkKey);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds run time-tracking columns to AssetWorkflowRuns if missing.
+    /// </summary>
+    private static void EnsureRunTimeTrackingColumns(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='TimeTrackingJson'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE AssetWorkflowRuns ADD COLUMN TimeTrackingJson TEXT NOT NULL DEFAULT '[]'";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='ProductiveSeconds'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE AssetWorkflowRuns ADD COLUMN ProductiveSeconds INTEGER NOT NULL DEFAULT 0";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='DowntimeSeconds'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE AssetWorkflowRuns ADD COLUMN DowntimeSeconds INTEGER NOT NULL DEFAULT 0";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='DowntimeEvents'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE AssetWorkflowRuns ADD COLUMN DowntimeEvents INTEGER NOT NULL DEFAULT 0";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
     }
 }

@@ -7,4 +7,5 @@ public class TableConfigEntity
     public string OrderJson { get; set; } = "[]";
     public string HiddenJson { get; set; } = "[]";
     public string BaseFieldNamesJson { get; set; } = "{}";
+    public string BaseFieldMetaJson { get; set; } = "{}";
 }

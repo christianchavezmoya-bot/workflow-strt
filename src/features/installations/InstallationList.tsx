@@ -32,22 +32,31 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
+import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import { useAuth } from "../../hooks/useAuth";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { fieldService } from "../../services/fieldService";
+import { officesService } from "../../services/officesService";
+import type { Office } from "../../components/GlobalOfficeMap";
+import { createCountryResolver } from "../../utils/officeCountry";
 import { installationTabsService, InstallationTab, InstallationTabRow } from "../../services/installationTabsService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createInstallation, deleteInstallation, fetchInstallations, updateInstallation } from "../../store/installationSlice";
 import { fetchProjects } from "../../store/projectSlice";
+import { fetchProducts } from "../../store/productsSlice";
 import { createUser, fetchUsers } from "../../store/usersSlice";
 import { Installation } from "../../types/installation";
 import { inspectionService, Inspection } from "../../services/inspectionService";
-import { issueService, Issue } from "../../services/issueService";
-import { documentService, DocumentRecord } from "../../services/documentService";
 import { customFieldService, CustomFieldDefinition } from "../../services/customFieldService";
+
+// Style for field definition labels (yellow bold)
+const fieldLabelStyle = {
+  color: '#FFD700',
+  fontWeight: 'bold'
+};
 
 const normalize = (value: string | number | undefined | null) => String(value ?? "");
 const defaultCustomColumns = ["ID", "Name", "Created Date"];
@@ -100,10 +109,19 @@ const InstallationList = () => {
   const projectsState = useAppSelector((state) => state.projects);
   const [searchParams, setSearchParams] = useSearchParams();
   const usersState = useAppSelector((state) => state.users);
+  const productsState = useAppSelector((state) => state.products);
   const [localInstallations, setLocalInstallations] = useState<Installation[]>([]);
+  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
+
+  useEffect(() => {
+    officesService.getAll().then(setGlobalOffices);
+  }, []);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(() => {
+    const stored = localStorage.getItem("installation_active_tab");
+    return stored ? parseInt(stored, 10) : 0;
+  });
   const [installationTabsConfig, setInstallationTabsConfig] = useState<InstallationTab[]>([]);
   const [installationTabsLoaded, setInstallationTabsLoaded] = useState(false);
   const [installationTabManagerOpen, setInstallationTabManagerOpen] = useState(false);
@@ -112,7 +130,7 @@ const InstallationList = () => {
   const [installationSettingsMenuOpen, setInstallationSettingsMenuOpen] = useState(false);
   const [newInstallationTabName, setNewInstallationTabName] = useState("");
   const [newInstallationTabType, setNewInstallationTabType] = useState<
-    "installations" | "inspections" | "issues" | "documents"
+    "installations"
   >("installations");
   const [installationTabRows, setInstallationTabRows] = useState<Record<string, Array<Record<string, string>>>>({});
   const [customInstallSorts, setCustomInstallSorts] = useState<Record<string, { key: string; dir: "asc" | "desc" }>>(
@@ -130,12 +148,9 @@ const InstallationList = () => {
   const [customInstallRowForm, setCustomInstallRowForm] = useState<Record<string, string>>({});
   const [viewMode, setViewMode] = useState<"table" | "form">("table");
   const [activeProduct, setActiveProduct] = useState("Strata Protech");
-  const [documentType, setDocumentType] = useState("Work Orders");
   const [assetTypes, setAssetTypes] = useState<string[]>([]);
   const [newInstallationOpen, setNewInstallationOpen] = useState(false);
   const [newInspectionOpen, setNewInspectionOpen] = useState(false);
-  const [newIssueOpen, setNewIssueOpen] = useState(false);
-  const [uploadDocOpen, setUploadDocOpen] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [installationProgress, setInstallationProgress] = useState(0);
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
@@ -184,18 +199,6 @@ const InstallationList = () => {
     anchorEl: null,
     key: ""
   });
-  const [issueSort, setIssueSort] = useState({ key: "", dir: "asc" as "asc" | "desc" });
-  const [issueFilters, setIssueFilters] = useState<Record<string, Set<string>>>({});
-  const [issueMenu, setIssueMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({
-    anchorEl: null,
-    key: ""
-  });
-  const [documentSort, setDocumentSort] = useState({ key: "", dir: "asc" as "asc" | "desc" });
-  const [documentFilters, setDocumentFilters] = useState<Record<string, Set<string>>>({});
-  const [documentMenu, setDocumentMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({
-    anchorEl: null,
-    key: ""
-  });
   const [selectedJobNumber, setSelectedJobNumber] = useState("");
   const [showAllInstallations, setShowAllInstallations] = useState(false);
   const [newInspection, setNewInspection] = useState({
@@ -204,51 +207,44 @@ const InstallationList = () => {
     inspector: "",
     date: ""
   });
-  const [newIssue, setNewIssue] = useState({
-    title: "",
-    installation: "",
-    priority: "Medium",
-    description: "",
-    startDate: "",
-    finishDate: ""
-  });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [modalErrors, setModalErrors] = useState<Record<string, string>>({});
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<Installation | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Installation | null>(null);
-  const [newDocument, setNewDocument] = useState({
-    link: "",
-    fileName: "",
-    file: null as File | null
-  });
-  const [docUploadError, setDocUploadError] = useState<string | null>(null);
-  const [docUploadSuccess, setDocUploadSuccess] = useState(false);
+  const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
+  const [placeholderNoticeOpen, setPlaceholderNoticeOpen] = useState(false);
   const [inspections, setInspections] = useState<
     Array<Inspection & { installationLabel: string }>
   >([]);
-  const [issues, setIssues] = useState<
-    Array<Issue & { installationLabel: string }>
-  >([]);
-  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [installationChecks, setInstallationChecks] = useState<Record<string, boolean>>({});
   const [formInstallationDynamic, setFormInstallationDynamic] = useState<Record<string, string>>({});
   const [modalInstallationDynamic, setModalInstallationDynamic] = useState<Record<string, string>>({});
   const [editInstallationDynamic, setEditInstallationDynamic] = useState<Record<string, string>>({});
   const [newInspectionDynamic, setNewInspectionDynamic] = useState<Record<string, string>>({});
-  const [newIssueDynamic, setNewIssueDynamic] = useState<Record<string, string>>({});
-  const [newDocumentDynamic, setNewDocumentDynamic] = useState<Record<string, string>>({});
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
-  const [tableConfigTarget, setTableConfigTarget] = useState<"installations" | "inspections" | "issues" | "documents">(
-    "installations"
-  );
+  const [tableConfigTarget, setTableConfigTarget] = useState<"installations" | "inspections">("installations");
 
   useEffect(() => {
     const loadTabs = async () => {
       try {
         const data = await installationTabsService.getAll();
         if (data.length > 0) {
-          setInstallationTabsConfig(data);
+          const filtered = data
+            .filter(
+              (tabItem) =>
+                tabItem.type !== "inspections" &&
+                tabItem.type !== "issues" &&
+                tabItem.type !== "documents" &&
+                tabItem.id !== "inspections" &&
+                tabItem.id !== "issues" &&
+                tabItem.id !== "documents"
+            )
+            .map((tabItem, index) => ({ ...tabItem, position: index }));
+          setInstallationTabsConfig(filtered);
+          if (filtered.length !== data.length) {
+            await installationTabsService.saveAll(filtered);
+          }
           setInstallationTabsLoaded(true);
           return;
         }
@@ -256,10 +252,7 @@ const InstallationList = () => {
         // ignore
       }
       const defaults: InstallationTab[] = [
-        { id: "installations", label: "Installations", type: "installations", position: 0 },
-        { id: "inspections", label: "Inspections", type: "inspections", position: 1 },
-        { id: "issues", label: "Issues", type: "issues", position: 2 },
-        { id: "documents", label: "Documents", type: "documents", position: 3 }
+        { id: "installations", label: "Installations", type: "installations", position: 0 }
       ];
       setInstallationTabsConfig(defaults);
       try {
@@ -290,9 +283,17 @@ const InstallationList = () => {
         customTabs.map(async (tabItem) => {
           try {
             const rows = await installationTabsService.getRows(tabItem.id);
+            const today = new Date().toISOString().slice(0, 10);
             setInstallationTabRows((prev) => ({
               ...prev,
-              [tabItem.id]: rows.map((row) => ({ ...row.data, _rowId: row.id }))
+              [tabItem.id]: rows.map((row) => {
+                const data = { ...row.data, _rowId: row.id };
+                // Backfill empty "Created Date" on existing rows
+                if ("Created Date" in data && !data["Created Date"]) {
+                  data["Created Date"] = today;
+                }
+                return data;
+              })
             }));
           } catch {
             // ignore
@@ -362,8 +363,6 @@ const InstallationList = () => {
 
   const installationsDynamic = useDynamicFields("installations");
   const inspectionsDynamic = useDynamicFields("inspections");
-  const issuesDynamic = useDynamicFields("issues");
-  const documentsDynamic = useDynamicFields("documents");
   const allFieldDefinitions = useFieldDefinitions();
   const installationsTableConfig = useTableConfig(
     "installations",
@@ -378,26 +377,6 @@ const InstallationList = () => {
   const inspectionsTableConfig = useTableConfig(
     "inspections",
     inspectionsDynamic.definitions.map((field) => ({
-      id: field.id,
-      name: field.name,
-      type: field.fieldType,
-      linkToFieldId: field.linkToFieldId,
-      actionType: field.actionType
-    }))
-  );
-  const issuesTableConfig = useTableConfig(
-    "issues",
-    issuesDynamic.definitions.map((field) => ({
-      id: field.id,
-      name: field.name,
-      type: field.fieldType,
-      linkToFieldId: field.linkToFieldId,
-      actionType: field.actionType
-    }))
-  );
-  const documentsTableConfig = useTableConfig(
-    "documents",
-    documentsDynamic.definitions.map((field) => ({
       id: field.id,
       name: field.name,
       type: field.fieldType,
@@ -430,14 +409,6 @@ const InstallationList = () => {
     () => new Set(["Inspection", "Installer", "Inspector", "Status", "Photos"].map((value) => value.toLowerCase())),
     []
   );
-  const issueFixedColumns = useMemo(
-    () => new Set(["Issue", "Start Date", "Finish Date", "Status", "Priority", "Owner"].map((value) => value.toLowerCase())),
-    []
-  );
-  const documentFixedColumns = useMemo(
-    () => new Set(["Document", "Type", "Linked to", "Uploaded"].map((value) => value.toLowerCase())),
-    []
-  );
 
   const installationDynamicColumns = useMemo(
     () =>
@@ -461,28 +432,6 @@ const InstallationList = () => {
       }),
     [inspectionsTableConfig.visibleFields, inspectionsDynamic.valuesByEntity, inspectionFixedColumns]
   );
-  const issueDynamicColumns = useMemo(
-    () =>
-      issuesTableConfig.visibleFields.filter((field) => {
-        if (issueFixedColumns.has(field.name.toLowerCase())) return false;
-        const hasValue = Object.values(issuesDynamic.valuesByEntity).some(
-          (values) => values[field.id]?.value?.trim()
-        );
-        return hasValue;
-      }),
-    [issuesTableConfig.visibleFields, issuesDynamic.valuesByEntity, issueFixedColumns]
-  );
-  const documentDynamicColumns = useMemo(
-    () =>
-      documentsTableConfig.visibleFields.filter((field) => {
-        if (documentFixedColumns.has(field.name.toLowerCase())) return false;
-        const hasValue = Object.values(documentsDynamic.valuesByEntity).some(
-          (values) => values[field.id]?.value?.trim()
-        );
-        return hasValue;
-      }),
-    [documentsTableConfig.visibleFields, documentsDynamic.valuesByEntity, documentFixedColumns]
-  );
 
   const availableFieldsForTable = useMemo(() => {
     const tableName = tableConfigTarget;
@@ -504,9 +453,13 @@ const InstallationList = () => {
   }, [dispatch]);
 
   useEffect(() => {
+    dispatch(fetchProducts());
+  }, [dispatch]);
+
+  useEffect(() => {
     dispatch(
       fetchProjects({
-        office: activeOffice !== "All" ? activeOffice : undefined,
+        country: activeOffice !== "All" ? activeOffice : undefined,
         page: 1,
         pageSize: 200
       })
@@ -535,6 +488,11 @@ const InstallationList = () => {
       localStorage.setItem("selected_job_number", selectedJobNumber);
     }
   }, [selectedJobNumber]);
+
+  // Persist active tab to localStorage
+  useEffect(() => {
+    localStorage.setItem("installation_active_tab", String(tab));
+  }, [tab]);
 
   useEffect(() => {
     const storedAssets = localStorage.getItem("admin_assets");
@@ -571,26 +529,6 @@ const InstallationList = () => {
         setInspections([]);
       });
 
-    issueService
-      .getIssues()
-      .then((data) =>
-        setIssues(
-          data.map((row) => ({
-            ...row,
-            installationLabel: row.installationId
-          }))
-        )
-      )
-      .catch(() => {
-        setIssues([]);
-      });
-
-    documentService
-      .getDocuments()
-      .then((data) => setDocuments(data))
-      .catch(() => {
-        setDocuments([]);
-      });
   }, []);
 
   useEffect(() => {
@@ -643,28 +581,6 @@ const InstallationList = () => {
     });
   }, [inspectionsDynamic.definitions]);
 
-  useEffect(() => {
-    if (issuesDynamic.definitions.length === 0) return;
-    setNewIssueDynamic((prev) => {
-      const next = { ...prev };
-      issuesDynamic.definitions.forEach((field) => {
-        if (next[field.id] === undefined) next[field.id] = "";
-      });
-      return next;
-    });
-  }, [issuesDynamic.definitions]);
-
-  useEffect(() => {
-    if (documentsDynamic.definitions.length === 0) return;
-    setNewDocumentDynamic((prev) => {
-      const next = { ...prev };
-      documentsDynamic.definitions.forEach((field) => {
-        if (next[field.id] === undefined) next[field.id] = "";
-      });
-      return next;
-    });
-  }, [documentsDynamic.definitions]);
-
   const helperText = useMemo(
     () =>
       "Format: Job Number, Installation Name, Site Name, Start Date, Scheduled End, Installer",
@@ -687,8 +603,42 @@ const InstallationList = () => {
     return projects.find((project) => project.jobNumber === selectedJobNumber)?.id || "";
   }, [projects, selectedJobNumber]);
 
+  // Resolve product names for the selected project
+  // Use local state so the name persists even when the office-filtered project list changes
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.jobNumber === selectedJobNumber),
+    [projects, selectedJobNumber]
+  );
+  const [selectedProductNames, setSelectedProductNames] = useState("");
+  useEffect(() => {
+    const ids = selectedProject?.productIds ?? [];
+    if (ids.length === 0 || productsState.items.length === 0) return;
+    const productMap = new Map(productsState.items.map((p) => [p.id, p.name]));
+    const names = ids.map((id) => productMap.get(id) || id).join(", ");
+    if (names) setSelectedProductNames(names);
+  }, [selectedProject, productsState.items]);
+
+  // Clear product names when job number changes
+  useEffect(() => {
+    if (!selectedJobNumber) setSelectedProductNames("");
+  }, [selectedJobNumber]);
+
+  // Find all projects using the same product(s)
+  const [sameProductDialogOpen, setSameProductDialogOpen] = useState(false);
+  const projectsUsingSameProduct = useMemo(() => {
+    const ids = selectedProject?.productIds ?? [];
+    if (ids.length === 0) return [];
+    const idSet = new Set(ids);
+    return projects.filter(
+      (p) => p.id !== selectedProject?.id && p.productIds?.some((pid) => idSet.has(pid))
+    );
+  }, [projects, selectedProject]);
+
   const installerOptions = useMemo(() => {
-    return usersState.items.map((user) => user.fullName).filter(Boolean);
+    return usersState.items
+      .map((user) => user.fullName)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
   }, [usersState.items]);
   const installerOptionsWithAdd = useMemo(
     () => [...installerOptions, "Add new installer..."],
@@ -703,10 +653,13 @@ const InstallationList = () => {
     Cancelled: 0
   };
 
+  const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
+
   const filteredData = useMemo(() => {
     const officeFiltered = dataWithSeq.filter((row) => {
-      const matchesOffice = activeOffice === "All" || row.office === activeOffice;
-      return matchesOffice;
+      if (activeOffice === "All") return true;
+      const installationCountry = countryForOffice(row.office);
+      return installationCountry === activeOffice || row.office === activeOffice;
     });
     const jobFiltered = selectedProjectIds.size
       ? officeFiltered.filter((row) => selectedProjectIds.has(row.projectId))
@@ -744,6 +697,7 @@ const InstallationList = () => {
   }, [
     dataWithSeq,
     activeOffice,
+    countryForOffice,
     installationFilters,
     installationSort,
     progressForStatus,
@@ -752,13 +706,17 @@ const InstallationList = () => {
 
   const officeJobInstallationIds = useMemo(() => {
     const officeFiltered = dataWithSeq.filter(
-      (row) => activeOffice === "All" || row.office === activeOffice
+      (row) => {
+        if (activeOffice === "All") return true;
+        const installationCountry = countryForOffice(row.office);
+        return installationCountry === activeOffice || row.office === activeOffice;
+      }
     );
     const jobFiltered = selectedProjectIds.size
       ? officeFiltered.filter((row) => selectedProjectIds.has(row.projectId))
       : officeFiltered;
     return new Set(jobFiltered.map((row) => row.id));
-  }, [dataWithSeq, activeOffice, selectedProjectIds]);
+  }, [dataWithSeq, activeOffice, selectedProjectIds, countryForOffice]);
 
   const installationFilterOptions = useMemo(
     () => ({
@@ -792,31 +750,6 @@ const InstallationList = () => {
     });
     return map;
   }, [dataWithSeq]);
-  const issuesWithSeq = useMemo(
-    () => issues.map((row, index) => ({ ...row, seq: index + 1 })),
-    [issues]
-  );
-  const documentsWithSeq = useMemo(
-    () => documents.map((row, index) => ({ ...row, seq: index + 1 })),
-    [documents]
-  );
-  const documentLinkOptions = useMemo(() => {
-    const installationOptions = dataWithSeq.map((row) => ({
-      label: `Installation ${row.installationNumber || row.id}`,
-      value: row.id,
-      group: "Installations"
-    }));
-    const inspectionOptions = inspectionsWithSeq.map((row) => ({
-      label: `Inspection ${row.name || row.id}`,
-      value: row.id,
-      group: "Inspections"
-    }));
-    return [
-      { label: "Unassigned", value: "Unassigned", group: "Other" },
-      ...installationOptions,
-      ...inspectionOptions
-    ];
-  }, [dataWithSeq, inspectionsWithSeq]);
 
   const filteredInspections = useMemo(() => {
     const filtered = applyAutoFilter(inspectionsWithSeq, inspectionFilters, {
@@ -845,42 +778,6 @@ const InstallationList = () => {
     installerByInstallationId
   ]);
 
-  const filteredIssues = useMemo(() => {
-    const filtered = applyAutoFilter(issuesWithSeq, issueFilters, {
-      title: (row) => normalize(row.title),
-      installation: (row) => normalize(row.startDate || ""),
-      status: (row) => normalize(row.status),
-      priority: (row) => normalize(row.priority),
-      owner: (row) => normalize(row.owner),
-      finishDate: (row) => normalize(row.finishDate || "")
-    });
-    const jobFiltered = selectedProjectIds.size
-      ? filtered.filter((row) => officeJobInstallationIds.has(row.installationId))
-      : filtered;
-    return applyAutoSort(jobFiltered, issueSort, {
-      title: (row) => normalize(row.title),
-      installation: (row) => normalize(row.startDate || ""),
-      status: (row) => normalize(row.status),
-      priority: (row) => normalize(row.priority),
-      owner: (row) => normalize(row.owner),
-      finishDate: (row) => normalize(row.finishDate || "")
-    });
-  }, [issuesWithSeq, issueFilters, issueSort, selectedProjectIds, officeJobInstallationIds]);
-
-  const filteredDocuments = useMemo(() => {
-    const filtered = applyAutoFilter(documentsWithSeq, documentFilters, {
-      name: (row) => normalize(row.name),
-      type: (row) => normalize(row.type),
-      linkedTo: (row) => normalize(row.linkedTo),
-      uploadedAt: (row) => normalize(row.uploadedAt)
-    });
-    return applyAutoSort(filtered, documentSort, {
-      name: (row) => normalize(row.name),
-      type: (row) => normalize(row.type),
-      linkedTo: (row) => normalize(row.linkedTo),
-      uploadedAt: (row) => normalize(row.uploadedAt)
-    });
-  }, [documentsWithSeq, documentFilters, documentSort]);
 
   const openOrCreateInstallationLinkedTab = (fieldName: string) => {
     if (!fieldName.trim()) return;
@@ -928,28 +825,6 @@ const InstallationList = () => {
       photos: Array.from(new Set(inspectionsWithSeq.map((row) => normalize(row.photoCount)))).sort()
     }),
     [inspectionsWithSeq, installerByInstallationId]
-  );
-
-  const issueFilterOptions = useMemo(
-    () => ({
-      title: Array.from(new Set(issuesWithSeq.map((row) => normalize(row.title)))).sort(),
-      installation: Array.from(new Set(issuesWithSeq.map((row) => normalize(row.startDate || "")))).sort(),
-      status: Array.from(new Set(issuesWithSeq.map((row) => normalize(row.status)))).sort(),
-      priority: Array.from(new Set(issuesWithSeq.map((row) => normalize(row.priority)))).sort(),
-      owner: Array.from(new Set(issuesWithSeq.map((row) => normalize(row.owner)))).sort(),
-      finishDate: Array.from(new Set(issuesWithSeq.map((row) => normalize(row.finishDate || "")))).sort()
-    }),
-    [issuesWithSeq]
-  );
-
-  const documentFilterOptions = useMemo(
-    () => ({
-      name: Array.from(new Set(documentsWithSeq.map((row) => normalize(row.name)))).sort(),
-      type: Array.from(new Set(documentsWithSeq.map((row) => normalize(row.type)))).sort(),
-      linkedTo: Array.from(new Set(documentsWithSeq.map((row) => normalize(row.linkedTo)))).sort(),
-      uploadedAt: Array.from(new Set(documentsWithSeq.map((row) => normalize(row.uploadedAt)))).sort()
-    }),
-    [documentsWithSeq]
   );
 
   const handleDragStart = (index: number) => {
@@ -1023,6 +898,10 @@ const InstallationList = () => {
     return errors;
   };
 
+  const showInstallationsPlaceholder = () => {
+    setPlaceholderNoticeOpen(true);
+  };
+
 
   const activeTab = installationTabsConfig[tab];
   const activeTabType = activeTab?.type ?? "installations";
@@ -1033,7 +912,7 @@ const InstallationList = () => {
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
         <Box>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-            Installations
+            Installations{selectedProductNames ? ` â€” ${selectedProductNames}` : ""}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Showing {activeOffice === "All" ? "all offices" : activeOffice} installations.
@@ -1042,12 +921,7 @@ const InstallationList = () => {
         <Stack direction="row" spacing={2} alignItems="center">
           <Button
             variant="outlined"
-            onClick={() => {
-              const index = installationTabsConfig.findIndex((item) => item.type === "installations");
-              setTab(index === -1 ? 0 : index);
-              setViewMode("form");
-              setNewInstallationOpen(true);
-            }}
+            onClick={showInstallationsPlaceholder}
           >
             Add new installation
           </Button>
@@ -1100,6 +974,15 @@ const InstallationList = () => {
         >
           {selectedJobNumber ? `Job # ${selectedJobNumber}` : "Job # (not set)"}
         </Button>
+        {selectedProductNames && projectsUsingSameProduct.length > 0 && (
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setSameProductDialogOpen(true)}
+          >
+            {projectsUsingSameProduct.length} other project{projectsUsingSameProduct.length !== 1 ? "s" : ""} using same product
+          </Button>
+        )}
       </Stack>
 
       <Tabs value={tab} onChange={(_, next) => setTab(next)}>
@@ -1137,7 +1020,7 @@ const InstallationList = () => {
                     {defaultFields.map((field) => (
                       <TableCell key={`${activeTab.id}-${field.id}`}>
                         <Stack direction="row" alignItems="center" spacing={0.5}>
-                          <span>{field.name}</span>
+                          <span style={fieldLabelStyle}>{field.name}</span>
                           <IconButton
                             size="small"
                             onClick={(event) =>
@@ -1212,7 +1095,7 @@ const InstallationList = () => {
                     setCustomInstallMenu({ tabId: "", anchorEl: null, key: "" });
                   }}
                 >
-                  Sort A → Z
+                  Sort A â†’ Z
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
@@ -1225,7 +1108,7 @@ const InstallationList = () => {
                     setCustomInstallMenu({ tabId: "", anchorEl: null, key: "" });
                   }}
                 >
-                  Sort Z → A
+                  Sort Z â†’ A
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
@@ -1260,7 +1143,7 @@ const InstallationList = () => {
         <Stack spacing={2}>
           <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
             <FormControl size="small" sx={{ minWidth: 140 }}>
-              <Select value={viewMode} onChange={(event) => setViewMode(event.target.value as typeof viewMode)}>
+              <Select value={viewMode} onChange={() => showInstallationsPlaceholder()}>
                 <MenuItem value="table">Table view</MenuItem>
                 <MenuItem value="form">Form view</MenuItem>
               </Select>
@@ -1269,16 +1152,13 @@ const InstallationList = () => {
             <Button variant="contained">Create report</Button>
             <Button
               variant="outlined"
-              onClick={() => {
-                setTableConfigTarget("installations");
-                setTableConfigOpen(true);
-              }}
+              onClick={showInstallationsPlaceholder}
             >
               Table configuration
             </Button>
           </Stack>
 
-          {viewMode === "table" && (
+          {false && viewMode === "table" && (
             <Box className="glass-card" sx={{ padding: 2 }}>
               <Table>
                 <TableHead>
@@ -1394,7 +1274,7 @@ const InstallationList = () => {
                     {installationDynamicColumns.map((field) => (
                       <TableCell key={`installations-field-${field.id}`}>
                         <Stack direction="row" alignItems="center" spacing={0.5}>
-                          <span>{field.name}</span>
+                          <span style={fieldLabelStyle}>{field.name}</span>
                           <IconButton size="small" onClick={(event) => setInstallationMenu({ anchorEl: event.currentTarget, key: `dyn-${field.id}` })}>
                             <ArrowDropDown fontSize="small" />
                           </IconButton>
@@ -1481,7 +1361,7 @@ const InstallationList = () => {
                   setInstallationMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort A → Z
+                Sort A â†’ Z
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -1489,7 +1369,7 @@ const InstallationList = () => {
                   setInstallationMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort Z → A
+                Sort Z â†’ A
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -1704,7 +1584,7 @@ const InstallationList = () => {
                         <Box sx={{ p: 2, borderRadius: 2, bgcolor: "rgba(255,255,255,0.04)" }}>
                           <Typography variant="body2">{component}</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            Serial · Firmware · Checks
+                            Serial Â· Firmware Â· Checks
                           </Typography>
                         </Box>
                       </Grid>
@@ -1750,7 +1630,7 @@ const InstallationList = () => {
                         }}
                       >
                         <Typography variant="body2">
-                          {field.name} · {field.fieldType}
+                          {field.name} Â· {field.fieldType}
                         </Typography>
                       </Box>
                     ))}
@@ -1820,6 +1700,7 @@ const InstallationList = () => {
                           onChange={(event) =>
                             setCustomFieldValues((prev) => ({ ...prev, [field.name]: event.target.value }))
                           }
+                          InputLabelProps={{ sx: fieldLabelStyle }}
                         />
                       </Grid>
                     ))}
@@ -1851,7 +1732,7 @@ const InstallationList = () => {
                         scheduledEnd: "",
                         status: "Not Started",
                         assignedTeam: formInstallation.installer || "Unassigned",
-                        office: activeOffice === "All" ? "USA" : activeOffice,
+                        office: selectedProject?.office || (activeOffice === "All" ? "USA" : activeOffice),
                         machineType: formInstallation.machineType,
                         pm1Serial: formInstallation.pm1Serial,
                         pm2Serial: formInstallation.pm2Serial,
@@ -1908,7 +1789,7 @@ const InstallationList = () => {
         </Stack>
       )}
 
-      {activeTabType === "inspections" && (
+      {activeTabType === "__removed_inspections__" && (
         <Stack spacing={2}>
           <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
             <Button variant="outlined" onClick={() => setNewInspectionOpen(true)}>
@@ -1974,7 +1855,7 @@ const InstallationList = () => {
                   {inspectionDynamicColumns.map((field) => (
                     <TableCell key={`inspections-field-${field.id}`}>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span>{field.name}</span>
+                        <span style={fieldLabelStyle}>{field.name}</span>
                       </Stack>
                     </TableCell>
                   ))}
@@ -2028,7 +1909,7 @@ const InstallationList = () => {
                   setInspectionMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort A → Z
+                Sort A â†’ Z
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -2036,7 +1917,7 @@ const InstallationList = () => {
                   setInspectionMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort Z → A
+                Sort Z â†’ A
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -2063,360 +1944,6 @@ const InstallationList = () => {
                             current.add(option);
                           }
                           return { ...prev, [inspectionMenu.key]: current };
-                        });
-                      }}
-                    >
-                      <Checkbox checked={selected} />
-                      <ListItemText primary={label} />
-                    </MenuItem>
-                  );
-                }
-              )}
-            </Menu>
-          </Box>
-        </Stack>
-      )}
-
-      {activeTabType === "issues" && (
-        <Stack spacing={2}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
-            <Button variant="outlined" onClick={() => setNewIssueOpen(true)}>
-              New issue
-            </Button>
-            <Button variant="outlined">Download report</Button>
-            <Button variant="contained">Create report</Button>
-            <Button
-              variant="outlined"
-              onClick={() => {
-                setTableConfigTarget("issues");
-                setTableConfigOpen(true);
-              }}
-            >
-              Table configuration
-            </Button>
-          </Stack>
-          <Box className="glass-card" sx={{ padding: 2 }}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>#</TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Issue</span>
-                      <IconButton size="small" onClick={(event) => setIssueMenu({ anchorEl: event.currentTarget, key: "title" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Start Date</span>
-                      <IconButton size="small" onClick={(event) => setIssueMenu({ anchorEl: event.currentTarget, key: "installation" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Finish Date</span>
-                      <IconButton size="small" onClick={(event) => setIssueMenu({ anchorEl: event.currentTarget, key: "finishDate" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Status</span>
-                      <IconButton size="small" onClick={(event) => setIssueMenu({ anchorEl: event.currentTarget, key: "status" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Priority</span>
-                      <IconButton size="small" onClick={(event) => setIssueMenu({ anchorEl: event.currentTarget, key: "priority" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Owner</span>
-                      <IconButton size="small" onClick={(event) => setIssueMenu({ anchorEl: event.currentTarget, key: "owner" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  {issueDynamicColumns.map((field) => (
-                    <TableCell key={`issues-field-${field.id}`}>
-                      <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span>{field.name}</span>
-                      </Stack>
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredIssues.map((row) => (
-                    <TableRow key={row.id} hover>
-                      <TableCell>{row.seq}</TableCell>
-                      <TableCell>{row.title}</TableCell>
-                      <TableCell>{row.startDate || "-"}</TableCell>
-                      <TableCell>{row.finishDate || "-"}</TableCell>
-                      <TableCell>
-                        <Select
-                          size="small"
-                          value={row.status}
-                          onChange={(event) => {
-                            const next = { ...row, status: event.target.value };
-                            setIssues((prev) => prev.map((item) => (item.id === row.id ? next : item)));
-                            issueService.updateIssue(row.id, {
-                              id: row.id,
-                              installationId: row.installationId,
-                              title: row.title,
-                              status: event.target.value,
-                              priority: row.priority,
-                              owner: row.owner,
-                              startDate: row.startDate,
-                              finishDate: row.finishDate,
-                              description: row.description
-                            });
-                          }}
-                        >
-                          {["Open", "In Progress", "Blocked", "Resolved"].map((status) => (
-                            <MenuItem key={status} value={status}>
-                              {status}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <Select
-                          size="small"
-                          value={row.priority}
-                          onChange={(event) => {
-                            const next = { ...row, priority: event.target.value };
-                            setIssues((prev) => prev.map((item) => (item.id === row.id ? next : item)));
-                            issueService.updateIssue(row.id, {
-                              id: row.id,
-                              installationId: row.installationId,
-                              title: row.title,
-                              status: row.status,
-                              priority: event.target.value,
-                              owner: row.owner,
-                              startDate: row.startDate,
-                              finishDate: row.finishDate,
-                              description: row.description
-                            });
-                          }}
-                        >
-                          {["Low", "Medium", "High", "Critical"].map((priority) => (
-                            <MenuItem key={priority} value={priority}>
-                              {priority}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </TableCell>
-                      <TableCell>{row.owner}</TableCell>
-                      {issueDynamicColumns.map((field) => (
-                        <TableCell key={`${row.id}-${field.id}`}>
-                          {issuesDynamic.valuesByEntity[row.id]?.[field.id]?.value || "-"}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
-            <Menu
-              anchorEl={issueMenu.anchorEl}
-              open={Boolean(issueMenu.anchorEl)}
-              onClose={() => setIssueMenu({ anchorEl: null, key: "" })}
-            >
-              <MenuItem
-                onClick={() => {
-                  if (issueMenu.key) setIssueSort({ key: issueMenu.key, dir: "asc" });
-                  setIssueMenu({ anchorEl: null, key: "" });
-                }}
-              >
-                Sort A → Z
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  if (issueMenu.key) setIssueSort({ key: issueMenu.key, dir: "desc" });
-                  setIssueMenu({ anchorEl: null, key: "" });
-                }}
-              >
-                Sort Z → A
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  setIssueSort({ key: "", dir: "asc" });
-                  setIssueMenu({ anchorEl: null, key: "" });
-                }}
-              >
-                Clear sort
-              </MenuItem>
-              {(issueFilterOptions[issueMenu.key as keyof typeof issueFilterOptions] || []).map((option) => {
-                const label = option || "(Blank)";
-                const selected = !!issueFilters[issueMenu.key]?.has(option);
-                return (
-                  <MenuItem
-                    key={`${issueMenu.key}-${option}`}
-                    onClick={() => {
-                      if (!issueMenu.key) return;
-                      setIssueFilters((prev) => {
-                        const current = new Set(prev[issueMenu.key] ?? []);
-                        if (current.has(option)) {
-                          current.delete(option);
-                        } else {
-                          current.add(option);
-                        }
-                        return { ...prev, [issueMenu.key]: current };
-                      });
-                    }}
-                  >
-                    <Checkbox checked={selected} />
-                    <ListItemText primary={label} />
-                  </MenuItem>
-                );
-              })}
-            </Menu>
-          </Box>
-        </Stack>
-      )}
-
-      {activeTabType === "documents" && (
-        <Stack spacing={2}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
-            <Button
-              variant="outlined"
-              onClick={() => {
-                setDocUploadError(null);
-                setUploadDocOpen(true);
-              }}
-            >
-              Upload document
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => {
-                setTableConfigTarget("documents");
-                setTableConfigOpen(true);
-              }}
-            >
-              Table configuration
-            </Button>
-          </Stack>
-          <Box className="glass-card" sx={{ padding: 2 }}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>#</TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Document</span>
-                      <IconButton size="small" onClick={(event) => setDocumentMenu({ anchorEl: event.currentTarget, key: "name" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Type</span>
-                      <IconButton size="small" onClick={(event) => setDocumentMenu({ anchorEl: event.currentTarget, key: "type" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Linked to</span>
-                      <IconButton size="small" onClick={(event) => setDocumentMenu({ anchorEl: event.currentTarget, key: "linkedTo" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Uploaded</span>
-                      <IconButton size="small" onClick={(event) => setDocumentMenu({ anchorEl: event.currentTarget, key: "uploadedAt" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  {documentDynamicColumns.map((field) => (
-                    <TableCell key={`documents-field-${field.id}`}>
-                      <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span>{field.name}</span>
-                      </Stack>
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredDocuments.map((row) => (
-                    <TableRow key={row.id} hover>
-                      <TableCell>{row.seq}</TableCell>
-                      <TableCell>{row.name}</TableCell>
-                      <TableCell>{row.type}</TableCell>
-                      <TableCell>{row.linkedTo}</TableCell>
-                      <TableCell>{row.uploadedAt}</TableCell>
-                      {documentDynamicColumns.map((field) => (
-                        <TableCell key={`${row.id}-${field.id}`}>
-                          {documentsDynamic.valuesByEntity[row.id]?.[field.id]?.value || "-"}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
-            <Menu
-              anchorEl={documentMenu.anchorEl}
-              open={Boolean(documentMenu.anchorEl)}
-              onClose={() => setDocumentMenu({ anchorEl: null, key: "" })}
-            >
-              <MenuItem
-                onClick={() => {
-                  if (documentMenu.key) setDocumentSort({ key: documentMenu.key, dir: "asc" });
-                  setDocumentMenu({ anchorEl: null, key: "" });
-                }}
-              >
-                Sort A → Z
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  if (documentMenu.key) setDocumentSort({ key: documentMenu.key, dir: "desc" });
-                  setDocumentMenu({ anchorEl: null, key: "" });
-                }}
-              >
-                Sort Z → A
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  setDocumentSort({ key: "", dir: "asc" });
-                  setDocumentMenu({ anchorEl: null, key: "" });
-                }}
-              >
-                Clear sort
-              </MenuItem>
-              {(documentFilterOptions[documentMenu.key as keyof typeof documentFilterOptions] || []).map(
-                (option) => {
-                  const label = option || "(Blank)";
-                  const selected = !!documentFilters[documentMenu.key]?.has(option);
-                  return (
-                    <MenuItem
-                      key={`${documentMenu.key}-${option}`}
-                      onClick={() => {
-                        if (!documentMenu.key) return;
-                        setDocumentFilters((prev) => {
-                          const current = new Set(prev[documentMenu.key] ?? []);
-                          if (current.has(option)) {
-                            current.delete(option);
-                          } else {
-                            current.add(option);
-                          }
-                          return { ...prev, [documentMenu.key]: current };
                         });
                       }}
                     >
@@ -2509,6 +2036,7 @@ const InstallationList = () => {
             <Stack spacing={2} sx={{ marginTop: 1 }}>
               {defaultCustomColumns.map((name) => {
                 const fieldId = `default:${name}`;
+                const isCreatedDate = name === "Created Date";
                 const value = customInstallRowForm[fieldId] ?? "";
                 const inputType = getDefaultColumnType(name) === "date" ? "date" : "text";
                 return (
@@ -2517,7 +2045,9 @@ const InstallationList = () => {
                     label={name}
                     type={inputType}
                     value={value}
-                    InputLabelProps={inputType === "date" ? { shrink: true } : undefined}
+                    InputLabelProps={inputType === "date" ? { shrink: true, sx: fieldLabelStyle } : { sx: fieldLabelStyle }}
+                    disabled={isCreatedDate}
+                    helperText={isCreatedDate ? "Auto-populated on creation" : undefined}
                     onChange={(event) =>
                       setCustomInstallRowForm((prev) => ({
                         ...prev,
@@ -2546,8 +2076,14 @@ const InstallationList = () => {
               onClick={() => {
                 if (!customInstallRowDialogTabId) return;
                 const nextRow: Record<string, string> = {};
+                const today = new Date().toISOString().slice(0, 10);
                 defaultCustomColumns.forEach((name) => {
-                  nextRow[name] = customInstallRowForm[`default:${name}`] ?? "";
+                  let val = customInstallRowForm[`default:${name}`] ?? "";
+                  // Auto-populate "Created Date" on new rows
+                  if (name === "Created Date" && !val && customInstallRowDialogIndex === null) {
+                    val = today;
+                  }
+                  nextRow[name] = val;
                 });
                 setInstallationTabRows((prev) => {
                   const current = prev[customInstallRowDialogTabId] || [];
@@ -2745,31 +2281,27 @@ const InstallationList = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete installation</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            Are you sure you want to delete this installation? This action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setDeleteTarget(null)}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={() => {
-              if (!deleteTarget) return;
-              dispatch(deleteInstallation(deleteTarget.id));
-              setLocalInstallations((prev) => prev.filter((item) => item.id !== deleteTarget.id));
-              setDeleteTarget(null);
-            }}
-          >
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <DeleteConfirmDialog
+        open={!!deleteTarget}
+        entityType="installation"
+        entityLabel={deleteTarget?.installationId || deleteTarget?.installationNumber || deleteTarget?.id}
+        loading={!!deleteTarget && deleteSavingId === deleteTarget.id}
+        onClose={() => {
+          if (deleteSavingId) return;
+          setDeleteTarget(null);
+        }}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          try {
+            setDeleteSavingId(deleteTarget.id);
+            await dispatch(deleteInstallation(deleteTarget.id)).unwrap();
+            setLocalInstallations((prev) => prev.filter((item) => item.id !== deleteTarget.id));
+            setDeleteTarget(null);
+          } finally {
+            setDeleteSavingId(null);
+          }
+        }}
+      />
 
       <Menu
         anchorEl={installationSettingsMenu}
@@ -2787,7 +2319,11 @@ const InstallationList = () => {
         <MenuItem
           onClick={() => {
             setInstallationSettingsMenuOpen(false);
-            setTableConfigTarget(activeTabType);
+            if (activeTabType === "installations") {
+              showInstallationsPlaceholder();
+              return;
+            }
+            setTableConfigTarget(activeTabType as "installations" | "inspections");
             setTableConfigOpen(true);
           }}
         >
@@ -2809,17 +2345,7 @@ const InstallationList = () => {
                 return;
               }
             if (activeTabType === "installations") {
-              setViewMode("form");
-              setNewInstallationOpen(true);
-            }
-            if (activeTabType === "inspections") {
-              setNewInspectionOpen(true);
-            }
-            if (activeTabType === "issues") {
-              setNewIssueOpen(true);
-            }
-            if (activeTabType === "documents") {
-              setUploadDocOpen(true);
+              showInstallationsPlaceholder();
             }
           }}
         >
@@ -2888,9 +2414,6 @@ const InstallationList = () => {
                           }}
                         >
                           <MenuItem value="installations">Installations</MenuItem>
-                          <MenuItem value="inspections">Inspections</MenuItem>
-                          <MenuItem value="issues">Issues</MenuItem>
-                          <MenuItem value="documents">Documents</MenuItem>
                         </Select>
                       </FormControl>
                     </TableCell>
@@ -2921,9 +2444,6 @@ const InstallationList = () => {
                   onChange={(event) => setNewInstallationTabType(event.target.value as typeof newInstallationTabType)}
                 >
                   <MenuItem value="installations">Installations</MenuItem>
-                  <MenuItem value="inspections">Inspections</MenuItem>
-                  <MenuItem value="issues">Issues</MenuItem>
-                  <MenuItem value="documents">Documents</MenuItem>
                 </Select>
               </FormControl>
               <Button
@@ -3132,7 +2652,7 @@ const InstallationList = () => {
                 scheduledEnd: "",
                 status: "Not Started",
                 assignedTeam: newInstallationForm.installer || "Unassigned",
-                office: activeOffice === "All" ? "USA" : activeOffice,
+                office: selectedProject?.office || (activeOffice === "All" ? "USA" : activeOffice),
                 machineType: newInstallationForm.machineType,
                 pm1Serial: newInstallationForm.pm1Serial,
                 pm2Serial: newInstallationForm.pm2Serial,
@@ -3257,213 +2777,14 @@ const InstallationList = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={newIssueOpen} onClose={() => setNewIssueOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>New issue</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ marginTop: 1 }}>
-            <TextField
-              label="Issue title"
-              fullWidth
-              value={newIssue.title}
-              onChange={(event) => setNewIssue((prev) => ({ ...prev, title: event.target.value }))}
-            />
-            <TextField
-              label="Start date"
-              fullWidth
-              type="date"
-              InputLabelProps={{ shrink: true }}
-              value={newIssue.startDate}
-              onChange={(event) => setNewIssue((prev) => ({ ...prev, startDate: event.target.value }))}
-            />
-            <TextField
-              label="Finish date"
-              fullWidth
-              type="date"
-              InputLabelProps={{ shrink: true }}
-              value={newIssue.finishDate}
-              onChange={(event) => setNewIssue((prev) => ({ ...prev, finishDate: event.target.value }))}
-            />
-            <FormControl fullWidth>
-              <Select
-                value={newIssue.priority}
-                onChange={(event) => setNewIssue((prev) => ({ ...prev, priority: event.target.value }))}
-              >
-                {["Low", "Medium", "High"].map((priority) => (
-                  <MenuItem key={priority} value={priority}>
-                    {priority}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              label="Description"
-              fullWidth
-              multiline
-              rows={3}
-              value={newIssue.description}
-              onChange={(event) => setNewIssue((prev) => ({ ...prev, description: event.target.value }))}
-            />
-            <DynamicFieldsForm
-              definitions={issuesDynamic.definitions}
-              values={newIssueDynamic}
-              onChange={setNewIssueDynamic}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setNewIssueOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => {
-              const entry: Issue = {
-                id: `issue-${Date.now()}`,
-                title: newIssue.title || "New issue",
-                installationId: "Unassigned",
-                status: "Open",
-                priority: newIssue.priority,
-                owner: "Unassigned",
-                startDate: newIssue.startDate || undefined,
-                finishDate: newIssue.finishDate || undefined,
-                description: newIssue.description || undefined
-              };
-              issueService.createIssue(entry).then((created) => {
-                setIssues((prev) => [
-                  { ...created, installationLabel: created.installationId },
-                  ...prev
-                ]);
-                issuesDynamic.upsertForEntity(
-                  created.id,
-                  newIssueDynamic,
-                  issuesDynamic.valuesByEntity[created.id]
-                );
-              });
-              setNewIssue({
-                title: "",
-                installation: "",
-                priority: "Medium",
-                description: "",
-                startDate: "",
-                finishDate: ""
-              });
-              setNewIssueDynamic({});
-              setNewIssueOpen(false);
-            }}
-          >
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={uploadDocOpen}
-        onClose={() => {
-          setDocUploadError(null);
-          setUploadDocOpen(false);
-        }}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Upload document</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ marginTop: 1 }}>
-            <FormControl fullWidth>
-              <Select value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
-                {["Work Orders", "Diagrams", "Checklists", "Compliance"].map((type) => (
-                  <MenuItem key={type} value={type}>
-                    {type}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <Autocomplete
-              options={documentLinkOptions}
-              groupBy={(option) => option.group}
-              value={documentLinkOptions.find((option) => option.value === newDocument.link) || null}
-              onChange={(_, value) =>
-                setNewDocument((prev) => ({ ...prev, link: value?.value || "" }))
-              }
-              renderInput={(params) => (
-                <TextField {...params} label="Link to installation / inspection" fullWidth />
-              )}
-            />
-            <DynamicFieldsForm
-              definitions={documentsDynamic.definitions}
-              values={newDocumentDynamic}
-              onChange={setNewDocumentDynamic}
-            />
-            <Button variant="outlined" component="label">
-              {newDocument.fileName ? `File: ${newDocument.fileName}` : "Choose file"}
-              <input
-                type="file"
-                hidden
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) {
-                    setNewDocument((prev) => ({ ...prev, fileName: file.name, file }));
-                  }
-                }}
-              />
-            </Button>
-            {docUploadError && (
-              <Typography variant="body2" color="error">
-                {docUploadError}
-              </Typography>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setUploadDocOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={async () => {
-              setDocUploadError(null);
-              if (!newDocument.file) {
-                setDocUploadError("Please choose a file to upload.");
-                return;
-              }
-              try {
-                const created = await documentService.uploadDocument(
-                  newDocument.file,
-                  documentType,
-                  newDocument.link || "Unassigned"
-                );
-                setDocuments((prev) => [created, ...prev]);
-                await documentsDynamic.upsertForEntity(
-                  created.id,
-                  newDocumentDynamic,
-                  documentsDynamic.valuesByEntity[created.id]
-                );
-                setDocUploadSuccess(true);
-                setNewDocument({ link: "", fileName: "", file: null });
-                setNewDocumentDynamic({});
-                setUploadDocOpen(false);
-              } catch (error: any) {
-                const message =
-                  error?.response?.data?.message ||
-                  error?.response?.data?.error ||
-                  error?.message ||
-                  "Upload failed. Please try again.";
-                setDocUploadError(message);
-              }
-            }}
-          >
-            Upload
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       <Snackbar
-        open={docUploadSuccess}
-        autoHideDuration={3000}
-        onClose={() => setDocUploadSuccess(false)}
+        open={placeholderNoticeOpen}
+        autoHideDuration={2500}
+        onClose={() => setPlaceholderNoticeOpen(false)}
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
-        <Alert severity="success" onClose={() => setDocUploadSuccess(false)} sx={{ width: "100%" }}>
-          Document uploaded successfully.
+        <Alert severity="info" onClose={() => setPlaceholderNoticeOpen(false)} sx={{ width: "100%" }}>
+          Placeholder only. Backend action is disabled for this control.
         </Alert>
       </Snackbar>
 
@@ -3481,26 +2802,16 @@ const InstallationList = () => {
         fields={
           tableConfigTarget === "installations"
             ? installationsTableConfig.orderedFields
-            : tableConfigTarget === "inspections"
-              ? inspectionsTableConfig.orderedFields
-              : tableConfigTarget === "issues"
-                ? issuesTableConfig.orderedFields
-                : documentsTableConfig.orderedFields
+            : inspectionsTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "installations"
             ? installationsTableConfig.config
-            : tableConfigTarget === "inspections"
-              ? inspectionsTableConfig.config
-              : tableConfigTarget === "issues"
-                ? issuesTableConfig.config
-                : documentsTableConfig.config
+            : inspectionsTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "installations") installationsTableConfig.setConfig(next);
           if (tableConfigTarget === "inspections") inspectionsTableConfig.setConfig(next);
-          if (tableConfigTarget === "issues") issuesTableConfig.setConfig(next);
-          if (tableConfigTarget === "documents") documentsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
           const tableName = tableConfigTarget;
@@ -3516,8 +2827,6 @@ const InstallationList = () => {
           await allFieldDefinitions.reload();
           if (tableName === "installations") await installationsDynamic.reload();
           if (tableName === "inspections") await inspectionsDynamic.reload();
-          if (tableName === "issues") await issuesDynamic.reload();
-          if (tableName === "documents") await documentsDynamic.reload();
         }}
         onCreateField={async (name, type, linkToFieldId, actionType) => {
           const tableName = tableConfigTarget;
@@ -3534,8 +2843,6 @@ const InstallationList = () => {
           await allFieldDefinitions.reload();
           if (tableName === "installations") await installationsDynamic.reload();
           if (tableName === "inspections") await inspectionsDynamic.reload();
-          if (tableName === "issues") await issuesDynamic.reload();
-          if (tableName === "documents") await documentsDynamic.reload();
           if (type === "lookup field" && actionType === "create linked table") {
             openOrCreateInstallationLinkedTab(name);
           }
@@ -3545,11 +2852,7 @@ const InstallationList = () => {
           const defs =
             tableName === "installations"
               ? installationsDynamic.definitions
-              : tableName === "inspections"
-                ? inspectionsDynamic.definitions
-                : tableName === "issues"
-                  ? issuesDynamic.definitions
-                  : documentsDynamic.definitions;
+              : inspectionsDynamic.definitions;
           const existing = defs.find((item) => item.id === fieldId);
           if (!existing) return;
           await fieldService.updateDefinition(fieldId, {
@@ -3561,8 +2864,6 @@ const InstallationList = () => {
           });
           if (tableName === "installations") await installationsDynamic.reload();
           if (tableName === "inspections") await inspectionsDynamic.reload();
-          if (tableName === "issues") await issuesDynamic.reload();
-          if (tableName === "documents") await documentsDynamic.reload();
           if (type === "lookup field" && actionType === "create linked table") {
             openOrCreateInstallationLinkedTab(name);
           }
@@ -3571,12 +2872,62 @@ const InstallationList = () => {
           await fieldService.deleteDefinition(fieldId);
           if (tableConfigTarget === "installations") await installationsDynamic.reload();
           if (tableConfigTarget === "inspections") await inspectionsDynamic.reload();
-          if (tableConfigTarget === "issues") await issuesDynamic.reload();
-          if (tableConfigTarget === "documents") await documentsDynamic.reload();
         }}
       />
+
+      <Dialog open={sameProductDialogOpen} onClose={() => setSameProductDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Projects using: {selectedProductNames}</DialogTitle>
+        <DialogContent>
+          {projectsUsingSameProduct.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              No other projects are using this product.
+            </Typography>
+          ) : (
+            <Table size="small" sx={{ mt: 1 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Job #</TableCell>
+                  <TableCell>Customer</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Office</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {projectsUsingSameProduct.map((project) => (
+                  <TableRow
+                    key={project.id}
+                    hover
+                    sx={{ cursor: "pointer" }}
+                    onClick={() => {
+                      setSameProductDialogOpen(false);
+                      setSelectedJobNumber(project.jobNumber);
+                      setShowAllInstallations(false);
+                      localStorage.setItem("selected_job_number", project.jobNumber);
+                      localStorage.setItem("show_all_installations", "false");
+                      setSearchParams((prev) => {
+                        const next = new URLSearchParams(prev);
+                        next.set("job", project.jobNumber);
+                        return next;
+                      });
+                    }}
+                  >
+                    <TableCell>{project.jobNumber}</TableCell>
+                    <TableCell>{project.customerName}</TableCell>
+                    <TableCell>{project.status}</TableCell>
+                    <TableCell>{project.office}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSameProductDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 };
 
 export default InstallationList;
+

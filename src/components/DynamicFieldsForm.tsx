@@ -1,6 +1,12 @@
 import { Checkbox, FormControlLabel, Grid, TextField } from "@mui/material";
 import { FieldDefinition } from "../services/fieldService";
 
+// Style for field definition labels (yellow bold)
+const fieldLabelStyle = {
+  color: '#FFD700',
+  fontWeight: 'bold'
+};
+
 type Props = {
   definitions: FieldDefinition[];
   values: Record<string, string>;
@@ -45,7 +51,7 @@ const DynamicFieldsForm = ({ definitions, values, onChange }: Props) => {
                     }
                   />
                 }
-                label={field.name}
+                label={<span style={fieldLabelStyle}>{field.name}</span>}
               />
             </Grid>
           );
@@ -57,7 +63,7 @@ const DynamicFieldsForm = ({ definitions, values, onChange }: Props) => {
               label={field.name}
               type={getInputType(field.fieldType)}
               fullWidth
-              InputLabelProps={field.fieldType === "date" ? { shrink: true } : undefined}
+              InputLabelProps={field.fieldType === "date" ? { shrink: true, sx: fieldLabelStyle } : { sx: fieldLabelStyle }}
               value={value}
               onChange={(event) => onChange({ ...values, [field.id]: event.target.value })}
             />

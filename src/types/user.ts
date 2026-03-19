@@ -1,6 +1,7 @@
-﻿export type Office = "USA" | "Australia" | "South Africa";
+﻿export type Office = string;
 
-export type UserRole = "Admin" | "Project Manager" | "Engineer" | "Viewer";
+export type BaseUserRole = "Admin" | "Project Manager" | "Engineer" | "Viewer";
+export type UserRole = BaseUserRole | (string & {});
 
 export interface User {
   id: string;
@@ -10,4 +11,7 @@ export interface User {
   office: Office;
   isActive: boolean;
   isFirstLogin: boolean;
+  is2faEnabled?: boolean;
+  recoveryCodesRemaining?: number;
+  passwordExpired?: boolean;
 }

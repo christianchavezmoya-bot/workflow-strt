@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Options;
-
 namespace Commtrac.Api.Services;
 
 public sealed class SmsSettings
@@ -16,25 +14,32 @@ public interface ISmsSender
 
 public sealed class SmsSender : ISmsSender
 {
-    private readonly SmsSettings _settings;
+    private readonly NotificationSettingsService _settingsService;
     private readonly ILogger<SmsSender> _logger;
 
-    public SmsSender(IOptions<SmsSettings> options, ILogger<SmsSender> logger)
+    public SmsSender(NotificationSettingsService settingsService, ILogger<SmsSender> logger)
     {
-        _settings = options.Value;
+        _settingsService = settingsService;
         _logger = logger;
     }
 
     public Task SendAsync(string toNumber, string message)
     {
-        if (string.IsNullOrWhiteSpace(_settings.Provider) || string.IsNullOrWhiteSpace(_settings.ApiKey))
+        // Settings are DB-backed; resolve at send-time.
+        return SendCoreAsync(toNumber, message);
+    }
+
+    private async Task SendCoreAsync(string toNumber, string message)
+    {
+        var settings = await _settingsService.GetSmsSettingsAsync();
+
+        if (string.IsNullOrWhiteSpace(settings.Provider) || string.IsNullOrWhiteSpace(settings.ApiKey))
         {
             _logger.LogInformation("SMS (simulated). To: {To} Message: {Message}", toNumber, message);
-            return Task.CompletedTask;
+            return;
         }
 
         // TODO: Integrate with real SMS provider.
-        _logger.LogInformation("SMS (provider {Provider}). To: {To} Message: {Message}", _settings.Provider, toNumber, message);
-        return Task.CompletedTask;
+        _logger.LogInformation("SMS (provider {Provider}). To: {To} Message: {Message}", settings.Provider, toNumber, message);
     }
 }

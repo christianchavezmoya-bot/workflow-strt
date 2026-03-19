@@ -5,6 +5,16 @@ export type TableConfig = {
   order: string[];
   hidden: string[];
   baseFieldNames?: Record<string, string>;
+  baseFieldMeta?: Record<
+    string,
+    {
+      fieldType?: string | null;
+      required?: boolean;
+      options?: string[] | null;
+      linkToFieldId?: string | null;
+      actionType?: string | null;
+    }
+  >;
 };
 
 export type TableField = {
@@ -18,7 +28,7 @@ export type TableField = {
 const getLocalStorageKey = (tableKey: string) => `table_config_migration:${tableKey}`;
 
 export const useTableConfig = (tableKey: string, fields: TableField[]) => {
-  const [config, setConfig] = useState<TableConfig>({ order: [], hidden: [], baseFieldNames: {} });
+  const [config, setConfig] = useState<TableConfig>({ order: [], hidden: [], baseFieldNames: {}, baseFieldMeta: {} });
   const [loading, setLoading] = useState(true);
 
   // Load config from backend
@@ -32,7 +42,8 @@ export const useTableConfig = (tableKey: string, fields: TableField[]) => {
         setConfig({
           order: backendConfig.order || [],
           hidden: backendConfig.hidden || [],
-          baseFieldNames: backendConfig.baseFieldNames || {}
+          baseFieldNames: backendConfig.baseFieldNames || {},
+          baseFieldMeta: backendConfig.baseFieldMeta || {}
         });
 
         // Check if there's localStorage data to migrate
@@ -45,7 +56,8 @@ export const useTableConfig = (tableKey: string, fields: TableField[]) => {
             const merged = {
               order: parsed.order?.length > 0 ? parsed.order : backendConfig.order || [],
               hidden: parsed.hidden?.length > 0 ? parsed.hidden : backendConfig.hidden || [],
-              baseFieldNames: { ...backendConfig.baseFieldNames, ...parsed.baseFieldNames }
+              baseFieldNames: { ...backendConfig.baseFieldNames, ...parsed.baseFieldNames },
+              baseFieldMeta: { ...backendConfig.baseFieldMeta, ...parsed.baseFieldMeta }
             };
 
             // Save merged config to backend
@@ -80,7 +92,8 @@ export const useTableConfig = (tableKey: string, fields: TableField[]) => {
         tableName: tableKey,
         order: newConfig.order,
         hidden: newConfig.hidden,
-        baseFieldNames: newConfig.baseFieldNames || {}
+        baseFieldNames: newConfig.baseFieldNames || {},
+        baseFieldMeta: newConfig.baseFieldMeta || {}
       });
     } catch (error) {
       console.error("Failed to save table config:", error);

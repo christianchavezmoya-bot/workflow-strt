@@ -25,6 +25,7 @@ import {
 } from "@mui/icons-material";
 import { useEffect, useState } from "react";
 import api from "../../services/api";
+import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 
 interface Site {
   id: string;
@@ -33,6 +34,7 @@ interface Site {
   address?: string;
   city?: string;
   state?: string;
+  country?: string;
   contactName?: string;
   contactPhone?: string;
   notes?: string;
@@ -55,6 +57,8 @@ export const SitesManagement = () => {
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<Site>>({});
   const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<Site | null>(null);
+  const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -99,6 +103,7 @@ export const SitesManagement = () => {
         address: editFormData.address,
         city: editFormData.city,
         state: editFormData.state,
+        country: editFormData.country,
         zipCode: null,
         contactName: editFormData.contactName,
         contactPhone: editFormData.contactPhone,
@@ -116,14 +121,23 @@ export const SitesManagement = () => {
   };
 
   const handleDelete = async (siteId: string) => {
-    if (!confirm('Are you sure you want to delete this site?')) return;
+    const target = sites.find((site) => site.id === siteId);
+    if (!target) return;
+    setDeleteTarget(target);
+  };
 
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await api.delete(`/sites/${siteId}`);
-      setSites(prev => prev.filter(s => s.id !== siteId));
+      setDeleteSavingId(deleteTarget.id);
+      await api.delete(`/sites/${deleteTarget.id}`);
+      setSites(prev => prev.filter(s => s.id !== deleteTarget.id));
+      setDeleteTarget(null);
     } catch (err) {
       console.error('Failed to delete site', err);
       alert('Failed to delete site');
+    } finally {
+      setDeleteSavingId(null);
     }
   };
 
@@ -172,7 +186,8 @@ export const SitesManagement = () => {
                   <TableCell>Customer</TableCell>
                   <TableCell>Site Name</TableCell>
                   <TableCell>City</TableCell>
-                  <TableCell>State/Country</TableCell>
+                  <TableCell>State</TableCell>
+                  <TableCell>Country</TableCell>
                   <TableCell>Comments</TableCell>
                   <TableCell width="120" align="center">Actions</TableCell>
                 </TableRow>
@@ -180,11 +195,11 @@ export const SitesManagement = () => {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">Loading...</TableCell>
+                    <TableCell colSpan={8} align="center">Loading...</TableCell>
                   </TableRow>
                 ) : sites.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">No sites found</TableCell>
+                    <TableCell colSpan={8} align="center">No sites found</TableCell>
                   </TableRow>
                 ) : (
                   sites.map((site, index) => {
@@ -274,7 +289,7 @@ export const SitesManagement = () => {
                           )}
                         </TableCell>
 
-                        {/* State/Country */}
+                        {/* State */}
                         <TableCell>
                           {isEditing ? (
                             <TextField
@@ -285,6 +300,20 @@ export const SitesManagement = () => {
                             />
                           ) : (
                             site.state || '-'
+                          )}
+                        </TableCell>
+
+                        {/* Country */}
+                        <TableCell>
+                          {isEditing ? (
+                            <TextField
+                              size="small"
+                              value={editFormData.country || ''}
+                              onChange={(e) => setEditFormData(prev => ({ ...prev, country: e.target.value }))}
+                              fullWidth
+                            />
+                          ) : (
+                            site.country || '-'
                           )}
                         </TableCell>
 
@@ -451,6 +480,17 @@ export const SitesManagement = () => {
             )}
           </Box>
         )}
+        <DeleteConfirmDialog
+          open={!!deleteTarget}
+          entityType="site"
+          entityLabel={deleteTarget?.name || deleteTarget?.id}
+          loading={!!deleteTarget && deleteSavingId === deleteTarget.id}
+          onClose={() => {
+            if (deleteSavingId) return;
+            setDeleteTarget(null);
+          }}
+          onConfirm={confirmDelete}
+        />
       </Stack>
     </Container>
   );

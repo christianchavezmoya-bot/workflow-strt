@@ -14,10 +14,13 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Site } from "../../types/site";
 import api from "../../services/api";
+import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
+import { usePermissions } from "../../hooks/usePermissions";
 
 const CustomerSites = () => {
   const { customerId } = useParams<{ customerId: string }>();
   const navigate = useNavigate();
+  const can = usePermissions();
 
   const [customerName, setCustomerName] = useState<string>("Loading...");
   const [customerLogo, setCustomerLogo] = useState<string | null>(null);
@@ -28,12 +31,15 @@ const CustomerSites = () => {
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Site | null>(null);
+  const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
 
   // Edit form state
   const [editSiteName, setEditSiteName] = useState("");
   const [editSiteAddress, setEditSiteAddress] = useState("");
   const [editSiteCity, setEditSiteCity] = useState("");
   const [editSiteState, setEditSiteState] = useState("");
+  const [editSiteCountry, setEditSiteCountry] = useState("");
   const [editSiteContactName, setEditSiteContactName] = useState("");
   const [editSiteContactPhone, setEditSiteContactPhone] = useState("");
 
@@ -88,6 +94,7 @@ const CustomerSites = () => {
       address: "",
       city: "",
       state: "",
+      country: "",
       contactName: "",
       contactPhone: "",
       createdAt: new Date().toISOString(),
@@ -99,6 +106,7 @@ const CustomerSites = () => {
     setEditSiteAddress("");
     setEditSiteCity("");
     setEditSiteState("");
+    setEditSiteCountry("");
     setEditSiteContactName("");
     setEditSiteContactPhone("");
   };
@@ -115,6 +123,7 @@ const CustomerSites = () => {
           address: editSiteAddress,
           city: editSiteCity,
           state: editSiteState,
+          country: editSiteCountry,
           zipCode: null,
           contactName: editSiteContactName,
           contactPhone: editSiteContactPhone,
@@ -129,10 +138,12 @@ const CustomerSites = () => {
       } else {
         // Update existing site
         const response = await api.put(`/sites/${siteId}`, {
+          customerId: String(customerId),
           name: editSiteName,
           address: editSiteAddress,
           city: editSiteCity,
           state: editSiteState,
+          country: editSiteCountry,
           zipCode: null,
           contactName: editSiteContactName,
           contactPhone: editSiteContactPhone,
@@ -154,21 +165,33 @@ const CustomerSites = () => {
     }
   };
 
-  const handleDeleteSite = async (siteId: string) => {
-    const isNewSite = siteId.startsWith("new-");
+  const handleDeleteSite = (siteId: string) => {
+    const target = sitesList.find((site) => site.id === siteId);
+    if (!target) return;
+    setDeleteTarget(target);
+  };
+
+  const confirmDeleteSite = async () => {
+    if (!deleteTarget) return;
+    const isNewSite = deleteTarget.id.startsWith("new-");
 
     if (isNewSite) {
       // Just remove from local state
-      setSitesList((prev) => prev.filter((s) => s.id !== siteId));
+      setSitesList((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      setDeleteTarget(null);
       return;
     }
 
     try {
-      await api.delete(`/sites/${siteId}`);
-      setSitesList((prev) => prev.filter((s) => s.id !== siteId));
+      setDeleteSavingId(deleteTarget.id);
+      await api.delete(`/sites/${deleteTarget.id}`);
+      setSitesList((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      setDeleteTarget(null);
     } catch (err) {
       console.error("Failed to delete site", err);
       alert("Failed to delete site");
+    } finally {
+      setDeleteSavingId(null);
     }
   };
 
@@ -178,6 +201,7 @@ const CustomerSites = () => {
     setEditSiteAddress(site.address || "");
     setEditSiteCity(site.city || "");
     setEditSiteState(site.state || "");
+    setEditSiteCountry(site.country || "");
     setEditSiteContactName(site.contactName || "");
     setEditSiteContactPhone(site.contactPhone || "");
   };
@@ -187,6 +211,7 @@ const CustomerSites = () => {
     setEditSiteAddress("");
     setEditSiteCity("");
     setEditSiteState("");
+    setEditSiteCountry("");
     setEditSiteContactName("");
     setEditSiteContactPhone("");
   };
@@ -200,44 +225,9 @@ const CustomerSites = () => {
       <Stack spacing={3} sx={{ py: 3 }}>
         {/* Header */}
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <IconButton onClick={() => navigate("/admin")}>
+          <IconButton onClick={() => navigate("/admin", { state: { openTab: "customers" } })}>
             <ArrowBack />
           </IconButton>
-          {customerLogoShape === 'none' && customerLogo ? (
-            <Box sx={{ display: 'flex', alignItems: 'center', maxHeight: 50 }}>
-              <img
-                src={customerLogo}
-                alt={customerName}
-                style={{
-                  maxHeight: `${50 * (customerPhotoScale / 100)}px`,
-                  height: 'auto',
-                  width: 'auto',
-                  objectFit: 'contain',
-                }}
-              />
-            </Box>
-          ) : (
-            <Box
-              sx={{
-                width: customerLogoShape === 'rectangular' ? 100 : 50,
-                height: 50,
-                borderRadius: customerLogoShape === 'none' ? '0px' : customerLogoShape === 'round' ? '50%' : '8px',
-                background: customerLogo ? "transparent" : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                backgroundImage: customerLogo ? `url(${customerLogo})` : "none",
-                backgroundSize: `${customerPhotoScale}%`,
-                backgroundPosition: "center",
-                backgroundRepeat: 'no-repeat',
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "white",
-                fontWeight: "bold",
-                fontSize: "1.2rem",
-              }}
-            >
-              {!customerLogo && customerName.charAt(0)}
-            </Box>
-          )}
           <Box sx={{ flex: 1 }}>
             <Typography variant="h5" sx={{ fontFamily: "Sora", fontWeight: 600 }}>
               Sites - {customerName}
@@ -246,13 +236,15 @@ const CustomerSites = () => {
               Manage physical locations for this customer
             </Typography>
           </Box>
-          <Button
-            variant="contained"
-            startIcon={<AddOutlined />}
-            onClick={handleAddNewSite}
-          >
-            Add New Site
-          </Button>
+          {can.modifyData && (
+            <Button
+              variant="contained"
+              startIcon={<AddOutlined />}
+              onClick={handleAddNewSite}
+            >
+              Add New Site
+            </Button>
+          )}
         </Box>
 
         {/* Loading State */}
@@ -343,14 +335,16 @@ const CustomerSites = () => {
                   <Typography variant="body2" color="text.secondary">
                     No sites found
                   </Typography>
-                  <Button
-                    variant="contained"
-                    size="small"
-                    startIcon={<AddOutlined />}
-                    onClick={handleAddNewSite}
-                  >
-                    Add New Site
-                  </Button>
+                  {can.modifyData && (
+                    <Button
+                      variant="contained"
+                      size="small"
+                      startIcon={<AddOutlined />}
+                      onClick={handleAddNewSite}
+                    >
+                      Add New Site
+                    </Button>
+                  )}
                 </Paper>
               </Box>
             )}
@@ -396,41 +390,43 @@ const CustomerSites = () => {
                         },
                       }}
                     >
-                      <Box
-                        sx={{
-                          position: "absolute",
-                          top: 8,
-                          right: 8,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 0.25,
-                        }}
-                      >
-                        <Tooltip title="Delete site">
-                          <IconButton
-                            size="small"
-                            sx={{ padding: 0.25 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteSite(site.id);
-                            }}
-                          >
-                            <DeleteOutline sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Edit site">
-                          <IconButton
-                            size="small"
-                            sx={{ padding: 0.25 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditClick(site);
-                            }}
-                          >
-                            <EditOutlined sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
+                      {can.modifyData && (
+                        <Box
+                          sx={{
+                            position: "absolute",
+                            top: 8,
+                            right: 8,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 0.25,
+                          }}
+                        >
+                          <Tooltip title="Delete site">
+                            <IconButton
+                              size="small"
+                              sx={{ padding: 0.25 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteSite(site.id);
+                              }}
+                            >
+                              <DeleteOutline sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Edit site">
+                            <IconButton
+                              size="small"
+                              sx={{ padding: 0.25 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditClick(site);
+                              }}
+                            >
+                              <EditOutlined sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      )}
 
                       {/* Customer Logo */}
                       {customerLogoShape === 'none' && customerLogo ? (
@@ -488,9 +484,7 @@ const CustomerSites = () => {
                         color="textSecondary"
                         sx={{ display: "block", mb: 1 }}
                       >
-                        {site.city && site.state
-                          ? `${site.city}, ${site.state}`
-                          : site.city || site.state || "No location"}
+                        {[site.city, site.state, site.country].filter(Boolean).join(", ") || "No location"}
                       </Typography>
                       {site.contactName && (
                         <Typography variant="caption" color="textSecondary" sx={{ display: "block" }}>
@@ -608,6 +602,19 @@ const CustomerSites = () => {
                             },
                           }}
                         />
+                        <TextField
+                          size="small"
+                          value={editSiteCountry}
+                          onChange={(e) => setEditSiteCountry(e.target.value)}
+                          placeholder="Country"
+                          fullWidth
+                          sx={{
+                            "& .MuiInputBase-root": {
+                              height: 26,
+                              fontSize: "0.75rem",
+                            },
+                          }}
+                        />
                       </Stack>
                       <Button
                         variant="contained"
@@ -623,6 +630,17 @@ const CustomerSites = () => {
             })}
           </Box>
         )}
+        <DeleteConfirmDialog
+          open={!!deleteTarget}
+          entityType="site"
+          entityLabel={deleteTarget?.name || deleteTarget?.id}
+          loading={!!deleteTarget && deleteSavingId === deleteTarget.id}
+          onClose={() => {
+            if (deleteSavingId) return;
+            setDeleteTarget(null);
+          }}
+          onConfirm={confirmDeleteSite}
+        />
       </Stack>
     </Container>
   );

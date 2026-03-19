@@ -44,6 +44,10 @@ export const deleteUser = createAsyncThunk("users/delete", async (id: string) =>
   return userService.deleteUser(id);
 });
 
+export const reset2fa = createAsyncThunk("users/reset2fa", async (id: string) => {
+  return userService.reset2fa(id);
+});
+
 const usersSlice = createSlice({
   name: "users",
   initialState,
@@ -65,11 +69,23 @@ const usersSlice = createSlice({
       .addCase(createUser.fulfilled, (state, action) => {
         state.items.unshift(action.payload);
       })
+      .addCase(updateUser.pending, (state, action) => {
+        // Optimistic update - update UI immediately by creating new array
+        const { id, payload } = action.meta.arg;
+        state.items = state.items.map((item) =>
+          item.id === id ? { ...item, ...payload } : item
+        );
+      })
       .addCase(updateUser.fulfilled, (state, action) => {
-        const index = state.items.findIndex((item) => item.id === action.payload.id);
-        if (index >= 0) {
-          state.items[index] = action.payload;
-        }
+        // Replace optimistic update with server response
+        state.items = state.items.map((item) =>
+          item.id === action.payload.id ? action.payload : item
+        );
+      })
+      .addCase(updateUser.rejected, (state, action) => {
+        // Revert optimistic update on failure - refetch from server
+        const { id } = action.meta.arg;
+        console.error("Failed to update user:", id, action.error);
       })
       .addCase(deactivateUser.fulfilled, (state, action) => {
         const index = state.items.findIndex((item) => item.id === action.payload.id);
@@ -79,6 +95,12 @@ const usersSlice = createSlice({
       })
       .addCase(deleteUser.fulfilled, (state, action) => {
         state.items = state.items.filter((item) => item.id !== action.payload);
+      })
+      .addCase(reset2fa.fulfilled, (state, action) => {
+        const index = state.items.findIndex((item) => item.id === action.payload.id);
+        if (index >= 0) {
+          state.items[index] = action.payload;
+        }
       });
   }
 });

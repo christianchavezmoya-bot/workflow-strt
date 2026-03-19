@@ -1,20 +1,29 @@
-﻿import {
+import {
   Alert,
   Box,
   Button,
+  Checkbox,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   FormControlLabel,
   FormHelperText,
   FormLabel,
   Grid,
+  InputLabel,
   ListItemText,
   MenuItem,
   Radio,
   RadioGroup,
+  Rating,
   Select,
   Stack,
   Switch,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography
 } from "@mui/material";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
@@ -28,67 +37,111 @@ import { useNavigate, useParams } from "react-router-dom";
 import { demoCustomers, demoProducts } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
+import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
+import { useTableConfig } from "../../hooks/useTableConfig";
+import TableConfigDialog from "../../components/TableConfigDialog";
 import { projectService } from "../../services/projectService";
+import { fieldService } from "../../services/fieldService";
+import { siteService } from "../../services/siteService";
+import { officesService } from "../../services/officesService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchCustomers } from "../../store/customersSlice";
 import { fetchProducts } from "../../store/productsSlice";
+import { fetchUsers } from "../../store/usersSlice";
 import { createProject, updateProject } from "../../store/projectSlice";
 import { ApprovalDecision, Office, Project, ProjectStatus } from "../../types/project";
-import DynamicFieldsForm from "../../components/DynamicFieldsForm";
+import type { ProductFeatureDefinition } from "../../types/product";
+import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
+import { createCountryResolver } from "../../utils/officeCountry";
+import type { Site } from "../../types/site";
+import type { FieldDefinition } from "../../services/fieldService";
 
 const schema = z
   .object({
     customerName: z.string().optional(),
-    customerId: z.string().min(1, "Customer ID is required"),
-    jobNumber: z.string().min(1, "Job number is required"),
-    description: z.string().min(1, "Description is required"),
-    startDate: z.string().min(1, "Start date is required"),
-    finishDate: z.string().min(1, "Finish date is required"),
-    office: z
-      .enum(["USA", "Australia", "South Africa", ""])
-      .refine((value) => value !== "", "Office is required"),
+    customerId: z.string().optional(),
+    siteId: z.string().optional(),
+    jobNumber: z.string().optional(),
+    purchaseOrderNumber: z.string().optional(),
+    description: z.string().optional(),
+    startDate: z.string().optional(),
+    finishDate: z.string().optional(),
+    office: z.string().optional(),
     region: z.string().optional(),
     projectManager: z.string().optional(),
-    projectType: z.enum(["Internal", "External"]),
-    status: z.enum([
-      "Draft",
-      "In Planning",
-      "Pending Approval",
-      "Approved",
-      "In Progress",
-      "On Hold",
-      "Completed",
-      "Cancelled"
-    ]),
+    projectType: z.enum(["Internal", "External"]).optional(),
+    status: z
+      .enum([
+        "Draft",
+        "In Planning",
+        "Pending Approval",
+        "Approved",
+        "In Progress",
+        "On Hold",
+        "Completed",
+        "Cancelled"
+      ])
+      .optional(),
     approvalDecision: z
-      .enum(["Approved", "Rejected", "More Info Required"] as [ApprovalDecision, ...ApprovalDecision[]])
+      .union([
+        z.enum(["Approved", "Rejected", "More Info Required"] as [ApprovalDecision, ...ApprovalDecision[]]),
+        z.literal("")
+      ])
       .optional(),
     isInstallationProject: z.boolean(),
-    productIds: z
-      .array(z.string())
-      .min(1, "Select a product.")
-      .max(1, "Only one product can be assigned.")
+    productIds: z.array(z.string()).optional()
   });
 
 type FormValues = z.infer<typeof schema>;
 
-const officeOptions: Office[] = ["USA", "Australia", "South Africa"];
-
 const ProjectForm = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { activeOffice } = useActiveOffice();
+  const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const { items } = useAppSelector((state) => state.projects);
   const customersState = useAppSelector((state) => state.customers);
   const productsState = useAppSelector((state) => state.products);
+  const usersState = useAppSelector((state) => state.users);
   const projectsDynamic = useDynamicFields("projects");
+  const allFieldDefinitions = useFieldDefinitions();
+  const projectsTableConfig = useTableConfig(
+    "projects",
+    projectsDynamic.definitions.map((field) => ({
+      id: field.id,
+      name: field.name,
+      type: field.fieldType,
+      linkToFieldId: field.linkToFieldId,
+      actionType: field.actionType
+    }))
+  );
+  const availableFieldsForProjects = useMemo(
+    () => allFieldDefinitions.definitions.filter((field) => !field.tables.includes("projects")),
+    [allFieldDefinitions.definitions]
+  );
+  const [tableConfigOpen, setTableConfigOpen] = useState(false);
+  const builtInLabel = useMemo(() => {
+    const overrides = projectsTableConfig.config.baseFieldNames || {};
+    return (id: string, fallback: string) => {
+      const value = overrides[id];
+      const trimmed = (value || "").trim();
+      return trimmed || fallback;
+    };
+  }, [projectsTableConfig.config.baseFieldNames]);
   const [projectDynamicValues, setProjectDynamicValues] = useState<Record<string, string>>({});
+  const [globalOffices, setGlobalOffices] = useState<GlobalOffice[]>([]);
+  const sortedGlobalOffices = useMemo(
+    () =>
+      [...globalOffices].sort((a, b) =>
+        (a.city || "").localeCompare(b.city || "", undefined, { numeric: true, sensitivity: "base" })
+      ),
+    [globalOffices]
+  );
+  const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const customers = customersState.items.length ? customersState.items : demoCustomers;
   const filteredCustomers = useMemo(() => {
-    if (activeOffice === "All") return customers;
-    return customers.filter((customer) => customer.office === activeOffice || customer.office === "All");
-  }, [activeOffice, customers]);
+    return customers;
+  }, [customers]);
   const products = productsState.items.length ? productsState.items : demoProducts;
   const {
     control,
@@ -96,21 +149,26 @@ const ProjectForm = () => {
     watch,
     formState: { errors },
     reset,
-    setValue
+    setError,
+    setValue,
+    setFocus
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
       customerName: "",
       customerId: "",
+      siteId: "",
       jobNumber: "",
+      purchaseOrderNumber: "",
       description: "",
       startDate: "",
       finishDate: "",
-      office: activeOffice === "All" ? "" : activeOffice,
+      office: "",
       region: "",
       projectManager: "",
       projectType: "Internal",
       status: "Draft",
+      approvalDecision: "",
       isInstallationProject: false,
       productIds: []
     }
@@ -119,15 +177,12 @@ const ProjectForm = () => {
   useEffect(() => {
     dispatch(fetchCustomers());
     dispatch(fetchProducts());
+    dispatch(fetchUsers());
   }, [dispatch]);
 
   useEffect(() => {
-    if (activeOffice === "All") {
-      setValue("office", "", { shouldValidate: true });
-    } else {
-      setValue("office", activeOffice, { shouldValidate: true });
-    }
-  }, [activeOffice, setValue]);
+    officesService.getAll().then(setGlobalOffices);
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -137,7 +192,9 @@ const ProjectForm = () => {
       reset({
         customerName: localProject.customerName,
         customerId: localProject.customerId,
+        siteId: localProject.siteId || "",
         jobNumber: localProject.jobNumber,
+        purchaseOrderNumber: localProject.purchaseOrderNumber || "",
         description: localProject.description,
         startDate: localProject.startDate,
         finishDate: localProject.finishDate,
@@ -146,10 +203,11 @@ const ProjectForm = () => {
         projectManager: localProject.projectManager,
         projectType: localProject.projectType,
         status: localProject.status,
-        approvalDecision: localProject.approvalDecision,
+        approvalDecision: localProject.approvalDecision || "",
         isInstallationProject: localProject.isInstallationProject,
         productIds: localProject.productIds ?? []
       });
+      setProductFeatureValues(localProject.productFeatureValues || {});
       return;
     }
 
@@ -157,7 +215,9 @@ const ProjectForm = () => {
       reset({
         customerName: project.customerName,
         customerId: project.customerId,
+        siteId: project.siteId || "",
         jobNumber: project.jobNumber,
+        purchaseOrderNumber: project.purchaseOrderNumber || "",
         description: project.description,
         startDate: project.startDate,
         finishDate: project.finishDate,
@@ -166,10 +226,11 @@ const ProjectForm = () => {
         projectManager: project.projectManager,
         projectType: project.projectType,
         status: project.status,
-        approvalDecision: project.approvalDecision,
+        approvalDecision: project.approvalDecision || "",
         isInstallationProject: project.isInstallationProject,
         productIds: project.productIds ?? []
       });
+      setProductFeatureValues(project.productFeatureValues || {});
     });
   }, [id, items, reset]);
 
@@ -199,7 +260,55 @@ const ProjectForm = () => {
   const isInstallationProject = watch("isInstallationProject");
   const status = watch("status");
   const customerId = watch("customerId");
+  const siteId = watch("siteId");
+  const office = watch("office");
+  const projectManager = watch("projectManager");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [allSites, setAllSites] = useState<Site[]>([]);
+  const [sitesLoading, setSitesLoading] = useState(false);
+  const [sitesLoadError, setSitesLoadError] = useState<string | null>(null);
+  const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
+  const [globalOfficePrompt, setGlobalOfficePrompt] = useState<{ country: string; managerName: string } | null>(null);
+  const [productFeatureValues, setProductFeatureValues] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setSitesLoading(true);
+    setSitesLoadError(null);
+    siteService
+      // When no customer is selected yet, show all sites. Once a customer is selected, show only that customer's sites.
+      .getSites(selectedCustomerId || undefined)
+      .then((rows) => {
+        const sorted = [...rows].sort((a, b) =>
+          (a.name || "").localeCompare(b.name || "", undefined, { numeric: true, sensitivity: "base" })
+        );
+        setAllSites(sorted);
+      })
+      .catch(() => {
+        setAllSites([]);
+        setSitesLoadError("Unable to load sites (API unavailable).");
+      })
+      .finally(() => {
+        setSitesLoading(false);
+      });
+  }, [selectedCustomerId]);
+
+  // When creating a new project, default the office city based on the active country filter.
+  // Project.office is stored as the office city (to map back to globalOffices).
+  useEffect(() => {
+    if (id) return;
+    if (activeOffice === "All") return;
+    if (globalOffices.length === 0) return;
+
+    const currentCountry = office ? countryForOffice(office) : "";
+    if (currentCountry === activeOffice) return;
+
+    const defaultCity =
+      globalOffices.find(
+        (o) => (o.country || "").toLowerCase() === activeOffice.toLowerCase() && !!o.city
+      )?.city || "";
+
+    setValue("office", defaultCity, { shouldValidate: true });
+  }, [id, activeOffice, globalOffices, office, countryForOffice, setValue]);
 
   const matchedCustomerId = useMemo(() => {
     if (!customerId) return "";
@@ -219,10 +328,85 @@ const ProjectForm = () => {
     if (!selected) return;
     setValue("customerName", selected.name, { shouldValidate: true });
     setValue("customerId", selected.customerId, { shouldValidate: true });
-    if (selected.office !== "All") {
-      setValue("office", selected.office, { shouldValidate: true });
+    if (selected.office && selected.office !== "All") {
+      // Customer.office is usually a country. Project.office is stored as an office city.
+      const officeIsCity = globalOffices.some((o) => o.city === selected.office);
+      if (officeIsCity) {
+        setValue("office", selected.office, { shouldValidate: true });
+      } else {
+        const defaultCity =
+          globalOffices.find(
+            (o) => (o.country || "").toLowerCase() === selected.office.toLowerCase() && !!o.city
+          )?.city || "";
+        if (defaultCity) {
+          setValue("office", defaultCity, { shouldValidate: true });
+        }
+      }
     }
-  }, [customers, selectedCustomerId, setValue]);
+  }, [selectedCustomerId, filteredCustomers, globalOffices, setValue]);
+
+  useEffect(() => {
+    if (!office || globalOffices.length === 0) return;
+    const selectedOffice = globalOffices.find((o) => o.city === office);
+    if (selectedOffice && selectedOffice.country) {
+      setValue("region", selectedOffice.country, { shouldValidate: true });
+    }
+  }, [office, globalOffices, setValue]);
+
+  useEffect(() => {
+    const managerName = String(projectManager || "").trim();
+    if (!managerName || globalOffices.length === 0 || usersState.items.length === 0) return;
+
+    const selectedManager = usersState.items.find(
+      (user) => String(user.fullName || "").trim().toLowerCase() === managerName.toLowerCase()
+    );
+    if (!selectedManager) return;
+
+    const managerOfficeRaw = String(selectedManager.office || "").trim();
+    if (!managerOfficeRaw || managerOfficeRaw.toLowerCase() === "all") return;
+
+    const managerCountry = countryForOffice(managerOfficeRaw);
+    if (!managerCountry) return;
+
+    let managerCity = "";
+    const officeByCity = globalOffices.find(
+      (o) => (o.city || "").trim().toLowerCase() === managerOfficeRaw.toLowerCase()
+    );
+    if (officeByCity?.city) {
+      managerCity = officeByCity.city;
+    } else {
+      const possibleCity = managerOfficeRaw.split(",")[0]?.trim();
+      const officeByPrefix = globalOffices.find(
+        (o) => (o.city || "").trim().toLowerCase() === String(possibleCity || "").toLowerCase()
+      );
+      if (officeByPrefix?.city) {
+        managerCity = officeByPrefix.city;
+      } else {
+        managerCity =
+          globalOffices.find(
+            (o) => (o.country || "").trim().toLowerCase() === managerCountry.toLowerCase() && !!o.city
+          )?.city || "";
+      }
+    }
+
+    if (managerCity) {
+      setValue("office", managerCity, { shouldValidate: true });
+    }
+    setValue("region", managerCountry, { shouldValidate: true });
+
+    if (
+      activeOffice !== "All" &&
+      managerCountry &&
+      activeOffice.toLowerCase() !== managerCountry.toLowerCase()
+    ) {
+      setGlobalOfficePrompt((prev) => {
+        if (prev && prev.country.toLowerCase() === managerCountry.toLowerCase()) return prev;
+        return { country: managerCountry, managerName };
+      });
+    } else {
+      setGlobalOfficePrompt(null);
+    }
+  }, [projectManager, usersState.items, globalOffices, countryForOffice, setValue, activeOffice]);
 
   const pushUiLog = (message: string, error?: string) => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: Array<{ id: string; time: string; method?: string; url?: string; status?: number; error?: string }> };
@@ -241,29 +425,143 @@ const ProjectForm = () => {
   };
 
   const onSubmit = async (data: FormValues) => {
-    const selected = filteredCustomers.find((customer) => customer.id === selectedCustomerId);
-    if (!selected) {
-      setSubmitError("Select a customer before submitting.");
-      pushUiLog("ProjectForm submit blocked", "Missing customer");
+    setDynamicFieldErrors({});
+    // Validate required fields based on table configuration (admin-controlled).
+    const hiddenSet = new Set(projectsTableConfig.config.hidden || []);
+    const meta = projectsTableConfig.config.baseFieldMeta || {};
+    const missing: string[] = [];
+
+    const isRequired = (fieldId: string) => !!meta[fieldId]?.required && !hiddenSet.has(fieldId);
+    const isBlank = (value: unknown) => String(value ?? "").trim() === "";
+
+    if (isRequired("customerName") && !selectedCustomerId) {
+      // customerName is driven by the separate Select (selectedCustomerId), so set an explicit form error.
+      setError("customerName", { type: "required", message: `${labelCustomer} is required` });
+      missing.push(labelCustomer);
+    }
+    if (isRequired("customerId") && isBlank(data.customerId)) {
+      setError("customerId", { type: "required", message: `${labelCustomerId} is required` });
+      missing.push(labelCustomerId);
+    }
+    if (isRequired("siteName") && isBlank(data.siteId)) {
+      setError("siteId", { type: "required", message: `${labelSite} is required` });
+      missing.push(labelSite);
+    }
+    if (isRequired("jobNumber") && isBlank(data.jobNumber)) {
+      setError("jobNumber", { type: "required", message: `${labelJobNumber} is required` });
+      missing.push(labelJobNumber);
+    }
+    if (isRequired("description") && isBlank(data.description)) {
+      setError("description", { type: "required", message: `${labelDescription} is required` });
+      missing.push(labelDescription);
+    }
+    if (isRequired("startDate") && isBlank(data.startDate)) {
+      setError("startDate", { type: "required", message: `${labelStartDate} is required` });
+      missing.push(labelStartDate);
+    }
+    if (isRequired("finishDate") && isBlank(data.finishDate)) {
+      setError("finishDate", { type: "required", message: `${labelFinishDate} is required` });
+      missing.push(labelFinishDate);
+    }
+    if (isRequired("office") && isBlank(data.office)) {
+      setError("office", { type: "required", message: `${labelOffice} is required` });
+      missing.push(labelOffice);
+    }
+    if (isRequired("region") && isBlank(data.region)) {
+      setError("region", { type: "required", message: `${labelRegion} is required` });
+      missing.push(labelRegion);
+    }
+    if (isRequired("projectManager") && isBlank(data.projectManager)) {
+      setError("projectManager", { type: "required", message: `${labelProjectManager} is required` });
+      missing.push(labelProjectManager);
+    }
+    if (isRequired("status") && isBlank(data.status)) {
+      setError("status", { type: "required", message: `${labelStatus} is required` });
+      missing.push(labelStatus);
+    }
+    if (isRequired("projectType") && isBlank(data.projectType)) {
+      setError("projectType", { type: "required", message: `${labelProjectType} is required` });
+      missing.push(labelProjectType);
+    }
+    if (isRequired("products") && (!data.productIds || data.productIds.length === 0)) {
+      setError("productIds", { type: "required", message: `${labelProducts} is required` });
+      missing.push(labelProducts);
+    }
+
+    const dynamicValueForValidation = (def: FieldDefinition) => {
+      const type = (def.fieldType || "").toLowerCase();
+      if (type === "lookup field" && def.linkToFieldId) {
+        const target = allDefinitionsById.get(def.linkToFieldId);
+        const targetIsSites = !!target && (target.tables || []).includes("sites");
+        const looksLikeCity = /city/i.test(def.name || "") || /city/i.test(def.id || "");
+        if (targetIsSites && looksLikeCity) {
+          return allSites.find((s) => s.id === data.siteId)?.city || "";
+        }
+      }
+      return projectDynamicValues[def.id] || "";
+    };
+
+    // Dynamic fields required flags are stored in baseFieldMeta by field id.
+    const missingDynamicDefs = projectsDynamic.definitions
+      .filter((def) => !!meta[def.id]?.required && !hiddenSet.has(def.id))
+      .filter((def) => isBlank(dynamicValueForValidation(def)))
+      .map((def) => ({ id: def.id, name: def.name }));
+    if (missingDynamicDefs.length) {
+      const nextErrors: Record<string, string> = {};
+      missingDynamicDefs.forEach((def) => {
+        nextErrors[def.id] = `${def.name} is required`;
+      });
+      setDynamicFieldErrors(nextErrors);
+      missing.push(...missingDynamicDefs.map((d) => d.name));
+    }
+
+    if (missing.length) {
+      setSubmitError(`Missing required fields: ${Array.from(new Set(missing)).join(", ")}`);
+      pushUiLog("ProjectForm submit blocked", "Missing required fields");
       return;
     }
+
+    const selected = filteredCustomers.find((customer) => customer.id === selectedCustomerId);
+    if (!selected) {
+      // Customer selection can be hidden/optional; only block if a dependent field is required.
+      if (isRequired("customerName") || isRequired("customerId") || isRequired("siteName")) {
+        setSubmitError(`Select a ${labelCustomer.toLowerCase()} before submitting.`);
+        pushUiLog("ProjectForm submit blocked", "Missing customer");
+        return;
+      }
+    }
     pushUiLog("ProjectForm submit");
+    const dynamicValuesToSave = { ...projectDynamicValues };
+    projectsDynamic.definitions.forEach((def) => {
+      const type = (def.fieldType || "").toLowerCase();
+      if (type !== "lookup field" || !def.linkToFieldId) return;
+      const target = allDefinitionsById.get(def.linkToFieldId);
+      const targetIsSites = !!target && (target.tables || []).includes("sites");
+      const looksLikeCity = /city/i.test(def.name || "") || /city/i.test(def.id || "");
+      if (targetIsSites && looksLikeCity) {
+        dynamicValuesToSave[def.id] = allSites.find((s) => s.id === data.siteId)?.city || "";
+      }
+    });
+
     const payload: Project = {
       id: id || `P-${Math.floor(Math.random() * 10000)}`,
-      customerName: selected.name,
-      customerId: selected.customerId,
-      jobNumber: data.jobNumber,
-      description: data.description,
-      startDate: data.startDate,
-      finishDate: data.finishDate,
-      office: data.office,
+      customerName: selected?.name || "",
+      customerId: selected?.customerId || "",
+      siteId: data.siteId || undefined,
+      jobNumber: data.jobNumber || "",
+      purchaseOrderNumber: data.purchaseOrderNumber || "",
+      description: data.description || "",
+      startDate: data.startDate || "",
+      finishDate: data.finishDate || "",
+      office: data.office || "",
       region: data.region,
-      projectType: data.projectType,
-      status: data.status,
-      approvalDecision: data.approvalDecision,
+      projectType: (data.projectType as any) || "Internal",
+      status: (data.status as any) || "Draft",
+      approvalDecision: data.approvalDecision || undefined,
       isInstallationProject: data.isInstallationProject,
       projectManager: data.projectManager,
-      productIds: data.productIds ?? []
+      productIds: data.productIds ?? [],
+      productFeatureValues
     };
 
     try {
@@ -271,16 +569,28 @@ const ProjectForm = () => {
         const result = await dispatch(updateProject({ id, payload })).unwrap();
         await projectsDynamic.upsertForEntity(
           result.id,
-          projectDynamicValues,
+          dynamicValuesToSave,
           projectsDynamic.valuesByEntity[result.id]
         );
       } else {
         const result = await dispatch(createProject(payload)).unwrap();
         await projectsDynamic.upsertForEntity(
           result.id,
-          projectDynamicValues,
+          dynamicValuesToSave,
           projectsDynamic.valuesByEntity[result.id]
         );
+        // Clone assets from selected source project if PM chose one
+        if (pendingCloneSourceId) {
+          try {
+            setCloning(true);
+            await projectService.cloneAssetsFrom(result.id, pendingCloneSourceId);
+          } catch {
+            // Non-fatal: project was created; log but don't block navigation
+            console.warn("[ProjectForm] Clone assets failed — project was still created successfully.");
+          } finally {
+            setCloning(false);
+          }
+        }
       }
       navigate("/projects");
     } catch {
@@ -291,8 +601,46 @@ const ProjectForm = () => {
 
   const onInvalid = (formErrors: Record<string, unknown>) => {
     const fields = Object.keys(formErrors).join(", ") || "unknown";
-    setSubmitError("Please complete the required fields before submitting.");
+    const keys = Object.keys(formErrors);
+    const labelByName: Record<string, string> = {
+      customerName: labelCustomer,
+      customerId: labelCustomerId,
+      siteId: labelSite,
+      jobNumber: labelJobNumber,
+      description: labelDescription,
+      startDate: labelStartDate,
+      finishDate: labelFinishDate,
+      office: labelOffice,
+      region: labelRegion,
+      projectManager: labelProjectManager,
+      projectType: labelProjectType,
+      status: labelStatus,
+      productIds: labelProducts,
+      approvalDecision: "Approval Decision",
+      isInstallationProject: "Installation project"
+    };
+    const missingLabels = keys.map((key) => labelByName[key] || key);
+    setSubmitError(
+      `Please complete the required fields before submitting.${missingLabels.length ? ` Missing/invalid: ${missingLabels.join(", ")}` : ""}`
+    );
     pushUiLog("ProjectForm validation failed", fields);
+
+    // Best-effort focus/scroll to first invalid input.
+    const first = keys[0];
+    if (first) {
+      try {
+        // @ts-expect-error setFocus expects a Path<FormValues>
+        setFocus(first);
+      } catch {
+        // ignore
+      }
+      try {
+        const el = document.querySelector(`[name="${CSS.escape(first)}"]`) as HTMLElement | null;
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      } catch {
+        // ignore
+      }
+    }
   };
 
   const handleCustomerSelect = (value: string) => {
@@ -300,6 +648,7 @@ const ProjectForm = () => {
       setSelectedCustomerId("");
       setValue("customerName", "", { shouldValidate: true });
       setValue("customerId", "", { shouldValidate: true });
+      setValue("siteId", "", { shouldValidate: true });
       return;
     }
     const selected = customers.find((customer) => customer.id === value);
@@ -307,261 +656,953 @@ const ProjectForm = () => {
       setSelectedCustomerId(selected.id);
       setValue("customerName", selected.name, { shouldValidate: true });
       setValue("customerId", selected.customerId, { shouldValidate: true });
-      if (selected.office !== "All") {
-        setValue("office", selected.office, { shouldValidate: true });
+      if (selected.office && selected.office !== "All") {
+        const officeIsCity = globalOffices.some((o) => o.city === selected.office);
+        if (officeIsCity) {
+          setValue("office", selected.office, { shouldValidate: true });
+        } else {
+          const defaultCity =
+            globalOffices.find(
+              (o) => (o.country || "").toLowerCase() === selected.office.toLowerCase() && !!o.city
+            )?.city || "";
+          if (defaultCity) {
+            setValue("office", defaultCity, { shouldValidate: true });
+          }
+        }
       }
     }
   };
 
+  // Keep Site in sync:
+  // - If a site is selected and belongs to a different customer, switch customer automatically.
+  // - If a customer is selected and no site is selected (or site doesn't belong), auto-pick the first site for that customer.
+  useEffect(() => {
+    if (!siteId) return;
+    const selectedSite = allSites.find((s) => s.id === siteId);
+    if (!selectedSite) return;
+    if (selectedSite.customerId && selectedSite.customerId !== selectedCustomerId) {
+      handleCustomerSelect(selectedSite.customerId);
+    }
+  }, [siteId, allSites, selectedCustomerId]);
+
+  useEffect(() => {
+    if (!selectedCustomerId) return;
+    const currentSite = siteId ? allSites.find((s) => s.id === siteId) : null;
+    if (currentSite && currentSite.customerId === selectedCustomerId) return;
+    const first = allSites.find((s) => s.customerId === selectedCustomerId);
+    if (first) {
+      setValue("siteId", first.id, { shouldValidate: true });
+    }
+  }, [selectedCustomerId, allSites, siteId, setValue]);
+
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Clone suggestion — shows when a new project shares a customer or site with existing ones
+  const [cloneSuggestOpen, setCloneSuggestOpen] = useState(false);
+  const [cloneCandidates, setCloneCandidates] = useState<{ id: string; jobNumber: string; customerName: string; siteName?: string; assetCount: number }[]>([]);
+  const [pendingCloneSourceId, setPendingCloneSourceId] = useState<string | null>(null);
+  const [cloning, setCloning] = useState(false);
+
+  // Detect matching projects whenever customer or site changes on a NEW project
+  useEffect(() => {
+    if (id) return; // only on create
+    const cid = watch("customerId");
+    const sid = watch("siteId");
+    if (!cid && !sid) { setCloneCandidates([]); return; }
+    const matches = items.filter((p) => {
+      if (p.id === id) return false;
+      if (cid && p.customerId === cid) return true;
+      if (sid && p.siteId && p.siteId === sid) return true;
+      return false;
+    });
+    setCloneCandidates(
+      matches.map((p) => ({
+        id: p.id,
+        jobNumber: p.jobNumber,
+        customerName: p.customerName,
+        siteName: (p as any).siteName || undefined,
+        assetCount: (p as any).assetCount || 0,
+      }))
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomerId, siteId, id, items]);
+
+  // Open the suggestion dialog once when candidates first appear (new project).
+  // useRef gives a stable mutable box — avoids spurious re-opens on re-render.
+  const cloneSuggestShownRef = { shown: false };
+  useEffect(() => {
+    if (id) return;
+    if (cloneCandidates.length === 0) return;
+    setCloneSuggestOpen((prev) => {
+      if (prev) return prev; // already open
+      return true;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloneCandidates.length > 0, id]);
+
+  const labelCustomer = builtInLabel("customerName", "Customer");
+  const labelCustomerId = builtInLabel("customerId", "Customer ID");
+  const labelSite = builtInLabel("siteName", "Site");
+  const labelProducts = builtInLabel("products", "Product name");
+  const labelJobNumber = builtInLabel("jobNumber", "Job Number");
+  const labelPurchaseOrderNumber = builtInLabel("purchaseOrderNumber", "Purchase Order Number");
+  const labelOffice = builtInLabel("office", "Office");
+  const labelRegion = builtInLabel("region", "Country");
+  const labelProjectManager = builtInLabel("projectManager", "Project Manager");
+  const labelDescription = builtInLabel("description", "Description");
+  const labelStartDate = builtInLabel("startDate", "Start Date");
+  const labelFinishDate = builtInLabel("finishDate", "Finish Date");
+  const labelStatus = builtInLabel("status", "Status");
+  const labelProjectType = builtInLabel("projectType", "Project Type");
+  const baseFieldIds = useMemo(
+    () => [
+      "jobNumber",
+      "purchaseOrderNumber",
+      "customerName",
+      "siteName",
+      "customerId",
+      "products",
+      "office",
+      "region",
+      "projectManager",
+      "description",
+      "startDate",
+      "finishDate",
+      "status",
+      "projectType"
+    ],
+    []
+  );
+  const hiddenSet = useMemo(() => new Set(projectsTableConfig.config.hidden || []), [projectsTableConfig.config.hidden]);
+  const baseFieldMeta = projectsTableConfig.config.baseFieldMeta || {};
+  const projectManagerMeta = baseFieldMeta["projectManager"] || {};
+  const isRequiredField = (fieldId: string) => !!baseFieldMeta[fieldId]?.required && !hiddenSet.has(fieldId);
+  const labelWithRequired = (fieldId: string, label: string) => (isRequiredField(fieldId) ? `${label} *` : label);
+  const projectManagerOptions = useMemo(() => {
+    const userNames = usersState.items
+      .filter(
+        (user) =>
+          user.isActive &&
+          String(user.role || "").trim().toLowerCase() === "project manager"
+      )
+      .map((user) => user.fullName)
+      .filter((name): name is string => !!name && !!name.trim());
+    return Array.from(new Set(userNames)).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
+    );
+  }, [usersState.items]);
+  const selectedProductId = watch("productIds")?.[0] || "";
+  const selectedProduct = useMemo(
+    () => products.find((product) => product.id === selectedProductId),
+    [products, selectedProductId]
+  );
+  const selectedProductFeatures = useMemo<ProductFeatureDefinition[]>(
+    () => selectedProduct?.features || [],
+    [selectedProduct]
+  );
+
+  const customerNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    customers.forEach((c) => map.set(c.id, c.name));
+    return map;
+  }, [customers]);
+
+  const siteOptions = useMemo(() => {
+    const selectedFirst = (site: Site) => (selectedCustomerId && site.customerId === selectedCustomerId ? 0 : 1);
+    return [...allSites].sort((a, b) => {
+      const aGroup = selectedFirst(a);
+      const bGroup = selectedFirst(b);
+      if (aGroup !== bGroup) return aGroup - bGroup;
+      const aCustomer = customerNameById.get(a.customerId) || "";
+      const bCustomer = customerNameById.get(b.customerId) || "";
+      const byCustomer = aCustomer.localeCompare(bCustomer, undefined, { numeric: true, sensitivity: "base" });
+      if (byCustomer !== 0) return byCustomer;
+      return (a.name || "").localeCompare(b.name || "", undefined, { numeric: true, sensitivity: "base" });
+    });
+  }, [allSites, selectedCustomerId, customerNameById]);
+
+  const dynamicDefById = useMemo(
+    () => new Map(projectsDynamic.definitions.map((def) => [def.id, def])),
+    [projectsDynamic.definitions]
+  );
+  const allDefinitionsById = useMemo(() => {
+    const map = new Map<string, FieldDefinition>();
+    allFieldDefinitions.definitions.forEach((def) => map.set(def.id, def));
+    return map;
+  }, [allFieldDefinitions.definitions]);
+
+  const orderedVisibleIds = useMemo(() => {
+    const dynamicIds = projectsDynamic.definitions.map((def) => def.id);
+    const allIds = [...baseFieldIds, ...dynamicIds];
+
+    let order: string[];
+    if (projectsTableConfig.config.order?.length) {
+      order = [...projectsTableConfig.config.order];
+      const remaining = allIds.filter((id) => !order.includes(id));
+      order = [...order, ...remaining];
+    } else {
+      order = allIds;
+    }
+
+    // Filter unknown ids and hidden ids.
+    const known = new Set(allIds);
+    return order.filter((id) => known.has(id) && !hiddenSet.has(id));
+  }, [projectsTableConfig.config.order, baseFieldIds, projectsDynamic.definitions, hiddenSet]);
+  const visibleIdSet = useMemo(() => new Set(orderedVisibleIds), [orderedVisibleIds]);
+  const cityFieldId = useMemo(() => {
+    return projectsDynamic.definitions.find((def) => {
+      const type = (def.fieldType || "").toLowerCase();
+      if (type !== "lookup field") return false;
+      if (!/city/i.test(def.name || "") && !/city/i.test(def.id || "")) return false;
+      if (!def.linkToFieldId) return false;
+      const target = allDefinitionsById.get(def.linkToFieldId);
+      return !!target && (target.tables || []).includes("sites");
+    })?.id;
+  }, [projectsDynamic.definitions, allDefinitionsById]);
+  const extraDynamicIds = useMemo(() => {
+    const excluded = new Set([cityFieldId || ""]);
+    return orderedVisibleIds.filter((id) => !baseFieldIds.includes(id) && !excluded.has(id));
+  }, [orderedVisibleIds, baseFieldIds, cityFieldId]);
+
+  const getDynamicInputType = (fieldType: string) => {
+    switch (fieldType) {
+      case "number":
+      case "currency":
+      case "percentage":
+        return "number";
+      case "date":
+        return "date";
+      case "email":
+        return "email";
+      case "phone":
+        return "tel";
+      default:
+        return "text";
+    }
+  };
+
+  const renderFormField = (fieldId: string) => {
+    // Base/built-in fields (form controls).
+    switch (fieldId) {
+      case "customerName":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <FormControl fullWidth error={!!errors.customerName}>
+              <Select
+                value={selectedCustomerId}
+                displayEmpty
+                onChange={(event) => handleCustomerSelect(event.target.value)}
+              >
+                <MenuItem value="">Select existing {labelCustomer.toLowerCase()}</MenuItem>
+                {filteredCustomers.map((customer) => (
+                  <MenuItem key={customer.id} value={customer.id}>
+                    {customer.name}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>
+                {errors.customerName?.message ||
+                  `Choose a ${labelCustomer.toLowerCase()} to auto-fill ${labelCustomerId.toLowerCase()} and filter sites.`}
+              </FormHelperText>
+            </FormControl>
+          </Grid>
+        );
+      case "products":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <FormControl fullWidth error={!!errors.productIds}>
+              <FormLabel>{labelWithRequired("products", labelProducts)}</FormLabel>
+              <Controller
+                name="productIds"
+                control={control}
+                render={({ field }) => (
+                  <Select
+                    value={field.value?.[0] ?? ""}
+                    onChange={(event) => field.onChange(event.target.value ? [event.target.value as string] : [])}
+                    displayEmpty
+                  >
+                    <MenuItem value="">Select a product</MenuItem>
+                    {products.map((product) => (
+                      <MenuItem key={product.id} value={product.id}>
+                        <ListItemText primary={product.name} />
+                      </MenuItem>
+                    ))}
+                  </Select>
+                )}
+              />
+              <FormHelperText>
+                {errors.productIds?.message || "Select the primary product for this project."}
+              </FormHelperText>
+            </FormControl>
+          </Grid>
+        );
+      case "customerId":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="customerId"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label={labelWithRequired("customerId", labelCustomerId)}
+                  fullWidth
+                  error={!!errors.customerId}
+                  helperText={errors.customerId?.message || `Auto-filled from ${labelCustomer.toLowerCase()}.`}
+                  InputProps={{ readOnly: true }}
+                />
+              )}
+            />
+          </Grid>
+        );
+      case "siteName":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="siteId"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label={labelWithRequired("siteName", labelSite)}
+                  fullWidth
+                  select
+                  SelectProps={{ native: true }}
+                  error={!!errors.siteId}
+                  helperText={
+                    errors.siteId?.message ||
+                    sitesLoadError ||
+                    (sitesLoading ? "Loading sites..." : "Optional. Link this project to a site.")
+                  }
+                  onChange={(event) => {
+                    const nextId = String(event.target.value || "");
+                    // RHF expects the value (string). Passing the full event here can cause state thrash/flicker.
+                    field.onChange(nextId);
+                    const nextSite = allSites.find((s) => s.id === nextId);
+                    if (nextSite && nextSite.customerId && nextSite.customerId !== selectedCustomerId) {
+                      handleCustomerSelect(nextSite.customerId);
+                    }
+                  }}
+                >
+                  <option value="">(No site)</option>
+                  {sitesLoading && <option value="" disabled>(Loading...)</option>}
+                  {!sitesLoading && allSites.length === 0 && <option value="" disabled>(No sites found)</option>}
+                  {siteOptions.map((site) => {
+                    const customerName = customerNameById.get(site.customerId) || "Customer";
+                    return (
+                      <option key={site.id} value={site.id}>
+                        {customerName} - {site.name}
+                      </option>
+                    );
+                  })}
+                </TextField>
+              )}
+            />
+          </Grid>
+        );
+      case "jobNumber":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="jobNumber"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label={labelWithRequired("jobNumber", labelJobNumber)}
+                  fullWidth
+                  error={!!errors.jobNumber}
+                  helperText={
+                    errors.jobNumber?.message || "Internal job number used for installations and reporting."
+                  }
+                />
+              )}
+            />
+          </Grid>
+        );
+      case "purchaseOrderNumber":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="purchaseOrderNumber"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label={labelWithRequired("purchaseOrderNumber", labelPurchaseOrderNumber)}
+                  fullWidth
+                  helperText="Customer PO or order reference number (used for Quickbase goods movements lookup)."
+                />
+              )}
+            />
+          </Grid>
+        );
+      case "office":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="office"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label={labelWithRequired("office", labelOffice)}
+                  fullWidth
+                  select
+                  SelectProps={{ native: true }}
+                  error={!!errors.office}
+                  helperText={
+                    errors.office?.message || "Office city responsible for this project (sets Country/State)."
+                  }
+                >
+                  <option value="">Select office</option>
+                  {sortedGlobalOffices.map((office) => (
+                    <option key={office.id} value={office.city}>
+                      {office.city}
+                    </option>
+                  ))}
+                </TextField>
+              )}
+            />
+          </Grid>
+        );
+      case "region":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="region"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label={labelWithRequired("region", labelRegion)}
+                  fullWidth
+                  error={!!errors.region}
+                  helperText={errors.region?.message || "Auto-filled from Office. Override if needed."}
+                />
+              )}
+            />
+          </Grid>
+        );
+      case "projectManager":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="projectManager"
+              control={control}
+              render={({ field }) => (
+                (["dropdown", "single select", "reference", "lookup field"] as string[]).includes(
+                  (projectManagerMeta.fieldType || "").toLowerCase()
+                ) ? (
+                  <TextField
+                    {...field}
+                    label={labelWithRequired("projectManager", labelProjectManager)}
+                    fullWidth
+                    select
+                    SelectProps={{ native: true }}
+                    error={!!errors.projectManager}
+                    helperText={
+                      errors.projectManager?.message ||
+                      "Select from active project managers."
+                    }
+                  >
+                    <option value="">Select project manager</option>
+                    {projectManagerOptions.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </TextField>
+                ) : (
+                  <TextField
+                    {...field}
+                    label={labelWithRequired("projectManager", labelProjectManager)}
+                    fullWidth
+                    error={!!errors.projectManager}
+                    helperText={errors.projectManager?.message || "Primary owner for delivery and communication."}
+                  />
+                )
+              )}
+            />
+          </Grid>
+        );
+      case "description":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="description"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label={labelWithRequired("description", labelDescription)}
+                  fullWidth
+                  multiline
+                  rows={3}
+                  error={!!errors.description}
+                  helperText={errors.description?.message || "Short scope summary shown in lists and exports."}
+                />
+              )}
+            />
+          </Grid>
+        );
+      case "startDate":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="startDate"
+              control={control}
+              render={({ field }) => (
+                <DatePicker
+                  label={labelWithRequired("startDate", labelStartDate)}
+                  value={field.value ? dayjs(field.value) : null}
+                  onChange={(value) => field.onChange(value ? value.format("YYYY-MM-DD") : "")}
+                  slotProps={{
+                    textField: {
+                      fullWidth: true,
+                      error: !!errors.startDate,
+                      helperText: errors.startDate?.message || "Planned start date."
+                    }
+                  }}
+                />
+              )}
+            />
+          </Grid>
+        );
+      case "finishDate":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="finishDate"
+              control={control}
+              render={({ field }) => (
+                <DatePicker
+                  label={labelWithRequired("finishDate", labelFinishDate)}
+                  value={field.value ? dayjs(field.value) : null}
+                  onChange={(value) => field.onChange(value ? value.format("YYYY-MM-DD") : "")}
+                  slotProps={{
+                    textField: {
+                      fullWidth: true,
+                      error: !!errors.finishDate,
+                      helperText: errors.finishDate?.message || "Planned finish date."
+                    }
+                  }}
+                />
+              )}
+            />
+          </Grid>
+        );
+      case "status":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="status"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label={labelWithRequired("status", labelStatus)}
+                  fullWidth
+                  select
+                  SelectProps={{ native: true }}
+                  error={!!errors.status}
+                  helperText={errors.status?.message || "Current workflow status for this project."}
+                >
+                  {([
+                    "Draft",
+                    "In Planning",
+                    "Pending Approval",
+                    "Approved",
+                    "In Progress",
+                    "On Hold",
+                    "Completed",
+                    "Cancelled"
+                  ] as ProjectStatus[]).map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </TextField>
+              )}
+            />
+          </Grid>
+        );
+      case "projectType":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <FormControl error={!!errors.projectType}>
+              <FormLabel>{labelWithRequired("projectType", labelProjectType)}</FormLabel>
+              <Controller
+                name="projectType"
+                control={control}
+                render={({ field }) => (
+                  <RadioGroup row {...field}>
+                    {["Internal", "External"].map((value) => (
+                      <FormControlLabel key={value} value={value} control={<Radio />} label={value} />
+                    ))}
+                  </RadioGroup>
+                )}
+              />
+              <FormHelperText>
+                {errors.projectType?.message ||
+                  "Internal skips approval; External can require approval before work begins."}
+              </FormHelperText>
+            </FormControl>
+          </Grid>
+        );
+      default:
+        break;
+    }
+
+    const dynamicDef = dynamicDefById.get(fieldId);
+    if (!dynamicDef) return null;
+    const rawValue = projectDynamicValues[fieldId];
+    const value = typeof rawValue === "string" ? rawValue : "";
+    const dynamicLabel = labelWithRequired(fieldId, dynamicDef.name);
+    const dynamicHelp = isRequiredField(fieldId) ? "Required custom field." : "Optional custom field.";
+    const dynamicError = dynamicFieldErrors[fieldId] || "";
+
+    const dynamicSitesLink = (() => {
+      const type = (dynamicDef.fieldType || "").toLowerCase();
+      if (type !== "reference" && type !== "lookup field") return { isSitesRef: false, isSitesLookup: false };
+      const targetId = dynamicDef.linkToFieldId;
+      if (!targetId) return { isSitesRef: false, isSitesLookup: false };
+      const target = allDefinitionsById.get(targetId);
+      if (!target) return { isSitesRef: false, isSitesLookup: false };
+      const isSites = (target.tables || []).includes("sites");
+      return { isSitesRef: type === "reference" && isSites, isSitesLookup: type === "lookup field" && isSites };
+    })();
+
+    if (dynamicDef.fieldType === "checkbox") {
+      return (
+        <Grid item xs={12} md={6} key={fieldId}>
+          <FormControl error={!!dynamicError}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={value === "true"}
+                  onChange={(event) =>
+                    setProjectDynamicValues((prev) => ({
+                      ...prev,
+                      [fieldId]: event.target.checked ? "true" : "false"
+                    }))
+                  }
+                />
+              }
+              label={dynamicLabel}
+            />
+            <FormHelperText>{dynamicError || dynamicHelp}</FormHelperText>
+          </FormControl>
+        </Grid>
+      );
+    }
+
+    if (dynamicSitesLink.isSitesRef) {
+      return (
+        <Grid item xs={12} md={6} key={fieldId}>
+          <TextField
+            label={dynamicLabel}
+            fullWidth
+            select
+            SelectProps={{ native: true }}
+            value={value}
+            error={!!dynamicError}
+            helperText={dynamicError || dynamicHelp.replace("custom field.", "custom field (select an existing site).")}
+            onChange={(event) =>
+              setProjectDynamicValues((prev) => ({ ...prev, [fieldId]: String(event.target.value || "") }))
+            }
+          >
+            <option value="">(No site)</option>
+            {siteOptions.map((site) => {
+              const customerName = customerNameById.get(site.customerId) || "Customer";
+              return (
+                <option key={site.id} value={site.id}>
+                  {customerName} - {site.name}
+                </option>
+              );
+            })}
+          </TextField>
+        </Grid>
+      );
+    }
+
+    if (dynamicSitesLink.isSitesLookup) {
+      // For Projects, treat Site lookup fields as derived display-only values from the selected Site.
+      // This avoids rendering "lookup field" as another Site selector and enables auto-fill use cases like Site City.
+      const looksLikeCity =
+        /city/i.test(dynamicDef.name || "") || /city/i.test(dynamicDef.id || "");
+      const derived = looksLikeCity ? (allSites.find((s) => s.id === siteId)?.city || "") : "";
+      return (
+        <Grid item xs={12} md={6} key={fieldId}>
+          <TextField
+            label={dynamicLabel}
+            fullWidth
+            value={derived}
+            InputProps={{ readOnly: true }}
+            error={!!dynamicError}
+            helperText={
+              dynamicError ||
+              (looksLikeCity
+                ? "Auto-filled from the selected Site."
+                : "Lookup fields are derived from linked records.")
+            }
+          />
+        </Grid>
+      );
+    }
+
+    return (
+      <Grid item xs={12} md={6} key={fieldId}>
+        <TextField
+          label={dynamicLabel}
+          type={getDynamicInputType(dynamicDef.fieldType)}
+          fullWidth
+          InputLabelProps={dynamicDef.fieldType === "date" ? { shrink: true } : undefined}
+          error={!!dynamicError}
+          helperText={dynamicError || dynamicHelp}
+          value={value}
+          onChange={(event) =>
+            setProjectDynamicValues((prev) => ({ ...prev, [fieldId]: event.target.value }))
+          }
+        />
+      </Grid>
+    );
+  };
 
   return (
     <Stack spacing={3}>
-      <Box>
-        <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-          {id ? "Edit project" : "Create project"}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Capture project identity, scheduling, and installation configuration.
-        </Typography>
-      </Box>
+      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" spacing={2}>
+        <Box>
+          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
+            {id ? "Edit project" : "Create project"}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Capture project identity, scheduling, and installation configuration.
+          </Typography>
+        </Box>
+        <Button variant="outlined" onClick={() => setTableConfigOpen(true)}>
+          Project table configuration
+        </Button>
+      </Stack>
 
       <Box className="glass-card" sx={{ padding: 3 }}>
         <form onSubmit={handleSubmit(onSubmit, onInvalid)}>
           <LocalizationProvider dateAdapter={AdapterDayjs}>
           <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth error={!!errors.customerName}>
-                <FormLabel>Select customer</FormLabel>
-                <Select
-                  value={selectedCustomerId}
-                  displayEmpty
-                  onChange={(event) => handleCustomerSelect(event.target.value)}
-                >
-                  <MenuItem value="">Select existing customer</MenuItem>
-                  {filteredCustomers.map((customer) => (
-                    <MenuItem key={customer.id} value={customer.id}>
-                      {customer.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-                {errors.customerName?.message && <FormHelperText>{errors.customerName.message}</FormHelperText>}
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth error={!!errors.productIds}>
-                <FormLabel>Product included</FormLabel>
-                <Controller
-                  name="productIds"
-                  control={control}
-                  render={({ field }) => (
-                    <Select
-                      value={field.value?.[0] ?? ""}
-                      onChange={(event) =>
-                        field.onChange(event.target.value ? [event.target.value as string] : [])
-                      }
-                      displayEmpty
-                    >
-                      <MenuItem value="">Select a product</MenuItem>
-                      {products.map((product) => (
-                        <MenuItem key={product.id} value={product.id}>
-                          <ListItemText primary={product.name} />
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  )}
-                />
-                {errors.productIds?.message && <FormHelperText>{errors.productIds.message}</FormHelperText>}
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Controller
-                name="customerId"
-                control={control}
-                render={({ field }) => (
-                  <TextField
-                    {...field}
-                    label="Customer ID"
-                    fullWidth
-                    error={!!errors.customerId}
-                    helperText={errors.customerId?.message}
-                    InputProps={{ readOnly: true }}
-                  />
-                )}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Controller
-                name="jobNumber"
-                control={control}
-                render={({ field }) => (
-                  <TextField
-                    {...field}
-                    label="Job Number"
-                    fullWidth
-                    error={!!errors.jobNumber}
-                    helperText={errors.jobNumber?.message}
-                  />
-                )}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Controller
-                name="office"
-                control={control}
-                render={({ field }) => (
-                  <TextField
-                    {...field}
-                    label="Office"
-                    fullWidth
-                    select
-                    SelectProps={{ native: true }}
-                    error={!!errors.office}
-                    helperText={errors.office?.message}
-                  >
-                    <option value="">Select office</option>
-                    {officeOptions.map((office) => (
-                      <option key={office} value={office}>
-                        {office}
-                      </option>
-                    ))}
-                  </TextField>
-                )}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Controller
-                name="region"
-                control={control}
-                render={({ field }) => <TextField {...field} label="Region (optional)" fullWidth />}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Controller
-                name="projectManager"
-                control={control}
-                render={({ field }) => <TextField {...field} label="Project Manager" fullWidth />}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <Controller
-                name="description"
-                control={control}
-                render={({ field }) => (
-                  <TextField
-                    {...field}
-                    label="Description"
-                    fullWidth
-                    multiline
-                    rows={3}
-                    error={!!errors.description}
-                    helperText={errors.description?.message}
-                  />
-                )}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Controller
-                name="startDate"
-                control={control}
-                render={({ field }) => (
-                  <DatePicker
-                    label="Start Date"
-                    value={field.value ? dayjs(field.value) : null}
-                    onChange={(value) =>
-                      field.onChange(value ? value.format("YYYY-MM-DD") : "")
+            {visibleIdSet.has("jobNumber") && renderFormField("jobNumber")}
+            {visibleIdSet.has("purchaseOrderNumber") && renderFormField("purchaseOrderNumber")}
+            {visibleIdSet.has("customerName") ? renderFormField("customerName") : <Grid item xs={12} md={6} />}
+
+            {visibleIdSet.has("siteName") && renderFormField("siteName")}
+            {cityFieldId && visibleIdSet.has(cityFieldId) ? renderFormField(cityFieldId) : <Grid item xs={12} md={6} />}
+
+            {visibleIdSet.has("products") && renderFormField("products")}
+            <Grid item xs={12} md={6} />
+            {selectedProductFeatures.length > 0 && (
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Product Features: {selectedProduct?.name}
+                </Typography>
+                <Grid container spacing={2}>
+                  {selectedProductFeatures.map((feature) => {
+                    const key = `${selectedProductId}:${feature.id}`;
+                    const value = productFeatureValues[key] || "";
+                    const setVal = (v: string) => setProductFeatureValues((prev) => ({ ...prev, [key]: v }));
+
+                    if (feature.valueType === "tri-state") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <Stack spacing={0.5}>
+                            <Typography variant="caption" color="text.secondary">{feature.name}</Typography>
+                            <ToggleButtonGroup
+                              value={value || null}
+                              exclusive
+                              onChange={(_, next) => { if (next !== null) setVal(next); }}
+                              size="small"
+                            >
+                              <ToggleButton value="yes">Yes</ToggleButton>
+                              <ToggleButton value="no">No</ToggleButton>
+                              <ToggleButton value="na">N/A</ToggleButton>
+                            </ToggleButtonGroup>
+                          </Stack>
+                        </Grid>
+                      );
                     }
-                    slotProps={{
-                      textField: {
-                        fullWidth: true,
-                        error: !!errors.startDate,
-                        helperText: errors.startDate?.message
-                      }
-                    }}
-                  />
-                )}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Controller
-                name="finishDate"
-                control={control}
-                render={({ field }) => (
-                  <DatePicker
-                    label="Finish Date"
-                    value={field.value ? dayjs(field.value) : null}
-                    onChange={(value) =>
-                      field.onChange(value ? value.format("YYYY-MM-DD") : "")
+                    if (feature.valueType === "single-select") {
+                      const options = feature.options || [];
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <FormControl fullWidth size="small">
+                            <InputLabel>{feature.name}</InputLabel>
+                            <Select label={feature.name} value={value} onChange={(event) => setVal(event.target.value)}>
+                              {options.map((option) => (
+                                <MenuItem key={option} value={option}>{option}</MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                      );
                     }
-                    slotProps={{
-                      textField: {
-                        fullWidth: true,
-                        error: !!errors.finishDate,
-                        helperText: errors.finishDate?.message
-                      }
-                    }}
-                  />
-                )}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Controller
-                name="status"
-                control={control}
-                render={({ field }) => (
-                  <TextField {...field} label="Status" fullWidth select SelectProps={{ native: true }}>
-                    {([
-                      "Draft",
-                      "In Planning",
-                      "Pending Approval",
-                      "Approved",
-                      "In Progress",
-                      "On Hold",
-                      "Completed",
-                      "Cancelled"
-                    ] as ProjectStatus[]).map((value) => (
-                      <option key={value} value={value}>
-                        {value}
-                      </option>
-                    ))}
-                  </TextField>
-                )}
-              />
-            </Grid>
+                    if (feature.valueType === "multi-select") {
+                      const options = feature.options || [];
+                      const selectedValues = value ? value.split(",").map((x) => x.trim()).filter(Boolean) : [];
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <FormControl fullWidth>
+                            <FormLabel>{feature.name}</FormLabel>
+                            <Select
+                              multiple
+                              value={selectedValues}
+                              onChange={(event) => {
+                                const next = Array.isArray(event.target.value) ? event.target.value : [];
+                                setVal(next.join(","));
+                              }}
+                              renderValue={(selected) => (Array.isArray(selected) ? selected.join(", ") : "")}
+                            >
+                              {options.map((option) => (
+                                <MenuItem key={option} value={option}>
+                                  <Checkbox checked={selectedValues.includes(option)} />
+                                  <ListItemText primary={option} />
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "rating") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <Stack spacing={0.5}>
+                            <Typography variant="caption" color="text.secondary">{feature.name}</Typography>
+                            <Rating
+                              value={parseInt(value) || 0}
+                              onChange={(_, next) => setVal(next ? String(next) : "")}
+                            />
+                          </Stack>
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "percentage") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <TextField
+                            label={`${feature.name} (%)`}
+                            fullWidth
+                            type="number"
+                            inputProps={{ min: 0, max: 100 }}
+                            value={value}
+                            onChange={(event) => setVal(event.target.value)}
+                          />
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "date") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <TextField
+                            label={feature.name}
+                            fullWidth
+                            type="date"
+                            value={value}
+                            onChange={(event) => setVal(event.target.value)}
+                            InputLabelProps={{ shrink: true }}
+                          />
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "rich-text") {
+                      return (
+                        <Grid item xs={12} key={key}>
+                          <TextField
+                            label={feature.name}
+                            fullWidth
+                            multiline
+                            rows={3}
+                            value={value}
+                            onChange={(event) => setVal(event.target.value)}
+                          />
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "link") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <TextField
+                            label={feature.name}
+                            fullWidth
+                            type="url"
+                            placeholder="https://"
+                            value={value}
+                            onChange={(event) => setVal(event.target.value)}
+                          />
+                        </Grid>
+                      );
+                    }
+                    if (feature.valueType === "file") {
+                      return (
+                        <Grid item xs={12} md={6} key={key}>
+                          <TextField
+                            label={feature.name}
+                            fullWidth
+                            placeholder="File URL or path"
+                            value={value}
+                            onChange={(event) => setVal(event.target.value)}
+                          />
+                        </Grid>
+                      );
+                    }
+                    return (
+                      <Grid item xs={12} md={6} key={key}>
+                        <TextField
+                          label={feature.name}
+                          fullWidth
+                          type={feature.valueType === "number" ? "number" : "text"}
+                          value={value}
+                          onChange={(event) => setVal(event.target.value)}
+                        />
+                      </Grid>
+                    );
+                  })}
+                </Grid>
+              </Grid>
+            )}
+
+            {visibleIdSet.has("projectManager") && renderFormField("projectManager")}
+            {visibleIdSet.has("office") ? renderFormField("office") : <Grid item xs={12} md={6} />}
+
+            {visibleIdSet.has("region") && renderFormField("region")}
+            <Grid item xs={12} md={6} />
+
+            {visibleIdSet.has("startDate") && renderFormField("startDate")}
+            {visibleIdSet.has("finishDate") ? renderFormField("finishDate") : <Grid item xs={12} md={6} />}
+
+            {visibleIdSet.has("description") && renderFormField("description")}
+            <Grid item xs={12} md={6} />
+
+            {visibleIdSet.has("projectType") && renderFormField("projectType")}
+            {visibleIdSet.has("status") ? renderFormField("status") : <Grid item xs={12} md={6} />}
+
+            {extraDynamicIds.map((fieldId) => renderFormField(fieldId))}
             <Grid item xs={12} md={6}>
               <FormControl>
-                <FormLabel>Project classification</FormLabel>
-                <Controller
-                  name="projectType"
-                  control={control}
-                  render={({ field }) => (
-                    <RadioGroup row {...field}>
-                      {["Internal", "External"].map((value) => (
-                        <FormControlLabel
-                          key={value}
-                          value={value}
-                          control={<Radio />}
-                          label={value}
-                        />
-                      ))}
-                    </RadioGroup>
-                  )}
-                />
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
+                <FormControlLabel
+                  control={
                   <Controller
                     name="isInstallationProject"
                     control={control}
                     render={({ field }) => (
-                      <Switch checked={field.value} onChange={field.onChange} />
+                      <Switch
+                        checked={!!field.value}
+                        onChange={(_, checked) => field.onChange(checked)}
+                      />
                     )}
                   />
                 }
-                label="Is this an Installation Project?"
+                label="Installation project"
               />
+                <FormHelperText>Enable if this project will have installation records and field work tracking.</FormHelperText>
+              </FormControl>
             </Grid>
             {projectType === "External" && (
               <Grid item xs={12}>
@@ -586,40 +1627,245 @@ const ProjectForm = () => {
                       </RadioGroup>
                     )}
                   />
+                  <FormHelperText>Record the current approval outcome for External projects.</FormHelperText>
                 </FormControl>
               </Grid>
             )}
 
           </Grid>
           </LocalizationProvider>
-          <Box sx={{ marginTop: 2 }}>
-            <Typography variant="subtitle2" sx={{ marginBottom: 1 }}>
-              Dynamic fields
-            </Typography>
-            <DynamicFieldsForm
-              definitions={projectsDynamic.definitions}
-              values={projectDynamicValues}
-              onChange={setProjectDynamicValues}
-            />
-          </Box>
           {submitError && (
             <Typography variant="body2" color="error" sx={{ marginTop: 2 }}>
               {submitError}
             </Typography>
+          )}
+          {!id && cloneCandidates.length > 0 && (
+            <Box
+              sx={{
+                mt: 2,
+                p: 1.5,
+                borderRadius: 1,
+                border: "1px solid",
+                borderColor: pendingCloneSourceId ? "primary.main" : "var(--stroke)",
+                bgcolor: pendingCloneSourceId ? "primary.main" : "transparent",
+                color: pendingCloneSourceId ? "primary.contrastText" : "text.secondary",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 2,
+              }}
+            >
+              <Typography variant="body2">
+                {pendingCloneSourceId
+                  ? `Will copy assets from: ${cloneCandidates.find((c) => c.id === pendingCloneSourceId)?.jobNumber}`
+                  : `${cloneCandidates.length} similar project${cloneCandidates.length !== 1 ? "s" : ""} found — start from scratch or copy assets`}
+              </Typography>
+              <Button
+                size="small"
+                variant={pendingCloneSourceId ? "outlined" : "contained"}
+                sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                onClick={() => setCloneSuggestOpen(true)}
+              >
+                {pendingCloneSourceId ? "Change selection" : "Copy assets"}
+              </Button>
+            </Box>
           )}
           <Stack direction="row" spacing={2} sx={{ marginTop: 3 }}>
             <Button variant="outlined" onClick={() => navigate("/projects")}>
               Cancel
             </Button>
             <Button variant="outlined">Save draft</Button>
-            <Button variant="contained" type="submit">
-              {id ? "Save changes" : "Submit project"}
+            <Button variant="contained" type="submit" disabled={cloning}>
+              {cloning ? "Copying assets…" : id ? "Save changes" : "Submit project"}
             </Button>
           </Stack>
         </form>
       </Box>
+
+      <TableConfigDialog
+        open={tableConfigOpen}
+        onClose={() => setTableConfigOpen(false)}
+        title="Table configuration: projects"
+        deferFieldChanges
+        availableFields={availableFieldsForProjects.map((field) => ({
+          id: field.id,
+          name: field.name,
+          fieldType: field.fieldType,
+          linkToFieldId: field.linkToFieldId,
+          actionType: field.actionType
+        }))}
+        fields={projectsTableConfig.orderedFields}
+        config={projectsTableConfig.config}
+        onChange={projectsTableConfig.setConfig}
+        builtInColumns={[
+          { id: "jobNumber", name: "Job Number", type: "text", required: true },
+          { id: "purchaseOrderNumber", name: "Purchase Order Number", type: "text", required: false },
+          { id: "customerName", name: "Customer name", type: "text", required: false },
+          { id: "siteName", name: "Site", type: "text", required: false },
+          { id: "customerId", name: "Customer ID", type: "text", required: true },
+          { id: "products", name: "Product name", type: "multi-select", required: true },
+          { id: "office", name: "Office", type: "text", required: true },
+          { id: "region", name: "Country/State", type: "text", required: false },
+          { id: "projectManager", name: "Project Manager", type: "text", required: false },
+          { id: "description", name: "Description", type: "text", required: true },
+          { id: "startDate", name: "Start Date", type: "date", required: true },
+          { id: "finishDate", name: "Finish Date", type: "date", required: true },
+          { id: "status", name: "Status", type: "single select", required: true },
+          { id: "projectType", name: "Project Type", type: "single select", required: true }
+        ]}
+        onAddField={async (fieldId) => {
+          const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
+          if (!existing) return;
+          const tables = existing.tables.includes("projects")
+            ? existing.tables
+            : [...existing.tables, "projects"];
+          await fieldService.updateDefinition(fieldId, { ...existing, tables });
+          await allFieldDefinitions.reload();
+          await projectsDynamic.reload();
+        }}
+        onCreateField={async (name, type, linkToFieldId, actionType) => {
+          const created = await fieldService.createDefinition({
+            id: "",
+            name,
+            fieldType: type,
+            linkToFieldId: linkToFieldId || null,
+            actionType: actionType || null,
+            tables: ["projects"],
+            sortOrder: allFieldDefinitions.definitions.length + 1,
+            isActive: true
+          });
+          await allFieldDefinitions.reload();
+          await projectsDynamic.reload();
+          return created;
+        }}
+        onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
+          const existing = projectsDynamic.definitions.find((item) => item.id === fieldId);
+          if (!existing) return;
+          await fieldService.updateDefinition(fieldId, {
+            ...existing,
+            name,
+            fieldType: type,
+            linkToFieldId: linkToFieldId || null,
+            actionType: actionType || null
+          });
+          await allFieldDefinitions.reload();
+          await projectsDynamic.reload();
+        }}
+        onDeleteField={async (fieldId) => {
+          // "Remove" means unassign from Projects (do not delete globally).
+          const existing =
+            allFieldDefinitions.definitions.find((item) => item.id === fieldId) ??
+            projectsDynamic.definitions.find((item) => item.id === fieldId);
+          if (!existing) return;
+          const tables = (existing.tables || []).filter((t) => t !== "projects");
+          await fieldService.updateDefinition(fieldId, { ...existing, tables });
+          await allFieldDefinitions.reload();
+          await projectsDynamic.reload();
+        }}
+      />
+      {/* Clone suggestion dialog */}
+      <Dialog
+        open={cloneSuggestOpen}
+        onClose={() => setCloneSuggestOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          className: "glass-card",
+          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)" }
+        }}
+      >
+        <DialogTitle>Copy from an existing project?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            We found {cloneCandidates.length} existing project{cloneCandidates.length !== 1 ? "s" : ""} for the same customer or site.
+            Would you like to copy the asset list and workflow assignments into this new project?
+          </Typography>
+          <Stack spacing={1}>
+            {cloneCandidates.map((p) => (
+              <Box
+                key={p.id}
+                onClick={() => setPendingCloneSourceId((prev) => (prev === p.id ? null : p.id))}
+                sx={{
+                  p: 1.5,
+                  borderRadius: 1,
+                  border: "1px solid",
+                  borderColor: pendingCloneSourceId === p.id ? "primary.main" : "var(--stroke)",
+                  cursor: "pointer",
+                  bgcolor: pendingCloneSourceId === p.id ? "primary.main" : "transparent",
+                  color: pendingCloneSourceId === p.id ? "primary.contrastText" : "text.primary",
+                  transition: "all 0.15s",
+                }}
+              >
+                <Typography variant="subtitle2">{p.jobNumber} — {p.customerName}</Typography>
+                {p.siteName && (
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>{p.siteName}</Typography>
+                )}
+                {p.assetCount > 0 && (
+                  <Typography variant="caption" sx={{ display: "block", opacity: 0.7 }}>
+                    {p.assetCount} asset{p.assetCount !== 1 ? "s" : ""}
+                  </Typography>
+                )}
+              </Box>
+            ))}
+          </Stack>
+          {pendingCloneSourceId && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
+              Assets will be copied with status reset to Not Started. Workflow runs are not copied.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => { setPendingCloneSourceId(null); setCloneSuggestOpen(false); }}>
+            Start fresh
+          </Button>
+          <Button
+            variant="contained"
+            disabled={!pendingCloneSourceId}
+            onClick={() => setCloneSuggestOpen(false)}
+          >
+            Copy assets after save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={!!globalOfficePrompt}
+        onClose={() => setGlobalOfficePrompt(null)}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          className: "glass-card",
+          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)" }
+        }}
+      >
+        <DialogTitle>Switch Global Active Office?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Project manager {globalOfficePrompt?.managerName} is assigned to {globalOfficePrompt?.country}.
+            Change Global Active Office to {globalOfficePrompt?.country}?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => setGlobalOfficePrompt(null)}>
+            Keep Current
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              if (!globalOfficePrompt?.country) return;
+              updateActiveOffice(globalOfficePrompt.country);
+              setGlobalOfficePrompt(null);
+            }}
+          >
+            Change Office
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 };
 
 export default ProjectForm;
+
+
+

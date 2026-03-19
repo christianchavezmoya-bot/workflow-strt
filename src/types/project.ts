@@ -1,4 +1,4 @@
-﻿export type Office = "USA" | "Australia" | "South Africa";
+﻿export type Office = string;
 
 export type UserRole = "Admin" | "Project Manager" | "Engineer" | "Viewer";
 
@@ -22,7 +22,10 @@ export interface Project {
   id: string;
   customerName: string;
   customerId: string;
+  siteId?: string;
+  siteName?: string;
   jobNumber: string;
+  purchaseOrderNumber?: string;
   description: string;
   startDate: string;
   finishDate: string;
@@ -37,4 +40,6 @@ export interface Project {
   contractValue?: number;
   probabilityStage?: string;
   productIds?: string[];
+  productFeatureValues?: Record<string, string>;
+  assetCount?: number;
 }

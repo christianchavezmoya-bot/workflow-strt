@@ -10,12 +10,12 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Paper,
   IconButton,
   Box,
   Typography,
-  Container,
   Stack,
   Tabs,
   Tab,
@@ -29,6 +29,7 @@ import {
   Tooltip,
   Chip,
   ListItemText,
+  Switch,
   ToggleButton,
   ToggleButtonGroup,
 } from "@mui/material";
@@ -40,32 +41,47 @@ import {
   SettingsOutlined,
   GridView,
   TableRows,
+  EmailOutlined,
+  PersonOffOutlined,
+  LockResetOutlined,
 } from "@mui/icons-material";
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
+import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import GlobalOfficeMap, { Office } from "../../components/GlobalOfficeMap";
 import { demoCustomers, demoProducts, demoUsers } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { adminTabsService, AdminTab, AdminTabRow } from "../../services/adminTabsService";
-import { fieldService } from "../../services/fieldService";
+import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
+import { roleConfigService, RolePermissions } from "../../services/roleConfigService";
 import api from "../../services/api";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer } from "../../store/customersSlice";
 import { createProduct, deleteProduct, fetchProducts, updateProduct } from "../../store/productsSlice";
-import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, updateUser } from "../../store/usersSlice";
+import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, reset2fa, updateUser } from "../../store/usersSlice";
 import { Customer } from "../../types/customer";
 import { Product } from "../../types/product";
+import type { FeatureSubProperty as ProductFeatureSubProperty, ProductFeatureDefinition, ProductFeatureValueType } from "../../types/product";
 import { User, UserRole } from "../../types/user";
+import { divisionService } from "../../services/divisionService";
+import type { Division } from "../../types/division";
+import { featureService } from "../../services/featureService";
+import type { Feature } from "../../types/feature";
 
-const roles: UserRole[] = ["Admin", "Project Manager", "Engineer", "Viewer"];
-const offices: Array<Customer["office"]> = ["USA", "Australia", "South Africa", "All"];
+// Style for field definition labels (yellow bold)
+const fieldLabelStyle = {
+  color: '#FFD700',
+  fontWeight: 'bold'
+};
+
 const defaultCustomColumns = ["ID", "Name", "Created Date"];
 const getDefaultColumnType = (name: string) => {
   if (name === "ID") return "lookup field";
@@ -212,27 +228,60 @@ function DraggablePaper(props: any) {
 }
 
 export const UserManagement: React.FC = () => {
+  const VIRTUAL_SITE_PREFIX = "virtual-site-for-customer:";
   const { user } = useAuth();
+  const can = usePermissions();
   const { activeOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const usersState = useAppSelector((state) => state.users);
   const customersState = useAppSelector((state) => state.customers);
   const productsState = useAppSelector((state) => state.products);
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [libraryFeatures, setLibraryFeatures] = useState<Feature[]>([]);
+  const [featurePickerOpen, setFeaturePickerOpen] = useState<"create" | "edit" | null>(null);
+  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
+
+  // Derive offices dropdown list from globalOffices (City, Country format)
+  // NOTE: This dropdown shows ALL offices, not filtered by activeOffice
+  const offices = useMemo(() => {
+    console.log('Computing offices dropdown from globalOffices:', globalOffices.length, 'offices');
+    console.log('Current activeOffice filter:', activeOffice);
+
+    const officeNames = globalOffices
+      .map((office) => {
+        if (office.city && office.country) {
+          return `${office.city}, ${office.country}`;
+        }
+        return office.country || office.city;
+      })
+      .filter((name): name is string => !!name);
+    const result = Array.from(new Set([...officeNames, "All"]));
+    console.log('Computed offices dropdown (all offices, not filtered):', result);
+    return result;
+  }, [globalOffices]);
+
+  const [roles, setRoles] = useState<string[]>(["Admin", "Project Manager", "Engineer", "Viewer"]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
-  const [productOpen, setProductOpen] = useState(false);
   const [editUserOpen, setEditUserOpen] = useState(false);
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
-  const [editProductOpen, setEditProductOpen] = useState(false);
   const [assetOpen, setAssetOpen] = useState(false);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
-    type: "user" | "customer" | "product" | "role";
+    type: "user" | "customer" | "product" | "role" | "site" | "office";
     id: string;
     label: string;
   } | null>(null);
-  const [tab, setTab] = useState(0);
+  const [deleteSaving, setDeleteSaving] = useState(false);
+  const [tab, setTab] = useState(() => {
+    const stored = localStorage.getItem("admin_active_tab");
+    return stored ? parseInt(stored, 10) : 0;
+  });
+  const [usersPage, setUsersPage] = useState(0);
+  const [usersRowsPerPage, setUsersRowsPerPage] = useState(25);
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
@@ -244,7 +293,7 @@ export const UserManagement: React.FC = () => {
     customerId: "",
     office: activeOffice === "All" ? "" : activeOffice
   });
-  const [editingCustomerId, setEditingCustomerId] = useState<number | null>(null);
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [editCustomerName, setEditCustomerName] = useState("");
   const [editCustomerIndustry, setEditCustomerIndustry] = useState("");
   const [editCustomerLogo, setEditCustomerLogo] = useState<string | null>(null);
@@ -262,6 +311,7 @@ export const UserManagement: React.FC = () => {
     address?: string;
     city?: string;
     state?: string;
+    country?: string;
     contactName?: string;
     contactPhone?: string;
     notes?: string;
@@ -272,14 +322,11 @@ export const UserManagement: React.FC = () => {
     name?: string;
     city?: string;
     state?: string;
+    country?: string;
     notes?: string;
     customerId?: string | number;
   }>({});
 
-  const [productForm, setProductForm] = useState({
-    name: "",
-    description: ""
-  });
   const [editUserForm, setEditUserForm] = useState({
     id: "",
     fullName: "",
@@ -297,8 +344,14 @@ export const UserManagement: React.FC = () => {
   const [editProductForm, setEditProductForm] = useState({
     id: "",
     name: "",
-    description: ""
+    description: "",
+    divisionId: ""
   });
+  const [editProductFeatures, setEditProductFeatures] = useState<ProductFeatureDefinition[]>([]);
+  const [productOpen, setProductOpen] = useState(false);
+  const [productForm, setProductForm] = useState({ name: "", description: "", divisionId: "" });
+  const [productFeatures, setProductFeatures] = useState<ProductFeatureDefinition[]>([]);
+  const [editProductOpen, setEditProductOpen] = useState(false);
   const [assetForm, setAssetForm] = useState({
     machineType: "",
     machineId: "",
@@ -321,8 +374,8 @@ export const UserManagement: React.FC = () => {
   const productsDynamic = useDynamicFields("products");
   const assetsDynamic = useDynamicFields("assets");
   const allFieldDefinitions = useFieldDefinitions();
-  const usersTableConfig = useTableConfig(
-    "users",
+  // Use database field definitions for users table
+  const allUsersFields = useMemo(() =>
     usersDynamic.definitions.map((field) => ({
       id: field.id,
       name: field.name,
@@ -330,7 +383,20 @@ export const UserManagement: React.FC = () => {
       linkToFieldId: field.linkToFieldId,
       actionType: field.actionType
     }))
-  );
+  , [usersDynamic.definitions]);
+
+  const usersTableConfig = useTableConfig("users", allUsersFields);
+
+  const ROLES_FIELDS = useMemo(() => [
+    { id: "base-viewOnly",            name: "View only" },
+    { id: "base-createDeleteTables",  name: "Create/Delete tables" },
+    { id: "base-createUsers",         name: "Create users" },
+    { id: "base-editFields",          name: "Edit fields" },
+    { id: "base-modifyData",          name: "Modify data" },
+    { id: "base-editForms",           name: "Edit forms" },
+  ], []);
+  const rolesTableConfig = useTableConfig("roles", ROLES_FIELDS);
+
   const customersTableConfig = useTableConfig(
     "customers",
     customersDynamic.definitions.map((field) => ({
@@ -362,11 +428,11 @@ export const UserManagement: React.FC = () => {
   const productsTableConfig = useTableConfig(
     "products",
     useMemo(() => [
-      { id: "base-name", name: baseFieldNames.products?.["base-name"] || "Name", type: "text" },
+      { id: "base-name", name: baseFieldNames.products?.["base-name"] || "Product name", type: "text" },
       { id: "base-description", name: baseFieldNames.products?.["base-description"] || "Description", type: "text" },
       ...productsDynamic.definitions.map((field) => ({
         id: field.id,
-        name: field.name,
+        name: field.id === "field-products" ? "Division" : field.name,
         type: field.fieldType,
         linkToFieldId: field.linkToFieldId,
         actionType: field.actionType
@@ -391,9 +457,10 @@ export const UserManagement: React.FC = () => {
     ], [baseFieldNames, assetsDynamic.definitions])
   );
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
-  const [tableConfigTarget, setTableConfigTarget] = useState<"users" | "customers" | "products" | "assets">("users");
+  const [tableConfigTarget, setTableConfigTarget] = useState<"users" | "customers" | "products" | "assets" | "roles">("users");
 
   const availableFieldsForAdminTable = useMemo(() => {
+    if (tableConfigTarget === "roles") return [];
     const tableName = tableConfigTarget;
     return allFieldDefinitions.definitions.filter((field) => !field.tables.includes(tableName));
   }, [allFieldDefinitions.definitions, tableConfigTarget]);
@@ -417,6 +484,14 @@ export const UserManagement: React.FC = () => {
     [productsDynamic.definitions, productsTableConfig.config]
   );
 
+  // Same list but with the division field renamed consistently for use inside forms
+  const productsDefinitionsForForm = useMemo(
+    () => orderedProductsDefinitions.map((d) =>
+      d.id === "field-products" ? { ...d, name: "Division" } : d
+    ),
+    [orderedProductsDefinitions]
+  );
+
   const orderedAssetsDefinitions = useMemo(
     () => getOrderedDefinitions(assetsDynamic.definitions, assetsTableConfig.config),
     [assetsDynamic.definitions, assetsTableConfig.config]
@@ -426,6 +501,15 @@ export const UserManagement: React.FC = () => {
     () => getOrderedDefinitions(usersDynamic.definitions, usersTableConfig.config),
     [usersDynamic.definitions, usersTableConfig.config]
   );
+
+  // Filter out static fields from dynamic fields to prevent duplicates in Edit User dialog
+  const dynamicOnlyUsersDefinitions = useMemo(() => {
+    const staticFieldIds = new Set(['field-user-name', 'field-email', 'field-role', 'field-office', 'field-active']);
+    const staticFieldNames = new Set(['User Name', 'Email', 'Role', 'Role name', 'Office', 'City', 'Office/City', 'Office / City', 'Global Offices', 'Active']);
+    return orderedUsersDefinitions.filter(def =>
+      !staticFieldIds.has(def.id) && !staticFieldNames.has(def.name)
+    );
+  }, [orderedUsersDefinitions]);
 
   const orderedCustomersDefinitions = useMemo(
     () => getOrderedDefinitions(customersDynamic.definitions, customersTableConfig.config),
@@ -472,13 +556,18 @@ export const UserManagement: React.FC = () => {
   const [rolesConfig, setRolesConfig] = useState(() => {
     try {
       const raw = localStorage.getItem("admin_roles_config");
-      if (raw) return JSON.parse(raw) as Record<string, Record<string, boolean>>;
+      if (raw) return JSON.parse(raw) as Record<string, RolePermissions>;
     } catch {
       // ignore
     }
     return {
       Viewer: {
-        viewOnly: true
+        viewOnly: true,
+        createDeleteTables: false,
+        createUsers: false,
+        editFields: false,
+        modifyData: false,
+        editForms: false
       },
       "Project Manager": {
         viewOnly: false,
@@ -504,7 +593,7 @@ export const UserManagement: React.FC = () => {
         modifyData: true,
         editForms: false
       }
-    };
+    } as Record<string, RolePermissions>;
   });
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -525,7 +614,58 @@ export const UserManagement: React.FC = () => {
     dispatch(fetchUsers());
     dispatch(fetchCustomers());
     dispatch(fetchProducts());
+    divisionService.getAll().then(setDivisions).catch(() => {});
+    featureService.getAll().then(setLibraryFeatures).catch(() => {});
   }, [dispatch]);
+
+  useEffect(() => {
+    officesService.getAll()
+      .then(offices => {
+        console.log('Loaded global offices:', offices);
+        setGlobalOffices(offices);
+      })
+      .catch(error => {
+        console.error('Failed to load global offices:', error);
+        setGlobalOffices([]);
+      });
+  }, []);
+
+  // Load roles from backend
+  const loadRolesFromDatabase = async () => {
+    try {
+      const config = await roleConfigService.get();
+      console.log('Loaded roles config:', config);
+      console.log('config.roles:', config.roles);
+      console.log('config.roles JSON:', JSON.stringify(config.roles, null, 2));
+      console.log('typeof config.roles:', typeof config.roles);
+
+      const roleNames = Object.keys(config.roles || {});
+      console.log('Role names for dropdown:', roleNames);
+
+      if (roleNames.length > 0) {
+        setRoles(roleNames);
+        setRolesConfig(config.roles);
+        console.log('✅ Roles refreshed from database');
+      } else {
+        console.warn('No roles found in config, using defaults');
+        console.log('Keeping default roles:', ["Admin", "Project Manager", "Engineer", "Viewer"]);
+      }
+    } catch (error) {
+      console.error("Failed to load roles:", error);
+      console.log('Using default roles:', ["Admin", "Project Manager", "Engineer", "Viewer"]);
+    }
+  };
+
+  useEffect(() => {
+    loadRolesFromDatabase();
+
+    // Expose to window for console access (helpful for debugging and external scripts)
+    (window as any).refreshRoles = loadRolesFromDatabase;
+
+    return () => {
+      delete (window as any).refreshRoles;
+    };
+  }, []);
 
   // Fetch sites from API
   useEffect(() => {
@@ -574,8 +714,36 @@ export const UserManagement: React.FC = () => {
   }, [customAssetColumns]);
 
 
+  // Track initial mount to avoid saving on first load
+  const isInitialRolesMount = useRef(true);
+  // Track whether the initial URL push for tab sync has run
+  const adminUrlInitialized = useRef(false);
+
   useEffect(() => {
+    // Update roles array to match rolesConfig keys (for dropdown)
+    const roleNames = Object.keys(rolesConfig);
+    if (roleNames.length > 0) {
+      setRoles(roleNames);
+    }
+
+    // Save to localStorage and notify same-tab listeners
     localStorage.setItem("admin_roles_config", JSON.stringify(rolesConfig));
+    window.dispatchEvent(new CustomEvent("roles-config-changed"));
+
+    // Skip database save on initial mount to avoid overwriting with stale localStorage data
+    if (isInitialRolesMount.current) {
+      isInitialRolesMount.current = false;
+      return;
+    }
+
+    // Save to database when roles are actually changed by user
+    roleConfigService.update({ roles: rolesConfig })
+      .then(() => {
+        console.log('✅ Roles saved to database');
+      })
+      .catch((error) => {
+        console.error('❌ Failed to save roles to database:', error);
+      });
   }, [rolesConfig]);
 
   // Site Management Helper Functions
@@ -594,6 +762,7 @@ export const UserManagement: React.FC = () => {
       name: site.name,
       city: site.city,
       state: site.state,
+      country: site.country,
       notes: site.notes,
       customerId: site.customerId,
     });
@@ -603,17 +772,45 @@ export const UserManagement: React.FC = () => {
     if (!editingSiteId) return;
 
     try {
+      const isVirtual = editingSiteId.startsWith(VIRTUAL_SITE_PREFIX);
+      if (isVirtual) {
+        const name = (editSiteFormData.name || "").trim();
+        if (!name) {
+          alert("Site name is required.");
+          return;
+        }
+        const response = await api.post('/sites', {
+          name,
+          address: '',
+          city: editSiteFormData.city,
+          state: editSiteFormData.state,
+          country: editSiteFormData.country,
+          zipCode: null,
+          contactName: '',
+          contactPhone: '',
+          contactEmail: null,
+          notes: editSiteFormData.notes,
+          customerId: String(editSiteFormData.customerId ?? "")
+        });
+
+        setSitesList(prev => [...prev, response.data]);
+        setEditingSiteId(null);
+        setEditSiteFormData({});
+        return;
+      }
+
       const response = await api.put(`/sites/${editingSiteId}`, {
         name: editSiteFormData.name,
         address: '',
         city: editSiteFormData.city,
         state: editSiteFormData.state,
+        country: editSiteFormData.country,
         zipCode: null,
         contactName: '',
         contactPhone: '',
         contactEmail: null,
         notes: editSiteFormData.notes,
-        customerId: editSiteFormData.customerId,
+        customerId: String(editSiteFormData.customerId ?? "")
       });
 
       setSitesList(prev => prev.map(s => s.id === editingSiteId ? { ...s, ...response.data } : s));
@@ -626,15 +823,13 @@ export const UserManagement: React.FC = () => {
   };
 
   const handleDeleteSite = async (siteId: string) => {
-    if (!confirm('Are you sure you want to delete this site?')) return;
-
-    try {
-      await api.delete(`/sites/${siteId}`);
-      setSitesList(prev => prev.filter(s => s.id !== siteId));
-    } catch (err) {
-      console.error('Failed to delete site', err);
-      alert('Failed to delete site');
-    }
+    if (siteId.startsWith(VIRTUAL_SITE_PREFIX)) return;
+    const site = sitesList.find((item) => item.id === siteId);
+    setDeleteTarget({
+      type: "site",
+      id: siteId,
+      label: site?.name || siteId
+    });
   };
 
   const handleCancelSiteEdit = () => {
@@ -714,16 +909,98 @@ export const UserManagement: React.FC = () => {
     setCustomerForm((prev) => ({ ...prev, office: activeOffice === "All" ? "" : activeOffice }));
   }, [activeOffice]);
 
+  // Clear customer filters when active office changes
+  useEffect(() => {
+    setCustomerFilters({});
+    setCustomerSort({ key: "", dir: "asc" });
+  }, [activeOffice]);
+
+  // Persist active tab to localStorage
+  useEffect(() => {
+    localStorage.setItem("admin_active_tab", String(tab));
+  }, [tab]);
+
   const users = useMemo(() => (usersState.items.length ? usersState.items : demoUsers), [usersState.items]);
   const products = useMemo(
     () => (productsState.items.length ? productsState.items : demoProducts),
     [productsState.items]
   );
 
-  const filteredCustomers = useMemo(() => {
-    if (activeOffice === "All") return customersState.items;
-    return customersState.items.filter((customer) => customer.office === activeOffice || customer.office === "All");
-  }, [customersState.items, activeOffice]);
+  // Map office cities/states to countries
+  const getCountryForOffice = useMemo(() => {
+    const map = new Map<string, string>();
+
+    // Add city → country mappings from globalOffices
+    globalOffices.forEach((office) => {
+      if (office.city && office.country) {
+        // Country to itself + common aliases (handles legacy values where Office already stores a country)
+        const country = office.country.trim();
+        const low = country.toLowerCase();
+        const aliases =
+          ["usa", "us", "u.s.", "united states", "united states of america"].includes(low)
+            ? [country, "USA", "US", "U.S.", "United States", "United States of America"]
+            : ["uk", "u.k.", "united kingdom", "great britain", "britain"].includes(low)
+              ? [country, "UK", "U.K.", "United Kingdom", "Great Britain", "Britain"]
+              : ["uae", "u.a.e.", "united arab emirates"].includes(low)
+                ? [country, "UAE", "U.A.E.", "United Arab Emirates"]
+                : [country];
+
+        aliases.forEach((alias) => {
+          map.set(alias, country);
+          map.set(alias.toLowerCase(), country);
+        });
+
+        map.set(office.city, office.country);
+        map.set(office.city.toLowerCase(), office.country);
+
+        // "City, Country" format (used by some dropdowns / legacy values)
+        const cityCountry = `${office.city}, ${office.country}`;
+        map.set(cityCountry, office.country);
+        map.set(cityCountry.toLowerCase(), office.country);
+      }
+    });
+
+    // Add common Australian state abbreviations and names
+    const australianStates = {
+      'NSW': 'Australia',
+      'New South Wales': 'Australia',
+      'VIC': 'Australia',
+      'Victoria': 'Australia',
+      'QLD': 'Australia',
+      'Queensland': 'Australia',
+      'WA': 'Australia',
+      'Western Australia': 'Australia',
+      'SA': 'Australia',
+      'South Australia': 'Australia',
+      'TAS': 'Australia',
+      'Tasmania': 'Australia',
+      'ACT': 'Australia',
+      'Australian Capital Territory': 'Australia',
+      'NT': 'Australia',
+      'Northern Territory': 'Australia'
+    };
+
+    Object.entries(australianStates).forEach(([state, country]) => {
+      map.set(state, country);
+      map.set(state.toLowerCase(), country);
+    });
+
+    return (officeLocation: string) => {
+      const value = (officeLocation ?? "").trim();
+      if (!value) return value;
+      // Try exact match first
+      const exactMatch = map.get(value);
+      if (exactMatch) return exactMatch;
+      // Try lowercase match
+      const lowerMatch = map.get(value.toLowerCase());
+      if (lowerMatch) return lowerMatch;
+      // Return original if no match found
+      return value;
+    };
+  }, [globalOffices]);
+
+  // Customers are visible across all offices (no activeOffice filtering).
+  const filteredCustomers = useMemo(() => customersState.items, [customersState.items]);
 
   const [adminTabsConfig, setAdminTabsConfig] = useState<AdminTab[]>([]);
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
@@ -749,18 +1026,15 @@ export const UserManagement: React.FC = () => {
   const [customTableConfigOpen, setCustomTableConfigOpen] = useState(false);
   const [customTableConfigTabId, setCustomTableConfigTabId] = useState<string | null>(null);
   const [adminTabsLoaded, setAdminTabsLoaded] = useState(false);
-  const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
-
-  useEffect(() => {
-    officesService.getAll().then(setGlobalOffices).catch(console.error);
-  }, []);
 
   useEffect(() => {
     const loadTabs = async () => {
       try {
         const data = await adminTabsService.getAll();
         if (data.length > 0) {
-          setAdminTabsConfig(data);
+          // Strip dispatch tab if it was previously injected (now lives in Projects page)
+          const cleaned = data.filter((t) => t.type !== "dispatch");
+          setAdminTabsConfig(cleaned);
           setAdminTabsLoaded(true);
           return;
         }
@@ -791,15 +1065,6 @@ export const UserManagement: React.FC = () => {
           label: "Global Offices",
           type: "offices",
           position: 2,
-          columns: [],
-          fieldIds: [],
-          config: { order: [], hidden: [] }
-        },
-        {
-          id: "admin-products",
-          label: "Products",
-          type: "products",
-          position: 3,
           columns: [],
           fieldIds: [],
           config: { order: [], hidden: [] }
@@ -857,6 +1122,23 @@ export const UserManagement: React.FC = () => {
     }
   }, [tab, adminTabsConfig.length]);
 
+  // Handle navigation with specific tab selection (location.state OR URL ?tab= param).
+  // On first load with no URL param, pushes the current tab type to the URL so
+  // Favorites always captures the correct sub-page.
+  useEffect(() => {
+    if (adminTabsConfig.length === 0) return;
+    const stateWithOpenTab = location.state as { openTab?: string } | null;
+    const tabType = stateWithOpenTab?.openTab ?? searchParams.get("tab");
+    if (tabType) {
+      const tabIndex = adminTabsConfig.findIndex((t) => t.type === tabType);
+      if (tabIndex >= 0) setTab(tabIndex);
+      adminUrlInitialized.current = true;
+    } else if (!adminUrlInitialized.current) {
+      adminUrlInitialized.current = true;
+      const currentType = adminTabsConfig[tab]?.type;
+      if (currentType) setSearchParams({ tab: currentType }, { replace: true });
+    }
+  }, [location.state, searchParams, adminTabsConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const loadRows = async () => {
@@ -865,9 +1147,17 @@ export const UserManagement: React.FC = () => {
         customTabs.map(async (tabItem) => {
           try {
             const rows = await adminTabsService.getRows(tabItem.id);
+            const today = new Date().toISOString().slice(0, 10);
             setAdminTabRows((prev) => ({
               ...prev,
-              [tabItem.id]: rows.map((row) => ({ ...row.data, _rowId: row.id }))
+              [tabItem.id]: rows.map((row) => {
+                const data = { ...row.data, _rowId: row.id };
+                // Backfill empty "Created Date" on existing rows
+                if ("Created Date" in data && !data["Created Date"]) {
+                  data["Created Date"] = today;
+                }
+                return data;
+              })
             }));
           } catch {
             // ignore
@@ -1055,10 +1345,117 @@ export const UserManagement: React.FC = () => {
     [roleLabels, roleAccessors]
   );
 
+  // Site/Customer table accessors and filters
+  const siteAccessors = useMemo(
+    () => ({
+      customer: (site: typeof sitesList[0]) => normalize(getCustomerName(site.customerId)),
+      siteName: (site: typeof sitesList[0]) => normalize(site.name),
+      city: (site: typeof sitesList[0]) => normalize(site.city ?? ""),
+      state: (site: typeof sitesList[0]) => normalize(site.state ?? ""),
+      country: (site: typeof sitesList[0]) => normalize(site.country ?? ""),
+      industry: (site: typeof sitesList[0]) => {
+        const customer = getCustomerData(site.customerId);
+        return normalize(customer?.industry ?? "");
+      },
+      notes: (site: typeof sitesList[0]) => normalize(site.notes ?? "")
+    }),
+    [sitesList, customersState.items]
+  );
+
+  const siteFilterOptions = useMemo(
+    () => ({
+      customer: Array.from(new Set(sitesList.map((site) => siteAccessors.customer(site)))).sort(),
+      siteName: Array.from(new Set(sitesList.map((site) => siteAccessors.siteName(site)))).sort(),
+      city: Array.from(new Set(sitesList.map((site) => siteAccessors.city(site)))).sort(),
+      state: Array.from(new Set(sitesList.map((site) => siteAccessors.state(site)))).sort(),
+      country: Array.from(new Set(sitesList.map((site) => siteAccessors.country(site)))).sort(),
+      industry: Array.from(new Set(sitesList.map((site) => siteAccessors.industry(site)))).sort(),
+      notes: Array.from(new Set(sitesList.map((site) => siteAccessors.notes(site)))).sort()
+    }),
+    [sitesList, siteAccessors]
+  );
+
+  const filteredSites = useMemo(() => {
+    const customerIdsWithRealSites = new Set(
+      sitesList
+        .map((site) => String(site.customerId ?? "").trim())
+        .filter(Boolean)
+    );
+
+    const virtualSites = customersState.items
+      .filter((customer) => !customerIdsWithRealSites.has(String(customer.id)))
+      .map((customer) => ({
+        id: `${VIRTUAL_SITE_PREFIX}${customer.id}`,
+        customerId: customer.id,
+        name: "",
+        address: "",
+        city: "",
+        state: "",
+        country: "",
+        contactName: "",
+        contactPhone: "",
+        notes: "",
+        createdAt: new Date().toISOString()
+      }));
+
+    let result = [...sitesList, ...virtualSites];
+
+    // Apply search filter
+    if (customerSearch) {
+      const searchLower = customerSearch.toLowerCase();
+      result = result.filter((site) => {
+        const customerName = getCustomerName(site.customerId).toLowerCase();
+        const siteName = site.name.toLowerCase();
+        const city = (site.city || '').toLowerCase();
+        const state = (site.state || '').toLowerCase();
+        const country = (site.country || '').toLowerCase();
+        return customerName.includes(searchLower) ||
+               siteName.includes(searchLower) ||
+               city.includes(searchLower) ||
+               state.includes(searchLower) ||
+               country.includes(searchLower);
+      });
+    }
+
+    // Apply column filters
+    Object.entries(customerFilters).forEach(([key, valueSet]) => {
+      if (valueSet.size === 0) return;
+      result = result.filter((site) => {
+        const value = siteAccessors[key as keyof typeof siteAccessors]?.(site) ?? "";
+        return valueSet.has(value);
+      });
+    });
+
+    // Apply sorting
+    if (customerSort.key) {
+      result.sort((a, b) => {
+        const aVal = siteAccessors[customerSort.key as keyof typeof siteAccessors]?.(a) ?? "";
+        const bVal = siteAccessors[customerSort.key as keyof typeof siteAccessors]?.(b) ?? "";
+        return customerSort.dir === "asc"
+          ? aVal.localeCompare(bVal)
+          : bVal.localeCompare(aVal);
+      });
+    }
+
+    return result;
+  }, [sitesList, customerSearch, customerFilters, customerSort, siteAccessors, customersState.items]);
+
   const filteredUsers = useMemo(() => {
-    const filtered = applyAutoFilter(numberedUsers, userFilters, userAccessors);
+    const officeFiltered = numberedUsers.filter((row) => {
+      if (activeOffice === "All") return true;
+      const userCountry = getCountryForOffice(row.office || "");
+      return userCountry === activeOffice || row.office === activeOffice;
+    });
+
+    const filtered = applyAutoFilter(officeFiltered, userFilters, userAccessors);
     return applyAutoSort(filtered, userSort, userAccessors);
-  }, [numberedUsers, userFilters, userSort, userAccessors]);
+  }, [numberedUsers, activeOffice, userFilters, userSort, userAccessors, getCountryForOffice]);
+
+  const pagedUsers = useMemo(() => {
+    const start = usersPage * usersRowsPerPage;
+    const end = start + usersRowsPerPage;
+    return filteredUsers.slice(start, end);
+  }, [filteredUsers, usersPage, usersRowsPerPage]);
 
   const filteredProductRows = useMemo(() => {
     const filtered = applyAutoFilter(numberedProducts, productFilters, productAccessors);
@@ -1218,7 +1615,7 @@ export const UserManagement: React.FC = () => {
         ...customRowDialogColumns.map((name) => ({
           id: `default:${name}`,
           name,
-          type: getDefaultColumnType(name)
+          type: customRowDialogTab?.columnTypes?.[name] || getDefaultColumnType(name)
         })),
         ...allFieldDefinitions.definitions
           .filter((field) => (customRowDialogTab.fieldIds || []).includes(field.id))
@@ -1279,7 +1676,10 @@ export const UserManagement: React.FC = () => {
       const created = await dispatch(createCustomer({
         name: customerForm.name,
         customerId: customerForm.customerId,
-        office: customerForm.office || "USA"
+        office: customerForm.office || "USA",
+        logoShape: "round",
+        photoScale: 100,
+        logoSize: 70
       })).unwrap();
       await customersDynamic.upsertForEntity(
         created.id,
@@ -1295,9 +1695,18 @@ export const UserManagement: React.FC = () => {
   };
 
   const handleCreateProduct = async () => {
+    const normalizedFeatures = productFeatures
+      .map((feature) => ({
+        ...feature,
+        name: feature.name.trim(),
+        options: (feature.options || []).map((item) => item.trim()).filter(Boolean)
+      }))
+      .filter((feature) => feature.name);
     const payload: Omit<Product, "id"> = {
       name: productForm.name,
-      description: productForm.description || undefined
+      description: productForm.description || undefined,
+      features: normalizedFeatures,
+      divisionId: productForm.divisionId || undefined
     };
     try {
       setActionError(null);
@@ -1311,7 +1720,8 @@ export const UserManagement: React.FC = () => {
       setActionError(resolveErrorMessage(error, "Failed to create product."));
     }
     setProductOpen(false);
-    setProductForm({ name: "", description: "" });
+    setProductForm({ name: "", description: "", divisionId: "" });
+    setProductFeatures([]);
     setProductDynamicValues({});
   };
 
@@ -1337,8 +1747,10 @@ export const UserManagement: React.FC = () => {
     setEditProductForm({
       id: product.id,
       name: product.name,
-      description: product.description || ""
+      description: product.description || "",
+      divisionId: product.divisionId || ""
     });
+    setEditProductFeatures(product.features || []);
     const existing = productsDynamic.valuesByEntity[product.id] || {};
     const next: Record<string, string> = {};
     productsDynamic.definitions.forEach((field) => {
@@ -1402,6 +1814,13 @@ export const UserManagement: React.FC = () => {
 
   const handleSaveProduct = async () => {
     if (!editProductForm.id) return;
+    const normalizedFeatures = editProductFeatures
+      .map((feature) => ({
+        ...feature,
+        name: feature.name.trim(),
+        options: (feature.options || []).map((item) => item.trim()).filter(Boolean)
+      }))
+      .filter((feature) => feature.name);
     try {
       setActionError(null);
       const updated = await dispatch(
@@ -1409,7 +1828,9 @@ export const UserManagement: React.FC = () => {
           id: editProductForm.id,
           payload: {
             name: editProductForm.name,
-            description: editProductForm.description || undefined
+            description: editProductForm.description || undefined,
+            features: normalizedFeatures,
+            divisionId: editProductForm.divisionId || ""
           }
         })
       ).unwrap();
@@ -1422,6 +1843,32 @@ export const UserManagement: React.FC = () => {
       setActionError(resolveErrorMessage(error, "Failed to update product."));
     }
     setEditProductOpen(false);
+  };
+
+  const createFeature = (): ProductFeatureDefinition => ({
+    id: crypto.randomUUID ? crypto.randomUUID() : `feature-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name: "",
+    valueType: "text",
+    options: []
+  });
+
+  const featureTypeOptions: ProductFeatureValueType[] = [
+    "text", "number", "tri-state", "single-select", "multi-select",
+    "date", "rating", "percentage", "file", "rich-text", "link", "component"
+  ];
+  const featureTypeLabels: Record<ProductFeatureValueType, string> = {
+    "text": "Text",
+    "number": "Number",
+    "tri-state": "Yes / No / N/A",
+    "single-select": "Single-select",
+    "multi-select": "Multi-select",
+    "date": "Date",
+    "rating": "Rating (1–5)",
+    "percentage": "Percentage (%)",
+    "file": "File / Image",
+    "rich-text": "Rich text",
+    "link": "Link (URL)",
+    "component": "Component (sub-fields)"
   };
 
   const handleAddOffice = async (office: Omit<Office, "id">) => {
@@ -1443,32 +1890,51 @@ export const UserManagement: React.FC = () => {
   };
 
   const handleDeleteOffice = async (id: string) => {
-    try {
-      await officesService.delete(id);
-      setGlobalOffices((prev) => prev.filter((o) => o.id !== id));
-    } catch (error) {
-      console.error("Failed to delete office:", error);
-    }
+    const office = globalOffices.find((item) => item.id === id);
+    const officeLabel = office
+      ? [office.city, office.country].filter(Boolean).join(", ") || office.id
+      : id;
+    setDeleteTarget({
+      type: "office",
+      id,
+      label: officeLabel
+    });
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
-    if (deleteTarget.type === "user") {
-      dispatch(deleteUser(deleteTarget.id));
+    try {
+      setDeleteSaving(true);
+      if (deleteTarget.type === "user") {
+        await dispatch(deleteUser(deleteTarget.id)).unwrap();
+      }
+      if (deleteTarget.type === "customer") {
+        await dispatch(deleteCustomer(deleteTarget.id)).unwrap();
+      }
+      if (deleteTarget.type === "product") {
+        await dispatch(deleteProduct(deleteTarget.id)).unwrap();
+      }
+      if (deleteTarget.type === "role") {
+        setRolesConfig((prev) => {
+          const { [deleteTarget.id]: _, ...rest } = prev;
+          return rest;
+        });
+      }
+      if (deleteTarget.type === "site") {
+        await api.delete(`/sites/${deleteTarget.id}`);
+        setSitesList((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      }
+      if (deleteTarget.type === "office") {
+        await officesService.delete(deleteTarget.id);
+        setGlobalOffices((prev) => prev.filter((o) => o.id !== deleteTarget.id));
+      }
+      setDeleteTarget(null);
+    } catch (error) {
+      console.error("Failed to delete item:", error);
+      alert("Failed to delete item");
+    } finally {
+      setDeleteSaving(false);
     }
-    if (deleteTarget.type === "customer") {
-      dispatch(deleteCustomer(deleteTarget.id));
-    }
-    if (deleteTarget.type === "product") {
-      dispatch(deleteProduct(deleteTarget.id));
-    }
-    if (deleteTarget.type === "role") {
-      setRolesConfig((prev) => {
-        const { [deleteTarget.id]: _, ...rest } = prev;
-        return rest;
-      });
-    }
-    setDeleteTarget(null);
   };
 
   const toggleFilterValue = (
@@ -1503,210 +1969,227 @@ export const UserManagement: React.FC = () => {
 
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" sx={{ mb: 2 }}>Admin</Typography>
-
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Tabs value={tab} onChange={(e, newValue) => setTab(newValue)}>
-            {adminTabsConfig.map((tabConfig) => (
-              <Tab key={tabConfig.id} label={tabConfig.label} />
-            ))}
-          </Tabs>
-
-          <IconButton
-            size="small"
-            onClick={(event) => {
-              setAdminSettingsMenu(event.currentTarget);
-              setAdminSettingsMenuOpen(true);
-            }}
-          >
-            <SettingsOutlined fontSize="small" />
-          </IconButton>
-        </Stack>
-      </Box>
-
-      {/* Users Tab */}
-      {adminTabsConfig[tab]?.type === "users" && (
+    <Stack spacing={3} sx={{ p: 3 }}>
+      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} gap={2}>
         <Box>
-          <Stack direction="row" sx={{ mb: 2 }}>
+          <Typography variant="h5" sx={{ fontFamily: "Sora", fontWeight: 700 }}>Admin</Typography>
+          <Typography variant="body2" color="text.secondary">Manage users, roles, offices and system settings</Typography>
+        </Box>
+        <Stack direction="row" spacing={1} alignItems="center">
+          {adminTabsConfig[tab]?.type === "users" && can.createUsers && (
             <Button variant="contained" onClick={() => setInviteOpen(true)}>
               Invite user
             </Button>
-          </Stack>
+          )}
+          {can.createDeleteTables && (
+            <IconButton
+              size="small"
+              onClick={(event) => {
+                setAdminSettingsMenu(event.currentTarget);
+                setAdminSettingsMenuOpen(true);
+              }}
+            >
+              <SettingsOutlined fontSize="small" />
+            </IconButton>
+          )}
+        </Stack>
+      </Stack>
 
-          {actionError && <Alert severity="error">{actionError}</Alert>}
+      <Paper className="glass-card" sx={{ p: 1.5 }}>
+        <Tabs value={tab} onChange={(_, newValue) => {
+          setTab(newValue);
+          const type = adminTabsConfig[newValue]?.type ?? "";
+          if (type) setSearchParams({ tab: type }, { replace: true });
+        }}>
+          {adminTabsConfig.map((tabConfig) => (
+            <Tab key={tabConfig.id} label={tabConfig.label} />
+          ))}
+        </Tabs>
+      </Paper>
 
-          <Table>
+      {/* Users Tab */}
+      {adminTabsConfig[tab]?.type === "users" && (
+        <>
+          <Paper
+            className="glass-card"
+            sx={{ overflow: 'hidden' }}
+          >
+            {actionError && <Alert severity="error" sx={{ m: 2 }}>{actionError}</Alert>}
+
+            <Box sx={{ overflowX: 'auto', width: '100%' }}>
+              <Table sx={{ tableLayout: 'auto', width: '100%' }} size="small">
             <TableHead>
               <TableRow>
-                <TableCell>#</TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Name</span>
-                    <IconButton size="small" onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: "name" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Email</span>
-                    <IconButton size="small" onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: "email" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Role</span>
-                    <IconButton size="small" onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: "role" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Office</span>
-                    <IconButton size="small" onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: "office" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Status</span>
-                    <IconButton size="small" onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: "status" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                {usersTableConfig.visibleFields
-                  .filter((field) => {
-                    const fixed = new Set(
-                      ["Name", "Email", "Role", "Office", "Status"].map((value) => value.toLowerCase())
-                    );
-                    if (fixed.has(field.name.toLowerCase())) return false;
-                    const hasValue = Object.values(usersDynamic.valuesByEntity).some(
-                      (values) => values[field.id]?.value?.trim()
-                    );
-                    return hasValue;
-                  })
-                  .map((field) => (
-                  <TableCell key={`users-field-${field.id}`}>{field.name}</TableCell>
-                ))}
-                <TableCell>Actions</TableCell>
+                <TableCell sx={{ minWidth: 50, padding: '8px 12px' }}>#</TableCell>
+                {usersTableConfig.visibleFields.map((field) => {
+                  const accessorKey = field.id.startsWith("base-")
+                    ? field.id.replace("base-", "")
+                    : field.id;
+                  return (
+                    <TableCell
+                      key={`users-header-${field.id}`}
+                      sx={{
+                        minWidth: 120,
+                        whiteSpace: 'nowrap',
+                        padding: '8px 12px'
+                      }}
+                    >
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>{field.id === "field-role" ? "Role name" : field.name}</span>
+                        <IconButton
+                          size="small"
+                          onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: accessorKey })}
+                        >
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                  );
+                })}
+                <TableCell sx={{ padding: '8px 12px' }}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {filteredUsers.map((user) => (
+              {pagedUsers.map((user) => (
                 <TableRow key={user.id} hover>
-                  <TableCell>{user.seq}</TableCell>
-                  <TableCell>{user.fullName}</TableCell>
-                  <TableCell>{user.email}</TableCell>
-                  <TableCell>
-                    <FormControl size="small">
-                      <Select
-                        value={user.role}
-                        onChange={(event) =>
-                          dispatch(
-                            updateUser({
-                              id: user.id,
-                              payload: { role: event.target.value as UserRole }
-                            })
-                          )
-                        }
-                      >
-                        {roles.map((role) => (
-                          <MenuItem key={role} value={role}>
-                            {role}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </TableCell>
-                  <TableCell>
-                    <FormControl size="small">
-                      <Select
-                        value={user.office}
-                        onChange={(event) =>
-                          dispatch(
-                            updateUser({
-                              id: user.id,
-                              payload: { office: event.target.value as User["office"] }
-                            })
-                          )
-                        }
-                      >
-                        {offices.filter((office) => office !== "All").map((office) => (
-                          <MenuItem key={office} value={office}>
-                            {office}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={!user.isActive && user.isFirstLogin ? "Pending" : user.isActive ? "Active" : "Inactive"}
-                      color={user.isActive ? "success" : "default"}
-                      size="small"
-                    />
-                  </TableCell>
-                  {usersTableConfig.visibleFields
-                    .filter((field) => {
-                      const fixed = new Set(
-                        ["Name", "Email", "Role", "Office", "Status"].map((value) => value.toLowerCase())
+                  <TableCell sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>{user.seq}</TableCell>
+                  {usersTableConfig.visibleFields.map((field) => {
+                    // Render built-in user fields from database field definitions
+                    if (field.id === "field-user-name") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>
+                          {user.fullName}
+                        </TableCell>
                       );
-                      if (fixed.has(field.name.toLowerCase())) return false;
-                      const hasValue = Object.values(usersDynamic.valuesByEntity).some(
-                        (values) => values[field.id]?.value?.trim()
+                    }
+                    if (field.id === "field-email") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>
+                          {user.email}
+                        </TableCell>
                       );
-                      return hasValue;
-                    })
-                    .map((field) => (
-                    <TableCell key={`${user.id}-${field.id}`}>
-                      {usersDynamic.valuesByEntity[user.id]?.[field.id]?.value || "-"}
-                    </TableCell>
-                  ))}
-                  <TableCell>
-                    <Stack direction="row" spacing={1}>
-                      <Button size="small" variant="outlined" onClick={() => dispatch(inviteUser(user.id))}>
-                        Invite
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => dispatch(deactivateUser(user.id))}
-                        disabled={!user.isActive}
-                      >
-                        Deactivate
-                      </Button>
-                      <Tooltip title="Edit user">
-                        <IconButton size="small" onClick={() => handleEditUser(user)}>
-                          <EditOutlined fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete user">
-                        <IconButton
-                          size="small"
-                          onClick={() =>
-                            setDeleteTarget({
-                              type: "user",
-                              id: user.id,
-                              label: user.fullName
-                            })
-                          }
-                        >
-                          <DeleteOutline fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                    }
+                    if (field.id === "field-role") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ padding: '8px 12px' }}>
+                          {user.role}
+                        </TableCell>
+                      );
+                    }
+                    if (field.id === "field-office") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ padding: '8px 12px' }}>
+                          {user.office || "-"}
+                        </TableCell>
+                      );
+                    }
+                    if (field.id === "field-active") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ padding: '8px 12px' }}>
+                          <Chip
+                            label={!user.isActive && user.isFirstLogin ? "Pending" : user.isActive ? "Active" : "Inactive"}
+                            color={user.isActive ? "success" : "default"}
+                            size="small"
+                          />
+                        </TableCell>
+                      );
+                    }
+                    if (field.id === "field-2fa") {
+                      return (
+                        <TableCell key={`${user.id}-${field.id}`} sx={{ padding: '8px 12px' }}>
+                          <Chip
+                            label={user.is2faEnabled ? "2FA On" : "Off"}
+                            color={user.is2faEnabled ? "info" : "default"}
+                            size="small"
+                            variant={user.is2faEnabled ? "filled" : "outlined"}
+                          />
+                        </TableCell>
+                      );
+                    }
+                    // Render dynamic custom fields
+                    return (
+                      <TableCell key={`${user.id}-${field.id}`} sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>
+                        {usersDynamic.valuesByEntity[user.id]?.[field.id]?.value || "-"}
+                      </TableCell>
+                    );
+                  })}
+                  <TableCell sx={{ padding: '8px 12px' }}>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      {can.createUsers && (
+                        <Tooltip title="Send invite email">
+                          <IconButton size="small" onClick={() => dispatch(inviteUser(user.id))}>
+                            <EmailOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {can.createUsers && (
+                        <Tooltip title={user.isActive ? "Deactivate user" : "User already inactive"}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              color="warning"
+                              disabled={!user.isActive}
+                              onClick={() => dispatch(deactivateUser(user.id))}
+                            >
+                              <PersonOffOutlined fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      )}
+                      {can.createUsers && user.is2faEnabled && (
+                        <Tooltip title="Reset 2FA">
+                          <IconButton size="small" color="warning" onClick={() => dispatch(reset2fa(user.id))}>
+                            <LockResetOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {can.createUsers && (
+                        <Tooltip title="Edit user">
+                          <IconButton size="small" onClick={() => handleEditUser(user)}>
+                            <EditOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {can.createUsers && (
+                        <Tooltip title="Delete user">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() =>
+                              setDeleteTarget({
+                                type: "user",
+                                id: user.id,
+                                label: user.fullName
+                              })
+                            }
+                          >
+                            <DeleteOutline fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </Stack>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+              </Table>
+            </Box>
+            <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
+              <TablePagination
+                component="div"
+                count={filteredUsers.length}
+                page={usersPage}
+                onPageChange={(_, nextPage) => setUsersPage(nextPage)}
+                rowsPerPage={usersRowsPerPage}
+                onRowsPerPageChange={(event) => {
+                  setUsersRowsPerPage(Number(event.target.value));
+                  setUsersPage(0);
+                }}
+                rowsPerPageOptions={[25, 50, 100, 500]}
+              />
+            </Box>
+          </Paper>
+
           <Menu
             anchorEl={userMenu.anchorEl}
             open={Boolean(userMenu.anchorEl)}
@@ -1769,81 +2252,49 @@ export const UserManagement: React.FC = () => {
               );
             })}
           </Menu>
-        </Box>
+        </>
       )}
 
       {/* Roles Tab */}
       {adminTabsConfig[tab]?.type === "roles" && (
-        <Box>
-          <Stack direction="row" sx={{ mb: 2 }}>
-            <Button variant="contained" onClick={() => openRoleDialog()}>
-              New role
-            </Button>
-          </Stack>
+        <Stack spacing={2}>
+          {can.createDeleteTables && (
+            <Stack direction="row">
+              <Button variant="contained" onClick={() => openRoleDialog()}>
+                New role
+              </Button>
+            </Stack>
+          )}
 
           {actionError && <Alert severity="error">{actionError}</Alert>}
 
+          <Paper className="glass-card" sx={{ overflow: 'hidden' }}>
           <Table>
             <TableHead>
               <TableRow>
                 <TableCell>#</TableCell>
                 <TableCell>
                   <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Role</span>
+                    <span>Role name</span>
                     <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "role" })}>
                       <ArrowDropDown fontSize="small" />
                     </IconButton>
                   </Stack>
                 </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>View only</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "viewOnly" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Create/Delete tables</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "createDeleteTables" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Create users</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "createUsers" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Edit fields</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "editFields" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Modify data</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "modifyData" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span>Edit forms</span>
-                    <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: "editForms" })}>
-                      <ArrowDropDown fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </TableCell>
-                               <TableCell>Actions</TableCell>
+                {rolesTableConfig.visibleFields.map((field) => {
+                  const permKey = field.id.startsWith("base-") ? field.id.replace("base-", "") : field.id;
+                  return (
+                    <TableCell key={`roles-header-${field.id}`}>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span>{field.name}</span>
+                        <IconButton size="small" onClick={(event) => setRoleMenu({ anchorEl: event.currentTarget, key: permKey })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                  );
+                })}
+                {can.createDeleteTables && <TableCell>Actions</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1851,59 +2302,50 @@ export const UserManagement: React.FC = () => {
                 <TableRow key={row.role} hover>
                   <TableCell>{row.seq}</TableCell>
                   <TableCell>{row.role}</TableCell>
-                  {[
-                    "viewOnly",
-                    "createDeleteTables",
-                    "createUsers",
-                    "editFields",
-                    "modifyData",
-                    "editForms"
-                  ].map((perm) => (
-                    <TableCell key={`${row.role}-${perm}`}>
-                      <Checkbox
-                        checked={!!rolesConfig[row.role]?.[perm]}
-                        onChange={(event) =>
-                          setRolesConfig((prev) => ({
-                            ...prev,
-                            [row.role]: {
-                              ...prev[row.role],
-                              [perm]: event.target.checked
-                            }
-                          }))
-                        }
-                      />
-                    </TableCell>
-                  ))}
-                  <TableCell>
-                    <Stack direction="row" spacing={1}>
-                      <Tooltip title="Edit role">
-                        <IconButton
-                          size="small"
-                          onClick={() => openRoleDialog(row.role)}
-                        >
-                          <EditOutlined fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete role">
-                        <IconButton
-                          size="small"
-                          onClick={() =>
-                            setDeleteTarget({
-                              type: "role",
-                              id: row.role,
-                              label: row.role
-                            })
+                  {rolesTableConfig.visibleFields.map((field) => {
+                    const permKey = field.id.startsWith("base-") ? field.id.replace("base-", "") : field.id;
+                    return (
+                      <TableCell key={`${row.role}-${field.id}`}>
+                        <Checkbox
+                          checked={!!(rolesConfig[row.role] as unknown as Record<string, boolean>)?.[permKey]}
+                          disabled={!can.createDeleteTables}
+                          onChange={(event) =>
+                            setRolesConfig((prev) => ({
+                              ...prev,
+                              [row.role]: {
+                                ...prev[row.role],
+                                [permKey]: event.target.checked
+                              }
+                            }))
                           }
-                        >
-                          <DeleteOutline fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                  </TableCell>
+                        />
+                      </TableCell>
+                    );
+                  })}
+                  {can.createDeleteTables && (
+                    <TableCell>
+                      <Stack direction="row" spacing={1}>
+                        <Tooltip title="Edit role">
+                          <IconButton size="small" onClick={() => openRoleDialog(row.role)}>
+                            <EditOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete role">
+                          <IconButton
+                            size="small"
+                            onClick={() => setDeleteTarget({ type: "role", id: row.role, label: row.role })}
+                          >
+                            <DeleteOutline fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
           </Table>
+          </Paper>
           <Menu
             anchorEl={roleMenu.anchorEl}
             open={Boolean(roleMenu.anchorEl)}
@@ -1966,21 +2408,33 @@ export const UserManagement: React.FC = () => {
               );
             })}
           </Menu>
-        </Box>
+        </Stack>
       )}
 
       {/* Customers Tab */}
       {adminTabsConfig[tab]?.type === "customers" && (
-        <Box>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2} sx={{ mb: 2 }}>
-            {customerViewMode === 'cards' ? (
+        <Stack spacing={2}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
+            {can.modifyData && customerViewMode === 'cards' ? (
               <Button
                 variant="contained"
                 startIcon={<AddOutlined />}
                 onClick={async () => {
+                  const customerCount = customersState.items.length + 1;
+
+                  // Generate sequential customer ID (CUST-XXXX format)
+                  const existingIds = customersState.items
+                    .map(c => c.customerId)
+                    .filter(id => id && id.startsWith('CUST-'))
+                    .map(id => parseInt(id.split('-')[1], 10))
+                    .filter(num => !isNaN(num));
+
+                  const nextNumber = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
+                  const customerId = `CUST-${String(nextNumber).padStart(4, '0')}`;
+
                   const newCustomerPayload = {
-                    name: `New Customer`,
-                    customerId: `CUST-${Date.now()}`,
+                    name: `customer${String(customerCount).padStart(2, '0')}`,
+                    customerId: customerId,
                     office: activeOffice === "All" ? "USA" : activeOffice,
                     industry: 'General',
                     logo: null,
@@ -2007,7 +2461,7 @@ export const UserManagement: React.FC = () => {
               >
                 New Client
               </Button>
-            ) : (
+            ) : can.modifyData ? (
               <Button
                 variant="contained"
                 startIcon={<AddOutlined />}
@@ -2025,12 +2479,14 @@ export const UserManagement: React.FC = () => {
                     address: '',
                     city: '',
                     state: '',
+                    country: '',
                     zipCode: null,
                     contactName: '',
                     contactPhone: '',
                     contactEmail: null,
                     notes: '',
-                    customerId: defaultCustomer.id
+                    // Create "unassigned" site in table view: no associated customer/logo.
+                    customerId: ""
                   };
 
                   try {
@@ -2038,20 +2494,22 @@ export const UserManagement: React.FC = () => {
                     setSitesList(prev => [...prev, response.data]);
                     setEditingSiteId(response.data.id);
                     setEditSiteFormData({
+                      customerId: response.data.customerId,
                       name: response.data.name,
                       city: response.data.city,
                       state: response.data.state,
+                      country: response.data.country,
                       notes: response.data.notes,
                     });
                   } catch (err) {
                     console.error('Failed to create site', err);
-                    alert('Failed to create site. Make sure the customer exists in the database.');
+                    alert('Failed to create site.');
                   }
                 }}
               >
                 New Site
               </Button>
-            )}
+            ) : null}
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
               <TextField
                 size="small"
@@ -2139,43 +2597,44 @@ export const UserManagement: React.FC = () => {
                         }}
                       >
                         <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-                          <Tooltip title="Delete customer">
-                            <IconButton
-                              size="small"
-                              sx={{ padding: 0.25 }}
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                if (!confirm(`Delete customer "${customer.name}"?`)) return;
-                                try {
-                                  await api.delete(`/customers/${customer.id}`);
-                                  await dispatch(fetchCustomers());
-                                } catch (err) {
-                                  console.error("Failed to delete customer", err);
-                                  alert("Failed to delete customer");
-                                }
-                              }}
-                            >
-                              <DeleteOutline sx={{ fontSize: 18 }} />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Edit customer">
-                            <IconButton
-                              size="small"
-                              sx={{ padding: 0.25 }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingCustomerId(customer.id);
-                                setEditCustomerName(customer.name);
-                                setEditCustomerIndustry(customer.type);
-                                setEditCustomerLogo(customer.logo);
-                                setEditCustomerLogoShape(customer.logoShape || 'round');
-                                setEditCustomerLogoSize(customer.logoSize || 70);
-                                setEditCustomerPhotoScale(customer.photoScale || 100);
-                              }}
-                            >
-                              <EditOutlined sx={{ fontSize: 18 }} />
-                            </IconButton>
-                          </Tooltip>
+                          {can.modifyData && (
+                            <Tooltip title="Delete customer">
+                              <IconButton
+                                size="small"
+                                sx={{ padding: 0.25 }}
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  setDeleteTarget({
+                                    type: "customer",
+                                    id: customer.id,
+                                    label: customer.name
+                                  });
+                                }}
+                              >
+                                <DeleteOutline sx={{ fontSize: 18 }} />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                          {can.modifyData && (
+                            <Tooltip title="Edit customer">
+                              <IconButton
+                                size="small"
+                                sx={{ padding: 0.25 }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingCustomerId(customer.id);
+                                  setEditCustomerName(customer.name);
+                                  setEditCustomerIndustry(customer.industry ?? "");
+                                  setEditCustomerLogo(customer.logo ?? null);
+                                  setEditCustomerLogoShape(customer.logoShape || 'round');
+                                  setEditCustomerLogoSize(customer.logoSize || 70);
+                                  setEditCustomerPhotoScale(customer.photoScale || 100);
+                                }}
+                              >
+                                <EditOutlined sx={{ fontSize: 18 }} />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Box>
                         {/* Logo Area - Fixed height */}
                         <Box
@@ -2346,6 +2805,7 @@ export const UserManagement: React.FC = () => {
                           value={editCustomerName}
                           onChange={(e) => setEditCustomerName(e.target.value)}
                           placeholder="Customer Name"
+                          label="Customer Name"
                           fullWidth
                           sx={{
                             '& .MuiInputBase-root': {
@@ -2357,9 +2817,36 @@ export const UserManagement: React.FC = () => {
                         />
                         <TextField
                           size="small"
+                          value={customer.customerId}
+                          label="Customer ID"
+                          disabled
+                          fullWidth
+                          sx={{
+                            '& .MuiInputBase-root': {
+                              height: 26,
+                              fontSize: '0.75rem'
+                            }
+                          }}
+                        />
+                        <TextField
+                          size="small"
+                          value={customer.office}
+                          label="Office"
+                          disabled
+                          fullWidth
+                          sx={{
+                            '& .MuiInputBase-root': {
+                              height: 26,
+                              fontSize: '0.75rem'
+                            }
+                          }}
+                        />
+                        <TextField
+                          size="small"
                           value={editCustomerIndustry}
                           onChange={(e) => setEditCustomerIndustry(e.target.value)}
                           placeholder="Industry"
+                          label="Industry"
                           fullWidth
                           sx={{
                             '& .MuiInputBase-root': {
@@ -2421,44 +2908,129 @@ export const UserManagement: React.FC = () => {
                 <TableHead>
                   <TableRow>
                     <TableCell width="60">#</TableCell>
-                    <TableCell>Customer</TableCell>
-                    <TableCell>Site Name</TableCell>
-                    <TableCell>City</TableCell>
-                    <TableCell>State/Country</TableCell>
-                    <TableCell>Comments</TableCell>
-                    <TableCell width="120" align="center">Actions</TableCell>
+                    <TableCell width="80">Logo</TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>Customer name</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "customer" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>Site Name</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "siteName" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>City</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "city" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>State</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "state" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>Country</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "country" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>Industry</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "industry" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <span style={fieldLabelStyle}>Comments</span>
+                        <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "notes" })}>
+                          <ArrowDropDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                    {can.modifyData && <TableCell width="120" align="center">Actions</TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sitesList.length === 0 ? (
+                  {filteredSites.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} align="center">
+                      <TableCell colSpan={10} align="center">
                         <Typography variant="body2" color="text.secondary">
                           No sites found
                         </Typography>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sitesList
-                      .filter((site) => {
-                        if (!customerSearch) return true;
-                        const searchLower = customerSearch.toLowerCase();
-                        const customerName = getCustomerName(site.customerId).toLowerCase();
-                        const siteName = site.name.toLowerCase();
-                        const city = (site.city || '').toLowerCase();
-                        const state = (site.state || '').toLowerCase();
-                        return customerName.includes(searchLower) ||
-                               siteName.includes(searchLower) ||
-                               city.includes(searchLower) ||
-                               state.includes(searchLower);
-                      })
-                      .map((site, index) => {
+                    filteredSites.map((site, index) => {
                       const isEditing = editingSiteId === site.id;
                       const customer = getCustomerData(site.customerId);
 
                       return (
                         <TableRow key={site.id} hover={!isEditing}>
                           <TableCell>{index + 1}</TableCell>
+
+                          {/* Logo */}
+                          <TableCell>
+                            {customer?.logo ? (
+                              customer.logoShape === 'none' ? (
+                                <img
+                                  src={customer.logo}
+                                  alt={customer.name}
+                                  style={{
+                                    maxHeight: '30px',
+                                    maxWidth: '60px',
+                                    objectFit: 'contain',
+                                  }}
+                                />
+                              ) : (
+                                <Box
+                                  sx={{
+                                    width: customer.logoShape === 'rectangular' ? 60 : 30,
+                                    height: 30,
+                                    borderRadius: customer.logoShape === 'round' ? '50%' : '4px',
+                                    backgroundImage: `url(${customer.logo})`,
+                                    backgroundSize: `${customer.photoScale || 100}%`,
+                                    backgroundPosition: 'center',
+                                    backgroundRepeat: 'no-repeat',
+                                  }}
+                                />
+                              )
+                            ) : (
+                              <Box
+                                sx={{
+                                  width: 30,
+                                  height: 30,
+                                  borderRadius: '50%',
+                                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: 'white',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 'bold',
+                                }}
+                              >
+                                {getCustomerName(site.customerId).charAt(0)}
+                              </Box>
+                            )}
+                          </TableCell>
 
                           {/* Customer */}
                           <TableCell>
@@ -2468,105 +3040,22 @@ export const UserManagement: React.FC = () => {
                                   value={editSiteFormData.customerId || ''}
                                   onChange={(e) => setEditSiteFormData(prev => ({ ...prev, customerId: e.target.value }))}
                                 >
-                                  {customersState.items.map((cust) => (
+                                  <MenuItem value="">
+                                    (Unassigned)
+                                  </MenuItem>
+                                  {[...customersState.items]
+                                    .sort((a, b) =>
+                                      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
+                                    )
+                                    .map((cust) => (
                                     <MenuItem key={cust.id} value={cust.id}>
-                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        {cust.logo ? (
-                                          cust.logoShape === 'none' ? (
-                                            <img
-                                              src={cust.logo}
-                                              alt={cust.name}
-                                              style={{
-                                                maxHeight: '20px',
-                                                maxWidth: '40px',
-                                                objectFit: 'contain',
-                                              }}
-                                            />
-                                          ) : (
-                                            <Box
-                                              sx={{
-                                                width: cust.logoShape === 'rectangular' ? 40 : 20,
-                                                height: 20,
-                                                borderRadius: cust.logoShape === 'round' ? '50%' : '4px',
-                                                backgroundImage: `url(${cust.logo})`,
-                                                backgroundSize: `${cust.photoScale || 100}%`,
-                                                backgroundPosition: 'center',
-                                                backgroundRepeat: 'no-repeat',
-                                              }}
-                                            />
-                                          )
-                                        ) : (
-                                          <Box
-                                            sx={{
-                                              width: 20,
-                                              height: 20,
-                                              borderRadius: '50%',
-                                              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                              display: 'flex',
-                                              alignItems: 'center',
-                                              justifyContent: 'center',
-                                              color: 'white',
-                                              fontSize: '0.625rem',
-                                              fontWeight: 'bold',
-                                            }}
-                                          >
-                                            {cust.name.charAt(0)}
-                                          </Box>
-                                        )}
-                                        <Typography variant="body2">{cust.name}</Typography>
-                                      </Box>
+                                      {cust.name}
                                     </MenuItem>
                                   ))}
                                 </Select>
                               </FormControl>
                             ) : (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                {customer?.logo ? (
-                                  customer.logoShape === 'none' ? (
-                                    <img
-                                      src={customer.logo}
-                                      alt={customer.name}
-                                      style={{
-                                        maxHeight: '30px',
-                                        maxWidth: '60px',
-                                        objectFit: 'contain',
-                                      }}
-                                    />
-                                  ) : (
-                                    <Box
-                                      sx={{
-                                        width: customer.logoShape === 'rectangular' ? 60 : 30,
-                                        height: 30,
-                                        borderRadius: customer.logoShape === 'round' ? '50%' : '4px',
-                                        backgroundImage: `url(${customer.logo})`,
-                                        backgroundSize: `${customer.photoScale || 100}%`,
-                                        backgroundPosition: 'center',
-                                        backgroundRepeat: 'no-repeat',
-                                      }}
-                                    />
-                                  )
-                                ) : (
-                                  <Box
-                                    sx={{
-                                      width: 30,
-                                      height: 30,
-                                      borderRadius: '50%',
-                                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      color: 'white',
-                                      fontSize: '0.75rem',
-                                      fontWeight: 'bold',
-                                    }}
-                                  >
-                                    {getCustomerName(site.customerId).charAt(0)}
-                                  </Box>
-                                )}
-                                <Typography variant="body2">
-                                  {getCustomerName(site.customerId)}
-                                </Typography>
-                              </Box>
+                              getCustomerName(site.customerId)
                             )}
                           </TableCell>
 
@@ -2580,7 +3069,7 @@ export const UserManagement: React.FC = () => {
                                 fullWidth
                               />
                             ) : (
-                              site.name
+                              site.name || ""
                             )}
                           </TableCell>
 
@@ -2598,7 +3087,7 @@ export const UserManagement: React.FC = () => {
                             )}
                           </TableCell>
 
-                          {/* State/Country */}
+                          {/* State */}
                           <TableCell>
                             {isEditing ? (
                               <TextField
@@ -2610,6 +3099,25 @@ export const UserManagement: React.FC = () => {
                             ) : (
                               site.state || '-'
                             )}
+                          </TableCell>
+
+                          {/* Country */}
+                          <TableCell>
+                            {isEditing ? (
+                              <TextField
+                                size="small"
+                                value={editSiteFormData.country || ''}
+                                onChange={(e) => setEditSiteFormData(prev => ({ ...prev, country: e.target.value }))}
+                                fullWidth
+                              />
+                            ) : (
+                              site.country || '-'
+                            )}
+                          </TableCell>
+
+                          {/* Industry */}
+                          <TableCell>
+                            {customer?.industry || '-'}
                           </TableCell>
 
                           {/* Comments */}
@@ -2629,31 +3137,40 @@ export const UserManagement: React.FC = () => {
                           </TableCell>
 
                           {/* Actions */}
-                          <TableCell align="center">
-                            {isEditing ? (
-                              <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
-                                <Button size="small" variant="contained" onClick={handleSaveSite}>
-                                  Save
-                                </Button>
-                                <Button size="small" variant="outlined" onClick={handleCancelSiteEdit}>
-                                  Cancel
-                                </Button>
-                              </Box>
-                            ) : (
-                              <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
-                                <Tooltip title="Edit">
-                                  <IconButton size="small" onClick={() => handleEditSite(site)}>
-                                    <EditOutlined fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Delete">
-                                  <IconButton size="small" onClick={() => handleDeleteSite(site.id)} color="error">
-                                    <DeleteOutline fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              </Box>
-                            )}
-                          </TableCell>
+                          {can.modifyData && (
+                            <TableCell align="center">
+                              {isEditing ? (
+                                <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+                                  <Button size="small" variant="contained" onClick={handleSaveSite}>
+                                    Save
+                                  </Button>
+                                  <Button size="small" variant="outlined" onClick={handleCancelSiteEdit}>
+                                    Cancel
+                                  </Button>
+                                </Box>
+                              ) : (
+                                <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+                                  <Tooltip title="Edit">
+                                    <IconButton size="small" onClick={() => handleEditSite(site)}>
+                                      <EditOutlined fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Delete">
+                                    <span>
+                                      <IconButton
+                                        size="small"
+                                        onClick={() => handleDeleteSite(site.id)}
+                                        color="error"
+                                        disabled={site.id.startsWith(VIRTUAL_SITE_PREFIX)}
+                                      >
+                                        <DeleteOutline fontSize="small" />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                </Box>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
                       );
                     })
@@ -2662,7 +3179,71 @@ export const UserManagement: React.FC = () => {
               </Table>
             </TableContainer>
           )}
-        </Box>
+
+          {/* Customer/Site Filter Menu */}
+          <Menu
+            anchorEl={customerMenu.anchorEl}
+            open={Boolean(customerMenu.anchorEl)}
+            onClose={() => setCustomerMenu({ anchorEl: null, key: "" })}
+            slotProps={{
+              paper: {
+                sx: { maxHeight: 400 }
+              }
+            }}
+          >
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                if (customerMenu.key) setCustomerSort({ key: customerMenu.key, dir: "asc" });
+                setCustomerMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Sort A → Z
+            </MenuItem>
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                if (customerMenu.key) setCustomerSort({ key: customerMenu.key, dir: "desc" });
+                setCustomerMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Sort Z → A
+            </MenuItem>
+            <MenuItem
+              dense
+              sx={{ fontSize: "0.875rem", py: 0.5 }}
+              onClick={() => {
+                setCustomerSort({ key: "", dir: "asc" });
+                setCustomerMenu({ anchorEl: null, key: "" });
+              }}
+            >
+              Clear sort
+            </MenuItem>
+            {(siteFilterOptions[customerMenu.key as keyof typeof siteFilterOptions] || []).map((option) => {
+              const label = option || "(Blank)";
+              const selected = !!customerFilters[customerMenu.key]?.has(option);
+              return (
+                <MenuItem
+                  dense
+                  key={`${customerMenu.key}-${option}`}
+                  sx={{ py: 0.25, minHeight: "unset" }}
+                  onClick={() => {
+                    if (!customerMenu.key) return;
+                    toggleFilterValue(setCustomerFilters, customerMenu.key, option);
+                  }}
+                >
+                  <Checkbox checked={selected} size="small" sx={{ py: 0 }} />
+                  <ListItemText
+                    primary={label}
+                    primaryTypographyProps={{ fontSize: "0.8125rem" }}
+                  />
+                </MenuItem>
+              );
+            })}
+          </Menu>
+        </Stack>
       )}
 
       {/* Global Offices Tab */}
@@ -2677,186 +3258,31 @@ export const UserManagement: React.FC = () => {
         </Box>
       )}
 
-      {/* Products Tab */}
-      {adminTabsConfig[tab]?.type === "products" && (
-        <Box>
-          <Stack direction="row" sx={{ mb: 2 }}>
-            <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setProductOpen(true)}>
-              New Product
-            </Button>
-          </Stack>
-
-          {actionError && <Alert severity="error">{actionError}</Alert>}
-
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>#</TableCell>
-                {productsTableConfig.visibleFields.map((field) => (
-                  <TableCell key={`products-header-${field.id}`}>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>{field.name}</span>
-                      <IconButton
-                        size="small"
-                        onClick={(event) => setProductMenu({ anchorEl: event.currentTarget, key: field.id })}
-                      >
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                ))}
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredProducts.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={2 + productsTableConfig.visibleFields.length} align="center">
-                    <Typography variant="body2" color="text.secondary">
-                      {products.length === 0 ? "No products yet" : "No products match the current filters"}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredProducts.map((product, index) => {
-                  const getProductFieldValue = (fieldId: string) => {
-                    if (fieldId === "base-name") return product.name;
-                    if (fieldId === "base-description") return product.description || "-";
-                    return productsDynamic.valuesByEntity[product.id]?.[fieldId]?.value || "-";
-                  };
-
-                  return (
-                    <TableRow key={product.id} hover>
-                      <TableCell>{index + 1}</TableCell>
-                      {productsTableConfig.visibleFields.map((field) => (
-                        <TableCell key={`${product.id}-${field.id}`}>
-                          {getProductFieldValue(field.id)}
-                        </TableCell>
-                      ))}
-                      <TableCell>
-                        <Stack direction="row" spacing={1}>
-                          <Tooltip title="Edit product">
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setEditProductForm({
-                                  id: product.id,
-                                  name: product.name,
-                                  description: product.description || ""
-                                });
-                                const dynamicVals = productsDynamic.valuesByEntity[product.id] || {};
-                                setEditProductDynamicValues(dynamicVals);
-                                setEditProductOpen(true);
-                              }}
-                            >
-                              <EditOutlined fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Delete product">
-                            <IconButton
-                              size="small"
-                              onClick={() =>
-                                setDeleteTarget({ type: "product", id: product.id, label: product.name })
-                              }
-                            >
-                              <DeleteOutline fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </Stack>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-          <Menu
-            anchorEl={productMenu.anchorEl}
-            open={Boolean(productMenu.anchorEl)}
-            onClose={() => setProductMenu({ anchorEl: null, key: "" })}
-            slotProps={{
-              paper: {
-                sx: { maxHeight: 400 }
-              }
-            }}
-          >
-            <MenuItem
-              dense
-              sx={{ fontSize: "0.875rem", py: 0.5 }}
-              onClick={() => {
-                if (productMenu.key) setProductSort({ key: productMenu.key, dir: "asc" });
-                setProductMenu({ anchorEl: null, key: "" });
-              }}
-            >
-              Sort A → Z
-            </MenuItem>
-            <MenuItem
-              dense
-              sx={{ fontSize: "0.875rem", py: 0.5 }}
-              onClick={() => {
-                if (productMenu.key) setProductSort({ key: productMenu.key, dir: "desc" });
-                setProductMenu({ anchorEl: null, key: "" });
-              }}
-            >
-              Sort Z → A
-            </MenuItem>
-            <MenuItem
-              dense
-              sx={{ fontSize: "0.875rem", py: 0.5 }}
-              onClick={() => {
-                setProductSort({ key: "", dir: "asc" });
-                setProductMenu({ anchorEl: null, key: "" });
-              }}
-            >
-              Clear sort
-            </MenuItem>
-            {(productFilterOptions[productMenu.key as keyof typeof productFilterOptions] || []).map((option) => {
-              const label = option || "(Blank)";
-              const selected = !!productFilters[productMenu.key]?.has(option);
-              return (
-                <MenuItem
-                  dense
-                  key={`${productMenu.key}-${option}`}
-                  sx={{ py: 0.25, minHeight: "unset" }}
-                  onClick={() => {
-                    if (!productMenu.key) return;
-                    toggleFilterValue(setProductFilters, productMenu.key, option);
-                  }}
-                >
-                  <Checkbox checked={selected} size="small" sx={{ py: 0 }} />
-                  <ListItemText
-                    primary={label}
-                    primaryTypographyProps={{ fontSize: "0.8125rem" }}
-                  />
-                </MenuItem>
-              );
-            })}
-          </Menu>
-        </Box>
-      )}
-
       {/* Assets Tab */}
       {adminTabsConfig[tab]?.type === "assets" && (
-        <Box>
-          <Stack direction="row" sx={{ mb: 2 }}>
-            <Button variant="contained" startIcon={<AddOutlined />} onClick={() => {
-              setEditingAssetId(null);
-              setAssetForm({
-                machineType: "",
-                machineId: "",
-                serialNumber: "",
-                pmCount: "1",
-                comments: ""
-              });
-              setAssetDynamicValues({});
-              setAssetOpen(true);
-            }}>
-              New Asset
-            </Button>
+        <Stack spacing={2}>
+          <Stack direction="row">
+            {can.modifyData && (
+              <Button variant="contained" startIcon={<AddOutlined />} onClick={() => {
+                setEditingAssetId(null);
+                setAssetForm({
+                  machineType: "",
+                  machineId: "",
+                  serialNumber: "",
+                  pmCount: "1",
+                  comments: ""
+                });
+                setAssetDynamicValues({});
+                setAssetOpen(true);
+              }}>
+                New Asset
+              </Button>
+            )}
           </Stack>
 
           {actionError && <Alert severity="error">{actionError}</Alert>}
 
+          <Paper className="glass-card" sx={{ overflow: 'hidden' }}>
           <Table>
             <TableHead>
               <TableRow>
@@ -2864,7 +3290,7 @@ export const UserManagement: React.FC = () => {
                 {assetsTableConfig.visibleFields.map((field) => (
                   <TableCell key={`assets-header-${field.id}`}>
                     <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>{field.name}</span>
+                      <span style={fieldLabelStyle}>{field.name}</span>
                       <IconButton
                         size="small"
                         onClick={(event) => setAssetMenu({ anchorEl: event.currentTarget, key: field.id })}
@@ -2905,6 +3331,7 @@ export const UserManagement: React.FC = () => {
                           {getAssetFieldValue(field.id)}
                         </TableCell>
                       ))}
+                      {can.modifyData && (
                       <TableCell>
                         <Stack direction="row" spacing={1}>
                           <Tooltip title="Edit asset">
@@ -2943,12 +3370,14 @@ export const UserManagement: React.FC = () => {
                           </Tooltip>
                         </Stack>
                       </TableCell>
+                      )}
                     </TableRow>
                   );
                 })
               )}
             </TableBody>
           </Table>
+          </Paper>
           <Menu
             anchorEl={assetMenu.anchorEl}
             open={Boolean(assetMenu.anchorEl)}
@@ -3011,7 +3440,7 @@ export const UserManagement: React.FC = () => {
               );
             })}
           </Menu>
-        </Box>
+        </Stack>
       )}
 
       {/* Custom Tabs - Dynamically Rendered */}
@@ -3056,8 +3485,9 @@ export const UserManagement: React.FC = () => {
           }
 
           return (
-            <Box key={tabConfig.id}>
+            <Stack key={tabConfig.id} spacing={2}>
               {/* Table */}
+              <Paper className="glass-card" sx={{ overflow: 'hidden' }}>
               <Table>
                 <TableHead>
                   <TableRow>
@@ -3142,6 +3572,7 @@ export const UserManagement: React.FC = () => {
                   )}
                 </TableBody>
               </Table>
+              </Paper>
               <Menu
                 anchorEl={customTabMenu.tabId === tabConfig.id ? customTabMenu.anchorEl : null}
                 open={Boolean(customTabMenu.tabId === tabConfig.id && customTabMenu.anchorEl)}
@@ -3233,7 +3664,7 @@ export const UserManagement: React.FC = () => {
                   );
                 })}
               </Menu>
-            </Box>
+            </Stack>
           );
         })}
 
@@ -3253,8 +3684,10 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setFormData((prev) => ({ ...prev, email: event.target.value }))}
             />
             <FormControl>
+              <InputLabel sx={fieldLabelStyle}>Role name</InputLabel>
               <Select
                 value={formData.role}
+                label="Role name"
                 onChange={(event) => setFormData((prev) => ({ ...prev, role: event.target.value as UserRole }))}
               >
                 {roles.map((role) => (
@@ -3279,7 +3712,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <DynamicFieldsForm
-              definitions={orderedUsersDefinitions}
+              definitions={dynamicOnlyUsersDefinitions}
               values={userDynamicValues}
               onChange={setUserDynamicValues}
             />
@@ -3343,7 +3776,7 @@ export const UserManagement: React.FC = () => {
                 if (roleForm.originalName && roleForm.originalName !== name) {
                   delete next[roleForm.originalName];
                 }
-                next[name] = { ...roleForm.permissions };
+                next[name] = { ...roleForm.permissions } as unknown as RolePermissions;
                 return next;
               });
               setRoleDialogOpen(false);
@@ -3368,28 +3801,34 @@ export const UserManagement: React.FC = () => {
         fields={
           tableConfigTarget === "users"
             ? usersTableConfig.orderedFields
-            : tableConfigTarget === "customers"
-              ? customersTableConfig.orderedFields
-              : tableConfigTarget === "products"
-                ? productsTableConfig.orderedFields
-                : assetsTableConfig.orderedFields
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.orderedFields
+              : tableConfigTarget === "customers"
+                ? customersTableConfig.orderedFields
+                : tableConfigTarget === "products"
+                  ? productsTableConfig.orderedFields
+                  : assetsTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "users"
             ? usersTableConfig.config
-            : tableConfigTarget === "customers"
-              ? customersTableConfig.config
-              : tableConfigTarget === "products"
-                ? productsTableConfig.config
-                : assetsTableConfig.config
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.config
+              : tableConfigTarget === "customers"
+                ? customersTableConfig.config
+                : tableConfigTarget === "products"
+                  ? productsTableConfig.config
+                  : assetsTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
+          if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
           if (tableConfigTarget === "customers") customersTableConfig.setConfig(next);
           if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
           if (tableConfigTarget === "assets") assetsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
           if (!existing) return;
           const tables = existing.tables.includes(tableConfigTarget)
@@ -3429,7 +3868,7 @@ export const UserManagement: React.FC = () => {
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
           try {
-            // Handle base fields - update local config only, no API call
+            // Handle base fields — update local display name only
             if (fieldId.startsWith("base-")) {
               setBaseFieldNames((prev) => ({
                 ...prev,
@@ -3448,7 +3887,8 @@ export const UserManagement: React.FC = () => {
                   : tableConfigTarget === "products"
                     ? productsDynamic.definitions
                     : assetsDynamic.definitions;
-            const existing = defs.find((item) => item.id === fieldId);
+            const existing = defs.find((item) => item.id === fieldId)
+              || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
             if (!existing) return;
             await fieldService.updateDefinition(fieldId, {
               ...existing,
@@ -3457,6 +3897,7 @@ export const UserManagement: React.FC = () => {
               linkToFieldId: linkToFieldId || null,
               actionType: actionType || null
             });
+            await allFieldDefinitions.reload();
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
@@ -3470,9 +3911,8 @@ export const UserManagement: React.FC = () => {
           }
         }}
         onDeleteField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           try {
-            // Skip API calls for base fields - they can't be deleted
-            if (fieldId.startsWith("base-")) return;
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
@@ -3520,7 +3960,10 @@ export const UserManagement: React.FC = () => {
                   ...(
                     adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.columns ||
                     defaultCustomColumns
-                  ).map((name) => ({ id: `default:${name}`, name, type: getDefaultColumnType(name) })),
+                  ).map((name) => {
+                    const storedType = adminTabsConfig.find((t) => t.id === customTableConfigTabId)?.columnTypes?.[name];
+                    return { id: `default:${name}`, name, type: storedType || getDefaultColumnType(name) };
+                  }),
                   ...allFieldDefinitions.definitions
                     .filter(
                       (field) =>
@@ -3612,22 +4055,25 @@ export const UserManagement: React.FC = () => {
               const oldName = fieldId.replace("default:", "");
               const nextName = name.trim() || oldName;
               setAdminTabsConfig((prev) =>
-                prev.map((tabItem) =>
-                  tabItem.id === customTableConfigTabId
-                    ? {
-                        ...tabItem,
-                        columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
-                        config: {
-                          order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
-                            id === fieldId ? `default:${nextName}` : id
-                          ),
-                          hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
-                            id === fieldId ? `default:${nextName}` : id
-                          )
-                        }
-                      }
-                    : tabItem
-                )
+                prev.map((tabItem) => {
+                  if (tabItem.id !== customTableConfigTabId) return tabItem;
+                  const nextColumnTypes = { ...(tabItem.columnTypes || {}) };
+                  delete nextColumnTypes[oldName];
+                  nextColumnTypes[nextName] = type;
+                  return {
+                    ...tabItem,
+                    columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
+                    columnTypes: nextColumnTypes,
+                    config: {
+                      order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
+                        id === fieldId ? `default:${nextName}` : id
+                      ),
+                      hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
+                        id === fieldId ? `default:${nextName}` : id
+                      )
+                    }
+                  };
+                })
               );
               setAdminTabRows((prev) => ({
                 ...prev,
@@ -3677,7 +4123,11 @@ export const UserManagement: React.FC = () => {
               setAdminTabsConfig((prev) =>
                 prev.map((tabItem) =>
                   tabItem.id === customTableConfigTabId
-                    ? { ...tabItem, columns: (tabItem.columns || []).filter((col) => col !== name) }
+                    ? {
+                        ...tabItem,
+                        columns: (tabItem.columns || []).filter((col) => col !== name),
+                        columnTypes: (() => { const ct = { ...(tabItem.columnTypes || {}) }; delete ct[name]; return ct; })()
+                      }
                     : tabItem
                 )
               );
@@ -3831,23 +4281,29 @@ export const UserManagement: React.FC = () => {
         fields={
           tableConfigTarget === "users"
             ? usersTableConfig.orderedFields
-            : tableConfigTarget === "products"
-              ? productsTableConfig.orderedFields
-              : assetsTableConfig.orderedFields
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.orderedFields
+              : tableConfigTarget === "products"
+                ? productsTableConfig.orderedFields
+                : assetsTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "users"
             ? usersTableConfig.config
-            : tableConfigTarget === "products"
-              ? productsTableConfig.config
-              : assetsTableConfig.config
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.config
+              : tableConfigTarget === "products"
+                ? productsTableConfig.config
+                : assetsTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
+          if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
           if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
           if (tableConfigTarget === "assets") assetsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
           if (!existing) return;
           const tables = existing.tables.includes(tableConfigTarget)
@@ -3860,6 +4316,7 @@ export const UserManagement: React.FC = () => {
           if (tableConfigTarget === "assets") await assetsDynamic.reload();
         }}
         onCreateField={async (name, type, linkToFieldId, actionType) => {
+          if (tableConfigTarget === "roles") return;
           await fieldService.createDefinition({
             id: "",
             name,
@@ -3897,7 +4354,8 @@ export const UserManagement: React.FC = () => {
                 : tableConfigTarget === "products"
                   ? productsDynamic.definitions
                   : assetsDynamic.definitions;
-            const existing = defs.find((item) => item.id === fieldId);
+            const existing = defs.find((item) => item.id === fieldId)
+              || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
             if (!existing) return;
             await fieldService.updateDefinition(fieldId, {
               ...existing,
@@ -3906,6 +4364,7 @@ export const UserManagement: React.FC = () => {
               linkToFieldId: linkToFieldId || null,
               actionType: actionType || null
             });
+            await allFieldDefinitions.reload();
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
             if (tableConfigTarget === "assets") await assetsDynamic.reload();
@@ -3918,9 +4377,8 @@ export const UserManagement: React.FC = () => {
           }
         }}
         onDeleteField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           try {
-            // Skip API calls for base fields - they can't be deleted
-            if (fieldId.startsWith("base-")) return;
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
@@ -3967,7 +4425,10 @@ export const UserManagement: React.FC = () => {
                   ...(
                     adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.columns ||
                     defaultCustomColumns
-                  ).map((name) => ({ id: `default:${name}`, name, type: getDefaultColumnType(name) })),
+                  ).map((name) => {
+                    const storedType = adminTabsConfig.find((t) => t.id === customTableConfigTabId)?.columnTypes?.[name];
+                    return { id: `default:${name}`, name, type: storedType || getDefaultColumnType(name) };
+                  }),
                   ...allFieldDefinitions.definitions
                     .filter(
                       (field) =>
@@ -4103,28 +4564,34 @@ export const UserManagement: React.FC = () => {
         fields={
           tableConfigTarget === "users"
             ? usersTableConfig.orderedFields
-            : tableConfigTarget === "customers"
-              ? customersTableConfig.orderedFields
-              : tableConfigTarget === "products"
-                ? productsTableConfig.orderedFields
-                : assetsTableConfig.orderedFields
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.orderedFields
+              : tableConfigTarget === "customers"
+                ? customersTableConfig.orderedFields
+                : tableConfigTarget === "products"
+                  ? productsTableConfig.orderedFields
+                  : assetsTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "users"
             ? usersTableConfig.config
-            : tableConfigTarget === "customers"
-              ? customersTableConfig.config
-              : tableConfigTarget === "products"
-                ? productsTableConfig.config
-                : assetsTableConfig.config
+            : tableConfigTarget === "roles"
+              ? rolesTableConfig.config
+              : tableConfigTarget === "customers"
+                ? customersTableConfig.config
+                : tableConfigTarget === "products"
+                  ? productsTableConfig.config
+                  : assetsTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
+          if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
           if (tableConfigTarget === "customers") customersTableConfig.setConfig(next);
           if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
           if (tableConfigTarget === "assets") assetsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
           if (!existing) return;
           const tables = existing.tables.includes(tableConfigTarget)
@@ -4164,7 +4631,7 @@ export const UserManagement: React.FC = () => {
         }}
         onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
           try {
-            // Handle base fields - update local config only, no API call
+            // Handle base fields — update local display name only
             if (fieldId.startsWith("base-")) {
               setBaseFieldNames((prev) => ({
                 ...prev,
@@ -4183,7 +4650,8 @@ export const UserManagement: React.FC = () => {
                   : tableConfigTarget === "products"
                     ? productsDynamic.definitions
                     : assetsDynamic.definitions;
-            const existing = defs.find((item) => item.id === fieldId);
+            const existing = defs.find((item) => item.id === fieldId)
+              || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
             if (!existing) return;
             await fieldService.updateDefinition(fieldId, {
               ...existing,
@@ -4192,6 +4660,7 @@ export const UserManagement: React.FC = () => {
               linkToFieldId: linkToFieldId || null,
               actionType: actionType || null
             });
+            await allFieldDefinitions.reload();
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
@@ -4205,9 +4674,8 @@ export const UserManagement: React.FC = () => {
           }
         }}
         onDeleteField={async (fieldId) => {
+          if (tableConfigTarget === "roles") return;
           try {
-            // Skip API calls for base fields - they can't be deleted
-            if (fieldId.startsWith("base-")) return;
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
@@ -4255,7 +4723,10 @@ export const UserManagement: React.FC = () => {
                   ...(
                     adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.columns ||
                     defaultCustomColumns
-                  ).map((name) => ({ id: `default:${name}`, name, type: getDefaultColumnType(name) })),
+                  ).map((name) => {
+                    const storedType = adminTabsConfig.find((t) => t.id === customTableConfigTabId)?.columnTypes?.[name];
+                    return { id: `default:${name}`, name, type: storedType || getDefaultColumnType(name) };
+                  }),
                   ...allFieldDefinitions.definitions
                     .filter(
                       (field) =>
@@ -4347,22 +4818,25 @@ export const UserManagement: React.FC = () => {
               const oldName = fieldId.replace("default:", "");
               const nextName = name.trim() || oldName;
               setAdminTabsConfig((prev) =>
-                prev.map((tabItem) =>
-                  tabItem.id === customTableConfigTabId
-                    ? {
-                        ...tabItem,
-                        columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
-                        config: {
-                          order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
-                            id === fieldId ? `default:${nextName}` : id
-                          ),
-                          hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
-                            id === fieldId ? `default:${nextName}` : id
-                          )
-                        }
-                      }
-                    : tabItem
-                )
+                prev.map((tabItem) => {
+                  if (tabItem.id !== customTableConfigTabId) return tabItem;
+                  const nextColumnTypes = { ...(tabItem.columnTypes || {}) };
+                  delete nextColumnTypes[oldName];
+                  nextColumnTypes[nextName] = type;
+                  return {
+                    ...tabItem,
+                    columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
+                    columnTypes: nextColumnTypes,
+                    config: {
+                      order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
+                        id === fieldId ? `default:${nextName}` : id
+                      ),
+                      hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
+                        id === fieldId ? `default:${nextName}` : id
+                      )
+                    }
+                  };
+                })
               );
               setAdminTabRows((prev) => ({
                 ...prev,
@@ -4412,7 +4886,11 @@ export const UserManagement: React.FC = () => {
               setAdminTabsConfig((prev) =>
                 prev.map((tabItem) =>
                   tabItem.id === customTableConfigTabId
-                    ? { ...tabItem, columns: (tabItem.columns || []).filter((col) => col !== name) }
+                    ? {
+                        ...tabItem,
+                        columns: (tabItem.columns || []).filter((col) => col !== name),
+                        columnTypes: (() => { const ct = { ...(tabItem.columnTypes || {}) }; delete ct[name]; return ct; })()
+                      }
                     : tabItem
                 )
               );
@@ -4543,8 +5021,189 @@ export const UserManagement: React.FC = () => {
               multiline
               rows={2}
             />
+            <FormControl fullWidth size="small">
+              <InputLabel>Division (optional)</InputLabel>
+              <Select
+                value={productForm.divisionId}
+                label="Division (optional)"
+                onChange={(event) => setProductForm((prev) => ({ ...prev, divisionId: event.target.value }))}
+              >
+                <MenuItem value=""><em>None</em></MenuItem>
+                {divisions.map((d) => (
+                  <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Stack spacing={1}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="subtitle2">Features</Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" variant="outlined" onClick={() => setFeaturePickerOpen("create")}>
+                    Link from library
+                  </Button>
+                  <Button size="small" onClick={() => setProductFeatures((prev) => [...prev, createFeature()])}>
+                    Add new
+                  </Button>
+                </Stack>
+              </Stack>
+              {productFeatures.map((feature) => (
+                <Stack key={feature.id} spacing={0.5}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center">
+                    <TextField
+                      label="Feature name"
+                      value={feature.name}
+                      onChange={(event) =>
+                        setProductFeatures((prev) =>
+                          prev.map((f) => (f.id === feature.id ? { ...f, name: event.target.value } : f))
+                        )
+                      }
+                      sx={{ flex: 2 }}
+                    />
+                    <FormControl sx={{ minWidth: 160, flex: 1 }}>
+                      <Select
+                        value={feature.valueType}
+                        onChange={(event) =>
+                          setProductFeatures((prev) =>
+                            prev.map((f) =>
+                              f.id === feature.id ? { ...f, valueType: event.target.value as ProductFeatureValueType } : f
+                            )
+                          )
+                        }
+                      >
+                        {featureTypeOptions.map((type) => (
+                          <MenuItem key={type} value={type}>
+                            {featureTypeLabels[type]}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    {(feature.valueType === "multi-select" || feature.valueType === "single-select") && (
+                      <TextField
+                        label="Options (comma separated)"
+                        value={(feature.options || []).join(", ")}
+                        onChange={(event) =>
+                          setProductFeatures((prev) =>
+                            prev.map((f) =>
+                              f.id === feature.id
+                                ? {
+                                    ...f,
+                                    options: event.target.value
+                                      .split(",")
+                                      .map((item) => item.trim())
+                                      .filter(Boolean)
+                                  }
+                                : f
+                            )
+                          )
+                        }
+                        sx={{ flex: 2 }}
+                      />
+                    )}
+                    <Button
+                      color="error"
+                      onClick={() => setProductFeatures((prev) => prev.filter((f) => f.id !== feature.id))}
+                    >
+                      Remove
+                    </Button>
+                  </Stack>
+                  {feature.valueType === "component" && (
+                    <Box sx={{ pl: 2, borderLeft: "2px solid", borderColor: "divider" }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
+                        <Typography variant="caption" color="text.secondary">Dependencies</Typography>
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            setProductFeatures((prev) =>
+                              prev.map((f) =>
+                                f.id === feature.id
+                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: crypto.randomUUID(), name: "", valueType: "text" as const, isInventory: false }] }
+                                  : f
+                              )
+                            )
+                          }
+                        >
+                          + Add dependency
+                        </Button>
+                      </Stack>
+                      {(feature.subProperties ?? []).map((sf) => (
+                        <Stack key={sf.id} spacing={0.5} mb={1}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <TextField
+                              size="small"
+                              label="Name"
+                              value={sf.name}
+                              sx={{ flex: 1 }}
+                              onChange={(e) =>
+                                setProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, name: e.target.value } : s)) }
+                                      : f
+                                  )
+                                )
+                              }
+                            />
+                            <TextField
+                              size="small"
+                              label="Unit"
+                              value={sf.unit ?? ""}
+                              sx={{ width: 80 }}
+                              placeholder="ea, m…"
+                              onChange={(e) =>
+                                setProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, unit: e.target.value } : s)) }
+                                      : f
+                                  )
+                                )
+                              }
+                            />
+                            <Tooltip title={sf.isInventory ? "Inventory — tracks serial numbers per unit" : "Non-inventory — tracks quantity + unit price"}>
+                              <Stack direction="row" alignItems="center" spacing={0.25}>
+                                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap", fontSize: 10 }}>
+                                  {sf.isInventory ? "Inventory" : "Non-inv."}
+                                </Typography>
+                                <Switch
+                                  size="small"
+                                  checked={!!sf.isInventory}
+                                  onChange={(e) =>
+                                    setProductFeatures((prev) =>
+                                      prev.map((f) =>
+                                        f.id === feature.id
+                                          ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, isInventory: e.target.checked } : s)) }
+                                          : f
+                                      )
+                                    )
+                                  }
+                                />
+                              </Stack>
+                            </Tooltip>
+                            <Button
+                              color="error"
+                              size="small"
+                              onClick={() =>
+                                setProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).filter((s) => s.id !== sf.id) }
+                                      : f
+                                  )
+                                )
+                              }
+                            >
+                              Remove
+                            </Button>
+                          </Stack>
+                        </Stack>
+                      ))}
+                    </Box>
+                  )}
+                </Stack>
+              ))}
+            </Stack>
             <DynamicFieldsForm
-              definitions={orderedProductsDefinitions}
+              definitions={productsDefinitionsForForm}
               values={productDynamicValues}
               onChange={setProductDynamicValues}
             />
@@ -4575,9 +5234,11 @@ export const UserManagement: React.FC = () => {
               value={editUserForm.email}
               onChange={(event) => setEditUserForm((prev) => ({ ...prev, email: event.target.value }))}
             />
-            <FormControl>
+            <FormControl fullWidth>
+              <InputLabel sx={fieldLabelStyle}>Role name</InputLabel>
               <Select
                 value={editUserForm.role}
+                label="Role name"
                 onChange={(event) =>
                   setEditUserForm((prev) => ({ ...prev, role: event.target.value as UserRole }))
                 }
@@ -4589,9 +5250,11 @@ export const UserManagement: React.FC = () => {
                 ))}
               </Select>
             </FormControl>
-            <FormControl>
+            <FormControl fullWidth>
+              <InputLabel sx={fieldLabelStyle}>Office / City</InputLabel>
               <Select
                 value={editUserForm.office}
+                label="Office / City"
                 onChange={(event) =>
                   setEditUserForm((prev) => ({ ...prev, office: event.target.value as User["office"] }))
                 }
@@ -4604,7 +5267,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <DynamicFieldsForm
-              definitions={orderedUsersDefinitions}
+              definitions={dynamicOnlyUsersDefinitions}
               values={editUserDynamicValues}
               onChange={setEditUserDynamicValues}
             />
@@ -4665,7 +5328,7 @@ export const UserManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={editProductOpen} onClose={() => setEditProductOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={editProductOpen} onClose={() => { setEditProductOpen(false); setEditProductFeatures([]); }} maxWidth="sm" fullWidth>
         <DialogTitle>Edit product</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ marginTop: 1 }}>
@@ -4681,15 +5344,196 @@ export const UserManagement: React.FC = () => {
               multiline
               rows={2}
             />
+            <FormControl fullWidth size="small">
+              <InputLabel>Division (optional)</InputLabel>
+              <Select
+                value={editProductForm.divisionId}
+                label="Division (optional)"
+                onChange={(event) => setEditProductForm((prev) => ({ ...prev, divisionId: event.target.value }))}
+              >
+                <MenuItem value=""><em>None</em></MenuItem>
+                {divisions.map((d) => (
+                  <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Stack spacing={1}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="subtitle2">Features</Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" variant="outlined" onClick={() => setFeaturePickerOpen("edit")}>
+                    Link from library
+                  </Button>
+                  <Button size="small" onClick={() => setEditProductFeatures((prev) => [...prev, createFeature()])}>
+                    Add new
+                  </Button>
+                </Stack>
+              </Stack>
+              {editProductFeatures.map((feature) => (
+                <Stack key={feature.id} spacing={0.5}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center">
+                    <TextField
+                      label="Feature name"
+                      value={feature.name}
+                      onChange={(event) =>
+                        setEditProductFeatures((prev) =>
+                          prev.map((f) => (f.id === feature.id ? { ...f, name: event.target.value } : f))
+                        )
+                      }
+                      sx={{ flex: 2 }}
+                    />
+                    <FormControl sx={{ minWidth: 160, flex: 1 }}>
+                      <Select
+                        value={feature.valueType}
+                        onChange={(event) =>
+                          setEditProductFeatures((prev) =>
+                            prev.map((f) =>
+                              f.id === feature.id ? { ...f, valueType: event.target.value as ProductFeatureValueType } : f
+                            )
+                          )
+                        }
+                      >
+                        {featureTypeOptions.map((type) => (
+                          <MenuItem key={type} value={type}>
+                            {featureTypeLabels[type]}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    {(feature.valueType === "multi-select" || feature.valueType === "single-select") && (
+                      <TextField
+                        label="Options (comma separated)"
+                        value={(feature.options || []).join(", ")}
+                        onChange={(event) =>
+                          setEditProductFeatures((prev) =>
+                            prev.map((f) =>
+                              f.id === feature.id
+                                ? {
+                                    ...f,
+                                    options: event.target.value
+                                      .split(",")
+                                      .map((item) => item.trim())
+                                      .filter(Boolean)
+                                  }
+                                : f
+                            )
+                          )
+                        }
+                        sx={{ flex: 2 }}
+                      />
+                    )}
+                    <Button
+                      color="error"
+                      onClick={() => setEditProductFeatures((prev) => prev.filter((f) => f.id !== feature.id))}
+                    >
+                      Remove
+                    </Button>
+                  </Stack>
+                  {feature.valueType === "component" && (
+                    <Box sx={{ pl: 2, borderLeft: "2px solid", borderColor: "divider" }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
+                        <Typography variant="caption" color="text.secondary">Dependencies</Typography>
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            setEditProductFeatures((prev) =>
+                              prev.map((f) =>
+                                f.id === feature.id
+                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: crypto.randomUUID(), name: "", valueType: "text" as const, isInventory: false }] }
+                                  : f
+                              )
+                            )
+                          }
+                        >
+                          + Add dependency
+                        </Button>
+                      </Stack>
+                      {(feature.subProperties ?? []).map((sf) => (
+                        <Stack key={sf.id} spacing={0.5} mb={1}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <TextField
+                              size="small"
+                              label="Name"
+                              value={sf.name}
+                              sx={{ flex: 1 }}
+                              onChange={(e) =>
+                                setEditProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, name: e.target.value } : s)) }
+                                      : f
+                                  )
+                                )
+                              }
+                            />
+                            <TextField
+                              size="small"
+                              label="Unit"
+                              value={sf.unit ?? ""}
+                              sx={{ width: 80 }}
+                              placeholder="ea, m…"
+                              onChange={(e) =>
+                                setEditProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, unit: e.target.value } : s)) }
+                                      : f
+                                  )
+                                )
+                              }
+                            />
+                            <Tooltip title={sf.isInventory ? "Inventory — tracks serial numbers per unit" : "Non-inventory — tracks quantity + unit price"}>
+                              <Stack direction="row" alignItems="center" spacing={0.25}>
+                                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap", fontSize: 10 }}>
+                                  {sf.isInventory ? "Inventory" : "Non-inv."}
+                                </Typography>
+                                <Switch
+                                  size="small"
+                                  checked={!!sf.isInventory}
+                                  onChange={(e) =>
+                                    setEditProductFeatures((prev) =>
+                                      prev.map((f) =>
+                                        f.id === feature.id
+                                          ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, isInventory: e.target.checked } : s)) }
+                                          : f
+                                      )
+                                    )
+                                  }
+                                />
+                              </Stack>
+                            </Tooltip>
+                            <Button
+                              color="error"
+                              size="small"
+                              onClick={() =>
+                                setEditProductFeatures((prev) =>
+                                  prev.map((f) =>
+                                    f.id === feature.id
+                                      ? { ...f, subProperties: (f.subProperties ?? []).filter((s) => s.id !== sf.id) }
+                                      : f
+                                  )
+                                )
+                              }
+                            >
+                              Remove
+                            </Button>
+                          </Stack>
+                        </Stack>
+                      ))}
+                    </Box>
+                  )}
+                </Stack>
+              ))}
+            </Stack>
             <DynamicFieldsForm
-              definitions={orderedProductsDefinitions}
+              definitions={productsDefinitionsForForm}
               values={editProductDynamicValues}
               onChange={setEditProductDynamicValues}
             />
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button variant="outlined" onClick={() => setEditProductOpen(false)}>
+          <Button variant="outlined" onClick={() => { setEditProductOpen(false); setEditProductFeatures([]); }}>
             Cancel
           </Button>
           <Button variant="contained" onClick={handleSaveProduct} disabled={!editProductForm.name.trim()}>
@@ -4816,7 +5660,7 @@ export const UserManagement: React.FC = () => {
                 return;
               }
               if (selected.type === "users") setTableConfigTarget("users");
-              if (selected.type === "products") setTableConfigTarget("products");
+              if (selected.type === "roles") setTableConfigTarget("roles");
               if (selected.type === "assets") setTableConfigTarget("assets");
               setTableConfigOpen(true);
             }}
@@ -4835,10 +5679,6 @@ export const UserManagement: React.FC = () => {
             }
             if (selected.type === "customers") {
               setCustomerOpen(true);
-              return;
-            }
-            if (selected.type === "products") {
-              setProductOpen(true);
               return;
             }
             if (selected.type === "assets") {
@@ -4945,7 +5785,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" color="text.secondary">
-                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "customers" ? "Customers" : item.type === "products" ? "Products" : item.type === "assets" ? "Assets" : "Default"}
+                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "dispatch" ? "Dispatch" : item.type === "customers" ? "Customers" : item.type === "assets" ? "Assets" : "Default"}
                       </Typography>
                     </TableCell>
                     <TableCell>
@@ -4977,6 +5817,7 @@ export const UserManagement: React.FC = () => {
                     type: "custom",
                     position: adminTabsConfig.length,
                     columns: ["ID", "Name", "Created Date"],
+                    columnTypes: { "ID": "lookup field", "Name": "text", "Created Date": "date" } as Record<string, string>,
                     fieldIds: [],
                     config: { order: [], hidden: [] }
                   };
@@ -5022,6 +5863,7 @@ export const UserManagement: React.FC = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ marginTop: 1 }}>
             {customRowDialogFields.map((field) => {
+              const isCreatedDate = field.name === "Created Date";
               const value = customRowForm[field.id] ?? "";
               const inputType = field.type === "date" ? "date" : "text";
               return (
@@ -5030,7 +5872,9 @@ export const UserManagement: React.FC = () => {
                   label={field.name}
                   type={inputType}
                   value={value}
-                  InputLabelProps={inputType === "date" ? { shrink: true } : undefined}
+                  InputLabelProps={inputType === "date" ? { shrink: true, sx: fieldLabelStyle } : { sx: fieldLabelStyle }}
+                  disabled={isCreatedDate}
+                  helperText={isCreatedDate ? "Auto-populated on creation" : undefined}
                   onChange={(event) =>
                     setCustomRowForm((prev) => ({
                       ...prev,
@@ -5064,8 +5908,14 @@ export const UserManagement: React.FC = () => {
                   : defaultCustomColumns;
               const tabFieldIds = customRowDialogTab.fieldIds || [];
               const nextRow: Record<string, string> = {};
+              const today = new Date().toISOString().slice(0, 10);
               columns.forEach((name) => {
-                nextRow[name] = customRowForm[`default:${name}`] ?? "";
+                let val = customRowForm[`default:${name}`] ?? "";
+                // Auto-populate "Created Date" on new rows
+                if (name === "Created Date" && !val && customRowDialogIndex === null) {
+                  val = today;
+                }
+                nextRow[name] = val;
               });
               tabFieldIds.forEach((fieldId) => {
                 nextRow[fieldId] = customRowForm[fieldId] ?? "";
@@ -5096,22 +5946,17 @@ export const UserManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete {deleteTarget?.type}</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            Are you sure you want to delete {deleteTarget?.label}? This action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setDeleteTarget(null)}>
-            Cancel
-          </Button>
-          <Button variant="contained" color="error" onClick={handleConfirmDelete}>
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <DeleteConfirmDialog
+        open={!!deleteTarget}
+        entityType={deleteTarget?.type || "item"}
+        entityLabel={deleteTarget?.label}
+        loading={deleteSaving}
+        onClose={() => {
+          if (deleteSaving) return;
+          setDeleteTarget(null);
+        }}
+        onConfirm={handleConfirmDelete}
+      />
 
       {/* Logo Upload Dialog */}
       <Dialog
@@ -5282,16 +6127,64 @@ export const UserManagement: React.FC = () => {
                   type="file"
                   hidden
                   accept="image/png,image/jpeg,image/jpg,image/gif,image/svg+xml"
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onloadend = () => {
-                        setEditCustomerLogo(reader.result as string);
-                        setEditCustomerPhotoScale(100);
-                      };
-                      reader.readAsDataURL(file);
+                    if (!file) return;
+
+                    // Check file size (warn if > 2MB)
+                    const maxFileSize = 2 * 1024 * 1024; // 2MB
+                    const maxDimension = 800; // Max width/height
+
+                    if (file.size > maxFileSize) {
+                      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+                      if (!confirm(`This image is ${sizeMB}MB, which is quite large. It will be automatically resized to optimize performance. Continue?`)) {
+                        return;
+                      }
                     }
+
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      const img = new Image();
+                      img.onload = () => {
+                        // Check if image needs resizing
+                        if (img.width > maxDimension || img.height > maxDimension) {
+                          // Calculate new dimensions maintaining aspect ratio
+                          let newWidth = img.width;
+                          let newHeight = img.height;
+
+                          if (img.width > img.height) {
+                            if (img.width > maxDimension) {
+                              newWidth = maxDimension;
+                              newHeight = (img.height * maxDimension) / img.width;
+                            }
+                          } else {
+                            if (img.height > maxDimension) {
+                              newHeight = maxDimension;
+                              newWidth = (img.width * maxDimension) / img.height;
+                            }
+                          }
+
+                          // Create canvas to resize
+                          const canvas = document.createElement('canvas');
+                          canvas.width = newWidth;
+                          canvas.height = newHeight;
+                          const ctx = canvas.getContext('2d');
+                          if (ctx) {
+                            ctx.drawImage(img, 0, 0, newWidth, newHeight);
+                            const resizedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                            setEditCustomerLogo(resizedDataUrl);
+                            setEditCustomerPhotoScale(100);
+                            alert(`Image resized from ${img.width}x${img.height} to ${Math.round(newWidth)}x${Math.round(newHeight)} for optimal display.`);
+                          }
+                        } else {
+                          // Image is within size limits, use as-is
+                          setEditCustomerLogo(reader.result as string);
+                          setEditCustomerPhotoScale(100);
+                        }
+                      };
+                      img.src = reader.result as string;
+                    };
+                    reader.readAsDataURL(file);
                   }}
                 />
               </Button>
@@ -5322,8 +6215,87 @@ export const UserManagement: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
-    </Container>
+
+      {/* Feature Library Picker */}
+      <Dialog
+        open={featurePickerOpen !== null}
+        onClose={() => setFeaturePickerOpen(null)}
+        maxWidth="sm"
+        fullWidth
+        PaperComponent={DraggablePaper}
+      >
+        <DialogTitle>Link Feature from Library</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1} sx={{ mt: 1 }}>
+            {libraryFeatures.length === 0 ? (
+              <Typography color="text.secondary" variant="body2">
+                No features in library yet. Use "Add new" to create inline features, or add features via Settings → Features.
+              </Typography>
+            ) : (
+              libraryFeatures.map((lf) => {
+                const alreadyLinked =
+                  featurePickerOpen === "create"
+                    ? productFeatures.some((pf) => pf.id === lf.id)
+                    : editProductFeatures.some((pf) => pf.id === lf.id);
+                return (
+                  <Stack
+                    key={lf.id}
+                    direction="row"
+                    alignItems="center"
+                    justifyContent="space-between"
+                    sx={{
+                      px: 1.5,
+                      py: 1,
+                      border: "1px solid",
+                      borderColor: "divider",
+                      borderRadius: 1,
+                      opacity: alreadyLinked ? 0.5 : 1,
+                    }}
+                  >
+                    <Stack spacing={0.25}>
+                      <Typography variant="body2" fontWeight={500}>
+                        {lf.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {lf.valueType}{lf.description ? ` · ${lf.description}` : ""}
+                      </Typography>
+                    </Stack>
+                    <Button
+                      size="small"
+                      disabled={alreadyLinked}
+                      onClick={() => {
+                        const linked: ProductFeatureDefinition = {
+                          id: lf.id,
+                          name: lf.name,
+                          valueType: lf.valueType as ProductFeatureValueType,
+                          options: lf.options ?? [],
+                          subProperties: lf.subProperties as ProductFeatureSubProperty[] | undefined,
+                        };
+                        if (featurePickerOpen === "create") {
+                          setProductFeatures((prev) => [...prev, linked]);
+                        } else {
+                          setEditProductFeatures((prev) => [...prev, linked]);
+                        }
+                        setFeaturePickerOpen(null);
+                      }}
+                    >
+                      {alreadyLinked ? "Linked" : "Add"}
+                    </Button>
+                  </Stack>
+                );
+              })
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFeaturePickerOpen(null)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+    </Stack>
   );
 };
 
 export default UserManagement;
+
+

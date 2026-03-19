@@ -15,59 +15,96 @@ const defaultUser: User = {
 export const useAuth = () => {
   const [user, setUser] = useState<User>(defaultUser);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [devRoleOverride, setDevRoleOverride] = useState<string | null>(
+    () => localStorage.getItem("dev_role_override")
+  );
 
-  const memoized = useMemo(() => ({ user, isAuthenticated }), [user, isAuthenticated]);
+  const effectiveUser = useMemo(
+    () => devRoleOverride ? { ...user, role: devRoleOverride as User["role"] } : user,
+    [user, devRoleOverride]
+  );
+
+  const memoized = useMemo(() => ({ user: effectiveUser, isAuthenticated }), [effectiveUser, isAuthenticated]);
 
   useEffect(() => {
-    const storedBackendUser = localStorage.getItem("auth_user");
-    const storedLocalUser = localStorage.getItem("local_auth_user");
-    const token = localStorage.getItem("auth_token");
+    const syncFromStorage = () => {
+      const storedBackendUser = localStorage.getItem("auth_user");
+      const storedLocalUser = localStorage.getItem("local_auth_user");
+      const token = localStorage.getItem("auth_token");
 
-    if (storedBackendUser) {
-      try {
-        const parsed = JSON.parse(storedBackendUser) as User;
-        setUser(parsed);
-        setIsAuthenticated(true);
-        return;
-      } catch {
-        // continue fallback
-      }
-    }
-
-    if (storedLocalUser) {
-      try {
-        const parsed = JSON.parse(storedLocalUser) as User;
-        setUser(parsed);
-        setIsAuthenticated(true);
-        return;
-      } catch {
-        // continue fallback
-      }
-    }
-
-    if (token && token !== "local") {
-      authService
-        .getProfile()
-        .then((profile) => {
-          setUser(profile);
+      if (storedBackendUser) {
+        try {
+          const parsed = JSON.parse(storedBackendUser) as User;
+          setUser(parsed);
           setIsAuthenticated(true);
-          localStorage.setItem("auth_user", JSON.stringify(profile));
-        })
-        .catch(() => {
-          setUser(defaultUser);
-          setIsAuthenticated(false);
-        });
-      return;
-    }
+          return true;
+        } catch {
+          // continue fallback
+        }
+      }
 
-    const storedRole = localStorage.getItem("mock_role");
-    const storedOffice = localStorage.getItem("mock_office");
-    setUser({
-      ...defaultUser,
-      role: (storedRole as User["role"]) || defaultUser.role,
-      office: (storedOffice as User["office"]) || defaultUser.office
-    });
-    setIsAuthenticated(true);
+      if (storedLocalUser) {
+        try {
+          const parsed = JSON.parse(storedLocalUser) as User;
+          setUser(parsed);
+          setIsAuthenticated(true);
+          return true;
+        } catch {
+          // continue fallback
+        }
+      }
+
+      if (token && token !== "local") {
+        authService
+          .getProfile()
+          .then((profile) => {
+            setUser(profile);
+            setIsAuthenticated(true);
+            localStorage.setItem("auth_user", JSON.stringify(profile));
+          })
+          .catch(() => {
+            setUser(defaultUser);
+            setIsAuthenticated(false);
+          });
+        return true;
+      }
+
+      const storedRole = localStorage.getItem("mock_role");
+      const storedOffice = localStorage.getItem("mock_office");
+      setUser({
+        ...defaultUser,
+        role: (storedRole as User["role"]) || defaultUser.role,
+        office: (storedOffice as User["office"]) || defaultUser.office
+      });
+      setIsAuthenticated(true);
+      return true;
+    };
+
+    syncFromStorage();
+
+    const onAuthUserUpdated = () => {
+      syncFromStorage();
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "auth_user" || event.key === "local_auth_user" || event.key === "auth_token") {
+        syncFromStorage();
+      }
+    };
+
+    const onDevRoleOverride = (e: Event) => {
+      const role = (e as CustomEvent<{ role: string | null }>).detail.role;
+      setDevRoleOverride(role);
+    };
+
+    window.addEventListener("auth-user-updated", onAuthUserUpdated);
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("dev-role-override-changed", onDevRoleOverride);
+    return () => {
+      window.removeEventListener("auth-user-updated", onAuthUserUpdated);
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("dev-role-override-changed", onDevRoleOverride);
+    };
   }, []);
 
   return memoized;

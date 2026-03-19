@@ -6,6 +6,10 @@
   installationsTableId: string;
   projectsFieldMap: string;
   installationsFieldMap: string;
+  goodsMovementsTableId: string;
+  goodsMovementsJobFid: string;
+  goodsMovementsOrderRefFid: string;
+  goodsMovementsDirectionFid: string;
 }
 
 export interface QuickbaseSettingsPayload {
@@ -16,4 +20,21 @@ export interface QuickbaseSettingsPayload {
   installationsTableId: string;
   projectsFieldMap: Record<string, number>;
   installationsFieldMap: Record<string, number>;
+  goodsMovementsTableId: string;
+  goodsMovementsJobFid: number;
+  goodsMovementsOrderRefFid: number;
+  goodsMovementsDirectionFid: number;
+}
+
+export interface NotificationSettingsPayload {
+  smtpHost: string;
+  smtpPort: number;
+  smtpUseSsl: boolean;
+  smtpUser: string;
+  smtpPass: string;
+  smtpFrom: string;
+  frontendBaseUrl: string;
+  smsProvider: string;
+  smsApiKey: string;
+  smsSender: string;
 }

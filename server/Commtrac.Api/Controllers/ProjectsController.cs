@@ -3,6 +3,7 @@ using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
 
@@ -12,6 +13,7 @@ namespace Commtrac.Api.Controllers;
 public class ProjectsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public ProjectsController(AppDbContext db)
     {
@@ -20,6 +22,7 @@ public class ProjectsController : ControllerBase
 
     [HttpGet]
     public async Task<ActionResult<ProjectListResponse>> GetAll(
+        [FromQuery] string? country,
         [FromQuery] string? office,
         [FromQuery] string? status,
         [FromQuery] string? type,
@@ -32,7 +35,39 @@ public class ProjectsController : ControllerBase
     {
         var query = _db.Projects.AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(office) && office != "All")
+        if (!string.IsNullOrWhiteSpace(country) && country != "All")
+        {
+            static List<string> Aliases(string input)
+            {
+                var c = input.Trim();
+                var low = c.ToLowerInvariant();
+                if (new[] { "usa", "us", "u.s.", "united states", "united states of america" }.Contains(low))
+                {
+                    return new List<string> { c, "USA", "US", "U.S.", "United States", "United States of America" };
+                }
+                if (new[] { "uk", "u.k.", "united kingdom", "great britain", "britain" }.Contains(low))
+                {
+                    return new List<string> { c, "UK", "U.K.", "United Kingdom", "Great Britain", "Britain" };
+                }
+                if (new[] { "uae", "u.a.e.", "united arab emirates" }.Contains(low))
+                {
+                    return new List<string> { c, "UAE", "U.A.E.", "United Arab Emirates" };
+                }
+                return new List<string> { c };
+            }
+
+            // Projects store Office as the office "city". Active office selection in the UI is country-based.
+            // Include legacy rows where Office was already stored as a country.
+            var countryAliases = Aliases(country);
+            var citiesInCountry = await _db.Offices
+                .Where(o => countryAliases.Contains(o.Country))
+                .Where(o => o.City != null && o.City != "")
+                .Select(o => o.City!)
+                .ToListAsync();
+
+            query = query.Where(p => countryAliases.Contains(p.Office) || citiesInCountry.Contains(p.Office));
+        }
+        else if (!string.IsNullOrWhiteSpace(office) && office != "All")
         {
             query = query.Where(p => p.Office == office);
         }
@@ -76,7 +111,31 @@ public class ProjectsController : ControllerBase
         }
 
         var items = await query.ToListAsync();
-        return Ok(new ProjectListResponse(items.Select(ToDto).ToList(), total));
+        var projectIds = items.Select(p => p.Id).ToList();
+
+        var siteIds = items.Select(p => p.SiteId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToList();
+        var sitesById = await _db.Sites
+            .Where(s => siteIds.Contains(s.Id))
+            .Select(s => new { s.Id, s.Name })
+            .ToDictionaryAsync(s => s.Id, s => s.Name);
+
+        // Count assets per (project, product) so the badge matches the installation page
+        // which shows assets for the first product only.
+        var assetCountsByProjectProduct = await _db.ProjectAssets
+            .Where(a => projectIds.Contains(a.ProjectId))
+            .GroupBy(a => new { a.ProjectId, a.ProductId })
+            .Select(g => new { g.Key.ProjectId, g.Key.ProductId, Count = g.Count() })
+            .ToListAsync();
+
+        return Ok(new ProjectListResponse(items.Select(p =>
+        {
+            var siteName = p.SiteId != null && sitesById.TryGetValue(p.SiteId, out var name) ? name : null;
+            var firstProduct = p.ProductIds?.FirstOrDefault();
+            var assetCount = assetCountsByProjectProduct
+                .Where(x => x.ProjectId == p.Id && (firstProduct == null || x.ProductId == firstProduct))
+                .Sum(x => x.Count);
+            return ToDto(p, siteName, assetCount);
+        }).ToList(), total));
     }
 
     [HttpGet("{id}")]
@@ -88,7 +147,16 @@ public class ProjectsController : ControllerBase
             return NotFound();
         }
 
-        return Ok(ToDto(project));
+        string? siteName = null;
+        if (!string.IsNullOrWhiteSpace(project.SiteId))
+        {
+            siteName = await _db.Sites
+                .Where(s => s.Id == project.SiteId)
+                .Select(s => s.Name)
+                .FirstOrDefaultAsync();
+        }
+
+        return Ok(ToDto(project, siteName));
     }
 
     [HttpPost]
@@ -100,7 +168,9 @@ public class ProjectsController : ControllerBase
             Id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString() : request.Id,
             CustomerName = request.CustomerName,
             CustomerId = request.CustomerId,
+            SiteId = request.SiteId,
             JobNumber = request.JobNumber,
+            PurchaseOrderNumber = request.PurchaseOrderNumber ?? string.Empty,
             Description = request.Description,
             StartDate = request.StartDate,
             FinishDate = request.FinishDate,
@@ -114,12 +184,22 @@ public class ProjectsController : ControllerBase
             ProjectManager = request.ProjectManager,
             ContractValue = request.ContractValue,
             ProbabilityStage = request.ProbabilityStage,
-            ProductIds = request.ProductIds ?? new List<string>()
+            ProductIds = request.ProductIds ?? new List<string>(),
+            ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions)
         };
 
         _db.Projects.Add(project);
         await _db.SaveChangesAsync();
-        return CreatedAtAction(nameof(GetById), new { id = project.Id }, ToDto(project));
+        string? siteName = null;
+        if (!string.IsNullOrWhiteSpace(project.SiteId))
+        {
+            siteName = await _db.Sites
+                .Where(s => s.Id == project.SiteId)
+                .Select(s => s.Name)
+                .FirstOrDefaultAsync();
+        }
+
+        return CreatedAtAction(nameof(GetById), new { id = project.Id }, ToDto(project, siteName));
     }
 
     [HttpPut("{id}")]
@@ -134,7 +214,9 @@ public class ProjectsController : ControllerBase
 
         project.CustomerName = request.CustomerName;
         project.CustomerId = request.CustomerId;
+        project.SiteId = request.SiteId;
         project.JobNumber = request.JobNumber;
+        project.PurchaseOrderNumber = request.PurchaseOrderNumber ?? string.Empty;
         project.Description = request.Description;
         project.StartDate = request.StartDate;
         project.FinishDate = request.FinishDate;
@@ -149,9 +231,19 @@ public class ProjectsController : ControllerBase
         project.ContractValue = request.ContractValue;
         project.ProbabilityStage = request.ProbabilityStage;
         project.ProductIds = request.ProductIds ?? new List<string>();
+        project.ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions);
 
         await _db.SaveChangesAsync();
-        return Ok(ToDto(project));
+        string? siteName = null;
+        if (!string.IsNullOrWhiteSpace(project.SiteId))
+        {
+            siteName = await _db.Sites
+                .Where(s => s.Id == project.SiteId)
+                .Select(s => s.Name)
+                .FirstOrDefaultAsync();
+        }
+
+        return Ok(ToDto(project, siteName));
     }
 
     [HttpPatch("{id}/status")]
@@ -167,7 +259,17 @@ public class ProjectsController : ControllerBase
         project.Status = request.Status;
         project.ApprovalDecision = request.ApprovalDecision;
         await _db.SaveChangesAsync();
-        return Ok(ToDto(project));
+
+        string? siteName = null;
+        if (!string.IsNullOrWhiteSpace(project.SiteId))
+        {
+            siteName = await _db.Sites
+                .Where(s => s.Id == project.SiteId)
+                .Select(s => s.Name)
+                .FirstOrDefaultAsync();
+        }
+
+        return Ok(ToDto(project, siteName));
     }
 
     [HttpDelete("{id}")]
@@ -185,12 +287,81 @@ public class ProjectsController : ControllerBase
         return NoContent();
     }
 
-    private static ProjectDto ToDto(ProjectEntity project)
+    /// <summary>
+    /// Copies all assets (and their workflow assignments) from <paramref name="sourceId"/>
+    /// into <paramref name="targetId"/>. Runs are NOT cloned — each asset starts fresh.
+    /// </summary>
+    [HttpPost("{targetId}/clone-assets-from/{sourceId}")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<ActionResult<CloneAssetsResult>> CloneAssetsFrom(string targetId, string sourceId)
+    {
+        if (!await _db.Projects.AnyAsync(p => p.Id == targetId))
+            return NotFound("Target project not found.");
+        if (!await _db.Projects.AnyAsync(p => p.Id == sourceId))
+            return NotFound("Source project not found.");
+
+        var sourceAssets = await _db.ProjectAssets
+            .Where(a => a.ProjectId == sourceId)
+            .ToListAsync();
+
+        var oldToNew = new Dictionary<string, string>(sourceAssets.Count);
+
+        foreach (var src in sourceAssets)
+        {
+            var newId = Guid.NewGuid().ToString();
+            oldToNew[src.Id] = newId;
+            _db.ProjectAssets.Add(new ProjectAssetEntity
+            {
+                Id                = newId,
+                ProjectId         = targetId,
+                ProductId         = src.ProductId,
+                ProductConfigId   = src.ProductConfigId,
+                WorkflowTemplateId = src.WorkflowTemplateId,
+                AssetTag          = src.AssetTag,
+                AssetName         = src.AssetName,
+                SerialNumber      = src.SerialNumber,
+                AssetModel        = src.AssetModel,
+                Manufacturer      = src.Manufacturer,
+                Location          = src.Location,
+                Notes             = src.Notes,
+                ConfigLabel       = src.ConfigLabel,
+                FeatureValuesJson = src.FeatureValuesJson,
+                Status            = "NotStarted",
+                IssuesJson        = "[]",
+            });
+        }
+        await _db.SaveChangesAsync();
+
+        var sourceAssignments = await _db.AssetWorkflowAssignments
+            .Where(a => oldToNew.Keys.Contains(a.AssetId))
+            .ToListAsync();
+
+        foreach (var asgn in sourceAssignments)
+        {
+            if (!oldToNew.TryGetValue(asgn.AssetId, out var newAssetId)) continue;
+            _db.AssetWorkflowAssignments.Add(new AssetWorkflowAssignmentEntity
+            {
+                Id               = Guid.NewGuid().ToString(),
+                AssetId          = newAssetId,
+                WorkflowTypeId   = asgn.WorkflowTypeId,
+                WorkflowConfigId = asgn.WorkflowConfigId,
+                Active           = true,
+            });
+        }
+        await _db.SaveChangesAsync();
+
+        return Ok(new CloneAssetsResult(sourceAssets.Count, sourceAssignments.Count));
+    }
+
+    private static ProjectDto ToDto(ProjectEntity project, string? siteName, int assetCount = 0)
         => new(
             project.Id,
             project.CustomerName,
             project.CustomerId,
+            project.SiteId,
+            siteName,
             project.JobNumber,
+            project.PurchaseOrderNumber,
             project.Description,
             project.StartDate,
             project.FinishDate,
@@ -204,7 +375,11 @@ public class ProjectsController : ControllerBase
             project.ProjectManager,
             project.ContractValue,
             project.ProbabilityStage,
-            project.ProductIds
+            project.ProductIds,
+            string.IsNullOrWhiteSpace(project.ProductFeatureValuesJson)
+                ? new Dictionary<string, string>()
+                : JsonSerializer.Deserialize<Dictionary<string, string>>(project.ProductFeatureValuesJson, JsonOptions) ?? new Dictionary<string, string>(),
+            assetCount
         );
 }
 

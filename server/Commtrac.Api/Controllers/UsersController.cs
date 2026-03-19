@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 using System.Security.Cryptography;
 
 namespace Commtrac.Api.Controllers;
@@ -17,16 +18,16 @@ public class UsersController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IEmailSender _emailSender;
-    private readonly EmailSettings _emailSettings;
+    private readonly NotificationSettingsService _notificationSettings;
 
     public UsersController(
         AppDbContext db,
         IEmailSender emailSender,
-        IOptions<EmailSettings> emailSettings)
+        NotificationSettingsService notificationSettings)
     {
         _db = db;
         _emailSender = emailSender;
-        _emailSettings = emailSettings.Value;
+        _notificationSettings = notificationSettings;
     }
 
     [HttpGet]
@@ -102,9 +103,42 @@ public class UsersController : ControllerBase
         user.IsActive = false;
         await _db.SaveChangesAsync();
 
-        var link = $"{_emailSettings.FrontendBaseUrl}/reset-password?token={Uri.EscapeDataString(token)}";
+        var emailSettings = await _notificationSettings.GetEmailSettingsAsync();
+        var baseUrl = ResolveFrontendBaseUrl(emailSettings.FrontendBaseUrl);
+        var link = $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}";
         await _emailSender.SendInviteAsync(user.Email, link);
         return NoContent();
+    }
+
+    [HttpPost("{id}/reset-2fa")]
+    public async Task<ActionResult<UserDto>> Reset2fa(string id)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id);
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        user.Is2faEnabled = false;
+        user.TotpSecret = null;
+        user.RecoveryCodesJson = null;
+        await _db.SaveChangesAsync();
+
+        // Audit log: admin reset 2FA
+        var adminId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown";
+        var adminEmail = User.FindFirstValue(ClaimTypes.Email) ?? "unknown";
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        _db.AuditLogs.Add(new AuditLogEntity
+        {
+            UserId = adminId,
+            UserEmail = adminEmail,
+            Action = "2fa_admin_reset",
+            Details = $"Reset 2FA for user {user.Email} ({user.Id})",
+            IpAddress = ip
+        });
+        await _db.SaveChangesAsync();
+
+        return Ok(ToDto(user));
     }
 
     [HttpDelete("{id}")]
@@ -122,19 +156,68 @@ public class UsersController : ControllerBase
     }
 
     private static UserDto ToDto(UserEntity user)
-        => new(
+    {
+        var codesRemaining = 0;
+        if (!string.IsNullOrEmpty(user.RecoveryCodesJson))
+        {
+            try { codesRemaining = System.Text.Json.JsonSerializer.Deserialize<List<string>>(user.RecoveryCodesJson)?.Count ?? 0; } catch { }
+        }
+        return new UserDto(
             user.Id,
             user.Email,
             user.FullName,
             user.Role,
             user.Office,
             user.IsActive,
-            user.IsFirstLogin
+            user.IsFirstLogin,
+            user.Is2faEnabled,
+            codesRemaining
         );
+    }
 
     private static string GenerateToken()
     {
         var bytes = RandomNumberGenerator.GetBytes(32);
         return Convert.ToBase64String(bytes);
+    }
+
+    private string ResolveFrontendBaseUrl(string? configuredBaseUrl)
+    {
+        var configured = (configuredBaseUrl ?? string.Empty).Trim().TrimEnd('/');
+
+        if (!string.IsNullOrWhiteSpace(configured) && !IsLocalhostUrl(configured))
+        {
+            return configured;
+        }
+
+        var origin = Request.Headers.Origin.ToString().Trim().TrimEnd('/');
+        if (Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
+        {
+            return $"{originUri.Scheme}://{originUri.Authority}";
+        }
+
+        var referer = Request.Headers.Referer.ToString().Trim();
+        if (Uri.TryCreate(referer, UriKind.Absolute, out var refererUri))
+        {
+            return $"{refererUri.Scheme}://{refererUri.Authority}";
+        }
+
+        if (Uri.TryCreate(configured, UriKind.Absolute, out var configuredUri))
+        {
+            return $"{configuredUri.Scheme}://{configuredUri.Authority}";
+        }
+
+        return $"{Request.Scheme}://{Request.Host.Value}";
+    }
+
+    private static bool IsLocalhostUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var host = uri.Host.ToLowerInvariant();
+        return host == "localhost" || host == "127.0.0.1" || host == "::1";
     }
 }
