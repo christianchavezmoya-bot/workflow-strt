@@ -80,9 +80,13 @@ export default function BomComparisonPage() {
 
   if (!state.draftProject) {
     return (
-      <Box p={4} textAlign="center">
-        <Typography color="text.secondary">No draft generated yet. Go back to classification.</Typography>
-        <Button sx={{ mt: 2 }} onClick={() => navigate(-1)}>Back</Button>
+      <Box sx={{ textAlign: "center", py: 6 }}>
+        <Alert severity="warning" sx={{ mb: 2, maxWidth: 480, mx: "auto" }}>
+          Session data not found. Please complete classification first.
+        </Alert>
+        <Button variant="outlined" onClick={() => navigate("/admin/bom-project")}>
+          Back to Dashboard
+        </Button>
       </Box>
     );
   }

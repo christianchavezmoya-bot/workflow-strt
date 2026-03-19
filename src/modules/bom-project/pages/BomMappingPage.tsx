@@ -21,6 +21,19 @@ export default function BomMappingPage() {
   const firstSheet = state.parsedWorkbook?.sheets[0];
   const sampleRows = firstSheet?.sampleRows ?? [];
 
+  if (state.rawRows.length === 0) {
+    return (
+      <Box sx={{ textAlign: "center", py: 6 }}>
+        <Alert severity="warning" sx={{ mb: 2, maxWidth: 480, mx: "auto" }}>
+          Session data not found. Please start from the dashboard and re-upload your file.
+        </Alert>
+        <Button variant="outlined" onClick={() => navigate("/admin/bom-project")}>
+          Back to Dashboard
+        </Button>
+      </Box>
+    );
+  }
+
   const handleNext = async () => {
     setSaving(true);
     setError(null);

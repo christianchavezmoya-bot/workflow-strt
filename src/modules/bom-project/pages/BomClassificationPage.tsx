@@ -86,6 +86,19 @@ export default function BomClassificationPage() {
     return acc;
   }, {} as Record<ItemType, number>);
 
+  if (state.normalizedRows.length === 0) {
+    return (
+      <Box sx={{ textAlign: "center", py: 6 }}>
+        <Alert severity="warning" sx={{ mb: 2, maxWidth: 480, mx: "auto" }}>
+          Session data not found. Please start from the dashboard and complete column mapping first.
+        </Alert>
+        <Button variant="outlined" onClick={() => navigate("/admin/bom-project")}>
+          Back to Dashboard
+        </Button>
+      </Box>
+    );
+  }
+
   return (
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={2}>

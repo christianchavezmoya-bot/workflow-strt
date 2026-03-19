@@ -1,5 +1,6 @@
-import { Box, Button, Chip, CircularProgress, Divider, Grid, LinearProgress, Paper, Stack, Tooltip, Typography } from "@mui/material";
+import { Box, Button, Chip, CircularProgress, Divider, Grid, IconButton, LinearProgress, Paper, Stack, Tooltip, Typography } from "@mui/material";
 import {
+  AssessmentOutlined,
   AssignmentLateOutlined,
   CheckCircleOutlineOutlined,
   ErrorOutlineOutlined,
@@ -21,6 +22,7 @@ import { fetchProjects } from "../../store/projectSlice";
 import { officesService } from "../../services/officesService";
 import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
 import { projectAssetService, type WorkloadSummaryItem } from "../../services/projectAssetService";
+import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 
@@ -47,8 +49,26 @@ const Dashboard = () => {
   const [attentionLoading,    setAttentionLoading]    = useState(false);
   const [workload,            setWorkload]            = useState<WorkloadSummaryItem[]>([]);
   const [workloadLoading,     setWorkloadLoading]     = useState(false);
+  const [reportingTechId,     setReportingTechId]     = useState<string | null>(null);
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
+
+  async function handleGenerateTechReport(w: WorkloadSummaryItem) {
+    setReportingTechId(w.userId);
+    try {
+      const exportDate = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+      const reportData: TechnicianReportData = {
+        technicianName: w.fullName,
+        reportPeriod: exportDate,
+        runs: [],
+        assets: [],
+        exportDate,
+      };
+      await generateTechnicianReport(reportData);
+    } finally {
+      setReportingTechId(null);
+    }
+  }
 
   useEffect(() => {
     officesService.getAll().then((offices) => {
@@ -443,6 +463,21 @@ const Dashboard = () => {
                       color={load}
                       sx={{ fontWeight: 700, minWidth: 40 }}
                     />
+                    <Tooltip title="Generate technician report">
+                      <span>
+                        <IconButton
+                          size="small"
+                          disabled={reportingTechId === w.userId}
+                          onClick={(e) => { e.stopPropagation(); void handleGenerateTechReport(w); }}
+                          sx={{ color: "text.secondary", flexShrink: 0 }}
+                        >
+                          {reportingTechId === w.userId
+                            ? <CircularProgress size={14} />
+                            : <AssessmentOutlined sx={{ fontSize: 16 }} />
+                          }
+                        </IconButton>
+                      </span>
+                    </Tooltip>
                   </Stack>
                 </Paper>
               );

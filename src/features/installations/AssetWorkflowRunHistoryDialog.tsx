@@ -37,7 +37,7 @@ import {
 } from "@mui/material";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import type { AssetWorkflowRun, RunIssue, StepResult } from "../../types/assetWorkflowRun";
-import type { BomActualItem } from "../../types/workflow";
+import type { BomActualItem, WorkflowStep } from "../../types/workflow";
 import type { WorkflowAssignment } from "../../types/workflowType";
 import type { ProjectAsset } from "../../types/projectAsset";
 
@@ -100,6 +100,18 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
 
   function parseStepResults(json: string): StepResult[] {
     try { return JSON.parse(json) as StepResult[]; } catch { return []; }
+  }
+
+  function parseSnapshotSteps(snapshotJson: string): WorkflowStep[] {
+    try {
+      const snap = JSON.parse(snapshotJson) as { stepsJson?: string };
+      if (snap?.stepsJson) {
+        const parsed = JSON.parse(snap.stepsJson);
+        if (Array.isArray(parsed)) return parsed as WorkflowStep[];
+        if (parsed?.steps && Array.isArray(parsed.steps)) return parsed.steps as WorkflowStep[];
+      }
+    } catch { /* ignore */ }
+    return [];
   }
 
   /** Render a single captured input value — handles photos, signatures, and plain text */
@@ -501,38 +513,41 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
                               </TableRow>
                             </TableHead>
                             <TableBody>
-                              {stepResults.map((sr) => {
-                                const entries = Object.entries(sr.values ?? {}).filter(([, v]) => v);
-                                return (
-                                  <TableRow key={sr.stepId} sx={{ verticalAlign: "top" }}>
-                                    <TableCell sx={{ fontSize: 12, py: 0.75, color: "text.secondary", fontFamily: "monospace", whiteSpace: "nowrap" }}>
-                                      {sr.stepId.slice(0, 8)}…
-                                    </TableCell>
-                                    <TableCell sx={{ py: 0.75 }}>
-                                      {entries.length > 0 ? (
-                                        <Stack spacing={0.75}>
-                                          {entries.map(([k, v]) => (
-                                            <Stack key={k} direction="row" spacing={1} alignItems="flex-start">
-                                              <Typography variant="caption" color="text.secondary" sx={{ minWidth: 80, flexShrink: 0, pt: 0.2 }}>
-                                                {k}
-                                              </Typography>
-                                              {renderValue(v)}
-                                            </Stack>
-                                          ))}
-                                        </Stack>
-                                      ) : (
-                                        <Typography variant="caption" color="text.disabled">—</Typography>
-                                      )}
-                                    </TableCell>
-                                    <TableCell sx={{ fontSize: 11, py: 0.75, color: "text.secondary", whiteSpace: "nowrap" }}>
-                                      {sr.completedAt
-                                        ? new Date(sr.completedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-                                        : "—"
-                                      }
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })}
+                              {(() => {
+                                const stepTitleMap = new Map(parseSnapshotSteps(run.workflowSnapshotJson).map((s) => [s.id, s.title]));
+                                return stepResults.map((sr) => {
+                                  const entries = Object.entries(sr.values ?? {}).filter(([, v]) => v);
+                                  return (
+                                    <TableRow key={sr.stepId} sx={{ verticalAlign: "top" }}>
+                                      <TableCell sx={{ fontSize: 12, py: 0.75, whiteSpace: "nowrap" }}>
+                                        {stepTitleMap.get(sr.stepId) ?? `${sr.stepId.slice(0, 8)}…`}
+                                      </TableCell>
+                                      <TableCell sx={{ py: 0.75 }}>
+                                        {entries.length > 0 ? (
+                                          <Stack spacing={0.75}>
+                                            {entries.map(([k, v]) => (
+                                              <Stack key={k} direction="row" spacing={1} alignItems="flex-start">
+                                                <Typography variant="caption" color="text.secondary" sx={{ minWidth: 80, flexShrink: 0, pt: 0.2 }}>
+                                                  {k}
+                                                </Typography>
+                                                {renderValue(v)}
+                                              </Stack>
+                                            ))}
+                                          </Stack>
+                                        ) : (
+                                          <Typography variant="caption" color="text.disabled">—</Typography>
+                                        )}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: 11, py: 0.75, color: "text.secondary", whiteSpace: "nowrap" }}>
+                                        {sr.completedAt
+                                          ? new Date(sr.completedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+                                          : "—"
+                                        }
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                });
+                              })()}
                             </TableBody>
                           </Table>
                         </>
