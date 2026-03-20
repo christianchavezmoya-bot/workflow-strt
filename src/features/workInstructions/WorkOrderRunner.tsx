@@ -10,6 +10,7 @@ import {
   LockOutlined,
   PauseOutlined,
   PhotoCameraOutlined,
+  PlayArrowOutlined,
   QrCodeScannerOutlined,
   ReportProblemOutlined,
   SyncOutlined,
@@ -34,6 +35,7 @@ import {
   Menu,
   MenuItem,
   Paper,
+  Popover,
   Select,
   Stack,
   Switch,
@@ -233,6 +235,7 @@ export default function WorkOrderRunner({
 
   const [downtimeReason, setDowntimeReason] = useState("");
   const [trackingBusy, setTrackingBusy] = useState(false);
+  const [reasonPopoverAnchor, setReasonPopoverAnchor] = useState<HTMLButtonElement | null>(null);
   const [productiveSecondsBase, setProductiveSecondsBase] = useState(0);
   const [downtimeSecondsBase, setDowntimeSecondsBase] = useState(0);
   const [trackingCategory, setTrackingCategory] = useState<"productive" | "downtime" | null>(null);
@@ -271,16 +274,15 @@ export default function WorkOrderRunner({
     if (!open) reset();
   }, [open, existingRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Tick every second while the runner is in the "running" stage so both
-  // productiveSecondsLive and downtimeSecondsLive update in real time.
-  // Deliberately does NOT include trackingCategory/trackingStartedAt so the
-  // interval is never torn down mid-switch — avoids the clock freezing when
-  // transitioning from productive to downtime.
+  // Tick every second while the dialog is open — drives productiveSecondsLive
+  // and downtimeSecondsLive in real time. Running unconditionally (not gated
+  // on stage or trackingCategory) means the clock never stops due to a stage
+  // transition and always restarts cleanly when tracking switches categories.
   useEffect(() => {
-    if (stage !== "running") return;
+    if (!open) return;
     const t = window.setInterval(() => setTickNow(Date.now()), 1000);
     return () => window.clearInterval(t);
-  }, [stage]);
+  }, [open]);
 
   function reset() {
     setStage("setup");
@@ -329,7 +331,8 @@ export default function WorkOrderRunner({
     setDowntimeSecondsBase(run.downtimeSeconds ?? 0);
     const entries = parseRunTimeEntries(run.timeTrackingJson ?? "[]");
     const open = [...entries].reverse().find((e) => !e.endedAtUtc) ?? null;
-    if (open && (open.category === "productive" || open.category === "downtime")) {
+    if (open && (open.category === "productive" || open.category === "downtime")
+        && !Number.isNaN(Date.parse(open.startedAtUtc))) {
       setTrackingCategory(open.category);
       setTrackingStartedAt(open.startedAtUtc);
     } else {
@@ -438,17 +441,15 @@ export default function WorkOrderRunner({
   }
 
   async function handlePause() {
-    if (activeRunId && isRealRun && trackingCategory !== "downtime") {
+    if (activeRunId && isRealRun) {
       try {
-        const updated = await queueOrSend("StartDowntime", "Paused by user");
-        if (updated) {
-          setActiveRun(updated);
-          syncRunTimeState(updated);
-        }
-        // If queued (offline), the run persists via localStorage — no UI update needed here
-        // since we're closing the dialog anyway
+        // Call directly (not via the offline queue) — pause is a fire-once
+        // action tied to closing the dialog; queuing it causes a stale "sync
+        // pending" chip when the user reopens the run.
+        const updated = await assetWorkflowRunService.trackTimeEntry(activeRunId, "StopAll");
+        if (updated) syncRunTimeState(updated);
       } catch {
-        // keep pause flow resilient
+        // non-fatal — idle state will be restored on next open
       }
     }
     await autosaveProgress();
@@ -483,6 +484,17 @@ export default function WorkOrderRunner({
       setActiveRunId(run.id);
       setActiveRun(run);
       syncRunTimeState(run);
+
+      // If the run has no open time entry (was paused → idle), automatically
+      // resume productive so the clock starts the moment the tech continues.
+      const timeEntries = parseRunTimeEntries(run.timeTrackingJson ?? "[]");
+      const hasOpenEntry = timeEntries.some((e) => !e.endedAtUtc);
+      if (!hasOpenEntry && run.id) {
+        try {
+          const resumed = await assetWorkflowRunService.trackTimeEntry(run.id, "ResumeProductive", "Continued");
+          if (resumed) syncRunTimeState(resumed);
+        } catch { /* non-fatal — tracking will still work manually */ }
+      }
 
       // Restore step values and issues from saved progress
       let prevValues: Record<string, Record<string, string>> = {};
@@ -1167,31 +1179,43 @@ export default function WorkOrderRunner({
             </Stack>
           </Stack>
           <LinearProgress variant="determinate" value={progress} sx={{ mt: 1, borderRadius: 1 }} />
-          {isRealRun && activeRunId && (
+{isRealRun && activeRunId && (
             <Stack spacing={1} sx={{ mt: 1.25 }}>
-              {/* Status row: state badge + time totals + offline/sync indicator */}
+              {/* Time tracking bar — colour-coded, always visible */}
+              <Box sx={{
+                display: "flex", alignItems: "center", gap: 1.5,
+                px: 1.5, py: 0.75, borderRadius: 1.5,
+                bgcolor: trackingCategory === "downtime" ? "warning.main"
+                  : trackingCategory === "productive" ? "success.dark"
+                  : "action.selected",
+                transition: "background-color 0.4s ease",
+              }}>
+                <Box sx={{
+                  width: 9, height: 9, borderRadius: "50%", flexShrink: 0,
+                  bgcolor: trackingCategory ? "#fff" : "text.disabled",
+                  animation: trackingCategory ? "timepulse 1.2s ease-in-out infinite" : "none",
+                  "@keyframes timepulse": { "0%,100%": { opacity: 1 }, "50%": { opacity: 0.25 } },
+                }} />
+                <Typography variant="caption" fontWeight={700} sx={{ color: trackingCategory ? "#fff" : "text.secondary", minWidth: 64 }}>
+                  {trackingCategory === "productive" ? "Productive" : trackingCategory === "downtime" ? "Downtime" : "Idle"}
+                </Typography>
+                <Box sx={{ display: "flex", gap: 2, ml: "auto" }}>
+                  <Box sx={{ textAlign: "center" }}>
+                    <Typography sx={{ fontFamily: "monospace", fontWeight: 700, fontSize: "0.82rem", letterSpacing: 1, color: trackingCategory === "productive" ? "#fff" : "text.secondary" }}>
+                      {formatDuration(productiveSecondsLive)}
+                    </Typography>
+                    <Typography variant="caption" display="block" sx={{ fontSize: "0.62rem", color: trackingCategory === "productive" ? "rgba(255,255,255,0.7)" : "text.disabled" }}>productive</Typography>
+                  </Box>
+                  <Box sx={{ textAlign: "center" }}>
+                    <Typography sx={{ fontFamily: "monospace", fontWeight: 700, fontSize: "0.82rem", letterSpacing: 1, color: trackingCategory === "downtime" ? "#fff" : "text.secondary" }}>
+                      {formatDuration(downtimeSecondsLive)}
+                    </Typography>
+                    <Typography variant="caption" display="block" sx={{ fontSize: "0.62rem", color: trackingCategory === "downtime" ? "rgba(255,255,255,0.7)" : "text.disabled" }}>downtime</Typography>
+                  </Box>
+                </Box>
+              </Box>
+              {/* Offline / sync status row */}
               <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
-                <Chip
-                  size="small"
-                  variant={trackingCategory ? "filled" : "outlined"}
-                  color={trackingCategory === "productive" ? "success" : trackingCategory === "downtime" ? "warning" : "default"}
-                  label={
-                    trackingCategory === "productive"
-                      ? "● Productive"
-                      : trackingCategory === "downtime"
-                      ? "● Downtime"
-                      : "Idle"
-                  }
-                  sx={{ fontWeight: 600, letterSpacing: 0.2 }}
-                />
-                <Chip size="small" color="success" variant="outlined" label={`Productive: ${formatDuration(productiveSecondsLive)}`} />
-                <Chip
-                  size="small"
-                  color={downtimeSecondsLive > 0 ? "warning" : "default"}
-                  variant="outlined"
-                  label={`Downtime: ${formatDuration(downtimeSecondsLive)}`}
-                />
-                {/* Offline / sync status */}
                 {syncing ? (
                   <Chip
                     size="small"
@@ -1219,59 +1243,95 @@ export default function WorkOrderRunner({
                   />
                 ) : null}
               </Stack>
-              {/* Controls row */}
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={0.75} alignItems={{ sm: "center" }} useFlexGap>
-                {/* Reason field — only editable when not already tracking downtime */}
-                {trackingCategory !== "downtime" && (
-                  <TextField
-                    size="small"
-                    label="Downtime reason"
-                    value={downtimeReason}
-                    onChange={(e) => setDowntimeReason(e.target.value)}
-                    placeholder="Waiting for parts / access / permit..."
-                    sx={{ minWidth: 220, flex: 1 }}
-                  />
-                )}
-                <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                  {/* Edit times */}
-                  <Button
-                    size="small"
-                    variant="text"
-                    color="inherit"
-                    sx={{ opacity: 0.65, fontSize: "0.72rem" }}
-                    onClick={() => setTimeEditorOpen(true)}
-                  >
-                    Edit Times
-                  </Button>
-                  {/* Single downtime toggle */}
-                  <Button
-                    size="small"
-                    color="warning"
-                    variant={trackingCategory === "downtime" ? "contained" : "outlined"}
-                    disabled={trackingBusy || (trackingCategory !== "downtime" && !downtimeReason.trim())}
-                    onClick={() => {
-                      if (trackingCategory === "downtime") {
-                        void trackRunTime("StopDowntime");
-                      } else {
-                        void trackRunTime("StartDowntime", downtimeReason.trim());
-                      }
-                    }}
-                  >
-                    {trackingCategory === "downtime" ? "Stop Downtime" : "Start Downtime"}
-                  </Button>
-                  {/* Productive button — greyed out / disabled while already productive */}
+              {/* Controls row — single toggle button */}
+              <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap>
+                <Button
+                  size="small"
+                  variant="text"
+                  color="inherit"
+                  sx={{ opacity: 0.65, fontSize: "0.72rem" }}
+                  onClick={() => setTimeEditorOpen(true)}
+                >
+                  Edit Times
+                </Button>
+                {/* Single toggle: downtime ↔ productive */}
+                {trackingCategory === "downtime" ? (
                   <Button
                     size="small"
                     color="success"
-                    variant={trackingCategory === "productive" ? "outlined" : "contained"}
-                    disabled={trackingBusy || trackingCategory === "productive"}
+                    variant="contained"
+                    disabled={trackingBusy}
+                    startIcon={trackingBusy ? <CircularProgress size={12} color="inherit" /> : <PlayArrowOutlined />}
                     onClick={() => { void trackRunTime("ResumeProductive"); }}
-                    sx={trackingCategory === "productive" ? { opacity: 0.5, cursor: "default" } : {}}
                   >
-                    {trackingCategory === "productive" ? "Running..." : "Resume Productive"}
+                    Resume Productive
                   </Button>
-                </Stack>
+                ) : (
+                  <Button
+                    size="small"
+                    color={trackingCategory === "productive" ? "warning" : "success"}
+                    variant="outlined"
+                    disabled={trackingBusy}
+                    startIcon={trackingBusy ? <CircularProgress size={12} color="inherit" /> : trackingCategory === "productive" ? <PauseOutlined /> : <PlayArrowOutlined />}
+                    onClick={(e) => setReasonPopoverAnchor(e.currentTarget)}
+                  >
+                    {trackingCategory === "productive" ? "Start Downtime" : "Start Productive"}
+                  </Button>
+                )}
               </Stack>
+              {/* Downtime reason popover */}
+              <Popover
+                open={Boolean(reasonPopoverAnchor)}
+                anchorEl={reasonPopoverAnchor}
+                onClose={() => { setReasonPopoverAnchor(null); setDowntimeReason(""); }}
+                anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+                transformOrigin={{ vertical: "top", horizontal: "left" }}
+                slotProps={{ paper: { sx: { p: 2, width: 300 } } }}
+              >
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2">
+                    {trackingCategory === "productive" ? "Downtime reason" : "Start productive tracking"}
+                  </Typography>
+                  {trackingCategory === "productive" && (
+                    <TextField
+                      autoFocus
+                      size="small"
+                      fullWidth
+                      label="Reason"
+                      placeholder="Waiting for parts / access / permit…"
+                      value={downtimeReason}
+                      onChange={(e) => setDowntimeReason(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && downtimeReason.trim()) {
+                          setReasonPopoverAnchor(null);
+                          void trackRunTime("StartDowntime", downtimeReason.trim());
+                        }
+                      }}
+                    />
+                  )}
+                  <Stack direction="row" spacing={1} justifyContent="flex-end">
+                    <Button size="small" onClick={() => { setReasonPopoverAnchor(null); setDowntimeReason(""); }}>
+                      Cancel
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color={trackingCategory === "productive" ? "warning" : "success"}
+                      disabled={trackingCategory === "productive" && !downtimeReason.trim()}
+                      onClick={() => {
+                        setReasonPopoverAnchor(null);
+                        if (trackingCategory === "productive") {
+                          void trackRunTime("StartDowntime", downtimeReason.trim());
+                        } else {
+                          void trackRunTime("ResumeProductive");
+                        }
+                      }}
+                    >
+                      {trackingCategory === "productive" ? "Start Downtime" : "Start Productive"}
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Popover>
             </Stack>
           )}
         </DialogTitle>

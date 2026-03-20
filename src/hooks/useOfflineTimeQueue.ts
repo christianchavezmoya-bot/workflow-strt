@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { assetWorkflowRunService } from "../services/assetWorkflowRunService";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 
-export type TrackAction = "StartProductive" | "ResumeProductive" | "StartDowntime" | "StopDowntime";
+export type TrackAction = "StartProductive" | "ResumeProductive" | "StartDowntime" | "StopDowntime" | "StopAll";
 
 interface QueuedAction {
   /** Unique ID for deduplication. */

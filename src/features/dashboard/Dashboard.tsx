@@ -118,11 +118,8 @@ const Dashboard = () => {
     });
   }, [activeOffice, installations, countryForOffice]);
 
-  const productCount            = products.length;
-  const projectCount            = filteredProjects.length;
-  const activeInstallationsCount = filteredInstallations.filter((i) => ["Scheduled", "In Progress"].includes(i.status)).length;
-  const pendingApprovalCount    = filteredProjects.filter((p) => p.status === "Pending Approval").length;
-  const inProgressCount         = filteredProjects.filter((p) => p.status === "In Progress").length;
+  const projectCount    = filteredProjects.length;
+  const inProgressCount = filteredProjects.filter((p) => p.status === "In Progress").length;
 
   // Needs Attention derived
   const blockingIssues  = openIssues.filter((i) => i.isBlocking);
@@ -154,15 +151,52 @@ const Dashboard = () => {
   return (
     <Stack spacing={3}>
 
-      {/* ── Row 1: Top KPI summary cards (existing, unchanged) ── */}
-      <Stack direction={{ xs: "column", md: "row" }} spacing={2} flexWrap="wrap" useFlexGap>
-        <SummaryCard title="Total Projects"       value={String(projectCount)}             trend={`${inProgressCount} in progress`} />
-        <SummaryCard title="Active Installations" value={String(activeInstallationsCount)} trend="Scheduled + In Progress" />
-        <SummaryCard title="Pending Approvals"    value={String(pendingApprovalCount)}     trend="Awaiting review" />
-        <SummaryCard title="Products"             value={String(productCount)}             trend="Catalog size" />
-      </Stack>
+      {/* ── Row 1: Regional Snapshot ── */}
+      <Box className="glass-card" sx={{ padding: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Regional snapshot ({activeOffice})
+        </Typography>
+        <Grid container spacing={2}>
+          {(activeOffice === "All" ? availableCountries : [activeOffice]).map((region) => {
+            const regionProjects = projects.filter((p) => {
+              const c = countryForOffice(p.office);
+              return c === region || p.office === region;
+            });
+            const regionInstallations = installations.filter((i) => {
+              const c = countryForOffice(i.office);
+              return c === region || i.office === region;
+            });
+            const regionActiveInstalls = regionInstallations.filter((i) =>
+              ["Scheduled", "In Progress"].includes(i.status)
+            ).length;
+            const regionInProgress = regionProjects.filter(p => p.status === "In Progress").length;
+            return (
+              <Grid key={region} item xs={12} md={4}>
+                <Box
+                  onClick={() => { updateActiveOffice(region); navigate("/projects"); }}
+                  sx={{
+                    padding: 2, borderRadius: 2,
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: "rgba(255,255,255,0.04)",
+                    cursor: "pointer", transition: "all 0.2s",
+                    "&:hover": { background: "rgba(45,212,191,0.1)", borderColor: "rgba(45,212,191,0.3)", transform: "translateY(-2px)" }
+                  }}
+                >
+                  <Typography variant="subtitle1" sx={{ fontFamily: "Sora" }}>{region}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {regionProjects.length} projects · {regionInProgress} in progress
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {regionActiveInstalls} active installations
+                  </Typography>
+                </Box>
+              </Grid>
+            );
+          })}
+        </Grid>
+      </Box>
 
-      {/* ── Row 2: Needs Attention (NEW) ── */}
+      {/* ── Row 2: Needs Attention ── */}
       <Box className="glass-card" sx={{ padding: 2.5 }}>
         <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
           <WarningAmberOutlined sx={{ color: attentionCount > 0 ? "warning.main" : "success.main", fontSize: 20 }} />
@@ -351,51 +385,6 @@ const Dashboard = () => {
           </Box>
         </Grid>
       </Grid>
-
-      {/* ── Row 4: Regional Snapshot (existing, unchanged) ── */}
-      <Box className="glass-card" sx={{ padding: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Regional snapshot ({activeOffice})
-        </Typography>
-        <Grid container spacing={2}>
-          {(activeOffice === "All" ? availableCountries : [activeOffice]).map((region) => {
-            const regionProjects = projects.filter((p) => {
-              const c = countryForOffice(p.office);
-              return c === region || p.office === region;
-            });
-            const regionInstallations = installations.filter((i) => {
-              const c = countryForOffice(i.office);
-              return c === region || i.office === region;
-            });
-            const regionActiveInstalls = regionInstallations.filter((i) =>
-              ["Scheduled", "In Progress"].includes(i.status)
-            ).length;
-            const regionInProgress = regionProjects.filter(p => p.status === "In Progress").length;
-            return (
-              <Grid key={region} item xs={12} md={4}>
-                <Box
-                  onClick={() => { updateActiveOffice(region); navigate("/projects"); }}
-                  sx={{
-                    padding: 2, borderRadius: 2,
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    background: "rgba(255,255,255,0.04)",
-                    cursor: "pointer", transition: "all 0.2s",
-                    "&:hover": { background: "rgba(45,212,191,0.1)", borderColor: "rgba(45,212,191,0.3)", transform: "translateY(-2px)" }
-                  }}
-                >
-                  <Typography variant="subtitle1" sx={{ fontFamily: "Sora" }}>{region}</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {regionProjects.length} projects · {regionInProgress} in progress
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {regionActiveInstalls} active installations
-                  </Typography>
-                </Box>
-              </Grid>
-            );
-          })}
-        </Grid>
-      </Box>
 
       {/* ── Technician Workload Panel ── */}
       <Box className="glass-card" sx={{ p: 3 }}>

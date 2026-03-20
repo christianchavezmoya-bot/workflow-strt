@@ -116,7 +116,7 @@ export const assetWorkflowRunService = {
 
   async trackTimeEntry(
     runId: string,
-    action: "StartProductive" | "ResumeProductive" | "StartDowntime" | "StopDowntime",
+    action: "StartProductive" | "ResumeProductive" | "StartDowntime" | "StopDowntime" | "StopAll",
     reason?: string,
     startedAtUtc?: string,
     endedAtUtc?: string

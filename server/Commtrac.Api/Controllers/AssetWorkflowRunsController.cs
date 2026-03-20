@@ -529,8 +529,13 @@ public class AssetWorkflowRunsController : ControllerBase
             case "stopdowntime":
                 CloseOpenCategory(run, "downtime", endAt);
                 break;
+            case "stopall":
+            case "pause":
+                // Close whatever is open (productive or downtime) → idle state
+                CloseAnyOpenTimeEntry(run, endAt);
+                break;
             default:
-                return BadRequest(new { message = "Unknown action. Use StartProductive, ResumeProductive, StartDowntime, StopDowntime." });
+                return BadRequest(new { message = "Unknown action. Use StartProductive, ResumeProductive, StartDowntime, StopDowntime, StopAll." });
         }
 
         run.UpdatedAt = now;
@@ -549,8 +554,11 @@ public class AssetWorkflowRunsController : ControllerBase
     private static DateTime ParseUtcOr(string? value, DateTime fallbackUtc)
     {
         if (string.IsNullOrWhiteSpace(value)) return fallbackUtc;
-        if (!DateTime.TryParse(value, out var parsed)) return fallbackUtc;
-        return parsed.Kind == DateTimeKind.Utc ? parsed : DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+        // Use DateTimeOffset so the "Z" / "+HH:mm" designator is preserved
+        // correctly regardless of the server's local timezone.
+        // DateTime.TryParse alone converts "Z" to local time on non-UTC servers.
+        if (DateTimeOffset.TryParse(value, out var dto)) return dto.UtcDateTime;
+        return fallbackUtc;
     }
 
     private static List<RunTimeEntry> ParseTimeEntries(string json)
