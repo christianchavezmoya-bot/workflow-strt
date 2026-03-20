@@ -329,6 +329,8 @@ const AssetInstallationPage = () => {
   const [inlineCommentTexts, setInlineCommentTexts] = useState<Record<string, string>>({});
   const [inlineCorrectiveTexts, setInlineCorrectiveTexts] = useState<Record<string, string>>({});
   const [inlineSaving, setInlineSaving] = useState(false);
+  const [inlineReportMedia,     setInlineReportMedia]     = useState<Record<string, string[]>>({});
+  const [inlineResolutionMedia, setInlineResolutionMedia] = useState<Record<string, string[]>>({});
 
   // Workflow assignments + runs (keyed by assetId)
   const [assignmentsMap, setAssignmentsMap] = useState<Record<string, WorkflowAssignment[]>>({});
@@ -1438,12 +1440,14 @@ const AssetInstallationPage = () => {
     function renderIssueCard(
       issue: AssetIssue | RunIssue,
       onSaveComment: (updated: AssetIssue | RunIssue) => void,
-      onCloseIssue: (note: string) => void,
+      onCloseIssue: (note: string, media?: string[]) => void,
       isRunIssue?: boolean,
     ) {
       const comments = issue.comments ?? [];
       const commentVal = inlineCommentTexts[issue.id] ?? "";
       const correctiveVal = inlineCorrectiveTexts[issue.id] ?? "";
+      const reportMediaVal    = inlineReportMedia[issue.id]     ?? [];
+      const resolutionMediaVal = inlineResolutionMedia[issue.id] ?? [];
       return (
         <Paper key={issue.id} variant="outlined" sx={{ p: 1.5, bgcolor: issue.resolved ? "rgba(255,255,255,0.02)" : "rgba(244,67,54,0.03)", borderColor: issue.resolved ? "divider" : "error.dark", opacity: issue.resolved ? 0.65 : 1 }}>
           <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="flex-start">
@@ -1465,6 +1469,25 @@ const AssetInstallationPage = () => {
               <Typography variant="caption" color="text.disabled" display="block">
                 {"createdBy" in issue && issue.createdBy ? `${issue.createdBy} · ` : ""}{new Date(issue.reportedAt).toLocaleString()}
               </Typography>
+              {!issue.resolved && (
+                <Box sx={{ mt: 1 }}>
+                  <MediaCapture
+                    media={reportMediaVal}
+                    onChange={(m) => setInlineReportMedia(prev => ({ ...prev, [issue.id]: m }))}
+                    label="Attach Photo / Video"
+                  />
+                </Box>
+              )}
+              {issue.resolved && (issue.reportMedia ?? []).length > 0 && (
+                <Box sx={{ mt: 0.75 }}>
+                  <MediaCapture
+                    media={issue.reportMedia ?? []}
+                    onChange={() => {}}
+                    label="Reported Media"
+                    disabled
+                  />
+                </Box>
+              )}
             </Box>
 
             {/* Col 2 — Comments */}
@@ -1507,7 +1530,7 @@ const AssetInstallationPage = () => {
                       const text = commentVal.trim();
                       if (!text) return;
                       const newComment = { id: crypto.randomUUID(), text, author: currentUser?.fullName ?? "User", createdAt: new Date().toISOString() };
-                      onSaveComment({ ...issue, comments: [...(issue.comments ?? []), newComment] });
+                      onSaveComment({ ...issue, reportMedia: inlineReportMedia[issue.id]?.length ? inlineReportMedia[issue.id] : issue.reportMedia, comments: [...(issue.comments ?? []), newComment] });
                       setInlineCommentTexts(prev => ({ ...prev, [issue.id]: "" }));
                     }}
                     sx={{ fontSize: 11 }}
@@ -1539,6 +1562,13 @@ const AssetInstallationPage = () => {
                     onChange={(e) => setInlineCorrectiveTexts(prev => ({ ...prev, [issue.id]: e.target.value }))}
                     sx={{ fontSize: 11, mb: 0.75 }}
                   />
+                  <Box sx={{ mb: 0.75 }}>
+                    <MediaCapture
+                      media={resolutionMediaVal}
+                      onChange={(m) => setInlineResolutionMedia(prev => ({ ...prev, [issue.id]: m }))}
+                      label="Resolution Evidence"
+                    />
+                  </Box>
                   <Button
                     size="small"
                     variant="contained"
@@ -1547,8 +1577,9 @@ const AssetInstallationPage = () => {
                     disabled={!correctiveVal.trim() || inlineSaving}
                     startIcon={<CheckCircleOutlined sx={{ fontSize: "0.85rem !important" }} />}
                     onClick={() => {
-                      onCloseIssue(correctiveVal.trim());
+                      onCloseIssue(correctiveVal.trim(), resolutionMediaVal.length > 0 ? resolutionMediaVal : undefined);
                       setInlineCorrectiveTexts(prev => ({ ...prev, [issue.id]: "" }));
+                      setInlineResolutionMedia(prev => ({ ...prev, [issue.id]: [] }));
                     }}
                     sx={{ fontSize: 11, py: 0.25 }}
                   >
@@ -1587,12 +1618,12 @@ const AssetInstallationPage = () => {
             {issues.map((issue) => renderIssueCard(
               issue,
               (updated) => saveInlineAssetIssue(asset, updated as AssetIssue),
-              (note) => saveInlineAssetIssue(asset, { ...issue, resolved: true, resolutionNote: note, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
+              (note, media) => saveInlineAssetIssue(asset, { ...issue, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
             ))}
             {runIssuesWithMeta.map((issue) => renderIssueCard(
               issue,
               (updated) => saveInlineRunIssue(issue.runId, asset.id, updated as RunIssue),
-              (note) => saveInlineRunIssue(issue.runId, asset.id, { ...issue, resolved: true, resolutionNote: note, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
+              (note, media) => saveInlineRunIssue(issue.runId, asset.id, { ...issue, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
               true,
             ))}
           </Stack>
