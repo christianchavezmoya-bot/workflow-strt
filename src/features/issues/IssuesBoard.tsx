@@ -32,7 +32,9 @@ import {
 } from "@mui/icons-material";
 import { Link } from "react-router-dom";
 import { assetWorkflowRunService, type OpenIssueRecord } from "../../services/assetWorkflowRunService";
+import { projectAssetService } from "../../services/projectAssetService";
 import type { RunIssue } from "../../types/assetWorkflowRun";
+import type { AssetIssue } from "../../types/projectAsset";
 import MediaCapture from "../../components/ui/MediaCapture";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -115,24 +117,45 @@ const IssuesBoard = () => {
 
   // ── Close issue ───────────────────────────────────────────────────────────
   async function handleCloseIssue(iss: OpenIssueRecord) {
-    const key  = `${iss.runId}-${iss.issueId}`;
+    const key  = `${iss.source}-${iss.assetId}-${iss.issueId}`;
     const note = (resolutionNotes[key] ?? "").trim();
     if (!note) return;
     setClosingKey(key);
+    const now = new Date().toISOString();
+    const media = (resolutionMedia[key] ?? []).length > 0 ? resolutionMedia[key] : undefined;
     try {
-      const run = await assetWorkflowRunService.getById(iss.runId);
-      if (!run) throw new Error("Run not found");
-      let runIssues: RunIssue[] = [];
-      try { runIssues = JSON.parse(run.issuesJson ?? "[]"); } catch { /* empty */ }
-      const now = new Date().toISOString();
-      runIssues = runIssues.map(ri =>
-        ri.id === iss.issueId
-          ? { ...ri, resolved: true, resolutionNote: note, resolutionMedia: (resolutionMedia[key] ?? []).length > 0 ? resolutionMedia[key] : undefined, resolvedAt: now }
-          : ri
-      );
-      await assetWorkflowRunService.patchIssues(iss.runId, JSON.stringify(runIssues));
+      if (iss.source === "asset") {
+        // Manually-added issue lives on the asset record
+        const asset = await projectAssetService.getById(iss.assetId);
+        if (!asset) throw new Error("Asset not found");
+        let assetIssues: AssetIssue[] = [];
+        try { assetIssues = JSON.parse(asset.issuesJson ?? "[]"); } catch { /* empty */ }
+        assetIssues = assetIssues.map(ai =>
+          ai.id === iss.issueId
+            ? { ...ai, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: now }
+            : ai
+        );
+        const anyOpen = assetIssues.some(ai => !ai.resolved);
+        await projectAssetService.update(iss.assetId, {
+          issuesJson: JSON.stringify(assetIssues),
+          // Reset status to Complete if no open issues remain
+          ...(anyOpen ? {} : { status: "Complete" as const }),
+        });
+      } else {
+        // Issue lives on a workflow run
+        const run = await assetWorkflowRunService.getById(iss.runId);
+        if (!run) throw new Error("Run not found");
+        let runIssues: RunIssue[] = [];
+        try { runIssues = JSON.parse(run.issuesJson ?? "[]"); } catch { /* empty */ }
+        runIssues = runIssues.map(ri =>
+          ri.id === iss.issueId
+            ? { ...ri, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: now }
+            : ri
+        );
+        await assetWorkflowRunService.patchIssues(iss.runId, JSON.stringify(runIssues));
+      }
       // Optimistic remove from list
-      setIssues(prev => prev.filter(i => !(i.runId === iss.runId && i.issueId === iss.issueId)));
+      setIssues(prev => prev.filter(i => !(i.assetId === iss.assetId && i.issueId === iss.issueId)));
       setExpandedKey(null);
     } catch (e) {
       console.error("Failed to close issue", e);
@@ -277,7 +300,7 @@ const IssuesBoard = () => {
             </TableHead>
             <TableBody>
               {filtered.map((iss) => {
-                const key = `${iss.runId}-${iss.issueId}`;
+                const key = `${iss.source}-${iss.assetId}-${iss.issueId}`;
                 const isExpanded = expandedKey === key;
                 const isClosing  = closingKey === key;
                 const noteVal    = resolutionNotes[key] ?? "";
@@ -330,6 +353,12 @@ const IssuesBoard = () => {
                         <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
                           {iss.description}
                         </Typography>
+                        <Chip
+                          label={iss.source === "asset" ? "Manual" : "Workflow"}
+                          size="small"
+                          variant="outlined"
+                          sx={{ fontSize: "0.6rem", height: 16, mt: 0.25, opacity: 0.7 }}
+                        />
                       </TableCell>
                       <TableCell sx={{ py: 0.75 }}>
                         <Typography variant="caption" color="text.secondary">{iss.stepTitle || "—"}</Typography>

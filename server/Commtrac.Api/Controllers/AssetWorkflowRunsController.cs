@@ -101,6 +101,7 @@ public class AssetWorkflowRunsController : ControllerBase
             var result = new List<OpenIssueDto>();
             var opts   = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
+            // ── 1. Workflow-run issues ─────────────────────────────────────
             foreach (var run in runs)
             {
                 var asset   = assets.FirstOrDefault(a => a.Id == run.AssetId);
@@ -134,7 +135,53 @@ public class AssetWorkflowRunsController : ControllerBase
                         AssetLocation: asset.Location ?? "",
                         ProjectId:    asset.ProjectId,
                         JobNumber:    project?.JobNumber ?? "",
-                        CustomerName: project?.CustomerName ?? ""
+                        CustomerName: project?.CustomerName ?? "",
+                        Source:       "run"
+                    ));
+                }
+            }
+
+            // ── 2. Manually-added asset-level issues ──────────────────────
+            var assetsWithIssues = await _db.ProjectAssets
+                .Where(a => a.IssuesJson != null && a.IssuesJson != "[]" && a.IssuesJson != "")
+                .ToListAsync();
+
+            var assetProjectIds2 = assetsWithIssues.Select(a => a.ProjectId).Distinct().ToList();
+            var projects2 = await _db.Projects.Where(p => assetProjectIds2.Contains(p.Id)).ToListAsync();
+
+            foreach (var asset in assetsWithIssues)
+            {
+                var project = projects2.FirstOrDefault(p => p.Id == asset.ProjectId);
+
+                List<JsonElement> issues;
+                try { issues = JsonSerializer.Deserialize<List<JsonElement>>(asset.IssuesJson!, opts) ?? []; }
+                catch { continue; }
+
+                foreach (var iss in issues)
+                {
+                    if (iss.TryGetProperty("resolved", out var resolvedEl) && resolvedEl.GetBoolean()) continue;
+
+                    string Get(string key) => iss.TryGetProperty(key, out var el) ? el.GetString() ?? "" : "";
+                    bool   GetBool(string key) => iss.TryGetProperty(key, out var el) && el.GetBoolean();
+
+                    result.Add(new OpenIssueDto(
+                        IssueId:      Get("id"),
+                        Description:  Get("description"),
+                        IssueType:    Get("issueType"),
+                        Severity:     Get("severity"),
+                        IsBlocking:   GetBool("isBlocking"),
+                        ReportedAt:   Get("reportedAt"),
+                        CreatedBy:    Get("createdBy"),
+                        StepTitle:    null,
+                        RunId:        "",
+                        AssetId:      asset.Id,
+                        AssetTag:     asset.AssetTag,
+                        AssetName:    asset.AssetName ?? asset.AssetTag,
+                        AssetLocation: asset.Location ?? "",
+                        ProjectId:    asset.ProjectId,
+                        JobNumber:    project?.JobNumber ?? "",
+                        CustomerName: project?.CustomerName ?? "",
+                        Source:       "asset"
                     ));
                 }
             }

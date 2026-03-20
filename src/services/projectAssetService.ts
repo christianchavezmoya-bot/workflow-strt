@@ -64,6 +64,15 @@ export const projectAssetService = {
     return res.data.map(fromDto);
   },
 
+  async getById(id: string): Promise<ProjectAsset | null> {
+    try {
+      const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
+      return fromDto(res.data);
+    } catch {
+      return null;
+    }
+  },
+
   async update(id: string, patch: Partial<CreateProjectAssetInput> & { status?: string; workOrderId?: string }): Promise<ProjectAsset> {
     const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
     return fromDto(res.data);

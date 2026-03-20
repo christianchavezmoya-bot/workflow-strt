@@ -1148,14 +1148,15 @@ public record OpenIssueDto(
     string ReportedAt,
     string? CreatedBy,
     string? StepTitle,
-    string RunId,
+    string RunId,       // empty string when Source == "asset"
     string AssetId,
     string AssetTag,
     string AssetName,
     string AssetLocation,
     string ProjectId,
     string JobNumber,
-    string CustomerName
+    string CustomerName,
+    string Source       // "run" | "asset"
 );
 
 /// <summary>Result returned after cloning assets from one project into another.</summary>

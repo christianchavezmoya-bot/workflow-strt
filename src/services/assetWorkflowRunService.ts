@@ -30,6 +30,8 @@ export interface OpenIssueRecord {
   projectId:    string;
   jobNumber:    string;
   customerName: string;
+  /** "run" = from a workflow run; "asset" = manually added via the chevron */
+  source:       "run" | "asset";
 }
 
 export const assetWorkflowRunService = {
