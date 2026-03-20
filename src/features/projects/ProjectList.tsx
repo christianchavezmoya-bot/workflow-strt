@@ -300,6 +300,10 @@ const ProjectList = () => {
   const products = productsState.items.length ? productsState.items : demoProducts;
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
+  const officeIdsForRegion = useMemo(() => {
+    if (activeOffice === "All") return null;
+    return new Set(globalOffices.filter((o) => o.country === activeOffice).map((o) => o.id));
+  }, [activeOffice, globalOffices]);
 
   const projectAccessors = useMemo(
     () => ({
@@ -328,17 +332,16 @@ const ProjectList = () => {
   );
 
   const filteredProjects = useMemo(() => {
-    const officeFiltered = sourceProjects.filter(
-      (project) => {
-        if (activeOffice === "All") return true;
-        const projectCountry = countryForOffice(project.office);
-        return projectCountry === activeOffice || project.office === activeOffice;
-      }
-    );
+    const officeFiltered = sourceProjects.filter((project) => {
+      if (activeOffice === "All") return true;
+      if (project.officeId && officeIdsForRegion) return officeIdsForRegion.has(project.officeId);
+      const projectCountry = countryForOffice(project.office);
+      return projectCountry === activeOffice || project.office === activeOffice;
+    });
 
     const filtered = applyAutoFilter(officeFiltered, autoFilters, projectAccessors);
     return applyAutoSort(filtered, autoSort, projectAccessors);
-  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice]);
+  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, officeIdsForRegion, countryForOffice]);
 
   const numberedProjects = useMemo(
     () => filteredProjects.map((project, index) => ({ ...project, seq: index + 1 })),

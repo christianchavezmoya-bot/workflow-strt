@@ -30,6 +30,7 @@ export interface Project {
   startDate: string;
   finishDate: string;
   office: Office;
+  officeId?: string;
   region?: string;
   projectType: ProjectType;
   status: ProjectStatus;

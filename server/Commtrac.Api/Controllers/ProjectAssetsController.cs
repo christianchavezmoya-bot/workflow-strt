@@ -18,6 +18,37 @@ public class ProjectAssetsController : ControllerBase
         _db = db;
     }
 
+    // GET api/project-assets/open  — all assets not yet Complete, joined with parent project info
+    [HttpGet("open")]
+    public async Task<ActionResult<IEnumerable<OpenAssetDto>>> GetOpen()
+    {
+        var assets = await _db.ProjectAssets
+            .Where(a => a.Status == "NotStarted" || a.Status == "InProgress")
+            .OrderBy(a => a.ProjectId).ThenBy(a => a.AssetTag)
+            .ToListAsync();
+
+        var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
+        var projects = await _db.Projects
+            .Where(p => projectIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.JobNumber, p.Office, p.OfficeId })
+            .ToDictionaryAsync(p => p.Id);
+
+        var result = assets.Select(a =>
+        {
+            projects.TryGetValue(a.ProjectId, out var proj);
+            return new OpenAssetDto(
+                a.Id, a.ProjectId,
+                proj?.JobNumber ?? "",
+                proj?.Office ?? "",
+                proj?.OfficeId,
+                a.AssetTag, a.AssetName, a.AssetModel, a.Manufacturer,
+                a.Status, a.AssignedUserId, a.Location
+            );
+        });
+
+        return Ok(result);
+    }
+
     // GET api/project-assets/workload-summary
     [HttpGet("workload-summary")]
     public async Task<ActionResult<IEnumerable<WorkloadSummaryDto>>> WorkloadSummary()

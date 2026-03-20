@@ -204,6 +204,8 @@ public class ProjectEntity
     public string FinishDate { get; set; } = string.Empty;
     [MaxLength(40)]
     public string Office { get; set; } = "Atlanta, United States";
+    [MaxLength(80)]
+    public string? OfficeId { get; set; }
     [MaxLength(120)]
     public string? Region { get; set; }
     [MaxLength(40)]

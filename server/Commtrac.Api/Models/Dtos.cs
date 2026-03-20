@@ -359,6 +359,7 @@ public record ProjectDto(
     string? ProbabilityStage,
     List<string>? ProductIds,
     Dictionary<string, string>? ProductFeatureValues,
+    string? OfficeId = null,
     int AssetCount = 0
 );
 
@@ -1164,3 +1165,19 @@ public record CloneAssetsResult(int AssetsCloned, int AssignmentsCloned);
 
 /// <summary>Per-technician open-asset counts for the Dashboard workload panel.</summary>
 public record WorkloadSummaryDto(string UserId, string FullName, int NotStarted, int InProgress, int TotalAssigned);
+
+/// <summary>Open (not-yet-complete) asset with parent project context for the Dashboard Active Installations panel.</summary>
+public record OpenAssetDto(
+    string Id,
+    string ProjectId,
+    string JobNumber,
+    string Office,
+    string? OfficeId,
+    string? AssetTag,
+    string? AssetName,
+    string? AssetModel,
+    string? Manufacturer,
+    string Status,
+    string? AssignedUserId,
+    string? Location
+);

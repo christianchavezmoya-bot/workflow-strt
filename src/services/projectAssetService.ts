@@ -90,7 +90,31 @@ export const projectAssetService = {
       return [];
     }
   },
+
+  async listOpen(): Promise<OpenAssetItem[]> {
+    try {
+      const res = await api.get<OpenAssetItem[]>("/project-assets/open");
+      return res.data;
+    } catch {
+      return [];
+    }
+  },
 };
+
+export interface OpenAssetItem {
+  id: string;
+  projectId: string;
+  jobNumber: string;
+  office: string;
+  officeId?: string;
+  assetTag?: string;
+  assetName?: string;
+  assetModel?: string;
+  manufacturer?: string;
+  status: string;
+  assignedUserId?: string;
+  location?: string;
+}
 
 export interface WorkloadSummaryItem {
   userId: string;

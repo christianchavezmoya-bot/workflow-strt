@@ -56,16 +56,21 @@ public class ProjectsController : ControllerBase
                 return new List<string> { c };
             }
 
-            // Projects store Office as the office "city". Active office selection in the UI is country-based.
-            // Include legacy rows where Office was already stored as a country.
+            // Projects with OfficeId use FK-based filtering; legacy rows fall back to Office string matching.
             var countryAliases = Aliases(country);
+            var officeIdsInCountry = await _db.Offices
+                .Where(o => countryAliases.Contains(o.Country))
+                .Select(o => o.Id)
+                .ToListAsync();
             var citiesInCountry = await _db.Offices
                 .Where(o => countryAliases.Contains(o.Country))
                 .Where(o => o.City != null && o.City != "")
                 .Select(o => o.City!)
                 .ToListAsync();
 
-            query = query.Where(p => countryAliases.Contains(p.Office) || citiesInCountry.Contains(p.Office));
+            query = query.Where(p =>
+                (p.OfficeId != null && officeIdsInCountry.Contains(p.OfficeId)) ||
+                (p.OfficeId == null && (countryAliases.Contains(p.Office) || citiesInCountry.Contains(p.Office))));
         }
         else if (!string.IsNullOrWhiteSpace(office) && office != "All")
         {
@@ -175,6 +180,7 @@ public class ProjectsController : ControllerBase
             StartDate = request.StartDate,
             FinishDate = request.FinishDate,
             Office = request.Office,
+            OfficeId = request.OfficeId,
             Region = request.Region,
             ProjectType = request.ProjectType,
             Status = request.Status,
@@ -221,6 +227,7 @@ public class ProjectsController : ControllerBase
         project.StartDate = request.StartDate;
         project.FinishDate = request.FinishDate;
         project.Office = request.Office;
+        project.OfficeId = request.OfficeId;
         project.Region = request.Region;
         project.ProjectType = request.ProjectType;
         project.Status = request.Status;
@@ -379,6 +386,7 @@ public class ProjectsController : ControllerBase
             string.IsNullOrWhiteSpace(project.ProductFeatureValuesJson)
                 ? new Dictionary<string, string>()
                 : JsonSerializer.Deserialize<Dictionary<string, string>>(project.ProductFeatureValuesJson, JsonOptions) ?? new Dictionary<string, string>(),
+            project.OfficeId,
             assetCount
         );
 }
