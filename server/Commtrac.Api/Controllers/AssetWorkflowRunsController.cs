@@ -325,18 +325,21 @@ public class AssetWorkflowRunsController : ControllerBase
         CloseAnyOpenTimeEntry(run, now);
         RecomputeRunTimeMetrics(run, now);
 
-        // Update asset status — Complete only if no open blocking issues remain across all runs
+        // Update asset status — Complete only if no open issues remain across all runs
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
         if (asset is not null)
         {
-            // Check all runs for this asset for any open blocking issues
-            var allRuns  = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
-            var anyBlock = allRuns.Any(r =>
+            // Check all runs for this asset for any open issues (blocking OR non-blocking)
+            var allRuns    = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
+            var anyBlock   = allRuns.Any(r =>
                 ParseIssues(r.IssuesJson).Any(i =>
                     i.TryGetProperty("isBlocking", out var b) && b.GetBoolean() &&
                     i.TryGetProperty("resolved",   out var rv) && !rv.GetBoolean()));
+            var anyOpenIssue = allRuns.Any(r =>
+                ParseIssues(r.IssuesJson).Any(i =>
+                    i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean()));
 
-            asset.Status    = anyBlock ? "Issue" : "Complete";
+            asset.Status    = anyOpenIssue ? "Issue" : "Complete";
             asset.UpdatedAt = now;
             // Record who completed the installation and when (only on first successful completion)
             if (!anyBlock && asset.InstalledAt is null)
@@ -370,16 +373,16 @@ public class AssetWorkflowRunsController : ControllerBase
         if (asset is not null)
         {
             var allRuns = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
-            var anyBlock = allRuns.Any(r => {
+            // Any open issue (blocking OR non-blocking) keeps the asset in "Issue" state
+            var anyOpenIssue = allRuns.Any(r => {
                 var json = r.Id == id ? req.IssuesJson : r.IssuesJson;
                 return ParseIssues(json).Any(i =>
-                    i.TryGetProperty("isBlocking", out var b) && b.GetBoolean() &&
-                    i.TryGetProperty("resolved",   out var rv) && !rv.GetBoolean());
+                    i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean());
             });
             var anyLocked = allRuns.Any(r => r.IsLocked || r.Id == id);
             if (anyLocked)
             {
-                asset.Status    = anyBlock ? "Issue" : "Complete";
+                asset.Status    = anyOpenIssue ? "Issue" : "Complete";
                 asset.UpdatedAt = DateTime.UtcNow;
             }
         }
