@@ -466,7 +466,7 @@ const Settings = () => {
   const [featureDialog, setFeatureDialog] = useState(false);
   const [featureEditId, setFeatureEditId] = useState<string | null>(null);
   const [featureJustCreatedId, setFeatureJustCreatedId] = useState<string | null>(null);
-  const [featureForm, setFeatureForm] = useState({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] as string[] });
+  const [featureForm, setFeatureForm] = useState({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] as string[], brand: "", supplier: "", alternativePartNumber: "", unitPrice: "", productLink: "" });
   const [featureSaving, setFeatureSaving] = useState(false);
   const [featureError, setFeatureError] = useState<string | null>(null);
 
@@ -485,6 +485,13 @@ const Settings = () => {
     setFeatureSaving(true);
     setFeatureError(null);
     try {
+      const procurementFields = {
+        brand: featureForm.brand.trim() || undefined,
+        supplier: featureForm.supplier.trim() || undefined,
+        alternativePartNumber: featureForm.alternativePartNumber.trim() || undefined,
+        unitPrice: featureForm.unitPrice.trim() ? Number(featureForm.unitPrice) : undefined,
+        productLink: featureForm.productLink.trim() || undefined,
+      };
       if (featureEditId) {
         await featureService.update(featureEditId, {
           name: featureForm.name.trim(),
@@ -492,6 +499,7 @@ const Settings = () => {
           valueType: featureForm.valueType,
           isInventory: featureForm.isInventory,
           captureFields: featureForm.captureFields,
+          ...procurementFields,
         });
         await loadFeatures();
         setFeatureDialog(false);
@@ -502,6 +510,7 @@ const Settings = () => {
           valueType: featureForm.valueType,
           isInventory: featureForm.isInventory,
           captureFields: featureForm.captureFields,
+          ...procurementFields,
         });
         await loadFeatures();
         // Stay open so user can add dependencies immediately
@@ -1866,7 +1875,7 @@ const Settings = () => {
                 onClick={() => {
                   setFeatureEditId(null);
                   setFeatureJustCreatedId(null);
-                  setFeatureForm({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] });
+                  setFeatureForm({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [], brand: "", supplier: "", alternativePartNumber: "", unitPrice: "", productLink: "" });
                   setFeatureError(null);
                   setFeatureDialog(true);
                 }}
@@ -1890,6 +1899,9 @@ const Settings = () => {
                   <TableRow>
                     <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
                     <TableCell><Typography variant="caption" fontWeight={700}>Type</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Brand</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Supplier</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Price / Unit</Typography></TableCell>
                     <TableCell><Typography variant="caption" fontWeight={700}>Description</Typography></TableCell>
                     <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
                   </TableRow>
@@ -1918,6 +1930,13 @@ const Settings = () => {
                             </Stack>
                           </TableCell>
                           <TableCell><Chip size="small" label={f.valueType} variant="outlined" /></TableCell>
+                          <TableCell><Typography variant="body2">{f.brand || "—"}</Typography></TableCell>
+                          <TableCell><Typography variant="body2">{f.supplier || "—"}</Typography></TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {f.unitPrice != null ? `$${Number(f.unitPrice).toFixed(2)}` : "—"}
+                            </Typography>
+                          </TableCell>
                           <TableCell><Typography variant="body2" color="text.secondary">{f.description || "—"}</Typography></TableCell>
                           <TableCell align="right">
                             <Stack direction="row" spacing={0.5} justifyContent="flex-end">
@@ -1926,7 +1945,7 @@ const Settings = () => {
                                   e.stopPropagation();
                                   setFeatureEditId(f.id);
                                   setFeatureJustCreatedId(null);
-                                  setFeatureForm({ name: f.name, description: f.description ?? "", valueType: f.valueType, isInventory: f.isInventory ?? false, captureFields: f.captureFields ?? [] });
+                                  setFeatureForm({ name: f.name, description: f.description ?? "", valueType: f.valueType, isInventory: f.isInventory ?? false, captureFields: f.captureFields ?? [], brand: f.brand ?? "", supplier: f.supplier ?? "", alternativePartNumber: f.alternativePartNumber ?? "", unitPrice: f.unitPrice != null ? String(f.unitPrice) : "", productLink: f.productLink ?? "" });
                                   setFeatureError(null);
                                   setFeatureDialog(true);
                                 }}>
@@ -2989,6 +3008,54 @@ const Settings = () => {
                   </Stack>
                 </FormControl>
               )}
+              {/* Procurement fields */}
+              <Divider><Typography variant="caption" color="text.secondary">Procurement (optional)</Typography></Divider>
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="Brand"
+                  size="small"
+                  fullWidth
+                  value={featureForm.brand}
+                  onChange={(e) => setFeatureForm((p) => ({ ...p, brand: e.target.value }))}
+                  placeholder="e.g. Hikvision"
+                />
+                <TextField
+                  label="Supplier / Manufacturer"
+                  size="small"
+                  fullWidth
+                  value={featureForm.supplier}
+                  onChange={(e) => setFeatureForm((p) => ({ ...p, supplier: e.target.value }))}
+                  placeholder="e.g. Hikvision Australia"
+                />
+              </Stack>
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="Alt. Part Number"
+                  size="small"
+                  fullWidth
+                  value={featureForm.alternativePartNumber}
+                  onChange={(e) => setFeatureForm((p) => ({ ...p, alternativePartNumber: e.target.value }))}
+                  placeholder="e.g. DS-2CD2143G2-I"
+                />
+                <TextField
+                  label="Price / Unit ($)"
+                  size="small"
+                  fullWidth
+                  type="number"
+                  inputProps={{ min: 0, step: "0.01" }}
+                  value={featureForm.unitPrice}
+                  onChange={(e) => setFeatureForm((p) => ({ ...p, unitPrice: e.target.value }))}
+                  placeholder="e.g. 185.00"
+                />
+              </Stack>
+              <TextField
+                label="Product Link (URL)"
+                size="small"
+                fullWidth
+                value={featureForm.productLink}
+                onChange={(e) => setFeatureForm((p) => ({ ...p, productLink: e.target.value }))}
+                placeholder="https://..."
+              />
               {featureError && <Alert severity="error" sx={{ fontSize: 12 }}>{featureError}</Alert>}
             </Stack>
           )}
