@@ -24,8 +24,6 @@ import {
   BomUploadPage,
   BomMappingPage,
   BomClassificationPage,
-  BomComparisonPage,
-  BomPreviewPage,
   BomCommitPage,
 } from "../modules/bom-project";
 
@@ -65,8 +63,8 @@ const AppRoutes = () => {
             <Route path="/admin/bom-project/upload" element={<BomProjectProvider><BomUploadPage /></BomProjectProvider>} />
             <Route path="/admin/bom-project/imports/:id/mapping" element={<BomProjectProvider><BomMappingPage /></BomProjectProvider>} />
             <Route path="/admin/bom-project/imports/:id/classification" element={<BomProjectProvider><BomClassificationPage /></BomProjectProvider>} />
-            <Route path="/admin/bom-project/imports/:id/compare" element={<BomProjectProvider><BomComparisonPage /></BomProjectProvider>} />
-            <Route path="/admin/bom-project/imports/:id/preview" element={<BomProjectProvider><BomPreviewPage /></BomProjectProvider>} />
+            <Route path="/admin/bom-project/imports/:id/compare" element={<Navigate to="/admin/bom-project" replace />} />
+            <Route path="/admin/bom-project/imports/:id/preview" element={<Navigate to="/admin/bom-project" replace />} />
             <Route path="/admin/bom-project/imports/:id/commit" element={<BomProjectProvider><BomCommitPage /></BomProjectProvider>} />
           </>
         )}

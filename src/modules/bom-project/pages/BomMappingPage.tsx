@@ -1,14 +1,12 @@
 import { useState } from "react";
 import {
-  Box, Typography, Button, Stack, Alert, Divider,
-  TextField, Chip, CircularProgress,
+  Box, Button, Stack, Alert, Chip, CircularProgress,
 } from "@mui/material";
-import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined";
 import { useNavigate, useParams } from "react-router-dom";
+import BomStepHeader from "../components/BomStepHeader";
 import ColumnMapper from "../components/ColumnMapper";
 import { useBomProject } from "../store/BomProjectContext";
 import { normalizeAllRows } from "../services/bomNormalizer";
-import { bomApiService } from "../services/bomApiService";
 
 export default function BomMappingPage() {
   const { id } = useParams<{ id: string }>();
@@ -16,7 +14,6 @@ export default function BomMappingPage() {
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [profileName, setProfileName] = useState("");
 
   const firstSheet = state.parsedWorkbook?.sheets[0];
   const sampleRows = firstSheet?.sampleRows ?? [];
@@ -34,6 +31,10 @@ export default function BomMappingPage() {
     );
   }
 
+  const mappedCount = state.activeMappings.filter((m) => m.canonicalField).length;
+  const totalCount = state.activeMappings.length;
+  const allMapped = mappedCount === totalCount;
+
   const handleNext = async () => {
     setSaving(true);
     setError(null);
@@ -48,38 +49,28 @@ export default function BomMappingPage() {
     }
   };
 
-  const handleSaveProfile = async () => {
-    if (!profileName.trim()) return;
-    try {
-      await bomApiService.saveMappingProfile({
-        name: profileName.trim(),
-        mappings: state.activeMappings,
-      });
-      setProfileName("");
-    } catch (e) {
-      setError(String(e));
-    }
-  };
-
-  const mappedCount = state.activeMappings.filter((m) => m.canonicalField).length;
-  const totalCount = state.activeMappings.length;
-
   return (
     <Box>
-      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={2}>
-        <Box>
-          <Typography variant="h5" fontWeight={700}>Column Mapping</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Map your spreadsheet columns to the canonical BOM fields.
-          </Typography>
-        </Box>
-        <Stack direction="row" spacing={1} alignItems="center">
+      <BomStepHeader
+        activeStep={1}
+        title="Map your columns"
+        subtitle="Tell us which column in your file matches each field. Auto-detected matches are shown below."
+      />
+
+      <Stack direction="row" spacing={1} alignItems="center" mb={2}>
+        <Chip
+          label={allMapped ? "All columns matched" : `${mappedCount} of ${totalCount} matched`}
+          color={allMapped ? "success" : "default"}
+          size="small"
+        />
+        {!allMapped && (
           <Chip
-            label={`${mappedCount} / ${totalCount} mapped`}
-            color={mappedCount === totalCount ? "success" : "default"}
+            label={`${totalCount - mappedCount} unmatched — you can skip these`}
             size="small"
+            variant="outlined"
+            color="warning"
           />
-        </Stack>
+        )}
       </Stack>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -90,29 +81,7 @@ export default function BomMappingPage() {
         onChange={(m) => dispatch({ type: "SET_MAPPINGS", payload: m })}
       />
 
-      <Divider sx={{ my: 3 }} />
-
-      {/* Save profile */}
-      <Stack direction="row" spacing={1} alignItems="center" mb={3}>
-        <TextField
-          size="small"
-          label="Save as profile"
-          placeholder="Profile name…"
-          value={profileName}
-          onChange={(e) => setProfileName(e.target.value)}
-        />
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<SaveOutlinedIcon />}
-          onClick={handleSaveProfile}
-          disabled={!profileName.trim()}
-        >
-          Save Profile
-        </Button>
-      </Stack>
-
-      <Stack direction="row" justifyContent="flex-end" spacing={1}>
+      <Stack direction="row" justifyContent="flex-end" spacing={1} mt={3}>
         <Button onClick={() => navigate(-1)}>Back</Button>
         <Button
           variant="contained"
@@ -120,7 +89,7 @@ export default function BomMappingPage() {
           disabled={saving || mappedCount === 0}
           startIcon={saving ? <CircularProgress size={16} /> : undefined}
         >
-          {saving ? "Normalizing…" : "Normalize & Classify →"}
+          {saving ? "Processing…" : "Next: Review Items →"}
         </Button>
       </Stack>
     </Box>

@@ -1,10 +1,12 @@
 import { useState } from "react";
 import {
-  Box, Typography, Button, Stack, Stepper, Step, StepLabel,
-  TextField, Alert, CircularProgress, Divider,
+  Box, Typography, Button, Stack,
+  TextField, Alert, CircularProgress, Divider, Paper, Chip,
 } from "@mui/material";
 import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
+import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
 import { useNavigate } from "react-router-dom";
+import BomStepHeader from "../components/BomStepHeader";
 import UploadDropzone from "../components/UploadDropzone";
 import WorkbookSheetPicker from "../components/WorkbookSheetPicker";
 import { parseWorkbookFile, extractRawRows } from "../services/workbookParser";
@@ -13,13 +15,10 @@ import { bomApiService } from "../services/bomApiService";
 import { useBomProject } from "../store/BomProjectContext";
 import { downloadBomTemplate } from "../services/bomTemplateGenerator";
 
-const STEPS = ["Upload File", "Select Sheets", "Confirm & Parse"];
-
 export default function BomUploadPage() {
   const { dispatch } = useBomProject();
   const navigate = useNavigate();
 
-  const [step, setStep] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,11 +33,9 @@ export default function BomUploadPage() {
     try {
       const wb = await parseWorkbookFile(f);
       setParsedWorkbook(wb);
-      // Auto-select first sheet
       if (wb.sheets.length > 0) setSelectedSheets([wb.sheets[0].name]);
-      setStep(1);
     } catch (e) {
-      setError(`Failed to parse file: ${String(e)}`);
+      setError(`Could not read file: ${String(e)}`);
     } finally {
       setParsing(false);
     }
@@ -49,7 +46,6 @@ export default function BomUploadPage() {
     setParsing(true);
     setError(null);
     try {
-      // Create run record on backend
       const run = await bomApiService.createRun({
         fileName: file.name,
         fileSizeBytes: file.size,
@@ -58,10 +54,7 @@ export default function BomUploadPage() {
         notes,
       });
 
-      // Extract raw rows client-side
       const rawRows = await extractRawRows(file, run.id, selectedSheets);
-
-      // Build suggested mappings from first selected sheet's headers
       const firstSheet = parsedWorkbook.sheets.find((s) => selectedSheets.includes(s.name));
       const suggested = firstSheet ? suggestMappings(firstSheet.headers) : [];
 
@@ -72,103 +65,116 @@ export default function BomUploadPage() {
 
       navigate(`/admin/bom-project/imports/${run.id}/mapping`);
     } catch (e) {
-      setError(`Failed to create import: ${String(e)}`);
+      setError(`Failed to start import: ${String(e)}`);
     } finally {
       setParsing(false);
     }
   };
 
+  const totalRows = parsedWorkbook?.sheets
+    .filter((s) => selectedSheets.includes(s.name))
+    .reduce((sum, s) => sum + s.rowCount, 0) ?? 0;
+
   return (
-    <Box maxWidth={800} mx="auto">
-      <Typography variant="h5" fontWeight={700} gutterBottom>Upload BOM File</Typography>
-      <Typography variant="body2" color="text.secondary" mb={3}>
-        Upload an Excel or CSV file containing your Bill of Materials.
-      </Typography>
-
-      <Alert severity="info" sx={{ mb: 3 }}
-        action={
-          <Button size="small" startIcon={<DownloadOutlinedIcon />} onClick={downloadBomTemplate} color="inherit">
-            Download Template
-          </Button>
-        }
-      >
-        First time? Download our Excel template — it has the correct columns pre-filled with examples.
-      </Alert>
-
-      <Stepper activeStep={step} sx={{ mb: 4 }}>
-        {STEPS.map((label) => (
-          <Step key={label}><StepLabel>{label}</StepLabel></Step>
-        ))}
-      </Stepper>
+    <Box maxWidth={680} mx="auto">
+      <BomStepHeader
+        activeStep={0}
+        title="Upload your BOM file"
+        subtitle="Excel (.xlsx) or CSV files are supported."
+      />
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-      {step === 0 && (
+      {/* Template reminder */}
+      {!file && (
+        <Alert
+          severity="info"
+          sx={{ mb: 3 }}
+          action={
+            <Button size="small" startIcon={<DownloadOutlinedIcon />} onClick={downloadBomTemplate} color="inherit">
+              Download
+            </Button>
+          }
+        >
+          First time? Use our Excel template — columns are already set up correctly.
+        </Alert>
+      )}
+
+      {/* Upload zone */}
+      {!parsedWorkbook && (
         <UploadDropzone onFile={handleFile} loading={parsing} />
       )}
 
-      {step === 1 && parsedWorkbook && (
-        <Box>
-          <WorkbookSheetPicker
-            sheets={parsedWorkbook.sheets}
-            selected={selectedSheets}
-            onChange={setSelectedSheets}
-          />
-          <Stack direction="row" justifyContent="flex-end" spacing={1} mt={2}>
-            <Button onClick={() => setStep(0)}>Back</Button>
-            <Button
-              variant="contained"
-              disabled={selectedSheets.length === 0}
-              onClick={() => setStep(2)}
-            >
-              Next
-            </Button>
-          </Stack>
-        </Box>
-      )}
+      {/* File selected — sheet picker + confirm */}
+      {parsedWorkbook && file && (
+        <Stack spacing={2.5}>
+          {/* File summary */}
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Stack direction="row" alignItems="center" spacing={1.5}>
+              <InsertDriveFileOutlinedIcon color="primary" />
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="body2" fontWeight={600}>{file.name}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {(file.size / 1024).toFixed(1)} KB · {parsedWorkbook.sheets.length} sheet{parsedWorkbook.sheets.length !== 1 ? "s" : ""}
+                </Typography>
+              </Box>
+              <Button size="small" onClick={() => { setFile(null); setParsedWorkbook(null); setSelectedSheets([]); }}>
+                Change
+              </Button>
+            </Stack>
+          </Paper>
 
-      {step === 2 && parsedWorkbook && (
-        <Box>
-          <Typography variant="subtitle1" fontWeight={600} gutterBottom>Confirm Import</Typography>
-          <Stack spacing={2}>
+          {/* Sheet selector — only show if multiple sheets */}
+          {parsedWorkbook.sheets.length > 1 && (
             <Box>
-              <Typography variant="body2" color="text.secondary">File</Typography>
-              <Typography variant="body2" fontWeight={500}>{file?.name}</Typography>
-            </Box>
-            <Box>
-              <Typography variant="body2" color="text.secondary">Selected Sheets</Typography>
-              <Typography variant="body2" fontWeight={500}>{selectedSheets.join(", ")}</Typography>
-            </Box>
-            <Box>
-              <Typography variant="body2" color="text.secondary">Total Rows</Typography>
-              <Typography variant="body2" fontWeight={500}>
-                {parsedWorkbook.sheets
-                  .filter((s) => selectedSheets.includes(s.name))
-                  .reduce((sum, s) => sum + s.rowCount, 0)}
+              <Typography variant="body2" fontWeight={600} gutterBottom>
+                Which sheets contain your BOM data?
               </Typography>
+              <WorkbookSheetPicker
+                sheets={parsedWorkbook.sheets}
+                selected={selectedSheets}
+                onChange={setSelectedSheets}
+              />
             </Box>
-            <Divider />
-            <TextField
-              label="Notes (optional)"
-              multiline
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              fullWidth
-            />
-          </Stack>
-          <Stack direction="row" justifyContent="flex-end" spacing={1} mt={3}>
-            <Button onClick={() => setStep(1)}>Back</Button>
+          )}
+
+          {/* Row count summary */}
+          {totalRows > 0 && (
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Chip label={`${totalRows} rows detected`} size="small" color="primary" variant="outlined" />
+              {selectedSheets.length > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  from sheet{selectedSheets.length > 1 ? "s" : ""}: {selectedSheets.join(", ")}
+                </Typography>
+              )}
+            </Stack>
+          )}
+
+          <Divider />
+
+          <TextField
+            label="Notes (optional)"
+            multiline
+            rows={2}
+            size="small"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            fullWidth
+            placeholder="e.g. Project name, revision number…"
+          />
+
+          <Stack direction="row" justifyContent="flex-end" spacing={1}>
+            <Button onClick={() => navigate("/admin/bom-project")}>Cancel</Button>
             <Button
               variant="contained"
               onClick={handleConfirm}
-              disabled={parsing}
+              disabled={parsing || selectedSheets.length === 0}
               startIcon={parsing ? <CircularProgress size={16} /> : undefined}
             >
-              {parsing ? "Creating Import…" : "Create Import & Map Columns"}
+              {parsing ? "Processing…" : "Next: Map Columns →"}
             </Button>
           </Stack>
-        </Box>
+        </Stack>
       )}
     </Box>
   );

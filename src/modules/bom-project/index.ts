@@ -9,6 +9,4 @@ export { default as BomDashboard } from "./pages/BomDashboard";
 export { default as BomUploadPage } from "./pages/BomUploadPage";
 export { default as BomMappingPage } from "./pages/BomMappingPage";
 export { default as BomClassificationPage } from "./pages/BomClassificationPage";
-export { default as BomComparisonPage } from "./pages/BomComparisonPage";
-export { default as BomPreviewPage } from "./pages/BomPreviewPage";
 export { default as BomCommitPage } from "./pages/BomCommitPage";
