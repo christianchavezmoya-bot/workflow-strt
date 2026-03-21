@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Box, Typography, Button, Stack, Card, CardContent,
+  Box, Typography, Button, Stack, Card, CardContent, Divider,
   Table, TableBody, TableCell, TableHead, TableRow, Paper,
   Chip, CircularProgress, Alert, IconButton, Tooltip, Switch, FormControlLabel,
 } from "@mui/material";
@@ -8,10 +8,13 @@ import AddOutlinedIcon from "@mui/icons-material/AddOutlined";
 import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined";
 import ArchiveOutlinedIcon from "@mui/icons-material/ArchiveOutlined";
 import RestoreOutlinedIcon from "@mui/icons-material/RestoreOutlined";
+import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
+import UploadFileOutlinedIcon from "@mui/icons-material/UploadFileOutlined";
 import { useNavigate } from "react-router-dom";
 import { useBomProject } from "../store/BomProjectContext";
 import { bomApiService } from "../services/bomApiService";
 import ImportRunStatusBadge from "../components/ImportRunStatusBadge";
+import { downloadBomTemplate } from "../services/bomTemplateGenerator";
 
 export default function BomDashboard() {
   const { state, dispatch } = useBomProject();
@@ -70,6 +73,55 @@ export default function BomDashboard() {
           New Import
         </Button>
       </Stack>
+
+      {/* ── Two-path getting started ── */}
+      <Paper variant="outlined" sx={{ p: 2.5, mb: 1 }}>
+        <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+          How would you like to import?
+        </Typography>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2} divider={<Divider orientation="vertical" flexItem />}>
+          {/* Path A — template */}
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="body2" fontWeight={600} gutterBottom>Use our template (recommended)</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Download our pre-formatted Excel file, fill in your equipment list, then upload. No column mapping needed.
+            </Typography>
+            <Stack direction="row" spacing={1}>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<DownloadOutlinedIcon />}
+                onClick={downloadBomTemplate}
+              >
+                Download Template
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<UploadFileOutlinedIcon />}
+                onClick={() => navigate("/admin/bom-project/upload")}
+              >
+                Upload Filled Template
+              </Button>
+            </Stack>
+          </Box>
+          {/* Path B — own file */}
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="body2" fontWeight={600} gutterBottom>Upload your own file</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Already have a BOM from your supplier or engineering team? Upload it and map the columns manually.
+            </Typography>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<UploadFileOutlinedIcon />}
+              onClick={() => navigate("/admin/bom-project/upload")}
+            >
+              Upload My File
+            </Button>
+          </Box>
+        </Stack>
+      </Paper>
 
       {/* KPI strip */}
       <Box display="grid" gridTemplateColumns="repeat(4, 1fr)" gap={2} mb={3}>

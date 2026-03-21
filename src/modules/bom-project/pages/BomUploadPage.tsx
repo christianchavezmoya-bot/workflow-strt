@@ -3,6 +3,7 @@ import {
   Box, Typography, Button, Stack, Stepper, Step, StepLabel,
   TextField, Alert, CircularProgress, Divider,
 } from "@mui/material";
+import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import { useNavigate } from "react-router-dom";
 import UploadDropzone from "../components/UploadDropzone";
 import WorkbookSheetPicker from "../components/WorkbookSheetPicker";
@@ -10,6 +11,7 @@ import { parseWorkbookFile, extractRawRows } from "../services/workbookParser";
 import { suggestMappings } from "../services/bomNormalizer";
 import { bomApiService } from "../services/bomApiService";
 import { useBomProject } from "../store/BomProjectContext";
+import { downloadBomTemplate } from "../services/bomTemplateGenerator";
 
 const STEPS = ["Upload File", "Select Sheets", "Confirm & Parse"];
 
@@ -82,6 +84,16 @@ export default function BomUploadPage() {
       <Typography variant="body2" color="text.secondary" mb={3}>
         Upload an Excel or CSV file containing your Bill of Materials.
       </Typography>
+
+      <Alert severity="info" sx={{ mb: 3 }}
+        action={
+          <Button size="small" startIcon={<DownloadOutlinedIcon />} onClick={downloadBomTemplate} color="inherit">
+            Download Template
+          </Button>
+        }
+      >
+        First time? Download our Excel template — it has the correct columns pre-filled with examples.
+      </Alert>
 
       <Stepper activeStep={step} sx={{ mb: 4 }}>
         {STEPS.map((label) => (
