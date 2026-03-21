@@ -46,7 +46,12 @@ public class FeaturesController : ControllerBase
             OptionsJson = JsonSerializer.Serialize(request.Options ?? new List<string>(), JsonOptions),
             SubPropertiesJson = JsonSerializer.Serialize(request.SubProperties ?? new List<FeatureSubPropertyDto>(), JsonOptions),
             IsInventory = request.IsInventory,
-            CaptureFieldsJson = JsonSerializer.Serialize(request.CaptureFields ?? new List<string>(), JsonOptions)
+            CaptureFieldsJson = JsonSerializer.Serialize(request.CaptureFields ?? new List<string>(), JsonOptions),
+            Brand = string.IsNullOrWhiteSpace(request.Brand) ? null : request.Brand.Trim(),
+            Supplier = string.IsNullOrWhiteSpace(request.Supplier) ? null : request.Supplier.Trim(),
+            AlternativePartNumber = string.IsNullOrWhiteSpace(request.AlternativePartNumber) ? null : request.AlternativePartNumber.Trim(),
+            UnitPrice = request.UnitPrice,
+            ProductLink = string.IsNullOrWhiteSpace(request.ProductLink) ? null : request.ProductLink.Trim(),
         };
         _db.Features.Add(feature);
         await _db.SaveChangesAsync();
@@ -67,6 +72,11 @@ public class FeaturesController : ControllerBase
         if (request.SubProperties is not null) feature.SubPropertiesJson = JsonSerializer.Serialize(request.SubProperties, JsonOptions);
         if (request.IsInventory.HasValue) feature.IsInventory = request.IsInventory.Value;
         if (request.CaptureFields is not null) feature.CaptureFieldsJson = JsonSerializer.Serialize(request.CaptureFields, JsonOptions);
+        if (request.Brand is not null) feature.Brand = string.IsNullOrWhiteSpace(request.Brand) ? null : request.Brand.Trim();
+        if (request.Supplier is not null) feature.Supplier = string.IsNullOrWhiteSpace(request.Supplier) ? null : request.Supplier.Trim();
+        if (request.AlternativePartNumber is not null) feature.AlternativePartNumber = string.IsNullOrWhiteSpace(request.AlternativePartNumber) ? null : request.AlternativePartNumber.Trim();
+        if (request.UnitPrice.HasValue) feature.UnitPrice = request.UnitPrice;
+        if (request.ProductLink is not null) feature.ProductLink = string.IsNullOrWhiteSpace(request.ProductLink) ? null : request.ProductLink.Trim();
 
         await _db.SaveChangesAsync();
         return Ok(ToDto(feature));
@@ -164,6 +174,7 @@ public class FeaturesController : ControllerBase
             ? null
             : JsonSerializer.Deserialize<List<string>>(f.CaptureFieldsJson, JsonOptions);
 
-        return new(f.Id, f.Name, f.Description, f.ValueType, options, subProps, f.IsInventory, captureFields);
+        return new(f.Id, f.Name, f.Description, f.ValueType, options, subProps, f.IsInventory, captureFields,
+            f.Brand, f.Supplier, f.AlternativePartNumber, f.UnitPrice, f.ProductLink);
     }
 }

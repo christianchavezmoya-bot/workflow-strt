@@ -170,7 +170,12 @@ public record FeatureDto(
     List<string>? Options,
     List<FeatureSubPropertyDto>? SubProperties,
     bool IsInventory,
-    List<string>? CaptureFields
+    List<string>? CaptureFields,
+    string? Brand = null,
+    string? Supplier = null,
+    string? AlternativePartNumber = null,
+    decimal? UnitPrice = null,
+    string? ProductLink = null
 );
 
 public record CreateFeatureRequest(
@@ -180,7 +185,12 @@ public record CreateFeatureRequest(
     List<string>? Options = null,
     List<FeatureSubPropertyDto>? SubProperties = null,
     bool IsInventory = false,
-    List<string>? CaptureFields = null
+    List<string>? CaptureFields = null,
+    string? Brand = null,
+    string? Supplier = null,
+    string? AlternativePartNumber = null,
+    decimal? UnitPrice = null,
+    string? ProductLink = null
 );
 
 public record UpdateFeatureRequest(
@@ -190,7 +200,12 @@ public record UpdateFeatureRequest(
     List<string>? Options,
     List<FeatureSubPropertyDto>? SubProperties,
     bool? IsInventory,
-    List<string>? CaptureFields
+    List<string>? CaptureFields,
+    string? Brand = null,
+    string? Supplier = null,
+    string? AlternativePartNumber = null,
+    decimal? UnitPrice = null,
+    string? ProductLink = null
 );
 
 public record FeatureDependencyDto(
