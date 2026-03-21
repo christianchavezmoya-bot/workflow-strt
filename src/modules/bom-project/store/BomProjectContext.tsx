@@ -63,6 +63,7 @@ export type BomAction =
   | { type: "SET_MAPPINGS"; payload: ColumnMappingEntry[] }
   | { type: "SET_MAPPING_PROFILES"; payload: MappingProfile[] }
   | { type: "SET_NORMALIZED_ROWS"; payload: CanonicalBomRow[] }
+  | { type: "UPDATE_NORMALIZED_ROW"; payload: Partial<CanonicalBomRow> & { sourceRowId: string } }
   | { type: "SET_CLASSIFICATIONS"; payload: ClassificationResult[] }
   | { type: "OVERRIDE_CLASSIFICATION"; payload: ClassificationResult }
   | { type: "SET_RULE_PROFILES"; payload: RuleProfile[] }
@@ -114,6 +115,13 @@ function reducer(state: BomProjectState, action: BomAction): BomProjectState {
     case "SET_MAPPINGS":       return { ...state, activeMappings: action.payload };
     case "SET_MAPPING_PROFILES": return { ...state, mappingProfiles: action.payload };
     case "SET_NORMALIZED_ROWS": return { ...state, normalizedRows: action.payload };
+    case "UPDATE_NORMALIZED_ROW":
+      return {
+        ...state,
+        normalizedRows: state.normalizedRows.map((r) =>
+          r.sourceRowId === action.payload.sourceRowId ? { ...r, ...action.payload } : r
+        ),
+      };
     case "SET_CLASSIFICATIONS": return { ...state, classifications: action.payload };
     case "OVERRIDE_CLASSIFICATION":
       return {
