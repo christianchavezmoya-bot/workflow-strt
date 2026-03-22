@@ -3,6 +3,7 @@ import {
   Box,
   Button,
   Checkbox,
+  Chip,
   Collapse,
   IconButton,
   ListItemText,
@@ -15,7 +16,6 @@ import {
   TableHead,
   TablePagination,
   TableRow,
-  TextField,
   Typography
 } from "@mui/material";
 import { ArrowDropDown, DeleteOutline, EditOutlined, ExpandLess, ExpandMore } from "@mui/icons-material";
@@ -31,8 +31,10 @@ import { usePermissions } from "../../hooks/usePermissions";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
+import { useWorkScope } from "../../hooks/useWorkScope";
 import { fieldService } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
+import { projectAssetService } from "../../services/projectAssetService";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
@@ -232,16 +234,28 @@ const ProjectList = () => {
   const { user } = useAuth();
   const can = usePermissions();
   const { activeOffice } = useActiveOffice();
+  const { isMyWork, canUseOfficeView } = useWorkScope();
   const dispatch = useAppDispatch();
   const { items, total, loading, error } = useAppSelector((state) => state.projects);
   const productsState = useAppSelector((state) => state.products);
   const projectsDynamic = useDynamicFields("projects");
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
   const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
+  const [myProjectIds, setMyProjectIds] = useState<string[]>([]);
 
   useEffect(() => {
     officesService.getAll().then(setGlobalOffices);
   }, []);
+
+  // Load my project IDs when in my-work scope for non-PM roles
+  useEffect(() => {
+    const role = user?.role ?? "";
+    if (isMyWork && ["Installer", "Engineer", "Supervisor"].includes(role)) {
+      projectAssetService.myProjectIds().then(setMyProjectIds);
+    } else {
+      setMyProjectIds([]);
+    }
+  }, [isMyWork, user?.role]);
   const projectsTableConfig = useTableConfig(
     "projects",
     projectsDynamic.definitions.map((field) => ({
@@ -328,17 +342,34 @@ const ProjectList = () => {
   );
 
   const filteredProjects = useMemo(() => {
-    const officeFiltered = sourceProjects.filter(
-      (project) => {
-        if (activeOffice === "All") return true;
-        const projectCountry = countryForOffice(project.office);
-        return projectCountry === activeOffice || project.office === activeOffice;
-      }
-    );
+    const role = user?.role ?? "";
+    const isAdmin = role === "Admin";
+    const isCustomer = role === "Customer";
 
-    const filtered = applyAutoFilter(officeFiltered, autoFilters, projectAccessors);
+    // Customers see nothing here (redirected elsewhere)
+    if (isCustomer) return [];
+
+    // Office-based filter (Admin always global, officeView uses activeOffice)
+    const officeFiltered = sourceProjects.filter((project) => {
+      if (isAdmin || activeOffice === "All") return true;
+      const projectCountry = countryForOffice(project.office);
+      return projectCountry === activeOffice || project.office === activeOffice;
+    });
+
+    // Scope-aware filtering
+    let scopeFiltered = officeFiltered;
+    if (isMyWork && !isAdmin) {
+      if (role === "Project Manager") {
+        scopeFiltered = officeFiltered.filter((p) => p.projectManager === user?.fullName);
+      } else if (["Installer", "Engineer", "Supervisor"].includes(role)) {
+        const idSet = new Set(myProjectIds);
+        scopeFiltered = officeFiltered.filter((p) => idSet.has(p.id));
+      }
+    }
+
+    const filtered = applyAutoFilter(scopeFiltered, autoFilters, projectAccessors);
     return applyAutoSort(filtered, autoSort, projectAccessors);
-  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice]);
+  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName]);
 
   const numberedProjects = useMemo(
     () => filteredProjects.map((project, index) => ({ ...project, seq: index + 1 })),
@@ -500,9 +531,14 @@ const ProjectList = () => {
     <Stack spacing={3}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center">
         <Box>
-          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-            Projects
-          </Typography>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
+              Projects
+            </Typography>
+            {isMyWork && canUseOfficeView && (
+              <Chip label="My Work" color="primary" size="small" />
+            )}
+          </Stack>
           <Typography variant="body2" color="text.secondary">
             Showing {activeOffice === "All" ? "all offices" : activeOffice} projects.
           </Typography>

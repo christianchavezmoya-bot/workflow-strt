@@ -2000,7 +2000,7 @@ export const UserManagement: React.FC = () => {
           setTab(newValue);
           const type = adminTabsConfig[newValue]?.type ?? "";
           if (type) setSearchParams({ tab: type }, { replace: true });
-        }}>
+        }} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
           {adminTabsConfig.map((tabConfig) => (
             <Tab key={tabConfig.id} label={tabConfig.label} />
           ))}

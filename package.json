@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/ios": "^8.2.0",
+    "@capacitor/status-bar": "^8.0.1",
     "@cyntler/react-doc-viewer": "^1.17.1",
     "@emotion/react": "^11.11.3",
     "@emotion/styled": "^11.11.3",
@@ -36,6 +38,8 @@
     "zod": "^3.23.2"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/core": "^8.2.0",
     "@types/react": "^18.2.56",
     "@types/react-dom": "^18.2.19",
     "@vitejs/plugin-react": "^4.2.1",

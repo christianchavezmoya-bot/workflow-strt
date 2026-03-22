@@ -81,6 +81,24 @@ export const projectAssetService = {
       return [];
     }
   },
+
+  async activeSummary(): Promise<ProjectAssetSummaryItem[]> {
+    try {
+      const res = await api.get<ProjectAssetSummaryItem[]>("/project-assets/active-summary");
+      return res.data;
+    } catch {
+      return [];
+    }
+  },
+
+  async myProjectIds(): Promise<string[]> {
+    try {
+      const res = await api.get<string[]>("/project-assets/my-project-ids");
+      return res.data;
+    } catch {
+      return [];
+    }
+  },
 };
 
 export interface WorkloadSummaryItem {
@@ -89,4 +107,12 @@ export interface WorkloadSummaryItem {
   notStarted: number;
   inProgress: number;
   totalAssigned: number;
+}
+
+export interface ProjectAssetSummaryItem {
+  projectId: string;
+  notStarted: number;
+  inProgress: number;
+  complete: number;
+  total: number;
 }

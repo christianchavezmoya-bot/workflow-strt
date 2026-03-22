@@ -1,27 +1,45 @@
-import { Avatar, Badge, Box, Button, CircularProgress, Divider, IconButton, ListItemIcon, Menu, MenuItem, Popover, Stack, TextField, Tooltip, Typography, Chip } from "@mui/material";
-import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
-import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
+import {
+  Avatar,
+  Badge,
+  Box,
+  Chip,
+  Divider,
+  IconButton,
+  ListItemIcon,
+  Menu,
+  MenuItem,
+  Stack,
+  Typography,
+} from "@mui/material";
+import WifiIcon from "@mui/icons-material/Wifi";
+import WifiOffIcon from "@mui/icons-material/WifiOff";
+import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
+import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
+import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
+import LogoutIcon from "@mui/icons-material/Logout";
+import CheckIcon from "@mui/icons-material/Check";
 import ViewSidebarOutlinedIcon from "@mui/icons-material/ViewSidebarOutlined";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
-import CheckIcon from "@mui/icons-material/Check";
+import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
+import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import StarOutlinedIcon from "@mui/icons-material/StarOutlined";
 import StarBorderOutlinedIcon from "@mui/icons-material/StarBorderOutlined";
+import BusinessOutlinedIcon from "@mui/icons-material/BusinessOutlined";
+import PersonOutlinedIcon from "@mui/icons-material/PersonOutlined";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { useViewMode } from "../../contexts/ViewModeContext";
 import { useFavoritesContext } from "../../contexts/FavoritesContext";
-import { useAppSelector } from "../../store/hooks";
+import { useWorkScope } from "../../hooks/useWorkScope";
 import GlobalSearchDialog from "./GlobalSearchDialog";
-import { searchIndexService, type SearchIndexStatus } from "../../services/searchIndexService";
+import strataLogo from "../../assets/strata_transparent.png";
 
 function getRolesFromCache(): string[] {
   try {
     const raw = localStorage.getItem("admin_roles_config");
     if (raw) return Object.keys(JSON.parse(raw));
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
   return ["Admin", "Project Manager", "Engineer", "Viewer"];
 }
 
@@ -41,40 +59,9 @@ const ROUTE_LABELS: Record<string, string> = {
   "/work-instructions": "Work Instructions",
   "/documents": "Documents",
   "/admin": "Admin",
-  "/admin/asset-registry": "Asset Registry",
   "/settings": "Settings",
   "/profile": "Profile",
-};
-
-// Human-readable labels for ?tab= URL params (Admin + Settings)
-const TAB_LABELS: Record<string, string> = {
-  // Admin tabs (dynamic type keys)
-  users: "Users",
-  roles: "Roles",
-  customers: "Customers",
-  offices: "Global Offices",
-  products: "Products",
-  // Settings tabs
-  quickbase: "Integrations",
-  sms: "SMS/SMTP",
-  fields: "Fields/Data",
-  "workflow-types": "Workflow Types",
-  logo: "Business Logo",
-  audit: "Audit Log",
-};
-
-const formatAgo = (utcDate?: string | null) => {
-  if (!utcDate) return "never";
-  const ts = Date.parse(utcDate);
-  if (Number.isNaN(ts)) return "unknown";
-  const deltaMs = Date.now() - ts;
-  if (deltaMs < 60_000) return "just now";
-  const mins = Math.floor(deltaMs / 60_000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  "/issues": "Issues",
 };
 
 const Topbar = () => {
@@ -83,411 +70,304 @@ const Topbar = () => {
   const { user } = useAuth();
   const { viewMode, toggleViewMode } = useViewMode();
   const { isFavorited, getFavorite, add, remove } = useFavoritesContext();
-  const products = useAppSelector((s) => s.products.items);
-  const projects = useAppSelector((s) => s.projects.items);
+  const { isMyWork, isOfficeView, canUseOfficeView, setWorkScope } = useWorkScope();
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
   const [roleMenuAnchor, setRoleMenuAnchor] = useState<null | HTMLElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [indexStatus, setIndexStatus] = useState<SearchIndexStatus | null>(null);
-  const [indexLoading, setIndexLoading] = useState(false);
-  const [indexPopoverAnchor, setIndexPopoverAnchor] = useState<null | HTMLElement>(null);
-  const isAdminUser = useMemo(() => /admin/i.test(user?.role ?? ""), [user?.role]);
-
-  // ── Favorites star ───────────────────────────────────────────────────────────
-  const currentPath = location.pathname + location.search;
-  const alreadyFavorited = isFavorited(currentPath);
-
-  const autoLabel = useMemo(() => {
-    const params = new URLSearchParams(location.search);
-    const productId = params.get("product");
-    const projectId = params.get("project");
-    const tabKey = params.get("tab");
-    const viewKey = params.get("view");
-    const parts: string[] = [ROUTE_LABELS[location.pathname] ?? location.pathname];
-    if (productId) {
-      const p = products.find((p) => p.id === productId);
-      if (p) parts.push(p.name);
-    }
-    if (projectId) {
-      const proj = projects.find((p) => p.id === projectId);
-      if (proj) parts.push(proj.jobNumber);
-    }
-    if (tabKey && TAB_LABELS[tabKey]) {
-      parts.push(TAB_LABELS[tabKey]);
-    }
-    if (viewKey === "builder") {
-      parts.push("Builder");
-    }
-    return parts.join(" — ");
-  }, [location.pathname, location.search, products, projects]);
-
-  const [starAnchor, setStarAnchor] = useState<null | HTMLElement>(null);
-  const [favLabel, setFavLabel] = useState("");
-
-  function handleStarClick(e: React.MouseEvent<HTMLElement>) {
-    if (alreadyFavorited) {
-      const existing = getFavorite(currentPath);
-      if (existing) remove(existing.id);
-    } else {
-      setFavLabel(autoLabel);
-      setStarAnchor(e.currentTarget);
-    }
-  }
-
-  function handleFavSave() {
-    const label = favLabel.trim() || autoLabel;
-    add(label, currentPath);
-    setStarAnchor(null);
-  }
-  // ─────────────────────────────────────────────────────────────────────────────
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   const [activeOverride, setActiveOverride] = useState<string | null>(
     () => localStorage.getItem("dev_role_override")
   );
+
+  // ── Network status ────────────────────────────────────────────────────────
   useEffect(() => {
-    function handleRoleChange(e: Event) {
-      setActiveOverride((e as CustomEvent<{ role: string | null }>).detail.role);
-    }
-    window.addEventListener("dev-role-override-changed", handleRoleChange);
-    return () => window.removeEventListener("dev-role-override-changed", handleRoleChange);
+    const online  = () => setIsOnline(true);
+    const offline = () => setIsOnline(false);
+    window.addEventListener("online",  online);
+    window.addEventListener("offline", offline);
+    return () => {
+      window.removeEventListener("online",  online);
+      window.removeEventListener("offline", offline);
+    };
   }, []);
 
+  // ── Role override listener ────────────────────────────────────────────────
   useEffect(() => {
-    const isAdmin = isAdminUser;
-    if (!isAdmin) {
-      setIndexStatus(null);
-      return;
-    }
-
-    let active = true;
-    const load = async () => {
-      try {
-        setIndexLoading(true);
-        const next = await searchIndexService.getStatus();
-        if (active) setIndexStatus(next);
-      } catch {
-        if (active) setIndexStatus(null);
-      } finally {
-        if (active) setIndexLoading(false);
-      }
+    const handler = (e: Event) => {
+      setActiveOverride((e as CustomEvent<{ role: string | null }>).detail.role);
     };
+    window.addEventListener("dev-role-override-changed", handler);
+    return () => window.removeEventListener("dev-role-override-changed", handler);
+  }, []);
 
-    void load();
-    const timer = window.setInterval(() => {
-      void load();
-    }, 10000);
-
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [isAdminUser]);
-
+  // ── Global search shortcut ────────────────────────────────────────────────
   useEffect(() => {
-    function handleGlobalSearchShortcut(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
         setSearchOpen(true);
       }
-    }
-    window.addEventListener("keydown", handleGlobalSearchShortcut);
-    return () => window.removeEventListener("keydown", handleGlobalSearchShortcut);
-  }, []);
-
-  useEffect(() => {
-    const handleSideNavClick = () => {
-      setSearchOpen(false);
     };
-    window.addEventListener("app:side-nav-click", handleSideNavClick);
-    return () => window.removeEventListener("app:side-nav-click", handleSideNavClick);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // ── Favorites ─────────────────────────────────────────────────────────────
+  const currentPath = location.pathname + location.search;
+  const alreadyFavorited = isFavorited(currentPath);
+  const pageLabel = ROUTE_LABELS[location.pathname] ?? location.pathname;
+
+  const handleStarClick = () => {
+    if (alreadyFavorited) {
+      const existing = getFavorite(currentPath);
+      if (existing) remove(existing.id);
+    } else {
+      add(pageLabel, currentPath);
+    }
+  };
+
+  // ── User display ──────────────────────────────────────────────────────────
   const initials = useMemo(() => {
     const fullName = user?.fullName?.trim();
     if (fullName) {
       const parts = fullName.split(" ").filter(Boolean);
-      const first = parts[0]?.[0] || "U";
-      const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
-      return `${first}${last}`.toUpperCase();
+      return `${parts[0]?.[0] ?? "U"}${parts.length > 1 ? parts[parts.length - 1][0] : ""}`.toUpperCase();
     }
-    const email = user?.email?.trim();
-    if (email) {
-      return email.slice(0, 2).toUpperCase();
-    }
-    return "U";
+    return (user?.email?.slice(0, 2) ?? "U").toUpperCase();
   }, [user?.fullName, user?.email]);
 
-  const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleClose = () => {
-    setAnchorEl(null);
-    setRoleMenuAnchor(null);
-  };
+  const displayRole = activeOverride ?? user?.role ?? "";
+  const availableRoles = useMemo(() => getRolesFromCache(), []);
 
   const handleLogout = () => {
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("auth_user");
-    localStorage.removeItem("local_auth_user");
-    localStorage.removeItem("mock_role");
-    localStorage.removeItem("mock_office");
-    localStorage.removeItem("dev_role_override");
-    handleClose();
+    ["auth_token","auth_user","local_auth_user","mock_role","mock_office","dev_role_override"]
+      .forEach((k) => localStorage.removeItem(k));
+    setAnchorEl(null);
     navigate("/login");
   };
 
-  const availableRoles = useMemo(() => getRolesFromCache(), []);
-
   return (
     <Box className="topbar">
-      <Stack direction="row" spacing={2} alignItems="center">
-        <Chip
-          icon={viewMode === "full" ? <ViewSidebarOutlinedIcon /> : <DashboardOutlinedIcon />}
-          label={viewMode === "full" ? "Full View" : "Minimal View"}
-          onClick={toggleViewMode}
-          sx={{
-            background: "rgba(45, 212, 191, 0.18)",
-            color: "#9df0e5",
-            border: "1px solid rgba(45, 212, 191, 0.3)",
-            cursor: "pointer",
-            "&:hover": {
-              background: "rgba(45, 212, 191, 0.28)"
-            }
-          }}
+
+      {/* ── Mobile layout (≤ 768px): iOS-style bar ─────────────────────── */}
+      <Box sx={{ display: { xs: "flex", md: "none" }, alignItems: "center", width: "100%", gap: 1 }}>
+        {/* Logo */}
+        <Box
+          component="img"
+          src={strataLogo}
+          alt="Kinet"
+          sx={{ height: 40, borderRadius: "8px", flexShrink: 0 }}
         />
-        <Stack spacing={0.5}>
-          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-            Global Project Workflow
+
+        {/* App name + connectivity + role */}
+        <Stack spacing={0} sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="subtitle1" fontWeight={700} lineHeight={1.2} noWrap>
+            Kinet
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {autoLabel}
-          </Typography>
-        </Stack>
-      </Stack>
-      <Stack direction="row" spacing={2} alignItems="center">
-        {(() => {
-          try {
-            const s = JSON.parse(localStorage.getItem("qb_settings") ?? "{}");
-            if (!s?.enabled) return null;
-            const host: string = s.realmHostname ?? "";
-            const provider = host.includes("quickbase") ? "Quickbase"
-              : host.includes("salesforce") ? "Salesforce"
-              : host ? new URL(`https://${host}`).hostname.split(".").slice(-2, -1)[0] ?? "API"
-              : "API";
-            return (
-              <Box className="status-chip">
-                <span className="status-dot" />
-                {provider} connected
-              </Box>
-            );
-          } catch { return null; }
-        })()}
-        {isAdminUser && (
-          <>
-            <Chip
-              size="small"
-              onClick={(e) => setIndexPopoverAnchor(e.currentTarget)}
-              icon={indexLoading || indexStatus?.isRunning ? <CircularProgress size={12} /> : undefined}
-              label={
-                indexStatus?.isRunning
-                  ? `Indexing ${indexStatus.currentRunProcessed}/${Math.max(indexStatus.currentRunTotal, 0)}`
-                  : `Index ${formatAgo(indexStatus?.lastRebuildCompletedAtUtc)}`
-              }
-              color={indexStatus?.lastError ? "error" : (indexStatus?.isRunning ? "warning" : "success")}
-              variant="outlined"
-              sx={{ cursor: "pointer" }}
-            />
-            <Popover
-              open={Boolean(indexPopoverAnchor)}
-              anchorEl={indexPopoverAnchor}
-              onClose={() => setIndexPopoverAnchor(null)}
-              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-              transformOrigin={{ vertical: "top", horizontal: "right" }}
-              slotProps={{ paper: { sx: { p: 2, width: 360 } } }}
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            {isOnline
+              ? <WifiIcon    sx={{ fontSize: 13, color: "success.main" }} />
+              : <WifiOffIcon sx={{ fontSize: 13, color: "warning.main" }} />
+            }
+            <Typography
+              variant="caption"
+              sx={{ fontSize: "0.72rem", color: isOnline ? "success.main" : "warning.main" }}
             >
-              <Stack spacing={1}>
-                <Typography variant="subtitle2" fontWeight={700}>Search Index</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Queue: {indexStatus?.queueDepth ?? 0} | Running: {indexStatus?.isRunning ? "Yes" : "No"}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Last rebuild started: {indexStatus?.lastRebuildStartedAtUtc ? new Date(indexStatus.lastRebuildStartedAtUtc).toLocaleString() : "Never"}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Last rebuild completed: {indexStatus?.lastRebuildCompletedAtUtc ? new Date(indexStatus.lastRebuildCompletedAtUtc).toLocaleString() : "Never"}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Last rebuild items: {(indexStatus?.lastRebuildProcessed ?? 0)}/{(indexStatus?.lastRebuildTotal ?? 0)}
-                </Typography>
-                {indexStatus?.lastError ? (
-                  <Typography variant="caption" color="error.main">
-                    Last error: {indexStatus.lastError}
-                  </Typography>
-                ) : null}
-                <Stack direction="row" justifyContent="flex-end">
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={async () => {
-                      try {
-                        await searchIndexService.rebuild();
-                        const next = await searchIndexService.getStatus();
-                        setIndexStatus(next);
-                      } catch (error) {
-                        console.error("Index rebuild failed:", error);
-                      }
-                    }}
-                  >
-                    Rebuild Now
-                  </Button>
-                </Stack>
-              </Stack>
-            </Popover>
-          </>
-        )}
-        <Tooltip title={alreadyFavorited ? "Remove from Favorites" : "Add to Favorites"}>
-          <IconButton color="inherit" onClick={handleStarClick}>
-            {alreadyFavorited
-              ? <StarOutlinedIcon sx={{ color: "#f59e0b" }} />
-              : <StarBorderOutlinedIcon />}
-          </IconButton>
-        </Tooltip>
-
-        {/* Add-favorite popover */}
-        <Popover
-          open={Boolean(starAnchor)}
-          anchorEl={starAnchor}
-          onClose={() => setStarAnchor(null)}
-          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-          transformOrigin={{ vertical: "top", horizontal: "right" }}
-          slotProps={{ paper: { sx: { p: 2, width: 300 } } }}
-        >
-          <Stack spacing={1.5}>
-            <Typography variant="subtitle2" fontWeight={700}>
-              Add to Favorites
+              {isOnline ? "Online" : "Offline"}
             </Typography>
-            <TextField
-              label="Name"
-              size="small"
-              fullWidth
-              autoFocus
-              value={favLabel}
-              onChange={(e) => setFavLabel(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleFavSave(); }}
-            />
-            <Stack direction="row" spacing={1} justifyContent="flex-end">
-              <Button size="small" onClick={() => setStarAnchor(null)}>Cancel</Button>
-              <Button size="small" variant="contained" onClick={handleFavSave}>Save</Button>
-            </Stack>
+            {displayRole && (
+              <>
+                <Typography variant="caption" sx={{ fontSize: "0.72rem", color: "text.disabled" }}>·</Typography>
+                <Typography variant="caption" sx={{ fontSize: "0.72rem", color: "text.secondary" }} noWrap>
+                  {displayRole}
+                </Typography>
+              </>
+            )}
+            {isOfficeView && (
+              <>
+                <Typography variant="caption" sx={{ fontSize: "0.72rem", color: "text.disabled" }}>·</Typography>
+                <Typography variant="caption" sx={{ fontSize: "0.72rem", color: "primary.main" }} noWrap>
+                  (Office)
+                </Typography>
+              </>
+            )}
           </Stack>
-        </Popover>
+        </Stack>
 
-        <IconButton color="inherit" onClick={() => setSearchOpen(true)}>
-          <SearchOutlinedIcon />
-        </IconButton>
-        <IconButton color="inherit">
-          <NotificationsNoneOutlinedIcon />
-        </IconButton>
-        <IconButton color="inherit" onClick={handleOpen}>
+        {/* ··· menu */}
+        <IconButton
+          size="small"
+          onClick={(e) => setAnchorEl(e.currentTarget)}
+          sx={{
+            bgcolor: "action.hover",
+            borderRadius: "50%",
+            width: 38,
+            height: 38,
+          }}
+        >
           <Badge
-            overlap="circular"
-            anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
             variant="dot"
             invisible={!activeOverride}
-            sx={{
-              "& .MuiBadge-dot": {
-                backgroundColor: "#f59e0b",
-                border: "2px solid var(--panel)",
-                width: 10,
-                height: 10,
-                borderRadius: "50%"
-              }
-            }}
+            sx={{ "& .MuiBadge-dot": { bgcolor: "warning.main" } }}
           >
-            <Avatar sx={{ bgcolor: "#2dd4bf", color: "#0b1d24" }}>{initials}</Avatar>
+            <MoreHorizIcon fontSize="small" />
           </Badge>
         </IconButton>
+      </Box>
 
-        {/* Profile menu */}
-        <Menu
-          anchorEl={anchorEl}
-          open={menuOpen}
-          onClose={handleClose}
-          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-          transformOrigin={{ vertical: "top", horizontal: "right" }}
-        >
-          <MenuItem disabled>
-            <Stack>
-              <Typography variant="body2">{user?.fullName || "User"}</Typography>
-              <Typography variant="caption" color="text.secondary">{user?.role}</Typography>
-            </Stack>
-          </MenuItem>
-          <Divider />
-          <MenuItem
-            onClick={(e) => setRoleMenuAnchor(e.currentTarget)}
-            sx={{ justifyContent: "space-between" }}
-          >
-            <Typography variant="body2">Test as role…</Typography>
-            {activeOverride && (
-              <Typography variant="caption" color="warning.main" sx={{ ml: 1 }}>
-                {activeOverride}
-              </Typography>
-            )}
-          </MenuItem>
-          <Divider />
-          <MenuItem
-            onClick={() => {
-              handleClose();
-              navigate("/profile");
+      {/* ── Desktop layout (≥ 768px): full bar ─────────────────────────── */}
+      <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", width: "100%", gap: 2 }}>
+        {/* Sidebar toggle + page title */}
+        <Stack direction="row" spacing={2} alignItems="center">
+          <Chip
+            icon={viewMode === "full" ? <ViewSidebarOutlinedIcon /> : <DashboardOutlinedIcon />}
+            label={viewMode === "full" ? "Full View" : "Minimal View"}
+            onClick={toggleViewMode}
+            sx={{
+              background: "rgba(45, 212, 191, 0.18)",
+              color: "#9df0e5",
+              border: "1px solid rgba(45, 212, 191, 0.3)",
+              cursor: "pointer",
+              "&:hover": { background: "rgba(45, 212, 191, 0.28)" }
             }}
-          >
-            Profile
-          </MenuItem>
-          <MenuItem onClick={handleLogout}>Logout</MenuItem>
-        </Menu>
+          />
+          <Stack spacing={0.25}>
+            <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Kinet</Typography>
+            <Typography variant="body2" color="text.secondary">{pageLabel}</Typography>
+          </Stack>
+        </Stack>
 
-        {/* Role switcher submenu */}
-        <Menu
-          anchorEl={roleMenuAnchor}
-          open={Boolean(roleMenuAnchor)}
-          onClose={() => setRoleMenuAnchor(null)}
-          anchorOrigin={{ vertical: "top", horizontal: "left" }}
-          transformOrigin={{ vertical: "top", horizontal: "right" }}
-        >
-          {availableRoles.map((role) => (
-            <MenuItem
-              key={role}
-              dense
-              onClick={() => {
-                setDevRoleOverride(role);
-                handleClose();
-              }}
+        <Box sx={{ flex: 1 }} />
+
+        {/* Desktop actions */}
+        <Stack direction="row" spacing={1} alignItems="center">
+          <IconButton color="inherit" onClick={handleStarClick}>
+            {alreadyFavorited
+              ? <StarOutlinedIcon    sx={{ color: "#f59e0b" }} />
+              : <StarBorderOutlinedIcon />}
+          </IconButton>
+          <IconButton color="inherit" onClick={() => setSearchOpen(true)}>
+            <SearchOutlinedIcon />
+          </IconButton>
+          <IconButton color="inherit">
+            <NotificationsNoneOutlinedIcon />
+          </IconButton>
+          <IconButton color="inherit" onClick={(e) => setAnchorEl(e.currentTarget)}>
+            <Badge
+              overlap="circular"
+              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+              variant="dot"
+              invisible={!activeOverride}
+              sx={{ "& .MuiBadge-dot": { backgroundColor: "#f59e0b", border: "2px solid var(--panel)", width: 10, height: 10, borderRadius: "50%" } }}
             >
-              <ListItemIcon sx={{ minWidth: 28 }}>
-                {activeOverride === role && <CheckIcon fontSize="small" sx={{ color: "warning.main" }} />}
+              <Avatar sx={{ bgcolor: "#2dd4bf", color: "#0b1d24", width: 32, height: 32, fontSize: 13 }}>
+                {initials}
+              </Avatar>
+            </Badge>
+          </IconButton>
+        </Stack>
+      </Box>
+
+      {/* ── Shared menu (mobile + desktop) ──────────────────────────────── */}
+      <Menu
+        anchorEl={anchorEl}
+        open={menuOpen}
+        onClose={() => { setAnchorEl(null); setRoleMenuAnchor(null); }}
+        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+        transformOrigin={{ vertical: "top", horizontal: "right" }}
+        slotProps={{ paper: { sx: { minWidth: 200, borderRadius: 2 } } }}
+      >
+        {/* User info header */}
+        <MenuItem disabled>
+          <Stack>
+            <Typography variant="body2" fontWeight={600}>{user?.fullName || "User"}</Typography>
+            <Typography variant="caption" color="text.secondary">{displayRole}</Typography>
+          </Stack>
+        </MenuItem>
+        <Divider />
+
+        {/* Profile */}
+        <MenuItem onClick={() => { setAnchorEl(null); navigate("/profile"); }}>
+          <ListItemIcon><PersonOutlineOutlinedIcon fontSize="small" /></ListItemIcon>
+          <Typography variant="body2">Profile</Typography>
+        </MenuItem>
+
+        {/* Work scope toggle */}
+        {canUseOfficeView && (
+          <>
+            <MenuItem onClick={() => { setWorkScope(isMyWork ? "office" : "my-work"); setAnchorEl(null); }}>
+              <ListItemIcon>
+                {isMyWork ? <BusinessOutlinedIcon fontSize="small" /> : <PersonOutlinedIcon fontSize="small" />}
               </ListItemIcon>
-              <Typography variant="body2">{role}</Typography>
+              <Typography variant="body2">
+                {isMyWork ? "Switch to Office View" : "Switch to My Work"}
+              </Typography>
             </MenuItem>
-          ))}
+            <Divider />
+          </>
+        )}
+
+        {/* Test as role → submenu */}
+        <MenuItem
+          onClick={(e) => setRoleMenuAnchor(e.currentTarget)}
+          sx={{ justifyContent: "space-between" }}
+        >
+          <Typography variant="body2">Test as role…</Typography>
           {activeOverride && (
-            <>
-              <Divider />
-              <MenuItem
-                dense
-                onClick={() => {
-                  setDevRoleOverride(null);
-                  handleClose();
-                }}
-              >
-                <Typography variant="body2" color="text.secondary">Clear role test</Typography>
-              </MenuItem>
-            </>
+            <Typography variant="caption" color="warning.main" sx={{ ml: 1 }}>
+              {activeOverride}
+            </Typography>
           )}
-        </Menu>
-      </Stack>
+        </MenuItem>
+
+        {/* Refresh */}
+        <MenuItem onClick={() => { setAnchorEl(null); window.location.reload(); }}>
+          <ListItemIcon><RefreshOutlinedIcon fontSize="small" /></ListItemIcon>
+          <Typography variant="body2">Refresh</Typography>
+        </MenuItem>
+
+        <Divider />
+
+        {/* Sign out */}
+        <MenuItem onClick={handleLogout} sx={{ color: "error.main" }}>
+          <ListItemIcon><LogoutIcon fontSize="small" sx={{ color: "error.main" }} /></ListItemIcon>
+          <Typography variant="body2">Sign Out</Typography>
+        </MenuItem>
+      </Menu>
+
+      {/* Role switcher submenu */}
+      <Menu
+        anchorEl={roleMenuAnchor}
+        open={Boolean(roleMenuAnchor)}
+        onClose={() => setRoleMenuAnchor(null)}
+        anchorOrigin={{ vertical: "top", horizontal: "left" }}
+        transformOrigin={{ vertical: "top", horizontal: "right" }}
+      >
+        {availableRoles.map((role) => (
+          <MenuItem
+            key={role}
+            dense
+            onClick={() => { setDevRoleOverride(role); setAnchorEl(null); setRoleMenuAnchor(null); }}
+          >
+            <ListItemIcon sx={{ minWidth: 28 }}>
+              {activeOverride === role && <CheckIcon fontSize="small" sx={{ color: "warning.main" }} />}
+            </ListItemIcon>
+            <Typography variant="body2">{role}</Typography>
+          </MenuItem>
+        ))}
+        {activeOverride && (
+          <>
+            <Divider />
+            <MenuItem dense onClick={() => { setDevRoleOverride(null); setAnchorEl(null); setRoleMenuAnchor(null); }}>
+              <Typography variant="body2" color="text.secondary">Clear role test</Typography>
+            </MenuItem>
+          </>
+        )}
+      </Menu>
+
       <GlobalSearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
     </Box>
   );

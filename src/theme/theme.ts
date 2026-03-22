@@ -25,12 +25,8 @@ const theme = createTheme({
   },
   typography: {
     fontFamily: "Manrope, Sora, system-ui, sans-serif",
-    h5: {
-      fontWeight: 600
-    },
-    h6: {
-      fontWeight: 600
-    }
+    h5: { fontWeight: 600 },
+    h6: { fontWeight: 600 }
   },
   shape: {
     borderRadius: 12

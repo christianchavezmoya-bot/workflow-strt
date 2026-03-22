@@ -384,26 +384,37 @@ const Settings = () => {
   const [productForm, setProductForm] = useState({ name: "", description: "", divisionId: "" });
   const [productSaving, setProductSaving] = useState(false);
   const [productError, setProductError] = useState<string | null>(null);
+  const [productsLoadError, setProductsLoadError] = useState<string | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [featurePickerProductId, setFeaturePickerProductId] = useState<string | null>(null);
   const [featurePickerAnchor, setFeaturePickerAnchor] = useState<HTMLElement | null>(null);
 
   async function loadProducts() {
     setProductsLoading(true);
+    setProductsLoadError(null);
     try {
       const data = await productService.getProducts();
       setProducts(data.sort((a, b) => a.name.localeCompare(b.name)));
-    } catch { console.warn("Failed to load products"); } finally {
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message ?? err?.message ?? "Unknown error";
+      setProductsLoadError(`Failed to load products (${status ?? "network error"}): ${msg}`);
+      console.warn("Failed to load products", err);
+    } finally {
       setProductsLoading(false);
     }
   }
 
   // Load products + divisions when Products tab becomes active (tab === 4).
-  // This covers direct URL navigation and localStorage-restored tab — not just click events.
+  // Load features when Features tab becomes active (tab === 5).
+  // Always reload — don't guard on length so switching back refreshes data.
   useEffect(() => {
     if (tab === 4) {
-      if (products.length === 0) loadProducts();
+      loadProducts();
       if (divisions.length === 0) loadDivisions();
+    }
+    if (tab === 5) {
+      loadFeatures();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
@@ -463,6 +474,7 @@ const Settings = () => {
   // Feature library manager
   const [features, setFeatures] = useState<Feature[]>([]);
   const [featuresLoading, setFeaturesLoading] = useState(false);
+  const [featuresLoadError, setFeaturesLoadError] = useState<string | null>(null);
   const [featureDialog, setFeatureDialog] = useState(false);
   const [featureEditId, setFeatureEditId] = useState<string | null>(null);
   const [featureJustCreatedId, setFeatureJustCreatedId] = useState<string | null>(null);
@@ -472,10 +484,16 @@ const Settings = () => {
 
   async function loadFeatures() {
     setFeaturesLoading(true);
+    setFeaturesLoadError(null);
     try {
       const data = await featureService.getAll();
       setFeatures(data.sort((a, b) => a.name.localeCompare(b.name)));
-    } catch { console.warn("Failed to load features"); } finally {
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message ?? err?.message ?? "Unknown error";
+      setFeaturesLoadError(`Failed to load features (${status ?? "network error"}): ${msg}`);
+      console.warn("Failed to load features", err);
+    } finally {
       setFeaturesLoading(false);
     }
   }
@@ -1266,13 +1284,13 @@ const Settings = () => {
           setTab(next);
           const key = SETTINGS_TAB_KEYS[next] ?? "";
           if (key) setSearchParams({ tab: key }, { replace: true });
-        }}>
+        }} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
           <Tab label="Integrations" />
           <Tab label="SMS/SMTP" />
           <Tab label="Fields/Data" />
-          <Tab label="Divisions" onClick={() => { if (divisions.length === 0) loadDivisions(); }} />
-          <Tab label="Products" onClick={() => { if (products.length === 0) loadProducts(); if (divisions.length === 0) loadDivisions(); }} />
-          <Tab label="Features" onClick={() => { if (features.length === 0) loadFeatures(); }} />
+          <Tab label="Divisions" />
+          <Tab label="Products" />
+          <Tab label="Features" />
           <Tab label="Workflow Types" onClick={() => { if (wfTypes.length === 0) loadWfTypes(); }} />
           <Tab label="Business Logo" />
           {isAdmin && <Tab label="Audit Log" />}
@@ -1729,6 +1747,10 @@ const Settings = () => {
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />
               </Stack>
+            ) : productsLoadError ? (
+              <Alert severity="error" action={<Button size="small" color="inherit" onClick={loadProducts}>Retry</Button>}>
+                {productsLoadError}
+              </Alert>
             ) : products.length === 0 ? (
               <Alert severity="info">
                 No products yet.{" "}
@@ -1879,6 +1901,10 @@ const Settings = () => {
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />
               </Stack>
+            ) : featuresLoadError ? (
+              <Alert severity="error" action={<Button size="small" color="inherit" onClick={loadFeatures}>Retry</Button>}>
+                {featuresLoadError}
+              </Alert>
             ) : features.length === 0 ? (
               <Alert severity="info">
                 No features in the library yet.{" "}

@@ -985,7 +985,7 @@ const InstallationList = () => {
         )}
       </Stack>
 
-      <Tabs value={tab} onChange={(_, next) => setTab(next)}>
+      <Tabs value={tab} onChange={(_, next) => setTab(next)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
         {installationTabsConfig.map((tabItem) => (
           <Tab key={tabItem.id} label={tabItem.label} />
         ))}
@@ -1012,8 +1012,8 @@ const InstallationList = () => {
           const rowsWithIndex = rows.map((row, index) => ({ row, index }));
           const filteredRows = applyAutoSort(applyAutoFilter(rowsWithIndex, filters, accessors), sortConfig, accessors);
           return (
-            <Box className="glass-card" sx={{ padding: 2 }}>
-              <Table>
+            <Box className="glass-card" sx={{ padding: 2, overflowX: "auto" }}>
+              <Table sx={{ minWidth: 600 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell>#</TableCell>

@@ -1163,3 +1163,6 @@ public record CloneAssetsResult(int AssetsCloned, int AssignmentsCloned);
 
 /// <summary>Per-technician open-asset counts for the Dashboard workload panel.</summary>
 public record WorkloadSummaryDto(string UserId, string FullName, int NotStarted, int InProgress, int TotalAssigned);
+
+/// <summary>Per-project asset status counts for the Dashboard regional snapshot.</summary>
+public record ProjectAssetSummaryDto(string ProjectId, int NotStarted, int InProgress, int Complete, int Total);

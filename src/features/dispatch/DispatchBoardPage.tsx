@@ -284,7 +284,7 @@ function OrderDetailDialog({
           </Stack>
         </Box>
 
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ px: 2, borderBottom: "1px solid", borderColor: "divider" }}>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ px: 2, borderBottom: "1px solid", borderColor: "divider" }}>
           <Tab label={`Items (${detail.lines.length})`} />
           <Tab label={`History (${detail.events.length})`} />
         </Tabs>

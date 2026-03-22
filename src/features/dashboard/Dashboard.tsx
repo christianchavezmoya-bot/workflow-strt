@@ -15,13 +15,15 @@ import SummaryCard from "../../components/ui/SummaryCard";
 import StatusStepper from "../../components/ui/StatusStepper";
 import { demoProducts } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
+import { useAuth } from "../../hooks/useAuth";
+import { useWorkScope } from "../../hooks/useWorkScope";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchInstallations } from "../../store/installationSlice";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
 import { officesService } from "../../services/officesService";
 import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
-import { projectAssetService, type WorkloadSummaryItem } from "../../services/projectAssetService";
+import { projectAssetService, type WorkloadSummaryItem, type ProjectAssetSummaryItem } from "../../services/projectAssetService";
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
@@ -34,6 +36,8 @@ function fmtDate(iso: string | null | undefined) {
 const Dashboard = () => {
   const navigate = useNavigate();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
+  const { user } = useAuth();
+  const { isMyWork, canUseOfficeView } = useWorkScope();
   const dispatch = useAppDispatch();
   const projectsState     = useAppSelector((state) => state.projects);
   const installationsState = useAppSelector((state) => state.installations);
@@ -50,6 +54,8 @@ const Dashboard = () => {
   const [workload,            setWorkload]            = useState<WorkloadSummaryItem[]>([]);
   const [workloadLoading,     setWorkloadLoading]     = useState(false);
   const [reportingTechId,     setReportingTechId]     = useState<string | null>(null);
+  const [assetSummary,        setAssetSummary]        = useState<ProjectAssetSummaryItem[]>([]);
+  const [myDashProjectIds,    setMyDashProjectIds]    = useState<string[]>([]);
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
 
@@ -99,28 +105,72 @@ const Dashboard = () => {
     loadAttention();
     setWorkloadLoading(true);
     projectAssetService.workloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
+    projectAssetService.activeSummary().then(setAssetSummary);
   }, [dispatch, loadAttention]);
+
+  // Load my project IDs for Installer/Engineer/Supervisor in my-work scope
+  useEffect(() => {
+    const role = user?.role ?? "";
+    if (isMyWork && ["Installer", "Engineer", "Supervisor"].includes(role)) {
+      projectAssetService.myProjectIds().then(setMyDashProjectIds);
+    } else {
+      setMyDashProjectIds([]);
+    }
+  }, [isMyWork, user?.role]);
 
   // ── Derived values ──────────────────────────────────────────────────────────
   const filteredProjects = useMemo(() => {
-    if (activeOffice === "All") return projects;
-    return projects.filter((p) => {
-      const c = countryForOffice(p.office);
-      return c === activeOffice || p.office === activeOffice;
-    });
-  }, [activeOffice, projects, countryForOffice]);
+    const role = user?.role ?? "";
+    const isAdmin = role === "Admin";
+
+    const officeFiltered = (activeOffice === "All" || isAdmin)
+      ? projects
+      : projects.filter((p) => {
+          const c = countryForOffice(p.office);
+          return c === activeOffice || p.office === activeOffice;
+        });
+
+    if (isMyWork && !isAdmin) {
+      if (role === "Project Manager") {
+        return officeFiltered.filter((p) => p.projectManager === user?.fullName);
+      } else if (["Installer", "Engineer", "Supervisor"].includes(role)) {
+        const idSet = new Set(myDashProjectIds);
+        return officeFiltered.filter((p) => idSet.has(p.id));
+      }
+    }
+
+    return officeFiltered;
+  }, [activeOffice, projects, countryForOffice, isMyWork, user?.role, user?.fullName, myDashProjectIds]);
 
   const filteredInstallations = useMemo(() => {
-    if (activeOffice === "All") return installations;
-    return installations.filter((i) => {
-      const c = countryForOffice(i.office);
-      return c === activeOffice || i.office === activeOffice;
-    });
-  }, [activeOffice, installations, countryForOffice]);
+    const role = user?.role ?? "";
+    const isAdmin = role === "Admin";
+
+    const officeFiltered = (activeOffice === "All" || isAdmin)
+      ? installations
+      : installations.filter((i) => {
+          const c = countryForOffice(i.office);
+          return c === activeOffice || i.office === activeOffice;
+        });
+
+    if (isMyWork && !isAdmin && ["Installer", "Engineer", "Supervisor"].includes(role)) {
+      const idSet = new Set(myDashProjectIds);
+      return officeFiltered.filter((i) => idSet.has(i.projectId ?? ""));
+    }
+
+    return officeFiltered;
+  }, [activeOffice, installations, countryForOffice, isMyWork, user?.role, myDashProjectIds]);
+
+  // Map projectId → active asset count (InProgress + NotStarted)
+  const assetSummaryMap = useMemo(() =>
+    new Map(assetSummary.map((s) => [s.projectId, s.inProgress + s.notStarted])),
+    [assetSummary]
+  );
 
   const productCount            = products.length;
   const projectCount            = filteredProjects.length;
-  const activeInstallationsCount = filteredInstallations.filter((i) => ["Scheduled", "In Progress"].includes(i.status)).length;
+  const activeInstallationsCount = filteredInstallations.filter((i) => ["Scheduled", "In Progress"].includes(i.status)).length
+    + filteredProjects.reduce((sum, p) => sum + (assetSummaryMap.get(p.id) ?? 0), 0);
   const pendingApprovalCount    = filteredProjects.filter((p) => p.status === "Pending Approval").length;
   const inProgressCount         = filteredProjects.filter((p) => p.status === "In Progress").length;
 
@@ -154,13 +204,23 @@ const Dashboard = () => {
   return (
     <Stack spacing={3}>
 
-      {/* ── Row 1: Top KPI summary cards (existing, unchanged) ── */}
-      <Stack direction={{ xs: "column", md: "row" }} spacing={2} flexWrap="wrap" useFlexGap>
-        <SummaryCard title="Total Projects"       value={String(projectCount)}             trend={`${inProgressCount} in progress`} />
-        <SummaryCard title="Active Installations" value={String(activeInstallationsCount)} trend="Scheduled + In Progress" />
-        <SummaryCard title="Pending Approvals"    value={String(pendingApprovalCount)}     trend="Awaiting review" />
-        <SummaryCard title="Products"             value={String(productCount)}             trend="Catalog size" />
-      </Stack>
+      {/* ── My Work banner ── */}
+      {isMyWork && canUseOfficeView && (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 0.5 }}>
+          <Chip label="My Work" color="primary" size="small" />
+          <Typography variant="caption" color="text.secondary">
+            Showing your assigned work
+          </Typography>
+        </Box>
+      )}
+
+      {/* ── Row 1: KPI summary cards — 2-col on mobile, 4-col on desktop ── */}
+      <Grid container spacing={2}>
+        <Grid item xs={6} md={3}><SummaryCard title="Total Projects"       value={String(projectCount)}             trend={`${inProgressCount} in progress`} /></Grid>
+        <Grid item xs={6} md={3}><SummaryCard title="Active Installations" value={String(activeInstallationsCount)} trend="Scheduled + In Progress" /></Grid>
+        <Grid item xs={6} md={3}><SummaryCard title="Pending Approvals"    value={String(pendingApprovalCount)}     trend="Awaiting review" /></Grid>
+        <Grid item xs={6} md={3}><SummaryCard title="Products"             value={String(productCount)}             trend="Catalog size" /></Grid>
+      </Grid>
 
       {/* ── Row 2: Needs Attention (NEW) ── */}
       <Box className="glass-card" sx={{ padding: 2.5 }}>
@@ -367,9 +427,9 @@ const Dashboard = () => {
               const c = countryForOffice(i.office);
               return c === region || i.office === region;
             });
-            const regionActiveInstalls = regionInstallations.filter((i) =>
-              ["Scheduled", "In Progress"].includes(i.status)
-            ).length;
+            const regionActiveInstalls =
+              regionInstallations.filter((i) => ["Scheduled", "In Progress"].includes(i.status)).length
+              + regionProjects.reduce((sum, p) => sum + (assetSummaryMap.get(p.id) ?? 0), 0);
             const regionInProgress = regionProjects.filter(p => p.status === "In Progress").length;
             return (
               <Grid key={region} item xs={12} md={4}>

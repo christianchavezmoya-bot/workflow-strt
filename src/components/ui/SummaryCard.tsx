@@ -8,7 +8,7 @@ interface SummaryCardProps {
 
 const SummaryCard = ({ title, value, trend }: SummaryCardProps) => {
   return (
-    <Box className="glass-card" sx={{ padding: 2.5, minWidth: 220 }}>
+    <Box className="glass-card" sx={{ padding: 2, height: "100%" }}>
       <Typography variant="overline" color="text.secondary">
         {title}
       </Typography>

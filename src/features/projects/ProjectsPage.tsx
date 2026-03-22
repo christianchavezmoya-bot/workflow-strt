@@ -20,7 +20,7 @@ export default function ProjectsPage() {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Paper className="glass-card" sx={{ p: 1.5 }}>
-        <Tabs value={tab} onChange={handleChange}>
+        <Tabs value={tab} onChange={handleChange} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
           {TABS.map((label) => <Tab key={label} label={label} />)}
         </Tabs>
       </Paper>

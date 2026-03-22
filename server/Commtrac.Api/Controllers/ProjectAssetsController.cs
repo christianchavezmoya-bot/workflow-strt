@@ -18,6 +18,38 @@ public class ProjectAssetsController : ControllerBase
         _db = db;
     }
 
+    // GET api/project-assets/my-project-ids
+    [HttpGet("my-project-ids")]
+    public async Task<ActionResult<IEnumerable<string>>> MyProjectIds()
+    {
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(userId)) return Ok(Array.Empty<string>());
+
+        var projectIds = await _db.ProjectAssets
+            .Where(a => a.AssignedUserId == userId)
+            .Select(a => a.ProjectId)
+            .Distinct()
+            .ToListAsync();
+        return Ok(projectIds);
+    }
+
+    // GET api/project-assets/active-summary
+    // Returns per-project asset counts (active = NotStarted + InProgress)
+    [HttpGet("active-summary")]
+    public async Task<ActionResult<IEnumerable<ProjectAssetSummaryDto>>> ActiveSummary()
+    {
+        var counts = await _db.ProjectAssets
+            .GroupBy(a => a.ProjectId)
+            .Select(g => new ProjectAssetSummaryDto(
+                g.Key,
+                g.Count(a => a.Status == "NotStarted"),
+                g.Count(a => a.Status == "InProgress"),
+                g.Count(a => a.Status == "Complete" || a.Status == "Completed"),
+                g.Count()))
+            .ToListAsync();
+        return Ok(counts);
+    }
+
     // GET api/project-assets/workload-summary
     [HttpGet("workload-summary")]
     public async Task<ActionResult<IEnumerable<WorkloadSummaryDto>>> WorkloadSummary()
