@@ -45,6 +45,7 @@ import {
   Typography,
 } from "@mui/material";
 import { documentService, type DocumentRecord } from "../../services/documentService";
+import QRUploadButton from "../../components/QRUploadButton";
 import { productService } from "../../services/productService";
 import { projectService } from "../../services/projectService";
 import { customerService } from "../../services/customerService";
@@ -691,10 +692,17 @@ export default function DocumentsPage() {
           )}
 
           {can.modifyData && (
-            <Button variant="contained" startIcon={<AddOutlined />}
-              onClick={() => { setAddForm(makeEmptyForm()); setAddError(null); setAddOpen(true); }}>
-              Add document
-            </Button>
+            <>
+              <QRUploadButton
+                docType={activeCategoryId !== "all" ? activeCategoryId : "technical"}
+                linkedTo=""
+                onUploaded={() => { loadDocs(); }}
+              />
+              <Button variant="contained" startIcon={<AddOutlined />}
+                onClick={() => { setAddForm(makeEmptyForm()); setAddError(null); setAddOpen(true); }}>
+                Add document
+              </Button>
+            </>
           )}
         </Stack>
       </Stack>

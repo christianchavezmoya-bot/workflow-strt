@@ -50,6 +50,7 @@ import { fetchProducts } from "../../store/productsSlice";
 import { createUser, fetchUsers } from "../../store/usersSlice";
 import { Installation } from "../../types/installation";
 import { inspectionService, Inspection } from "../../services/inspectionService";
+import QRUploadButton from "../../components/QRUploadButton";
 import { customFieldService, CustomFieldDefinition } from "../../services/customFieldService";
 
 // Style for field definition labels (yellow bold)
@@ -1887,6 +1888,15 @@ const InstallationList = () => {
                               }}
                             />
                           </Button>
+                          <QRUploadButton
+                            docType="inspection-photo"
+                            linkedTo={row.id}
+                            label="Photo from Phone"
+                            onUploaded={() => {
+                              const next = { ...row, photoCount: row.photoCount + 1 };
+                              setInspections((prev) => prev.map((item) => (item.id === row.id ? next : item)));
+                            }}
+                          />
                         </Stack>
                       </TableCell>
                       {inspectionDynamicColumns.map((field) => (

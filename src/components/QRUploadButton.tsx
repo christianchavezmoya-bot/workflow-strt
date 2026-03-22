@@ -7,6 +7,7 @@ import PhoneAndroidOutlinedIcon from "@mui/icons-material/PhoneAndroidOutlined";
 import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import { QRCodeSVG } from "qrcode.react";
 import api from "../services/api";
+import { documentService, type DocumentRecord } from "../services/documentService";
 
 interface QRUploadButtonProps {
   /** Document type to store (e.g. "tips") */
@@ -17,6 +18,12 @@ interface QRUploadButtonProps {
   customValuesJson?: string;
   /** Called with the new documentId once upload completes on the phone */
   onUploaded: (documentId: string) => void;
+  /**
+   * Optional — when provided, after upload completes the component fetches the
+   * document record, converts the file to a base64 data URL, and calls this
+   * callback with both the documentId and the dataUrl.
+   */
+  onUploadedWithData?: (documentId: string, dataUrl: string) => void;
   /** Optional button label override */
   label?: string;
   disabled?: boolean;
@@ -37,6 +44,7 @@ export default function QRUploadButton({
   linkedTo,
   customValuesJson,
   onUploaded,
+  onUploadedWithData,
   label = "Upload from Phone",
   disabled,
 }: QRUploadButtonProps) {
@@ -46,6 +54,7 @@ export default function QRUploadButton({
   const [expiresAt, setExpiresAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = () => {
@@ -83,6 +92,7 @@ export default function QRUploadButton({
     setToken(null);
     setDone(false);
     setError(null);
+    setProcessing(false);
   };
 
   // Start/restart polling whenever token changes
@@ -97,6 +107,27 @@ export default function QRUploadButton({
           stopPolling();
           setDone(true);
           onUploaded(documentId);
+          if (onUploadedWithData) {
+            setProcessing(true);
+            try {
+              // Fetch the document record to get contentType + downloadUrl
+              const docs = await documentService.getDocuments();
+              const doc: DocumentRecord | undefined = docs.find((d) => d.id === documentId);
+              if (doc?.downloadUrl) {
+                const buffer = await documentService.openDocumentAsBuffer(doc.downloadUrl);
+                const bytes = new Uint8Array(buffer);
+                let binary = "";
+                bytes.forEach((b) => (binary += String.fromCharCode(b)));
+                const base64 = window.btoa(binary);
+                const dataUrl = `data:${doc.contentType ?? "application/octet-stream"};base64,${base64}`;
+                onUploadedWithData(documentId, dataUrl);
+              }
+            } catch {
+              // Non-fatal — onUploaded already called
+            } finally {
+              setProcessing(false);
+            }
+          }
           setTimeout(() => handleClose(), 2000);
         } else if (status === "expired" || status === "not_found") {
           stopPolling();
@@ -163,7 +194,14 @@ export default function QRUploadButton({
           {done && (
             <Stack alignItems="center" spacing={1} py={3}>
               <Typography variant="h6" color="success.main" fontWeight={700}>✓ Upload complete!</Typography>
-              <Typography variant="body2" color="text.secondary">File received from your phone.</Typography>
+              {processing ? (
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <CircularProgress size={14} />
+                  <Typography variant="body2" color="text.secondary">Processing…</Typography>
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">File received from your phone.</Typography>
+              )}
             </Stack>
           )}
           {!loading && !error && !done && token && (

@@ -53,6 +53,7 @@ import { signatureService } from "../../services/signatureService";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
+import QRUploadButton from "../../components/QRUploadButton";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
@@ -904,6 +905,7 @@ export default function WorkOrderRunner({
       try { media = JSON.parse(val || "[]"); } catch {}
       return (
         <Box>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <Button
             size="small"
             variant="outlined"
@@ -926,6 +928,16 @@ export default function WorkOrderRunner({
               }}
             />
           </Button>
+          <QRUploadButton
+            docType="workflow-evidence"
+            linkedTo={inp.label}
+            label="Upload from Phone"
+            onUploaded={() => { /* handled by onUploadedWithData */ }}
+            onUploadedWithData={(_, dataUrl) => {
+              onChange(JSON.stringify([...media, dataUrl]));
+            }}
+          />
+          </Stack>
           {media.length > 0 && (
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1 }}>
               {media.map((src, idx) => (
