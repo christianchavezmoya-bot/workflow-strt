@@ -302,7 +302,8 @@ export default function DocumentsPage() {
       const cfg = await documentService.getDocumentConfig();
       if (cfg.tabsJson && cfg.tabsJson !== "[]") {
         const parsed = JSON.parse(cfg.tabsJson) as DocTab[];
-        if (parsed.length) { setTabs(parsed); lsSet(LS_TABS_KEY, parsed); }
+        const filtered = parsed.filter((t) => t.id !== "tips");
+        if (filtered.length) { setTabs(filtered); lsSet(LS_TABS_KEY, filtered); }
       }
       if (cfg.fieldsJson && cfg.fieldsJson !== "[]") {
         const { customFields: cf, columnOrder: co } = parseFieldsJson(cfg.fieldsJson);
