@@ -2,17 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import {
   Box, Button, Stack, Alert, Paper, Table, TableBody,
   TableCell, TableHead, TableRow, Chip, Select, MenuItem,
-  FormControl, CircularProgress, Typography, Tooltip, TextField,
-  InputAdornment,
+  FormControl, CircularProgress, Typography, Tooltip, TextField, IconButton,
 } from "@mui/material";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import AddOutlinedIcon from "@mui/icons-material/AddOutlined";
 import { useNavigate, useParams } from "react-router-dom";
 import BomStepHeader from "../components/BomStepHeader";
 import { useBomProject } from "../store/BomProjectContext";
 import { classifyAllRows } from "../services/bomClassifier";
 import { generateDraftProject } from "../services/bomProjectGenerator";
+import { featureService } from "../../../services/featureService";
 import type { CanonicalBomRow } from "../types/canonicalBom";
-import type { ItemType } from "../types/classification";
+import type { ItemType, ClassificationResult } from "../types/classification";
+import type { Feature } from "../../../types/feature";
 
 const ITEM_TYPES: ItemType[] = ["asset", "component", "consumable", "ignore"];
 
@@ -106,12 +111,37 @@ function EditableCell({ value, onCommit, placeholder, numeric, width = 140 }: Ed
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
+/** Normalize a string for fuzzy matching against feature names */
+function normalize(s: string) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 export default function BomClassificationPage() {
   const { id } = useParams<{ id: string }>();
   const { state, dispatch } = useBomProject();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [productFeatures, setProductFeatures] = useState<Feature[]>([]);
+
+  // Load existing product features for match display
+  useEffect(() => {
+    if (state.selectedProduct?.id) {
+      featureService.getByProduct(state.selectedProduct.id)
+        .then(setProductFeatures)
+        .catch(() => setProductFeatures([]));
+    } else {
+      setProductFeatures([]);
+    }
+  }, [state.selectedProduct?.id]);
+
+  /** Returns matched feature name if BOM row description matches an existing feature */
+  const matchedFeature = (row: CanonicalBomRow): Feature | undefined => {
+    if (productFeatures.length === 0) return undefined;
+    const rowKey = normalize(row.description || row.partNumber || "");
+    if (!rowKey) return undefined;
+    return productFeatures.find((f) => normalize(f.name) === rowKey);
+  };
 
   // Auto-classify on mount
   useEffect(() => {
@@ -148,6 +178,37 @@ export default function BomClassificationPage() {
       type: "OVERRIDE_CLASSIFICATION",
       payload: { ...existing, itemType, isManualOverride: true },
     });
+  };
+
+  const addRow = () => {
+    const sourceRowId = crypto.randomUUID();
+    const assetNumber = state.normalizedRows.filter((r) => {
+      const cl = new Map(state.classifications.map((c) => [c.sourceRowId, c])).get(r.sourceRowId);
+      return cl?.itemType === "asset";
+    }).length + 1;
+    const row: CanonicalBomRow = {
+      sourceRowId,
+      importRunId: id ?? "",
+      sheetName: "manual",
+      rowIndex: state.normalizedRows.length + 1,
+      description: `Asset ${assetNumber}`,
+    };
+    const classification: ClassificationResult = {
+      classificationId: crypto.randomUUID(),
+      sourceRowId,
+      importRunId: id ?? "",
+      itemType: "asset",
+      inventoryTracked: false,
+      serialRequired: false,
+      configurable: false,
+      installRequired: true,
+      testRequired: false,
+      photoRequired: false,
+      confidenceScore: 1,
+      ruleSource: "manual",
+      isManualOverride: true,
+    };
+    dispatch({ type: "ADD_ROW", payload: { row, classification } });
   };
 
   const handleNext = async () => {
@@ -195,6 +256,15 @@ export default function BomClassificationPage() {
           icon={<EditOutlinedIcon sx={{ fontSize: "12px !important" }} />}
           sx={{ color: "text.disabled", borderColor: "divider" }}
         />
+        <Box sx={{ flex: 1 }} />
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<AddOutlinedIcon />}
+          onClick={addRow}
+        >
+          Insert Asset Row
+        </Button>
       </Stack>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -205,10 +275,13 @@ export default function BomClassificationPage() {
             <TableRow>
               <TableCell><Typography variant="caption" fontWeight={700}>Part Number</Typography></TableCell>
               <TableCell><Typography variant="caption" fontWeight={700}>Description</Typography></TableCell>
-              <TableCell><Typography variant="caption" fontWeight={700}>Group / Machine ID</Typography></TableCell>
               <TableCell align="right"><Typography variant="caption" fontWeight={700}>Qty</Typography></TableCell>
               <TableCell align="right"><Typography variant="caption" fontWeight={700}>Unit Price</Typography></TableCell>
               <TableCell><Typography variant="caption" fontWeight={700}>Type</Typography></TableCell>
+              {state.selectedProduct && (
+                <TableCell><Typography variant="caption" fontWeight={700}>In Product</Typography></TableCell>
+              )}
+              <TableCell />
             </TableRow>
           </TableHead>
           <TableBody>
@@ -236,14 +309,6 @@ export default function BomClassificationPage() {
                         />
                       </Box>
                     </Tooltip>
-                  </TableCell>
-                  <TableCell>
-                    <EditableCell
-                      value={row.groupName ?? ""}
-                      placeholder="add machine ID / group"
-                      onCommit={(v) => updateRow(row.sourceRowId, { groupName: v })}
-                      width={160}
-                    />
                   </TableCell>
                   <TableCell align="right">
                     <EditableCell
@@ -292,6 +357,47 @@ export default function BomClassificationPage() {
                         </Tooltip>
                       )}
                     </Stack>
+                  </TableCell>
+                  {state.selectedProduct && (() => {
+                    const match = matchedFeature(row);
+                    return (
+                      <TableCell>
+                        {match ? (
+                          <Tooltip title={`Matched: "${match.name}"`}>
+                            <Chip
+                              icon={<CheckCircleOutlineIcon sx={{ fontSize: "14px !important" }} />}
+                              label="Matched"
+                              size="small"
+                              color="success"
+                              variant="outlined"
+                              sx={{ height: 20, fontSize: "0.68rem" }}
+                            />
+                          </Tooltip>
+                        ) : (
+                          <Tooltip title="Will be added as a new feature to this product">
+                            <Chip
+                              icon={<AddCircleOutlineIcon sx={{ fontSize: "14px !important" }} />}
+                              label="New"
+                              size="small"
+                              color="primary"
+                              variant="outlined"
+                              sx={{ height: 20, fontSize: "0.68rem" }}
+                            />
+                          </Tooltip>
+                        )}
+                      </TableCell>
+                    );
+                  })()}
+                  <TableCell padding="none" sx={{ pr: 1 }}>
+                    <Tooltip title="Remove this row">
+                      <IconButton
+                        size="small"
+                        onClick={() => dispatch({ type: "DELETE_ROW", payload: row.sourceRowId })}
+                        sx={{ color: "text.disabled", "&:hover": { color: "error.main" } }}
+                      >
+                        <DeleteOutlineIcon sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </Tooltip>
                   </TableCell>
                 </TableRow>
               );

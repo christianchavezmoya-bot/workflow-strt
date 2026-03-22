@@ -3,11 +3,13 @@ import {
   Box, Typography, Button, Stack, Card, CardContent, Divider,
   Table, TableBody, TableCell, TableHead, TableRow, Paper,
   Chip, CircularProgress, Alert, IconButton, Tooltip, Switch, FormControlLabel,
+  Dialog, DialogTitle, DialogContent, DialogActions,
 } from "@mui/material";
 import AddOutlinedIcon from "@mui/icons-material/AddOutlined";
 import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined";
 import ArchiveOutlinedIcon from "@mui/icons-material/ArchiveOutlined";
 import RestoreOutlinedIcon from "@mui/icons-material/RestoreOutlined";
+import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import UploadFileOutlinedIcon from "@mui/icons-material/UploadFileOutlined";
 import { useNavigate } from "react-router-dom";
@@ -21,6 +23,8 @@ export default function BomDashboard() {
   const navigate = useNavigate();
   const [showArchived, setShowArchived] = useState(false);
   const [archiving, setArchiving] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; fileName: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     dispatch({ type: "SET_RUNS_LOADING", payload: true });
@@ -43,6 +47,17 @@ export default function BomDashboard() {
       dispatch({ type: "SET_RUNS", payload: runs });
     } catch { /* ignore */ }
     finally { setArchiving(null); }
+  };
+
+  const handlePurge = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await bomApiService.purgeRun(deleteTarget.id);
+      const runs = await bomApiService.listRuns();
+      dispatch({ type: "SET_RUNS", payload: runs });
+    } catch { /* ignore */ }
+    finally { setDeleting(false); setDeleteTarget(null); }
   };
 
   const visibleRuns = showArchived
@@ -212,7 +227,13 @@ export default function BomDashboard() {
                     <TableCell><ImportRunStatusBadge status={run.status} /></TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={0.5} alignItems="center">
-                        {!isArchived && (
+                        {!isArchived && run.status === "published" && run.publishedProjectId && (
+                          <Button size="small" variant="outlined" color="primary"
+                            onClick={() => navigate(`/projects/${run.publishedProjectId}`)}>
+                            View Project
+                          </Button>
+                        )}
+                        {!isArchived && run.status !== "published" && (
                           <Button size="small" onClick={() => navigate(`/admin/bom-project/imports/${run.id}`)}>
                             Open
                           </Button>
@@ -233,6 +254,14 @@ export default function BomDashboard() {
                             </IconButton>
                           </span>
                         </Tooltip>
+                        <Tooltip title="Delete permanently">
+                          <IconButton
+                            size="small"
+                            onClick={() => setDeleteTarget({ id: run.id, fileName: run.fileName })}
+                          >
+                            <DeleteOutlinedIcon sx={{ fontSize: 16, color: "error.main" }} />
+                          </IconButton>
+                        </Tooltip>
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -242,6 +271,28 @@ export default function BomDashboard() {
           </Table>
         )}
       </Paper>
+
+      {/* Permanent delete confirmation */}
+      <Dialog open={!!deleteTarget} onClose={() => !deleting && setDeleteTarget(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete Import?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Permanently delete <strong>{deleteTarget?.fileName}</strong>? This cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handlePurge}
+            disabled={deleting}
+            startIcon={deleting ? <CircularProgress size={14} /> : <DeleteOutlinedIcon />}
+          >
+            {deleting ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

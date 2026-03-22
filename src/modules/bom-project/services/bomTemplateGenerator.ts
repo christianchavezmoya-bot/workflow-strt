@@ -13,6 +13,7 @@ import * as XLSX from "xlsx";
 const HEADERS = [
   "Part Number",
   "Description",
+  "Type",
   "Brand",
   "Supplier / Manufacturer",
   "Alt Part Number",
@@ -26,6 +27,7 @@ const EXAMPLE_ROWS = [
   [
     "CAM-4K-001",
     "IP Camera 4K Outdoor",
+    "component",
     "Hikvision",
     "Hikvision Australia",
     "DS-2CD2143G2-I",
@@ -37,6 +39,7 @@ const EXAMPLE_ROWS = [
   [
     "NVR-16CH-002",
     "16-Channel NVR",
+    "asset",
     "Hikvision",
     "Hikvision Australia",
     "DS-7616NXI-I2",
@@ -48,6 +51,7 @@ const EXAMPLE_ROWS = [
   [
     "CAT6-CBL-003",
     "Cat6 Network Cable (per metre)",
+    "consumable",
     "CommScope",
     "Cablex Australia",
     "",
@@ -58,7 +62,7 @@ const EXAMPLE_ROWS = [
   ],
 ];
 
-const COL_WIDTHS = [18, 32, 18, 28, 20, 14, 8, 14, 40];
+const COL_WIDTHS = [18, 32, 14, 18, 28, 20, 14, 8, 14, 40];
 
 export function downloadBomTemplate(): void {
   const wb = XLSX.utils.book_new();
@@ -78,6 +82,7 @@ export function downloadBomTemplate(): void {
     ["Column Reference:"],
     ["Part Number", "Your internal or supplier part/SKU number"],
     ["Description", "Full name or description of the item"],
+    ["Type", "Item classification: asset | component | consumable | ignore  (optional — app will auto-classify if blank)"],
     ["Brand", "Manufacturer brand (e.g. Hikvision, Axis, CommScope)"],
     ["Supplier / Manufacturer", "Who you purchase it from"],
     ["Alt Part Number", "Alternative or substitute part number"],
@@ -85,6 +90,12 @@ export function downloadBomTemplate(): void {
     ["Qty", "Quantity required for this project"],
     ["Total Cost", "Price / Unit × Qty — can be left blank"],
     ["Link", "URL to product page, datasheet, or supplier listing"],
+    [""],
+    ["Type column valid values:"],
+    ["asset", "A physical unit that will be installed and tracked (e.g. NVR, vehicle)"],
+    ["component", "A part installed into/onto an asset (e.g. camera, cable)"],
+    ["consumable", "Bulk material consumed during installation (e.g. cable ties, grease)"],
+    ["ignore", "Row to skip — won't be imported"],
   ];
   const wsInstr = XLSX.utils.aoa_to_sheet(instructions);
   wsInstr["!cols"] = [{ wch: 36 }, { wch: 60 }];

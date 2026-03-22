@@ -8,7 +8,18 @@ import type {
   ClassificationResult,
   ClassificationRule,
   RuleCondition,
+  ItemType,
 } from "../types/classification";
+
+const VALID_ITEM_TYPES: ItemType[] = ["asset", "component", "consumable", "reference", "ignore"];
+
+function parseItemTypeHint(raw: string | undefined): ItemType | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.toLowerCase().trim();
+  // Accept common variations
+  if (normalized === "inventory") return "component";
+  return VALID_ITEM_TYPES.find((t) => t === normalized);
+}
 
 // ── Default built-in rules ───────────────────────────────────────────────────
 
@@ -98,6 +109,26 @@ export function classifyRow(
   customRules: ClassificationRule[] = [],
   importRunId: string
 ): ClassificationResult {
+  // If the BOM file had a "Type" column, honour it as a manual override
+  const hint = parseItemTypeHint(row.itemTypeHint);
+  if (hint) {
+    return {
+      classificationId: crypto.randomUUID(),
+      sourceRowId: row.sourceRowId,
+      importRunId,
+      itemType: hint,
+      inventoryTracked: hint === "component" || hint === "consumable",
+      serialRequired: false,
+      configurable: false,
+      installRequired: hint === "asset" || hint === "component",
+      testRequired: false,
+      photoRequired: false,
+      confidenceScore: 1,
+      ruleSource: "bom-column",
+      isManualOverride: true,
+    };
+  }
+
   const allRules = [...customRules, ...DEFAULT_RULES].sort(
     (a, b) => a.priority - b.priority
   );

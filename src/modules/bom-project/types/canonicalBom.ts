@@ -36,4 +36,7 @@ export interface CanonicalBomRow {
 
   // ── Metadata ─────────────────────────────────────────────────────────────
   notes?: string;
+
+  /** Pre-classification hint from the BOM file "Type" column (e.g. "asset", "component") */
+  itemTypeHint?: string;
 }

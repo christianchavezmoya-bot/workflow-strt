@@ -16,6 +16,7 @@ import Login from "../features/auth/Login";
 import ResetPassword from "../features/auth/ResetPassword";
 import ExternalSignPage from "../features/sign/ExternalSignPage";
 import IssuesBoard from "../features/issues/IssuesBoard";
+import TipsPage from "../features/tips/TipsPage";
 // ── BOM Module (feature-flagged, conditionally imported) ──────────────────────
 import {
   BOM_MODULE_ENABLED,
@@ -50,6 +51,7 @@ const AppRoutes = () => {
         <Route path="/installations/assets" element={<AssetInstallationPage />} />
         <Route path="/work-instructions" element={<WorkInstructions />} />
         <Route path="/documents" element={<DocumentsPage />} />
+        <Route path="/tips" element={<TipsPage />} />
         <Route path="/admin" element={<UserManagement />} />
         <Route path="/admin/customers/:customerId/sites" element={<CustomerSites />} />
         <Route path="/admin/asset-registry" element={<Navigate to="/projects" replace />} />

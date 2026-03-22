@@ -7,6 +7,7 @@ import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
 import { useNavigate } from "react-router-dom";
 import BomStepHeader from "../components/BomStepHeader";
+import BomProductSelector from "../components/BomProductSelector";
 import UploadDropzone from "../components/UploadDropzone";
 import WorkbookSheetPicker from "../components/WorkbookSheetPicker";
 import { parseWorkbookFile, extractRawRows } from "../services/workbookParser";
@@ -16,7 +17,7 @@ import { useBomProject } from "../store/BomProjectContext";
 import { downloadBomTemplate } from "../services/bomTemplateGenerator";
 
 export default function BomUploadPage() {
-  const { dispatch } = useBomProject();
+  const { state, dispatch } = useBomProject();
   const navigate = useNavigate();
 
   const [file, setFile] = useState<File | null>(null);
@@ -75,6 +76,8 @@ export default function BomUploadPage() {
     .filter((s) => selectedSheets.includes(s.name))
     .reduce((sum, s) => sum + s.rowCount, 0) ?? 0;
 
+  const productSelected = !!state.selectedProduct;
+
   return (
     <Box maxWidth={680} mx="auto">
       <BomStepHeader
@@ -84,6 +87,11 @@ export default function BomUploadPage() {
       />
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+      {/* Step 0a: Product selector */}
+      <Paper variant="outlined" sx={{ p: 2.5, mb: 3 }}>
+        <BomProductSelector />
+      </Paper>
 
       {/* Template reminder */}
       {!file && (
@@ -163,12 +171,17 @@ export default function BomUploadPage() {
             placeholder="e.g. Project name, revision number…"
           />
 
+          {!productSelected && (
+            <Alert severity="warning" sx={{ mt: 0 }}>
+              Please select a product above before continuing.
+            </Alert>
+          )}
           <Stack direction="row" justifyContent="flex-end" spacing={1}>
             <Button onClick={() => navigate("/admin/bom-project")}>Cancel</Button>
             <Button
               variant="contained"
               onClick={handleConfirm}
-              disabled={parsing || selectedSheets.length === 0}
+              disabled={parsing || selectedSheets.length === 0 || !productSelected}
               startIcon={parsing ? <CircularProgress size={16} /> : undefined}
             >
               {parsing ? "Processing…" : "Next: Map Columns →"}

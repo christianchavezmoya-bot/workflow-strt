@@ -100,7 +100,6 @@ const DEFAULT_TABS: DocTab[] = [
   { id: "drawings",    label: "Drawings",           color: "secondary" },
   { id: "procedures",  label: "Procedures",         color: "info"      },
   { id: "atw",         label: "Authority to Work",  color: "error"     },
-  { id: "tips",        label: "Tips & Tricks",      color: "success"   },
   { id: "bulletins",   label: "Tech Bulletins",     color: "warning"   },
   { id: "informative", label: "Informative",        color: "default"   },
 ];
@@ -203,7 +202,7 @@ export default function DocumentsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // ---- tab & field config â€” loaded from backend, cached in LS -----
-  const [tabs, setTabs]               = useState<DocTab[]>(() => lsGet<DocTab[]>(LS_TABS_KEY, DEFAULT_TABS));
+  const [tabs, setTabs]               = useState<DocTab[]>(() => lsGet<DocTab[]>(LS_TABS_KEY, DEFAULT_TABS).filter((t) => t.id !== "tips"));
   const [customFields, setCustomFields] = useState<CustomField[]>(() => {
     const raw = localStorage.getItem(LS_FIELDS_KEY);
     return raw ? parseFieldsJson(raw).customFields : [];
