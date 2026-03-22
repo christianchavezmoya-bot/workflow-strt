@@ -17,6 +17,7 @@ import ResetPassword from "../features/auth/ResetPassword";
 import ExternalSignPage from "../features/sign/ExternalSignPage";
 import IssuesBoard from "../features/issues/IssuesBoard";
 import TipsPage from "../features/tips/TipsPage";
+import MobileUploadPage from "../features/mobile-upload/MobileUploadPage";
 // ── BOM Module (feature-flagged, conditionally imported) ──────────────────────
 import {
   BOM_MODULE_ENABLED,
@@ -71,6 +72,8 @@ const AppRoutes = () => {
           </>
         )}
       </Route>
+      {/* ── Mobile upload (public — phone camera scan) ── */}
+      <Route path="/mobile-upload" element={<MobileUploadPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

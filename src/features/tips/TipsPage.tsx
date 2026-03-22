@@ -32,6 +32,7 @@ import {
   Typography,
 } from "@mui/material";
 import AddOutlinedIcon from "@mui/icons-material/AddOutlined";
+import QRUploadButton from "../../components/QRUploadButton";
 import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
 import GridViewOutlinedIcon from "@mui/icons-material/GridViewOutlined";
 import TableRowsOutlinedIcon from "@mui/icons-material/TableRowsOutlined";
@@ -855,6 +856,11 @@ const TipsPage = () => {
               <TableRowsOutlinedIcon />
             </IconButton>
           </Tooltip>
+          <QRUploadButton
+            docType="tips"
+            linkedTo="General"
+            onUploaded={() => loadDocs()}
+          />
           <Button
             variant="contained"
             startIcon={<AddOutlinedIcon />}
