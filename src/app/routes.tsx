@@ -1,4 +1,4 @@
-﻿import { Navigate, Route, Routes } from "react-router-dom";
+﻿import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 import { usePermissions } from "../hooks/usePermissions";
 import Dashboard from "../features/dashboard/Dashboard";
@@ -61,15 +61,15 @@ const AppRoutes = () => {
         <Route path="/profile" element={<ProfileWizard />} />
         {/* ── BOM Module routes (only when feature flag enabled) ── */}
         {BOM_MODULE_ENABLED && (
-          <>
-            <Route path="/admin/bom-project" element={<BomProjectProvider><BomDashboard /></BomProjectProvider>} />
-            <Route path="/admin/bom-project/upload" element={<BomProjectProvider><BomUploadPage /></BomProjectProvider>} />
-            <Route path="/admin/bom-project/imports/:id/mapping" element={<BomProjectProvider><BomMappingPage /></BomProjectProvider>} />
-            <Route path="/admin/bom-project/imports/:id/classification" element={<BomProjectProvider><BomClassificationPage /></BomProjectProvider>} />
+          <Route element={<BomProjectProvider><Outlet /></BomProjectProvider>}>
+            <Route path="/admin/bom-project" element={<BomDashboard />} />
+            <Route path="/admin/bom-project/upload" element={<BomUploadPage />} />
+            <Route path="/admin/bom-project/imports/:id/mapping" element={<BomMappingPage />} />
+            <Route path="/admin/bom-project/imports/:id/classification" element={<BomClassificationPage />} />
             <Route path="/admin/bom-project/imports/:id/compare" element={<Navigate to="/admin/bom-project" replace />} />
             <Route path="/admin/bom-project/imports/:id/preview" element={<Navigate to="/admin/bom-project" replace />} />
-            <Route path="/admin/bom-project/imports/:id/commit" element={<BomProjectProvider><BomCommitPage /></BomProjectProvider>} />
-          </>
+            <Route path="/admin/bom-project/imports/:id/commit" element={<BomCommitPage />} />
+          </Route>
         )}
       </Route>
       {/* ── Mobile upload (public — phone camera scan) ── */}

@@ -35,7 +35,7 @@ export default function WhatsNewModal({ open, entries, onDismiss }: Props) {
       fullWidth
       PaperProps={{ sx: { borderRadius: 3, p: 0.5 } }}
     >
-      <DialogContent>
+      <DialogContent sx={{ overflowY: "auto", maxHeight: "80vh" }}>
         <Stack spacing={2.5}>
           {/* Header */}
           <Stack direction="row" alignItems="center" spacing={1.25}>
@@ -89,9 +89,12 @@ export default function WhatsNewModal({ open, entries, onDismiss }: Props) {
           ))}
 
           {/* Action */}
-          <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Button variant="text" size="small" onClick={onDismiss} sx={{ color: "text.disabled" }}>
+              Skip for now
+            </Button>
             <Button variant="contained" onClick={onDismiss}>Got it</Button>
-          </Box>
+          </Stack>
         </Stack>
       </DialogContent>
     </Dialog>

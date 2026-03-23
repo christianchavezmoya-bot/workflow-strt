@@ -141,7 +141,7 @@ api.interceptors.response.use(
     if (status === 401) {
       const reqUrl = config.url ?? "";
       // Don't redirect for login/refresh calls — they handle their own errors
-      if (!reqUrl.includes("/auth/login") && !reqUrl.includes("/auth/refresh")) {
+      if (!reqUrl.includes("/auth/login") && !reqUrl.includes("/auth/refresh") && !reqUrl.includes("/brand-settings")) {
         localStorage.removeItem("auth_token");
         localStorage.removeItem("auth_user");
         window.location.href = "/login";

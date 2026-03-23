@@ -719,6 +719,8 @@ public record BulkCreateProjectAssetsRequest(
     List<UpsertProjectAssetRequest> Assets
 );
 
+public record PatchIssuesRequest(string? IssuesJson);
+
 // ─── v2 Workflow Config Unification DTOs ──────────────────────────────────────
 
 public record WorkflowConfigDto(
@@ -829,7 +831,6 @@ public record CompleteRunRequest(
     string? BomActualJson
 );
 
-public record PatchIssuesRequest(string IssuesJson);
 public record PatchTimeEntriesRequest(string TimeEntriesJson);
 public record TrackRunTimeRequest(
     string Action,
@@ -838,8 +839,8 @@ public record TrackRunTimeRequest(
     string? EndedAtUtc
 );
 
-public record BrandSettingDto(string? LogoBase64);
-public record UpdateBrandSettingRequest(string? LogoBase64);
+public record BrandSettingDto(string? LogoBase64, string? AppName);
+public record UpdateBrandSettingRequest(string? LogoBase64, string? AppName);
 
 // ─── Asset Documents ──────────────────────────────────────────────────────────
 public record AssetDocumentRevisionDto(

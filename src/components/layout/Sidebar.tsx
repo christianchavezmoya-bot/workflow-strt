@@ -28,6 +28,7 @@ import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { officesService } from "../../services/officesService";
+import { brandSettingsService } from "../../services/brandSettingsService";
 import type { Office } from "../../components/GlobalOfficeMap";
 import strataLogo from "../../assets/strata_transparent.png";
 import FavoritesSection from "./FavoritesSection";
@@ -57,6 +58,20 @@ const Sidebar = () => {
   });
   const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
   const [officeOptions, setOfficeOptions] = useState<string[]>(["All"]);
+  const [appName, setAppName] = useState("Field Operations");
+
+  useEffect(() => {
+    brandSettingsService.get().then((s) => {
+      if (s.appName) setAppName(s.appName);
+    }).catch(() => {});
+
+    const handleBrandUpdate = (e: Event) => {
+      const name = (e as CustomEvent<{ appName: string }>).detail?.appName;
+      if (name) setAppName(name);
+    };
+    window.addEventListener("brand-name-changed", handleBrandUpdate);
+    return () => window.removeEventListener("brand-name-changed", handleBrandUpdate);
+  }, []);
 
   useEffect(() => {
     officesService.getAll().then((offices) => {

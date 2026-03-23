@@ -1651,6 +1651,7 @@ export const UserManagement: React.FC = () => {
         userDynamicValues,
         usersDynamic.valuesByEntity[created.id]
       );
+      await dispatch(inviteUser(created.id));
     } catch (error) {
       setActionError(resolveErrorMessage(error, "Failed to create user."));
     }

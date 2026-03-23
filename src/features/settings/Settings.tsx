@@ -48,6 +48,7 @@ import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/set
 import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
 import { useAuth } from "../../hooks/useAuth";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import PasswordField from "../../components/ui/PasswordField";
 
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
 function BusinessLogoTab() {
@@ -57,10 +58,15 @@ function BusinessLogoTab() {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [appName, setAppName] = useState("");
+  const [appNameSaving, setAppNameSaving] = useState(false);
+  const [appNameSuccess, setAppNameSuccess] = useState(false);
+  const [appNameError, setAppNameError] = useState<string | null>(null);
 
   useEffect(() => {
     brandSettingsService.get().then((data) => {
       setLogo(data.logoBase64 ?? null);
+      setAppName(data.appName ?? "");
       setLoading(false);
     });
   }, []);
@@ -107,8 +113,52 @@ function BusinessLogoTab() {
     }
   }
 
+  async function handleSaveAppName() {
+    setAppNameSaving(true);
+    setAppNameError(null);
+    try {
+      await brandSettingsService.setAppName(appName.trim());
+      const resolvedName = appName.trim() || "Field Operations";
+      document.title = resolvedName;
+      window.dispatchEvent(new CustomEvent("brand-name-changed", { detail: { appName: resolvedName } }));
+      setAppNameSuccess(true);
+      setTimeout(() => setAppNameSuccess(false), 3000);
+    } catch {
+      setAppNameError("Failed to save app name.");
+    } finally {
+      setAppNameSaving(false);
+    }
+  }
+
   return (
     <Stack spacing={2} sx={{ marginTop: 2 }}>
+      <Typography variant="h6">App Name</Typography>
+      <Typography variant="body2" color="text.secondary">
+        The name shown in the browser tab, invite emails, and throughout the app.
+      </Typography>
+      <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+
+      {!loading && (
+        <>
+          <TextField
+            label="App Name"
+            value={appName}
+            onChange={(e) => setAppName(e.target.value)}
+            placeholder="e.g. Field Operations"
+            sx={{ maxWidth: 360 }}
+            size="small"
+          />
+          {appNameError && <Alert severity="error" sx={{ maxWidth: 500 }}>{appNameError}</Alert>}
+          {appNameSuccess && <Alert severity="success" sx={{ maxWidth: 500 }}>App name saved.</Alert>}
+          <Box>
+            <Button variant="contained" onClick={handleSaveAppName} disabled={appNameSaving} sx={{ minWidth: 120 }}>
+              {appNameSaving ? "Saving…" : "Save Name"}
+            </Button>
+          </Box>
+        </>
+      )}
+
+      <Divider sx={{ borderColor: "rgba(255,255,255,0.08)", mt: 1 }} />
       <Typography variant="h6">Business Logo</Typography>
       <Typography variant="body2" color="text.secondary">
         Upload your company logo. It will appear in the left header of generated PDF reports.
@@ -388,21 +438,26 @@ const Settings = () => {
   const [featurePickerProductId, setFeaturePickerProductId] = useState<string | null>(null);
   const [featurePickerAnchor, setFeaturePickerAnchor] = useState<HTMLElement | null>(null);
 
+  const [productsError, setProductsError] = useState<string | null>(null);
+
   async function loadProducts() {
     setProductsLoading(true);
+    setProductsError(null);
     try {
       const data = await productService.getProducts();
       setProducts(data.sort((a, b) => a.name.localeCompare(b.name)));
-    } catch { console.warn("Failed to load products"); } finally {
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      setProductsError(status ? `Failed to load products (HTTP ${status})` : "Failed to load products — check server connection.");
+    } finally {
       setProductsLoading(false);
     }
   }
 
-  // Load products + divisions when Products tab becomes active (tab === 4).
-  // This covers direct URL navigation and localStorage-restored tab — not just click events.
+  // Load products + divisions whenever Products tab becomes active.
   useEffect(() => {
     if (tab === 4) {
-      if (products.length === 0) loadProducts();
+      loadProducts();
       if (divisions.length === 0) loadDivisions();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -428,7 +483,10 @@ const Settings = () => {
       }
       await loadProducts();
       setProductDialog(false);
-    } catch { setProductError("Failed to save product."); } finally {
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number; data?: { message?: string } } })?.response;
+      setProductError(status?.status === 403 ? "Permission denied — Admin or Project Manager role required." : status?.data?.message ?? "Failed to save product. Check server logs.");
+    } finally {
       setProductSaving(false);
     }
   }
@@ -463,6 +521,7 @@ const Settings = () => {
   // Feature library manager
   const [features, setFeatures] = useState<Feature[]>([]);
   const [featuresLoading, setFeaturesLoading] = useState(false);
+  const [featuresError, setFeaturesError] = useState<string | null>(null);
   const [featureDialog, setFeatureDialog] = useState(false);
   const [featureEditId, setFeatureEditId] = useState<string | null>(null);
   const [featureJustCreatedId, setFeatureJustCreatedId] = useState<string | null>(null);
@@ -472,13 +531,23 @@ const Settings = () => {
 
   async function loadFeatures() {
     setFeaturesLoading(true);
+    setFeaturesError(null);
     try {
       const data = await featureService.getAll();
       setFeatures(data.sort((a, b) => a.name.localeCompare(b.name)));
-    } catch { console.warn("Failed to load features"); } finally {
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      setFeaturesError(status ? `Failed to load features (HTTP ${status})` : "Failed to load features — check server connection.");
+    } finally {
       setFeaturesLoading(false);
     }
   }
+
+  // Load features whenever Features tab becomes active.
+  useEffect(() => {
+    if (tab === 5) loadFeatures();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   async function saveFeature() {
     if (!featureForm.name.trim()) { setFeatureError("Name is required."); return; }
@@ -518,7 +587,10 @@ const Settings = () => {
         setExpandedFeatureId(created.id);
         loadDeps(created.id);
       }
-    } catch { setFeatureError("Failed to save feature."); } finally {
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number; data?: { message?: string } } })?.response;
+      setFeatureError(status?.status === 403 ? "Permission denied — Admin or Project Manager role required." : status?.data?.message ?? "Failed to save feature. Check server logs.");
+    } finally {
       setFeatureSaving(false);
     }
   }
@@ -1578,9 +1650,8 @@ const Settings = () => {
               />
               <Typography variant="body2">Use SSL</Typography>
             </Stack>
-            <TextField
+            <PasswordField
               label="SMTP Password"
-              type="password"
               value={String(notifySettings.smtpPass || "")}
               onChange={(event) => setNotifySettings((prev) => ({ ...prev, smtpPass: event.target.value }))}
               fullWidth
@@ -1734,6 +1805,9 @@ const Settings = () => {
               </Button>
             </Stack>
             <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            {productsError && (
+              <Alert severity="error" onClose={() => setProductsError(null)}>{productsError}</Alert>
+            )}
             {productsLoading ? (
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />
@@ -1884,6 +1958,9 @@ const Settings = () => {
               </Button>
             </Stack>
             <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            {featuresError && (
+              <Alert severity="error" onClose={() => setFeaturesError(null)}>{featuresError}</Alert>
+            )}
             {featuresLoading ? (
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />

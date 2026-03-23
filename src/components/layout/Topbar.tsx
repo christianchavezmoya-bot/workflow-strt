@@ -14,6 +14,7 @@ import { useFavoritesContext } from "../../contexts/FavoritesContext";
 import { useAppSelector } from "../../store/hooks";
 import GlobalSearchDialog from "./GlobalSearchDialog";
 import { searchIndexService, type SearchIndexStatus } from "../../services/searchIndexService";
+import { brandSettingsService } from "../../services/brandSettingsService";
 
 function getRolesFromCache(): string[] {
   try {
@@ -85,6 +86,20 @@ const Topbar = () => {
   const { isFavorited, getFavorite, add, remove } = useFavoritesContext();
   const products = useAppSelector((s) => s.products.items);
   const projects = useAppSelector((s) => s.projects.items);
+
+  const [appName, setAppName] = useState("Field Operations");
+
+  useEffect(() => {
+    brandSettingsService.get().then((s) => {
+      if (s.appName) setAppName(s.appName);
+    }).catch(() => {});
+    const handler = (e: Event) => {
+      const name = (e as CustomEvent<{ appName: string }>).detail?.appName;
+      if (name) setAppName(name);
+    };
+    window.addEventListener("brand-name-changed", handler);
+    return () => window.removeEventListener("brand-name-changed", handler);
+  }, []);
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
@@ -260,7 +275,7 @@ const Topbar = () => {
         />
         <Stack spacing={0.5}>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-            Global Project Workflow
+            {appName}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {autoLabel}

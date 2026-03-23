@@ -15,7 +15,6 @@ import {
   Divider,
   FormControlLabel,
   IconButton,
-  LinearProgress,
   MenuItem,
   Select,
   Stack,
@@ -52,7 +51,6 @@ import {
   RefreshOutlined,
   SendOutlined,
   SettingsOutlined,
-  WarningAmberOutlined,
 } from "@mui/icons-material";
 import { useAppSelector } from "../../store/hooks";
 import { projectContactService } from "../../services/projectContactService";
@@ -347,10 +345,6 @@ export default function ProjectChevronPanel({
   const [qbFilterQuery, setQbFilterQuery] = useState("");
 
   const syncQb = useCallback(async () => {
-    if (!isQbEnabled()) {
-      setQbError("Quickbase integration is not enabled. Configure it in Settings → Integrations.");
-      return;
-    }
     setQbLoading(true);
     setQbError(null);
     try {

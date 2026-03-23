@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using Commtrac.Api.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -41,7 +42,9 @@ builder.Services.AddCors(options =>
                 return host == "localhost"
                     || host == "127.0.0.1"
                     || host.StartsWith("10.")
-                    || host.StartsWith("192.168.");
+                    || host.StartsWith("192.168.")
+                    || host.StartsWith("172.")
+                    || IPAddress.TryParse(host, out _); // allow any IP-based origin
             })
             .AllowAnyHeader()
             .AllowAnyMethod()

@@ -78,6 +78,11 @@ export const projectAssetService = {
     return fromDto(res.data);
   },
 
+  async patchIssues(id: string, issuesJson: string): Promise<ProjectAsset> {
+    const res = await api.patch<ProjectAsset>(`/project-assets/${id}/issues`, { issuesJson });
+    return fromDto(res.data);
+  },
+
   async remove(id: string): Promise<void> {
     await api.delete(`/project-assets/${id}`);
   },

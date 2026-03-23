@@ -2,7 +2,6 @@ import { Box, Button, Chip, CircularProgress, Divider, Grid, IconButton, LinearP
 import {
   AssessmentOutlined,
   AssignmentLateOutlined,
-  BuildOutlined,
   CheckCircleOutlineOutlined,
   ErrorOutlineOutlined,
   OpenInNewOutlined,
@@ -41,7 +40,6 @@ const Dashboard = () => {
   const [pendingSigs,         setPendingSigs]         = useState<PendingSignatureRecord[]>([]);
   const [attentionLoading,    setAttentionLoading]    = useState(false);
   const [openAssets,          setOpenAssets]          = useState<OpenAssetItem[]>([]);
-  const [openAssetsLoading,   setOpenAssetsLoading]   = useState(false);
   const [workload,            setWorkload]            = useState<WorkloadSummaryItem[]>([]);
   const [workloadLoading,     setWorkloadLoading]     = useState(false);
   const [reportingTechId,     setReportingTechId]     = useState<string | null>(null);
@@ -96,8 +94,7 @@ const Dashboard = () => {
     loadAttention();
     setWorkloadLoading(true);
     projectAssetService.workloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
-    setOpenAssetsLoading(true);
-    projectAssetService.listOpen().then(setOpenAssets).finally(() => setOpenAssetsLoading(false));
+    projectAssetService.listOpen().then(setOpenAssets);
   }, [dispatch, loadAttention]);
 
   // ── Derived values ──────────────────────────────────────────────────────────
@@ -138,14 +135,6 @@ const Dashboard = () => {
     for (const p of filteredProjects) counts[p.status] = (counts[p.status] ?? 0) + 1;
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }, [filteredProjects]);
-
-  // filteredOpenAssets is already status-filtered (NotStarted | InProgress) — sort by assetTag for consistency
-  const activeInstallations = useMemo(() =>
-    [...filteredOpenAssets].sort((a, b) =>
-      (a.jobNumber || "").localeCompare(b.jobNumber || "") ||
-      (a.assetTag || "").localeCompare(b.assetTag || "")
-    ),
-  [filteredOpenAssets]);
 
   const statusColor: Record<string, string> = {
     "In Progress": "primary",
@@ -475,87 +464,6 @@ const Dashboard = () => {
                         </IconButton>
                       </span>
                     </Tooltip>
-                  </Stack>
-                </Paper>
-              );
-            })}
-          </Stack>
-        )}
-      </Box>
-
-      {/* ── Active Installations Panel ── */}
-      <Box className="glass-card" sx={{ p: 3 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-          <Box>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <BuildOutlined sx={{ fontSize: 18, color: "primary.main" }} />
-              <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Active Installations</Typography>
-              <Chip
-                label={activeInstallations.length}
-                size="small"
-                color={activeInstallations.length > 0 ? "primary" : "default"}
-                sx={{ height: 20, fontSize: "0.7rem" }}
-              />
-            </Stack>
-            <Typography variant="caption" color="text.secondary">All open installations — not yet completed or cancelled</Typography>
-          </Box>
-          <Button
-            size="small"
-            variant="text"
-            component={Link}
-            to="/installations/assets"
-            endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />}
-            sx={{ fontSize: "0.72rem" }}
-          >
-            View All
-          </Button>
-        </Stack>
-
-        {openAssetsLoading ? (
-          <LinearProgress />
-        ) : activeInstallations.length === 0 ? (
-          <Stack direction="row" spacing={1} alignItems="center">
-            <CheckCircleOutlineOutlined sx={{ fontSize: 16, color: "success.main" }} />
-            <Typography variant="body2" color="success.main">All installations are complete.</Typography>
-          </Stack>
-        ) : (
-          <Stack spacing={1}>
-            {activeInstallations.map((inst) => {
-              const statusColor: Record<string, "default" | "warning" | "primary" | "error" | "info"> = {
-                "NotStarted": "default",
-                "InProgress": "primary",
-              };
-              const statusLabel: Record<string, string> = {
-                "NotStarted": "Not Started",
-                "InProgress": "In Progress",
-              };
-              return (
-                <Paper
-                  key={inst.id}
-                  elevation={0}
-                  onClick={() => navigate("/installations/assets")}
-                  sx={{
-                    p: 1.5, border: "1px solid var(--stroke)",
-                    borderRadius: 1.5, cursor: "pointer", transition: "all 0.15s",
-                    "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
-                  }}
-                >
-                  <Stack direction="row" alignItems="center" spacing={2}>
-                    <Chip
-                      label={statusLabel[inst.status] ?? inst.status}
-                      size="small"
-                      color={statusColor[inst.status] ?? "default"}
-                      variant="outlined"
-                      sx={{ fontSize: "0.65rem", height: 20, minWidth: 84, flexShrink: 0 }}
-                    />
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography variant="body2" fontWeight={600} noWrap>
-                        {inst.jobNumber ? `${inst.jobNumber} — ` : ""}{inst.assetTag}{inst.assetName ? ` · ${inst.assetName}` : ""}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" noWrap>
-                        {inst.assetModel || inst.manufacturer || "—"}{inst.location ? ` · ${inst.location}` : ""}
-                      </Typography>
-                    </Box>
                   </Stack>
                 </Paper>
               );

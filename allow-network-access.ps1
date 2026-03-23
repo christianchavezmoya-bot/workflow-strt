@@ -27,7 +27,7 @@ Write-Host ""
 Write-Host "Firewall rules added successfully!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Your app should now be accessible from other devices on the network at:" -ForegroundColor Cyan
-Write-Host "  Frontend: http://10.7.15.52:5173" -ForegroundColor White
-Write-Host "  Backend:  http://10.7.15.52:4000" -ForegroundColor White
+Write-Host "  Frontend: http://192.168.1.104:5173" -ForegroundColor White
+Write-Host "  Backend:  http://192.168.1.104:4000" -ForegroundColor White
 Write-Host ""
 Write-Host "Note: Make sure both servers are running!" -ForegroundColor Yellow

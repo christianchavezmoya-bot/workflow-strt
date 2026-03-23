@@ -42,7 +42,7 @@ export default function OnboardingWelcomeModal({ open, userName, defaultRole = "
       // prevent accidental backdrop close
       onClose={() => {}}
     >
-      <DialogContent>
+      <DialogContent sx={{ overflowY: "auto", maxHeight: "80vh" }}>
         <Stack spacing={3}>
           {/* Header */}
           <Box>

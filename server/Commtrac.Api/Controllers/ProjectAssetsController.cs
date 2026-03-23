@@ -199,6 +199,19 @@ public class ProjectAssetsController : ControllerBase
         return Ok(ToDto(asset));
     }
 
+    // PATCH api/project-assets/{id}/issues — update issuesJson only; open to all authenticated users (Engineers, Installers, etc.)
+    [HttpPatch("{id}/issues")]
+    public async Task<ActionResult<ProjectAssetDto>> PatchIssues(string id, [FromBody] PatchIssuesRequest request)
+    {
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
+        if (asset is null) return NotFound();
+
+        asset.IssuesJson = string.IsNullOrWhiteSpace(request.IssuesJson) ? "[]" : request.IssuesJson;
+        asset.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ToDto(asset));
+    }
+
     // DELETE api/project-assets/{id}
     [HttpDelete("{id}")]
     [Authorize(Roles = "Admin,Project Manager")]

@@ -257,6 +257,18 @@ export default function TourOverlay({ tour, userId, role, onComplete, onSkip }: 
               {isLast ? "Done" : "Next →"}
             </Button>
           </Stack>
+
+          {/* Skip */}
+          <Box sx={{ textAlign: "center" }}>
+            <Button
+              size="small"
+              variant="text"
+              onClick={onSkip}
+              sx={{ color: "text.disabled", fontSize: 11 }}
+            >
+              Skip for now
+            </Button>
+          </Box>
         </Stack>
       </Paper>
     </Box>
