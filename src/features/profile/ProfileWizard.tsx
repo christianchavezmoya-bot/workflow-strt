@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { authService, Session, LoginHistoryEntry } from "../../services/authService";
 import { useAuth } from "../../hooks/useAuth";
 import TwoFactorSetup from "../auth/TwoFactorSetup";
+import PasswordField from "../../components/ui/PasswordField";
 
 const ProfileWizard = () => {
   const navigate = useNavigate();
@@ -47,6 +48,25 @@ const ProfileWizard = () => {
   const [regenLoading, setRegenLoading] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
   const [regenCodes, setRegenCodes] = useState<string[] | null>(null);
+
+  // Always sync name + office from backend on mount so the profile reflects
+  // what an admin set in Users — not just the cached localStorage value.
+  useEffect(() => {
+    authService.getProfile().then((fresh) => {
+      setFullName(fresh.fullName || "");
+      setOffice(fresh.office || "");
+      // Keep localStorage in sync
+      const stored = localStorage.getItem("auth_user");
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          localStorage.setItem("auth_user", JSON.stringify({ ...parsed, fullName: fresh.fullName, office: fresh.office }));
+          window.dispatchEvent(new Event("auth-user-updated"));
+        } catch { /* ignore */ }
+      }
+    }).catch(() => { /* offline — keep cached values */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isFirstLoginWithout2fa = !!user?.isFirstLogin && !is2faEnabled;
 
@@ -283,9 +303,8 @@ const ProfileWizard = () => {
               </Stack>
               {showDisable && (
                 <Stack spacing={1}>
-                  <TextField
+                  <PasswordField
                     label="Enter your password to disable 2FA"
-                    type="password"
                     fullWidth
                     value={disablePassword}
                     onChange={(e) => setDisablePassword(e.target.value)}
@@ -331,17 +350,15 @@ const ProfileWizard = () => {
               Must be at least 8 characters with uppercase, lowercase, number, and special character.
             </Typography>
           </Box>
-          <TextField
+          <PasswordField
             label="Current password"
-            type="password"
             fullWidth
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
             size="small"
           />
-          <TextField
+          <PasswordField
             label="New password"
-            type="password"
             fullWidth
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
@@ -375,9 +392,8 @@ const ProfileWizard = () => {
               </Box>
             );
           })()}
-          <TextField
+          <PasswordField
             label="Confirm new password"
-            type="password"
             fullWidth
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
@@ -577,9 +593,8 @@ const ProfileWizard = () => {
               <Typography variant="body2" color="text.secondary">
                 This will invalidate all your existing recovery codes and generate new ones. Enter your password to confirm.
               </Typography>
-              <TextField
+              <PasswordField
                 label="Password"
-                type="password"
                 fullWidth
                 value={regenPassword}
                 onChange={(e) => setRegenPassword(e.target.value)}
