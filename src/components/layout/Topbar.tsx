@@ -26,6 +26,7 @@ import StarOutlinedIcon from "@mui/icons-material/StarOutlined";
 import StarBorderOutlinedIcon from "@mui/icons-material/StarBorderOutlined";
 import BusinessOutlinedIcon from "@mui/icons-material/BusinessOutlined";
 import PersonOutlinedIcon from "@mui/icons-material/PersonOutlined";
+import LightbulbOutlinedIcon from "@mui/icons-material/LightbulbOutlined";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
@@ -196,6 +197,24 @@ const Topbar = () => {
             )}
           </Stack>
         </Stack>
+
+        {/* Search */}
+        <IconButton
+          size="small"
+          onClick={() => setSearchOpen(true)}
+          sx={{ bgcolor: "action.hover", borderRadius: "50%", width: 38, height: 38 }}
+        >
+          <SearchOutlinedIcon fontSize="small" />
+        </IconButton>
+
+        {/* Tips & Tricks */}
+        <IconButton
+          size="small"
+          onClick={() => navigate("/tips")}
+          sx={{ bgcolor: "action.hover", borderRadius: "50%", width: 38, height: 38 }}
+        >
+          <LightbulbOutlinedIcon fontSize="small" sx={{ color: "#f59e0b" }} />
+        </IconButton>
 
         {/* ··· menu */}
         <IconButton

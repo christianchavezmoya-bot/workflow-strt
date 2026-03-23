@@ -10,6 +10,7 @@ import WorkInstructions from "../features/workInstructions/WorkInstructions";
 import UserManagement from "../features/admin/UserManagement";
 import CustomerSites from "../features/admin/CustomerSites";
 import DocumentsPage from "../features/documents/DocumentsPage";
+import TipsAndTricksPage from "../features/tips/TipsAndTricksPage";
 import ProfileWizard from "../features/profile/ProfileWizard";
 import Settings from "../features/settings/Settings";
 import Login from "../features/auth/Login";
@@ -52,6 +53,7 @@ const AppRoutes = () => {
         <Route path="/installations/assets" element={<AssetInstallationPage />} />
         <Route path="/work-instructions" element={<WorkInstructions />} />
         <Route path="/documents" element={<DocumentsPage />} />
+        <Route path="/tips" element={<TipsAndTricksPage />} />
         <Route path="/admin" element={<UserManagement />} />
         <Route path="/admin/customers/:customerId/sites" element={<CustomerSites />} />
         <Route path="/admin/asset-registry" element={<Navigate to="/projects" replace />} />

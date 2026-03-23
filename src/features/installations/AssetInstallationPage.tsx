@@ -2167,21 +2167,30 @@ const AssetInstallationPage = () => {
   return (
     <Stack spacing={3}>
       {/* Header */}
-      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
-        <Box>
-          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Installation Assets</Typography>
-          <Typography variant="body2" color="text.secondary">
+      <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
+        <Box sx={{ minWidth: 0 }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Installation Assets</Typography>
+            {/* Refresh — always visible next to title */}
+            <Tooltip title="Refresh assets">
+              <IconButton size="small" onClick={refreshAssets}>
+                <RefreshOutlined fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+          <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", md: "block" } }}>
             Track assets across projects — start work orders, record status, and monitor progress.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
-          <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={refreshAssets}>Refresh</Button>
+          {/* Import CSV — desktop only */}
           {can.modifyData && (
             <Button
               size="small"
               variant="outlined"
               startIcon={<FileUploadOutlined />}
               disabled={!activeProduct}
+              sx={{ display: { xs: "none", md: "inline-flex" } }}
               onClick={() => {
                 if (activeProduct) workflowConfigService.listByProduct(activeProduct.id, "Published").then(setWorkflowConfigs);
                 setCsvImportOpen(true);
@@ -2220,44 +2229,58 @@ const AssetInstallationPage = () => {
 
       {/* Health summary bar */}
       {!loadingAssets && activeHealth && activeHealth.total > 0 && (
-        <Paper className="glass-card" sx={{ px: 2.5, py: 1.5 }}>
-          <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} spacing={1.5} flexWrap="wrap" useFlexGap>
-            <Typography variant="caption" color="text.secondary" fontWeight={700}
-              sx={{ textTransform: "uppercase", letterSpacing: 0.5, flexShrink: 0 }}>
-              {activeProduct?.name} health
-            </Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              {activeHealth.notStarted > 0 && (
-                <Chip size="small" label={`${activeHealth.notStarted} Not Started`} />
-              )}
-              {activeHealth.inProgress > 0 && (
-                <Chip size="small" label={`${activeHealth.inProgress} In Progress`} color="primary" />
-              )}
-              {activeHealth.complete > 0 && (
-                <Chip size="small" label={`${activeHealth.complete} Complete`} color="success" />
-              )}
-              {activeHealth.issue > 0 && (
-                <Chip size="small" label={`${activeHealth.issue} Issue`} color="error" />
-              )}
-              {activeHealth.noWorkflow > 0 && (
-                <Tooltip title="These assets have no workflow linked and cannot be worked on.">
-                  <Chip size="small" label={`${activeHealth.noWorkflow} No Workflow`} color="warning" variant="outlined" />
-                </Tooltip>
-              )}
-            </Stack>
-            <Box sx={{ flex: 1, minWidth: 100 }}>
+        <Paper className="glass-card" sx={{ px: { xs: 1.5, sm: 2.5 }, py: { xs: 1, sm: 1.5 } }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+
+            {/* LEFT: scrollable chips — takes all available space */}
+            <Box sx={{ flex: 1, overflowX: "auto", minWidth: 0 }}>
+              <Stack direction="row" spacing={0.75} sx={{ flexWrap: "nowrap", width: "max-content" }}>
+                {activeHealth.notStarted > 0 && (
+                  <Chip label={`${activeHealth.notStarted} Not Started`}
+                    sx={{ fontSize: "0.72rem", height: 26, flexShrink: 0 }} />
+                )}
+                {activeHealth.inProgress > 0 && (
+                  <Chip color="primary" label={`${activeHealth.inProgress} In Progress`}
+                    sx={{ fontSize: "0.72rem", height: 26, flexShrink: 0 }} />
+                )}
+                {activeHealth.complete > 0 && (
+                  <Chip color="success" label={`${activeHealth.complete} Complete`}
+                    sx={{ fontSize: "0.72rem", height: 26, flexShrink: 0 }} />
+                )}
+                {activeHealth.issue > 0 && (
+                  <Chip color="error" label={`${activeHealth.issue} Issue`}
+                    sx={{ fontSize: "0.72rem", height: 26, flexShrink: 0 }} />
+                )}
+                {activeHealth.noWorkflow > 0 && (
+                  <Tooltip title="These assets have no workflow linked and cannot be worked on.">
+                    <Chip color="warning" variant="outlined" label={`${activeHealth.noWorkflow} No Workflow`}
+                      sx={{ fontSize: "0.72rem", height: 26, flexShrink: 0 }} />
+                  </Tooltip>
+                )}
+              </Stack>
+            </Box>
+
+            {/* RIGHT: progress bar + % — fixed width, always visible */}
+            <Box sx={{ flexShrink: 0, width: { xs: 64, sm: 120 }, textAlign: "center" }}>
+              <Typography variant="caption" fontWeight={700} color="text.secondary"
+                sx={{ fontSize: { xs: "0.72rem", sm: "0.8rem" }, display: "block", lineHeight: 1.2 }}>
+                {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}%
+              </Typography>
               <LinearProgress
                 variant="determinate"
                 value={activeHealth.total > 0 ? (activeHealth.complete / activeHealth.total) * 100 : 0}
                 color={activeHealth.issue > 0 ? "error" : "success"}
-                sx={{ height: 6, borderRadius: 1 }}
+                sx={{ height: 5, borderRadius: 1, mt: 0.5 }}
               />
+              <Typography variant="caption" color="text.disabled"
+                sx={{ fontSize: "0.6rem", display: { xs: "none", sm: "block" } }}>
+                progress
+              </Typography>
             </Box>
-            <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-              {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}% complete
-            </Typography>
+
+            {/* Productivity / downtime — desktop only */}
             {(activeTimeRollup.productive > 0 || activeTimeRollup.downtime > 0) && (
-              <>
+              <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 1, flexShrink: 0 }}>
                 <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
                 <Tooltip title="Total productive time across all visible assets">
                   <Chip size="small" color="success" variant="outlined"
@@ -2271,22 +2294,22 @@ const AssetInstallationPage = () => {
                       sx={{ fontSize: 10, height: 20 }} />
                   </Tooltip>
                 )}
-              </>
+              </Box>
             )}
           </Stack>
         </Paper>
       )}
 
-      {/* Filters */}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} flexWrap="wrap" useFlexGap>
-        <FormControl size="small" sx={{ minWidth: 220 }}>
+      {/* Filters — one row on all screen sizes */}
+      <Stack direction="row" spacing={1} alignItems="center">
+        <FormControl size="small" sx={{ flex: 1, minWidth: 0 }}>
           <InputLabel>Project</InputLabel>
           <Select label="Project" value={selectedProjectId} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
             <MenuItem value="">All projects</MenuItem>
             {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} — {p.customerName}</MenuItem>)}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 160 }}>
+        <FormControl size="small" sx={{ flex: "0 0 120px", display: { xs: "none", sm: "block" } }}>
           <InputLabel>Status</InputLabel>
           <Select label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as ProjectAssetStatus | "All")}>
             <MenuItem value="All">All statuses</MenuItem>
@@ -2296,8 +2319,11 @@ const AssetInstallationPage = () => {
             <MenuItem value="Issue">Issue</MenuItem>
           </Select>
         </FormControl>
-        <TextField size="small" label="Search asset tag / serial / location"
-          value={search} onChange={(e) => setSearch(e.target.value)} sx={{ minWidth: 260 }} />
+        <TextField size="small" placeholder="Search…"
+          value={search} onChange={(e) => setSearch(e.target.value)}
+          sx={{ flex: 1, minWidth: 0 }}
+          label={null}
+        />
       </Stack>
 
       {/* Bulk actions toolbar — visible when ≥1 asset is selected */}
@@ -2426,7 +2452,7 @@ const AssetInstallationPage = () => {
               color={archiveMode ? "success" : "inherit"}
               startIcon={<ArchiveOutlined fontSize="small" />}
               onClick={() => setArchiveMode((v) => !v)}
-              sx={{ fontSize: 12 }}
+              sx={{ fontSize: 12, display: { xs: "none", md: "inline-flex" } }}
             >
               {archiveMode ? "Archive View — Exit" : "Archive"}
             </Button>
@@ -2437,11 +2463,10 @@ const AssetInstallationPage = () => {
               variant="outlined"
               startIcon={<PrintOutlined fontSize="small" />}
               onClick={() => {
-                // Pre-scope to selection if any are selected
                 setPrintScope(selectedAssetIds.size > 0 ? "selection" : "visible");
                 setPrintOpen(true);
               }}
-              sx={{ fontSize: 12 }}
+              sx={{ fontSize: 12, display: { xs: "none", md: "inline-flex" } }}
             >
               Print / PDF
             </Button>

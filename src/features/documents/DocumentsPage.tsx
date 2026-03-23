@@ -193,7 +193,6 @@ function parseFieldsJson(json: string): { customFields: CustomField[]; columnOrd
 export default function DocumentsPage() {
   useAuth(); // keep auth context available for future use
   const can = usePermissions();
-
   // ---- data -------------------------------------------------------
   const [docs, setDocs]       = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(false);

@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
   Chip,
   CircularProgress,
+  Grid,
   IconButton,
   MenuItem,
   Select,
@@ -102,96 +103,98 @@ const IssuesBoard = () => {
   return (
     <Stack spacing={3}>
       {/* ── Header ── */}
-      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" spacing={1}>
-        <Box>
+      <Box>
+        <Stack direction="row" alignItems="center" spacing={1}>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Issues Board</Typography>
-          <Typography variant="body2" color="text.secondary">
-            All open unresolved issues across every project and workflow run.
-          </Typography>
-        </Box>
-        <Tooltip title="Refresh">
-          <IconButton onClick={load} disabled={loading}>
-            {loading ? <CircularProgress size={18} /> : <RefreshOutlined />}
-          </IconButton>
-        </Tooltip>
-      </Stack>
+          <Tooltip title="Refresh">
+            <IconButton size="small" onClick={load} disabled={loading}>
+              {loading ? <CircularProgress size={16} /> : <RefreshOutlined fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+        </Stack>
+        <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", md: "block" } }}>
+          All open unresolved issues across every project and workflow run.
+        </Typography>
+      </Box>
 
-      {/* ── KPI strip ── */}
-      <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-        <Box className="glass-card" sx={{ px: 2.5, py: 1.5, minWidth: 130, textAlign: "center" }}>
-          <Typography variant="h4" fontWeight={700} color="error.main">{blockingCount}</Typography>
-          <Typography variant="caption" color="text.secondary">Blocking Issues</Typography>
-        </Box>
-        <Box className="glass-card" sx={{ px: 2.5, py: 1.5, minWidth: 130, textAlign: "center" }}>
-          <Typography variant="h4" fontWeight={700} color="warning.main">{highCount}</Typography>
-          <Typography variant="caption" color="text.secondary">High Severity</Typography>
-        </Box>
-        <Box className="glass-card" sx={{ px: 2.5, py: 1.5, minWidth: 130, textAlign: "center" }}>
-          <Typography variant="h4" fontWeight={700}>{issues.length}</Typography>
-          <Typography variant="caption" color="text.secondary">Total Open</Typography>
-        </Box>
-        <Box className="glass-card" sx={{ px: 2.5, py: 1.5, minWidth: 130, textAlign: "center" }}>
-          <Typography variant="h4" fontWeight={700}>{projectsAffected}</Typography>
-          <Typography variant="caption" color="text.secondary">Projects Affected</Typography>
-        </Box>
-      </Stack>
+      {/* ── KPI strip — 4 columns always ── */}
+      <Grid container spacing={1}>
+        {[
+          { label: "Blocking",  value: blockingCount,    color: "error.main"   },
+          { label: "High",      value: highCount,        color: "warning.main" },
+          { label: "Total Open",value: issues.length,    color: "text.primary" },
+          { label: "Projects",  value: projectsAffected, color: "text.primary" },
+        ].map(({ label, value, color }) => (
+          <Grid item xs={3} key={label}>
+            <Box className="glass-card" sx={{ py: { xs: 1, md: 1.5 }, px: { xs: 0.5, md: 2 }, textAlign: "center" }}>
+              <Typography variant="h5" fontWeight={700} color={color} sx={{ fontSize: { xs: "1.2rem", md: "2rem" } }}>
+                {value}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: "0.58rem", md: "0.75rem" }, lineHeight: 1.2, display: "block" }}>
+                {label}
+              </Typography>
+            </Box>
+          </Grid>
+        ))}
+      </Grid>
 
       {/* ── Filters ── */}
-      <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap alignItems="center">
-        <FilterListOutlined sx={{ fontSize: 18, color: "text.secondary" }} />
+      <Stack spacing={1}>
+        {/* Search — full width */}
         <TextField
           size="small"
           placeholder="Search description, asset, project…"
           value={searchText}
           onChange={e => setSearchText(e.target.value)}
-          sx={{ minWidth: 240 }}
+          fullWidth
         />
-        <Select
-          size="small"
-          value={filterProject}
-          onChange={e => setFilterProject(e.target.value)}
-          sx={{ minWidth: 200 }}
-          displayEmpty
-        >
-          <MenuItem value="__all__">All Projects</MenuItem>
-          {projectOptions.map(([id, label]) => (
-            <MenuItem key={id} value={id}>{label}</MenuItem>
-          ))}
-        </Select>
-        <Select
-          size="small"
-          value={filterSeverity}
-          onChange={e => setFilterSeverity(e.target.value)}
-          sx={{ minWidth: 130 }}
-          displayEmpty
-        >
-          <MenuItem value="__all__">All Severities</MenuItem>
-          <MenuItem value="high">High</MenuItem>
-          <MenuItem value="medium">Medium</MenuItem>
-          <MenuItem value="low">Low</MenuItem>
-        </Select>
-        <Select
-          size="small"
-          value={filterType}
-          onChange={e => setFilterType(e.target.value)}
-          sx={{ minWidth: 160 }}
-          displayEmpty
-        >
-          <MenuItem value="__all__">All Types</MenuItem>
-          <MenuItem value="blocking">Blocking</MenuItem>
-          <MenuItem value="observation">Observation</MenuItem>
-          <MenuItem value="scope-deviation">Scope Deviation</MenuItem>
-        </Select>
-        {(filterProject !== "__all__" || filterSeverity !== "__all__" || filterType !== "__all__" || searchText) && (
-          <Button
+        {/* Project + Severity + Type — one row */}
+        <Stack direction="row" spacing={1} alignItems="center">
+          <FilterListOutlined sx={{ fontSize: 16, color: "text.secondary", flexShrink: 0 }} />
+          <Select
             size="small"
-            variant="text"
-            onClick={() => { setFilterProject("__all__"); setFilterSeverity("__all__"); setFilterType("__all__"); setSearchText(""); }}
+            value={filterProject}
+            onChange={e => setFilterProject(e.target.value)}
+            displayEmpty
+            sx={{ flex: 1, minWidth: 0, fontSize: { xs: "0.72rem", md: "0.875rem" } }}
           >
-            Clear
-          </Button>
-        )}
-        <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
+            <MenuItem value="__all__">Project</MenuItem>
+            {projectOptions.map(([id, label]) => (
+              <MenuItem key={id} value={id} sx={{ fontSize: "0.8rem" }}>{label}</MenuItem>
+            ))}
+          </Select>
+          <Select
+            size="small"
+            value={filterSeverity}
+            onChange={e => setFilterSeverity(e.target.value)}
+            displayEmpty
+            sx={{ flex: 1, minWidth: 0, fontSize: { xs: "0.72rem", md: "0.875rem" } }}
+          >
+            <MenuItem value="__all__">Severity</MenuItem>
+            <MenuItem value="high">High</MenuItem>
+            <MenuItem value="medium">Medium</MenuItem>
+            <MenuItem value="low">Low</MenuItem>
+          </Select>
+          <Select
+            size="small"
+            value={filterType}
+            onChange={e => setFilterType(e.target.value)}
+            displayEmpty
+            sx={{ flex: 1, minWidth: 0, fontSize: { xs: "0.72rem", md: "0.875rem" } }}
+          >
+            <MenuItem value="__all__">Type</MenuItem>
+            <MenuItem value="blocking">Blocking</MenuItem>
+            <MenuItem value="observation">Observation</MenuItem>
+            <MenuItem value="scope-deviation">Scope Dev.</MenuItem>
+          </Select>
+          {(filterProject !== "__all__" || filterSeverity !== "__all__" || filterType !== "__all__" || searchText) && (
+            <Button size="small" variant="text" sx={{ flexShrink: 0, px: 0.5, minWidth: "auto" }}
+              onClick={() => { setFilterProject("__all__"); setFilterSeverity("__all__"); setFilterType("__all__"); setSearchText(""); }}>
+              Clear
+            </Button>
+          )}
+        </Stack>
+        <Typography variant="caption" color="text.secondary">
           {filtered.length} of {issues.length} issues
         </Typography>
       </Stack>

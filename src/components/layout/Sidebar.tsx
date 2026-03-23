@@ -17,6 +17,7 @@ import AssignmentOutlinedIcon from "@mui/icons-material/AssignmentOutlined";
 import ErrorOutlineOutlinedIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
 import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
+import LightbulbOutlinedIcon from "@mui/icons-material/LightbulbOutlined";
 import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
@@ -39,6 +40,7 @@ const navItems = [
   { label: "Installations",     icon: <TableChartOutlinedIcon />,         to: "/installations/assets" },
   { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
   { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents" },
+  { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,          to: "/tips" },
   ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project" }] : []),
   { label: "Admin",             icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin" },
   { label: "Settings",          icon: <SettingsOutlinedIcon />,           to: "/settings" },
