@@ -107,6 +107,7 @@ import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
 import AssetDocumentsDialog from "./AssetDocumentsDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
+import QRUploadButton from "../../components/QRUploadButton";
 
 // ------------------------------------------------------------------
 // Column configuration
@@ -1400,7 +1401,7 @@ const AssetInstallationPage = () => {
       try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
       const idx = issues.findIndex(i => i.id === updatedIssue.id);
       if (idx >= 0) issues[idx] = updatedIssue;
-      await projectAssetService.update(asset.id, { issuesJson: JSON.stringify(issues) }).catch(console.warn);
+      await projectAssetService.patchIssues(asset.id, JSON.stringify(issues)).catch(console.warn);
       refreshAssets();
     } finally { setInlineSaving(false); }
   }
@@ -1475,6 +1476,8 @@ const AssetInstallationPage = () => {
                     media={reportMediaVal}
                     onChange={(m) => setInlineReportMedia(prev => ({ ...prev, [issue.id]: m }))}
                     label="Attach Photo / Video"
+                    qrDocType="issue-photo"
+                    qrLinkedTo={issue.id}
                   />
                 </Box>
               )}
@@ -1567,6 +1570,8 @@ const AssetInstallationPage = () => {
                       media={resolutionMediaVal}
                       onChange={(m) => setInlineResolutionMedia(prev => ({ ...prev, [issue.id]: m }))}
                       label="Resolution Evidence"
+                      qrDocType="issue-photo"
+                      qrLinkedTo={issue.id}
                     />
                   </Box>
                   <Button
@@ -2960,6 +2965,8 @@ const AssetInstallationPage = () => {
               media={issueMedia}
               onChange={setIssueMedia}
               label="Attach Photo / Video (optional)"
+              qrDocType="issue-photo"
+              qrLinkedTo={issueDialogAsset?.id ?? ""}
             />
           </Stack>
         </DialogContent>
@@ -3755,19 +3762,48 @@ const AssetInstallationPage = () => {
             <Alert severity="info" sx={{ fontSize: 12 }}>
               The same file will be linked to every selected asset. Assets already at 3 documents will be skipped automatically.
             </Alert>
-            <Button variant="outlined" component="label" sx={{ justifyContent: "flex-start", textTransform: "none" }}>
-              {bulkDocsFile ? bulkDocsFile.name : "Choose file…"}
-              <input
-                type="file"
-                hidden
-                accept=".pdf,.xlsx,.xls,.docx,.doc,.json,.png,.jpg,.jpeg"
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  setBulkDocsFile(f);
-                  if (f && !bulkDocsName) setBulkDocsName(f.name.replace(/\.[^.]+$/, ""));
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Button variant="outlined" component="label" sx={{ justifyContent: "flex-start", textTransform: "none", flex: 1 }}>
+                {bulkDocsFile ? bulkDocsFile.name : "Choose file…"}
+                <input
+                  type="file"
+                  hidden
+                  accept=".pdf,.xlsx,.xls,.docx,.doc,.json,.png,.jpg,.jpeg"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setBulkDocsFile(f);
+                    if (f && !bulkDocsName) setBulkDocsName(f.name.replace(/\.[^.]+$/, ""));
+                  }}
+                />
+              </Button>
+              <QRUploadButton
+                docType={bulkDocsType}
+                linkedTo="bulk"
+                label="Phone"
+                onUploaded={async (documentId) => {
+                  setBulkDocsSaving(true);
+                  setBulkDocsResult(null);
+                  const ids = [...selectedAssetIds];
+                  let uploaded = 0, skipped = 0, failed = 0;
+                  await Promise.all(ids.map(async (assetId) => {
+                    if ((docsCountMap[assetId] ?? 0) >= 3) { skipped++; return; }
+                    try {
+                      await assetDocumentLinkService.attach(assetId, documentId, currentUser?.fullName ?? undefined);
+                      uploaded++;
+                      setDocsCountMap((prev) => ({ ...prev, [assetId]: (prev[assetId] ?? 0) + 1 }));
+                    } catch { failed++; }
+                  }));
+                  setBulkDocsSaving(false);
+                  const parts: string[] = [];
+                  if (uploaded) parts.push(`${uploaded} uploaded`);
+                  if (skipped) parts.push(`${skipped} skipped`);
+                  if (failed) parts.push(`${failed} failed`);
+                  setBulkDocsResult(`Done — ${parts.join(", ")}.`);
+                  if (failed === 0) setSelectedAssetIds(new Set());
+                  setBulkDocsOpen(false);
                 }}
               />
-            </Button>
+            </Stack>
             <TextField
               label="Document name"
               size="small"

@@ -191,6 +191,8 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
               media={reportMedia}
               onChange={setReportMedia}
               label="Attach Photo / Video (optional)"
+              qrDocType="issue-photo"
+              qrLinkedTo={issue.id}
             />
           </Box>
         )}
@@ -306,6 +308,8 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
                   media={resolutionMedia}
                   onChange={setResolutionMedia}
                   label="Resolution Evidence — Photo / Video (optional)"
+                  qrDocType="issue-photo"
+                  qrLinkedTo={issue.id}
                 />
                 <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                   <Button

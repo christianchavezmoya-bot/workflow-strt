@@ -54,6 +54,7 @@ import { STEP_TYPE_LABELS } from "../../types/workflow";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
+import QRUploadButton from "../../components/QRUploadButton";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import { workflowConfigFeatureService } from "../../services/workflowConfigFeatureService";
 import type { WorkflowConfigFeature } from "../../types/workflowConfigFeature";
@@ -2969,6 +2970,31 @@ function MediaLibraryPanel({ workflow, step, templateId, ensureConfigId, onStepC
           >
             Upload
           </Button>
+          <QRUploadButton
+            docType="workflow-media"
+            linkedTo={templateId ?? "new"}
+            label="Phone"
+            onUploaded={() => {}}
+            onUploadedWithData={async (_docId, dataUrl) => {
+              const cfgId = await ensureConfigId();
+              if (!cfgId) { return; }
+              // Convert base64 dataUrl to File
+              const [meta, b64] = dataUrl.split(",");
+              const mime = meta.match(/:(.*?);/)?.[1] ?? "image/jpeg";
+              const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+              const file = new File([bytes], "phone-upload", { type: mime });
+              setUploading(true);
+              try {
+                const updatedConfig = await workflowConfigService.uploadMedia(cfgId, file);
+                onWorkflowUpdate(updatedConfig.workflow as unknown as Workflow);
+              } catch {
+                setUploadError("Upload failed.");
+              } finally {
+                setUploading(false);
+              }
+            }}
+            disabled={uploading}
+          />
         </Stack>
       </Stack>
 

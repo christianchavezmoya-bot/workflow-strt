@@ -444,6 +444,8 @@ const IssuesBoard = () => {
                                     media={mediaVal}
                                     onChange={m => setResolutionMedia(p => ({ ...p, [key]: m }))}
                                     label="Resolution Evidence — Photo / Video (optional)"
+                                    qrDocType="issue-photo"
+                                    qrLinkedTo={iss.id}
                                   />
                                 </Box>
                               </Stack>

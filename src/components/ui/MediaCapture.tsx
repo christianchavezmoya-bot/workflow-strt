@@ -10,12 +10,16 @@ import PhotoCameraOutlinedIcon from "@mui/icons-material/PhotoCameraOutlined";
 import VideocamOutlinedIcon from "@mui/icons-material/VideocamOutlined";
 import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import PlayCircleOutlineOutlinedIcon from "@mui/icons-material/PlayCircleOutlineOutlined";
+import QRUploadButton from "../QRUploadButton";
 
 interface Props {
   media: string[];
   onChange: (media: string[]) => void;
   label?: string;
   disabled?: boolean;
+  /** When provided, a "Upload from Phone" QR button is shown */
+  qrDocType?: string;
+  qrLinkedTo?: string;
 }
 
 function isVideo(dataUrl: string) {
@@ -31,7 +35,7 @@ function toBase64(file: File): Promise<string> {
   });
 }
 
-export default function MediaCapture({ media, onChange, label, disabled = false }: Props) {
+export default function MediaCapture({ media, onChange, label, disabled = false, qrDocType, qrLinkedTo }: Props) {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,7 +66,7 @@ export default function MediaCapture({ media, onChange, label, disabled = false 
       )}
 
       {/* Capture buttons */}
-      <Stack direction="row" spacing={1} mb={media.length > 0 ? 1.25 : 0}>
+      <Stack direction="row" spacing={1} flexWrap="wrap" mb={media.length > 0 ? 1.25 : 0}>
         <Button
           size="small"
           variant="outlined"
@@ -83,6 +87,15 @@ export default function MediaCapture({ media, onChange, label, disabled = false 
         >
           Add Video
         </Button>
+        {qrDocType && qrLinkedTo && !disabled && (
+          <QRUploadButton
+            docType={qrDocType}
+            linkedTo={qrLinkedTo}
+            label="Phone"
+            onUploaded={() => {}}
+            onUploadedWithData={(_docId, dataUrl) => onChange([...media, dataUrl])}
+          />
+        )}
 
         {/* Hidden inputs */}
         <input
