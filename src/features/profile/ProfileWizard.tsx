@@ -1,4 +1,4 @@
-import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { ContentCopy } from "@mui/icons-material";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -448,7 +448,8 @@ const ProfileWizard = () => {
             )}
           </Stack>
           {sessionsLoaded && sessions.length > 0 && (
-            <Table size="small">
+            <TableContainer sx={{ overflowX: "auto" }}>
+            <Table size="small" sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>IP</TableCell>
@@ -480,6 +481,7 @@ const ProfileWizard = () => {
                 ))}
               </TableBody>
             </Table>
+            </TableContainer>
           )}
           {sessionsLoaded && sessions.length === 0 && (
             <Typography variant="body2" color="text.secondary">No active sessions found.</Typography>
@@ -504,7 +506,8 @@ const ProfileWizard = () => {
           {historyLoaded && loginHistory.length > 0 && (
             <>
               <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 650 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell>Time</TableCell>
@@ -537,6 +540,7 @@ const ProfileWizard = () => {
                   ))}
                 </TableBody>
               </Table>
+              </TableContainer>
             </>
           )}
           {historyLoaded && loginHistory.length === 0 && (

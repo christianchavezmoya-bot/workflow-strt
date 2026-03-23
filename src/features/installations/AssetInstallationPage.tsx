@@ -60,6 +60,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   Tabs,
@@ -1763,7 +1764,7 @@ const AssetInstallationPage = () => {
     }
 
     return (
-      <Table size="small" sx={{ maxWidth: 680 }}>
+      <Table size="small" sx={{ maxWidth: 680, minWidth: 650 }}>
         <TableHead>
           <TableRow sx={{ bgcolor: "rgba(255,255,255,0.06)" }}>
             <TableCell sx={{ fontWeight: 700, fontSize: 12, py: 0.75, width: "35%", color: "text.primary" }}>Feature</TableCell>
@@ -2153,7 +2154,7 @@ const AssetInstallationPage = () => {
         </Stack>
 
         {allDowntimeEntries.length > 0 && (
-          <Table size="small" sx={{ maxWidth: 600 }}>
+          <Table size="small" sx={{ maxWidth: 600, minWidth: 650 }}>
             <TableHead>
               <TableRow sx={{ bgcolor: "rgba(255,255,255,0.03)" }}>
                 <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 40 }}>Run</TableCell>
@@ -2516,7 +2517,8 @@ const AssetInstallationPage = () => {
             </Alert>
           </Box>
         ) : (
-          <Table size="small">
+          <Box sx={{ overflowX: "auto" }}>
+          <Table size="small" sx={{ minWidth: 900 }}>
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: 28, px: 0.5 }}>
@@ -2676,6 +2678,7 @@ const AssetInstallationPage = () => {
               })}
             </TableBody>
           </Table>
+          </Box>
         )}
       </Paper>
 
@@ -3161,7 +3164,7 @@ const AssetInstallationPage = () => {
                   }
                 </Alert>
                 <Box sx={{ maxHeight: 320, overflow: "auto" }}>
-                  <Table size="small">
+                  <Table size="small" sx={{ minWidth: 650 }}>
                     <TableHead>
                       <TableRow>
                         <TableCell><Typography variant="caption" fontWeight={700}>Asset Tag</Typography></TableCell>
@@ -3406,7 +3409,7 @@ const AssetInstallationPage = () => {
               bgcolor: "rgba(0,0,0,0.04)",
             }}
           >
-            <Table size="small">
+            <Table size="small" sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 700, py: 0.5 }}>Asset Tag</TableCell>

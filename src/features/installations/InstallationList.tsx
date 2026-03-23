@@ -22,6 +22,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   TextField,
@@ -1013,8 +1014,8 @@ const InstallationList = () => {
           const rowsWithIndex = rows.map((row, index) => ({ row, index }));
           const filteredRows = applyAutoSort(applyAutoFilter(rowsWithIndex, filters, accessors), sortConfig, accessors);
           return (
-            <Box className="glass-card" sx={{ padding: 2 }}>
-              <Table>
+            <Box className="glass-card" sx={{ padding: 2, overflowX: "auto" }}>
+              <Table sx={{ minWidth: 900 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell>#</TableCell>
@@ -1160,8 +1161,8 @@ const InstallationList = () => {
           </Stack>
 
           {false && viewMode === "table" && (
-            <Box className="glass-card" sx={{ padding: 2 }}>
-              <Table>
+            <Box className="glass-card" sx={{ padding: 2, overflowX: "auto" }}>
+              <Table sx={{ minWidth: 900 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell>#</TableCell>
@@ -1808,8 +1809,8 @@ const InstallationList = () => {
               Table configuration
             </Button>
           </Stack>
-          <Box className="glass-card" sx={{ padding: 2 }}>
-            <Table>
+          <Box className="glass-card" sx={{ padding: 2, overflowX: "auto" }}>
+            <Table sx={{ minWidth: 900 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>#</TableCell>
@@ -2368,7 +2369,8 @@ const InstallationList = () => {
         <DialogTitle>Installation tabs</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ marginTop: 1 }}>
-            <Table>
+            <TableContainer sx={{ overflowX: "auto" }}>
+            <Table sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>Order</TableCell>
@@ -2441,6 +2443,7 @@ const InstallationList = () => {
                 ))}
               </TableBody>
             </Table>
+            </TableContainer>
             <Stack direction="row" spacing={1} alignItems="center">
               <TextField
                 label="New tab name"
@@ -2893,7 +2896,8 @@ const InstallationList = () => {
               No other projects are using this product.
             </Typography>
           ) : (
-            <Table size="small" sx={{ mt: 1 }}>
+            <TableContainer sx={{ overflowX: "auto", mt: 1 }}>
+            <Table size="small" sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>Job #</TableCell>
@@ -2929,6 +2933,7 @@ const InstallationList = () => {
                 ))}
               </TableBody>
             </Table>
+            </TableContainer>
           )}
         </DialogContent>
         <DialogActions>

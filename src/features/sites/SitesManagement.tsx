@@ -178,8 +178,8 @@ export const SitesManagement = () => {
 
         {/* Table View */}
         {viewMode === 'table' && (
-          <TableContainer component={Paper}>
-            <Table>
+          <TableContainer component={Paper} sx={{ overflowX: "auto" }}>
+            <Table sx={{ minWidth: 900 }}>
               <TableHead>
                 <TableRow>
                   <TableCell width="60">#</TableCell>

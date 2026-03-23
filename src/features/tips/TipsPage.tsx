@@ -532,8 +532,8 @@ const TipsPage = () => {
 
   const renderTable = () => (
     <Paper variant="outlined">
-      <TableContainer>
-        <Table size="small">
+      <TableContainer sx={{ overflowX: "auto" }}>
+        <Table size="small" sx={{ minWidth: 900 }}>
           <TableHead>
             <TableRow>
               <TableCell sx={{ width: 48 }} />

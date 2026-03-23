@@ -21,15 +21,16 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   TextField,
   Tooltip,
   Typography
 } from "@mui/material";
-import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined, CheckCircleOutline, BlockOutlined } from "@mui/icons-material";
+import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined, CheckCircleOutline, BlockOutlined, ExpandMoreOutlined, ExpandLessOutlined, UploadFileOutlined } from "@mui/icons-material";
 import { quickbaseService, type QbFieldInfo } from "../../services/quickbaseService";
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { workflowTypeService } from "../../services/workflowTypeService";
@@ -48,6 +49,7 @@ import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/set
 import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
 import { useAuth } from "../../hooks/useAuth";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import * as XLSX from "xlsx";
 import PasswordField from "../../components/ui/PasswordField";
 
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
@@ -528,6 +530,89 @@ const Settings = () => {
   const [featureForm, setFeatureForm] = useState({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] as string[], brand: "", supplier: "", alternativePartNumber: "", unitPrice: "", productLink: "" });
   const [featureSaving, setFeatureSaving] = useState(false);
   const [featureError, setFeatureError] = useState<string | null>(null);
+
+  // Bulk feature import state
+  interface ImportRow { name: string; description: string; valueType: string; supplier: string; partNumber: string; unitPrice: string; brand: string; }
+  const [featureImportDialog, setFeatureImportDialog] = useState(false);
+  const [featureImportRows, setFeatureImportRows] = useState<ImportRow[]>([]);
+  const [featureImportProduct, setFeatureImportProduct] = useState<string>("");
+  const [featureImportError, setFeatureImportError] = useState<string | null>(null);
+  const [featureImporting, setFeatureImporting] = useState(false);
+  const [featureImportDone, setFeatureImportDone] = useState<{ created: number; skipped: number } | null>(null);
+  const featureImportFileRef = useRef<HTMLInputElement>(null);
+
+  function downloadFeatureTemplate() {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["name", "description", "valueType", "supplier", "partNumber", "unitPrice", "brand"],
+      ["IP Camera", "Outdoor IP camera", "component", "Hikvision", "DS-2CD2143G2-I", "120", "Hikvision"],
+      ["NVR 8ch", "8 channel NVR", "component", "Hikvision", "DS-7608NI-K2", "350", "Hikvision"],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Features");
+    XLSX.writeFile(wb, "features-template.xlsx");
+  }
+
+  function handleFeatureImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFeatureImportError(null);
+    setFeatureImportDone(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = new Uint8Array(ev.target!.result as ArrayBuffer);
+        const wb = XLSX.read(data, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
+        const parsed: ImportRow[] = rows.map((r) => ({
+          name: String(r["name"] || r["Name"] || "").trim(),
+          description: String(r["description"] || r["Description"] || "").trim(),
+          valueType: String(r["valueType"] || r["type"] || r["Type"] || "text").trim() || "text",
+          supplier: String(r["supplier"] || r["Supplier"] || "").trim(),
+          partNumber: String(r["partNumber"] || r["part_number"] || r["PartNumber"] || r["part#"] || "").trim(),
+          unitPrice: String(r["unitPrice"] || r["unit_price"] || r["UnitPrice"] || r["price"] || "").trim(),
+          brand: String(r["brand"] || r["Brand"] || "").trim(),
+        })).filter((r) => r.name);
+        if (!parsed.length) { setFeatureImportError("No valid rows found. Make sure the file has a 'name' column."); return; }
+        setFeatureImportRows(parsed);
+      } catch {
+        setFeatureImportError("Could not parse file. Use the template for correct format.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
+  }
+
+  async function runFeatureImport() {
+    setFeatureImporting(true);
+    setFeatureImportError(null);
+    let created = 0; let skipped = 0;
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const existing = await featureService.getAll();
+    const existingKeys = new Set(existing.map((f) => normalize(f.name)));
+    for (const row of featureImportRows) {
+      if (existingKeys.has(normalize(row.name))) { skipped++; continue; }
+      try {
+        const created_ = await featureService.create({
+          name: row.name,
+          description: row.description || undefined,
+          valueType: row.valueType,
+          supplier: row.supplier || undefined,
+          alternativePartNumber: row.partNumber || undefined,
+          unitPrice: row.unitPrice ? Number(row.unitPrice) : undefined,
+          brand: row.brand || undefined,
+        });
+        if (featureImportProduct) {
+          await featureService.linkToProduct(featureImportProduct, created_.id);
+        }
+        existingKeys.add(normalize(row.name));
+        created++;
+      } catch { skipped++; }
+    }
+    await loadFeatures();
+    setFeatureImporting(false);
+    setFeatureImportDone({ created, skipped });
+  }
 
   async function loadFeatures() {
     setFeaturesLoading(true);
@@ -1535,7 +1620,8 @@ const Settings = () => {
                   <Alert severity="error" sx={{ m: 2 }}>{discoverError}</Alert>
                 )}
                 {!discoverLoading && !discoverError && discoverFields.length > 0 && (
-                  <Table size="small">
+                  <TableContainer sx={{ overflowX: "auto" }}>
+                  <Table size="small" sx={{ minWidth: 650 }}>
                     <TableHead>
                       <TableRow>
                         <TableCell sx={{ width: 60 }}>FID</TableCell>
@@ -1570,6 +1656,7 @@ const Settings = () => {
                       ))}
                     </TableBody>
                   </Table>
+                  </TableContainer>
                 )}
               </DialogContent>
               <DialogActions>
@@ -1727,7 +1814,8 @@ const Settings = () => {
                 <Button size="small" onClick={loadDivisions}>Refresh</Button>
               </Alert>
             ) : (
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 650 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
@@ -1774,6 +1862,7 @@ const Settings = () => {
                   ))}
                 </TableBody>
               </Table>
+              </TableContainer>
             )}
             <Button size="small" variant="outlined" onClick={loadDivisions} disabled={divisionsLoading}>
               {divisionsLoading ? "Refreshing…" : "Refresh"}
@@ -1818,7 +1907,8 @@ const Settings = () => {
                 <Button size="small" onClick={loadProducts}>Refresh</Button>
               </Alert>
             ) : (
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 650 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
@@ -1845,9 +1935,9 @@ const Settings = () => {
                         }}>
                           <TableCell>
                             <Stack direction="row" alignItems="center" spacing={1}>
-                              <Typography variant="body2" sx={{ fontSize: "0.75rem", opacity: 0.5, userSelect: "none" }}>
-                                {isExpanded ? "▼" : "▶"}
-                              </Typography>
+                              <IconButton size="small" onClick={(e) => { e.stopPropagation(); if (isExpanded) { setExpandedProductId(null); } else { setExpandedProductId(p.id); if (features.length === 0) loadFeatures(); } }}>
+                                {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
+                              </IconButton>
                               <Stack>
                                 <Typography variant="body2" fontWeight={600}>{p.name}</Typography>
                                 {p.description && <Typography variant="caption" color="text.secondary">{p.description}</Typography>}
@@ -1926,6 +2016,7 @@ const Settings = () => {
                   })}
                 </TableBody>
               </Table>
+              </TableContainer>
             )}
             <Button size="small" variant="outlined" onClick={loadProducts} disabled={productsLoading}>
               {productsLoading ? "Refreshing…" : "Refresh"}
@@ -1942,20 +2033,36 @@ const Settings = () => {
                   Global reusable features that can be linked to any product (e.g. IP Camera, Room, NVR).
                 </Typography>
               </Box>
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<AddOutlined />}
-                onClick={() => {
-                  setFeatureEditId(null);
-                  setFeatureJustCreatedId(null);
-                  setFeatureForm({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [], brand: "", supplier: "", alternativePartNumber: "", unitPrice: "", productLink: "" });
-                  setFeatureError(null);
-                  setFeatureDialog(true);
-                }}
-              >
-                Add feature
-              </Button>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<UploadFileOutlined />}
+                  onClick={() => {
+                    setFeatureImportRows([]);
+                    setFeatureImportProduct("");
+                    setFeatureImportError(null);
+                    setFeatureImportDone(null);
+                    setFeatureImportDialog(true);
+                  }}
+                >
+                  Import
+                </Button>
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<AddOutlined />}
+                  onClick={() => {
+                    setFeatureEditId(null);
+                    setFeatureJustCreatedId(null);
+                    setFeatureForm({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [], brand: "", supplier: "", alternativePartNumber: "", unitPrice: "", productLink: "" });
+                    setFeatureError(null);
+                    setFeatureDialog(true);
+                  }}
+                >
+                  Add feature
+                </Button>
+              </Stack>
             </Stack>
             <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
             {featuresError && (
@@ -1971,7 +2078,8 @@ const Settings = () => {
                 <Button size="small" onClick={loadFeatures}>Refresh</Button>
               </Alert>
             ) : (
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 900 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
@@ -2000,9 +2108,9 @@ const Settings = () => {
                         }}>
                           <TableCell>
                             <Stack direction="row" alignItems="center" spacing={1}>
-                              <Typography variant="body2" sx={{ fontSize: "0.75rem", opacity: 0.5, userSelect: "none" }}>
-                                {isExpanded ? "▼" : "▶"}
-                              </Typography>
+                              <IconButton size="small" onClick={(e) => { e.stopPropagation(); if (isExpanded) { setExpandedFeatureId(null); } else { setExpandedFeatureId(f.id); if (!dependencies[f.id]) loadDeps(f.id); } }}>
+                                {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
+                              </IconButton>
                               <Typography variant="body2" fontWeight={600}>{f.name}</Typography>
                             </Stack>
                           </TableCell>
@@ -2093,6 +2201,7 @@ const Settings = () => {
                   })}
                 </TableBody>
               </Table>
+              </TableContainer>
             )}
             <Button size="small" variant="outlined" onClick={loadFeatures} disabled={featuresLoading}>
               {featuresLoading ? "Refreshing…" : "Refresh"}
@@ -2134,7 +2243,8 @@ const Settings = () => {
                 <Button size="small" onClick={loadWfTypes}>Refresh</Button>
               </Alert>
             ) : (
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 650 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
@@ -2181,6 +2291,7 @@ const Settings = () => {
                   ))}
                 </TableBody>
               </Table>
+              </TableContainer>
             )}
             <Button size="small" variant="outlined" onClick={loadWfTypes} disabled={wfTypesLoading}>
               {wfTypesLoading ? "Refreshing…" : "Refresh"}
@@ -2215,7 +2326,8 @@ const Settings = () => {
               {auditLoading ? "Loading..." : "Load audit log"}
             </Button>
             {auditLogs.length > 0 && (
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 650 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell>Timestamp</TableCell>
@@ -2252,6 +2364,7 @@ const Settings = () => {
                   ))}
                 </TableBody>
               </Table>
+              </TableContainer>
             )}
             {auditLogs.length === 0 && !auditLoading && (
               <Typography variant="body2" color="text.secondary">
@@ -2470,7 +2583,8 @@ const Settings = () => {
                   </Typography>
                 </Stack>
               ) : (
-                <Table sx={{ marginTop: 1 }}>
+                <TableContainer sx={{ overflowX: "auto" }}>
+                <Table sx={{ marginTop: 1, minWidth: 900 }}>
                   <TableHead>
                     <TableRow>
                       <TableCell sx={fieldLabelStyle}>Created field</TableCell>
@@ -2599,6 +2713,7 @@ const Settings = () => {
                     )}
                   </TableBody>
                 </Table>
+                </TableContainer>
               )}
             </Box>
           </Stack>
@@ -2737,7 +2852,8 @@ const Settings = () => {
             >
               Add row
             </Button>
-            <Table>
+            <TableContainer sx={{ overflowX: "auto" }}>
+            <Table sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>#</TableCell>
@@ -2785,6 +2901,7 @@ const Settings = () => {
                 ))}
               </TableBody>
             </Table>
+            </TableContainer>
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -2913,6 +3030,94 @@ const Settings = () => {
           >
             {divisionSaving ? "Saving…" : divisionEditId ? "Save changes" : "Add division"}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Feature Import dialog */}
+      <Dialog open={featureImportDialog} onClose={() => { if (!featureImporting) setFeatureImportDialog(false); }} maxWidth="md" fullWidth>
+        <DialogTitle>Import Features from CSV / Excel</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Button size="small" variant="outlined" startIcon={<Download />} onClick={downloadFeatureTemplate}>
+                Download template
+              </Button>
+              <Typography variant="caption" color="text.secondary">
+                Columns: name, description, valueType, supplier, partNumber, unitPrice, brand
+              </Typography>
+            </Stack>
+
+            <Stack direction="row" spacing={1} alignItems="center">
+              <input ref={featureImportFileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }} onChange={handleFeatureImportFile} />
+              <Button variant="contained" size="small" startIcon={<UploadFileOutlined />} onClick={() => featureImportFileRef.current?.click()}>
+                Choose file
+              </Button>
+              {featureImportRows.length > 0 && (
+                <Typography variant="body2" color="success.main">{featureImportRows.length} rows ready</Typography>
+              )}
+            </Stack>
+
+            {featureImportError && <Alert severity="error">{featureImportError}</Alert>}
+
+            {featureImportRows.length > 0 && (
+              <>
+                <FormControl size="small" fullWidth>
+                  <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ mb: 0.5 }}>
+                    Link all imported features to product (optional)
+                  </Typography>
+                  <Select
+                    value={featureImportProduct}
+                    onChange={(e) => setFeatureImportProduct(e.target.value)}
+                    displayEmpty
+                  >
+                    <MenuItem value=""><em>— No product —</em></MenuItem>
+                    {products.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
+                  </Select>
+                </FormControl>
+
+                <TableContainer sx={{ overflowX: "auto", maxHeight: 300 }}>
+                  <Table size="small" stickyHeader sx={{ minWidth: 600 }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Name</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell>Supplier</TableCell>
+                        <TableCell>Part #</TableCell>
+                        <TableCell>Unit Price</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {featureImportRows.map((r, i) => (
+                        <TableRow key={i}>
+                          <TableCell><Typography variant="body2" fontWeight={600}>{r.name}</Typography>{r.description && <Typography variant="caption" color="text.secondary" display="block">{r.description}</Typography>}</TableCell>
+                          <TableCell><Chip size="small" label={r.valueType} variant="outlined" /></TableCell>
+                          <TableCell>{r.supplier || "—"}</TableCell>
+                          <TableCell>{r.partNumber || "—"}</TableCell>
+                          <TableCell>{r.unitPrice ? `$${r.unitPrice}` : "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </>
+            )}
+
+            {featureImportDone && (
+              <Alert severity="success">
+                Done — {featureImportDone.created} feature{featureImportDone.created !== 1 ? "s" : ""} created
+                {featureImportDone.skipped > 0 ? `, ${featureImportDone.skipped} skipped (already exist)` : ""}.
+                {featureImportProduct && " All linked to selected product."}
+              </Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFeatureImportDialog(false)} disabled={featureImporting}>Close</Button>
+          {featureImportRows.length > 0 && !featureImportDone && (
+            <Button variant="contained" onClick={runFeatureImport} disabled={featureImporting}>
+              {featureImporting ? <><CircularProgress size={14} sx={{ mr: 1 }} />Importing…</> : `Import ${featureImportRows.length} features`}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
