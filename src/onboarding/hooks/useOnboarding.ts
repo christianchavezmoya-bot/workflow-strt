@@ -11,6 +11,10 @@ import { getUnseenWhatsNew } from "../config/whatsNew.config";
 interface UseOnboardingOptions {
   userId: string;
   role: string;
+  /** Pass user.isFirstLogin from the backend — forces welcome even if localStorage says done */
+  isFirstLogin?: boolean;
+  /** Called when user completes or skips welcome — use to mark IsFirstLogin=false on backend */
+  onWelcomeDone?: () => void;
 }
 
 export interface OnboardingControls {
@@ -48,7 +52,7 @@ export interface OnboardingControls {
   resetOnboarding: () => void;
 }
 
-export function useOnboarding({ userId, role }: UseOnboardingOptions): OnboardingControls {
+export function useOnboarding({ userId, role, isFirstLogin, onWelcomeDone }: UseOnboardingOptions): OnboardingControls {
   const flags = useMemo(() => getOnboardingFlags(), []);
   const location = useLocation();
 
@@ -80,7 +84,8 @@ export function useOnboarding({ userId, role }: UseOnboardingOptions): Onboardin
   }, [location.pathname]);
 
   // ── Welcome ────────────────────────────────────────────────────────────────
-  const showWelcome = flags.enabled && !state.firstLoginCompleted;
+  // Show welcome if: backend says isFirstLogin=true OR localStorage not yet completed
+  const showWelcome = flags.enabled && (!state.firstLoginCompleted || isFirstLogin === true);
 
   const completeWelcome = useCallback((focusArea: FocusArea) => {
     onboardingAnalytics.emit("onboarding_started", { userId, role, focusArea });
@@ -90,9 +95,10 @@ export function useOnboarding({ userId, role }: UseOnboardingOptions): Onboardin
       firstLoginCompleted: true,
       selectedFocusArea: focusArea,
     }));
+    onWelcomeDone?.();
     // Auto-start quick tour after welcome
     if (flags.quickTour) setActiveTour(quickTour);
-  }, [userId, role, flags.quickTour]);
+  }, [userId, role, flags.quickTour, onWelcomeDone]);
 
   const skipWelcome = useCallback(() => {
     onboardingAnalytics.emit("onboarding_skipped", { userId, role });
@@ -101,7 +107,8 @@ export function useOnboarding({ userId, role }: UseOnboardingOptions): Onboardin
       firstLoginCompleted: true,
       quickTourSkipped: true,
     }));
-  }, [userId, role]);
+    onWelcomeDone?.();
+  }, [userId, role, onWelcomeDone]);
 
   // ── Quick / Role Tours ────────────────────────────────────────────────────
   const showQuickTour = flags.enabled && flags.quickTour && !!activeTour;

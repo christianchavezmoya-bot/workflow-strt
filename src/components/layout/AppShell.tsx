@@ -10,10 +10,25 @@ import OnboardingController from "../../onboarding/OnboardingController";
 import HelpCenterLauncher from "../../onboarding/components/HelpCenterLauncher";
 import { useOnboarding } from "../../onboarding/hooks/useOnboarding";
 import { useAuth } from "../../hooks/useAuth";
+import { authService } from "../../services/authService";
+import { useCallback } from "react";
 
 function OnboardingLayer() {
   const { user } = useAuth();
-  const controls = useOnboarding({ userId: user.id, role: user.role });
+
+  // When the user finishes or skips welcome, mark IsFirstLogin=false on backend
+  // so an admin reset (setting IsFirstLogin=true) is the only way to re-trigger it.
+  const handleWelcomeDone = useCallback(() => {
+    authService.updateProfile({ fullName: user.fullName, office: user.office }).catch(() => {});
+  }, [user.fullName, user.office]);
+
+  const controls = useOnboarding({
+    userId: user.id,
+    role: user.role,
+    isFirstLogin: user.isFirstLogin,
+    onWelcomeDone: handleWelcomeDone,
+  });
+
   return (
     <>
       <OnboardingController

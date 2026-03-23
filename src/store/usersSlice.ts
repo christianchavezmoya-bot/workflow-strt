@@ -48,6 +48,10 @@ export const reset2fa = createAsyncThunk("users/reset2fa", async (id: string) =>
   return userService.reset2fa(id);
 });
 
+export const resetOnboarding = createAsyncThunk("users/resetOnboarding", async (id: string) => {
+  return userService.resetOnboarding(id);
+});
+
 const usersSlice = createSlice({
   name: "users",
   initialState,

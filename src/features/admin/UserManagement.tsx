@@ -44,6 +44,7 @@ import {
   EmailOutlined,
   PersonOffOutlined,
   LockResetOutlined,
+  ReplayOutlined,
 } from "@mui/icons-material";
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
@@ -66,7 +67,7 @@ import api from "../../services/api";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer } from "../../store/customersSlice";
 import { createProduct, deleteProduct, fetchProducts, updateProduct } from "../../store/productsSlice";
-import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, reset2fa, updateUser } from "../../store/usersSlice";
+import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, reset2fa, resetOnboarding, updateUser } from "../../store/usersSlice";
 import { Customer } from "../../types/customer";
 import { Product } from "../../types/product";
 import type { FeatureSubProperty as ProductFeatureSubProperty, ProductFeatureDefinition, ProductFeatureValueType } from "../../types/product";
@@ -2140,6 +2141,13 @@ export const UserManagement: React.FC = () => {
                         <Tooltip title="Reset 2FA">
                           <IconButton size="small" color="warning" onClick={() => dispatch(reset2fa(user.id))}>
                             <LockResetOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {can.createUsers && (
+                        <Tooltip title="Reset onboarding — user will see welcome tour on next login">
+                          <IconButton size="small" color="info" onClick={() => dispatch(resetOnboarding(user.id))}>
+                            <ReplayOutlined fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
