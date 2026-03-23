@@ -34,17 +34,17 @@ import FavoritesSection from "./FavoritesSection";
 import { BOM_MODULE_ENABLED } from "../../modules/bom-project";
 
 const navItems = [
-  { label: "Dashboard",         icon: <DashboardOutlinedIcon />,          to: "/",                      end: true },
-  { label: "Projects",          icon: <AssignmentOutlinedIcon />,         to: "/projects" },
-  { label: "Issues Board",      icon: <ErrorOutlineOutlinedIcon />,       to: "/issues" },
-  { label: "Installations",     icon: <TableChartOutlinedIcon />,         to: "/installations/assets" },
-  { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
-  { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents" },
-  { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,         to: "/tips" },
-  ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project" }] : []),
-  { label: "Admin",             icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin",                 end: true },
-  { label: "Settings",          icon: <SettingsOutlinedIcon />,           to: "/settings" },
-  { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,      to: "/profile" },
+  { label: "Dashboard",         icon: <DashboardOutlinedIcon />,          to: "/",                      end: true,  tourKey: "nav-dashboard" },
+  { label: "Projects",          icon: <AssignmentOutlinedIcon />,         to: "/projects",                          tourKey: "nav-projects" },
+  { label: "Issues Board",      icon: <ErrorOutlineOutlinedIcon />,       to: "/issues",                            tourKey: "nav-issues" },
+  { label: "Installations",     icon: <TableChartOutlinedIcon />,         to: "/installations/assets",              tourKey: "nav-installations" },
+  { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions",                 tourKey: "nav-work-instructions" },
+  { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents",                         tourKey: "nav-documents" },
+  { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,         to: "/tips",                              tourKey: "nav-tips" },
+  ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project", tourKey: "nav-bom" }] : []),
+  { label: "Admin",             icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin",                 end: true,  tourKey: "nav-admin" },
+  { label: "Settings",          icon: <SettingsOutlinedIcon />,           to: "/settings",                          tourKey: "nav-settings" },
+  { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,      to: "/profile",                           tourKey: "nav-profile" },
 ];
 
 const Sidebar = () => {
@@ -93,13 +93,14 @@ const Sidebar = () => {
         <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
       </Stack>
       <FavoritesSection />
-      <List sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+      <List sx={{ display: "flex", flexDirection: "column", gap: 0.5 }} data-tour="nav-sidebar">
         {visibleNavItems.map((item) => (
           <ListItemButton
             key={item.label}
             component={NavLink}
             to={item.to}
             end={item.end}
+            data-tour={item.tourKey}
             onClick={() => {
               window.dispatchEvent(new CustomEvent("app:side-nav-click"));
             }}

@@ -6,6 +6,26 @@ import DebugPanel from "./DebugPanel";
 import FieldNotificationBar from "../FieldNotificationBar";
 import { useViewMode } from "../../contexts/ViewModeContext";
 import { FavoritesProvider } from "../../contexts/FavoritesContext";
+import OnboardingController from "../../onboarding/OnboardingController";
+import HelpCenterLauncher from "../../onboarding/components/HelpCenterLauncher";
+import { useOnboarding } from "../../onboarding/hooks/useOnboarding";
+import { useAuth } from "../../hooks/useAuth";
+
+function OnboardingLayer() {
+  const { user } = useAuth();
+  const controls = useOnboarding({ userId: user.id, role: user.role });
+  return (
+    <>
+      <OnboardingController
+        controls={controls}
+        userId={user.id}
+        role={user.role}
+        userName={user.fullName}
+      />
+      <HelpCenterLauncher controls={controls} />
+    </>
+  );
+}
 
 const AppShell = () => {
   const { viewMode } = useViewMode();
@@ -22,6 +42,7 @@ const AppShell = () => {
           </Box>
         </Box>
         <DebugPanel />
+        <OnboardingLayer />
       </Box>
     </FavoritesProvider>
   );
