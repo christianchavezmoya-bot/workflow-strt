@@ -102,7 +102,6 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
           ref={photoInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           multiple
           style={{ display: "none" }}
           onChange={(e) => { void handleFiles(e.target.files); e.target.value = ""; }}
@@ -111,7 +110,6 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
           ref={videoInputRef}
           type="file"
           accept="video/*"
-          capture="environment"
           multiple
           style={{ display: "none" }}
           onChange={(e) => { void handleFiles(e.target.files); e.target.value = ""; }}

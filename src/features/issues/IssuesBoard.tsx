@@ -153,6 +153,8 @@ const IssuesBoard = () => {
             : ri
         );
         await assetWorkflowRunService.patchIssues(iss.runId, JSON.stringify(runIssues));
+        // Auto-lock run if this was the last blocking issue and run is still in-progress
+        await assetWorkflowRunService.tryAutoComplete(iss.runId).catch(() => {});
       }
       // Optimistic remove from list
       setIssues(prev => prev.filter(i => !(i.assetId === iss.assetId && i.issueId === iss.issueId)));
@@ -445,7 +447,7 @@ const IssuesBoard = () => {
                                     onChange={m => setResolutionMedia(p => ({ ...p, [key]: m }))}
                                     label="Resolution Evidence — Photo / Video (optional)"
                                     qrDocType="issue-photo"
-                                    qrLinkedTo={iss.id}
+                                    qrLinkedTo={iss.issueId}
                                   />
                                 </Box>
                               </Stack>

@@ -20,6 +20,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Collapse,
@@ -29,6 +30,7 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   LinearProgress,
@@ -167,6 +169,7 @@ export default function WorkOrderRunner({
   const [flagDescription, setFlagDescription] = useState("");
   const [flagSeverity, setFlagSeverity] = useState<"low" | "medium" | "high">("medium");
   const [flagIssueType, setFlagIssueType] = useState<"blocking" | "observation" | "scope-deviation">("observation");
+  const [flagIsScopeDeviation, setFlagIsScopeDeviation] = useState(false);
   const [flagExtraHours, setFlagExtraHours] = useState("");
   const [flagCostImpact, setFlagCostImpact] = useState("");
   const [flagSubmitted, setFlagSubmitted] = useState(false);
@@ -299,6 +302,7 @@ export default function WorkOrderRunner({
     setFlagDescription("");
     setFlagSeverity("medium");
     setFlagIssueType("observation");
+    setFlagIsScopeDeviation(false);
     setFlagExtraHours("");
     setFlagCostImpact("");
     setFlagMedia([]);
@@ -378,21 +382,22 @@ export default function WorkOrderRunner({
 
   function submitFlag() {
     if (!flagDescription.trim()) return;
-    const isScopeDev = flagIssueType === "scope-deviation";
-    const isBlocking = !isScopeDev && flagSeverity === "high";
+    const derivedIssueType: "blocking" | "observation" | "scope-deviation" =
+      flagIsScopeDeviation ? "scope-deviation" : flagSeverity === "high" ? "blocking" : "observation";
+    const isBlocking = flagSeverity === "high" && !flagIsScopeDeviation;
     const issue: RunIssue = {
       id: crypto.randomUUID ? crypto.randomUUID() : `issue_${Date.now()}`,
       description: flagDescription.trim(),
-      issueType: flagIssueType,
+      issueType: derivedIssueType,
       isBlocking,
-      severity: isScopeDev ? "medium" : flagSeverity,
+      severity: flagSeverity,
       stepId: currentStep?.id,
       stepTitle: currentStep?.title,
       reportedAt: new Date().toISOString(),
       resolved: false,
       createdBy: currentUserName,
       reportMedia: flagMedia.length > 0 ? flagMedia : undefined,
-      ...(isScopeDev && {
+      ...(flagIsScopeDeviation && {
         extraHours: flagExtraHours ? parseFloat(flagExtraHours) : undefined,
         costImpact: flagCostImpact.trim() || undefined,
       }),
@@ -1575,29 +1580,34 @@ export default function WorkOrderRunner({
               <strong>Medium</strong> or <strong>Low</strong> = observation — noted but does not block completion.
             </Typography>
             <Stack spacing={1.25}>
-              {/* Issue type selector */}
-              <FormControl size="small" sx={{ maxWidth: 300 }}>
-                <InputLabel>Issue type</InputLabel>
-                <Select
-                  label="Issue type"
-                  value={flagIssueType}
-                  onChange={(e) => setFlagIssueType(e.target.value as typeof flagIssueType)}
-                >
-                  <MenuItem value="observation">Observation — noted, non-blocking</MenuItem>
-                  <MenuItem value="blocking">Blocking — must resolve before completion</MenuItem>
-                  <MenuItem value="scope-deviation">Scope deviation — work outside original scope</MenuItem>
-                </Select>
-              </FormControl>
-              {flagIssueType !== "scope-deviation" && (
-                <Typography variant="caption" color="text.secondary" display="block">
-                  {flagIssueType === "blocking"
-                    ? "Workflow cannot be completed until this is resolved."
-                    : "Logged for record — does not block completion."}
-                </Typography>
-              )}
-              {flagIssueType === "scope-deviation" && (
+              {/* Severity selector */}
+              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+                <FormControl size="small" sx={{ minWidth: 240 }}>
+                  <InputLabel>Severity</InputLabel>
+                  <Select
+                    label="Severity"
+                    value={flagSeverity}
+                    onChange={(e) => setFlagSeverity(e.target.value as "low" | "medium" | "high")}
+                  >
+                    <MenuItem value="low">Low — observation, non-blocking</MenuItem>
+                    <MenuItem value="medium">Medium — attention needed, non-blocking</MenuItem>
+                    <MenuItem value="high">High — blocks completion</MenuItem>
+                  </Select>
+                </FormControl>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={flagIsScopeDeviation}
+                      onChange={(e) => setFlagIsScopeDeviation(e.target.checked)}
+                    />
+                  }
+                  label={<Typography variant="caption">Scope deviation</Typography>}
+                />
+              </Stack>
+              {flagIsScopeDeviation && (
                 <Typography variant="caption" color="warning.main" display="block">
-                  Use for work discovered outside the original scope (e.g. additional cabling, unforeseen access requirements).
+                  Work discovered outside the original scope (e.g. additional cabling, unforeseen access requirements).
                 </Typography>
               )}
 
@@ -1670,21 +1680,7 @@ export default function WorkOrderRunner({
                 value={flagDescription}
                 onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
               />
-              {flagIssueType !== "scope-deviation" && (
-                <FormControl size="small" sx={{ maxWidth: 260 }}>
-                  <InputLabel>Severity</InputLabel>
-                  <Select
-                    label="Severity"
-                    value={flagSeverity}
-                    onChange={(e) => setFlagSeverity(e.target.value as "low" | "medium" | "high")}
-                  >
-                    <MenuItem value="low">Low — observation only</MenuItem>
-                    <MenuItem value="medium">Medium — attention needed</MenuItem>
-                    <MenuItem value="high">High — blocks completion</MenuItem>
-                  </Select>
-                </FormControl>
-              )}
-              {flagIssueType === "scope-deviation" && (
+              {flagIsScopeDeviation && (
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
                   <TextField
                     size="small"
@@ -1989,39 +1985,60 @@ export default function WorkOrderRunner({
             )}
           </Stack>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ justifyContent: "space-between" }}>
           <Button onClick={handleClose} disabled={saving}>
             {saved ? "Close" : "Discard"}
           </Button>
           {!saved && (
-            <Button
-              variant="contained"
-              onClick={() => {
-                const hasBom = (workflow.bomItems ?? []).length > 0;
-                if (hasBom && activeRunId) {
-                  // Initialise BOM actual from expected qty if not already set
-                  setBomActual((workflow.bomItems ?? []).map((item) => ({
-                    bomItemId: item.id,
-                    description: item.description,
-                    isInventory: item.isInventory,
-                    expectedQty: item.expectedQty,
-                    actualQty: item.expectedQty,
-                    unitOfMeasure: item.unitOfMeasure,
-                    unitCaptures: item.isInventory
-                      ? Array.from({ length: item.expectedQty }, () =>
-                          Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
-                      : undefined,
-                  })));
-                  setStage("bom");
-                } else {
-                  handleSave();
-                }
-              }}
-              disabled={saving || (hasBlockingIssues && Boolean(activeRunId))}
-              startIcon={saving ? <CircularProgress size={14} /> : undefined}
-            >
-              {saving ? "Saving…" : activeRunId ? "Lock run ✓" : "Done (preview)"}
-            </Button>
+            <Stack direction="row" spacing={1}>
+              {hasBlockingIssues && Boolean(activeRunId) && (
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  disabled={saving}
+                  startIcon={saving ? <CircularProgress size={14} /> : undefined}
+                  onClick={async () => {
+                    setSaving(true);
+                    try {
+                      const stepsJson = JSON.stringify(buildStepsData());
+                      const issuesJson = JSON.stringify(issues);
+                      await assetWorkflowRunService.saveProgress(activeRunId!, stepsJson, issuesJson, "InProgress");
+                      handleClose();
+                    } catch { setSaveError("Failed to save progress."); }
+                    finally { setSaving(false); }
+                  }}
+                >
+                  Save & close
+                </Button>
+              )}
+              <Button
+                variant="contained"
+                onClick={() => {
+                  const hasBom = (workflow.bomItems ?? []).length > 0;
+                  if (hasBom && activeRunId) {
+                    setBomActual((workflow.bomItems ?? []).map((item) => ({
+                      bomItemId: item.id,
+                      description: item.description,
+                      isInventory: item.isInventory,
+                      expectedQty: item.expectedQty,
+                      actualQty: item.expectedQty,
+                      unitOfMeasure: item.unitOfMeasure,
+                      unitCaptures: item.isInventory
+                        ? Array.from({ length: item.expectedQty }, () =>
+                            Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
+                        : undefined,
+                    })));
+                    setStage("bom");
+                  } else {
+                    handleSave();
+                  }
+                }}
+                disabled={saving || (hasBlockingIssues && Boolean(activeRunId))}
+                startIcon={saving ? <CircularProgress size={14} /> : undefined}
+              >
+                {saving ? "Saving…" : activeRunId ? "Lock run ✓" : "Done (preview)"}
+              </Button>
+            </Stack>
           )}
         </DialogActions>
       </>

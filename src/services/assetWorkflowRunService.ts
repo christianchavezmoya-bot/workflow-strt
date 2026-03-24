@@ -102,6 +102,21 @@ export const assetWorkflowRunService = {
     return res.data;
   },
 
+  /**
+   * After resolving a blocking issue, call this to auto-lock the run if no
+   * blocking issues remain and the run is still in-progress.
+   * Returns the updated run if it was auto-completed, null otherwise.
+   */
+  async tryAutoComplete(runId: string, completedByName?: string): Promise<AssetWorkflowRun | null> {
+    const run = await this.getById(runId);
+    if (!run || run.status !== "InProgress") return null;
+    let issues: Array<{ isBlocking: boolean; resolved: boolean }> = [];
+    try { issues = JSON.parse(run.issuesJson ?? "[]"); } catch { /* empty */ }
+    const stillBlocking = issues.some((i) => i.isBlocking && !i.resolved);
+    if (stillBlocking) return null;
+    return await this.completeRun(runId, run.stepResultsJson ?? "[]", run.issuesJson ?? "[]", completedByName, run.bomActualJson);
+  },
+
   /** Replace the full time-entries array and recompute metrics. Works on locked runs. */
   async patchTimeEntries(runId: string, timeEntriesJson: string): Promise<AssetWorkflowRun> {
     const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entries`, { timeEntriesJson });

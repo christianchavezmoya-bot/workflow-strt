@@ -1418,6 +1418,8 @@ const AssetInstallationPage = () => {
       const idx = issues.findIndex(i => i.id === updatedIssue.id);
       if (idx >= 0) issues[idx] = updatedIssue;
       await assetWorkflowRunService.patchIssues(runId, JSON.stringify(issues)).catch(console.warn);
+      // Auto-lock run if this was the last blocking issue and run is still in-progress
+      await assetWorkflowRunService.tryAutoComplete(runId).catch(() => {});
       await loadAssignmentsForAsset(assetId);
     } finally { setInlineSaving(false); }
   }
