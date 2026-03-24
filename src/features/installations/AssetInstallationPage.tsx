@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMediaQuery, useTheme } from "@mui/material";
 import {
   AddOutlined,
   ArchiveOutlined,
@@ -239,6 +240,8 @@ type FeatureDef = {
 // ------------------------------------------------------------------
 
 const AssetInstallationPage = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const dispatch = useAppDispatch();
   const { user: currentUser } = useAuth();
   const can = usePermissions();
@@ -258,6 +261,27 @@ const AssetInstallationPage = () => {
   );
   const [statusFilter, setStatusFilter] = useState<ProjectAssetStatus | "All">("All");
   const [search, setSearch] = useState("");
+
+  // Health chip quick-filter (mobile) — auto-resets after 5 min
+  type HealthFilterKey = "notStarted" | "inProgress" | "complete" | "issue" | "noWorkflow";
+  const [healthFilter, setHealthFilter] = useState<HealthFilterKey | null>(null);
+  const healthFilterSetAt = useRef<number | null>(null);
+
+  const applyHealthFilter = (key: HealthFilterKey) => {
+    setHealthFilter((prev) => (prev === key ? null : key));
+    healthFilterSetAt.current = Date.now();
+  };
+
+  useEffect(() => {
+    if (!healthFilter) return;
+    const interval = setInterval(() => {
+      if (healthFilterSetAt.current && Date.now() - healthFilterSetAt.current > 5 * 60 * 1000) {
+        setHealthFilter(null);
+        healthFilterSetAt.current = null;
+      }
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [healthFilter]);
 
   const [assets, setAssets] = useState<ProjectAsset[]>([]);
   const [configs, setConfigs] = useState<ProductConfig[]>([]);
@@ -533,9 +557,14 @@ const AssetInstallationPage = () => {
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
       }
       if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q)))) return false;
+      if (healthFilter === "notStarted" && a.status !== "NotStarted") return false;
+      if (healthFilter === "inProgress" && a.status !== "InProgress") return false;
+      if (healthFilter === "complete" && a.status !== "Complete") return false;
+      if (healthFilter === "issue" && a.status !== "Issue") return false;
+      if (healthFilter === "noWorkflow" && !(!a.productConfigId && !a.workflowTemplateId)) return false;
       return true;
     });
-  }, [assets, selectedProjectId, statusFilter, search, archiveMode]);
+  }, [assets, selectedProjectId, statusFilter, search, archiveMode, healthFilter]);
 
   // Projects filtered to those linked to the active product (used in add/edit dialogs)
   const productProjects = useMemo(
@@ -2206,19 +2235,27 @@ const AssetInstallationPage = () => {
       </Stack>
 
       {/* Product tabs with health dots */}
-      <Paper className="glass-card" sx={{ p: 1.5 }}>
-        <Tabs value={tab} onChange={(_, next) => { setTab(next); try { sessionStorage.setItem("installations_active_product_id", products[next]?.id ?? ""); } catch {} }} variant="scrollable" allowScrollButtonsMobile scrollButtons="auto">
+      <Paper className="glass-card" sx={{ p: { xs: 0.5, sm: 1.5 } }}>
+        <Tabs
+          value={tab}
+          onChange={(_, next) => { setTab(next); try { sessionStorage.setItem("installations_active_product_id", products[next]?.id ?? ""); } catch {} }}
+          variant={isMobile ? "fullWidth" : "scrollable"}
+          allowScrollButtonsMobile
+          scrollButtons="auto"
+          sx={{ minHeight: { xs: 38, sm: 48 } }}
+        >
           {products.map((p) => {
             const h = healthMap[p.id];
             const dotColor = tabDotColor(h);
             return (
               <Tab
                 key={p.id}
+                sx={{ minHeight: { xs: 38, sm: 48 }, py: { xs: 0.5, sm: 1 }, px: { xs: 0.5, sm: 1.5 }, minWidth: 0, fontSize: { xs: "0.68rem", sm: "0.875rem" } }}
                 label={
-                  <Stack direction="row" alignItems="center" spacing={0.75}>
-                    <span>{p.name}</span>
-                    {dotColor && <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: dotColor, flexShrink: 0 }} />}
-                    {h && h.total > 0 && <Typography variant="caption" sx={{ opacity: 0.65 }}>{h.total}</Typography>}
+                  <Stack direction="row" alignItems="center" spacing={0.5}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                    {dotColor && <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: dotColor, flexShrink: 0 }} />}
+                    {h && h.total > 0 && <Typography variant="caption" sx={{ opacity: 0.65, fontSize: "inherit" }}>{h.total}</Typography>}
                   </Stack>
                 }
               />
@@ -2230,72 +2267,82 @@ const AssetInstallationPage = () => {
       {/* Health summary bar */}
       {!loadingAssets && activeHealth && activeHealth.total > 0 && (
         <Paper className="glass-card" sx={{ px: { xs: 1.5, sm: 2.5 }, py: { xs: 1, sm: 1.5 } }}>
-          <Stack direction="row" alignItems="center" spacing={1}>
+          <Stack spacing={1}>
 
-            {/* LEFT: scrollable chips — takes all available space */}
-            <Box sx={{ flex: 1, overflowX: "auto", minWidth: 0 }}>
-              <Stack direction="row" spacing={0.75} sx={{ flexWrap: "nowrap", width: "max-content" }}>
-                {activeHealth.notStarted > 0 && (
-                  <Chip label={`${activeHealth.notStarted} Not Started`}
-                    sx={{ fontSize: "0.72rem", height: 26, flexShrink: 0 }} />
-                )}
-                {activeHealth.inProgress > 0 && (
-                  <Chip color="primary" label={`${activeHealth.inProgress} In Progress`}
-                    sx={{ fontSize: "0.72rem", height: 26, flexShrink: 0 }} />
-                )}
-                {activeHealth.complete > 0 && (
-                  <Chip color="success" label={`${activeHealth.complete} Complete`}
-                    sx={{ fontSize: "0.72rem", height: 26, flexShrink: 0 }} />
-                )}
-                {activeHealth.issue > 0 && (
-                  <Chip color="error" label={`${activeHealth.issue} Issue`}
-                    sx={{ fontSize: "0.72rem", height: 26, flexShrink: 0 }} />
-                )}
-                {activeHealth.noWorkflow > 0 && (
-                  <Tooltip title="These assets have no workflow linked and cannot be worked on.">
-                    <Chip color="warning" variant="outlined" label={`${activeHealth.noWorkflow} No Workflow`}
-                      sx={{ fontSize: "0.72rem", height: 26, flexShrink: 0 }} />
+            {/* ROW 1: chips + desktop productivity */}
+            <Stack direction="row" alignItems="center" spacing={1}>
+              {/* chips — wrap on mobile; clickable to filter asset list */}
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Stack direction="row" sx={{ flexWrap: "wrap", gap: { xs: 0.5, sm: 0.75 } }}>
+                  {activeHealth.notStarted > 0 && (
+                    <Chip label={`${activeHealth.notStarted} Not Started`}
+                      onClick={() => applyHealthFilter("notStarted")}
+                      variant={healthFilter === "notStarted" ? "filled" : "outlined"}
+                      sx={{ fontSize: { xs: "0.68rem", sm: "0.82rem" }, height: { xs: 24, sm: 32 }, fontWeight: 600, cursor: "pointer" }} />
+                  )}
+                  {activeHealth.inProgress > 0 && (
+                    <Chip color="primary" label={`${activeHealth.inProgress} In Progress`}
+                      onClick={() => applyHealthFilter("inProgress")}
+                      variant={healthFilter === "inProgress" ? "filled" : "outlined"}
+                      sx={{ fontSize: { xs: "0.68rem", sm: "0.82rem" }, height: { xs: 24, sm: 32 }, fontWeight: 600, cursor: "pointer" }} />
+                  )}
+                  {activeHealth.complete > 0 && (
+                    <Chip color="success" label={`${activeHealth.complete} Complete`}
+                      onClick={() => applyHealthFilter("complete")}
+                      variant={healthFilter === "complete" ? "filled" : "outlined"}
+                      sx={{ fontSize: { xs: "0.68rem", sm: "0.82rem" }, height: { xs: 24, sm: 32 }, fontWeight: 600, cursor: "pointer" }} />
+                  )}
+                  {activeHealth.issue > 0 && (
+                    <Chip color="error" label={`${activeHealth.issue} Issue`}
+                      onClick={() => applyHealthFilter("issue")}
+                      variant={healthFilter === "issue" ? "filled" : "outlined"}
+                      sx={{ fontSize: { xs: "0.68rem", sm: "0.82rem" }, height: { xs: 24, sm: 32 }, fontWeight: 600, cursor: "pointer" }} />
+                  )}
+                  {activeHealth.noWorkflow > 0 && (
+                    <Tooltip title="These assets have no workflow linked and cannot be worked on.">
+                      <Chip color="warning" label={`${activeHealth.noWorkflow} No Workflow`}
+                        onClick={() => applyHealthFilter("noWorkflow")}
+                        variant={healthFilter === "noWorkflow" ? "filled" : "outlined"}
+                        sx={{ fontSize: { xs: "0.68rem", sm: "0.82rem" }, height: { xs: 24, sm: 32 }, fontWeight: 600, cursor: "pointer" }} />
+                    </Tooltip>
+                  )}
+                </Stack>
+              </Box>
+
+              {/* Productivity / downtime — desktop only */}
+              {(activeTimeRollup.productive > 0 || activeTimeRollup.downtime > 0) && (
+                <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 1, flexShrink: 0 }}>
+                  <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+                  <Tooltip title="Total productive time across all visible assets">
+                    <Chip size="small" color="success" variant="outlined"
+                      label={`Productive ${formatRunDur(activeTimeRollup.productive)}`}
+                      sx={{ fontSize: 10, height: 20 }} />
                   </Tooltip>
-                )}
-              </Stack>
-            </Box>
+                  {activeTimeRollup.downtime > 0 && (
+                    <Tooltip title={`${activeTimeRollup.downtimeEvents} downtime event${activeTimeRollup.downtimeEvents !== 1 ? "s" : ""} across all visible assets`}>
+                      <Chip size="small" color="warning" variant="outlined"
+                        label={`Downtime ${formatRunDur(activeTimeRollup.downtime)}`}
+                        sx={{ fontSize: 10, height: 20 }} />
+                    </Tooltip>
+                  )}
+                </Box>
+              )}
+            </Stack>
 
-            {/* RIGHT: progress bar + % — fixed width, always visible */}
-            <Box sx={{ flexShrink: 0, width: { xs: 64, sm: 120 }, textAlign: "center" }}>
-              <Typography variant="caption" fontWeight={700} color="text.secondary"
-                sx={{ fontSize: { xs: "0.72rem", sm: "0.8rem" }, display: "block", lineHeight: 1.2 }}>
-                {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}%
-              </Typography>
+            {/* ROW 2: full-width progress bar */}
+            <Stack direction="row" alignItems="center" spacing={1}>
               <LinearProgress
                 variant="determinate"
                 value={activeHealth.total > 0 ? (activeHealth.complete / activeHealth.total) * 100 : 0}
                 color={activeHealth.issue > 0 ? "error" : "success"}
-                sx={{ height: 5, borderRadius: 1, mt: 0.5 }}
+                sx={{ flex: 1, height: { xs: 8, sm: 10 }, borderRadius: 2 }}
               />
-              <Typography variant="caption" color="text.disabled"
-                sx={{ fontSize: "0.6rem", display: { xs: "none", sm: "block" } }}>
-                progress
+              <Typography variant="caption" fontWeight={700} color="text.secondary"
+                sx={{ fontSize: { xs: "0.78rem", sm: "0.85rem" }, flexShrink: 0, minWidth: 36, textAlign: "right" }}>
+                {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}%
               </Typography>
-            </Box>
+            </Stack>
 
-            {/* Productivity / downtime — desktop only */}
-            {(activeTimeRollup.productive > 0 || activeTimeRollup.downtime > 0) && (
-              <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 1, flexShrink: 0 }}>
-                <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-                <Tooltip title="Total productive time across all visible assets">
-                  <Chip size="small" color="success" variant="outlined"
-                    label={`Productive ${formatRunDur(activeTimeRollup.productive)}`}
-                    sx={{ fontSize: 10, height: 20 }} />
-                </Tooltip>
-                {activeTimeRollup.downtime > 0 && (
-                  <Tooltip title={`${activeTimeRollup.downtimeEvents} downtime event${activeTimeRollup.downtimeEvents !== 1 ? "s" : ""} across all visible assets`}>
-                    <Chip size="small" color="warning" variant="outlined"
-                      label={`Downtime ${formatRunDur(activeTimeRollup.downtime)}`}
-                      sx={{ fontSize: 10, height: 20 }} />
-                  </Tooltip>
-                )}
-              </Box>
-            )}
           </Stack>
         </Paper>
       )}
@@ -2474,7 +2521,7 @@ const AssetInstallationPage = () => {
         </Stack>
         {!archiveMode && can.editFields && (
           <Tooltip title="Column settings">
-            <IconButton size="small" onClick={openColumnSettings} sx={{ opacity: 0.7, "&:hover": { opacity: 1 } }}>
+            <IconButton size="small" onClick={openColumnSettings} sx={{ opacity: 0.7, "&:hover": { opacity: 1 }, display: { xs: "none", md: "inline-flex" } }}>
               <ViewColumnOutlined fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -2486,8 +2533,131 @@ const AssetInstallationPage = () => {
         )}
       </Box>
 
-      {/* Asset table */}
-      <Paper className="glass-card" sx={{ overflow: "hidden" }}>
+      {/* ── Mobile card list ── */}
+      {isMobile && (
+        <Stack spacing={1}>
+          {loadingAssets ? (
+            <Stack alignItems="center" py={6}><CircularProgress size={28} /></Stack>
+          ) : visibleAssets.length === 0 ? (
+            <Alert severity="info">
+              {assets.length === 0
+                ? `No assets for ${activeProduct?.name ?? "this product"} yet.`
+                : "No assets match the current filters."}
+            </Alert>
+          ) : visibleAssets.map((asset) => {
+            const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
+            const proj = projectMap.get(asset.projectId);
+            const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
+            const isExpanded = expandedAssetId === asset.id;
+            const runs = runsMap[asset.id] ?? [];
+            const latestRun = runs.find(r => r.status === "InProgress") ?? runs[0];
+            const currentStep = latestRun?.status === "InProgress" ? `Run #${latestRun.runNumber}` : undefined;
+            const issueHealth = computeAssetHealth(asset, runs);
+            const latestLocked = runs.find(r => r.isLocked);
+            const awaitingCustomerSig = asset.status === "Complete" && !!latestLocked
+              && !latestLocked.customerSignedAt
+              && latestLocked.signatureStatus !== "WaivedCustomer";
+            const chipColor =
+              issueHealth === "red"   ? "error"   :
+              issueHealth === "amber" ? "warning" :
+              awaitingCustomerSig     ? "warning" :
+              issueHealth === "green" ? "success" :
+              STATUS_COLORS[asset.status as ProjectAssetStatus] ?? "default";
+            const chipLabel = awaitingCustomerSig && issueHealth !== "red" && issueHealth !== "amber"
+              ? "Awaiting Sig."
+              : STATUS_LABELS[asset.status as ProjectAssetStatus] ?? asset.status;
+
+            return (
+              <Paper key={asset.id} className="glass-card" sx={{
+                overflow: "hidden",
+                borderLeft: asset.status === "Issue" ? "3px solid" : "3px solid transparent",
+                borderLeftColor: asset.status === "Issue" ? "error.main" : "transparent",
+              }}>
+                {/* Card header — tap to expand */}
+                <Box sx={{ px: 1.5, py: 1.25, cursor: "pointer" }}
+                  onClick={() => { const next = isExpanded ? null : asset.id; setExpandedAssetId(next); if (next) loadAssignmentsForAsset(next); }}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.4 }}>
+                        <Typography variant="body2" fontWeight={700} noWrap>{asset.assetTag}</Typography>
+                        {issuesBadge(asset)}
+                        <Chip size="small" label={chipLabel} color={chipColor}
+                          sx={{ fontSize: "0.65rem", height: 20, ml: "auto", flexShrink: 0 }} />
+                      </Stack>
+                      <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 0.25 }}>
+                        {asset.location && (
+                          <Typography variant="caption" color="text.secondary" noWrap>{asset.location}</Typography>
+                        )}
+                        {tech && (
+                          <Typography variant="caption" color="text.disabled" noWrap>· {tech.fullName}</Typography>
+                        )}
+                        {currentStep && (
+                          <Typography variant="caption" color="primary.main" noWrap>· {currentStep}</Typography>
+                        )}
+                      </Stack>
+                      {asset.assetModel && (
+                        <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.62rem" }}>{asset.assetModel}</Typography>
+                      )}
+                    </Box>
+                    <IconButton size="small" sx={{ flexShrink: 0 }}>
+                      {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
+                    </IconButton>
+                  </Stack>
+                </Box>
+
+                {/* Expanded detail */}
+                <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                  <Divider />
+                  <Box sx={{ px: 1.5, py: 1.5, bgcolor: "rgba(45,212,191,0.04)" }}>
+                    {renderFeatureExpandedRow(asset)}
+                    {asset.notes && (
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={600}>Notes: </Typography>
+                        <Typography variant="caption">{asset.notes}</Typography>
+                      </Box>
+                    )}
+                    <Divider sx={{ my: 1 }} />
+                    {renderIssuesPanel(asset)}
+                    <Divider sx={{ my: 1 }} />
+                    {renderWorkflowAssignmentsPanel(asset)}
+                    <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: "wrap", gap: 0.5 }}>
+                      {(can.modifyData || asset.status === "Complete") && actionButton(asset)}
+                      {!can.viewOnly && (
+                        <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
+                          <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
+                            <Badge badgeContent={`${docsCountMap[asset.id] ?? 0}/3`}
+                              color={(docsCountMap[asset.id] ?? 0) === 0 ? "default" : (docsCountMap[asset.id] ?? 0) === 3 ? "success" : "primary"}
+                              sx={{ "& .MuiBadge-badge": { fontSize: 9, minWidth: 28, height: 16 } }}>
+                              <FolderOutlined fontSize="small" />
+                            </Badge>
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {can.modifyData && (
+                        <Tooltip title="Edit asset">
+                          <IconButton size="small" onClick={() => openEditAsset(asset)}>
+                            <EditOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {can.modifyData && (
+                        <Tooltip title="Delete asset">
+                          <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
+                            <DeleteOutline fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Stack>
+                  </Box>
+                </Collapse>
+              </Paper>
+            );
+          })}
+        </Stack>
+      )}
+
+      {/* ── Desktop table ── */}
+      {!isMobile && <Paper className="glass-card" sx={{ overflow: "hidden" }}>
         {loadingAssets ? (
           <Stack alignItems="center" justifyContent="center" sx={{ p: 6 }}>
             <CircularProgress size={32} />
@@ -2662,7 +2832,7 @@ const AssetInstallationPage = () => {
             </TableBody>
           </Table>
         )}
-      </Paper>
+      </Paper>}
 
       {/* Add asset dialog */}
       <Dialog open={addOpen} onClose={() => !addSaving && setAddOpen(false)} maxWidth="sm" fullWidth>

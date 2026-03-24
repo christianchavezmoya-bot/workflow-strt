@@ -1,14 +1,22 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Box,
   Button,
   Checkbox,
   Chip,
+  CircularProgress,
   Collapse,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
   IconButton,
   ListItemText,
   Menu,
   MenuItem,
+  Paper,
   Stack,
   Table,
   TableBody,
@@ -16,9 +24,11 @@ import {
   TableHead,
   TablePagination,
   TableRow,
-  Typography
+  Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
-import { ArrowDropDown, DeleteOutline, EditOutlined, ExpandLess, ExpandMore } from "@mui/icons-material";
+import { ArrowDropDown, CalendarTodayOutlined, DeleteOutline, EditOutlined, ExpandLess, ExpandMore, PersonOutlined } from "@mui/icons-material";
 import ProjectChevronPanel from "./ProjectChevronPanel";
 import { Link } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
@@ -231,6 +241,8 @@ const applyAutoFilter = <T,>(
 };
 
 const ProjectList = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const { user } = useAuth();
   const can = usePermissions();
   const { activeOffice } = useActiveOffice();
@@ -288,6 +300,10 @@ const ProjectList = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const canDeleteProjects = can.modifyData;
+
+  // Block-complete dialog — shown when assets are not all done
+  const [blockComplete, setBlockComplete] = useState<{ open: boolean; incomplete: number; total: number }>({ open: false, incomplete: 0, total: 0 });
+  const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
 
   // Clear column filters when active office changes
   useEffect(() => {
@@ -442,40 +458,23 @@ const ProjectList = () => {
       .filter((col): col is NonNullable<typeof col> => col !== null);
   }, [projectsTableConfig.config.order, projectsTableConfig.config.hidden, projectDynamicColumns, projectsDynamic.valuesByEntity]);
 
-  const handleAction = (project: Project, label: string) => {
-    if (!project.id) {
-      return;
-    }
+  const handleAction = async (project: Project, label: string) => {
+    if (!project.id) return;
 
     if (label === "Submit for Approval") {
       dispatch(updateProjectStatus({ id: project.id, payload: { status: "Pending Approval" } }));
     }
 
     if (label === "Approve") {
-      dispatch(
-        updateProjectStatus({
-          id: project.id,
-          payload: { status: "Approved", approvalDecision: "Approved" }
-        })
-      );
+      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Approved", approvalDecision: "Approved" } }));
     }
 
     if (label === "Request Info") {
-      dispatch(
-        updateProjectStatus({
-          id: project.id,
-          payload: { status: "Pending Approval", approvalDecision: "More Info Required" }
-        })
-      );
+      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Pending Approval", approvalDecision: "More Info Required" } }));
     }
 
     if (label === "Reject") {
-      dispatch(
-        updateProjectStatus({
-          id: project.id,
-          payload: { status: "Cancelled", approvalDecision: "Rejected" }
-        })
-      );
+      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Cancelled", approvalDecision: "Rejected" } }));
     }
 
     if (label === "Start Work") {
@@ -483,7 +482,24 @@ const ProjectList = () => {
     }
 
     if (label === "Mark Completed") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Completed" } }));
+      // Enforce: all installation assets must be Complete before project can be marked Completed.
+      // Project Managers (and above) are subject to the same rule — no exceptions.
+      setCompletingProjectId(project.id);
+      try {
+        const assets = await projectAssetService.listByProject(project.id);
+        const total = assets.length;
+        const incomplete = assets.filter((a) => a.status !== "Complete").length;
+        if (incomplete > 0) {
+          setBlockComplete({ open: true, incomplete, total });
+          return;
+        }
+        dispatch(updateProjectStatus({ id: project.id, payload: { status: "Completed" } }));
+      } catch {
+        // If we can't verify assets, block the action to be safe
+        setBlockComplete({ open: true, incomplete: -1, total: 0 });
+      } finally {
+        setCompletingProjectId(null);
+      }
     }
   };
 
@@ -518,6 +534,9 @@ const ProjectList = () => {
             size="small"
             variant="outlined"
             color="primary"
+            disabled={label === "Mark Completed" && completingProjectId === project.id}
+            startIcon={label === "Mark Completed" && completingProjectId === project.id
+              ? <CircularProgress size={12} /> : undefined}
             onClick={() => handleAction(project, label)}
           >
             {label}
@@ -549,7 +568,7 @@ const ProjectList = () => {
               Create project
             </Button>
           )}
-          {can.editFields && (
+          {can.editFields && !isMobile && (
             <Button variant="outlined" onClick={() => setTableConfigOpen(true)}>
               Table configuration
             </Button>
@@ -563,7 +582,166 @@ const ProjectList = () => {
         </Typography>
       )}
 
-      <Box
+      {/* ── Mobile card list ── */}
+      {isMobile && (
+        <Stack spacing={1} sx={{ mb: 10 }}>
+          {loading ? (
+            <Stack alignItems="center" py={6}><CircularProgress size={28} /></Stack>
+          ) : pagedProjects.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" textAlign="center" py={4}>
+              No projects found.
+            </Typography>
+          ) : pagedProjects.map((project) => {
+            const isExpanded = expandedProjectId === project.id;
+            const productNames = (project.productIds ?? [])
+              .map((id) => products.find((p) => p.id === id)?.name ?? id)
+              .join(", ");
+
+            // Mobile actions — excludes "Start Work"
+            const mobileActions = (() => {
+              const actions: string[] = [];
+              if (project.status === "Draft" && user?.role === "Project Manager") actions.push("Submit for Approval");
+              if (project.status === "Pending Approval" && user?.role === "Admin") actions.push("Approve", "Request Info", "Reject");
+              if (project.status === "In Progress" && can.modifyData) actions.push("Mark Completed");
+              return actions;
+            })();
+
+            return (
+              <Paper key={project.id} className="glass-card" sx={{
+                overflow: "hidden",
+                transition: "all 0.2s ease",
+                "&:hover": {
+                  transform: "translateY(-3px)",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+                  borderColor: "rgba(45,212,191,0.35)",
+                  background: "rgba(45,212,191,0.04)",
+                },
+              }}>
+                {/* Tap row to expand */}
+                <Box sx={{ px: 1.5, py: 1.25, cursor: "pointer" }}
+                  onClick={() => setExpandedProjectId(isExpanded ? null : project.id)}>
+                  <Stack direction="row" alignItems="flex-start" spacing={1}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      {/* Job number (plain) + asset count badge (always) + status */}
+                      <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.4 }}>
+                        <Typography variant="body2" fontWeight={700}>{project.jobNumber}</Typography>
+                        <Box component="span" sx={{
+                          px: 0.75, py: 0.1, borderRadius: 999,
+                          fontSize: "0.6rem", fontWeight: 700, lineHeight: 1.6,
+                          background: "rgba(45,212,191,0.25)", color: "rgba(45,212,191,1)",
+                          border: "1px solid rgba(45,212,191,0.4)",
+                        }}>
+                          {project.assetCount ?? 0}
+                        </Box>
+                        <Box sx={{ ml: "auto", flexShrink: 0 }}><StatusChip status={project.status} /></Box>
+                      </Stack>
+
+                      {/* Customer + site */}
+                      {project.customerName && (
+                        <Typography variant="body2" fontWeight={600} noWrap>{project.customerName}</Typography>
+                      )}
+                      {project.siteName && (
+                        <Typography variant="caption" color="text.secondary" noWrap>{project.siteName}</Typography>
+                      )}
+
+                      {/* PM + product */}
+                      <Stack direction="row" spacing={1} sx={{ mt: 0.4, flexWrap: "wrap", gap: 0.25 }}>
+                        {project.projectManager && (
+                          <Stack direction="row" alignItems="center" spacing={0.25}>
+                            <PersonOutlined sx={{ fontSize: 12, color: "text.disabled" }} />
+                            <Typography variant="caption" color="text.disabled">{project.projectManager}</Typography>
+                          </Stack>
+                        )}
+                        {productNames && (
+                          <Typography variant="caption" color="text.disabled" noWrap>· {productNames}</Typography>
+                        )}
+                      </Stack>
+
+                      {/* Dates */}
+                      {(project.startDate || project.finishDate) && (
+                        <Stack direction="row" alignItems="center" spacing={0.25} sx={{ mt: 0.25 }}>
+                          <CalendarTodayOutlined sx={{ fontSize: 11, color: "text.disabled" }} />
+                          <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.65rem" }}>
+                            {project.startDate || "?"} → {project.finishDate || "?"}
+                          </Typography>
+                        </Stack>
+                      )}
+                    </Box>
+
+                    <IconButton size="small" sx={{ flexShrink: 0, mt: -0.25 }}>
+                      {isExpanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+                    </IconButton>
+                  </Stack>
+
+                  {/* Bottom row: Asset Installs button + Edit/Delete + workflow actions */}
+                  <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mt: 1 }}
+                    onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      component="a"
+                      href={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`}
+                      sx={{ fontSize: "0.7rem", py: 0.25, px: 1, height: 26, flexShrink: 0 }}
+                    >
+                      Asset Installs
+                    </Button>
+                    {mobileActions.map((label) => (
+                      <Button key={label} size="small" variant="outlined" color="primary"
+                        sx={{ fontSize: "0.7rem", py: 0.25, px: 1, height: 26, flexShrink: 0 }}
+                        onClick={() => handleAction(project, label)}>
+                        {label}
+                      </Button>
+                    ))}
+                    <Box sx={{ ml: "auto" }}>
+                      {can.modifyData && (
+                        <IconButton size="small" component="a" href={`/projects/${project.id}/edit`}>
+                          <EditOutlined fontSize="small" />
+                        </IconButton>
+                      )}
+                      {canDeleteProjects && (
+                        <IconButton size="small" color="error" disabled={deleteSavingId === project.id}
+                          onClick={() => setDeleteTarget(project)}>
+                          <DeleteOutline fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Box>
+                  </Stack>
+                </Box>
+
+                {/* Expanded chevron panel */}
+                <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                  <Divider />
+                  <Box sx={{ overflow: "hidden" }}>
+                    <ProjectChevronPanel
+                      projectId={project.id}
+                      productId={project.productIds?.[0]}
+                      projectJobNumber={project.jobNumber}
+                      projectCustomer={project.customerName}
+                      projectSite={project.siteName}
+                      projectManager={project.projectManager}
+                    />
+                  </Box>
+                </Collapse>
+              </Paper>
+            );
+          })}
+
+          {/* Mobile pagination */}
+          <TablePagination
+            component="div"
+            count={totalCount}
+            page={page}
+            onPageChange={(_, next) => setPage(next)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(e) => { setRowsPerPage(Number(e.target.value)); setPage(0); }}
+            rowsPerPageOptions={[25, 50, 100]}
+            sx={{ borderTop: "1px solid", borderColor: "divider" }}
+          />
+        </Stack>
+      )}
+
+      {/* ── Desktop table ── */}
+      {!isMobile && <Box
         className="glass-card"
         sx={{
           padding: 2,
@@ -677,9 +855,9 @@ const ProjectList = () => {
         </TableBody>
           </Table>
         </Box>
-      </Box>
+      </Box>}
 
-      <Box
+      {!isMobile && <Box
         sx={{
           position: 'fixed',
           bottom: 0,
@@ -704,7 +882,7 @@ const ProjectList = () => {
           }}
           rowsPerPageOptions={[25, 50, 100, 500]}
         />
-      </Box>
+      </Box>}
 
       <Menu
         anchorEl={autoMenu.anchorEl}
@@ -789,6 +967,26 @@ const ProjectList = () => {
           }
         }}
       />
+
+      {/* Block-complete dialog — shown when not all assets are done */}
+      <Dialog open={blockComplete.open} onClose={() => setBlockComplete({ open: false, incomplete: 0, total: 0 })} maxWidth="xs" fullWidth>
+        <DialogTitle>Cannot Complete Project</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 1 }}>
+            {blockComplete.incomplete === -1
+              ? "Unable to verify installation asset status. Please try again or contact support."
+              : `${blockComplete.incomplete} of ${blockComplete.total} installation asset${blockComplete.incomplete !== 1 ? "s are" : " is"} not yet completed.`}
+          </Alert>
+          <Typography variant="body2" color="text.secondary">
+            A project can only be marked as Completed once <strong>all installation assets</strong> have a "Complete" status. Please finish the remaining assets first.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBlockComplete({ open: false, incomplete: 0, total: 0 })} variant="contained">
+            OK
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <TableConfigDialog
         open={tableConfigOpen}
