@@ -22,6 +22,21 @@ public class SettingsController : ControllerBase
         _notificationSettings = notificationSettings;
     }
 
+    [HttpGet("quickbase")]
+    [Authorize]
+    public async Task<ActionResult<QuickbaseSettingsDto>> GetQuickbase()
+    {
+        var s = await _db.QuickbaseSettings.FirstOrDefaultAsync(x => x.Id == 1);
+        if (s is null) return Ok(new QuickbaseSettingsDto(false, "", "", "", "", new(), new(), "", 0, 0, 0));
+        return Ok(new QuickbaseSettingsDto(
+            s.Enabled, s.RealmHostname, s.UserToken,
+            s.ProjectsTableId, s.InstallationsTableId,
+            JsonSerializer.Deserialize<Dictionary<string, int>>(s.ProjectsFieldMapJson ?? "{}") ?? new(),
+            JsonSerializer.Deserialize<Dictionary<string, int>>(s.InstallationsFieldMapJson ?? "{}") ?? new(),
+            s.GoodsMovementsTableId ?? "", s.GoodsMovementsJobFid, s.GoodsMovementsOrderRefFid, s.GoodsMovementsDirectionFid
+        ));
+    }
+
     [HttpPost("quickbase")]
     public async Task<ActionResult<QuickbaseSettingsDto>> SaveQuickbase([FromBody] QuickbaseSettingsDto request)
     {

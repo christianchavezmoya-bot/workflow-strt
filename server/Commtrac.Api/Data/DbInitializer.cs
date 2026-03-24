@@ -803,8 +803,9 @@ public static class DbInitializer
 
             AddIfMissing("Brand",                 "TEXT NULL");
             AddIfMissing("Supplier",              "TEXT NULL");
-            AddIfMissing("AlternativePartNumber", "TEXT NULL");
-            AddIfMissing("UnitPrice",             "TEXT NULL");  // stored as TEXT/REAL; nullable decimal
+            AddIfMissing("AlternativePartNumber",   "TEXT NULL");
+            AddIfMissing("ManufacturerPartNumber", "TEXT NULL");
+            AddIfMissing("UnitPrice",              "TEXT NULL");  // stored as TEXT/REAL; nullable decimal
             AddIfMissing("ProductLink",           "TEXT NULL");
         }
         finally

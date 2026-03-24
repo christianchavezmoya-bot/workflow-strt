@@ -15,6 +15,7 @@ export interface Feature {
   brand?: string;
   supplier?: string;
   alternativePartNumber?: string;
+  manufacturerPartNumber?: string;
   unitPrice?: number;
   productLink?: string;
 }

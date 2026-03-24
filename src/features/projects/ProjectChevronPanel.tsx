@@ -57,6 +57,7 @@ import { projectContactService } from "../../services/projectContactService";
 import { projectAssetService } from "../../services/projectAssetService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { quickbaseService } from "../../services/quickbaseService";
+import { settingsService } from "../../services/settingsService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import type {
   InboundCondition,
@@ -125,14 +126,6 @@ const emptyInbound = (): InboundFormState => ({
 
 const PANEL_MAX_W = 900;
 
-// ─── QB enabled check ─────────────────────────────────────────────────────────
-
-function isQbEnabled(): boolean {
-  try {
-    const s = JSON.parse(localStorage.getItem("qb_settings") ?? "{}");
-    return !!s?.enabled && !!s?.goodsMovementsTableId;
-  } catch { return false; }
-}
 
 // ─── Goods Movement table ─────────────────────────────────────────────────────
 

@@ -50,6 +50,7 @@ public class FeaturesController : ControllerBase
             Brand = string.IsNullOrWhiteSpace(request.Brand) ? null : request.Brand.Trim(),
             Supplier = string.IsNullOrWhiteSpace(request.Supplier) ? null : request.Supplier.Trim(),
             AlternativePartNumber = string.IsNullOrWhiteSpace(request.AlternativePartNumber) ? null : request.AlternativePartNumber.Trim(),
+            ManufacturerPartNumber = string.IsNullOrWhiteSpace(request.ManufacturerPartNumber) ? null : request.ManufacturerPartNumber.Trim(),
             UnitPrice = request.UnitPrice,
             ProductLink = string.IsNullOrWhiteSpace(request.ProductLink) ? null : request.ProductLink.Trim(),
         };
@@ -75,6 +76,7 @@ public class FeaturesController : ControllerBase
         if (request.Brand is not null) feature.Brand = string.IsNullOrWhiteSpace(request.Brand) ? null : request.Brand.Trim();
         if (request.Supplier is not null) feature.Supplier = string.IsNullOrWhiteSpace(request.Supplier) ? null : request.Supplier.Trim();
         if (request.AlternativePartNumber is not null) feature.AlternativePartNumber = string.IsNullOrWhiteSpace(request.AlternativePartNumber) ? null : request.AlternativePartNumber.Trim();
+        if (request.ManufacturerPartNumber is not null) feature.ManufacturerPartNumber = string.IsNullOrWhiteSpace(request.ManufacturerPartNumber) ? null : request.ManufacturerPartNumber.Trim();
         if (request.UnitPrice.HasValue) feature.UnitPrice = request.UnitPrice;
         if (request.ProductLink is not null) feature.ProductLink = string.IsNullOrWhiteSpace(request.ProductLink) ? null : request.ProductLink.Trim();
 
@@ -175,6 +177,6 @@ public class FeaturesController : ControllerBase
             : JsonSerializer.Deserialize<List<string>>(f.CaptureFieldsJson, JsonOptions);
 
         return new(f.Id, f.Name, f.Description, f.ValueType, options, subProps, f.IsInventory, captureFields,
-            f.Brand, f.Supplier, f.AlternativePartNumber, f.UnitPrice, f.ProductLink);
+            f.Brand, f.Supplier, f.AlternativePartNumber, f.UnitPrice, f.ProductLink, f.ManufacturerPartNumber);
     }
 }

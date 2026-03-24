@@ -175,7 +175,8 @@ public record FeatureDto(
     string? Supplier = null,
     string? AlternativePartNumber = null,
     decimal? UnitPrice = null,
-    string? ProductLink = null
+    string? ProductLink = null,
+    string? ManufacturerPartNumber = null
 );
 
 public record CreateFeatureRequest(
@@ -190,7 +191,8 @@ public record CreateFeatureRequest(
     string? Supplier = null,
     string? AlternativePartNumber = null,
     decimal? UnitPrice = null,
-    string? ProductLink = null
+    string? ProductLink = null,
+    string? ManufacturerPartNumber = null
 );
 
 public record UpdateFeatureRequest(
@@ -205,7 +207,8 @@ public record UpdateFeatureRequest(
     string? Supplier = null,
     string? AlternativePartNumber = null,
     decimal? UnitPrice = null,
-    string? ProductLink = null
+    string? ProductLink = null,
+    string? ManufacturerPartNumber = null
 );
 
 public record FeatureDependencyDto(
@@ -324,6 +327,16 @@ public record UpdateProductRequest(
     List<ProductFeatureDefinitionDto>? Features,
     string? DivisionId = null
 );
+
+public class DeleteProductRequest
+{
+    /// <summary>Feature IDs to fully delete (only if they have no other product links after unlinking).</summary>
+    public List<string> DeleteFeatureIds { get; set; } = new();
+    /// <summary>Asset IDs to fully delete. Assets NOT in this list have their ProductId nullified.</summary>
+    public List<string> DeleteAssetIds { get; set; } = new();
+    /// <summary>Workflow config IDs to fully delete. Workflows NOT in this list have their ProductId nullified.</summary>
+    public List<string> DeleteWorkflowIds { get; set; } = new();
+}
 
 public record AssetDto(
     string Id,

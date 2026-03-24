@@ -554,47 +554,11 @@ export const UserManagement: React.FC = () => {
     anchorEl: null,
     key: ""
   });
-  const [rolesConfig, setRolesConfig] = useState(() => {
-    try {
-      const raw = localStorage.getItem("admin_roles_config");
-      if (raw) return JSON.parse(raw) as Record<string, RolePermissions>;
-    } catch {
-      // ignore
-    }
-    return {
-      Viewer: {
-        viewOnly: true,
-        createDeleteTables: false,
-        createUsers: false,
-        editFields: false,
-        modifyData: false,
-        editForms: false
-      },
-      "Project Manager": {
-        viewOnly: false,
-        createDeleteTables: true,
-        createUsers: false,
-        editFields: true,
-        modifyData: true,
-        editForms: true
-      },
-      Admin: {
-        viewOnly: false,
-        createDeleteTables: true,
-        createUsers: true,
-        editFields: true,
-        modifyData: true,
-        editForms: true
-      },
-      Engineer: {
-        viewOnly: false,
-        createDeleteTables: false,
-        createUsers: false,
-        editFields: false,
-        modifyData: true,
-        editForms: false
-      }
-    } as Record<string, RolePermissions>;
+  const [rolesConfig, setRolesConfig] = useState<Record<string, RolePermissions>>({
+    Viewer: { viewOnly: true, createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false },
+    "Project Manager": { viewOnly: false, createDeleteTables: true, createUsers: false, editFields: true, modifyData: true, editForms: true },
+    Admin: { viewOnly: false, createDeleteTables: true, createUsers: true, editFields: true, modifyData: true, editForms: true },
+    Engineer: { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true, editForms: false }
   });
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -727,8 +691,7 @@ export const UserManagement: React.FC = () => {
       setRoles(roleNames);
     }
 
-    // Save to localStorage and notify same-tab listeners
-    localStorage.setItem("admin_roles_config", JSON.stringify(rolesConfig));
+    // Notify same-tab listeners
     window.dispatchEvent(new CustomEvent("roles-config-changed"));
 
     // Skip database save on initial mount to avoid overwriting with stale localStorage data

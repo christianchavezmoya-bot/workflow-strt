@@ -88,6 +88,8 @@ const Topbar = () => {
   const projects = useAppSelector((s) => s.projects.items);
 
   const [appName, setAppName] = useState("Field Operations");
+  const [qbEnabled, setQbEnabled] = useState(false);
+  const [qbHost, setQbHost] = useState("");
 
   useEffect(() => {
     brandSettingsService.get().then((s) => {
@@ -99,6 +101,15 @@ const Topbar = () => {
     };
     window.addEventListener("brand-name-changed", handler);
     return () => window.removeEventListener("brand-name-changed", handler);
+  }, []);
+
+  useEffect(() => {
+    import("../../services/settingsService").then(({ settingsService }) => {
+      settingsService.getQuickbaseSettings().then((s) => {
+        setQbEnabled(!!s?.enabled);
+        setQbHost(s?.realmHostname ?? "");
+      }).catch(() => {});
+    });
   }, []);
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -283,22 +294,17 @@ const Topbar = () => {
         </Stack>
       </Stack>
       <Stack direction="row" spacing={2} alignItems="center">
-        {(() => {
-          try {
-            const s = JSON.parse(localStorage.getItem("qb_settings") ?? "{}");
-            if (!s?.enabled) return null;
-            const host: string = s.realmHostname ?? "";
-            const provider = host.includes("quickbase") ? "Quickbase"
-              : host.includes("salesforce") ? "Salesforce"
-              : host ? new URL(`https://${host}`).hostname.split(".").slice(-2, -1)[0] ?? "API"
-              : "API";
-            return (
-              <Box className="status-chip">
-                <span className="status-dot" />
-                {provider} connected
-              </Box>
-            );
-          } catch { return null; }
+        {qbEnabled && (() => {
+          const provider = qbHost.includes("quickbase") ? "Quickbase"
+            : qbHost.includes("salesforce") ? "Salesforce"
+            : qbHost ? ((() => { try { return new URL(`https://${qbHost}`).hostname.split(".").slice(-2, -1)[0] ?? "API"; } catch { return "API"; } })())
+            : "API";
+          return (
+            <Box className="status-chip">
+              <span className="status-dot" />
+              {provider} connected
+            </Box>
+          );
         })()}
         {isAdminUser && (
           <>

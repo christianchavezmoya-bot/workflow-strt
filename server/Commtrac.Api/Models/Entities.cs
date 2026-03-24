@@ -121,6 +121,9 @@ public class FeatureEntity
     /// <summary>Procurement: alternative / substitute part number</summary>
     [MaxLength(200)]
     public string? AlternativePartNumber { get; set; }
+    /// <summary>Procurement: manufacturer's own part number</summary>
+    [MaxLength(200)]
+    public string? ManufacturerPartNumber { get; set; }
     /// <summary>Procurement: unit price (cost per unit)</summary>
     public decimal? UnitPrice { get; set; }
     /// <summary>Procurement: URL to product page, datasheet, or supplier listing</summary>
