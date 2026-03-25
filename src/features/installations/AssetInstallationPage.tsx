@@ -73,6 +73,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
+import { usePendingAssetIds } from "../../hooks/usePendingAssetIds";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
@@ -242,6 +243,7 @@ type FeatureDef = {
 const AssetInstallationPage = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const pendingIds = usePendingAssetIds();
   const dispatch = useAppDispatch();
   const { user: currentUser } = useAuth();
   const can = usePermissions();
@@ -2567,11 +2569,15 @@ const AssetInstallationPage = () => {
               ? "Awaiting Sig."
               : STATUS_LABELS[asset.status as ProjectAssetStatus] ?? asset.status;
 
+            const isPending = pendingIds.has(asset.id);
+
             return (
               <Paper key={asset.id} className="glass-card" sx={{
                 overflow: "hidden",
-                borderLeft: asset.status === "Issue" ? "3px solid" : "3px solid transparent",
-                borderLeftColor: asset.status === "Issue" ? "error.main" : "transparent",
+                borderLeft: "3px solid",
+                borderLeftColor: isPending ? "warning.main" : asset.status === "Issue" ? "error.main" : "transparent",
+                transition: "transform 0.15s ease, box-shadow 0.15s ease",
+                "&:hover": { transform: "translateY(-2px)", boxShadow: "0 6px 20px rgba(0,0,0,0.12)" },
               }}>
                 {/* Card header — tap to expand */}
                 <Box sx={{ px: 1.5, py: 1.25, cursor: "pointer" }}
@@ -2580,6 +2586,15 @@ const AssetInstallationPage = () => {
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.4 }}>
                         <Typography variant="body2" fontWeight={700} noWrap>{asset.assetTag}</Typography>
+                        {isPending && (
+                          <Tooltip title="Change pending sync">
+                            <Box sx={{
+                              width: 7, height: 7, borderRadius: "50%", bgcolor: "warning.main", flexShrink: 0,
+                              animation: "pulse 1.5s ease-in-out infinite",
+                              "@keyframes pulse": { "0%,100%": { opacity: 1 }, "50%": { opacity: 0.3 } },
+                            }} />
+                          </Tooltip>
+                        )}
                         {issuesBadge(asset)}
                         <Chip size="small" label={chipLabel} color={chipColor}
                           sx={{ fontSize: "0.65rem", height: 20, ml: "auto", flexShrink: 0 }} />
