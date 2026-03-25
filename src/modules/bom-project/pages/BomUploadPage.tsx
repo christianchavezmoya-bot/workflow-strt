@@ -169,6 +169,7 @@ export default function BomUploadPage() {
             onChange={(e) => setNotes(e.target.value)}
             fullWidth
             placeholder="e.g. Project name, revision number…"
+            InputLabelProps={{ shrink: true }}
           />
 
           {!productSelected && (

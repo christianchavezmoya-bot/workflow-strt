@@ -156,6 +156,7 @@ function BusinessLogoTab() {
             placeholder="e.g. Field Operations"
             sx={{ maxWidth: 360 }}
             size="small"
+            InputLabelProps={{ shrink: true }}
           />
           {appNameError && <Alert severity="error" sx={{ maxWidth: 500 }}>{appNameError}</Alert>}
           {appNameSuccess && <Alert severity="success" sx={{ maxWidth: 500 }}>App name saved.</Alert>}
@@ -1629,6 +1630,7 @@ const Settings = () => {
               }
               placeholder="your-realm.quickbase.com"
               fullWidth
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="User token"
@@ -1638,6 +1640,7 @@ const Settings = () => {
               }
               placeholder="QB-USER-TOKEN"
               fullWidth
+              InputLabelProps={{ shrink: true }}
             />
             <Stack direction="row" alignItems="center" spacing={1.5}>
               <Button
@@ -1717,6 +1720,7 @@ const Settings = () => {
                 onChange={(e) => setSettings((p) => ({ ...p, goodsMovementsTableId: e.target.value }))}
                 fullWidth
                 placeholder="e.g. bpqxy123"
+                InputLabelProps={{ shrink: true }}
               />
               <Button
                 variant="outlined"
@@ -2247,6 +2251,7 @@ const Settings = () => {
                   <col style={{ minWidth: 110 }} />
                   <col style={{ minWidth: 220 }} />
                   <col style={{ minWidth: 100 }} />
+                  <col style={{ minWidth: 180 }} />
                 </colgroup>
                 <TableHead>
                   <TableRow>
@@ -2257,6 +2262,7 @@ const Settings = () => {
                     <TableCell><Typography variant="caption" fontWeight={700}>Mfr. Part #</Typography></TableCell>
                     <TableCell><Typography variant="caption" fontWeight={700}>Price / Unit</Typography></TableCell>
                     <TableCell><Typography variant="caption" fontWeight={700}>Description</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Products</Typography></TableCell>
                     <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
                   </TableRow>
                 </TableHead>
@@ -2293,6 +2299,11 @@ const Settings = () => {
                             </Typography>
                           </TableCell>
                           <TableCell><Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-word" }}>{f.description || "—"}</Typography></TableCell>
+                          <TableCell>
+                            {f.linkedProducts && f.linkedProducts.length > 0
+                              ? <Stack direction="row" flexWrap="wrap" gap={0.5}>{f.linkedProducts.map((p) => <Chip key={p} label={p} size="small" variant="outlined" />)}</Stack>
+                              : <Typography variant="body2" color="text.disabled">—</Typography>}
+                          </TableCell>
                           <TableCell align="right">
                             <Stack direction="row" spacing={0.5} justifyContent="flex-end">
                               <Tooltip title="Edit">

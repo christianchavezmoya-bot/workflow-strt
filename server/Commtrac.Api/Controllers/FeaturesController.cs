@@ -23,7 +23,14 @@ public class FeaturesController : ControllerBase
     public async Task<ActionResult<IEnumerable<FeatureDto>>> GetAll()
     {
         var features = await _db.Features.OrderBy(f => f.Name).ToListAsync();
-        return Ok(features.Select(ToDto));
+        var featureIds = features.Select(f => f.Id).ToList();
+        var links = await _db.ProductFeatures
+            .Where(pf => featureIds.Contains(pf.FeatureId))
+            .Join(_db.Products, pf => pf.ProductId, p => p.Id, (pf, p) => new { pf.FeatureId, p.Name })
+            .ToListAsync();
+        var productsByFeature = links.GroupBy(l => l.FeatureId)
+            .ToDictionary(g => g.Key, g => g.Select(l => l.Name).ToList());
+        return Ok(features.Select(f => ToDto(f, productsByFeature.TryGetValue(f.Id, out var prods) ? prods : null)));
     }
 
     [HttpGet("{id}")]
@@ -162,7 +169,7 @@ public class FeaturesController : ControllerBase
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static FeatureDto ToDto(FeatureEntity f)
+    private static FeatureDto ToDto(FeatureEntity f, List<string>? linkedProducts = null)
     {
         var options = string.IsNullOrWhiteSpace(f.OptionsJson) || f.OptionsJson == "[]"
             ? null
@@ -177,6 +184,7 @@ public class FeaturesController : ControllerBase
             : JsonSerializer.Deserialize<List<string>>(f.CaptureFieldsJson, JsonOptions);
 
         return new(f.Id, f.Name, f.Description, f.ValueType, options, subProps, f.IsInventory, captureFields,
-            f.Brand, f.Supplier, f.AlternativePartNumber, f.UnitPrice, f.ProductLink, f.ManufacturerPartNumber);
+            f.Brand, f.Supplier, f.AlternativePartNumber, f.UnitPrice, f.ProductLink, f.ManufacturerPartNumber,
+            linkedProducts);
     }
 }

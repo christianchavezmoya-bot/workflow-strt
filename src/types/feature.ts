@@ -18,6 +18,7 @@ export interface Feature {
   manufacturerPartNumber?: string;
   unitPrice?: number;
   productLink?: string;
+  linkedProducts?: string[];
 }
 
 export interface FeatureSubProperty {

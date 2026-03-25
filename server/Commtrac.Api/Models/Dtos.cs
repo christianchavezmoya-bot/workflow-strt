@@ -176,7 +176,8 @@ public record FeatureDto(
     string? AlternativePartNumber = null,
     decimal? UnitPrice = null,
     string? ProductLink = null,
-    string? ManufacturerPartNumber = null
+    string? ManufacturerPartNumber = null,
+    List<string>? LinkedProducts = null
 );
 
 public record CreateFeatureRequest(

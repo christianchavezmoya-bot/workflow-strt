@@ -245,6 +245,7 @@ export default function BomProductSelector() {
               onChange={(e) => setNewName(e.target.value)}
               placeholder="e.g. AIM-100, HazardAvert"
               autoFocus
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Description (optional)"

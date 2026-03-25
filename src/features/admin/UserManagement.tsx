@@ -2779,6 +2779,7 @@ export const UserManagement: React.FC = () => {
                           placeholder="Customer Name"
                           label="Customer Name"
                           fullWidth
+                          InputLabelProps={{ shrink: true }}
                           sx={{
                             '& .MuiInputBase-root': {
                               height: 32,
@@ -2820,6 +2821,7 @@ export const UserManagement: React.FC = () => {
                           placeholder="Industry"
                           label="Industry"
                           fullWidth
+                          InputLabelProps={{ shrink: true }}
                           sx={{
                             '& .MuiInputBase-root': {
                               height: 26,
@@ -5121,6 +5123,7 @@ export const UserManagement: React.FC = () => {
                               value={sf.unit ?? ""}
                               sx={{ width: 80 }}
                               placeholder="ea, m…"
+                              InputLabelProps={{ shrink: true }}
                               onChange={(e) =>
                                 setProductFeatures((prev) =>
                                   prev.map((f) =>
@@ -5444,6 +5447,7 @@ export const UserManagement: React.FC = () => {
                               value={sf.unit ?? ""}
                               sx={{ width: 80 }}
                               placeholder="ea, m…"
+                              InputLabelProps={{ shrink: true }}
                               onChange={(e) =>
                                 setEditProductFeatures((prev) =>
                                   prev.map((f) =>

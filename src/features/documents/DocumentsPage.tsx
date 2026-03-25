@@ -897,7 +897,8 @@ export default function DocumentsPage() {
             {addForm.mode === "url" && (
               <TextField label="Document Name *" size="small" fullWidth required
                 value={addForm.name} onChange={(e) => setAddForm((p) => ({ ...p, name: e.target.value }))}
-                placeholder="e.g. Wiring Diagram Rev3" />
+                placeholder="e.g. Wiring Diagram Rev3"
+                InputLabelProps={{ shrink: true }} />
             )}
             <FormControl size="small" fullWidth>
               <InputLabel>Category</InputLabel>
@@ -910,10 +911,12 @@ export default function DocumentsPage() {
             </FormControl>
             <TextField label="Linked To (asset tag or product name)" size="small" fullWidth
               value={addForm.linkedTo} onChange={(e) => setAddForm((p) => ({ ...p, linkedTo: e.target.value }))}
-              placeholder="e.g. VEH-001 or leave blank for general" />
+              placeholder="e.g. VEH-001 or leave blank for general"
+              InputLabelProps={{ shrink: true }} />
             <TextField label="Notes / Description" size="small" fullWidth multiline rows={3}
               value={addForm.notes} onChange={(e) => setAddForm((p) => ({ ...p, notes: e.target.value }))}
-              placeholder="Optional notes about this document…" />
+              placeholder="Optional notes about this document…"
+              InputLabelProps={{ shrink: true }} />
 
             {/* Custom fields */}
             {customFields.length > 0 && (
@@ -972,6 +975,7 @@ export default function DocumentsPage() {
               <TextField label="Document URL *" size="small" fullWidth
                 value={addForm.url} onChange={(e) => setAddForm((p) => ({ ...p, url: e.target.value }))}
                 placeholder="https://…"
+                InputLabelProps={{ shrink: true }}
                 InputProps={{ startAdornment: <InputAdornment position="start"><LinkOutlined fontSize="small" /></InputAdornment> }} />
             )}
 

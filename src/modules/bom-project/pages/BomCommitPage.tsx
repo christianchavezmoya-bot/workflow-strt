@@ -236,7 +236,7 @@ export default function BomCommitPage() {
                 }
               }}
               renderInput={(params) => (
-                <TextField {...params} label="Site — Customer" placeholder="Search sites…" />
+                <TextField {...params} label="Site — Customer" placeholder="Search sites…" InputLabelProps={{ ...params.InputLabelProps, shrink: true }} />
               )}
             />
             <TextField

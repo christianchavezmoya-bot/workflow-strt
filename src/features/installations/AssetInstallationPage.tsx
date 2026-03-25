@@ -2766,28 +2766,33 @@ const AssetInstallationPage = () => {
             <TextField label="Asset Tag *" size="small" fullWidth required
               value={addForm.assetTag}
               onChange={(e) => setAddForm((p) => ({ ...p, assetTag: e.target.value }))}
-              placeholder="e.g. VEH-001" />
+              placeholder="e.g. VEH-001"
+              InputLabelProps={{ shrink: true }} />
             <TextField label="Asset Name" size="small" fullWidth
               value={addForm.assetName}
               onChange={(e) => setAddForm((p) => ({ ...p, assetName: e.target.value }))}
               placeholder="e.g. AGI-10, Shuttle Car, Skid Steer"
-              helperText="Equipment type or model name" />
+              helperText="Equipment type or model name"
+              InputLabelProps={{ shrink: true }} />
             <TextField label="Serial Number" size="small" fullWidth
               value={addForm.serialNumber}
               onChange={(e) => setAddForm((p) => ({ ...p, serialNumber: e.target.value }))} />
             <TextField label="Asset Model" size="small" fullWidth
               value={addForm.assetModel}
               onChange={(e) => setAddForm((p) => ({ ...p, assetModel: e.target.value }))}
-              placeholder="e.g. Axis P3245-V" />
+              placeholder="e.g. Axis P3245-V"
+              InputLabelProps={{ shrink: true }} />
             <TextField label="Manufacturer" size="small" fullWidth
               value={addForm.manufacturer}
               onChange={(e) => setAddForm((p) => ({ ...p, manufacturer: e.target.value }))}
-              placeholder="e.g. Axis, Cisco" />
+              placeholder="e.g. Axis, Cisco"
+              InputLabelProps={{ shrink: true }} />
             <TextField
               label="Location" size="small" fullWidth
               value={addForm.location}
               onChange={(e) => setAddForm((p) => ({ ...p, location: e.target.value }))}
               placeholder="Auto-filled from project site"
+              InputLabelProps={{ shrink: true }}
               helperText={
                 addForm.projectId && projects.find((p) => p.id === addForm.projectId)?.siteName
                   ? `Site: ${projects.find((p) => p.id === addForm.projectId)?.siteName}`
@@ -2856,7 +2861,8 @@ const AssetInstallationPage = () => {
             <TextField label="Asset Name" size="small" fullWidth
               value={editForm.assetName}
               onChange={(e) => setEditForm((p) => ({ ...p, assetName: e.target.value }))}
-              placeholder="e.g. AGI-10, Shuttle Car, Skid Steer" />
+              placeholder="e.g. AGI-10, Shuttle Car, Skid Steer"
+              InputLabelProps={{ shrink: true }} />
             <FormControl size="small" fullWidth>
               <InputLabel>Configuration Type</InputLabel>
               <Select
