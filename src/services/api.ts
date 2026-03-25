@@ -98,8 +98,9 @@ const silentRefresh = async () => {
 };
 
 api.interceptors.request.use(async (config) => {
-  // Skip refresh for the refresh call itself and for login-related endpoints
   const url = config.url ?? "";
+
+  // Skip refresh for the refresh call itself and for login-related endpoints
   if (!url.includes("/auth/refresh") && !url.includes("/auth/login")) {
     await silentRefresh();
   }
@@ -108,6 +109,13 @@ api.interceptors.request.use(async (config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Auth endpoints must never time out — give them unlimited time.
+  // The 8s timeout only applies to data GETs so the cache kicks in quickly.
+  if (url.includes("/auth/")) {
+    config.timeout = 0;
+  }
+
   (config as typeof config & { metadata?: { start: number } }).metadata = { start: Date.now() };
   return config;
 });
