@@ -11,8 +11,6 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import WifiIcon from "@mui/icons-material/Wifi";
-import WifiOffIcon from "@mui/icons-material/WifiOff";
 import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
@@ -34,6 +32,7 @@ import { useViewMode } from "../../contexts/ViewModeContext";
 import { useFavoritesContext } from "../../contexts/FavoritesContext";
 import { useWorkScope } from "../../hooks/useWorkScope";
 import GlobalSearchDialog from "./GlobalSearchDialog";
+import SyncStatusBadge from "../ui/SyncStatusBadge";
 import strataLogo from "../../assets/strata_transparent.png";
 
 function getRolesFromCache(): string[] {
@@ -77,23 +76,9 @@ const Topbar = () => {
   const menuOpen = Boolean(anchorEl);
   const [roleMenuAnchor, setRoleMenuAnchor] = useState<null | HTMLElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-
   const [activeOverride, setActiveOverride] = useState<string | null>(
     () => localStorage.getItem("dev_role_override")
   );
-
-  // ── Network status ────────────────────────────────────────────────────────
-  useEffect(() => {
-    const online  = () => setIsOnline(true);
-    const offline = () => setIsOnline(false);
-    window.addEventListener("online",  online);
-    window.addEventListener("offline", offline);
-    return () => {
-      window.removeEventListener("online",  online);
-      window.removeEventListener("offline", offline);
-    };
-  }, []);
 
   // ── Role override listener ────────────────────────────────────────────────
   useEffect(() => {
@@ -163,22 +148,14 @@ const Topbar = () => {
           sx={{ height: 40, borderRadius: "8px", flexShrink: 0 }}
         />
 
-        {/* App name + connectivity + role */}
+        {/* App name + sync status + role */}
         <Stack spacing={0} sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="subtitle1" fontWeight={700} lineHeight={1.2} noWrap>
             Kinet
           </Typography>
           <Stack direction="row" alignItems="center" spacing={0.5}>
-            {isOnline
-              ? <WifiIcon    sx={{ fontSize: 13, color: "success.main" }} />
-              : <WifiOffIcon sx={{ fontSize: 13, color: "warning.main" }} />
-            }
-            <Typography
-              variant="caption"
-              sx={{ fontSize: "0.72rem", color: isOnline ? "success.main" : "warning.main" }}
-            >
-              {isOnline ? "Online" : "Offline"}
-            </Typography>
+            {/* Sync status replaces plain Online/Offline */}
+            <SyncStatusBadge />
             {displayRole && (
               <>
                 <Typography variant="caption" sx={{ fontSize: "0.72rem", color: "text.disabled" }}>·</Typography>
