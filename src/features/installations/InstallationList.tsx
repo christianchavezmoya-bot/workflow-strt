@@ -914,7 +914,7 @@ const InstallationList = () => {
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
         <Box>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-            Installations{selectedProductNames ? ` â€” ${selectedProductNames}` : ""}
+            Installations{selectedProductNames ? ` — ${selectedProductNames}` : ""}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Showing {activeOffice === "All" ? "all offices" : activeOffice} installations.

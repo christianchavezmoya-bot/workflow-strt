@@ -122,13 +122,13 @@ function printPdf(cfg: WorkflowConfig, productName: string) {
     )
     .join("");
 
-  const html = `<html><head><title>Work Instruction â€” ${cfg.name}</title>
+  const html = `<html><head><title>Work Instruction — ${cfg.name}</title>
     <style>body{font-family:Arial,sans-serif;padding:30px;color:#1a1a1a}@media print{body{padding:0}}</style>
     </head><body>
     <h2 style="margin:0 0 4px">Work Instruction: ${cfg.name}</h2>
     <p style="margin:0 0 16px;font-size:13px;color:#666">
       Product: ${productName}&nbsp;|&nbsp;
-      Configuration Type: ${cfg.configType ?? "â€”"}&nbsp;|&nbsp;
+      Configuration Type: ${cfg.configType ?? "—"}&nbsp;|&nbsp;
       Status: ${cfg.status}&nbsp;|&nbsp;v${cfg.version}
     </p>
     ${cfg.notes ? `<p style="margin:0 0 12px;font-size:12px;color:#555;font-style:italic">${cfg.notes}</p>` : ""}
@@ -240,7 +240,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
           </Box>
         ) : (
           <>
-            {/* Left sidebar â€” step list */}
+            {/* Left sidebar — step list */}
             <Box
               sx={{
                 width: 200,
@@ -296,7 +296,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
               ))}
             </Box>
 
-            {/* Right â€” step content */}
+            {/* Right — step content */}
             <Box sx={{ flex: 1, overflowY: "auto", p: 3.5 }}>
               {currentStep && (
                 <Stack spacing={3}>
@@ -819,7 +819,7 @@ const WorkInstructions = () => {
                 <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ md: "center" }} sx={{ width: "100%" }}>
                   <TextField
                     size="small"
-                    placeholder="Search work instructionsâ€¦"
+                    placeholder="Search work instructions…"
                     value={configSearch}
                     onChange={(e) => setConfigSearch(e.target.value)}
                     InputProps={{
@@ -890,25 +890,25 @@ const WorkInstructions = () => {
                           </Stack>
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2">{cfg.configType || "â€”"}</Typography>
+                          <Typography variant="body2">{cfg.configType || "—"}</Typography>
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2">{activeProduct.name}</Typography>
                         </TableCell>
                         <TableCell sx={{ maxWidth: 220 }}>
                           <Typography variant="body2" color="text.secondary" noWrap>
-                            {cfg.notes || "â€”"}
+                            {cfg.notes || "—"}
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2">{cfg.createdBy || "â€”"}</Typography>
+                          <Typography variant="body2">{cfg.createdBy || "—"}</Typography>
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2">{formatDate(cfg.createdAt)}</Typography>
                         </TableCell>
                         <TableCell align="right">
                           <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-                            {/* New version â€” Published/Archived */}
+                            {/* New version — Published/Archived */}
                             {can.editForms && (cfg.status === "Published" || cfg.status === "Archived") && (
                               <Tooltip title="Create new version (Draft)">
                                 <span>
@@ -1130,7 +1130,7 @@ const WorkInstructions = () => {
         <DialogActions>
           <Button onClick={closeConfigDialog} disabled={configSaving}>Cancel</Button>
           <Button variant="contained" onClick={saveConfig} disabled={configSaving}>
-            {configSaving ? "Savingâ€¦" : editingConfig ? "Save Changes" : "Create Draft"}
+            {configSaving ? "Saving…" : editingConfig ? "Save Changes" : "Create Draft"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1156,7 +1156,7 @@ const WorkInstructions = () => {
         <DialogActions>
           <Button onClick={() => setDeleteConfig(null)} disabled={deleting}>Cancel</Button>
           <Button variant="contained" color="error" onClick={confirmDelete} disabled={deleting}>
-            {deleting ? "Deletingâ€¦" : "Delete"}
+            {deleting ? "Deleting…" : "Delete"}
           </Button>
         </DialogActions>
       </Dialog>

@@ -67,7 +67,7 @@ interface CustomField {
   label: string;
   type: "text" | "textarea" | "select" | "relation";
   options?: string[];
-  /** For type === "relation" â€” which entity table to pull values from */
+  /** For type === "relation" — which entity table to pull values from */
   relatesTo?: "products" | "projects" | "customers";
 }
 
@@ -123,7 +123,7 @@ function lsSet(key: string, val: unknown) {
 }
 
 function formatBytes(bytes: number | null | undefined): string {
-  if (!bytes) return "â€”";
+  if (!bytes) return "—";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -202,7 +202,7 @@ export default function DocumentsPage() {
   const [sortBy, setSortBy] = useState<DocumentSortKey>("dateCreated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  // ---- tab & field config â€” loaded from backend, cached in LS -----
+  // ---- tab & field config — loaded from backend, cached in LS -----
   const [tabs, setTabs]               = useState<DocTab[]>(() => lsGet<DocTab[]>(LS_TABS_KEY, DEFAULT_TABS).filter((t) => t.id !== "tips"));
   const [customFields, setCustomFields] = useState<CustomField[]>(() => {
     const raw = localStorage.getItem(LS_FIELDS_KEY);
@@ -219,7 +219,7 @@ export default function DocumentsPage() {
   const [relProjects,  setRelProjects]  = useState<{ id: string; name: string }[]>([]);
   const [relCustomers, setRelCustomers] = useState<{ id: string; name: string }[]>([]);
 
-  // Derived â€” must precede makeEmptyForm (which is a lazy useState initializer)
+  // Derived — must precede makeEmptyForm (which is a lazy useState initializer)
   const activeCategoryId = tabs[catTab]?.id ?? "all";
 
   // ---- add dialog -------------------------------------------------
@@ -317,7 +317,7 @@ export default function DocumentsPage() {
   useEffect(() => {
     const needs = new Set(customFields.filter((f) => f.type === "relation").map((f) => f.relatesTo));
     if (needs.has("products")  && !relProducts.length)  productService.getProducts().then((r) => setRelProducts(r.map((p) => ({ id: p.id, name: p.name })))).catch(() => {});
-    if (needs.has("projects")  && !relProjects.length)  projectService.getProjects({}).then((r) => { const items = Array.isArray(r) ? r : (r as { items?: unknown[] }).items ?? []; setRelProjects((items as { id: string; customerName: string; jobNumber: string }[]).map((p) => ({ id: p.id, name: `${p.jobNumber} â€” ${p.customerName}` }))); }).catch(() => {});
+    if (needs.has("projects")  && !relProjects.length)  projectService.getProjects({}).then((r) => { const items = Array.isArray(r) ? r : (r as { items?: unknown[] }).items ?? []; setRelProjects((items as { id: string; customerName: string; jobNumber: string }[]).map((p) => ({ id: p.id, name: `${p.jobNumber} — ${p.customerName}` }))); }).catch(() => {});
     if (needs.has("customers") && !relCustomers.length) customerService.getCustomers().then((r) => setRelCustomers((r as { id: string; name: string }[]).map((c) => ({ id: c.id, name: c.name })))).catch(() => {});
   }, [customFields]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -467,12 +467,12 @@ export default function DocumentsPage() {
 
   async function openPreview(doc: DocumentRecord) {
     if (!doc.downloadUrl) return;
-    // External URL â€” open directly in a new tab, no dialog
+    // External URL — open directly in a new tab, no dialog
     if (!isBackendFile(doc.downloadUrl)) {
       window.open(doc.downloadUrl, "_blank", "noopener,noreferrer");
       return;
     }
-    // Uploaded file â€” fetch as authenticated blob and show inline
+    // Uploaded file — fetch as authenticated blob and show inline
     setPreviewDoc(doc);
     setPreviewBlobUrl(null);
     setPreviewError(null);
@@ -511,7 +511,7 @@ export default function DocumentsPage() {
         <video src={previewBlobUrl} controls style={{ width: "100%", maxHeight: "72vh" }} />
       </Box>
     );
-    // Unsupported type â€” show download prompt
+    // Unsupported type — show download prompt
     return (
       <Stack alignItems="center" justifyContent="center" sx={{ p: 8 }} spacing={2}>
         <FolderOutlined sx={{ fontSize: 56, color: "text.disabled" }} />
@@ -546,7 +546,7 @@ export default function DocumentsPage() {
       } else if (status) {
         setDeleteError(`Server returned HTTP ${status}. Check the server logs for details.`);
       } else {
-        setDeleteError("No response from server â€” check that the backend is running and reachable.");
+        setDeleteError("No response from server — check that the backend is running and reachable.");
       }
     } finally { setDeleteLoading(false); }
   }
@@ -657,13 +657,13 @@ export default function DocumentsPage() {
         <Box>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Documents</Typography>
           <Typography variant="body2" color="text.secondary">
-            Technical bulletins, drawings, procedures, authority-to-work and more â€” linked to assets or general.
+            Technical bulletins, drawings, procedures, authority-to-work and more — linked to assets or general.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={loadDocs}>Refresh</Button>
 
-          {/* Gear settings â€” admin only */}
+          {/* Gear settings — admin only */}
           {can.editForms && (
             <>
               <Tooltip title="Document settings">
@@ -712,7 +712,7 @@ export default function DocumentsPage() {
       {!configLoaded && (
         <Stack direction="row" alignItems="center" spacing={1}>
           <CircularProgress size={12} />
-          <Typography variant="caption" color="text.secondary">Loading document configurationâ€¦</Typography>
+          <Typography variant="caption" color="text.secondary">Loading document configuration…</Typography>
         </Stack>
       )}
 
@@ -734,7 +734,7 @@ export default function DocumentsPage() {
 
       {/* Search + sorting */}
       <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} alignItems={{ md: "center" }}>
-        <TextField size="small" placeholder="Search by name, asset tag, category, creatorâ€¦"
+        <TextField size="small" placeholder="Search by name, asset tag, category, creator…"
           value={search} onChange={(e) => setSearch(e.target.value)} sx={{ maxWidth: 440, width: "100%" }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchOutlined fontSize="small" /></InputAdornment> }}
         />
@@ -798,7 +798,7 @@ export default function DocumentsPage() {
                               <Typography variant="body2" fontWeight={500}>{addExtIfMissing(doc.name, doc.contentType)}</Typography>
                               {doc.notes && (
                                 <Typography variant="caption" color="text.secondary" display="block">
-                                  {doc.notes.length > 64 ? doc.notes.slice(0, 64) + "â€¦" : doc.notes}
+                                  {doc.notes.length > 64 ? doc.notes.slice(0, 64) + "…" : doc.notes}
                                 </Typography>
                               )}
                             </Box>
@@ -825,13 +825,13 @@ export default function DocumentsPage() {
                       if (colId === "dateCreated") return (
                         <TableCell key={colId}>
                           <Typography variant="body2" color="text.secondary">
-                            {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : "â€”"}
+                            {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : "—"}
                           </Typography>
                         </TableCell>
                       );
                       if (colId === "createdBy") return (
                         <TableCell key={colId}>
-                          <Typography variant="body2" color="text.secondary">{doc.createdBy || "â€”"}</Typography>
+                          <Typography variant="body2" color="text.secondary">{doc.createdBy || "—"}</Typography>
                         </TableCell>
                       );
                       // Custom field column
@@ -840,7 +840,7 @@ export default function DocumentsPage() {
                       // Custom values live in doc.customValues (hydrated from customValuesJson),
                       // NOT as top-level properties of doc.
                       const rawVal = doc.customValues?.[colId];
-                      // For relation fields the stored value is an entity ID â€” resolve to name.
+                      // For relation fields the stored value is an entity ID — resolve to name.
                       let displayVal: string | undefined;
                       if (cf.type === "relation" && rawVal) {
                         const opts = relationOptions(cf);
@@ -850,7 +850,7 @@ export default function DocumentsPage() {
                       }
                       return (
                         <TableCell key={colId}>
-                          <Typography variant="body2" color="text.secondary">{displayVal || "â€”"}</Typography>
+                          <Typography variant="body2" color="text.secondary">{displayVal || "—"}</Typography>
                         </TableCell>
                       );
                     })}
@@ -913,7 +913,7 @@ export default function DocumentsPage() {
               placeholder="e.g. VEH-001 or leave blank for general" />
             <TextField label="Notes / Description" size="small" fullWidth multiline rows={3}
               value={addForm.notes} onChange={(e) => setAddForm((p) => ({ ...p, notes: e.target.value }))}
-              placeholder="Optional notes about this documentâ€¦" />
+              placeholder="Optional notes about this document…" />
 
             {/* Custom fields */}
             {customFields.length > 0 && (
@@ -929,7 +929,7 @@ export default function DocumentsPage() {
                           onChange={(e) => setAddForm((p) => ({ ...p, customValues: { ...p.customValues, [cf.id]: e.target.value } }))}>
                           <MenuItem value=""><em>None</em></MenuItem>
                           {opts.length === 0
-                            ? <MenuItem disabled value=""><em>Loadingâ€¦</em></MenuItem>
+                            ? <MenuItem disabled value=""><em>Loading…</em></MenuItem>
                             : opts.map((o) => <MenuItem key={o.id} value={o.id}>{o.name}</MenuItem>)
                           }
                         </Select>
@@ -971,14 +971,14 @@ export default function DocumentsPage() {
             {addForm.mode === "url" && (
               <TextField label="Document URL *" size="small" fullWidth
                 value={addForm.url} onChange={(e) => setAddForm((p) => ({ ...p, url: e.target.value }))}
-                placeholder="https://â€¦"
+                placeholder="https://…"
                 InputProps={{ startAdornment: <InputAdornment position="start"><LinkOutlined fontSize="small" /></InputAdornment> }} />
             )}
 
             {addForm.mode === "upload" && (
               <Box>
                 <Button component="label" variant="outlined" startIcon={<AttachFileOutlined />} size="small">
-                  {addForm.files.length === 0 ? "Choose filesâ€¦" : "Add more files"}
+                  {addForm.files.length === 0 ? "Choose files…" : "Add more files"}
                   <input type="file" multiple hidden onChange={(e) => {
                     const picked = Array.from(e.target.files ?? []);
                     if (!picked.length) return;
@@ -1020,7 +1020,7 @@ export default function DocumentsPage() {
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 1 }}>
                     <CircularProgress size={14} />
                     <Typography variant="caption" color="text.secondary">
-                      Uploading file {uploadProgress.current} of {uploadProgress.total}â€¦
+                      Uploading file {uploadProgress.current} of {uploadProgress.total}…
                     </Typography>
                   </Stack>
                 )}
@@ -1034,7 +1034,7 @@ export default function DocumentsPage() {
           <Button onClick={() => setAddOpen(false)} disabled={addSaving}>Cancel</Button>
           <Button variant="contained" onClick={saveDoc} disabled={addSaving}
             startIcon={addSaving ? <CircularProgress size={14} /> : <AddOutlined />}>
-            {addSaving ? "Savingâ€¦" : "Add document"}
+            {addSaving ? "Saving…" : "Add document"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1066,7 +1066,7 @@ export default function DocumentsPage() {
                           onChange={(e) => setEditCustomValues((p) => ({ ...p, [cf.id]: e.target.value }))}>
                           <MenuItem value=""><em>None</em></MenuItem>
                           {opts.length === 0
-                            ? <MenuItem disabled value=""><em>Loadingâ€¦</em></MenuItem>
+                            ? <MenuItem disabled value=""><em>Loading…</em></MenuItem>
                             : opts.map((o) => <MenuItem key={o.id} value={o.id}>{o.name}</MenuItem>)
                           }
                         </Select>
@@ -1112,7 +1112,7 @@ export default function DocumentsPage() {
           <Button onClick={() => setEditDoc(null)} disabled={editSaving}>Cancel</Button>
           <Button variant="contained" onClick={saveEdit} disabled={editSaving || !editName.trim()}
             startIcon={editSaving ? <CircularProgress size={14} /> : undefined}>
-            {editSaving ? "Savingâ€¦" : "Save changes"}
+            {editSaving ? "Saving…" : "Save changes"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1194,7 +1194,7 @@ export default function DocumentsPage() {
           <Button onClick={() => setTabMgrOpen(false)}>Cancel</Button>
           <Button variant="contained" onClick={applyTabManager} disabled={mgrSaving}
             startIcon={mgrSaving ? <CircularProgress size={14} /> : undefined}>
-            {mgrSaving ? "Savingâ€¦" : "Apply"}
+            {mgrSaving ? "Saving…" : "Apply"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1218,7 +1218,7 @@ export default function DocumentsPage() {
           {previewLoading && (
             <Stack alignItems="center" justifyContent="center" sx={{ p: 8 }} spacing={1}>
               <CircularProgress />
-              <Typography variant="caption" color="text.secondary">Loading documentâ€¦</Typography>
+              <Typography variant="caption" color="text.secondary">Loading document…</Typography>
             </Stack>
           )}
           {previewError && <Alert severity="error" sx={{ m: 2 }}>{previewError}</Alert>}
@@ -1254,7 +1254,7 @@ export default function DocumentsPage() {
           <Button onClick={() => { setDeleteDoc(null); setDeleteError(null); }} disabled={deleteLoading}>Cancel</Button>
           <Button variant="contained" color="error" onClick={deleteDocConfirmed} disabled={deleteLoading}
             startIcon={deleteLoading ? <CircularProgress size={14} /> : <DeleteOutline />}>
-            {deleteLoading ? "Deletingâ€¦" : "Delete"}
+            {deleteLoading ? "Deleting…" : "Delete"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1345,7 +1345,7 @@ export default function DocumentsPage() {
           <Button onClick={() => setFieldCfgOpen(false)}>Cancel</Button>
           <Button variant="contained" onClick={applyFieldConfig} disabled={cfgSaving}
             startIcon={cfgSaving ? <CircularProgress size={14} /> : undefined}>
-            {cfgSaving ? "Savingâ€¦" : "Apply"}
+            {cfgSaving ? "Saving…" : "Apply"}
           </Button>
         </DialogActions>
       </Dialog>
