@@ -155,46 +155,31 @@ function isNetworkOrTimeoutError(error: unknown): boolean {
   );
 }
 
-// Wrap the default adapter with stale-while-revalidate for GET requests
-const defaultAdapter = api.defaults.adapter as (config: unknown) => Promise<unknown>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(api.defaults as any).adapter = async (config: any) => {
-  const isGet = config.method?.toLowerCase() === "get";
-  const isAuth = (config.url ?? "").includes("/auth/");
+// ── cachedGet: stale-while-revalidate for GET requests ───────────────────────
+// Returns cached data instantly if available, fires a background refresh,
+// and notifies subscribers when fresh data arrives.
+// Falls back to waiting for the network when no cache exists yet.
+export async function cachedGet<T>(url: string, params?: Record<string, unknown>): Promise<T> {
+  const key = apiCacheKey(url, params);
+  const cached = cacheRead(key);
 
-  if (isGet && !isAuth && config.url) {
-    const key = apiCacheKey(config.url, config.params as Record<string, unknown>);
-    const cached = cacheRead(key);
-
-    if (cached !== null) {
-      // ── CACHE HIT: return instantly, refresh in background ──────────────
-      defaultAdapter(config)
-        .then((res: any) => {
-          cacheWrite(key, res.data);
-          // Notify subscribers that fresh data is available
-          window.dispatchEvent(new CustomEvent("api-cache-updated", {
-            detail: { url: config.url, data: res.data }
-          }));
-        })
-        .catch(() => {
-          // Server unreachable — cached data is still valid, signal offline
-          window.dispatchEvent(new Event("api-serving-cache"));
-        });
-
-      return {
-        data: cached,
-        status: 200,
-        statusText: "OK (cached)",
-        headers: {},
-        config,
-        request: null,
-      };
-    }
+  if (cached !== null) {
+    // Serve cache immediately — kick off background refresh
+    api.get<T>(url, { params }).then((res) => {
+      cacheWrite(key, res.data);
+      window.dispatchEvent(new CustomEvent("api-cache-updated", {
+        detail: { url, data: res.data }
+      }));
+    }).catch(() => {
+      window.dispatchEvent(new Event("api-serving-cache"));
+    });
+    return cached as T;
   }
 
-  // ── NO CACHE: wait for network (first load or non-GET) ──────────────────
-  return defaultAdapter(config);
-};
+  // No cache yet — wait for network normally
+  const res = await api.get<T>(url, { params });
+  return res.data;
+}
 
 api.interceptors.response.use(
   (response) => {

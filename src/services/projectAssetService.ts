@@ -1,9 +1,6 @@
-import api from "./api";
+import api, { cachedGet } from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 import { pendingAdd, pendingGetAll } from "./localDB";
-
-const LS_KEY_PROJECT = (projectId: string) => `project_assets_v1_${projectId}`;
-const LS_KEY_PRODUCT = (productId: string) => `project_assets_prod_v1_${productId}`;
 
 // ── Optimistic cache helpers ──────────────────────────────────────────────────
 
@@ -64,32 +61,16 @@ function fromDto(dto: ProjectAsset): ProjectAsset {
 export const projectAssetService = {
   async listByProject(projectId: string): Promise<ProjectAsset[]> {
     try {
-      const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`);
-      try { localStorage.setItem(LS_KEY_PROJECT(projectId), JSON.stringify(res.data)); } catch {}
-      return res.data.map(fromDto);
-    } catch (err: unknown) {
-      console.warn("[projectAssetService] API unavailable, falling back to localStorage", err);
-      try {
-        const raw = localStorage.getItem(LS_KEY_PROJECT(projectId));
-        if (raw) return (JSON.parse(raw) as ProjectAsset[]).map(fromDto);
-      } catch {}
-      return [];
-    }
+      const data = await cachedGet<ProjectAsset[]>(`/project-assets/by-project/${projectId}`);
+      return data.map(fromDto);
+    } catch { return []; }
   },
 
   async listByProduct(productId: string): Promise<ProjectAsset[]> {
     try {
-      const res = await api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`);
-      try { localStorage.setItem(LS_KEY_PRODUCT(productId), JSON.stringify(res.data)); } catch {}
-      return res.data.map(fromDto);
-    } catch (err: unknown) {
-      console.warn("[projectAssetService] API unavailable, falling back to localStorage", err);
-      try {
-        const raw = localStorage.getItem(LS_KEY_PRODUCT(productId));
-        if (raw) return (JSON.parse(raw) as ProjectAsset[]).map(fromDto);
-      } catch {}
-      return [];
-    }
+      const data = await cachedGet<ProjectAsset[]>(`/project-assets/by-product/${productId}`);
+      return data.map(fromDto);
+    } catch { return []; }
   },
 
   async create(input: CreateProjectAssetInput): Promise<ProjectAsset> {

@@ -1,4 +1,4 @@
-import api from "./api";
+import api, { cachedGet } from "./api";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 
 export interface PendingSignatureRecord {
@@ -34,22 +34,13 @@ export interface OpenIssueRecord {
 
 export const assetWorkflowRunService = {
   async listLatestByProject(projectId: string): Promise<AssetWorkflowRun[]> {
-    try {
-      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
-      return res.data;
-    } catch {
-      return [];
-    }
+    try { return await cachedGet<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`); }
+    catch { return []; }
   },
 
   async listByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
-    try {
-      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
-      return res.data;
-    } catch (err: unknown) {
-      console.warn("[assetWorkflowRunService] listByAsset failed", err);
-      return [];
-    }
+    try { return await cachedGet<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`); }
+    catch { return []; }
   },
 
   async getById(id: string): Promise<AssetWorkflowRun | null> {
@@ -138,11 +129,7 @@ export const assetWorkflowRunService = {
   },
 
   async listOpenIssues(): Promise<OpenIssueRecord[]> {
-    try {
-      const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues");
-      return res.data;
-    } catch {
-      return [];
-    }
+    try { return await cachedGet<OpenIssueRecord[]>("/asset-workflow-runs/open-issues"); }
+    catch { return []; }
   },
 };

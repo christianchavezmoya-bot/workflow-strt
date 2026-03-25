@@ -1,4 +1,4 @@
-﻿import api from "./api";
+﻿import api, { cachedGet } from "./api";
 import { Project, ProjectStatus, ProjectType } from "../types/project";
 
 export interface ProjectFilters {
@@ -25,13 +25,10 @@ export interface ProjectListResponse {
 
 export const projectService = {
   async getProjects(filters?: ProjectFilters) {
-    const response = await api.get<Project[] | ProjectListResponse>("/projects", {
-      params: filters && Object.keys(filters).length ? filters : undefined
-    });
-    if (Array.isArray(response.data)) {
-      return { items: response.data, total: response.data.length };
-    }
-    return response.data;
+    const params = filters && Object.keys(filters).length ? filters : undefined;
+    const data = await cachedGet<Project[] | ProjectListResponse>("/projects", params as Record<string, unknown>);
+    if (Array.isArray(data)) return { items: data, total: data.length };
+    return data;
   },
   async getProject(id: string) {
     const response = await api.get<Project>(`/projects/${id}`);
