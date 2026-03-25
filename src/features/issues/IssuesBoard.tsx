@@ -4,9 +4,11 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Divider,
   Grid,
   IconButton,
   MenuItem,
+  Paper,
   Select,
   Stack,
   Table,
@@ -17,6 +19,8 @@ import {
   TextField,
   Tooltip,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import {
   ErrorOutlineOutlined,
@@ -56,6 +60,9 @@ function typeColor(t: string): "error" | "warning" | "info" {
 // ─── component ────────────────────────────────────────────────────────────────
 
 const IssuesBoard = () => {
+  const theme   = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+
   const [issues,   setIssues]   = useState<OpenIssueRecord[]>([]);
   const [loading,  setLoading]  = useState(false);
 
@@ -199,23 +206,125 @@ const IssuesBoard = () => {
         </Typography>
       </Stack>
 
-      {/* ── Table ── */}
-      <Box className="glass-card" sx={{ padding: 2, paddingBottom: 0, overflowX: "auto" }}>
-        {loading && issues.length === 0 ? (
-          <Stack alignItems="center" py={6}>
-            <CircularProgress size={28} />
-            <Typography variant="caption" color="text.secondary" mt={1}>Loading issues…</Typography>
-          </Stack>
-        ) : filtered.length === 0 ? (
-          <Stack alignItems="center" py={6} spacing={1}>
-            {issues.length === 0
-              ? <ErrorOutlineOutlined sx={{ fontSize: 40, color: "success.main" }} />
-              : <WarningAmberOutlined sx={{ fontSize: 40, color: "text.disabled" }} />}
-            <Typography variant="body2" color="text.secondary">
-              {issues.length === 0 ? "No open issues — great work!" : "No issues match the current filters."}
-            </Typography>
-          </Stack>
-        ) : (
+      {/* ── Empty / loading state (shared) ── */}
+      {(loading && issues.length === 0) ? (
+        <Stack alignItems="center" py={6}>
+          <CircularProgress size={28} />
+          <Typography variant="caption" color="text.secondary" mt={1}>Loading issues…</Typography>
+        </Stack>
+      ) : filtered.length === 0 ? (
+        <Stack alignItems="center" py={6} spacing={1}>
+          {issues.length === 0
+            ? <ErrorOutlineOutlined sx={{ fontSize: 40, color: "success.main" }} />
+            : <WarningAmberOutlined sx={{ fontSize: 40, color: "text.disabled" }} />}
+          <Typography variant="body2" color="text.secondary">
+            {issues.length === 0 ? "No open issues — great work!" : "No issues match the current filters."}
+          </Typography>
+        </Stack>
+      ) : isMobile ? (
+
+        /* ── Mobile card list ── */
+        <Stack spacing={1.5}>
+          {filtered.map((iss) => (
+            <Paper
+              key={`${iss.runId}-${iss.issueId}`}
+              className="glass-card"
+              sx={{
+                p: 1.5,
+                borderLeft: "3px solid",
+                borderLeftColor: iss.isBlocking ? "error.main" : "transparent",
+                transition: "transform 0.15s ease, box-shadow 0.15s ease",
+                "&:hover": {
+                  transform: "translateY(-2px)",
+                  boxShadow: "0 6px 20px rgba(0,0,0,0.12)",
+                },
+              }}
+            >
+              {/* Row 1: chips + open button */}
+              <Stack direction="row" alignItems="center" spacing={0.75} mb={0.75}>
+                <Chip
+                  label={typeLabel(iss.issueType)}
+                  size="small"
+                  color={typeColor(iss.issueType)}
+                  variant="outlined"
+                  sx={{ fontSize: "0.68rem", height: 20 }}
+                />
+                <Chip
+                  label={iss.severity.charAt(0).toUpperCase() + iss.severity.slice(1)}
+                  size="small"
+                  color={severityColor(iss.severity)}
+                  sx={{ fontSize: "0.68rem", height: 20 }}
+                />
+                {iss.isBlocking && (
+                  <ErrorOutlineOutlined sx={{ fontSize: 15, color: "error.main" }} />
+                )}
+                <Box sx={{ flex: 1 }} />
+                <Tooltip title="Go to asset installations">
+                  <IconButton
+                    size="small"
+                    component={Link}
+                    to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`}
+                    sx={{ p: 0.5 }}
+                  >
+                    <OpenInNewOutlined sx={{ fontSize: 15 }} />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+
+              {/* Row 2: description */}
+              <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5, lineHeight: 1.3 }}>
+                {iss.description}
+              </Typography>
+
+              <Divider sx={{ my: 0.75 }} />
+
+              {/* Row 3: asset + step */}
+              <Stack direction="row" spacing={1} alignItems="flex-start" mb={0.5}>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" color="text.disabled" display="block">Asset</Typography>
+                  <Typography variant="caption" fontWeight={700}>{iss.assetTag}</Typography>
+                  {iss.assetLocation && (
+                    <Typography variant="caption" color="text.disabled" display="block">{iss.assetLocation}</Typography>
+                  )}
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" color="text.disabled" display="block">Step</Typography>
+                  <Typography variant="caption">{iss.stepTitle || "—"}</Typography>
+                </Box>
+              </Stack>
+
+              {/* Row 4: project + reported */}
+              <Stack direction="row" spacing={1} alignItems="flex-start">
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" color="text.disabled" display="block">Project</Typography>
+                  <Button
+                    component={Link}
+                    to={`/projects?open=${encodeURIComponent(iss.projectId)}`}
+                    size="small"
+                    sx={{ p: 0, minWidth: "auto", textAlign: "left", textTransform: "none" }}
+                  >
+                    <Stack>
+                      <Typography variant="caption" fontWeight={700}>{iss.jobNumber}</Typography>
+                      <Typography variant="caption" color="text.secondary">{iss.customerName}</Typography>
+                    </Stack>
+                  </Button>
+                </Box>
+                <Box sx={{ textAlign: "right" }}>
+                  <Typography variant="caption" color="text.disabled" display="block">Reported</Typography>
+                  <Typography variant="caption">{fmtDate(iss.reportedAt)}</Typography>
+                  {iss.createdBy && (
+                    <Typography variant="caption" color="text.disabled" display="block">{iss.createdBy}</Typography>
+                  )}
+                </Box>
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+
+      ) : (
+
+        /* ── Desktop table (unchanged) ── */
+        <Box className="glass-card" sx={{ padding: 2, paddingBottom: 0, overflowX: "auto" }}>
           <Table size="small" sx={{ minWidth: 900 }}>
             <TableHead>
               <TableRow>
@@ -249,44 +358,23 @@ const IssuesBoard = () => {
                     ) : null}
                   </TableCell>
                   <TableCell sx={{ py: 0.75 }}>
-                    <Chip
-                      label={typeLabel(iss.issueType)}
-                      size="small"
-                      color={typeColor(iss.issueType)}
-                      variant="outlined"
-                      sx={{ fontSize: "0.65rem", height: 18 }}
-                    />
+                    <Chip label={typeLabel(iss.issueType)} size="small" color={typeColor(iss.issueType)} variant="outlined" sx={{ fontSize: "0.65rem", height: 18 }} />
                   </TableCell>
                   <TableCell sx={{ py: 0.75 }}>
-                    <Chip
-                      label={iss.severity.charAt(0).toUpperCase() + iss.severity.slice(1)}
-                      size="small"
-                      color={severityColor(iss.severity)}
-                      variant="filled"
-                      sx={{ fontSize: "0.65rem", height: 18 }}
-                    />
+                    <Chip label={iss.severity.charAt(0).toUpperCase() + iss.severity.slice(1)} size="small" color={severityColor(iss.severity)} variant="filled" sx={{ fontSize: "0.65rem", height: 18 }} />
                   </TableCell>
                   <TableCell sx={{ py: 0.75, maxWidth: 300 }}>
-                    <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
-                      {iss.description}
-                    </Typography>
+                    <Typography variant="body2" sx={{ wordBreak: "break-word" }}>{iss.description}</Typography>
                   </TableCell>
                   <TableCell sx={{ py: 0.75 }}>
                     <Typography variant="caption" color="text.secondary">{iss.stepTitle || "—"}</Typography>
                   </TableCell>
                   <TableCell sx={{ py: 0.75 }}>
                     <Typography variant="body2" fontWeight={600}>{iss.assetTag}</Typography>
-                    {iss.assetLocation && (
-                      <Typography variant="caption" color="text.disabled" display="block">{iss.assetLocation}</Typography>
-                    )}
+                    {iss.assetLocation && <Typography variant="caption" color="text.disabled" display="block">{iss.assetLocation}</Typography>}
                   </TableCell>
                   <TableCell sx={{ py: 0.75 }}>
-                    <Button
-                      component={Link}
-                      to={`/projects?open=${encodeURIComponent(iss.projectId)}`}
-                      size="small"
-                      sx={{ p: 0, minWidth: "auto", textAlign: "left", textTransform: "none" }}
-                    >
+                    <Button component={Link} to={`/projects?open=${encodeURIComponent(iss.projectId)}`} size="small" sx={{ p: 0, minWidth: "auto", textAlign: "left", textTransform: "none" }}>
                       <Stack>
                         <Typography variant="caption" fontWeight={700}>{iss.jobNumber}</Typography>
                         <Typography variant="caption" color="text.secondary">{iss.customerName}</Typography>
@@ -301,11 +389,7 @@ const IssuesBoard = () => {
                   </TableCell>
                   <TableCell sx={{ py: 0.75, pr: 1 }}>
                     <Tooltip title="Go to asset installations">
-                      <IconButton
-                        size="small"
-                        component={Link}
-                        to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`}
-                      >
+                      <IconButton size="small" component={Link} to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`}>
                         <OpenInNewOutlined sx={{ fontSize: 14 }} />
                       </IconButton>
                     </Tooltip>
@@ -314,8 +398,8 @@ const IssuesBoard = () => {
               ))}
             </TableBody>
           </Table>
-        )}
-      </Box>
+        </Box>
+      )}
     </Stack>
   );
 };
