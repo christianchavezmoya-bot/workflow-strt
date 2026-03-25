@@ -42,6 +42,7 @@ import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { useWorkScope } from "../../hooks/useWorkScope";
+import { useApiCacheUpdate } from "../../hooks/useApiCacheUpdate";
 import { fieldService } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
 import { projectAssetService } from "../../services/projectAssetService";
@@ -325,6 +326,15 @@ const ProjectList = () => {
   useEffect(() => {
     dispatch(fetchProducts());
   }, [dispatch]);
+
+  // Silently re-fetch when background cache update arrives for projects
+  useApiCacheUpdate("/projects", () => {
+    dispatch(fetchProjects({
+      country: activeOffice !== "All" ? activeOffice : undefined,
+      page: page + 1,
+      pageSize: rowsPerPage,
+    }));
+  });
 
   const sourceProjects = items;
   const products = productsState.items.length ? productsState.items : demoProducts;

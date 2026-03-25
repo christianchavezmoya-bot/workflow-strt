@@ -18,8 +18,8 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json"
   },
-  // Fail fast when server is unreachable so localStorage cache kicks in quickly
-  timeout: 8000,
+  // Only used when there is no cache — auth endpoints override this to 0
+  timeout: 5000,
 });
 
 type DebugLog = {
@@ -120,10 +120,10 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-// ── Global GET response cache ─────────────────────────────────────────────────
-// Every successful GET is stored in localStorage keyed by URL+params.
-// On network failure / timeout for a GET, we return the cached response so
-// every page automatically shows last-known data while offline.
+// ── Stale-while-revalidate GET cache ──────────────────────────────────────────
+// Strategy: serve cached data INSTANTLY on every GET, then update the cache
+// in the background. Data is always visible immediately — no waiting on network.
+// If there is no cache yet (first load), the network request runs normally.
 
 function apiCacheKey(url: string, params?: Record<string, unknown>): string {
   const q = params && Object.keys(params).length
@@ -132,17 +132,69 @@ function apiCacheKey(url: string, params?: Record<string, unknown>): string {
   return `api_cache_v2_${url}${q}`;
 }
 
+function cacheRead(key: string): unknown | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function cacheWrite(key: string, data: unknown): void {
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch {}
+}
+
 function isNetworkOrTimeoutError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const e = error as { code?: string; message?: string; response?: unknown };
-  if (e.response) return false;            // server replied (4xx/5xx) — not a network error
+  if (e.response) return false;
   return (
-    e.code === "ECONNABORTED" ||           // axios timeout
+    e.code === "ECONNABORTED" ||
     e.code === "ERR_NETWORK" ||
     e.message === "Network Error" ||
     !navigator.onLine
   );
 }
+
+// Wrap the default adapter with stale-while-revalidate for GET requests
+const defaultAdapter = api.defaults.adapter as (config: unknown) => Promise<unknown>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(api.defaults as any).adapter = async (config: any) => {
+  const isGet = config.method?.toLowerCase() === "get";
+  const isAuth = (config.url ?? "").includes("/auth/");
+
+  if (isGet && !isAuth && config.url) {
+    const key = apiCacheKey(config.url, config.params as Record<string, unknown>);
+    const cached = cacheRead(key);
+
+    if (cached !== null) {
+      // ── CACHE HIT: return instantly, refresh in background ──────────────
+      defaultAdapter(config)
+        .then((res: any) => {
+          cacheWrite(key, res.data);
+          // Notify subscribers that fresh data is available
+          window.dispatchEvent(new CustomEvent("api-cache-updated", {
+            detail: { url: config.url, data: res.data }
+          }));
+        })
+        .catch(() => {
+          // Server unreachable — cached data is still valid, signal offline
+          window.dispatchEvent(new Event("api-serving-cache"));
+        });
+
+      return {
+        data: cached,
+        status: 200,
+        statusText: "OK (cached)",
+        headers: {},
+        config,
+        request: null,
+      };
+    }
+  }
+
+  // ── NO CACHE: wait for network (first load or non-GET) ──────────────────
+  return defaultAdapter(config);
+};
 
 api.interceptors.response.use(
   (response) => {
@@ -157,12 +209,12 @@ api.interceptors.response.use(
       durationMs
     });
 
-    // Cache every successful GET response
+    // Persist every fresh GET response so the cache stays warm
     if (response.config.method?.toLowerCase() === "get" && response.config.url) {
-      try {
-        const key = apiCacheKey(response.config.url, response.config.params as Record<string, unknown>);
-        localStorage.setItem(key, JSON.stringify(response.data));
-      } catch { /* storage quota — ignore */ }
+      cacheWrite(
+        apiCacheKey(response.config.url, response.config.params as Record<string, unknown>),
+        response.data
+      );
     }
 
     return response;
@@ -182,24 +234,21 @@ api.interceptors.response.use(
       error: error?.message
     });
 
-    // ── Offline / timeout fallback for GET requests ───────────────────────────
+    // Last-resort fallback: if a network request fails (cache miss path) try cache
     if (config.method?.toLowerCase() === "get" && isNetworkOrTimeoutError(error) && config.url) {
-      try {
-        const key = apiCacheKey(config.url, config.params as Record<string, unknown>);
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          console.info(`[api] offline — serving cached response for ${config.url}`);
-          window.dispatchEvent(new Event("api-serving-cache"));
-          return Promise.resolve({
-            data: JSON.parse(raw),
-            status: 200,
-            statusText: "OK (cached)",
-            headers: {},
-            config,
-            request: null,
-          });
-        }
-      } catch { /* parse error — fall through */ }
+      const key = apiCacheKey(config.url, config.params as Record<string, unknown>);
+      const cached = cacheRead(key);
+      if (cached !== null) {
+        window.dispatchEvent(new Event("api-serving-cache"));
+        return Promise.resolve({
+          data: cached,
+          status: 200,
+          statusText: "OK (cached)",
+          headers: {},
+          config,
+          request: null,
+        });
+      }
     }
 
     if (status === 401) {

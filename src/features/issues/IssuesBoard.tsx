@@ -31,6 +31,7 @@ import {
 } from "@mui/icons-material";
 import { Link } from "react-router-dom";
 import { assetWorkflowRunService, type OpenIssueRecord } from "../../services/assetWorkflowRunService";
+import { useApiCacheUpdate } from "../../hooks/useApiCacheUpdate";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,8 @@ const IssuesBoard = () => {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useApiCacheUpdate("/workflow-runs", load);
+  useApiCacheUpdate("/issues", load);
 
   // ── Derived filter options ─────────────────────────────────────────────────
   const projectOptions = useMemo(() => {
