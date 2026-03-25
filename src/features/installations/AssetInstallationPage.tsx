@@ -74,7 +74,6 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { usePendingAssetIds } from "../../hooks/usePendingAssetIds";
-import { useApiCacheUpdate } from "../../hooks/useApiCacheUpdate";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
@@ -534,7 +533,6 @@ const AssetInstallationPage = () => {
     return () => window.removeEventListener("online", handleOnline);
   }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useApiCacheUpdate("/project-assets", refreshAssets);
 
   const selectedAddConfig = useMemo(
     () => configs.find((c) => c.id === addForm.configId) ?? null,
