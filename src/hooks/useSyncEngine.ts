@@ -180,9 +180,23 @@ export function useSyncEngine(): SyncState {
     return null;
   }, [refreshPending]);
 
+  // Track whether we're actively serving cached data (server unreachable)
+  const [servingCache, setServingCache] = useState(false);
+  useEffect(() => {
+    const handler = () => { setServingCache(true); };
+    const clear   = () => { setServingCache(false); };
+    window.addEventListener("api-serving-cache", handler);
+    window.addEventListener("online", clear);
+    return () => {
+      window.removeEventListener("api-serving-cache", handler);
+      window.removeEventListener("online", clear);
+    };
+  }, []);
+
   // ── Derived status ────────────────────────────────────────────────────────
   const status: SyncStatus =
     !isOnline        ? "offline"  :
+    servingCache     ? "offline"  :  // server unreachable even though OS says online
     syncing          ? "syncing"  :
     hasError         ? "error"    :
     pending > 0      ? "pending"  :

@@ -112,6 +112,30 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// ── Global GET response cache ─────────────────────────────────────────────────
+// Every successful GET is stored in localStorage keyed by URL+params.
+// On network failure / timeout for a GET, we return the cached response so
+// every page automatically shows last-known data while offline.
+
+function apiCacheKey(url: string, params?: Record<string, unknown>): string {
+  const q = params && Object.keys(params).length
+    ? "?" + new URLSearchParams(params as Record<string, string>).toString()
+    : "";
+  return `api_cache_v2_${url}${q}`;
+}
+
+function isNetworkOrTimeoutError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const e = error as { code?: string; message?: string; response?: unknown };
+  if (e.response) return false;            // server replied (4xx/5xx) — not a network error
+  return (
+    e.code === "ECONNABORTED" ||           // axios timeout
+    e.code === "ERR_NETWORK" ||
+    e.message === "Network Error" ||
+    !navigator.onLine
+  );
+}
+
 api.interceptors.response.use(
   (response) => {
     const meta = (response.config as typeof response.config & { metadata?: { start: number } }).metadata;
@@ -124,6 +148,15 @@ api.interceptors.response.use(
       status: response.status,
       durationMs
     });
+
+    // Cache every successful GET response
+    if (response.config.method?.toLowerCase() === "get" && response.config.url) {
+      try {
+        const key = apiCacheKey(response.config.url, response.config.params as Record<string, unknown>);
+        localStorage.setItem(key, JSON.stringify(response.data));
+      } catch { /* storage quota — ignore */ }
+    }
+
     return response;
   },
   (error) => {
@@ -140,9 +173,29 @@ api.interceptors.response.use(
       durationMs,
       error: error?.message
     });
+
+    // ── Offline / timeout fallback for GET requests ───────────────────────────
+    if (config.method?.toLowerCase() === "get" && isNetworkOrTimeoutError(error) && config.url) {
+      try {
+        const key = apiCacheKey(config.url, config.params as Record<string, unknown>);
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          console.info(`[api] offline — serving cached response for ${config.url}`);
+          window.dispatchEvent(new Event("api-serving-cache"));
+          return Promise.resolve({
+            data: JSON.parse(raw),
+            status: 200,
+            statusText: "OK (cached)",
+            headers: {},
+            config,
+            request: null,
+          });
+        }
+      } catch { /* parse error — fall through */ }
+    }
+
     if (status === 401) {
       const reqUrl = config.url ?? "";
-      // Don't redirect for login/refresh calls — they handle their own errors
       if (!reqUrl.includes("/auth/login") && !reqUrl.includes("/auth/refresh")) {
         localStorage.removeItem("auth_token");
         localStorage.removeItem("auth_user");
