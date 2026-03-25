@@ -526,6 +526,13 @@ const AssetInstallationPage = () => {
     });
   };
 
+  // Auto-refresh when connection returns after server was down
+  useEffect(() => {
+    const handleOnline = () => { refreshAssets(); };
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const selectedAddConfig = useMemo(
     () => configs.find((c) => c.id === addForm.configId) ?? null,
     [configs, addForm.configId],
@@ -2534,6 +2541,13 @@ const AssetInstallationPage = () => {
           </Typography>
         )}
       </Box>
+
+      {/* ── Offline cached-data banner ── */}
+      {!navigator.onLine && assets.length > 0 && (
+        <Alert severity="warning" sx={{ py: 0.5, fontSize: "0.78rem" }}>
+          Offline — showing cached data. Changes will sync when connection returns.
+        </Alert>
+      )}
 
       {/* ── Mobile card list ── */}
       {isMobile && (

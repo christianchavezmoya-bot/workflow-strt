@@ -17,7 +17,9 @@ const api = axios.create({
   baseURL: getApiBaseUrl(),
   headers: {
     "Content-Type": "application/json"
-  }
+  },
+  // Fail fast when server is unreachable so localStorage cache kicks in quickly
+  timeout: 8000,
 });
 
 type DebugLog = {
