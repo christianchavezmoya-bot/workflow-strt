@@ -1,4 +1,6 @@
-import { Avatar, Badge, Box, Button, CircularProgress, Divider, IconButton, ListItemIcon, Menu, MenuItem, Popover, Stack, TextField, Tooltip, Typography, Chip } from "@mui/material";
+import { Avatar, Badge, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, IconButton, InputAdornment, ListItemIcon, Menu, MenuItem, Popover, Stack, TextField, Tooltip, Typography, Chip } from "@mui/material";
+import SearchIcon from "@mui/icons-material/Search";
+import SwitchAccountOutlinedIcon from "@mui/icons-material/SwitchAccountOutlined";
 import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
 import ViewSidebarOutlinedIcon from "@mui/icons-material/ViewSidebarOutlined";
@@ -267,6 +269,64 @@ const Topbar = () => {
 
   const availableRoles = useMemo(() => getRolesFromCache(), []);
 
+  // ── Test-as-user switcher ─────────────────────────────────────────────────
+  const [testUserDialogOpen, setTestUserDialogOpen] = useState(false);
+  const [testUserSearch, setTestUserSearch] = useState("");
+  const [testUserList, setTestUserList] = useState<{ id: string; fullName: string; email: string; role: string }[]>([]);
+  const [testUserLoading, setTestUserLoading] = useState(false);
+  const isTestMode = !!localStorage.getItem("test_mode_original_auth");
+  const testModeName = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem("auth_user") ?? "")?.fullName ?? null; } catch { return null; }
+  }, []);
+
+  function openTestUserDialog() {
+    handleClose();
+    setTestUserSearch("");
+    setTestUserDialogOpen(true);
+    if (testUserList.length === 0) {
+      setTestUserLoading(true);
+      import("../../services/api").then(({ default: api }) =>
+        api.get("/users").then((res) => {
+          setTestUserList((res.data as any[]).map((u: any) => ({
+            id: u.id, fullName: u.fullName, email: u.email, role: u.role,
+          })));
+        }).catch(() => {}).finally(() => setTestUserLoading(false))
+      );
+    }
+  }
+
+  function activateTestUser(u: { id: string; fullName: string; email: string; role: string }) {
+    // Save original session so we can restore it
+    if (!localStorage.getItem("test_mode_original_auth")) {
+      const original = localStorage.getItem("auth_user") || localStorage.getItem("local_auth_user");
+      if (original) localStorage.setItem("test_mode_original_auth", original);
+    }
+    const testUser = { id: u.id, fullName: u.fullName, email: u.email, role: u.role, isActive: true, isFirstLogin: false, office: "" };
+    localStorage.setItem("auth_user", JSON.stringify(testUser));
+    localStorage.removeItem("dev_role_override");
+    window.dispatchEvent(new CustomEvent("dev-role-override-changed", { detail: { role: null } }));
+    window.dispatchEvent(new Event("auth-user-updated"));
+    setTestUserDialogOpen(false);
+  }
+
+  function exitTestMode() {
+    const original = localStorage.getItem("test_mode_original_auth");
+    if (original) {
+      localStorage.setItem("auth_user", original);
+      localStorage.removeItem("test_mode_original_auth");
+      localStorage.removeItem("dev_role_override");
+      window.dispatchEvent(new CustomEvent("dev-role-override-changed", { detail: { role: null } }));
+      window.dispatchEvent(new Event("auth-user-updated"));
+    }
+  }
+
+  const filteredTestUsers = useMemo(() =>
+    testUserList.filter(u =>
+      u.fullName.toLowerCase().includes(testUserSearch.toLowerCase()) ||
+      u.role.toLowerCase().includes(testUserSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(testUserSearch.toLowerCase())
+    ), [testUserList, testUserSearch]);
+
   return (
     <Box className="topbar">
       <Stack direction="row" spacing={2} alignItems="center">
@@ -447,6 +507,22 @@ const Topbar = () => {
             </Stack>
           </MenuItem>
           <Divider />
+          <MenuItem onClick={openTestUserDialog} sx={{ justifyContent: "space-between" }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <SwitchAccountOutlinedIcon fontSize="small" sx={{ color: "text.secondary" }} />
+              <Typography variant="body2">Test as user…</Typography>
+            </Stack>
+            {isTestMode && (
+              <Typography variant="caption" color="warning.main" sx={{ ml: 1 }} noWrap>
+                {testModeName}
+              </Typography>
+            )}
+          </MenuItem>
+          {isTestMode && (
+            <MenuItem onClick={() => { exitTestMode(); handleClose(); }}>
+              <Typography variant="body2" color="warning.main">Exit test mode</Typography>
+            </MenuItem>
+          )}
           <MenuItem
             onClick={(e) => setRoleMenuAnchor(e.currentTarget)}
             sx={{ justifyContent: "space-between" }}
@@ -509,6 +585,75 @@ const Topbar = () => {
           )}
         </Menu>
       </Stack>
+      {/* Test mode banner */}
+      {isTestMode && (
+        <Box sx={{
+          position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999,
+          bgcolor: "warning.main", color: "warning.contrastText",
+          px: 2, py: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 2,
+        }}>
+          <SwitchAccountOutlinedIcon sx={{ fontSize: 16 }} />
+          <Typography variant="caption" fontWeight={700}>
+            TEST MODE — viewing as {testModeName}
+          </Typography>
+          <Button size="small" variant="outlined"
+            sx={{ color: "warning.contrastText", borderColor: "warning.contrastText", py: 0, fontSize: "0.7rem" }}
+            onClick={exitTestMode}>
+            Exit
+          </Button>
+        </Box>
+      )}
+
+      {/* Test-as-user picker dialog */}
+      <Dialog open={testUserDialogOpen} onClose={() => setTestUserDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Test as user</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 0.5 }}>
+            <TextField
+              size="small" fullWidth autoFocus
+              placeholder="Search by name, role or email…"
+              InputLabelProps={{ shrink: true }}
+              value={testUserSearch}
+              onChange={(e) => setTestUserSearch(e.target.value)}
+              InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+            />
+            {testUserLoading ? (
+              <Stack alignItems="center" py={2}><CircularProgress size={24} /></Stack>
+            ) : filteredTestUsers.length === 0 ? (
+              <Typography variant="caption" color="text.disabled">No users found.</Typography>
+            ) : (
+              <Stack spacing={0.5} sx={{ maxHeight: 320, overflowY: "auto" }}>
+                {filteredTestUsers.map((u) => (
+                  <Box key={u.id}
+                    onClick={() => activateTestUser(u)}
+                    sx={{
+                      px: 1.5, py: 1, borderRadius: 1, cursor: "pointer", border: "1px solid",
+                      borderColor: "divider",
+                      "&:hover": { bgcolor: "rgba(45,212,191,0.08)", borderColor: "primary.main" },
+                    }}>
+                    <Stack direction="row" alignItems="center" justifyContent="space-between">
+                      <Box>
+                        <Typography variant="body2" fontWeight={600}>{u.fullName}</Typography>
+                        <Typography variant="caption" color="text.secondary">{u.email}</Typography>
+                      </Box>
+                      <Chip label={u.role} size="small" variant="outlined" sx={{ fontSize: "0.65rem", height: 20 }} />
+                    </Stack>
+                  </Box>
+                ))}
+              </Stack>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          {isTestMode && (
+            <Button color="warning" onClick={() => { exitTestMode(); setTestUserDialogOpen(false); }}>
+              Exit test mode
+            </Button>
+          )}
+          <Button onClick={() => setTestUserDialogOpen(false)}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
+
       <GlobalSearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
     </Box>
   );
