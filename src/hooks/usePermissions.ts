@@ -3,10 +3,15 @@ import { roleConfigService, RolePermissions } from "../services/roleConfigServic
 import { useAuth } from "./useAuth";
 
 const FALLBACK_PERMISSIONS: Record<string, RolePermissions> = {
-  Admin: { viewOnly: false, createDeleteTables: true, createUsers: true, editFields: true, modifyData: true, editForms: true },
-  "Project Manager": { viewOnly: false, createDeleteTables: true, createUsers: false, editFields: true, modifyData: true, editForms: true },
-  Engineer: { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true, editForms: false },
-  Viewer: { viewOnly: true, createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false },
+  Admin:             { viewOnly: false, createDeleteTables: true,  createUsers: true,  editFields: true,  modifyData: true,  editForms: true  },
+  "Project Manager": { viewOnly: false, createDeleteTables: true,  createUsers: false, editFields: true,  modifyData: true,  editForms: true  },
+  Supervisor:        { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: true,  editForms: true  },
+  Engineer:          { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: false },
+  "QA Inspector":    { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: true  },
+  Installer:         { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: false, editForms: true  },
+  Technician:        { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: true  },
+  Client:            { viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false },
+  Viewer:            { viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false },
 };
 
 export const usePermissions = () => {

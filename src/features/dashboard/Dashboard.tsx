@@ -59,9 +59,11 @@ const WINDOW_OPTIONS = [30, 60, 90, 180];
 const Dashboard = () => {
   const navigate   = useNavigate();
   const { user }   = useAuth();
-  const isManager  = user.role === "Admin" || user.role === "Project Manager";
-  const isEngineer = user.role === "Engineer";
-  const isViewer   = user.role === "Viewer";
+  const isManager    = user.role === "Admin" || user.role === "Project Manager";
+  const isSupervisor = user.role === "Supervisor";
+  const isEngineer   = user.role === "Engineer" || user.role === "QA Inspector";
+  const isInstaller  = user.role === "Installer" || user.role === "Technician";
+  const isViewer     = user.role === "Viewer" || user.role === "Client";
 
   const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch      = useAppDispatch();
