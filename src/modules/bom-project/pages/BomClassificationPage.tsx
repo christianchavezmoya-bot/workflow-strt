@@ -278,6 +278,7 @@ export default function BomClassificationPage() {
               <TableCell align="right"><Typography variant="caption" fontWeight={700}>Qty</Typography></TableCell>
               <TableCell align="right"><Typography variant="caption" fontWeight={700}>Unit Price</Typography></TableCell>
               <TableCell><Typography variant="caption" fontWeight={700}>Type</Typography></TableCell>
+              <TableCell><Typography variant="caption" fontWeight={700}>Inventory</Typography></TableCell>
               {state.selectedProduct && (
                 <TableCell><Typography variant="caption" fontWeight={700}>In Product</Typography></TableCell>
               )}
@@ -357,6 +358,15 @@ export default function BomClassificationPage() {
                         </Tooltip>
                       )}
                     </Stack>
+                  </TableCell>
+                  <TableCell>
+                    {itemType === "asset" || itemType === "component" ? (
+                      <Chip label="Inventory" size="small" color="success" variant="outlined" sx={{ height: 20, fontSize: "0.68rem" }} />
+                    ) : itemType === "consumable" ? (
+                      <Chip label="Non-Inventory" size="small" color="default" variant="outlined" sx={{ height: 20, fontSize: "0.68rem" }} />
+                    ) : (
+                      <Typography variant="caption" color="text.disabled">—</Typography>
+                    )}
                   </TableCell>
                   {state.selectedProduct && (() => {
                     const match = matchedFeature(row);

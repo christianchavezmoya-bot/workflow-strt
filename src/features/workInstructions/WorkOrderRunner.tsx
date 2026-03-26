@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessTimeOutlined,
+  AttachMoneyOutlined,
   CheckCircleOutlined,
   CloudOffOutlined,
   CommentOutlined,
@@ -1602,12 +1604,18 @@ export default function WorkOrderRunner({
                       onChange={(e) => setFlagIsScopeDeviation(e.target.checked)}
                     />
                   }
-                  label={<Typography variant="caption">Scope deviation</Typography>}
+                  label={
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <Typography variant="caption">Scope variation</Typography>
+                      <AttachMoneyOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
+                      <AccessTimeOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
+                    </Stack>
+                  }
                 />
               </Stack>
               {flagIsScopeDeviation && (
                 <Typography variant="caption" color="warning.main" display="block">
-                  Work discovered outside the original scope (e.g. additional cabling, unforeseen access requirements).
+                  Work discovered outside the original scope (e.g. additional cabling, unforeseen access requirements). This is a scope variation.
                 </Typography>
               )}
 
@@ -1644,7 +1652,7 @@ export default function WorkOrderRunner({
                               {issue.resolved
                                 ? <Chip size="small" label="Resolved" color="success" sx={{ height: 18, fontSize: 10 }} />
                                 : <Chip size="small"
-                                    label={issue.issueType === "scope-deviation" ? "Scope Dev." : issue.isBlocking ? "Blocking" : "Observation"}
+                                    label={issue.issueType === "scope-deviation" ? "Scope Var." : issue.isBlocking ? "Blocking" : "Observation"}
                                     color={issue.issueType === "scope-deviation" ? "warning" : issue.isBlocking ? "error" : "warning"}
                                     sx={{ height: 18, fontSize: 10 }} />
                               }
@@ -1675,7 +1683,7 @@ export default function WorkOrderRunner({
                 fullWidth
                 multiline
                 rows={2}
-                label={flagIssueType === "scope-deviation" ? "Describe the out-of-scope work" : "Describe/Add issue here"}
+                label={flagIssueType === "scope-deviation" ? "Describe the scope variation" : "Describe/Add issue here"}
                 placeholder={flagIssueType === "scope-deviation" ? "e.g. Additional conduit run required due to obstructed original route…" : "Describe what you observed…"}
                 value={flagDescription}
                 onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
@@ -1847,7 +1855,7 @@ export default function WorkOrderRunner({
                   )}
                   {issues.filter((i) => i.issueType === "scope-deviation").length > 0 && (
                     <Typography component="span" variant="caption" color="warning.main" sx={{ ml: 1 }}>
-                      · {issues.filter((i) => i.issueType === "scope-deviation").length} scope deviation{issues.filter((i) => i.issueType === "scope-deviation").length !== 1 ? "s" : ""}
+                      · {issues.filter((i) => i.issueType === "scope-deviation").length} scope variation{issues.filter((i) => i.issueType === "scope-deviation").length !== 1 ? "s" : ""}
                     </Typography>
                   )}
                 </Typography>
@@ -1878,7 +1886,7 @@ export default function WorkOrderRunner({
                             {issue.resolved
                               ? <Chip size="small" label="Resolved" color="success" sx={{ flexShrink: 0 }} />
                               : <Chip size="small"
-                                  label={issue.issueType === "scope-deviation" ? "Scope Dev." : issue.isBlocking ? "Blocking" : "Observation"}
+                                  label={issue.issueType === "scope-deviation" ? "Scope Var." : issue.isBlocking ? "Blocking" : "Observation"}
                                   color={issue.issueType === "scope-deviation" ? "warning" : issue.isBlocking ? "error" : "default"}
                                   sx={{ flexShrink: 0 }} />
                             }

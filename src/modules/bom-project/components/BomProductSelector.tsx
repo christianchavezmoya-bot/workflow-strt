@@ -81,6 +81,8 @@ export default function BomProductSelector() {
     setProductId(id);
     const prod = products.find((p) => p.id === id) ?? null;
     dispatch({ type: "SET_SELECTED_PRODUCT", payload: prod });
+    // Auto-populate division from the selected product
+    if (prod?.divisionId) setDivisionId(prod.divisionId);
   };
 
   const handleDivisionChange = (id: string) => {

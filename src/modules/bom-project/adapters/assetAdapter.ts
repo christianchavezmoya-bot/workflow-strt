@@ -16,6 +16,7 @@ export const assetAdapter = {
     for (const asset of assets) {
       const payload: Record<string, unknown> = {
         projectId,
+        assetTag: asset.partNumber ?? "",
         assetName: asset.assetName,
         assetType: asset.assetType ?? "",
         location: asset.location ?? "",

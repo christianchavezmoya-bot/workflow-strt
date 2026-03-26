@@ -90,6 +90,7 @@ export async function commitDraft(
     status: "Draft",
     isInstallationProject: true,
     installationMode: "Multiple Installations",
+    productIds: publishDetails?.productId ? [publishDetails.productId] : [],
   });
 
   const warnings: string[] = [];

@@ -127,4 +127,9 @@ export interface WorkloadSummaryItem {
   notStarted: number;
   inProgress: number;
   totalAssigned: number;
+  jobNumbers: string[];
+  hasIssues: boolean;
+  completedSteps: number;
+  totalSteps: number;
+  startedAt?: string;
 }

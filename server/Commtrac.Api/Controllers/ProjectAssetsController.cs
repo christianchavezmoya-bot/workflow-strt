@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -58,20 +59,101 @@ public class ProjectAssetsController : ControllerBase
                      && (a.Status == "NotStarted" || a.Status == "InProgress"))
             .ToListAsync();
 
-        var userIds = assets.Select(a => a.AssignedUserId!).Distinct().ToList();
+        var userIds   = assets.Select(a => a.AssignedUserId!).Distinct().ToList();
+        var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
+        var assetIds   = assets.Select(a => a.Id).Distinct().ToList();
+
         var users = await _db.Users
             .Where(u => userIds.Contains(u.Id))
             .Select(u => new { u.Id, u.FullName })
             .ToDictionaryAsync(u => u.Id, u => u.FullName);
 
+        var projects = await _db.Projects
+            .Where(p => projectIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.JobNumber })
+            .ToDictionaryAsync(p => p.Id, p => p.JobNumber);
+
+        // Get latest in-progress run per asset for start time
+        var runs = await _db.AssetWorkflowRuns
+            .Where(r => assetIds.Contains(r.AssetId) && r.Status == "InProgress")
+            .OrderByDescending(r => r.StartedAt)
+            .ToListAsync();
+
+        var latestRunByAsset = runs
+            .GroupBy(r => r.AssetId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
         var summary = assets
             .GroupBy(a => a.AssignedUserId!)
-            .Select(g => new WorkloadSummaryDto(
-                g.Key,
-                users.TryGetValue(g.Key, out var name) ? name : "Unknown",
-                g.Count(a => a.Status == "NotStarted"),
-                g.Count(a => a.Status == "InProgress"),
-                g.Count()))
+            .Select(g =>
+            {
+                var userId = g.Key;
+                var name   = users.TryGetValue(userId, out var n) ? n : "Unknown";
+                var inProgressAssets = g.Where(a => a.Status == "InProgress").ToList();
+
+                // Distinct job numbers
+                var jobNumbers = g
+                    .Select(a => projects.TryGetValue(a.ProjectId, out var j) ? j : null)
+                    .Where(j => j != null)
+                    .Distinct()
+                    .ToList()!;
+
+                // Any unresolved issues across assets
+                bool hasIssues = inProgressAssets.Any(a =>
+                {
+                    if (string.IsNullOrEmpty(a.IssuesJson) || a.IssuesJson == "[]") return false;
+                    try
+                    {
+                        var issues = JsonSerializer.Deserialize<List<JsonElement>>(a.IssuesJson, opts) ?? [];
+                        return issues.Any(i =>
+                        {
+                            i.TryGetProperty("resolved", out var r);
+                            return r.ValueKind != JsonValueKind.True;
+                        });
+                    }
+                    catch { return false; }
+                });
+
+                // Step progress from in-progress workflow runs
+                int completedSteps = 0, totalSteps = 0;
+                foreach (var asset in inProgressAssets)
+                {
+                    if (!latestRunByAsset.TryGetValue(asset.Id, out var run)) continue;
+                    try
+                    {
+                        var results = JsonSerializer.Deserialize<JsonElement[]>(run.StepResultsJson ?? "[]", opts);
+                        completedSteps += results?.Length ?? 0;
+                    }
+                    catch { }
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(run.WorkflowSnapshotJson ?? "{}");
+                        if (doc.RootElement.TryGetProperty("steps", out var steps))
+                            totalSteps += steps.GetArrayLength();
+                    }
+                    catch { }
+                }
+
+                // Earliest start time for in-progress assets
+                DateTime? startedAt = inProgressAssets
+                    .Select(a => latestRunByAsset.TryGetValue(a.Id, out var r) ? r.StartedAt : (DateTime?)null)
+                    .Where(d => d != null)
+                    .OrderBy(d => d)
+                    .FirstOrDefault();
+
+                return new WorkloadSummaryDto(
+                    userId, name,
+                    g.Count(a => a.Status == "NotStarted"),
+                    g.Count(a => a.Status == "InProgress"),
+                    g.Count(),
+                    jobNumbers!,
+                    hasIssues,
+                    completedSteps,
+                    totalSteps,
+                    startedAt?.ToString("o"));
+            })
             .OrderByDescending(w => w.TotalAssigned)
             .ToList();
 

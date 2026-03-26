@@ -586,8 +586,13 @@ const ProjectForm = () => {
         }
       }
       navigate("/projects");
-    } catch {
-      setSubmitError("Unable to save project. Check API availability.");
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 403 || status === 401) {
+        setSubmitError("You don't have permission to save projects. Contact your Project Manager or Admin.");
+      } else {
+        setSubmitError("Unable to save project. Check API availability.");
+      }
       pushUiLog("ProjectForm submit failed", "API error");
     }
   };
@@ -1388,175 +1393,6 @@ const ProjectForm = () => {
 
             {visibleIdSet.has("products") && renderFormField("products")}
             <Grid item xs={12} md={6} />
-            {selectedProductFeatures.length > 0 && (
-              <Grid item xs={12}>
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  Product Features: {selectedProduct?.name}
-                </Typography>
-                <Grid container spacing={2}>
-                  {selectedProductFeatures.map((feature) => {
-                    const key = `${selectedProductId}:${feature.id}`;
-                    const value = productFeatureValues[key] || "";
-                    const setVal = (v: string) => setProductFeatureValues((prev) => ({ ...prev, [key]: v }));
-
-                    if (feature.valueType === "tri-state") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <Stack spacing={0.5}>
-                            <Typography variant="caption" color="text.secondary">{feature.name}</Typography>
-                            <ToggleButtonGroup
-                              value={value || null}
-                              exclusive
-                              onChange={(_, next) => { if (next !== null) setVal(next); }}
-                              size="small"
-                            >
-                              <ToggleButton value="yes">Yes</ToggleButton>
-                              <ToggleButton value="no">No</ToggleButton>
-                              <ToggleButton value="na">N/A</ToggleButton>
-                            </ToggleButtonGroup>
-                          </Stack>
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "single-select") {
-                      const options = feature.options || [];
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <FormControl fullWidth size="small">
-                            <InputLabel>{feature.name}</InputLabel>
-                            <Select label={feature.name} value={value} onChange={(event) => setVal(event.target.value)}>
-                              {options.map((option) => (
-                                <MenuItem key={option} value={option}>{option}</MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "multi-select") {
-                      const options = feature.options || [];
-                      const selectedValues = value ? value.split(",").map((x) => x.trim()).filter(Boolean) : [];
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <FormControl fullWidth>
-                            <FormLabel>{feature.name}</FormLabel>
-                            <Select
-                              multiple
-                              value={selectedValues}
-                              onChange={(event) => {
-                                const next = Array.isArray(event.target.value) ? event.target.value : [];
-                                setVal(next.join(","));
-                              }}
-                              renderValue={(selected) => (Array.isArray(selected) ? selected.join(", ") : "")}
-                            >
-                              {options.map((option) => (
-                                <MenuItem key={option} value={option}>
-                                  <Checkbox checked={selectedValues.includes(option)} />
-                                  <ListItemText primary={option} />
-                                </MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "rating") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <Stack spacing={0.5}>
-                            <Typography variant="caption" color="text.secondary">{feature.name}</Typography>
-                            <Rating
-                              value={parseInt(value) || 0}
-                              onChange={(_, next) => setVal(next ? String(next) : "")}
-                            />
-                          </Stack>
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "percentage") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <TextField
-                            label={`${feature.name} (%)`}
-                            fullWidth
-                            type="number"
-                            inputProps={{ min: 0, max: 100 }}
-                            value={value}
-                            onChange={(event) => setVal(event.target.value)}
-                          />
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "date") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <TextField
-                            label={feature.name}
-                            fullWidth
-                            type="date"
-                            value={value}
-                            onChange={(event) => setVal(event.target.value)}
-                            InputLabelProps={{ shrink: true }}
-                          />
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "rich-text") {
-                      return (
-                        <Grid item xs={12} key={key}>
-                          <TextField
-                            label={feature.name}
-                            fullWidth
-                            multiline
-                            rows={3}
-                            value={value}
-                            onChange={(event) => setVal(event.target.value)}
-                          />
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "link") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <TextField
-                            label={feature.name}
-                            fullWidth
-                            type="url"
-                            placeholder="https://"
-                            value={value}
-                            onChange={(event) => setVal(event.target.value)}
-                          />
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "file") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <TextField
-                            label={feature.name}
-                            fullWidth
-                            placeholder="File URL or path"
-                            value={value}
-                            onChange={(event) => setVal(event.target.value)}
-                          />
-                        </Grid>
-                      );
-                    }
-                    return (
-                      <Grid item xs={12} md={6} key={key}>
-                        <TextField
-                          label={feature.name}
-                          fullWidth
-                          type={feature.valueType === "number" ? "number" : "text"}
-                          value={value}
-                          onChange={(event) => setVal(event.target.value)}
-                        />
-                      </Grid>
-                    );
-                  })}
-                </Grid>
-              </Grid>
-            )}
 
             {visibleIdSet.has("projectManager") && renderFormField("projectManager")}
             {visibleIdSet.has("office") ? renderFormField("office") : <Grid item xs={12} md={6} />}

@@ -102,6 +102,8 @@ import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { BomItem, StepInput, Workflow } from "../../types/workflow";
 import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
+import { siteService } from "../../services/siteService";
+import type { Site } from "../../types/site";
 import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
@@ -262,6 +264,7 @@ const AssetInstallationPage = () => {
   const [statusFilter, setStatusFilter] = useState<ProjectAssetStatus | "All">("All");
   const [search, setSearch] = useState("");
 
+  const [sites, setSites] = useState<Site[]>([]);
   const [assets, setAssets] = useState<ProjectAsset[]>([]);
   const [configs, setConfigs] = useState<ProductConfig[]>([]);
   const [publishedWfConfigs, setPublishedWfConfigs] = useState<WorkflowConfig[]>([]);
@@ -286,9 +289,13 @@ const AssetInstallationPage = () => {
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
 
-  // Delete
+  // Delete (single)
   const [deleteAsset, setDeleteAsset] = useState<ProjectAsset | null>(null);
   const [deletingAsset, setDeletingAsset] = useState(false);
+
+  // Bulk delete
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Work order runner
   const [runnerOpen, setRunnerOpen] = useState(false);
@@ -410,6 +417,7 @@ const AssetInstallationPage = () => {
     dispatch(fetchProducts());
     dispatch(fetchProjects());
     dispatch(fetchUsers());
+    siteService.getSites().then(setSites).catch(() => {});
   }, [dispatch]);
 
   const products = useMemo(
@@ -707,6 +715,15 @@ const AssetInstallationPage = () => {
   // Edit asset
   // ------------------------------------------------------------------
 
+  /** Returns "Address, City" for a project's site, or empty string if unavailable */
+  function getSiteLocation(siteId?: string): string {
+    if (!siteId) return "";
+    const site = sites.find((s) => s.id === siteId);
+    if (!site) return "";
+    const parts = [site.address, site.city].filter(Boolean);
+    return parts.join(", ");
+  }
+
   function openEditAsset(asset: ProjectAsset) {
     let fv: Record<string, string> = {};
     try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
@@ -719,7 +736,7 @@ const AssetInstallationPage = () => {
       serialNumber: asset.serialNumber ?? "",
       assetModel: asset.assetModel ?? "",
       manufacturer: asset.manufacturer ?? "",
-      location: asset.location ?? "",
+      location: asset.location || getSiteLocation(projectMap.get(asset.projectId)?.siteId),
       assignedUserId: asset.assignedUserId ?? "",
       notes: asset.notes ?? "",
       featureValues: fv,
@@ -786,6 +803,21 @@ const AssetInstallationPage = () => {
       alert("Failed to delete asset.");
     } finally {
       setDeletingAsset(false);
+    }
+  }
+
+  async function confirmBulkDelete() {
+    setBulkDeleting(true);
+    const ids = Array.from(selectedAssetIds);
+    try {
+      await Promise.all(ids.map((id) => projectAssetService.remove(id)));
+      setSelectedAssetIds(new Set());
+      setBulkDeleteOpen(false);
+      refreshAssets();
+    } catch {
+      alert("One or more assets could not be deleted.");
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -2453,6 +2485,16 @@ const AssetInstallationPage = () => {
             Export CSV
           </Button>
 
+          {/* Bulk delete */}
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            onClick={() => setBulkDeleteOpen(true)}
+          >
+            Delete selected
+          </Button>
+
           <Button size="small" color="inherit" onClick={() => setSelectedAssetIds(new Set())}>
             Clear
           </Button>
@@ -2700,7 +2742,7 @@ const AssetInstallationPage = () => {
                   setAddForm((p) => ({
                     ...p,
                     projectId: projId,
-                    location: p.location || proj?.siteName || "",
+                    location: p.location || getSiteLocation(proj?.siteId) || proj?.siteName || "",
                   }));
                 }}
               >
@@ -2936,6 +2978,26 @@ const AssetInstallationPage = () => {
           <Button variant="contained" color="error" onClick={confirmDeleteAsset} disabled={deletingAsset}
             startIcon={deletingAsset ? <CircularProgress size={14} /> : undefined}>
             {deletingAsset ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk delete confirmation */}
+      <Dialog open={bulkDeleteOpen} onClose={() => !bulkDeleting && setBulkDeleteOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete {selectedAssetIds.size} Asset{selectedAssetIds.size !== 1 ? "s" : ""}?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" gutterBottom>
+            You are about to permanently delete <strong>{selectedAssetIds.size}</strong> asset{selectedAssetIds.size !== 1 ? "s" : ""}. This cannot be undone.
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Associated workflow runs, issues, and documents will also be removed.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkDeleteOpen(false)} disabled={bulkDeleting}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={confirmBulkDelete} disabled={bulkDeleting}
+            startIcon={bulkDeleting ? <CircularProgress size={14} /> : undefined}>
+            {bulkDeleting ? "Deleting…" : `Delete ${selectedAssetIds.size}`}
           </Button>
         </DialogActions>
       </Dialog>

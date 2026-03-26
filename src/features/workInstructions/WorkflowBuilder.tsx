@@ -391,11 +391,15 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     stepId: string; type: StepType; featureId: string; unitIndex: number;
   } | null>(null);
 
+  // Generic confirm dialog
+  const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
+
   // Build a step patch from a type template
-  function buildStepTemplate(type: StepType, featureId: string, unitIndex: number): Partial<WorkflowStep> {
+  function buildStepTemplate(type: StepType, featureId: string, unitIndex: number, selectedDepIds?: string[]): Partial<WorkflowStep> {
     const feat = productFeatures.find((f) => f.id === featureId);
     const featName = feat?.name ?? "Unit";
-    const deps = feat?.subProperties ?? [];
+    const allDeps = feat?.subProperties ?? [];
+    const deps = selectedDepIds ? allDeps.filter((d) => selectedDepIds.includes(d.id)) : allDeps;
     const u = uid;
     const mkCheck = (label: string, fid?: string): StepInput =>
       ({ id: u(), type: "checkbox", label, required: true, ...(fid ? { featureId: fid } : {}) });
@@ -966,10 +970,13 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               color="warning"
               startIcon={<RestartAltOutlined />}
               onClick={() => {
-                if (window.confirm("Reset to blank workflow? This will remove all current steps.")) {
-                  importedRef.current = true;
-                  setWorkflow(createDefaultWorkflow(productId, productName));
-                }
+                setConfirmDialog({
+                  message: "Reset to blank workflow? This will remove all current steps.",
+                  onConfirm: () => {
+                    importedRef.current = true;
+                    setWorkflow(createDefaultWorkflow(productId, productName));
+                  },
+                });
               }}
             >
               Reset
@@ -1026,11 +1033,22 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
                   disabled={!featureSelections.some((s) => s.activeCount > 0)}
                   onClick={() => {
                     const hasSteps = workflow.steps.length > 0;
-                    if (hasSteps && !window.confirm("This will replace all current steps with a new auto-generated workflow. Continue?")) return;
-                    const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current);
-                    importedRef.current = true;
-                    updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
-                    importedRef.current = false;
+                    if (!hasSteps) {
+                      const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current);
+                      importedRef.current = true;
+                      updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
+                      importedRef.current = false;
+                      return;
+                    }
+                    setConfirmDialog({
+                      message: "This will replace all current steps with a new auto-generated workflow. Continue?",
+                      onConfirm: () => {
+                        const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current);
+                        importedRef.current = true;
+                        updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
+                        importedRef.current = false;
+                      },
+                    });
                   }}
                 >
                   {workflow.steps.length > 0 ? "Regenerate Workflow" : "Create Workflow"}
@@ -1061,7 +1079,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               ensureConfigId={ensureConfigId}
               productFeatures={productFeatures}
               featureSelections={featureSelections}
-              onApplyStepTemplate={(type, featureId, unitIndex) => {
+              onApplyStepTemplate={(type, featureId, unitIndex, selectedDepIds) => {
                 const step = workflow.steps.find((s) => s.id === selectedStep.id);
                 const hasContent = step && (
                   (step.inputs?.length ?? 0) > 0 ||
@@ -1071,7 +1089,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
                 if (hasContent && type !== "custom") {
                   setStepTypeConfirm({ stepId: selectedStep.id, type, featureId: featureId ?? "", unitIndex: unitIndex ?? 1 });
                 } else {
-                  updateStep(selectedStep.id, buildStepTemplate(type, featureId ?? "", unitIndex ?? 1));
+                  updateStep(selectedStep.id, buildStepTemplate(type, featureId ?? "", unitIndex ?? 1, selectedDepIds));
                 }
               }}
               onStepChange={(patch) => updateStep(selectedStep.id, patch)}
@@ -1261,6 +1279,26 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
         );
       })()}
 
+      {/* Generic confirm dialog (replaces window.confirm) */}
+      {confirmDialog && (
+        <Dialog open onClose={() => setConfirmDialog(null)} maxWidth="xs" fullWidth>
+          <DialogTitle>Warning</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2">{confirmDialog.message}</Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setConfirmDialog(null)}>Cancel</Button>
+            <Button
+              variant="contained"
+              color="warning"
+              onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}
+            >
+              Continue
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
     </Stack>
   );
 };
@@ -1440,6 +1478,29 @@ function ConnectivityAudit({ steps }: { steps: WorkflowStep[] }) {
 }
 
 // ------------------------------------------------------------------
+// OptionsField — local string state so commas can be typed mid-word
+// ------------------------------------------------------------------
+
+function OptionsField({ options, onCommit }: { options: string[]; onCommit: (opts: string[]) => void }) {
+  const [raw, setRaw] = React.useState((options || []).join(", "));
+  React.useEffect(() => {
+    setRaw((options || []).join(", "));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options.join(",")]);
+  return (
+    <TextField
+      label="Options (comma-separated)"
+      size="small"
+      fullWidth
+      value={raw}
+      onChange={(e) => setRaw(e.target.value)}
+      onBlur={() => onCommit(raw.split(",").map((x) => x.trim()).filter(Boolean))}
+      placeholder="Option A, Option B, Option C"
+    />
+  );
+}
+
+// ------------------------------------------------------------------
 // StepEditorPanel
 // ------------------------------------------------------------------
 
@@ -1451,7 +1512,7 @@ interface StepEditorPanelProps {
   ensureConfigId: () => Promise<string | null>;
   productFeatures: ProductFeatureDefinition[];
   featureSelections?: FeatureSelection[];
-  onApplyStepTemplate: (type: StepType, featureId?: string, unitIndex?: number) => void;
+  onApplyStepTemplate: (type: StepType, featureId?: string, unitIndex?: number, selectedDepIds?: string[]) => void;
   onStepChange: (patch: Partial<WorkflowStep>) => void;
   onAddDecision: () => void;
   onUpdateDecision: (id: string, patch: Partial<Decision>) => void;
@@ -1496,7 +1557,7 @@ function StepEditorPanel({
   const [pendingUnit, setPendingUnit] = useState(1);
 
   // Reset pending when switching steps
-  useEffect(() => { setPendingType(""); setPendingFeatureId(""); setPendingUnit(1); }, [step.id]);
+  useEffect(() => { setPendingType(""); setPendingFeatureId(""); setPendingUnit(1); setSelectedDepIds(new Set()); }, [step.id]);
 
   useEffect(() => {
     setShowReportText(step.overrideInReport);
@@ -1513,10 +1574,31 @@ function StepEditorPanel({
   const needsFeaturePicker = pendingType === "installation" || pendingType === "data-collection";
   const maxUnits = includedFeatures.find((f) => f.id === pendingFeatureId)?.qty ?? 1;
 
+  // For data-collection: which deps to include
+  const [selectedDepIds, setSelectedDepIds] = useState<Set<string>>(new Set());
+  const pendingFeatureDeps = pendingType === "data-collection" && pendingFeatureId
+    ? (productFeatures.find((f) => f.id === pendingFeatureId)?.subProperties ?? [])
+    : [];
+
+  // When feature changes in data-collection mode, select all deps by default
+  useEffect(() => {
+    if (pendingType === "data-collection" && pendingFeatureId) {
+      const deps = productFeatures.find((f) => f.id === pendingFeatureId)?.subProperties ?? [];
+      setSelectedDepIds(new Set(deps.map((d) => d.id)));
+    } else {
+      setSelectedDepIds(new Set());
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingType, pendingFeatureId]);
+
   function handleApply() {
     if (!pendingType) return;
-    onApplyStepTemplate(pendingType as StepType, pendingFeatureId || undefined, pendingUnit);
+    const depIds = pendingType === "data-collection" && pendingFeatureDeps.length > 0
+      ? Array.from(selectedDepIds)
+      : undefined;
+    onApplyStepTemplate(pendingType as StepType, pendingFeatureId || undefined, pendingUnit, depIds);
     setPendingType("");
+    setSelectedDepIds(new Set());
   }
 
   return (
@@ -1581,13 +1663,45 @@ function StepEditorPanel({
                 )}
               </Stack>
             )}
+            {/* Dep selector for data-collection steps */}
+            {pendingType === "data-collection" && pendingFeatureId && pendingFeatureDeps.length > 0 && (
+              <Stack spacing={0.5}>
+                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                  Select fields to collect:
+                </Typography>
+                <Stack direction="row" flexWrap="wrap" gap={0.5} useFlexGap>
+                  {pendingFeatureDeps.map((dep) => {
+                    const checked = selectedDepIds.has(dep.id);
+                    return (
+                      <Chip
+                        key={dep.id}
+                        label={dep.name}
+                        size="small"
+                        color={checked ? "primary" : "default"}
+                        variant={checked ? "filled" : "outlined"}
+                        onClick={() => setSelectedDepIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(dep.id)) next.delete(dep.id);
+                          else next.add(dep.id);
+                          return next;
+                        })}
+                        sx={{ cursor: "pointer" }}
+                      />
+                    );
+                  })}
+                </Stack>
+                <Typography variant="caption" color="text.disabled">
+                  {selectedDepIds.size} of {pendingFeatureDeps.length} selected — click to toggle
+                </Typography>
+              </Stack>
+            )}
             {pendingType && (
               <Stack direction="row" spacing={1}>
                 <Button size="small" variant="contained" onClick={handleApply}
                   disabled={needsFeaturePicker && !pendingFeatureId && includedFeatures.length > 0}>
                   Apply template
                 </Button>
-                <Button size="small" onClick={() => setPendingType("")}>Cancel</Button>
+                <Button size="small" onClick={() => { setPendingType(""); setSelectedDepIds(new Set()); }}>Cancel</Button>
               </Stack>
             )}
           </Stack>
@@ -1948,17 +2062,9 @@ function InputsSection({
                   </Stack>
                 </Stack>
                 {inp.type === "choice" && (
-                  <TextField
-                    label="Options (comma-separated)"
-                    size="small"
-                    fullWidth
-                    value={(inp.options || []).join(", ")}
-                    onChange={(e) =>
-                      onUpdateInput(inp.id, {
-                        options: e.target.value.split(",").map((x) => x.trim()).filter(Boolean),
-                      })
-                    }
-                    placeholder="Option A, Option B, Option C"
+                  <OptionsField
+                    options={inp.options || []}
+                    onCommit={(opts) => onUpdateInput(inp.id, { options: opts })}
                   />
                 )}
               </Stack>

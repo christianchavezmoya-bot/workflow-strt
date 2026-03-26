@@ -1194,7 +1194,13 @@ public record OpenIssueDto(
 public record CloneAssetsResult(int AssetsCloned, int AssignmentsCloned);
 
 /// <summary>Per-technician open-asset counts for the Dashboard workload panel.</summary>
-public record WorkloadSummaryDto(string UserId, string FullName, int NotStarted, int InProgress, int TotalAssigned);
+public record WorkloadSummaryDto(
+    string UserId, string FullName,
+    int NotStarted, int InProgress, int TotalAssigned,
+    List<string> JobNumbers,
+    bool HasIssues,
+    int CompletedSteps, int TotalSteps,
+    string? StartedAt);
 
 /// <summary>Open (not-yet-complete) asset with parent project context for the Dashboard Active Installations panel.</summary>
 public record OpenAssetDto(
@@ -1210,4 +1216,50 @@ public record OpenAssetDto(
     string Status,
     string? AssignedUserId,
     string? Location
+);
+
+// ── Dashboard: Evidence Completeness ──────────────────────────────────────
+
+public record EvidenceCompletenessDto(
+    int WindowDays,
+    int TotalRuns,
+    int Signed,
+    int SignedPct,
+    int AllStepsComplete,
+    int AllStepsCompletePct,
+    int HasMedia,
+    int HasMediaPct,
+    int NoOpenIssues,
+    int NoOpenIssuesPct,
+    int OverallScore,
+    List<EvidenceProjectDto> ByProject
+);
+
+public record EvidenceProjectDto(
+    string ProjectId,
+    string JobNumber,
+    string CustomerName,
+    int RunCount,
+    int Score
+);
+
+// ── Dashboard: Workflow Health Score ──────────────────────────────────────
+
+public record WorkflowHealthDto(
+    int WindowDays,
+    int OverallScore,
+    int PreviousScore,
+    int ScoreDelta,
+    int TotalRuns,
+    int CompletionRate,
+    int FirstRunSuccessRate,
+    int StepPassRate,
+    int CleanClosureRate,
+    List<WorkflowTypeHealthDto> ByType
+);
+
+public record WorkflowTypeHealthDto(
+    string TypeName,
+    int RunCount,
+    int Score
 );
