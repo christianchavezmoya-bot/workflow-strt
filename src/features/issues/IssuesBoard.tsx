@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -419,7 +419,7 @@ const IssuesBoard = () => {
                 const mediaVal   = resolutionMedia[key] ?? [];
 
                 return (
-                  <React.Fragment key={key}>
+                  <Fragment key={key}>
                     <TableRow
                       hover
                       sx={{
@@ -585,7 +585,7 @@ const IssuesBoard = () => {
                         </Collapse>
                       </TableCell>
                     </TableRow>
-                  </React.Fragment>
+                  </Fragment>
                 );
               })}
             </TableBody>

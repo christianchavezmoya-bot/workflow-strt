@@ -2244,9 +2244,9 @@ const Settings = () => {
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />
               </Stack>
-            ) : featuresLoadError ? (
+            ) : featuresError ? (
               <Alert severity="error" action={<Button size="small" color="inherit" onClick={loadFeatures}>Retry</Button>}>
-                {featuresLoadError}
+                {featuresError}
               </Alert>
             ) : features.length === 0 ? (
               <Alert severity="info">

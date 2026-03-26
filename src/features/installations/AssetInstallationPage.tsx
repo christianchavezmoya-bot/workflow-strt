@@ -294,6 +294,7 @@ const AssetInstallationPage = () => {
   }, [healthFilter]);
 
   const [assets, setAssets] = useState<ProjectAsset[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
   const [configs, setConfigs] = useState<ProductConfig[]>([]);
   const [publishedWfConfigs, setPublishedWfConfigs] = useState<WorkflowConfig[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
