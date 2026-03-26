@@ -382,7 +382,7 @@ function OrderDetailDialog({
             {evtError && <Alert severity="error" sx={{ mb: 1 }}>{evtError}</Alert>}
             <Stack direction="row" spacing={1} alignItems="flex-start" flexWrap="wrap" useFlexGap>
               <FormControl size="small" sx={{ minWidth: 140 }}>
-                <InputLabel>Event type</InputLabel>
+                <InputLabel shrink>Event type</InputLabel>
                 <Select value={evtType} label="Event type" onChange={e => setEvtType(e.target.value as DeliveryEventType)}>
                   <MenuItem value="Confirmed">Confirmed</MenuItem>
                   <MenuItem value="Packed">Packed</MenuItem>
@@ -482,7 +482,7 @@ export default function DispatchBoardPage() {
       {/* Filters */}
       <Stack direction="row" spacing={2} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
         <FormControl size="small" sx={{ minWidth: 160 }}>
-          <InputLabel>Status</InputLabel>
+          <InputLabel shrink>Status</InputLabel>
           <Select value={statusFilter} label="Status" onChange={e => setStatusFilter(e.target.value as DispatchStatus | "All")}>
             <MenuItem value="All">All statuses</MenuItem>
             {STATUS_ORDER.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
@@ -494,6 +494,7 @@ export default function DispatchBoardPage() {
           onChange={e => setProjectFilter(e.target.value)}
           size="small"
           placeholder="Filter by project…"
+          InputLabelProps={{ shrink: true }}
           sx={{ minWidth: 200 }}
         />
       </Stack>

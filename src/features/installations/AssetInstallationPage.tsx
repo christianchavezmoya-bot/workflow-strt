@@ -2355,14 +2355,14 @@ const AssetInstallationPage = () => {
       {/* Filters */}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} flexWrap="wrap" useFlexGap>
         <FormControl size="small" sx={{ minWidth: 220 }}>
-          <InputLabel>Project</InputLabel>
+          <InputLabel shrink>Project</InputLabel>
           <Select label="Project" value={selectedProjectId} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
             <MenuItem value="">All projects</MenuItem>
             {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} — {p.customerName}</MenuItem>)}
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ minWidth: 160 }}>
-          <InputLabel>Status</InputLabel>
+          <InputLabel shrink>Status</InputLabel>
           <Select label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as ProjectAssetStatus | "All")}>
             <MenuItem value="All">All statuses</MenuItem>
             <MenuItem value="NotStarted">Not Started</MenuItem>
@@ -2732,7 +2732,7 @@ const AssetInstallationPage = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl size="small" fullWidth required>
-              <InputLabel>Project *</InputLabel>
+              <InputLabel shrink>Project *</InputLabel>
               <Select
                 label="Project *"
                 value={addForm.projectId}
@@ -2761,7 +2761,7 @@ const AssetInstallationPage = () => {
             </FormControl>
 
             <FormControl size="small" fullWidth>
-              <InputLabel>Configuration Type</InputLabel>
+              <InputLabel shrink>Configuration Type</InputLabel>
               <Select
                 label="Configuration Type"
                 value={addForm.configId}
@@ -2842,7 +2842,7 @@ const AssetInstallationPage = () => {
               }
             />
             <FormControl size="small" fullWidth>
-              <InputLabel>Assigned Technician</InputLabel>
+              <InputLabel shrink>Assigned Technician</InputLabel>
               <Select label="Assigned Technician" value={addForm.assignedUserId}
                 onChange={(e) => setAddForm((p) => ({ ...p, assignedUserId: e.target.value }))}>
                 <MenuItem value="">(Unassigned)</MenuItem>
@@ -2906,7 +2906,7 @@ const AssetInstallationPage = () => {
               placeholder="e.g. AGI-10, Shuttle Car, Skid Steer"
               InputLabelProps={{ shrink: true }} />
             <FormControl size="small" fullWidth>
-              <InputLabel>Configuration Type</InputLabel>
+              <InputLabel shrink>Configuration Type</InputLabel>
               <Select
                 label="Configuration Type"
                 value={editForm.configId}
@@ -2933,7 +2933,7 @@ const AssetInstallationPage = () => {
               value={editForm.location}
               onChange={(e) => setEditForm((p) => ({ ...p, location: e.target.value }))} />
             <FormControl size="small" fullWidth>
-              <InputLabel>Assigned Technician</InputLabel>
+              <InputLabel shrink>Assigned Technician</InputLabel>
               <Select label="Assigned Technician" value={editForm.assignedUserId}
                 onChange={(e) => setEditForm((p) => ({ ...p, assignedUserId: e.target.value }))}>
                 <MenuItem value="">(Unassigned)</MenuItem>
@@ -2946,7 +2946,7 @@ const AssetInstallationPage = () => {
               value={editForm.notes}
               onChange={(e) => setEditForm((p) => ({ ...p, notes: e.target.value }))} />
             <FormControl size="small" fullWidth>
-              <InputLabel>Status</InputLabel>
+              <InputLabel shrink>Status</InputLabel>
               <Select label="Status" value={editStatus}
                 onChange={(e) => setEditStatus(e.target.value as ProjectAssetStatus)}>
                 <MenuItem value="NotStarted">Not Started</MenuItem>
@@ -3023,7 +3023,7 @@ const AssetInstallationPage = () => {
               placeholder="Describe the issue…"
             />
             <FormControl size="small" fullWidth>
-              <InputLabel>Severity</InputLabel>
+              <InputLabel shrink>Severity</InputLabel>
               <Select
                 label="Severity"
                 value={issueForm.severity}
@@ -3125,7 +3125,7 @@ const AssetInstallationPage = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl size="small" fullWidth required>
-              <InputLabel>Workflow Type *</InputLabel>
+              <InputLabel shrink>Workflow Type *</InputLabel>
               <Select
                 label="Workflow Type *"
                 value={assignForm.workflowTypeId}
@@ -3137,7 +3137,7 @@ const AssetInstallationPage = () => {
               </Select>
             </FormControl>
             <FormControl size="small" fullWidth required>
-              <InputLabel>Workflow Config (Published) *</InputLabel>
+              <InputLabel shrink>Workflow Config (Published) *</InputLabel>
               <Select
                 label="Workflow Config (Published) *"
                 value={assignForm.workflowConfigId}
@@ -3519,7 +3519,7 @@ const AssetInstallationPage = () => {
         <DialogTitle>Assign technician to {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""}</DialogTitle>
         <DialogContent>
           <FormControl fullWidth sx={{ mt: 1 }}>
-            <InputLabel>Technician</InputLabel>
+            <InputLabel shrink>Technician</InputLabel>
             <Select label="Technician" value={bulkTechId} onChange={(e) => setBulkTechId(e.target.value)}>
               <MenuItem value="">(Unassign)</MenuItem>
               {users.filter((u) => u.isActive).map((u) => (
@@ -3560,7 +3560,7 @@ const AssetInstallationPage = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl fullWidth>
-              <InputLabel>Workflow type</InputLabel>
+              <InputLabel shrink>Workflow type</InputLabel>
               <Select label="Workflow type" value={bulkWfTypeId} onChange={(e) => setBulkWfTypeId(e.target.value)}>
                 {workflowTypes.map((wt) => (
                   <MenuItem key={wt.id} value={wt.id}>{wt.name}</MenuItem>
@@ -3568,7 +3568,7 @@ const AssetInstallationPage = () => {
               </Select>
             </FormControl>
             <FormControl fullWidth>
-              <InputLabel>Workflow config</InputLabel>
+              <InputLabel shrink>Workflow config</InputLabel>
               <Select label="Workflow config" value={bulkWfConfigId} onChange={(e) => setBulkWfConfigId(e.target.value)}>
                 {latestPublishedWfConfigs.map((wc) => (
                   <MenuItem key={wc.id} value={wc.id}>{wc.name}</MenuItem>
@@ -3642,7 +3642,7 @@ const AssetInstallationPage = () => {
                 <Stack spacing={2}>
                   <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                     <FormControl size="small" sx={{ minWidth: 200 }}>
-                      <InputLabel>Technician</InputLabel>
+                      <InputLabel shrink>Technician</InputLabel>
                       <Select label="Technician" value={printTechId} onChange={(e) => setPrintTechId(e.target.value)}>
                         <MenuItem value="">(All technicians)</MenuItem>
                         {users.filter((u) => u.isActive).map((u) => (
@@ -3885,7 +3885,7 @@ const AssetInstallationPage = () => {
               onChange={(e) => setBulkDocsName(e.target.value)}
             />
             <FormControl fullWidth size="small">
-              <InputLabel>Type</InputLabel>
+              <InputLabel shrink>Type</InputLabel>
               <Select label="Type" value={bulkDocsType} onChange={(e) => setBulkDocsType(e.target.value)}>
                 {["Technical", "Drawings", "Procedures", "Authority to Work", "Tips & Tricks", "Tech Bulletins", "Informative", "Other"].map((t) => (
                   <MenuItem key={t} value={t}>{t}</MenuItem>

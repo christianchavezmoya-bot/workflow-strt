@@ -832,7 +832,7 @@ const WorkInstructions = () => {
                     sx={{ maxWidth: 360, width: "100%" }}
                   />
                   <FormControl size="small" sx={{ minWidth: 170 }}>
-                    <InputLabel>Sort By</InputLabel>
+                    <InputLabel shrink>Sort By</InputLabel>
                     <Select label="Sort By" value={sortBy} onChange={(e) => setSortBy(e.target.value as WorkInstructionSortKey)}>
                       <MenuItem value="dateCreated">Date Created</MenuItem>
                       <MenuItem value="name">Name</MenuItem>
@@ -842,7 +842,7 @@ const WorkInstructions = () => {
                     </Select>
                   </FormControl>
                   <FormControl size="small" sx={{ minWidth: 150 }}>
-                    <InputLabel>Order</InputLabel>
+                    <InputLabel shrink>Order</InputLabel>
                     <Select label="Order" value={sortDir} onChange={(e) => setSortDir(e.target.value as "asc" | "desc")}>
                       <MenuItem value="asc">Ascending</MenuItem>
                       <MenuItem value="desc">Descending</MenuItem>

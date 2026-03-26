@@ -1622,7 +1622,7 @@ function StepEditorPanel({
                 <Chip size="small" color="primary" label={STEP_TYPE_LABELS[step.stepType]} sx={{ fontWeight: 600 }} />
               )}
               <FormControl size="small" sx={{ minWidth: 200 }}>
-                <InputLabel>Apply step template</InputLabel>
+                <InputLabel shrink>Apply step template</InputLabel>
                 <Select
                   label="Apply step template"
                   value={pendingType}
@@ -1643,7 +1643,7 @@ function StepEditorPanel({
             {needsFeaturePicker && (
               <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                 <FormControl size="small" sx={{ minWidth: 150 }}>
-                  <InputLabel>Feature</InputLabel>
+                  <InputLabel shrink>Feature</InputLabel>
                   <Select label="Feature" value={pendingFeatureId} onChange={(e) => { setPendingFeatureId(e.target.value); setPendingUnit(1); }}>
                     <MenuItem value=""><em>No feature</em></MenuItem>
                     {includedFeatures.map((f) => (
@@ -1653,7 +1653,7 @@ function StepEditorPanel({
                 </FormControl>
                 {pendingFeatureId && (
                   <FormControl size="small" sx={{ minWidth: 80 }}>
-                    <InputLabel>Unit #</InputLabel>
+                    <InputLabel shrink>Unit #</InputLabel>
                     <Select label="Unit #" value={pendingUnit} onChange={(e) => setPendingUnit(Number(e.target.value))}>
                       {Array.from({ length: maxUnits }, (_, i) => i + 1).map((n) => (
                         <MenuItem key={n} value={n}>{n}</MenuItem>
@@ -2383,7 +2383,7 @@ function CaptureFieldsSection({
                 </Stack>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
                   <FormControl size="small" sx={{ minWidth: 120 }}>
-                    <InputLabel>Type</InputLabel>
+                    <InputLabel shrink>Type</InputLabel>
                     <Select
                       label="Type"
                       value={field.type}

@@ -420,7 +420,7 @@ export default function ExternalSignPage() {
         </Stack>
 
         <FormControl size="small" fullWidth>
-          <InputLabel>Decision</InputLabel>
+          <InputLabel shrink>Decision</InputLabel>
           <Select value={reasonCode} label="Decision" onChange={e => setReasonCode(e.target.value)}>
             <MenuItem value="Completed">Accept — work completed satisfactorily</MenuItem>
             <MenuItem value="Conditional">Accept with reservations</MenuItem>

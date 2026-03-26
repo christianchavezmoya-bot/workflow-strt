@@ -1585,7 +1585,7 @@ export default function WorkOrderRunner({
               {/* Severity selector */}
               <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
                 <FormControl size="small" sx={{ minWidth: 240 }}>
-                  <InputLabel>Severity</InputLabel>
+                  <InputLabel shrink>Severity</InputLabel>
                   <Select
                     label="Severity"
                     value={flagSeverity}
@@ -1632,7 +1632,7 @@ export default function WorkOrderRunner({
                           <TextField size="small" fullWidth multiline rows={2} label="Description"
                             value={editIssueDesc} onChange={(e) => setEditIssueDesc(e.target.value)} />
                           <FormControl size="small" sx={{ maxWidth: 220 }}>
-                            <InputLabel>Severity</InputLabel>
+                            <InputLabel shrink>Severity</InputLabel>
                             <Select label="Severity" value={editIssueSeverity}
                               onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
                               <MenuItem value="low">Low — observation only</MenuItem>
@@ -1866,7 +1866,7 @@ export default function WorkOrderRunner({
                         <TextField size="small" fullWidth multiline rows={2} label="Description"
                           value={editIssueDesc} onChange={(e) => setEditIssueDesc(e.target.value)} />
                         <FormControl size="small" sx={{ maxWidth: 220 }}>
-                          <InputLabel>Severity</InputLabel>
+                          <InputLabel shrink>Severity</InputLabel>
                           <Select label="Severity" value={editIssueSeverity}
                             onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
                             <MenuItem value="low">Low — observation only</MenuItem>

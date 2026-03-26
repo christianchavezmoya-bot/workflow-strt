@@ -3658,7 +3658,7 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setFormData((prev) => ({ ...prev, email: event.target.value }))}
             />
             <FormControl>
-              <InputLabel sx={fieldLabelStyle}>Role name</InputLabel>
+              <InputLabel shrink sx={fieldLabelStyle}>Role name</InputLabel>
               <Select
                 value={formData.role}
                 label="Role name"
@@ -4996,7 +4996,7 @@ export const UserManagement: React.FC = () => {
               rows={2}
             />
             <FormControl fullWidth size="small">
-              <InputLabel>Division (optional)</InputLabel>
+              <InputLabel shrink>Division (optional)</InputLabel>
               <Select
                 value={productForm.divisionId}
                 label="Division (optional)"
@@ -5210,7 +5210,7 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setEditUserForm((prev) => ({ ...prev, email: event.target.value }))}
             />
             <FormControl fullWidth>
-              <InputLabel sx={fieldLabelStyle}>Role name</InputLabel>
+              <InputLabel shrink sx={fieldLabelStyle}>Role name</InputLabel>
               <Select
                 value={editUserForm.role}
                 label="Role name"
@@ -5226,7 +5226,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <FormControl fullWidth>
-              <InputLabel sx={fieldLabelStyle}>Office / City</InputLabel>
+              <InputLabel shrink sx={fieldLabelStyle}>Office / City</InputLabel>
               <Select
                 value={editUserForm.office}
                 label="Office / City"
@@ -5320,7 +5320,7 @@ export const UserManagement: React.FC = () => {
               rows={2}
             />
             <FormControl fullWidth size="small">
-              <InputLabel>Division (optional)</InputLabel>
+              <InputLabel shrink>Division (optional)</InputLabel>
               <Select
                 value={editProductForm.divisionId}
                 label="Division (optional)"
@@ -5546,7 +5546,7 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setAssetForm((prev) => ({ ...prev, serialNumber: event.target.value }))}
             />
             <FormControl fullWidth>
-              <InputLabel>{baseFieldNames.assets?.["base-pmCount"] || "PM Count"}</InputLabel>
+              <InputLabel shrink>{baseFieldNames.assets?.["base-pmCount"] || "PM Count"}</InputLabel>
               <Select
                 label={baseFieldNames.assets?.["base-pmCount"] || "PM Count"}
                 value={assetForm.pmCount}

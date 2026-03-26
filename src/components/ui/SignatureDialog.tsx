@@ -218,7 +218,7 @@ export default function SignatureDialog({
           />
 
           <FormControl size="small" fullWidth>
-            <InputLabel>Reason code</InputLabel>
+            <InputLabel shrink>Reason code</InputLabel>
             <Select
               value={reasonCode}
               label="Reason code"

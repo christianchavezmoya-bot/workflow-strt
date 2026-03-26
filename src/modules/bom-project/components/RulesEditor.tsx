@@ -215,7 +215,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                     {rule.conditions.map((cond, idx) => (
                       <Stack key={idx} direction="row" spacing={1} alignItems="center">
                         <FormControl size="small" sx={{ minWidth: 140 }}>
-                          <InputLabel>Field</InputLabel>
+                          <InputLabel shrink>Field</InputLabel>
                           <Select
                             label="Field"
                             value={cond.field}
@@ -232,7 +232,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                         </FormControl>
 
                         <FormControl size="small" sx={{ minWidth: 130 }}>
-                          <InputLabel>Operator</InputLabel>
+                          <InputLabel shrink>Operator</InputLabel>
                           <Select
                             label="Operator"
                             value={cond.operator}
@@ -288,7 +288,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                   </Typography>
                   <Stack direction="row" spacing={1.5} alignItems="center" sx={{ pl: 1 }}>
                     <FormControl size="small" sx={{ minWidth: 140 }}>
-                      <InputLabel>Item type</InputLabel>
+                      <InputLabel shrink>Item type</InputLabel>
                       <Select
                         label="Item type"
                         value={rule.result.itemType ?? "component"}
@@ -312,7 +312,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                       </Select>
                     </FormControl>
                     <FormControl size="small" sx={{ minWidth: 130 }}>
-                      <InputLabel>Inventory</InputLabel>
+                      <InputLabel shrink>Inventory</InputLabel>
                       <Select
                         label="Inventory"
                         value={rule.result.inventoryTracked ? "yes" : "no"}
@@ -327,7 +327,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                       </Select>
                     </FormControl>
                     <FormControl size="small" sx={{ minWidth: 130 }}>
-                      <InputLabel>Serial</InputLabel>
+                      <InputLabel shrink>Serial</InputLabel>
                       <Select
                         label="Serial"
                         value={rule.result.serialRequired ? "yes" : "no"}
