@@ -180,27 +180,29 @@ export function useSyncEngine(): SyncState {
     return null;
   }, [refreshPending]);
 
-  // Track whether we're actively serving cached data (server unreachable)
-  const [servingCache, setServingCache] = useState(false);
+  // Track server reachability based on actual API responses — not navigator.onLine
+  // which is unreliable in iOS WKWebView (always reports true).
+  // api-serving-cache  → server unreachable, fallback to IndexedDB
+  // api-server-reachable → real server response received
+  const [serverUnreachable, setServerUnreachable] = useState(false);
   useEffect(() => {
-    const handler = () => { setServingCache(true); };
-    const clear   = () => { setServingCache(false); };
-    window.addEventListener("api-serving-cache", handler);
-    window.addEventListener("online", clear);
+    const handleUnreachable = () => setServerUnreachable(true);
+    const handleReachable   = () => { setServerUnreachable(false); void flush(); };
+    window.addEventListener("api-serving-cache",   handleUnreachable);
+    window.addEventListener("api-server-reachable", handleReachable);
     return () => {
-      window.removeEventListener("api-serving-cache", handler);
-      window.removeEventListener("online", clear);
+      window.removeEventListener("api-serving-cache",   handleUnreachable);
+      window.removeEventListener("api-server-reachable", handleReachable);
     };
-  }, []);
+  }, [flush]);
 
   // ── Derived status ────────────────────────────────────────────────────────
   const status: SyncStatus =
-    !isOnline        ? "offline"  :
-    servingCache     ? "offline"  :  // server unreachable even though OS says online
-    syncing          ? "syncing"  :
-    hasError         ? "error"    :
-    pending > 0      ? "pending"  :
-                       "synced";
+    serverUnreachable ? "offline"  :
+    syncing           ? "syncing"  :
+    hasError          ? "error"    :
+    pending > 0       ? "pending"  :
+                        "synced";
 
   return {
     status,

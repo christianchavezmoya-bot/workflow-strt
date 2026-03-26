@@ -192,6 +192,9 @@ api.interceptors.response.use(
       ).catch(() => {});
     }
 
+    // Real server response — signal server is reachable (used by sync engine)
+    window.dispatchEvent(new Event("api-server-reachable"));
+
     return response;
   },
   async (error) => {
