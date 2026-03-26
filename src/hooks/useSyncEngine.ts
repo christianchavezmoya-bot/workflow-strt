@@ -1,10 +1,11 @@
 /**
  * useSyncEngine — global offline sync hook.
  *
- * - Tracks online/offline state
+ * - Tracks connectivity state (online / server-unreachable / offline / token-expired)
  * - Queues write actions when offline (or when the request fails)
  * - Flushes the queue automatically when connection returns
  * - Flushes on page visibility (phone unlock / tab switch)
+ * - Exponential backoff with per-record state
  * - Exposes status for the SyncStatusBadge in Topbar
  *
  * Usage:
@@ -17,8 +18,10 @@ import {
   pendingAdd,
   pendingCount,
   pendingGetAll,
-  pendingMarkError,
+  pendingGetDue,
+  pendingMarkRetry,
   pendingRemove,
+  pendingSetStatus,
   syncMetaSet,
   type PendingAction,
   type PendingActionMethod,
@@ -32,6 +35,8 @@ export type SyncStatus =
   | "syncing"     // actively uploading
   | "error"       // last flush had failures
   | "offline";    // no connection
+
+type ConnectivityState = "online" | "server-unreachable" | "offline" | "token-expired";
 
 export interface SyncState {
   status: SyncStatus;
@@ -65,25 +70,37 @@ let _flushing = false;
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useSyncEngine(): SyncState {
-  const [isOnline,     setIsOnline]     = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
-  const [syncing,      setSyncing]      = useState(false);
-  const [pending,      setPending]      = useState(0);
-  const [lastSyncAt,   setLastSyncAt]   = useState<Date | null>(null);
-  const [hasError,     setHasError]     = useState(false);
+  const [connectivity, setConnectivity] = useState<ConnectivityState>(
+    typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "online"
+  );
+  const [syncing,    setSyncing]    = useState(false);
+  const [pending,    setPending]    = useState(0);
+  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
+  const [hasError,   setHasError]   = useState(false);
 
-  const isOnlineRef = useRef(isOnline);
-  isOnlineRef.current = isOnline;
+  const connectivityRef = useRef(connectivity);
+  connectivityRef.current = connectivity;
 
   // Refresh badge count from IndexedDB
   const refreshPending = useCallback(async () => {
     setPending(await pendingCount());
   }, []);
 
+  // ── Schedule retry based on earliest nextRetryAt in queue ─────────────────
+  // Declared as ref to avoid circular dep with flush
+  const scheduleRetryRef = useRef<(() => Promise<void>) | null>(null);
+
   // ── Flush queue ────────────────────────────────────────────────────────────
   const flush = useCallback(async () => {
-    if (_flushing || !isOnlineRef.current) return;
-    const queue = await pendingGetAll();
-    if (queue.length === 0) return;
+    const conn = connectivityRef.current;
+    if (_flushing || conn === "offline" || conn === "server-unreachable" || conn === "token-expired") return;
+
+    const due = await pendingGetDue();
+    if (due.length === 0) {
+      // Nothing due — but there may be future-scheduled items; let scheduleRetry handle them
+      await scheduleRetryRef.current?.();
+      return;
+    }
 
     _flushing = true;
     setSyncing(true);
@@ -91,8 +108,9 @@ export function useSyncEngine(): SyncState {
 
     let anyError = false;
 
-    for (const action of queue) {
+    for (const action of due) {
       try {
+        await pendingSetStatus(action.id, "uploading");
         await api.request({
           url: action.url,
           method: action.method,
@@ -102,7 +120,7 @@ export function useSyncEngine(): SyncState {
         await syncMetaSet(action.entityType);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        await pendingMarkError(action.id, msg);
+        await pendingMarkRetry(action.id, msg);
         anyError = true;
         // Don't break — try remaining actions in queue
       }
@@ -113,12 +131,35 @@ export function useSyncEngine(): SyncState {
     setSyncing(false);
     setLastSyncAt(new Date());
     _flushing = false;
+
+    // Schedule next retry if there are still items with future nextRetryAt
+    await scheduleRetryRef.current?.();
   }, [refreshPending]);
+
+  // ── Scheduled retry timer ─────────────────────────────────────────────────
+  const scheduleRetry = useCallback(async () => {
+    const all = await pendingGetAll();
+    if (all.length === 0) return;
+    const future = all
+      .filter(a => a.nextRetryAt)
+      .map(a => new Date(a.nextRetryAt!).getTime());
+    if (future.length === 0) return;
+    const nextMs = Math.max(Math.min(...future) - Date.now(), 1000);
+    setTimeout(() => void flush(), Math.min(nextMs, 300_000)); // cap at 5 min
+  }, [flush]);
+
+  // Wire up the ref so flush can call scheduleRetry without circular deps
+  useEffect(() => {
+    scheduleRetryRef.current = scheduleRetry;
+  }, [scheduleRetry]);
 
   // ── Online / offline events ────────────────────────────────────────────────
   useEffect(() => {
-    const handleOnline  = () => { setIsOnline(true);  void flush(); };
-    const handleOffline = () => { setIsOnline(false); };
+    const handleOnline  = () => {
+      setConnectivity(prev => prev === "token-expired" ? prev : "online");
+      void flush();
+    };
+    const handleOffline = () => setConnectivity("offline");
     window.addEventListener("online",  handleOnline);
     window.addEventListener("offline", handleOffline);
     return () => {
@@ -143,6 +184,25 @@ export function useSyncEngine(): SyncState {
     return () => window.removeEventListener("sync-pending-changed", handler);
   }, [refreshPending]);
 
+  // ── Server reachability / auth error state machine ────────────────────────
+  useEffect(() => {
+    const handleUnreachable = () => setConnectivity("server-unreachable");
+    const handleReachable   = () => {
+      setConnectivity("online");
+      void flush();
+    };
+    const handleAuthError   = () => setConnectivity("token-expired");
+
+    window.addEventListener("api-serving-cache",    handleUnreachable);
+    window.addEventListener("api-server-reachable", handleReachable);
+    window.addEventListener("api-auth-error",       handleAuthError);
+    return () => {
+      window.removeEventListener("api-serving-cache",    handleUnreachable);
+      window.removeEventListener("api-server-reachable", handleReachable);
+      window.removeEventListener("api-auth-error",       handleAuthError);
+    };
+  }, [flush]);
+
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
     void refreshPending();
@@ -165,7 +225,7 @@ export function useSyncEngine(): SyncState {
     }
 
     // Offline path: store in IndexedDB and signal optimistic update
-    const action: Omit<PendingAction, "retries"> = {
+    const action: Omit<PendingAction, "retries" | "status"> = {
       id: crypto.randomUUID(),
       url,
       method,
@@ -180,29 +240,16 @@ export function useSyncEngine(): SyncState {
     return null;
   }, [refreshPending]);
 
-  // Track server reachability based on actual API responses — not navigator.onLine
-  // which is unreliable in iOS WKWebView (always reports true).
-  // api-serving-cache  → server unreachable, fallback to IndexedDB
-  // api-server-reachable → real server response received
-  const [serverUnreachable, setServerUnreachable] = useState(false);
-  useEffect(() => {
-    const handleUnreachable = () => setServerUnreachable(true);
-    const handleReachable   = () => { setServerUnreachable(false); void flush(); };
-    window.addEventListener("api-serving-cache",   handleUnreachable);
-    window.addEventListener("api-server-reachable", handleReachable);
-    return () => {
-      window.removeEventListener("api-serving-cache",   handleUnreachable);
-      window.removeEventListener("api-server-reachable", handleReachable);
-    };
-  }, [flush]);
-
   // ── Derived status ────────────────────────────────────────────────────────
+  const isOnline = connectivity !== "offline";
+
   const status: SyncStatus =
-    serverUnreachable ? "offline"  :
-    syncing           ? "syncing"  :
-    hasError          ? "error"    :
-    pending > 0       ? "pending"  :
-                        "synced";
+    connectivity === "offline" || connectivity === "server-unreachable" ? "offline" :
+    connectivity === "token-expired" ? "error" :
+    syncing    ? "syncing"  :
+    hasError   ? "error"    :
+    pending > 0 ? "pending"  :
+                  "synced";
 
   return {
     status,

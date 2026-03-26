@@ -232,6 +232,7 @@ api.interceptors.response.use(
     if (status === 401) {
       const reqUrl = config.url ?? "";
       if (!reqUrl.includes("/auth/login") && !reqUrl.includes("/auth/refresh")) {
+        window.dispatchEvent(new Event("api-auth-error"));
         localStorage.removeItem("auth_token");
         localStorage.removeItem("auth_user");
         window.location.href = "/login";

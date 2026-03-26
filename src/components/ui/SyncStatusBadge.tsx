@@ -1,6 +1,7 @@
 /**
  * SyncStatusBadge — compact sync indicator for the Topbar.
- * Tap to open the API debug log panel.
+ * Tap to open the Sync Center page (full-screen dialog).
+ * API Debug Log is accessible via a button inside the Sync Center.
  */
 
 import {
@@ -18,9 +19,10 @@ import {
   UploadOutlined,
 } from "@mui/icons-material";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
-import ApiDebugPanel from "./ApiDebugPanel";
+import { pendingGetByEntityId } from "../../services/localDB";
+import SyncCenterPage from "../../features/sync/SyncCenterPage";
 
 function timeAgo(date: Date): string {
   const secs = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -31,10 +33,9 @@ function timeAgo(date: Date): string {
 
 export default function SyncStatusBadge() {
   const { status, pendingCount, lastSyncAt, syncing, triggerSync } = useSyncEngine();
-  const [debugOpen, setDebugOpen] = useState(false);
+  const [syncCenterOpen, setSyncCenterOpen] = useState(false);
 
   const iconSx = { fontSize: 13 };
-  const openDebug = () => setDebugOpen(true);
 
   const badge = (() => {
     if (status === "syncing") {
@@ -105,10 +106,10 @@ export default function SyncStatusBadge() {
 
   return (
     <>
-      <Box onClick={openDebug} sx={{ cursor: "pointer" }}>
+      <Box onClick={() => setSyncCenterOpen(true)} sx={{ cursor: "pointer" }}>
         {badge}
       </Box>
-      <ApiDebugPanel open={debugOpen} onClose={() => setDebugOpen(false)} />
+      <SyncCenterPage open={syncCenterOpen} onClose={() => setSyncCenterOpen(false)} />
     </>
   );
 }
@@ -128,23 +129,47 @@ export function SyncIconButton({ onPress }: { onPress?: () => void }) {
 
 /**
  * Tiny dot shown on individual cards to indicate their sync state.
+ * Checks real pending state for this specific entity via IndexedDB.
  */
 export function SyncDot({ entityId, sx }: { entityId: string; sx?: object }) {
-  if (!entityId) return null;
+  const [actionState, setActionState] = useState<"pending" | "uploading" | "failed" | null>(null);
+
+  const refresh = useCallback(async () => {
+    const actions = await pendingGetByEntityId(entityId);
+    if (actions.length === 0) { setActionState(null); return; }
+    // Priority: uploading > failed > pending
+    if (actions.some(a => a.status === "uploading")) setActionState("uploading");
+    else if (actions.some(a => a.status === "failed")) setActionState("failed");
+    else setActionState("pending");
+  }, [entityId]);
+
+  useEffect(() => {
+    void refresh();
+    const handler = () => void refresh();
+    window.addEventListener("sync-pending-changed", handler);
+    return () => window.removeEventListener("sync-pending-changed", handler);
+  }, [refresh]);
+
+  if (!actionState) return null;
+
+  const color =
+    actionState === "failed"    ? "error.main"   :
+    actionState === "uploading" ? "info.main"     :
+                                  "warning.main";
+
+  const animate = actionState === "uploading" || actionState === "pending";
+
   return (
-    <Box
-      sx={{
-        width: 6, height: 6,
-        borderRadius: "50%",
-        bgcolor: "warning.main",
-        flexShrink: 0,
+    <Box sx={{
+      width: 7, height: 7,
+      borderRadius: "50%",
+      bgcolor: color,
+      flexShrink: 0,
+      ...(animate ? {
         animation: "pulse 1.5s ease-in-out infinite",
-        "@keyframes pulse": {
-          "0%, 100%": { opacity: 1 },
-          "50%": { opacity: 0.3 },
-        },
-        ...sx,
-      }}
-    />
+        "@keyframes pulse": { "0%, 100%": { opacity: 1 }, "50%": { opacity: 0.3 } },
+      } : {}),
+      ...sx,
+    }} />
   );
 }

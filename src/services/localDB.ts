@@ -34,6 +34,8 @@ export interface PendingAction {
   createdAt: string;     // ISO wall-clock time of the user action
   retries: number;
   lastError?: string;
+  status: "pending" | "uploading" | "failed";
+  nextRetryAt?: string;  // ISO timestamp — when to next attempt this action
 }
 
 export interface SyncMeta {
@@ -176,10 +178,10 @@ export async function cacheGetMeta(key: string): Promise<CacheEntry | null> {
 
 // ── Pending action helpers ────────────────────────────────────────────────────
 
-export async function pendingAdd(action: Omit<PendingAction, "retries">): Promise<void> {
+export async function pendingAdd(action: Omit<PendingAction, "retries" | "status">): Promise<void> {
   try {
     const db = await getDB();
-    await db.put("pending_actions", { ...action, retries: 0 });
+    await db.put("pending_actions", { ...action, retries: 0, status: "pending" });
     window.dispatchEvent(new Event("sync-pending-changed"));
   } catch { /* ignore */ }
 }
@@ -204,6 +206,57 @@ export async function pendingMarkError(id: string, error: string): Promise<void>
     const db = await getDB();
     const item = await db.get("pending_actions", id);
     if (item) await db.put("pending_actions", { ...item, retries: item.retries + 1, lastError: error });
+  } catch { /* ignore */ }
+}
+
+// ── Backoff schedule: 5s, 15s, 30s, 60s, 300s ────────────────────────────────
+
+export function calcNextRetryAt(retryCount: number): string {
+  const delays = [5_000, 15_000, 30_000, 60_000, 300_000];
+  const delay = delays[Math.min(retryCount, delays.length - 1)];
+  return new Date(Date.now() + delay).toISOString();
+}
+
+/** Get only actions that are due for retry right now (no nextRetryAt, or it has passed). */
+export async function pendingGetDue(): Promise<PendingAction[]> {
+  try {
+    const all = await pendingGetAll();
+    const now = new Date();
+    return all.filter(a => !a.nextRetryAt || new Date(a.nextRetryAt) <= now);
+  } catch { return []; }
+}
+
+/** Update the status of a single pending action. */
+export async function pendingSetStatus(id: string, status: PendingAction["status"]): Promise<void> {
+  try {
+    const db = await getDB();
+    const item = await db.get("pending_actions", id);
+    if (item) await db.put("pending_actions", { ...item, status });
+  } catch { /* ignore */ }
+}
+
+/** Get all pending actions for a specific entity (for per-record state). */
+export async function pendingGetByEntityId(entityId: string): Promise<PendingAction[]> {
+  try {
+    const all = await pendingGetAll();
+    return all.filter(a => a.entityId === entityId);
+  } catch { return []; }
+}
+
+/** Increment retries, set lastError, compute nextRetryAt via backoff, mark status = "failed". */
+export async function pendingMarkRetry(id: string, error: string): Promise<void> {
+  try {
+    const db = await getDB();
+    const item = await db.get("pending_actions", id);
+    if (!item) return;
+    const newRetries = item.retries + 1;
+    await db.put("pending_actions", {
+      ...item,
+      retries: newRetries,
+      lastError: error,
+      nextRetryAt: calcNextRetryAt(newRetries),
+      status: "failed",
+    });
   } catch { /* ignore */ }
 }
 
