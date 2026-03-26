@@ -368,6 +368,7 @@ const Settings = () => {
   const [divisionForm, setDivisionForm] = useState({ name: "", description: "", sortOrder: "99" });
   const [divisionSaving, setDivisionSaving] = useState(false);
   const [divisionError, setDivisionError] = useState<string | null>(null);
+  const [deleteDivisionConfirm, setDeleteDivisionConfirm] = useState<{ id: string; name: string } | null>(null);
 
   async function loadDivisions() {
     setDivisionsLoading(true);
@@ -398,11 +399,17 @@ const Settings = () => {
   }
 
   async function removeDivision(id: string) {
-    if (!confirm("Delete this division? Products assigned to it will keep their data but lose the association.")) return;
+    const div = divisions.find((d) => d.id === id);
+    setDeleteDivisionConfirm({ id, name: div?.name ?? "this division" });
+  }
+
+  async function confirmRemoveDivision() {
+    if (!deleteDivisionConfirm) return;
     try {
-      await divisionService.remove(id);
-      setDivisions((prev) => prev.filter((d) => d.id !== id));
-    } catch { alert("Failed to delete division."); }
+      await divisionService.remove(deleteDivisionConfirm.id);
+      setDivisions((prev) => prev.filter((d) => d.id !== deleteDivisionConfirm.id));
+      setDeleteDivisionConfirm(null);
+    } catch { setDeleteDivisionConfirm(null); alert("Failed to delete division."); }
   }
 
   async function toggleDivisionActive(id: string, currentIsActive: boolean) {
@@ -3470,6 +3477,20 @@ const Settings = () => {
           </Dialog>
         );
       })()}
+
+      {/* Delete Division confirm dialog */}
+      <Dialog open={!!deleteDivisionConfirm} onClose={() => setDeleteDivisionConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete Division?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Delete <strong>{deleteDivisionConfirm?.name}</strong>? Products assigned to it will keep their data but lose the association.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDivisionConfirm(null)}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={confirmRemoveDivision}>Delete</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Add / Edit Division dialog */}
       <Dialog open={divisionDialog} onClose={() => !divisionSaving && setDivisionDialog(false)} maxWidth="xs" fullWidth>
