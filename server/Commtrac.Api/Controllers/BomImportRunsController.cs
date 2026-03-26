@@ -108,6 +108,17 @@ public class BomImportRunsController : ControllerBase
         return NoContent();
     }
 
+    [HttpDelete("{id}/purge")]
+    public async Task<IActionResult> Purge(string id)
+    {
+        if (!ModuleEnabled) return ModuleDisabled();
+        var run = await _db.BomImportRuns.FindAsync(id);
+        if (run == null) return NotFound();
+        _db.BomImportRuns.Remove(run);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     // ── Draft persistence ──────────────────────────────────────────────────────
 
     [HttpPost("{id}/draft")]

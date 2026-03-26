@@ -22,6 +22,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   TextField,
@@ -50,6 +51,7 @@ import { fetchProducts } from "../../store/productsSlice";
 import { createUser, fetchUsers } from "../../store/usersSlice";
 import { Installation } from "../../types/installation";
 import { inspectionService, Inspection } from "../../services/inspectionService";
+import QRUploadButton from "../../components/QRUploadButton";
 import { customFieldService, CustomFieldDefinition } from "../../services/customFieldService";
 
 // Style for field definition labels (yellow bold)
@@ -912,7 +914,7 @@ const InstallationList = () => {
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
         <Box>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-            Installations{selectedProductNames ? ` â€” ${selectedProductNames}` : ""}
+            Installations{selectedProductNames ? ` — ${selectedProductNames}` : ""}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Showing {activeOffice === "All" ? "all offices" : activeOffice} installations.
@@ -1013,7 +1015,7 @@ const InstallationList = () => {
           const filteredRows = applyAutoSort(applyAutoFilter(rowsWithIndex, filters, accessors), sortConfig, accessors);
           return (
             <Box className="glass-card" sx={{ padding: 2, overflowX: "auto" }}>
-              <Table sx={{ minWidth: 600 }}>
+              <Table sx={{ minWidth: 900 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell>#</TableCell>
@@ -1159,8 +1161,8 @@ const InstallationList = () => {
           </Stack>
 
           {false && viewMode === "table" && (
-            <Box className="glass-card" sx={{ padding: 2 }}>
-              <Table>
+            <Box className="glass-card" sx={{ padding: 2, overflowX: "auto" }}>
+              <Table sx={{ minWidth: 900 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell>#</TableCell>
@@ -1807,8 +1809,8 @@ const InstallationList = () => {
               Table configuration
             </Button>
           </Stack>
-          <Box className="glass-card" sx={{ padding: 2 }}>
-            <Table>
+          <Box className="glass-card" sx={{ padding: 2, overflowX: "auto" }}>
+            <Table sx={{ minWidth: 900 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>#</TableCell>
@@ -1887,6 +1889,15 @@ const InstallationList = () => {
                               }}
                             />
                           </Button>
+                          <QRUploadButton
+                            docType="inspection-photo"
+                            linkedTo={row.id}
+                            label="Photo from Phone"
+                            onUploaded={() => {
+                              const next = { ...row, photoCount: row.photoCount + 1 };
+                              setInspections((prev) => prev.map((item) => (item.id === row.id ? next : item)));
+                            }}
+                          />
                         </Stack>
                       </TableCell>
                       {inspectionDynamicColumns.map((field) => (
@@ -2358,7 +2369,8 @@ const InstallationList = () => {
         <DialogTitle>Installation tabs</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ marginTop: 1 }}>
-            <Table>
+            <TableContainer sx={{ overflowX: "auto" }}>
+            <Table sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>Order</TableCell>
@@ -2431,6 +2443,7 @@ const InstallationList = () => {
                 ))}
               </TableBody>
             </Table>
+            </TableContainer>
             <Stack direction="row" spacing={1} alignItems="center">
               <TextField
                 label="New tab name"
@@ -2883,7 +2896,8 @@ const InstallationList = () => {
               No other projects are using this product.
             </Typography>
           ) : (
-            <Table size="small" sx={{ mt: 1 }}>
+            <TableContainer sx={{ overflowX: "auto", mt: 1 }}>
+            <Table size="small" sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>Job #</TableCell>
@@ -2919,6 +2933,7 @@ const InstallationList = () => {
                 ))}
               </TableBody>
             </Table>
+            </TableContainer>
           )}
         </DialogContent>
         <DialogActions>

@@ -50,6 +50,11 @@ export const bomApiService = {
     await api.delete(`${BASE}/${id}`);
   },
 
+  /** Permanently delete an import run (cannot be undone) */
+  async purgeRun(id: string): Promise<void> {
+    await api.delete(`${BASE}/${id}/purge`);
+  },
+
   // ── Mapping Profiles ───────────────────────────────────────────────────────
 
   async listMappingProfiles(): Promise<MappingProfile[]> {

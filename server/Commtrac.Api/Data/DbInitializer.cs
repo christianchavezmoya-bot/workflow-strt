@@ -26,6 +26,7 @@ public static class DbInitializer
         EnsureAssetDocumentLinksTables(db);
         EnsureRunTimeTrackingColumns(db);
         EnsureMarch15Columns(db);
+        EnsureFeatureProcurementColumns(db);
         EnsureLinkableKeyFieldDefinitions(db);
 
         if (!db.Users.Any())
@@ -71,6 +72,8 @@ public static class DbInitializer
         // Customer seed data is now handled by migrations (SeedDemoCustomerAndSite)
         // Removed default customers to avoid conflicts
 
+        CleanupSeederArtifacts(db);
+        SeedDivisions(db);
         SeedProducts(db);
         db.SaveChanges(); // flush products before feature patch so LINQ queries can find them
 
@@ -277,30 +280,116 @@ public static class DbInitializer
     }
 
     // -----------------------------------------------------------------------
+    // Division seeding
+    // -----------------------------------------------------------------------
+
+    // These IDs are only used when the database has NO divisions at all (fresh install).
+    // If any divisions already exist, seeding is skipped entirely.
+    private const string DivMiningId    = "div-mining";
+    private const string DivSafetyId    = "div-safety";
+    private const string DivTechId      = "div-tech";
+
+    private static readonly (string Id, string Name, string? Description, int SortOrder)[] KnownDivisions =
+    [
+        (DivMiningId,  "Mining",    "Underground and surface mining products",  1),
+        (DivSafetyId,  "Safety",    "Personnel and vehicle safety systems",     2),
+        (DivTechId,    "Technology","Core technology and software platforms",   3),
+    ];
+
+    // Only seed divisions on a completely fresh database (no existing divisions).
+    // If the user already has their own divisions, do nothing.
+    private static void SeedDivisions(AppDbContext db)
+    {
+        if (db.Divisions.Any()) return; // user already has divisions — don't overwrite
+
+        foreach (var (id, name, desc, sort) in KnownDivisions)
+            db.Divisions.Add(new DivisionEntity { Id = id, Name = name, Description = desc, SortOrder = sort, IsActive = true });
+    }
+
+    // -----------------------------------------------------------------------
+    // One-time cleanup of artifacts created by earlier seeder bugs
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Removes duplicate products and spurious seeded divisions that were created
+    /// by a previous version of SeedDivisions/SeedProducts running when the user
+    /// already had their own divisions and products.
+    /// </summary>
+    private static void CleanupSeederArtifacts(AppDbContext db)
+    {
+        // Remove the three hardcoded seeder divisions IF user-created divisions also exist.
+        // If the user ONLY has these seeder divisions (fresh install), keep them.
+        var seederDivIds = new[] { DivMiningId, DivSafetyId, DivTechId };
+        var hasRealDivisions = db.Divisions.Any(d => !seederDivIds.Contains(d.Id));
+        if (hasRealDivisions)
+        {
+            var toRemove = db.Divisions.Where(d => seederDivIds.Contains(d.Id)).ToList();
+            foreach (var div in toRemove)
+            {
+                // Null-out any products pointing at these seeder division IDs
+                var affected = db.Products.Where(p => p.DivisionId == div.Id).ToList();
+                foreach (var p in affected) p.DivisionId = null;
+                db.Divisions.Remove(div);
+            }
+        }
+
+        // Remove duplicate products: keep the oldest (lowest Id lexicographically) per name.
+        var allProducts = db.Products.OrderBy(p => p.Id).ToList();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var product in allProducts)
+        {
+            if (!seen.Add(product.Name))
+                db.Products.Remove(product); // duplicate — remove the newer one
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Product seeding
     // -----------------------------------------------------------------------
 
     // All known products. Add new products here — they will be inserted on
     // first startup if the name doesn't already exist in the database.
-    private static readonly (string Name, string? Description)[] KnownProducts =
+    private static readonly (string Name, string? Description, string? DivisionId)[] KnownProducts =
     [
-        ("AIM-100",               "AIM-100 field device"),
-        ("Commtrac",              "Commtrac core platform"),
-        ("EDGE AI",               "EDGE AI processing module"),
-        ("Hazard Avert",          "Hazard detection and avoidance"),
-        ("Hazard Avert - Gen 2",  "Hazard Avert second generation"),
-        ("Ping Alert",            "Personnel alerting system"),
-        ("New Ice Cream",         null),
-        ("Coffee",                null),
+        ("AIM-100",               "AIM-100 field device",                  DivMiningId),
+        ("Commtrac",              "Commtrac core platform",                 DivTechId),
+        ("EDGE AI",               "EDGE AI processing module",              DivTechId),
+        ("Hazard Avert",          "Hazard detection and avoidance",         DivSafetyId),
+        ("Hazard Avert - Gen 2",  "Hazard Avert second generation",         DivSafetyId),
+        ("Ping Alert",            "Personnel alerting system",              DivSafetyId),
+        ("New Ice Cream",         null,                                     null),
+        ("Coffee",                null,                                     null),
     ];
 
     private static void SeedProducts(AppDbContext db)
     {
-        var existingNames = db.Products.Select(p => p.Name).ToHashSet();
-        foreach (var (name, desc) in KnownProducts)
+        // Only assign seeder division IDs if the seeder divisions actually exist in the DB.
+        var seederDivIds = new HashSet<string> { DivMiningId, DivSafetyId, DivTechId };
+        var existingDivIds = db.Divisions.Select(d => d.Id).ToHashSet();
+        var useSeederDivisions = seederDivIds.Any(id => existingDivIds.Contains(id));
+
+        var existingNames = db.Products.Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, desc, divId) in KnownProducts)
         {
             if (!existingNames.Contains(name))
-                db.Products.Add(new ProductEntity { Name = name, Description = desc });
+            {
+                var assignedDivId = (useSeederDivisions && divId != null) ? divId : null;
+                db.Products.Add(new ProductEntity { Name = name, Description = desc, DivisionId = assignedDivId });
+            }
+        }
+
+        // Backfill DivisionId only on a fresh install where seeder divisions are in use
+        if (useSeederDivisions)
+        {
+            var productsByName = db.Products.AsEnumerable()
+                .GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (name, _, divId) in KnownProducts)
+            {
+                if (divId != null && productsByName.TryGetValue(name, out var p) && p.DivisionId == null)
+                    p.DivisionId = divId;
+            }
         }
     }
 
@@ -687,6 +776,41 @@ public static class DbInitializer
                     existingLinkSet.Add(linkKey);
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Adds procurement columns to Features table if missing.
+    /// These columns were added to FeatureEntity but the DB may not have them yet.
+    /// </summary>
+    private static void EnsureFeatureProcurementColumns(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            void AddIfMissing(string col, string colDef)
+            {
+                cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('Features') WHERE name='{col}'";
+                if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+                {
+                    cmd.CommandText = $"ALTER TABLE Features ADD COLUMN {col} {colDef}";
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            AddIfMissing("Brand",                 "TEXT NULL");
+            AddIfMissing("Supplier",              "TEXT NULL");
+            AddIfMissing("AlternativePartNumber",   "TEXT NULL");
+            AddIfMissing("ManufacturerPartNumber", "TEXT NULL");
+            AddIfMissing("UnitPrice",              "TEXT NULL");  // stored as TEXT/REAL; nullable decimal
+            AddIfMissing("ProductLink",           "TEXT NULL");
+        }
+        finally
+        {
+            conn.Close();
         }
     }
 

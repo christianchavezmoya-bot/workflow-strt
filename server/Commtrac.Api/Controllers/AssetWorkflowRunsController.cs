@@ -101,6 +101,7 @@ public class AssetWorkflowRunsController : ControllerBase
             var result = new List<OpenIssueDto>();
             var opts   = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
+            // ── 1. Workflow-run issues ─────────────────────────────────────
             foreach (var run in runs)
             {
                 var asset   = assets.FirstOrDefault(a => a.Id == run.AssetId);
@@ -134,7 +135,53 @@ public class AssetWorkflowRunsController : ControllerBase
                         AssetLocation: asset.Location ?? "",
                         ProjectId:    asset.ProjectId,
                         JobNumber:    project?.JobNumber ?? "",
-                        CustomerName: project?.CustomerName ?? ""
+                        CustomerName: project?.CustomerName ?? "",
+                        Source:       "run"
+                    ));
+                }
+            }
+
+            // ── 2. Manually-added asset-level issues ──────────────────────
+            var assetsWithIssues = await _db.ProjectAssets
+                .Where(a => a.IssuesJson != null && a.IssuesJson != "[]" && a.IssuesJson != "")
+                .ToListAsync();
+
+            var assetProjectIds2 = assetsWithIssues.Select(a => a.ProjectId).Distinct().ToList();
+            var projects2 = await _db.Projects.Where(p => assetProjectIds2.Contains(p.Id)).ToListAsync();
+
+            foreach (var asset in assetsWithIssues)
+            {
+                var project = projects2.FirstOrDefault(p => p.Id == asset.ProjectId);
+
+                List<JsonElement> issues;
+                try { issues = JsonSerializer.Deserialize<List<JsonElement>>(asset.IssuesJson!, opts) ?? []; }
+                catch { continue; }
+
+                foreach (var iss in issues)
+                {
+                    if (iss.TryGetProperty("resolved", out var resolvedEl) && resolvedEl.GetBoolean()) continue;
+
+                    string Get(string key) => iss.TryGetProperty(key, out var el) ? el.GetString() ?? "" : "";
+                    bool   GetBool(string key) => iss.TryGetProperty(key, out var el) && el.GetBoolean();
+
+                    result.Add(new OpenIssueDto(
+                        IssueId:      Get("id"),
+                        Description:  Get("description"),
+                        IssueType:    Get("issueType"),
+                        Severity:     Get("severity"),
+                        IsBlocking:   GetBool("isBlocking"),
+                        ReportedAt:   Get("reportedAt"),
+                        CreatedBy:    Get("createdBy"),
+                        StepTitle:    null,
+                        RunId:        "",
+                        AssetId:      asset.Id,
+                        AssetTag:     asset.AssetTag,
+                        AssetName:    asset.AssetName ?? asset.AssetTag,
+                        AssetLocation: asset.Location ?? "",
+                        ProjectId:    asset.ProjectId,
+                        JobNumber:    project?.JobNumber ?? "",
+                        CustomerName: project?.CustomerName ?? "",
+                        Source:       "asset"
                     ));
                 }
             }
@@ -325,18 +372,21 @@ public class AssetWorkflowRunsController : ControllerBase
         CloseAnyOpenTimeEntry(run, now);
         RecomputeRunTimeMetrics(run, now);
 
-        // Update asset status — Complete only if no open blocking issues remain across all runs
+        // Update asset status — Complete only if no open issues remain across all runs
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
         if (asset is not null)
         {
-            // Check all runs for this asset for any open blocking issues
-            var allRuns  = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
-            var anyBlock = allRuns.Any(r =>
+            // Check all runs for this asset for any open issues (blocking OR non-blocking)
+            var allRuns    = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
+            var anyBlock   = allRuns.Any(r =>
                 ParseIssues(r.IssuesJson).Any(i =>
                     i.TryGetProperty("isBlocking", out var b) && b.GetBoolean() &&
                     i.TryGetProperty("resolved",   out var rv) && !rv.GetBoolean()));
+            var anyOpenIssue = allRuns.Any(r =>
+                ParseIssues(r.IssuesJson).Any(i =>
+                    i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean()));
 
-            asset.Status    = anyBlock ? "Issue" : "Complete";
+            asset.Status    = anyOpenIssue ? "Issue" : "Complete";
             asset.UpdatedAt = now;
             // Record who completed the installation and when (only on first successful completion)
             if (!anyBlock && asset.InstalledAt is null)
@@ -370,16 +420,16 @@ public class AssetWorkflowRunsController : ControllerBase
         if (asset is not null)
         {
             var allRuns = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
-            var anyBlock = allRuns.Any(r => {
+            // Any open issue (blocking OR non-blocking) keeps the asset in "Issue" state
+            var anyOpenIssue = allRuns.Any(r => {
                 var json = r.Id == id ? req.IssuesJson : r.IssuesJson;
                 return ParseIssues(json).Any(i =>
-                    i.TryGetProperty("isBlocking", out var b) && b.GetBoolean() &&
-                    i.TryGetProperty("resolved",   out var rv) && !rv.GetBoolean());
+                    i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean());
             });
             var anyLocked = allRuns.Any(r => r.IsLocked || r.Id == id);
             if (anyLocked)
             {
-                asset.Status    = anyBlock ? "Issue" : "Complete";
+                asset.Status    = anyOpenIssue ? "Issue" : "Complete";
                 asset.UpdatedAt = DateTime.UtcNow;
             }
         }
@@ -479,8 +529,13 @@ public class AssetWorkflowRunsController : ControllerBase
             case "stopdowntime":
                 CloseOpenCategory(run, "downtime", endAt);
                 break;
+            case "stopall":
+            case "pause":
+                // Close whatever is open (productive or downtime) → idle state
+                CloseAnyOpenTimeEntry(run, endAt);
+                break;
             default:
-                return BadRequest(new { message = "Unknown action. Use StartProductive, ResumeProductive, StartDowntime, StopDowntime." });
+                return BadRequest(new { message = "Unknown action. Use StartProductive, ResumeProductive, StartDowntime, StopDowntime, StopAll." });
         }
 
         run.UpdatedAt = now;
@@ -499,8 +554,11 @@ public class AssetWorkflowRunsController : ControllerBase
     private static DateTime ParseUtcOr(string? value, DateTime fallbackUtc)
     {
         if (string.IsNullOrWhiteSpace(value)) return fallbackUtc;
-        if (!DateTime.TryParse(value, out var parsed)) return fallbackUtc;
-        return parsed.Kind == DateTimeKind.Utc ? parsed : DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+        // Use DateTimeOffset so the "Z" / "+HH:mm" designator is preserved
+        // correctly regardless of the server's local timezone.
+        // DateTime.TryParse alone converts "Z" to local time on non-UTC servers.
+        if (DateTimeOffset.TryParse(value, out var dto)) return dto.UtcDateTime;
+        return fallbackUtc;
     }
 
     private static List<RunTimeEntry> ParseTimeEntries(string json)

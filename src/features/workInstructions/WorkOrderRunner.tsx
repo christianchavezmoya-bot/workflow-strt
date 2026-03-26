@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import {
+  AccessTimeOutlined,
+  AttachMoneyOutlined,
   CheckCircleOutlined,
   CloudOffOutlined,
   CommentOutlined,
@@ -12,6 +14,7 @@ import {
   LockOutlined,
   PauseOutlined,
   PhotoCameraOutlined,
+  PlayArrowOutlined,
   QrCodeScannerOutlined,
   ReportProblemOutlined,
   SyncOutlined,
@@ -21,6 +24,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Collapse,
@@ -30,12 +34,14 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   LinearProgress,
   Menu,
   MenuItem,
   Paper,
+  Popover,
   Select,
   Stack,
   Switch,
@@ -52,6 +58,8 @@ import { assetWorkflowRunService } from "../../services/assetWorkflowRunService"
 import { signatureService } from "../../services/signatureService";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
+import MediaCapture from "../../components/ui/MediaCapture";
+import QRUploadButton from "../../components/QRUploadButton";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
@@ -168,9 +176,11 @@ export default function WorkOrderRunner({
   const [flagDescription, setFlagDescription] = useState("");
   const [flagSeverity, setFlagSeverity] = useState<"low" | "medium" | "high">("medium");
   const [flagIssueType, setFlagIssueType] = useState<"blocking" | "observation" | "scope-deviation">("observation");
+  const [flagIsScopeDeviation, setFlagIsScopeDeviation] = useState(false);
   const [flagExtraHours, setFlagExtraHours] = useState("");
   const [flagCostImpact, setFlagCostImpact] = useState("");
   const [flagSubmitted, setFlagSubmitted] = useState(false);
+  const [flagMedia, setFlagMedia] = useState<string[]>([]);
   // Issue editing
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [editIssueDesc, setEditIssueDesc] = useState("");
@@ -236,6 +246,7 @@ export default function WorkOrderRunner({
 
   const [downtimeReason, setDowntimeReason] = useState("");
   const [trackingBusy, setTrackingBusy] = useState(false);
+  const [reasonPopoverAnchor, setReasonPopoverAnchor] = useState<HTMLButtonElement | null>(null);
   const [productiveSecondsBase, setProductiveSecondsBase] = useState(0);
   const [downtimeSecondsBase, setDowntimeSecondsBase] = useState(0);
   const [trackingCategory, setTrackingCategory] = useState<"productive" | "downtime" | null>(null);
@@ -274,16 +285,15 @@ export default function WorkOrderRunner({
     if (!open) reset();
   }, [open, existingRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Tick every second while the runner is in the "running" stage so both
-  // productiveSecondsLive and downtimeSecondsLive update in real time.
-  // Deliberately does NOT include trackingCategory/trackingStartedAt so the
-  // interval is never torn down mid-switch — avoids the clock freezing when
-  // transitioning from productive to downtime.
+  // Tick every second while the dialog is open — drives productiveSecondsLive
+  // and downtimeSecondsLive in real time. Running unconditionally (not gated
+  // on stage or trackingCategory) means the clock never stops due to a stage
+  // transition and always restarts cleanly when tracking switches categories.
   useEffect(() => {
-    if (stage !== "running") return;
+    if (!open) return;
     const t = window.setInterval(() => setTickNow(Date.now()), 1000);
     return () => window.clearInterval(t);
-  }, [stage]);
+  }, [open]);
 
   function reset() {
     setStage("setup");
@@ -299,8 +309,10 @@ export default function WorkOrderRunner({
     setFlagDescription("");
     setFlagSeverity("medium");
     setFlagIssueType("observation");
+    setFlagIsScopeDeviation(false);
     setFlagExtraHours("");
     setFlagCostImpact("");
+    setFlagMedia([]);
     setFlagSubmitted(false);
     setIssues([]);
     setActiveRunId(existingRunId ?? null);
@@ -331,7 +343,8 @@ export default function WorkOrderRunner({
     setDowntimeSecondsBase(run.downtimeSeconds ?? 0);
     const entries = parseRunTimeEntries(run.timeTrackingJson ?? "[]");
     const open = [...entries].reverse().find((e) => !e.endedAtUtc) ?? null;
-    if (open && (open.category === "productive" || open.category === "downtime")) {
+    if (open && (open.category === "productive" || open.category === "downtime")
+        && !Number.isNaN(Date.parse(open.startedAtUtc))) {
       setTrackingCategory(open.category);
       setTrackingStartedAt(open.startedAtUtc);
     } else {
@@ -376,20 +389,22 @@ export default function WorkOrderRunner({
 
   function submitFlag() {
     if (!flagDescription.trim()) return;
-    const isScopeDev = flagIssueType === "scope-deviation";
-    const isBlocking = !isScopeDev && flagSeverity === "high";
+    const derivedIssueType: "blocking" | "observation" | "scope-deviation" =
+      flagIsScopeDeviation ? "scope-deviation" : flagSeverity === "high" ? "blocking" : "observation";
+    const isBlocking = flagSeverity === "high" && !flagIsScopeDeviation;
     const issue: RunIssue = {
       id: crypto.randomUUID ? crypto.randomUUID() : `issue_${Date.now()}`,
       description: flagDescription.trim(),
-      issueType: flagIssueType,
+      issueType: derivedIssueType,
       isBlocking,
-      severity: isScopeDev ? "medium" : flagSeverity,
+      severity: flagSeverity,
       stepId: currentStep?.id,
       stepTitle: currentStep?.title,
       reportedAt: new Date().toISOString(),
       resolved: false,
       createdBy: currentUserName,
-      ...(isScopeDev && {
+      reportMedia: flagMedia.length > 0 ? flagMedia : undefined,
+      ...(flagIsScopeDeviation && {
         extraHours: flagExtraHours ? parseFloat(flagExtraHours) : undefined,
         costImpact: flagCostImpact.trim() || undefined,
       }),
@@ -398,6 +413,7 @@ export default function WorkOrderRunner({
     setFlagDescription("");
     setFlagExtraHours("");
     setFlagCostImpact("");
+    setFlagMedia([]);
     setFlagSubmitted(true);
   }
 
@@ -438,17 +454,15 @@ export default function WorkOrderRunner({
   }
 
   async function handlePause() {
-    if (activeRunId && isRealRun && trackingCategory !== "downtime") {
+    if (activeRunId && isRealRun) {
       try {
-        const updated = await queueOrSend("StartDowntime", "Paused by user");
-        if (updated) {
-          setActiveRun(updated);
-          syncRunTimeState(updated);
-        }
-        // If queued (offline), the run persists via localStorage — no UI update needed here
-        // since we're closing the dialog anyway
+        // Call directly (not via the offline queue) — pause is a fire-once
+        // action tied to closing the dialog; queuing it causes a stale "sync
+        // pending" chip when the user reopens the run.
+        const updated = await assetWorkflowRunService.trackTimeEntry(activeRunId, "StopAll");
+        if (updated) syncRunTimeState(updated);
       } catch {
-        // keep pause flow resilient
+        // non-fatal — idle state will be restored on next open
       }
     }
     await autosaveProgress();
@@ -483,6 +497,17 @@ export default function WorkOrderRunner({
       setActiveRunId(run.id);
       setActiveRun(run);
       syncRunTimeState(run);
+
+      // If the run has no open time entry (was paused → idle), automatically
+      // resume productive so the clock starts the moment the tech continues.
+      const timeEntries = parseRunTimeEntries(run.timeTrackingJson ?? "[]");
+      const hasOpenEntry = timeEntries.some((e) => !e.endedAtUtc);
+      if (!hasOpenEntry && run.id) {
+        try {
+          const resumed = await assetWorkflowRunService.trackTimeEntry(run.id, "ResumeProductive", "Continued");
+          if (resumed) syncRunTimeState(resumed);
+        } catch { /* non-fatal — tracking will still work manually */ }
+      }
 
       // Restore step values and issues from saved progress
       let prevValues: Record<string, Record<string, string>> = {};
@@ -892,6 +917,7 @@ export default function WorkOrderRunner({
       try { media = JSON.parse(val || "[]"); } catch {}
       return (
         <Box>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <Button
             size="small"
             variant="outlined"
@@ -914,6 +940,16 @@ export default function WorkOrderRunner({
               }}
             />
           </Button>
+          <QRUploadButton
+            docType="workflow-evidence"
+            linkedTo={inp.label}
+            label="Upload from Phone"
+            onUploaded={() => { /* handled by onUploadedWithData */ }}
+            onUploadedWithData={(_, dataUrl) => {
+              onChange(JSON.stringify([...media, dataUrl]));
+            }}
+          />
+          </Stack>
           {media.length > 0 && (
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1 }}>
               {media.map((src, idx) => (
@@ -1167,31 +1203,43 @@ export default function WorkOrderRunner({
             </Stack>
           </Stack>
           <LinearProgress variant="determinate" value={progress} sx={{ mt: 1, borderRadius: 1 }} />
-          {isRealRun && activeRunId && (
+{isRealRun && activeRunId && (
             <Stack spacing={1} sx={{ mt: 1.25 }}>
-              {/* Status row: state badge + time totals + offline/sync indicator */}
+              {/* Time tracking bar — colour-coded, always visible */}
+              <Box sx={{
+                display: "flex", alignItems: "center", gap: 1.5,
+                px: 1.5, py: 0.75, borderRadius: 1.5,
+                bgcolor: trackingCategory === "downtime" ? "warning.main"
+                  : trackingCategory === "productive" ? "success.dark"
+                  : "action.selected",
+                transition: "background-color 0.4s ease",
+              }}>
+                <Box sx={{
+                  width: 9, height: 9, borderRadius: "50%", flexShrink: 0,
+                  bgcolor: trackingCategory ? "#fff" : "text.disabled",
+                  animation: trackingCategory ? "timepulse 1.2s ease-in-out infinite" : "none",
+                  "@keyframes timepulse": { "0%,100%": { opacity: 1 }, "50%": { opacity: 0.25 } },
+                }} />
+                <Typography variant="caption" fontWeight={700} sx={{ color: trackingCategory ? "#fff" : "text.secondary", minWidth: 64 }}>
+                  {trackingCategory === "productive" ? "Productive" : trackingCategory === "downtime" ? "Downtime" : "Idle"}
+                </Typography>
+                <Box sx={{ display: "flex", gap: 2, ml: "auto" }}>
+                  <Box sx={{ textAlign: "center" }}>
+                    <Typography sx={{ fontFamily: "monospace", fontWeight: 700, fontSize: "0.82rem", letterSpacing: 1, color: trackingCategory === "productive" ? "#fff" : "text.secondary" }}>
+                      {formatDuration(productiveSecondsLive)}
+                    </Typography>
+                    <Typography variant="caption" display="block" sx={{ fontSize: "0.62rem", color: trackingCategory === "productive" ? "rgba(255,255,255,0.7)" : "text.disabled" }}>productive</Typography>
+                  </Box>
+                  <Box sx={{ textAlign: "center" }}>
+                    <Typography sx={{ fontFamily: "monospace", fontWeight: 700, fontSize: "0.82rem", letterSpacing: 1, color: trackingCategory === "downtime" ? "#fff" : "text.secondary" }}>
+                      {formatDuration(downtimeSecondsLive)}
+                    </Typography>
+                    <Typography variant="caption" display="block" sx={{ fontSize: "0.62rem", color: trackingCategory === "downtime" ? "rgba(255,255,255,0.7)" : "text.disabled" }}>downtime</Typography>
+                  </Box>
+                </Box>
+              </Box>
+              {/* Offline / sync status row */}
               <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
-                <Chip
-                  size="small"
-                  variant={trackingCategory ? "filled" : "outlined"}
-                  color={trackingCategory === "productive" ? "success" : trackingCategory === "downtime" ? "warning" : "default"}
-                  label={
-                    trackingCategory === "productive"
-                      ? "● Productive"
-                      : trackingCategory === "downtime"
-                      ? "● Downtime"
-                      : "Idle"
-                  }
-                  sx={{ fontWeight: 600, letterSpacing: 0.2 }}
-                />
-                <Chip size="small" color="success" variant="outlined" label={`Productive: ${formatDuration(productiveSecondsLive)}`} />
-                <Chip
-                  size="small"
-                  color={downtimeSecondsLive > 0 ? "warning" : "default"}
-                  variant="outlined"
-                  label={`Downtime: ${formatDuration(downtimeSecondsLive)}`}
-                />
-                {/* Offline / sync status */}
                 {syncing ? (
                   <Chip
                     size="small"
@@ -1219,59 +1267,95 @@ export default function WorkOrderRunner({
                   />
                 ) : null}
               </Stack>
-              {/* Controls row */}
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={0.75} alignItems={{ sm: "center" }} useFlexGap>
-                {/* Reason field — only editable when not already tracking downtime */}
-                {trackingCategory !== "downtime" && (
-                  <TextField
-                    size="small"
-                    label="Downtime reason"
-                    value={downtimeReason}
-                    onChange={(e) => setDowntimeReason(e.target.value)}
-                    placeholder="Waiting for parts / access / permit..."
-                    sx={{ minWidth: 220, flex: 1 }}
-                  />
-                )}
-                <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                  {/* Edit times */}
-                  <Button
-                    size="small"
-                    variant="text"
-                    color="inherit"
-                    sx={{ opacity: 0.65, fontSize: "0.72rem" }}
-                    onClick={() => setTimeEditorOpen(true)}
-                  >
-                    Edit Times
-                  </Button>
-                  {/* Single downtime toggle */}
-                  <Button
-                    size="small"
-                    color="warning"
-                    variant={trackingCategory === "downtime" ? "contained" : "outlined"}
-                    disabled={trackingBusy || (trackingCategory !== "downtime" && !downtimeReason.trim())}
-                    onClick={() => {
-                      if (trackingCategory === "downtime") {
-                        void trackRunTime("StopDowntime");
-                      } else {
-                        void trackRunTime("StartDowntime", downtimeReason.trim());
-                      }
-                    }}
-                  >
-                    {trackingCategory === "downtime" ? "Stop Downtime" : "Start Downtime"}
-                  </Button>
-                  {/* Productive button — greyed out / disabled while already productive */}
+              {/* Controls row — single toggle button */}
+              <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap>
+                <Button
+                  size="small"
+                  variant="text"
+                  color="inherit"
+                  sx={{ opacity: 0.65, fontSize: "0.72rem" }}
+                  onClick={() => setTimeEditorOpen(true)}
+                >
+                  Edit Times
+                </Button>
+                {/* Single toggle: downtime ↔ productive */}
+                {trackingCategory === "downtime" ? (
                   <Button
                     size="small"
                     color="success"
-                    variant={trackingCategory === "productive" ? "outlined" : "contained"}
-                    disabled={trackingBusy || trackingCategory === "productive"}
+                    variant="contained"
+                    disabled={trackingBusy}
+                    startIcon={trackingBusy ? <CircularProgress size={12} color="inherit" /> : <PlayArrowOutlined />}
                     onClick={() => { void trackRunTime("ResumeProductive"); }}
-                    sx={trackingCategory === "productive" ? { opacity: 0.5, cursor: "default" } : {}}
                   >
-                    {trackingCategory === "productive" ? "Running..." : "Resume Productive"}
+                    Resume Productive
                   </Button>
-                </Stack>
+                ) : (
+                  <Button
+                    size="small"
+                    color={trackingCategory === "productive" ? "warning" : "success"}
+                    variant="outlined"
+                    disabled={trackingBusy}
+                    startIcon={trackingBusy ? <CircularProgress size={12} color="inherit" /> : trackingCategory === "productive" ? <PauseOutlined /> : <PlayArrowOutlined />}
+                    onClick={(e) => setReasonPopoverAnchor(e.currentTarget)}
+                  >
+                    {trackingCategory === "productive" ? "Start Downtime" : "Start Productive"}
+                  </Button>
+                )}
               </Stack>
+              {/* Downtime reason popover */}
+              <Popover
+                open={Boolean(reasonPopoverAnchor)}
+                anchorEl={reasonPopoverAnchor}
+                onClose={() => { setReasonPopoverAnchor(null); setDowntimeReason(""); }}
+                anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+                transformOrigin={{ vertical: "top", horizontal: "left" }}
+                slotProps={{ paper: { sx: { p: 2, width: 300 } } }}
+              >
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2">
+                    {trackingCategory === "productive" ? "Downtime reason" : "Start productive tracking"}
+                  </Typography>
+                  {trackingCategory === "productive" && (
+                    <TextField
+                      autoFocus
+                      size="small"
+                      fullWidth
+                      label="Reason"
+                      placeholder="Waiting for parts / access / permit…"
+                      value={downtimeReason}
+                      onChange={(e) => setDowntimeReason(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && downtimeReason.trim()) {
+                          setReasonPopoverAnchor(null);
+                          void trackRunTime("StartDowntime", downtimeReason.trim());
+                        }
+                      }}
+                    />
+                  )}
+                  <Stack direction="row" spacing={1} justifyContent="flex-end">
+                    <Button size="small" onClick={() => { setReasonPopoverAnchor(null); setDowntimeReason(""); }}>
+                      Cancel
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color={trackingCategory === "productive" ? "warning" : "success"}
+                      disabled={trackingCategory === "productive" && !downtimeReason.trim()}
+                      onClick={() => {
+                        setReasonPopoverAnchor(null);
+                        if (trackingCategory === "productive") {
+                          void trackRunTime("StartDowntime", downtimeReason.trim());
+                        } else {
+                          void trackRunTime("ResumeProductive");
+                        }
+                      }}
+                    >
+                      {trackingCategory === "productive" ? "Start Downtime" : "Start Productive"}
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Popover>
             </Stack>
           )}
         </DialogTitle>
@@ -1502,29 +1586,40 @@ export default function WorkOrderRunner({
               <strong>Medium</strong> or <strong>Low</strong> = observation — noted but does not block completion.
             </Typography>
             <Stack spacing={1.25}>
-              {/* Issue type selector */}
-              <FormControl size="small" sx={{ maxWidth: 300 }}>
-                <InputLabel>Issue type</InputLabel>
-                <Select
-                  label="Issue type"
-                  value={flagIssueType}
-                  onChange={(e) => setFlagIssueType(e.target.value as typeof flagIssueType)}
-                >
-                  <MenuItem value="observation">Observation — noted, non-blocking</MenuItem>
-                  <MenuItem value="blocking">Blocking — must resolve before completion</MenuItem>
-                  <MenuItem value="scope-deviation">Scope deviation — work outside original scope</MenuItem>
-                </Select>
-              </FormControl>
-              {flagIssueType !== "scope-deviation" && (
-                <Typography variant="caption" color="text.secondary" display="block">
-                  {flagIssueType === "blocking"
-                    ? "Workflow cannot be completed until this is resolved."
-                    : "Logged for record — does not block completion."}
-                </Typography>
-              )}
-              {flagIssueType === "scope-deviation" && (
+              {/* Severity selector */}
+              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+                <FormControl size="small" sx={{ minWidth: 240 }}>
+                  <InputLabel>Severity</InputLabel>
+                  <Select
+                    label="Severity"
+                    value={flagSeverity}
+                    onChange={(e) => setFlagSeverity(e.target.value as "low" | "medium" | "high")}
+                  >
+                    <MenuItem value="low">Low — observation, non-blocking</MenuItem>
+                    <MenuItem value="medium">Medium — attention needed, non-blocking</MenuItem>
+                    <MenuItem value="high">High — blocks completion</MenuItem>
+                  </Select>
+                </FormControl>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={flagIsScopeDeviation}
+                      onChange={(e) => setFlagIsScopeDeviation(e.target.checked)}
+                    />
+                  }
+                  label={
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <Typography variant="caption">Scope variation</Typography>
+                      <AttachMoneyOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
+                      <AccessTimeOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
+                    </Stack>
+                  }
+                />
+              </Stack>
+              {flagIsScopeDeviation && (
                 <Typography variant="caption" color="warning.main" display="block">
-                  Use for work discovered outside the original scope (e.g. additional cabling, unforeseen access requirements).
+                  Work discovered outside the original scope (e.g. additional cabling, unforeseen access requirements). This is a scope variation.
                 </Typography>
               )}
 
@@ -1561,7 +1656,7 @@ export default function WorkOrderRunner({
                               {issue.resolved
                                 ? <Chip size="small" label="Resolved" color="success" sx={{ height: 18, fontSize: 10 }} />
                                 : <Chip size="small"
-                                    label={issue.issueType === "scope-deviation" ? "Scope Dev." : issue.isBlocking ? "Blocking" : "Observation"}
+                                    label={issue.issueType === "scope-deviation" ? "Scope Var." : issue.isBlocking ? "Blocking" : "Observation"}
                                     color={issue.issueType === "scope-deviation" ? "warning" : issue.isBlocking ? "error" : "warning"}
                                     sx={{ height: 18, fontSize: 10 }} />
                               }
@@ -1592,26 +1687,12 @@ export default function WorkOrderRunner({
                 fullWidth
                 multiline
                 rows={2}
-                label={flagIssueType === "scope-deviation" ? "Describe the out-of-scope work" : "Describe/Add issue here"}
+                label={flagIssueType === "scope-deviation" ? "Describe the scope variation" : "Describe/Add issue here"}
                 placeholder={flagIssueType === "scope-deviation" ? "e.g. Additional conduit run required due to obstructed original route…" : "Describe what you observed…"}
                 value={flagDescription}
                 onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
               />
-              {flagIssueType !== "scope-deviation" && (
-                <FormControl size="small" sx={{ maxWidth: 260 }}>
-                  <InputLabel>Severity</InputLabel>
-                  <Select
-                    label="Severity"
-                    value={flagSeverity}
-                    onChange={(e) => setFlagSeverity(e.target.value as "low" | "medium" | "high")}
-                  >
-                    <MenuItem value="low">Low — observation only</MenuItem>
-                    <MenuItem value="medium">Medium — attention needed</MenuItem>
-                    <MenuItem value="high">High — blocks completion</MenuItem>
-                  </Select>
-                </FormControl>
-              )}
-              {flagIssueType === "scope-deviation" && (
+              {flagIsScopeDeviation && (
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
                   <TextField
                     size="small"
@@ -1632,6 +1713,11 @@ export default function WorkOrderRunner({
                   />
                 </Stack>
               )}
+              <MediaCapture
+                media={flagMedia}
+                onChange={setFlagMedia}
+                label="Attach Photo / Video (optional)"
+              />
               <Stack direction="row" spacing={1} alignItems="center">
                 <Button
                   size="small"
@@ -1774,7 +1860,7 @@ export default function WorkOrderRunner({
                   )}
                   {issues.filter((i) => i.issueType === "scope-deviation").length > 0 && (
                     <Typography component="span" variant="caption" color="warning.main" sx={{ ml: 1 }}>
-                      · {issues.filter((i) => i.issueType === "scope-deviation").length} scope deviation{issues.filter((i) => i.issueType === "scope-deviation").length !== 1 ? "s" : ""}
+                      · {issues.filter((i) => i.issueType === "scope-deviation").length} scope variation{issues.filter((i) => i.issueType === "scope-deviation").length !== 1 ? "s" : ""}
                     </Typography>
                   )}
                 </Typography>
@@ -1805,7 +1891,7 @@ export default function WorkOrderRunner({
                             {issue.resolved
                               ? <Chip size="small" label="Resolved" color="success" sx={{ flexShrink: 0 }} />
                               : <Chip size="small"
-                                  label={issue.issueType === "scope-deviation" ? "Scope Dev." : issue.isBlocking ? "Blocking" : "Observation"}
+                                  label={issue.issueType === "scope-deviation" ? "Scope Var." : issue.isBlocking ? "Blocking" : "Observation"}
                                   color={issue.issueType === "scope-deviation" ? "warning" : issue.isBlocking ? "error" : "default"}
                                   sx={{ flexShrink: 0 }} />
                             }
@@ -1912,39 +1998,60 @@ export default function WorkOrderRunner({
             )}
           </Stack>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ justifyContent: "space-between" }}>
           <Button onClick={handleClose} disabled={saving}>
             {saved ? "Close" : "Discard"}
           </Button>
           {!saved && (
-            <Button
-              variant="contained"
-              onClick={() => {
-                const hasBom = (workflow.bomItems ?? []).length > 0;
-                if (hasBom && activeRunId) {
-                  // Initialise BOM actual from expected qty if not already set
-                  setBomActual((workflow.bomItems ?? []).map((item) => ({
-                    bomItemId: item.id,
-                    description: item.description,
-                    isInventory: item.isInventory,
-                    expectedQty: item.expectedQty,
-                    actualQty: item.expectedQty,
-                    unitOfMeasure: item.unitOfMeasure,
-                    unitCaptures: item.isInventory
-                      ? Array.from({ length: item.expectedQty }, () =>
-                          Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
-                      : undefined,
-                  })));
-                  setStage("bom");
-                } else {
-                  handleSave();
-                }
-              }}
-              disabled={saving || (hasBlockingIssues && Boolean(activeRunId))}
-              startIcon={saving ? <CircularProgress size={14} /> : undefined}
-            >
-              {saving ? "Saving…" : activeRunId ? "Lock run ✓" : "Done (preview)"}
-            </Button>
+            <Stack direction="row" spacing={1}>
+              {hasBlockingIssues && Boolean(activeRunId) && (
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  disabled={saving}
+                  startIcon={saving ? <CircularProgress size={14} /> : undefined}
+                  onClick={async () => {
+                    setSaving(true);
+                    try {
+                      const stepsJson = JSON.stringify(buildStepsData());
+                      const issuesJson = JSON.stringify(issues);
+                      await assetWorkflowRunService.saveProgress(activeRunId!, stepsJson, issuesJson, "InProgress");
+                      handleClose();
+                    } catch { setSaveError("Failed to save progress."); }
+                    finally { setSaving(false); }
+                  }}
+                >
+                  Save & close
+                </Button>
+              )}
+              <Button
+                variant="contained"
+                onClick={() => {
+                  const hasBom = (workflow.bomItems ?? []).length > 0;
+                  if (hasBom && activeRunId) {
+                    setBomActual((workflow.bomItems ?? []).map((item) => ({
+                      bomItemId: item.id,
+                      description: item.description,
+                      isInventory: item.isInventory,
+                      expectedQty: item.expectedQty,
+                      actualQty: item.expectedQty,
+                      unitOfMeasure: item.unitOfMeasure,
+                      unitCaptures: item.isInventory
+                        ? Array.from({ length: item.expectedQty }, () =>
+                            Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
+                        : undefined,
+                    })));
+                    setStage("bom");
+                  } else {
+                    handleSave();
+                  }
+                }}
+                disabled={saving || (hasBlockingIssues && Boolean(activeRunId))}
+                startIcon={saving ? <CircularProgress size={14} /> : undefined}
+              >
+                {saving ? "Saving…" : activeRunId ? "Lock run ✓" : "Done (preview)"}
+              </Button>
+            </Stack>
           )}
         </DialogActions>
       </>

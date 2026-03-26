@@ -105,7 +105,7 @@ public class UsersController : ControllerBase
 
         var emailSettings = await _notificationSettings.GetEmailSettingsAsync();
         var baseUrl = ResolveFrontendBaseUrl(emailSettings.FrontendBaseUrl);
-        var link = $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}";
+        var link = $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}&invite=true";
         await _emailSender.SendInviteAsync(user.Email, link);
         return NoContent();
     }

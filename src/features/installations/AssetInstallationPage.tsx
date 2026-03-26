@@ -61,6 +61,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   Tabs,
@@ -103,11 +104,15 @@ import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { BomItem, StepInput, Workflow } from "../../types/workflow";
 import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
+import { siteService } from "../../services/siteService";
+import type { Site } from "../../types/site";
 import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
 import AssetDocumentsDialog from "./AssetDocumentsDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
+import MediaCapture from "../../components/ui/MediaCapture";
+import QRUploadButton from "../../components/QRUploadButton";
 
 // ------------------------------------------------------------------
 // Column configuration
@@ -263,6 +268,9 @@ const AssetInstallationPage = () => {
   );
   const [statusFilter, setStatusFilter] = useState<ProjectAssetStatus | "All">("All");
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"product" | "project">("product");
+  const [projectViewAssets, setProjectViewAssets] = useState<ProjectAsset[]>([]);
+  const [loadingProjectView, setLoadingProjectView] = useState(false);
 
   // Health chip quick-filter (mobile) — auto-resets after 5 min
   type HealthFilterKey = "notStarted" | "inProgress" | "complete" | "issue" | "noWorkflow";
@@ -309,9 +317,13 @@ const AssetInstallationPage = () => {
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
 
-  // Delete
+  // Delete (single)
   const [deleteAsset, setDeleteAsset] = useState<ProjectAsset | null>(null);
   const [deletingAsset, setDeletingAsset] = useState(false);
+
+  // Bulk delete
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Work order runner
   const [runnerOpen, setRunnerOpen] = useState(false);
@@ -345,6 +357,7 @@ const AssetInstallationPage = () => {
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
   const [issueDialogAsset, setIssueDialogAsset] = useState<ProjectAsset | null>(null);
   const [issueForm, setIssueForm] = useState<{ description: string; severity: "low" | "medium" | "high" }>({ description: "", severity: "medium" });
+  const [issueMedia, setIssueMedia] = useState<string[]>([]);
   // Issue detail dialog (comments / close)
   const [issueDetailAsset, setIssueDetailAsset] = useState<ProjectAsset | null>(null);
   const [issueDetailIssueId, setIssueDetailIssueId] = useState<string | null>(null);
@@ -353,6 +366,8 @@ const AssetInstallationPage = () => {
   const [inlineCommentTexts, setInlineCommentTexts] = useState<Record<string, string>>({});
   const [inlineCorrectiveTexts, setInlineCorrectiveTexts] = useState<Record<string, string>>({});
   const [inlineSaving, setInlineSaving] = useState(false);
+  const [inlineReportMedia,     setInlineReportMedia]     = useState<Record<string, string[]>>({});
+  const [inlineResolutionMedia, setInlineResolutionMedia] = useState<Record<string, string[]>>({});
 
   // Workflow assignments + runs (keyed by assetId)
   const [assignmentsMap, setAssignmentsMap] = useState<Record<string, WorkflowAssignment[]>>({});
@@ -430,6 +445,7 @@ const AssetInstallationPage = () => {
     dispatch(fetchProducts());
     dispatch(fetchProjects());
     dispatch(fetchUsers());
+    siteService.getSites().then(setSites).catch(() => {});
   }, [dispatch]);
 
   const products = useMemo(
@@ -533,6 +549,16 @@ const AssetInstallationPage = () => {
     return () => window.removeEventListener("online", handleOnline);
   }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Load assets for "See all in project" view mode
+  useEffect(() => {
+    if (viewMode !== "project" || !selectedProjectId) { setProjectViewAssets([]); return; }
+    setLoadingProjectView(true);
+    projectAssetService.listByProject(selectedProjectId)
+      .then(setProjectViewAssets)
+      .catch(() => setProjectViewAssets([]))
+      .finally(() => setLoadingProjectView(false));
+  }, [viewMode, selectedProjectId]);
+
 
   const selectedAddConfig = useMemo(
     () => configs.find((c) => c.id === addForm.configId) ?? null,
@@ -558,12 +584,13 @@ const AssetInstallationPage = () => {
   }, [selectedAddConfig?.workflowTemplateId]);
 
   const visibleAssets = useMemo(() => {
+    const pool = viewMode === "project" && selectedProjectId ? projectViewAssets : assets;
     const q = search.trim().toLowerCase();
-    return assets.filter((a) => {
+    return pool.filter((a) => {
       if (archiveMode) {
         if (a.status !== "Complete") return false;
       } else {
-        if (selectedProjectId && a.projectId !== selectedProjectId) return false;
+        if (viewMode !== "project" && selectedProjectId && a.projectId !== selectedProjectId) return false;
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
       }
       if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q)))) return false;
@@ -574,7 +601,7 @@ const AssetInstallationPage = () => {
       if (healthFilter === "noWorkflow" && !(!a.productConfigId && !a.workflowTemplateId)) return false;
       return true;
     });
-  }, [assets, selectedProjectId, statusFilter, search, archiveMode, healthFilter]);
+  }, [assets, projectViewAssets, viewMode, selectedProjectId, statusFilter, search, archiveMode, healthFilter]);
 
   // Projects filtered to those linked to the active product (used in add/edit dialogs)
   const productProjects = useMemo(
@@ -740,6 +767,15 @@ const AssetInstallationPage = () => {
   // Edit asset
   // ------------------------------------------------------------------
 
+  /** Returns "Address, City" for a project's site, or empty string if unavailable */
+  function getSiteLocation(siteId?: string): string {
+    if (!siteId) return "";
+    const site = sites.find((s) => s.id === siteId);
+    if (!site) return "";
+    const parts = [site.address, site.city].filter(Boolean);
+    return parts.join(", ");
+  }
+
   function openEditAsset(asset: ProjectAsset) {
     let fv: Record<string, string> = {};
     try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
@@ -752,7 +788,7 @@ const AssetInstallationPage = () => {
       serialNumber: asset.serialNumber ?? "",
       assetModel: asset.assetModel ?? "",
       manufacturer: asset.manufacturer ?? "",
-      location: asset.location ?? "",
+      location: asset.location || getSiteLocation(projectMap.get(asset.projectId)?.siteId),
       assignedUserId: asset.assignedUserId ?? "",
       notes: asset.notes ?? "",
       featureValues: fv,
@@ -819,6 +855,21 @@ const AssetInstallationPage = () => {
       alert("Failed to delete asset.");
     } finally {
       setDeletingAsset(false);
+    }
+  }
+
+  async function confirmBulkDelete() {
+    setBulkDeleting(true);
+    const ids = Array.from(selectedAssetIds);
+    try {
+      await Promise.all(ids.map((id) => projectAssetService.remove(id)));
+      setSelectedAssetIds(new Set());
+      setBulkDeleteOpen(false);
+      refreshAssets();
+    } catch {
+      alert("One or more assets could not be deleted.");
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -1011,6 +1062,7 @@ const AssetInstallationPage = () => {
       isBlocking: false,
       reportedAt: new Date().toISOString(),
       resolved: false,
+      reportMedia: issueMedia.length > 0 ? issueMedia : undefined,
     };
     issues.push(newIssue);
     try {
@@ -1020,6 +1072,7 @@ const AssetInstallationPage = () => {
     setIssueDialogOpen(false);
     setIssueDialogAsset(null);
     setIssueForm({ description: "", severity: "medium" });
+    setIssueMedia([]);
   }
 
   async function handleToggleIssueResolved(asset: ProjectAsset, issueId: string) {
@@ -1433,7 +1486,7 @@ const AssetInstallationPage = () => {
       try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
       const idx = issues.findIndex(i => i.id === updatedIssue.id);
       if (idx >= 0) issues[idx] = updatedIssue;
-      await projectAssetService.update(asset.id, { issuesJson: JSON.stringify(issues) }).catch(console.warn);
+      await projectAssetService.patchIssues(asset.id, JSON.stringify(issues)).catch(console.warn);
       refreshAssets();
     } finally { setInlineSaving(false); }
   }
@@ -1449,6 +1502,8 @@ const AssetInstallationPage = () => {
       const idx = issues.findIndex(i => i.id === updatedIssue.id);
       if (idx >= 0) issues[idx] = updatedIssue;
       await assetWorkflowRunService.patchIssues(runId, JSON.stringify(issues)).catch(console.warn);
+      // Auto-lock run if this was the last blocking issue and run is still in-progress
+      await assetWorkflowRunService.tryAutoComplete(runId).catch(() => {});
       await loadAssignmentsForAsset(assetId);
     } finally { setInlineSaving(false); }
   }
@@ -1473,12 +1528,14 @@ const AssetInstallationPage = () => {
     function renderIssueCard(
       issue: AssetIssue | RunIssue,
       onSaveComment: (updated: AssetIssue | RunIssue) => void,
-      onCloseIssue: (note: string) => void,
+      onCloseIssue: (note: string, media?: string[]) => void,
       isRunIssue?: boolean,
     ) {
       const comments = issue.comments ?? [];
       const commentVal = inlineCommentTexts[issue.id] ?? "";
       const correctiveVal = inlineCorrectiveTexts[issue.id] ?? "";
+      const reportMediaVal    = inlineReportMedia[issue.id]     ?? [];
+      const resolutionMediaVal = inlineResolutionMedia[issue.id] ?? [];
       return (
         <Paper key={issue.id} variant="outlined" sx={{ p: 1.5, bgcolor: issue.resolved ? "rgba(255,255,255,0.02)" : "rgba(244,67,54,0.03)", borderColor: issue.resolved ? "divider" : "error.dark", opacity: issue.resolved ? 0.65 : 1 }}>
           <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="flex-start">
@@ -1500,6 +1557,27 @@ const AssetInstallationPage = () => {
               <Typography variant="caption" color="text.disabled" display="block">
                 {"createdBy" in issue && issue.createdBy ? `${issue.createdBy} · ` : ""}{new Date(issue.reportedAt).toLocaleString()}
               </Typography>
+              {!issue.resolved && (
+                <Box sx={{ mt: 1 }}>
+                  <MediaCapture
+                    media={reportMediaVal}
+                    onChange={(m) => setInlineReportMedia(prev => ({ ...prev, [issue.id]: m }))}
+                    label="Attach Photo / Video"
+                    qrDocType="issue-photo"
+                    qrLinkedTo={issue.id}
+                  />
+                </Box>
+              )}
+              {issue.resolved && (issue.reportMedia ?? []).length > 0 && (
+                <Box sx={{ mt: 0.75 }}>
+                  <MediaCapture
+                    media={issue.reportMedia ?? []}
+                    onChange={() => {}}
+                    label="Reported Media"
+                    disabled
+                  />
+                </Box>
+              )}
             </Box>
 
             {/* Col 2 — Comments */}
@@ -1542,7 +1620,7 @@ const AssetInstallationPage = () => {
                       const text = commentVal.trim();
                       if (!text) return;
                       const newComment = { id: crypto.randomUUID(), text, author: currentUser?.fullName ?? "User", createdAt: new Date().toISOString() };
-                      onSaveComment({ ...issue, comments: [...(issue.comments ?? []), newComment] });
+                      onSaveComment({ ...issue, reportMedia: inlineReportMedia[issue.id]?.length ? inlineReportMedia[issue.id] : issue.reportMedia, comments: [...(issue.comments ?? []), newComment] });
                       setInlineCommentTexts(prev => ({ ...prev, [issue.id]: "" }));
                     }}
                     sx={{ fontSize: 11 }}
@@ -1574,6 +1652,15 @@ const AssetInstallationPage = () => {
                     onChange={(e) => setInlineCorrectiveTexts(prev => ({ ...prev, [issue.id]: e.target.value }))}
                     sx={{ fontSize: 11, mb: 0.75 }}
                   />
+                  <Box sx={{ mb: 0.75 }}>
+                    <MediaCapture
+                      media={resolutionMediaVal}
+                      onChange={(m) => setInlineResolutionMedia(prev => ({ ...prev, [issue.id]: m }))}
+                      label="Resolution Evidence"
+                      qrDocType="issue-photo"
+                      qrLinkedTo={issue.id}
+                    />
+                  </Box>
                   <Button
                     size="small"
                     variant="contained"
@@ -1582,8 +1669,9 @@ const AssetInstallationPage = () => {
                     disabled={!correctiveVal.trim() || inlineSaving}
                     startIcon={<CheckCircleOutlined sx={{ fontSize: "0.85rem !important" }} />}
                     onClick={() => {
-                      onCloseIssue(correctiveVal.trim());
+                      onCloseIssue(correctiveVal.trim(), resolutionMediaVal.length > 0 ? resolutionMediaVal : undefined);
                       setInlineCorrectiveTexts(prev => ({ ...prev, [issue.id]: "" }));
+                      setInlineResolutionMedia(prev => ({ ...prev, [issue.id]: [] }));
                     }}
                     sx={{ fontSize: 11, py: 0.25 }}
                   >
@@ -1622,12 +1710,12 @@ const AssetInstallationPage = () => {
             {issues.map((issue) => renderIssueCard(
               issue,
               (updated) => saveInlineAssetIssue(asset, updated as AssetIssue),
-              (note) => saveInlineAssetIssue(asset, { ...issue, resolved: true, resolutionNote: note, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
+              (note, media) => saveInlineAssetIssue(asset, { ...issue, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
             ))}
             {runIssuesWithMeta.map((issue) => renderIssueCard(
               issue,
               (updated) => saveInlineRunIssue(issue.runId, asset.id, updated as RunIssue),
-              (note) => saveInlineRunIssue(issue.runId, asset.id, { ...issue, resolved: true, resolutionNote: note, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
+              (note, media) => saveInlineRunIssue(issue.runId, asset.id, { ...issue, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
               true,
             ))}
           </Stack>
@@ -1762,7 +1850,7 @@ const AssetInstallationPage = () => {
     }
 
     return (
-      <Table size="small" sx={{ maxWidth: 680 }}>
+      <Table size="small" sx={{ maxWidth: 680, minWidth: 650 }}>
         <TableHead>
           <TableRow sx={{ bgcolor: "rgba(255,255,255,0.06)" }}>
             <TableCell sx={{ fontWeight: 700, fontSize: 12, py: 0.75, width: "35%", color: "text.primary" }}>Feature</TableCell>
@@ -2152,7 +2240,7 @@ const AssetInstallationPage = () => {
         </Stack>
 
         {allDowntimeEntries.length > 0 && (
-          <Table size="small" sx={{ maxWidth: 600 }}>
+          <Table size="small" sx={{ maxWidth: 600, minWidth: 650 }}>
             <TableHead>
               <TableRow sx={{ bgcolor: "rgba(255,255,255,0.03)" }}>
                 <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 40 }}>Run</TableCell>
@@ -2208,14 +2296,36 @@ const AssetInstallationPage = () => {
       {/* Header */}
       <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
         <Box sx={{ minWidth: 0 }}>
-          <Stack direction="row" alignItems="center" spacing={1}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ flexWrap: "wrap" }}>
             <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Installation Assets</Typography>
-            {/* Refresh — always visible next to title */}
+            {/* Refresh — desktop only; mobile uses topbar sync badge */}
             <Tooltip title="Refresh assets">
-              <IconButton size="small" onClick={refreshAssets}>
+              <IconButton size="small" onClick={refreshAssets} sx={{ display: { xs: "none", md: "inline-flex" } }}>
                 <RefreshOutlined fontSize="small" />
               </IconButton>
             </Tooltip>
+            {/* Product / Project view toggle — mobile only */}
+            {isMobile && (
+              <Stack direction="row" spacing={0.5}>
+                <Chip
+                  label="Product"
+                  size="small"
+                  color={viewMode === "product" ? "primary" : "default"}
+                  variant={viewMode === "product" ? "filled" : "outlined"}
+                  onClick={() => setViewMode("product")}
+                  sx={{ fontSize: "0.68rem", height: 24 }}
+                />
+                <Chip
+                  label="Project"
+                  size="small"
+                  color={viewMode === "project" ? "primary" : "default"}
+                  variant={viewMode === "project" ? "filled" : "outlined"}
+                  onClick={() => { if (selectedProjectId) setViewMode("project"); }}
+                  disabled={!selectedProjectId}
+                  sx={{ fontSize: "0.68rem", height: 24 }}
+                />
+              </Stack>
+            )}
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", md: "block" } }}>
             Track assets across projects — start work orders, record status, and monitor progress.
@@ -2239,7 +2349,36 @@ const AssetInstallationPage = () => {
             </Button>
           )}
           {can.modifyData && (
-            <Button variant="contained" startIcon={<AddOutlined />} onClick={openAdd} disabled={!activeProduct}>Add asset</Button>
+            <>
+              <Button
+                variant="contained"
+                startIcon={<AddOutlined />}
+                onClick={openAdd}
+                disabled={!activeProduct}
+                sx={{ display: { xs: "none", md: "inline-flex" } }}
+              >
+                Add asset
+              </Button>
+              <Tooltip title="Add asset">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={openAdd}
+                    disabled={!activeProduct}
+                    sx={{
+                      display: { xs: "inline-flex", md: "none" },
+                      bgcolor: "primary.main",
+                      color: "primary.contrastText",
+                      borderRadius: 1,
+                      "&:hover": { bgcolor: "primary.dark" },
+                      "&.Mui-disabled": { bgcolor: "action.disabledBackground" },
+                    }}
+                  >
+                    <AddOutlined fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </>
           )}
         </Stack>
       </Stack>
@@ -2493,6 +2632,16 @@ const AssetInstallationPage = () => {
             Export CSV
           </Button>
 
+          {/* Bulk delete */}
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            onClick={() => setBulkDeleteOpen(true)}
+          >
+            Delete selected
+          </Button>
+
           <Button size="small" color="inherit" onClick={() => setSelectedAssetIds(new Set())}>
             Clear
           </Button>
@@ -2553,11 +2702,13 @@ const AssetInstallationPage = () => {
       {/* ── Mobile card list ── */}
       {isMobile && (
         <Stack spacing={1}>
-          {loadingAssets ? (
+          {loadingAssets || loadingProjectView ? (
             <Stack alignItems="center" py={6}><CircularProgress size={28} /></Stack>
           ) : visibleAssets.length === 0 ? (
             <Alert severity="info">
-              {assets.length === 0
+              {viewMode === "project" && !selectedProjectId
+                ? "Select a project to see all its assets."
+                : assets.length === 0 && viewMode !== "project"
                 ? `No assets for ${activeProduct?.name ?? "this product"} yet.`
                 : "No assets match the current filters."}
             </Alert>
@@ -2614,20 +2765,47 @@ const AssetInstallationPage = () => {
                         <Chip size="small" label={chipLabel} color={chipColor}
                           sx={{ fontSize: "0.65rem", height: 20, ml: "auto", flexShrink: 0 }} />
                       </Stack>
-                      <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 0.25 }}>
+                      <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", gap: 0.25 }}>
                         {asset.location && (
                           <Typography variant="caption" color="text.secondary" noWrap>{asset.location}</Typography>
                         )}
                         {tech && (
-                          <Typography variant="caption" color="text.disabled" noWrap>· {tech.fullName}</Typography>
+                          <Typography variant="caption" color="text.disabled" noWrap>
+                            {asset.location ? "· " : ""}Installer: {tech.fullName}
+                          </Typography>
                         )}
                         {currentStep && (
                           <Typography variant="caption" color="primary.main" noWrap>· {currentStep}</Typography>
                         )}
                       </Stack>
-                      {asset.assetModel && (
-                        <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.62rem" }}>{asset.assetModel}</Typography>
-                      )}
+                      {/* Row 3: model + no-workflow chip or quick-start button */}
+                      <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mt: 0.25 }}>
+                        {asset.assetModel && (
+                          <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.62rem" }}>{asset.assetModel}</Typography>
+                        )}
+                        {!asset.productConfigId && !asset.workflowTemplateId ? (
+                          <Chip
+                            size="small"
+                            label="No workflow"
+                            variant="outlined"
+                            sx={{ fontSize: "0.6rem", height: 18, ml: "auto", flexShrink: 0 }}
+                          />
+                        ) : can.modifyData && (asset.status === "NotStarted" || asset.status === "InProgress") ? (
+                          <Box onClick={(e) => e.stopPropagation()} sx={{ ml: "auto", flexShrink: 0 }}>
+                            <Button
+                              size="small"
+                              variant={asset.status === "InProgress" ? "contained" : "outlined"}
+                              color={asset.status === "InProgress" ? "primary" : "success"}
+                              startIcon={runnerLoading === asset.id ? <CircularProgress size={10} /> : <PlayArrowOutlined />}
+                              disabled={runnerLoading === asset.id}
+                              onClick={() => handleStartWorkOrder(asset)}
+                              sx={{ fontSize: "0.65rem", height: 22, py: 0, px: 0.75, minWidth: 0 }}
+                            >
+                              {asset.status === "InProgress" ? "Continue" : "Start"}
+                            </Button>
+                          </Box>
+                        ) : null}
+                      </Stack>
                     </Box>
                     <IconButton size="small" sx={{ flexShrink: 0 }}>
                       {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
@@ -2701,7 +2879,8 @@ const AssetInstallationPage = () => {
             </Alert>
           </Box>
         ) : (
-          <Table size="small">
+          <Box sx={{ overflowX: "auto" }}>
+          <Table size="small" sx={{ minWidth: 900 }}>
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: 28, px: 0.5 }}>
@@ -2861,6 +3040,7 @@ const AssetInstallationPage = () => {
               })}
             </TableBody>
           </Table>
+          </Box>
         )}
       </Paper>}
 
@@ -2880,7 +3060,7 @@ const AssetInstallationPage = () => {
                   setAddForm((p) => ({
                     ...p,
                     projectId: projId,
-                    location: p.location || proj?.siteName || "",
+                    location: p.location || getSiteLocation(proj?.siteId) || proj?.siteName || "",
                   }));
                 }}
               >
@@ -2946,28 +3126,33 @@ const AssetInstallationPage = () => {
             <TextField label="Asset Tag *" size="small" fullWidth required
               value={addForm.assetTag}
               onChange={(e) => setAddForm((p) => ({ ...p, assetTag: e.target.value }))}
-              placeholder="e.g. VEH-001" />
+              placeholder="e.g. VEH-001"
+              InputLabelProps={{ shrink: true }} />
             <TextField label="Asset Name" size="small" fullWidth
               value={addForm.assetName}
               onChange={(e) => setAddForm((p) => ({ ...p, assetName: e.target.value }))}
               placeholder="e.g. AGI-10, Shuttle Car, Skid Steer"
-              helperText="Equipment type or model name" />
+              helperText="Equipment type or model name"
+              InputLabelProps={{ shrink: true }} />
             <TextField label="Serial Number" size="small" fullWidth
               value={addForm.serialNumber}
               onChange={(e) => setAddForm((p) => ({ ...p, serialNumber: e.target.value }))} />
             <TextField label="Asset Model" size="small" fullWidth
               value={addForm.assetModel}
               onChange={(e) => setAddForm((p) => ({ ...p, assetModel: e.target.value }))}
-              placeholder="e.g. Axis P3245-V" />
+              placeholder="e.g. Axis P3245-V"
+              InputLabelProps={{ shrink: true }} />
             <TextField label="Manufacturer" size="small" fullWidth
               value={addForm.manufacturer}
               onChange={(e) => setAddForm((p) => ({ ...p, manufacturer: e.target.value }))}
-              placeholder="e.g. Axis, Cisco" />
+              placeholder="e.g. Axis, Cisco"
+              InputLabelProps={{ shrink: true }} />
             <TextField
               label="Location" size="small" fullWidth
               value={addForm.location}
               onChange={(e) => setAddForm((p) => ({ ...p, location: e.target.value }))}
               placeholder="Auto-filled from project site"
+              InputLabelProps={{ shrink: true }}
               helperText={
                 addForm.projectId && projects.find((p) => p.id === addForm.projectId)?.siteName
                   ? `Site: ${projects.find((p) => p.id === addForm.projectId)?.siteName}`
@@ -3036,7 +3221,8 @@ const AssetInstallationPage = () => {
             <TextField label="Asset Name" size="small" fullWidth
               value={editForm.assetName}
               onChange={(e) => setEditForm((p) => ({ ...p, assetName: e.target.value }))}
-              placeholder="e.g. AGI-10, Shuttle Car, Skid Steer" />
+              placeholder="e.g. AGI-10, Shuttle Car, Skid Steer"
+              InputLabelProps={{ shrink: true }} />
             <FormControl size="small" fullWidth>
               <InputLabel>Configuration Type</InputLabel>
               <Select
@@ -3114,8 +3300,28 @@ const AssetInstallationPage = () => {
         </DialogActions>
       </Dialog>
 
+      {/* Bulk delete confirmation */}
+      <Dialog open={bulkDeleteOpen} onClose={() => !bulkDeleting && setBulkDeleteOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete {selectedAssetIds.size} Asset{selectedAssetIds.size !== 1 ? "s" : ""}?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" gutterBottom>
+            You are about to permanently delete <strong>{selectedAssetIds.size}</strong> asset{selectedAssetIds.size !== 1 ? "s" : ""}. This cannot be undone.
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Associated workflow runs, issues, and documents will also be removed.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkDeleteOpen(false)} disabled={bulkDeleting}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={confirmBulkDelete} disabled={bulkDeleting}
+            startIcon={bulkDeleting ? <CircularProgress size={14} /> : undefined}>
+            {bulkDeleting ? "Deleting…" : `Delete ${selectedAssetIds.size}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Add issue dialog */}
-      <Dialog open={issueDialogOpen} onClose={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); }} maxWidth="xs" fullWidth>
+      <Dialog open={issueDialogOpen} onClose={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); setIssueMedia([]); }} maxWidth="xs" fullWidth>
         <DialogTitle>
           <Stack direction="row" alignItems="center" spacing={1}>
             <ReportProblemOutlined color="error" fontSize="small" />
@@ -3146,10 +3352,17 @@ const AssetInstallationPage = () => {
                 <MenuItem value="high">High</MenuItem>
               </Select>
             </FormControl>
+            <MediaCapture
+              media={issueMedia}
+              onChange={setIssueMedia}
+              label="Attach Photo / Video (optional)"
+              qrDocType="issue-photo"
+              qrLinkedTo={issueDialogAsset?.id ?? ""}
+            />
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); }}>Cancel</Button>
+          <Button onClick={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); setIssueMedia([]); }}>Cancel</Button>
           <Button variant="contained" color="error" onClick={handleAddIssue} disabled={!issueForm.description.trim()}>
             Add issue
           </Button>
@@ -3339,7 +3552,7 @@ const AssetInstallationPage = () => {
                   }
                 </Alert>
                 <Box sx={{ maxHeight: 320, overflow: "auto" }}>
-                  <Table size="small">
+                  <Table size="small" sx={{ minWidth: 650 }}>
                     <TableHead>
                       <TableRow>
                         <TableCell><Typography variant="caption" fontWeight={700}>Asset Tag</Typography></TableCell>
@@ -3584,7 +3797,7 @@ const AssetInstallationPage = () => {
               bgcolor: "rgba(0,0,0,0.04)",
             }}
           >
-            <Table size="small">
+            <Table size="small" sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 700, py: 0.5 }}>Asset Tag</TableCell>
@@ -3940,19 +4153,48 @@ const AssetInstallationPage = () => {
             <Alert severity="info" sx={{ fontSize: 12 }}>
               The same file will be linked to every selected asset. Assets already at 3 documents will be skipped automatically.
             </Alert>
-            <Button variant="outlined" component="label" sx={{ justifyContent: "flex-start", textTransform: "none" }}>
-              {bulkDocsFile ? bulkDocsFile.name : "Choose file…"}
-              <input
-                type="file"
-                hidden
-                accept=".pdf,.xlsx,.xls,.docx,.doc,.json,.png,.jpg,.jpeg"
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  setBulkDocsFile(f);
-                  if (f && !bulkDocsName) setBulkDocsName(f.name.replace(/\.[^.]+$/, ""));
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Button variant="outlined" component="label" sx={{ justifyContent: "flex-start", textTransform: "none", flex: 1 }}>
+                {bulkDocsFile ? bulkDocsFile.name : "Choose file…"}
+                <input
+                  type="file"
+                  hidden
+                  accept=".pdf,.xlsx,.xls,.docx,.doc,.json,.png,.jpg,.jpeg"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setBulkDocsFile(f);
+                    if (f && !bulkDocsName) setBulkDocsName(f.name.replace(/\.[^.]+$/, ""));
+                  }}
+                />
+              </Button>
+              <QRUploadButton
+                docType={bulkDocsType}
+                linkedTo="bulk"
+                label="Phone"
+                onUploaded={async (documentId) => {
+                  setBulkDocsSaving(true);
+                  setBulkDocsResult(null);
+                  const ids = [...selectedAssetIds];
+                  let uploaded = 0, skipped = 0, failed = 0;
+                  await Promise.all(ids.map(async (assetId) => {
+                    if ((docsCountMap[assetId] ?? 0) >= 3) { skipped++; return; }
+                    try {
+                      await assetDocumentLinkService.attach(assetId, documentId, currentUser?.fullName ?? undefined);
+                      uploaded++;
+                      setDocsCountMap((prev) => ({ ...prev, [assetId]: (prev[assetId] ?? 0) + 1 }));
+                    } catch { failed++; }
+                  }));
+                  setBulkDocsSaving(false);
+                  const parts: string[] = [];
+                  if (uploaded) parts.push(`${uploaded} uploaded`);
+                  if (skipped) parts.push(`${skipped} skipped`);
+                  if (failed) parts.push(`${failed} failed`);
+                  setBulkDocsResult(`Done — ${parts.join(", ")}.`);
+                  if (failed === 0) setSelectedAssetIds(new Set());
+                  setBulkDocsOpen(false);
                 }}
               />
-            </Button>
+            </Stack>
             <TextField
               label="Document name"
               size="small"

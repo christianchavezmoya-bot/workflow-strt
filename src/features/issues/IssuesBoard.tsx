@@ -4,6 +4,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Collapse,
   Divider,
   Grid,
   IconButton,
@@ -23,7 +24,10 @@ import {
   useTheme,
 } from "@mui/material";
 import {
+  CheckCircleOutlineOutlined,
   ErrorOutlineOutlined,
+  ExpandLessOutlined,
+  ExpandMoreOutlined,
   FilterListOutlined,
   OpenInNewOutlined,
   RefreshOutlined,
@@ -31,6 +35,10 @@ import {
 } from "@mui/icons-material";
 import { Link } from "react-router-dom";
 import { assetWorkflowRunService, type OpenIssueRecord } from "../../services/assetWorkflowRunService";
+import { projectAssetService } from "../../services/projectAssetService";
+import type { RunIssue } from "../../types/assetWorkflowRun";
+import type { AssetIssue } from "../../types/projectAsset";
+import MediaCapture from "../../components/ui/MediaCapture";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -72,6 +80,12 @@ const IssuesBoard = () => {
   const [filterType,     setFilterType]     = useState("__all__");
   const [searchText,     setSearchText]     = useState("");
 
+  // ── Expanded row state ─────────────────────────────────────────────────────
+  const [expandedKey,       setExpandedKey]       = useState<string | null>(null);
+  const [resolutionNotes,   setResolutionNotes]   = useState<Record<string, string>>({});
+  const [resolutionMedia,   setResolutionMedia]   = useState<Record<string, string[]>>({});
+  const [closingKey,        setClosingKey]        = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try { setIssues(await assetWorkflowRunService.listOpenIssues()); }
@@ -103,9 +117,64 @@ const IssuesBoard = () => {
   }, [issues, filterProject, filterSeverity, filterType, searchText]);
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
-  const blockingCount  = issues.filter(i => i.isBlocking).length;
-  const highCount      = issues.filter(i => i.severity === "high").length;
+  const blockingCount    = issues.filter(i => i.isBlocking).length;
+  const mediumCount      = issues.filter(i => i.severity === "medium").length;
   const projectsAffected = new Set(issues.map(i => i.projectId)).size;
+
+  // ── Close issue ───────────────────────────────────────────────────────────
+  async function handleCloseIssue(iss: OpenIssueRecord) {
+    const key  = `${iss.source}-${iss.assetId}-${iss.issueId}`;
+    const note = (resolutionNotes[key] ?? "").trim();
+    if (!note) return;
+    setClosingKey(key);
+    const now = new Date().toISOString();
+    const media = (resolutionMedia[key] ?? []).length > 0 ? resolutionMedia[key] : undefined;
+    try {
+      if (iss.source === "asset") {
+        // Manually-added issue lives on the asset record
+        const asset = await projectAssetService.getById(iss.assetId);
+        if (!asset) throw new Error("Asset not found");
+        let assetIssues: AssetIssue[] = [];
+        try { assetIssues = JSON.parse(asset.issuesJson ?? "[]"); } catch { /* empty */ }
+        assetIssues = assetIssues.map(ai =>
+          ai.id === iss.issueId
+            ? { ...ai, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: now }
+            : ai
+        );
+        const anyOpen = assetIssues.some(ai => !ai.resolved);
+        await projectAssetService.update(iss.assetId, {
+          issuesJson: JSON.stringify(assetIssues),
+          // Reset status to Complete if no open issues remain
+          ...(anyOpen ? {} : { status: "Complete" as const }),
+        });
+      } else {
+        // Issue lives on a workflow run
+        const run = await assetWorkflowRunService.getById(iss.runId);
+        if (!run) throw new Error("Run not found");
+        let runIssues: RunIssue[] = [];
+        try { runIssues = JSON.parse(run.issuesJson ?? "[]"); } catch { /* empty */ }
+        runIssues = runIssues.map(ri =>
+          ri.id === iss.issueId
+            ? { ...ri, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: now }
+            : ri
+        );
+        await assetWorkflowRunService.patchIssues(iss.runId, JSON.stringify(runIssues));
+        // Auto-lock run if this was the last blocking issue and run is still in-progress
+        await assetWorkflowRunService.tryAutoComplete(iss.runId).catch(() => {});
+      }
+      // Optimistic remove from list
+      setIssues(prev => prev.filter(i => !(i.assetId === iss.assetId && i.issueId === iss.issueId)));
+      setExpandedKey(null);
+    } catch (e) {
+      console.error("Failed to close issue", e);
+    } finally {
+      setClosingKey(null);
+    }
+  }
+
+  function toggleExpand(key: string) {
+    setExpandedKey(prev => prev === key ? null : key);
+  }
 
   return (
     <Stack spacing={3}>
@@ -124,11 +193,11 @@ const IssuesBoard = () => {
         </Typography>
       </Box>
 
-      {/* ── KPI strip — 4 columns always ── */}
+      {/* ── KPI strip ── */}
       <Grid container spacing={1}>
         {[
           { label: "Blocking",  value: blockingCount,    color: "error.main"   },
-          { label: "High",      value: highCount,        color: "warning.main" },
+          { label: "Medium",    value: mediumCount,      color: "warning.main" },
           { label: "Total Open",value: issues.length,    color: "text.primary" },
           { label: "Projects",  value: projectsAffected, color: "text.primary" },
         ].map(({ label, value, color }) => (
@@ -329,6 +398,7 @@ const IssuesBoard = () => {
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: 36, py: 1 }}></TableCell>
+                <TableCell sx={{ width: 36, py: 1 }}></TableCell>
                 <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Type</TableCell>
                 <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Severity</TableCell>
                 <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Description</TableCell>
@@ -341,61 +411,183 @@ const IssuesBoard = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {filtered.map((iss) => (
-                <TableRow
-                  key={`${iss.runId}-${iss.issueId}`}
-                  hover
-                  sx={{
-                    borderLeft: iss.isBlocking ? "3px solid" : "3px solid transparent",
-                    borderLeftColor: iss.isBlocking ? "error.main" : "transparent",
-                  }}
-                >
-                  <TableCell sx={{ py: 0.75, pl: 1 }}>
-                    {iss.isBlocking ? (
-                      <ErrorOutlineOutlined sx={{ fontSize: 16, color: "error.main" }} />
-                    ) : iss.severity === "high" ? (
-                      <WarningAmberOutlined sx={{ fontSize: 16, color: "warning.main" }} />
-                    ) : null}
-                  </TableCell>
-                  <TableCell sx={{ py: 0.75 }}>
-                    <Chip label={typeLabel(iss.issueType)} size="small" color={typeColor(iss.issueType)} variant="outlined" sx={{ fontSize: "0.65rem", height: 18 }} />
-                  </TableCell>
-                  <TableCell sx={{ py: 0.75 }}>
-                    <Chip label={iss.severity.charAt(0).toUpperCase() + iss.severity.slice(1)} size="small" color={severityColor(iss.severity)} variant="filled" sx={{ fontSize: "0.65rem", height: 18 }} />
-                  </TableCell>
-                  <TableCell sx={{ py: 0.75, maxWidth: 300 }}>
-                    <Typography variant="body2" sx={{ wordBreak: "break-word" }}>{iss.description}</Typography>
-                  </TableCell>
-                  <TableCell sx={{ py: 0.75 }}>
-                    <Typography variant="caption" color="text.secondary">{iss.stepTitle || "—"}</Typography>
-                  </TableCell>
-                  <TableCell sx={{ py: 0.75 }}>
-                    <Typography variant="body2" fontWeight={600}>{iss.assetTag}</Typography>
-                    {iss.assetLocation && <Typography variant="caption" color="text.disabled" display="block">{iss.assetLocation}</Typography>}
-                  </TableCell>
-                  <TableCell sx={{ py: 0.75 }}>
-                    <Button component={Link} to={`/projects?open=${encodeURIComponent(iss.projectId)}`} size="small" sx={{ p: 0, minWidth: "auto", textAlign: "left", textTransform: "none" }}>
-                      <Stack>
-                        <Typography variant="caption" fontWeight={700}>{iss.jobNumber}</Typography>
-                        <Typography variant="caption" color="text.secondary">{iss.customerName}</Typography>
-                      </Stack>
-                    </Button>
-                  </TableCell>
-                  <TableCell sx={{ py: 0.75 }}>
-                    <Typography variant="caption">{fmtDate(iss.reportedAt)}</Typography>
-                  </TableCell>
-                  <TableCell sx={{ py: 0.75 }}>
-                    <Typography variant="caption" color="text.secondary">{iss.createdBy || "—"}</Typography>
-                  </TableCell>
-                  <TableCell sx={{ py: 0.75, pr: 1 }}>
-                    <Tooltip title="Go to asset installations">
-                      <IconButton size="small" component={Link} to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`}>
-                        <OpenInNewOutlined sx={{ fontSize: 14 }} />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {filtered.map((iss) => {
+                const key = `${iss.source}-${iss.assetId}-${iss.issueId}`;
+                const isExpanded = expandedKey === key;
+                const isClosing  = closingKey === key;
+                const noteVal    = resolutionNotes[key] ?? "";
+                const mediaVal   = resolutionMedia[key] ?? [];
+
+                return (
+                  <React.Fragment key={key}>
+                    <TableRow
+                      hover
+                      sx={{
+                        borderLeft: iss.isBlocking ? "3px solid" : "3px solid transparent",
+                        borderLeftColor: iss.isBlocking ? "error.main" : "transparent",
+                        cursor: "pointer",
+                        bgcolor: isExpanded ? "action.selected" : undefined,
+                      }}
+                      onClick={() => toggleExpand(key)}
+                    >
+                      {/* Chevron */}
+                      <TableCell sx={{ py: 0.5, pl: 1, pr: 0 }}>
+                        <IconButton size="small" sx={{ p: 0.25 }} onClick={e => { e.stopPropagation(); toggleExpand(key); }}>
+                          {isExpanded ? <ExpandLessOutlined sx={{ fontSize: 16 }} /> : <ExpandMoreOutlined sx={{ fontSize: 16 }} />}
+                        </IconButton>
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75, pl: 1 }}>
+                        {iss.isBlocking ? (
+                          <ErrorOutlineOutlined sx={{ fontSize: 16, color: "error.main" }} />
+                        ) : iss.severity === "high" ? (
+                          <WarningAmberOutlined sx={{ fontSize: 16, color: "warning.main" }} />
+                        ) : null}
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75 }}>
+                        <Chip
+                          label={typeLabel(iss.issueType)}
+                          size="small"
+                          color={typeColor(iss.issueType)}
+                          variant="outlined"
+                          sx={{ fontSize: "0.65rem", height: 18 }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75 }}>
+                        <Chip
+                          label={iss.severity.charAt(0).toUpperCase() + iss.severity.slice(1)}
+                          size="small"
+                          color={severityColor(iss.severity)}
+                          variant="filled"
+                          sx={{ fontSize: "0.65rem", height: 18 }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75, maxWidth: 300 }}>
+                        <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
+                          {iss.description}
+                        </Typography>
+                        <Chip
+                          label={iss.source === "asset" ? "Manual" : "Workflow"}
+                          size="small"
+                          variant="outlined"
+                          sx={{ fontSize: "0.6rem", height: 16, mt: 0.25, opacity: 0.7 }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75 }}>
+                        <Typography variant="caption" color="text.secondary">{iss.stepTitle || "—"}</Typography>
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75 }}>
+                        <Typography variant="body2" fontWeight={600}>{iss.assetTag}</Typography>
+                        {iss.assetLocation && (
+                          <Typography variant="caption" color="text.disabled" display="block">{iss.assetLocation}</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75 }}>
+                        <Button
+                          component={Link}
+                          to={`/projects?open=${encodeURIComponent(iss.projectId)}`}
+                          size="small"
+                          sx={{ p: 0, minWidth: "auto", textAlign: "left", textTransform: "none" }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <Stack>
+                            <Typography variant="caption" fontWeight={700}>{iss.jobNumber}</Typography>
+                            <Typography variant="caption" color="text.secondary">{iss.customerName}</Typography>
+                          </Stack>
+                        </Button>
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75 }}>
+                        <Typography variant="caption">{fmtDate(iss.reportedAt)}</Typography>
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75 }}>
+                        <Typography variant="caption" color="text.secondary">{iss.createdBy || "—"}</Typography>
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75, pr: 1 }}>
+                        <Tooltip title="Go to asset installations">
+                          <IconButton
+                            size="small"
+                            component={Link}
+                            to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <OpenInNewOutlined sx={{ fontSize: 14 }} />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+
+                    {/* Expanded close-issue panel */}
+                    <TableRow sx={{ bgcolor: "action.hover" }}>
+                      <TableCell colSpan={11} sx={{ py: 0, px: 0, border: 0 }}>
+                        <Collapse in={isExpanded} unmountOnExit>
+                          <Paper
+                            variant="outlined"
+                            sx={{
+                              m: 1.5,
+                              p: 2,
+                              borderColor: "divider",
+                              bgcolor: "background.paper",
+                            }}
+                          >
+                            <Stack spacing={2}>
+                              <Typography variant="subtitle2" fontWeight={700}>
+                                Close Issue — <span style={{ fontWeight: 400 }}>{iss.description}</span>
+                              </Typography>
+                              <Divider />
+                              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                                {/* Resolution note */}
+                                <Box sx={{ flex: 1 }}>
+                                  <Typography variant="caption" fontWeight={700} color="text.secondary"
+                                    sx={{ textTransform: "uppercase", letterSpacing: 0.6 }} display="block" mb={0.75}>
+                                    Corrective Action (required)
+                                  </Typography>
+                                  <TextField
+                                    size="small"
+                                    fullWidth
+                                    multiline
+                                    rows={3}
+                                    placeholder="Describe what was done to resolve this issue…"
+                                    value={noteVal}
+                                    onChange={e => setResolutionNotes(p => ({ ...p, [key]: e.target.value }))}
+                                  />
+                                </Box>
+                                {/* Resolution media */}
+                                <Box sx={{ flex: 1 }}>
+                                  <MediaCapture
+                                    media={mediaVal}
+                                    onChange={m => setResolutionMedia(p => ({ ...p, [key]: m }))}
+                                    label="Resolution Evidence — Photo / Video (optional)"
+                                    qrDocType="issue-photo"
+                                    qrLinkedTo={iss.issueId}
+                                  />
+                                </Box>
+                              </Stack>
+                              <Stack direction="row" spacing={1} justifyContent="flex-end">
+                                <Button
+                                  size="small"
+                                  color="inherit"
+                                  onClick={() => setExpandedKey(null)}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  color="success"
+                                  startIcon={isClosing ? <CircularProgress size={14} color="inherit" /> : <CheckCircleOutlineOutlined />}
+                                  disabled={!noteVal.trim() || isClosing}
+                                  onClick={e => { e.stopPropagation(); void handleCloseIssue(iss); }}
+                                >
+                                  {isClosing ? "Closing…" : "Close Issue"}
+                                </Button>
+                              </Stack>
+                            </Stack>
+                          </Paper>
+                        </Collapse>
+                      </TableCell>
+                    </TableRow>
+                  </React.Fragment>
+                );
+              })}
             </TableBody>
           </Table>
         </Box>

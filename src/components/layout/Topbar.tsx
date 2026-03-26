@@ -34,6 +34,7 @@ import { useWorkScope } from "../../hooks/useWorkScope";
 import GlobalSearchDialog from "./GlobalSearchDialog";
 import SyncStatusBadge from "../ui/SyncStatusBadge";
 import strataLogo from "../../assets/strata_transparent.png";
+import { brandSettingsService } from "../../services/brandSettingsService";
 
 function getRolesFromCache(): string[] {
   try {
@@ -71,6 +72,31 @@ const Topbar = () => {
   const { viewMode, toggleViewMode } = useViewMode();
   const { isFavorited, getFavorite, add, remove } = useFavoritesContext();
   const { isMyWork, isOfficeView, canUseOfficeView, setWorkScope } = useWorkScope();
+
+  const [appName, setAppName] = useState("Field Operations");
+  const [qbEnabled, setQbEnabled] = useState(false);
+  const [qbHost, setQbHost] = useState("");
+
+  useEffect(() => {
+    brandSettingsService.get().then((s) => {
+      if (s.appName) setAppName(s.appName);
+    }).catch(() => {});
+    const handler = (e: Event) => {
+      const name = (e as CustomEvent<{ appName: string }>).detail?.appName;
+      if (name) setAppName(name);
+    };
+    window.addEventListener("brand-name-changed", handler);
+    return () => window.removeEventListener("brand-name-changed", handler);
+  }, []);
+
+  useEffect(() => {
+    import("../../services/settingsService").then(({ settingsService }) => {
+      settingsService.getQuickbaseSettings().then((s) => {
+        setQbEnabled(!!s?.enabled);
+        setQbHost(s?.realmHostname ?? "");
+      }).catch(() => {});
+    });
+  }, []);
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
@@ -135,6 +161,9 @@ const Topbar = () => {
     navigate("/login");
   };
 
+  // suppress unused warnings for qb state used only in desktop section
+  void qbEnabled; void qbHost;
+
   return (
     <Box className="topbar">
 
@@ -151,7 +180,7 @@ const Topbar = () => {
         {/* App name + sync status + role */}
         <Stack spacing={0} sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="subtitle1" fontWeight={700} lineHeight={1.2} noWrap>
-            Kinet
+            {appName}
           </Typography>
           <Stack direction="row" alignItems="center" spacing={0.5}>
             {/* Sync status replaces plain Online/Offline */}
@@ -231,7 +260,7 @@ const Topbar = () => {
             }}
           />
           <Stack spacing={0.25}>
-            <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Kinet</Typography>
+            <Typography variant="h5" sx={{ fontFamily: "Sora" }}>{appName}</Typography>
             <Typography variant="body2" color="text.secondary">{pageLabel}</Typography>
           </Stack>
         </Stack>

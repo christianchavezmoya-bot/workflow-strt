@@ -11,6 +11,14 @@ export interface Feature {
   isInventory?: boolean;
   /** Inventory only: fields to capture per unit e.g. serialNo, firmware, ipAddress */
   captureFields?: string[];
+  /** Procurement fields */
+  brand?: string;
+  supplier?: string;
+  alternativePartNumber?: string;
+  manufacturerPartNumber?: string;
+  unitPrice?: number;
+  productLink?: string;
+  linkedProducts?: string[];
 }
 
 export interface FeatureSubProperty {

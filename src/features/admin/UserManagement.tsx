@@ -44,6 +44,7 @@ import {
   EmailOutlined,
   PersonOffOutlined,
   LockResetOutlined,
+  ReplayOutlined,
 } from "@mui/icons-material";
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
@@ -66,7 +67,7 @@ import api from "../../services/api";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer } from "../../store/customersSlice";
 import { createProduct, deleteProduct, fetchProducts, updateProduct } from "../../store/productsSlice";
-import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, reset2fa, updateUser } from "../../store/usersSlice";
+import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, reset2fa, resetOnboarding, updateUser } from "../../store/usersSlice";
 import { Customer } from "../../types/customer";
 import { Product } from "../../types/product";
 import type { FeatureSubProperty as ProductFeatureSubProperty, ProductFeatureDefinition, ProductFeatureValueType } from "../../types/product";
@@ -553,47 +554,11 @@ export const UserManagement: React.FC = () => {
     anchorEl: null,
     key: ""
   });
-  const [rolesConfig, setRolesConfig] = useState(() => {
-    try {
-      const raw = localStorage.getItem("admin_roles_config");
-      if (raw) return JSON.parse(raw) as Record<string, RolePermissions>;
-    } catch {
-      // ignore
-    }
-    return {
-      Viewer: {
-        viewOnly: true,
-        createDeleteTables: false,
-        createUsers: false,
-        editFields: false,
-        modifyData: false,
-        editForms: false
-      },
-      "Project Manager": {
-        viewOnly: false,
-        createDeleteTables: true,
-        createUsers: false,
-        editFields: true,
-        modifyData: true,
-        editForms: true
-      },
-      Admin: {
-        viewOnly: false,
-        createDeleteTables: true,
-        createUsers: true,
-        editFields: true,
-        modifyData: true,
-        editForms: true
-      },
-      Engineer: {
-        viewOnly: false,
-        createDeleteTables: false,
-        createUsers: false,
-        editFields: false,
-        modifyData: true,
-        editForms: false
-      }
-    } as Record<string, RolePermissions>;
+  const [rolesConfig, setRolesConfig] = useState<Record<string, RolePermissions>>({
+    Viewer: { viewOnly: true, createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false },
+    "Project Manager": { viewOnly: false, createDeleteTables: true, createUsers: false, editFields: true, modifyData: true, editForms: true },
+    Admin: { viewOnly: false, createDeleteTables: true, createUsers: true, editFields: true, modifyData: true, editForms: true },
+    Engineer: { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true, editForms: false }
   });
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -726,8 +691,7 @@ export const UserManagement: React.FC = () => {
       setRoles(roleNames);
     }
 
-    // Save to localStorage and notify same-tab listeners
-    localStorage.setItem("admin_roles_config", JSON.stringify(rolesConfig));
+    // Notify same-tab listeners
     window.dispatchEvent(new CustomEvent("roles-config-changed"));
 
     // Skip database save on initial mount to avoid overwriting with stale localStorage data
@@ -1650,6 +1614,7 @@ export const UserManagement: React.FC = () => {
         userDynamicValues,
         usersDynamic.valuesByEntity[created.id]
       );
+      await dispatch(inviteUser(created.id));
     } catch (error) {
       setActionError(resolveErrorMessage(error, "Failed to create user."));
     }
@@ -2140,6 +2105,13 @@ export const UserManagement: React.FC = () => {
                         <Tooltip title="Reset 2FA">
                           <IconButton size="small" color="warning" onClick={() => dispatch(reset2fa(user.id))}>
                             <LockResetOutlined fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {can.createUsers && (
+                        <Tooltip title="Reset onboarding — user will see welcome tour on next login">
+                          <IconButton size="small" color="info" onClick={() => dispatch(resetOnboarding(user.id))}>
+                            <ReplayOutlined fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
@@ -2807,6 +2779,7 @@ export const UserManagement: React.FC = () => {
                           placeholder="Customer Name"
                           label="Customer Name"
                           fullWidth
+                          InputLabelProps={{ shrink: true }}
                           sx={{
                             '& .MuiInputBase-root': {
                               height: 32,
@@ -2848,6 +2821,7 @@ export const UserManagement: React.FC = () => {
                           placeholder="Industry"
                           label="Industry"
                           fullWidth
+                          InputLabelProps={{ shrink: true }}
                           sx={{
                             '& .MuiInputBase-root': {
                               height: 26,
@@ -2903,8 +2877,8 @@ export const UserManagement: React.FC = () => {
 
           {/* Table View */}
           {customerViewMode === 'table' && (
-            <TableContainer component={Paper}>
-              <Table>
+            <TableContainer component={Paper} sx={{ overflowX: "auto" }}>
+              <Table sx={{ minWidth: 900 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell width="60">#</TableCell>
@@ -5149,6 +5123,7 @@ export const UserManagement: React.FC = () => {
                               value={sf.unit ?? ""}
                               sx={{ width: 80 }}
                               placeholder="ea, m…"
+                              InputLabelProps={{ shrink: true }}
                               onChange={(e) =>
                                 setProductFeatures((prev) =>
                                   prev.map((f) =>
@@ -5472,6 +5447,7 @@ export const UserManagement: React.FC = () => {
                               value={sf.unit ?? ""}
                               sx={{ width: 80 }}
                               placeholder="ea, m…"
+                              InputLabelProps={{ shrink: true }}
                               onChange={(e) =>
                                 setEditProductFeatures((prev) =>
                                   prev.map((f) =>

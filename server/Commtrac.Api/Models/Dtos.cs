@@ -170,7 +170,14 @@ public record FeatureDto(
     List<string>? Options,
     List<FeatureSubPropertyDto>? SubProperties,
     bool IsInventory,
-    List<string>? CaptureFields
+    List<string>? CaptureFields,
+    string? Brand = null,
+    string? Supplier = null,
+    string? AlternativePartNumber = null,
+    decimal? UnitPrice = null,
+    string? ProductLink = null,
+    string? ManufacturerPartNumber = null,
+    List<string>? LinkedProducts = null
 );
 
 public record CreateFeatureRequest(
@@ -180,7 +187,13 @@ public record CreateFeatureRequest(
     List<string>? Options = null,
     List<FeatureSubPropertyDto>? SubProperties = null,
     bool IsInventory = false,
-    List<string>? CaptureFields = null
+    List<string>? CaptureFields = null,
+    string? Brand = null,
+    string? Supplier = null,
+    string? AlternativePartNumber = null,
+    decimal? UnitPrice = null,
+    string? ProductLink = null,
+    string? ManufacturerPartNumber = null
 );
 
 public record UpdateFeatureRequest(
@@ -190,7 +203,13 @@ public record UpdateFeatureRequest(
     List<string>? Options,
     List<FeatureSubPropertyDto>? SubProperties,
     bool? IsInventory,
-    List<string>? CaptureFields
+    List<string>? CaptureFields,
+    string? Brand = null,
+    string? Supplier = null,
+    string? AlternativePartNumber = null,
+    decimal? UnitPrice = null,
+    string? ProductLink = null,
+    string? ManufacturerPartNumber = null
 );
 
 public record FeatureDependencyDto(
@@ -310,6 +329,16 @@ public record UpdateProductRequest(
     string? DivisionId = null
 );
 
+public class DeleteProductRequest
+{
+    /// <summary>Feature IDs to fully delete (only if they have no other product links after unlinking).</summary>
+    public List<string> DeleteFeatureIds { get; set; } = new();
+    /// <summary>Asset IDs to fully delete. Assets NOT in this list have their ProductId nullified.</summary>
+    public List<string> DeleteAssetIds { get; set; } = new();
+    /// <summary>Workflow config IDs to fully delete. Workflows NOT in this list have their ProductId nullified.</summary>
+    public List<string> DeleteWorkflowIds { get; set; } = new();
+}
+
 public record AssetDto(
     string Id,
     int Seq,
@@ -359,6 +388,7 @@ public record ProjectDto(
     string? ProbabilityStage,
     List<string>? ProductIds,
     Dictionary<string, string>? ProductFeatureValues,
+    string? OfficeId = null,
     int AssetCount = 0
 );
 
@@ -703,6 +733,8 @@ public record BulkCreateProjectAssetsRequest(
     List<UpsertProjectAssetRequest> Assets
 );
 
+public record PatchIssuesRequest(string? IssuesJson);
+
 // ─── v2 Workflow Config Unification DTOs ──────────────────────────────────────
 
 public record WorkflowConfigDto(
@@ -813,7 +845,6 @@ public record CompleteRunRequest(
     string? BomActualJson
 );
 
-public record PatchIssuesRequest(string IssuesJson);
 public record PatchTimeEntriesRequest(string TimeEntriesJson);
 public record TrackRunTimeRequest(
     string Action,
@@ -822,8 +853,8 @@ public record TrackRunTimeRequest(
     string? EndedAtUtc
 );
 
-public record BrandSettingDto(string? LogoBase64);
-public record UpdateBrandSettingRequest(string? LogoBase64);
+public record BrandSettingDto(string? LogoBase64, string? AppName);
+public record UpdateBrandSettingRequest(string? LogoBase64, string? AppName);
 
 // ─── Asset Documents ──────────────────────────────────────────────────────────
 public record AssetDocumentRevisionDto(
@@ -1148,21 +1179,90 @@ public record OpenIssueDto(
     string ReportedAt,
     string? CreatedBy,
     string? StepTitle,
-    string RunId,
+    string RunId,       // empty string when Source == "asset"
     string AssetId,
     string AssetTag,
     string AssetName,
     string AssetLocation,
     string ProjectId,
     string JobNumber,
-    string CustomerName
+    string CustomerName,
+    string Source       // "run" | "asset"
 );
 
 /// <summary>Result returned after cloning assets from one project into another.</summary>
 public record CloneAssetsResult(int AssetsCloned, int AssignmentsCloned);
 
 /// <summary>Per-technician open-asset counts for the Dashboard workload panel.</summary>
-public record WorkloadSummaryDto(string UserId, string FullName, int NotStarted, int InProgress, int TotalAssigned);
+public record WorkloadSummaryDto(
+    string UserId, string FullName,
+    int NotStarted, int InProgress, int TotalAssigned,
+    List<string> JobNumbers,
+    bool HasIssues,
+    int CompletedSteps, int TotalSteps,
+    string? StartedAt);
 
 /// <summary>Per-project asset status counts for the Dashboard regional snapshot.</summary>
 public record ProjectAssetSummaryDto(string ProjectId, int NotStarted, int InProgress, int Complete, int Total);
+
+/// <summary>Open (not-yet-complete) asset with parent project context for the Dashboard Active Installations panel.</summary>
+public record OpenAssetDto(
+    string Id,
+    string ProjectId,
+    string JobNumber,
+    string Office,
+    string? OfficeId,
+    string? AssetTag,
+    string? AssetName,
+    string? AssetModel,
+    string? Manufacturer,
+    string Status,
+    string? AssignedUserId,
+    string? Location
+);
+
+// ── Dashboard: Evidence Completeness ──────────────────────────────────────
+
+public record EvidenceCompletenessDto(
+    int WindowDays,
+    int TotalRuns,
+    int Signed,
+    int SignedPct,
+    int AllStepsComplete,
+    int AllStepsCompletePct,
+    int HasMedia,
+    int HasMediaPct,
+    int NoOpenIssues,
+    int NoOpenIssuesPct,
+    int OverallScore,
+    List<EvidenceProjectDto> ByProject
+);
+
+public record EvidenceProjectDto(
+    string ProjectId,
+    string JobNumber,
+    string CustomerName,
+    int RunCount,
+    int Score
+);
+
+// ── Dashboard: Workflow Health Score ──────────────────────────────────────
+
+public record WorkflowHealthDto(
+    int WindowDays,
+    int OverallScore,
+    int PreviousScore,
+    int ScoreDelta,
+    int TotalRuns,
+    int CompletionRate,
+    int FirstRunSuccessRate,
+    int StepPassRate,
+    int CleanClosureRate,
+    List<WorkflowTypeHealthDto> ByType
+);
+
+public record WorkflowTypeHealthDto(
+    string TypeName,
+    int RunCount,
+    int Score
+);

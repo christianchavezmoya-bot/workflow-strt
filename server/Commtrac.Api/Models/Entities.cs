@@ -112,6 +112,23 @@ public class FeatureEntity
     public bool IsInventory { get; set; } = false;
     /// <summary>Inventory only: JSON array of capture field names e.g. ["serialNo","firmware","ipAddress"]</summary>
     public string CaptureFieldsJson { get; set; } = "[]";
+    /// <summary>Procurement: brand name e.g. "Hikvision"</summary>
+    [MaxLength(200)]
+    public string? Brand { get; set; }
+    /// <summary>Procurement: supplier or manufacturer name</summary>
+    [MaxLength(200)]
+    public string? Supplier { get; set; }
+    /// <summary>Procurement: alternative / substitute part number</summary>
+    [MaxLength(200)]
+    public string? AlternativePartNumber { get; set; }
+    /// <summary>Procurement: manufacturer's own part number</summary>
+    [MaxLength(200)]
+    public string? ManufacturerPartNumber { get; set; }
+    /// <summary>Procurement: unit price (cost per unit)</summary>
+    public decimal? UnitPrice { get; set; }
+    /// <summary>Procurement: URL to product page, datasheet, or supplier listing</summary>
+    [MaxLength(1000)]
+    public string? ProductLink { get; set; }
 }
 
 /// <summary>
@@ -204,6 +221,8 @@ public class ProjectEntity
     public string FinishDate { get; set; } = string.Empty;
     [MaxLength(40)]
     public string Office { get; set; } = "Atlanta, United States";
+    [MaxLength(80)]
+    public string? OfficeId { get; set; }
     [MaxLength(120)]
     public string? Region { get; set; }
     [MaxLength(40)]

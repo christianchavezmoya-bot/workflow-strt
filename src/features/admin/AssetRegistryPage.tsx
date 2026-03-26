@@ -151,7 +151,7 @@ export default function AssetRegistryPage() {
         <Box>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Asset Registry</Typography>
           <Typography variant="body2" color="text.secondary">
-            Full registry of all project assets across products â€” model, manufacturer, serial, workflow and config used.
+            Full registry of all project assets across products — model, manufacturer, serial, workflow and config used.
           </Typography>
         </Box>
         <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={loadAll}>
@@ -199,7 +199,7 @@ export default function AssetRegistryPage() {
         </FormControl>
         <TextField
           size="small"
-          placeholder="Search tag / serial / model / manufacturerâ€¦"
+          placeholder="Search tag / serial / model / manufacturer…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           sx={{ minWidth: 280 }}
@@ -271,16 +271,16 @@ export default function AssetRegistryPage() {
                       <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">{product?.name ?? "â€”"}</Typography>
+                      <Typography variant="body2" color="text.secondary">{product?.name ?? "—"}</Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">{asset.assetModel || "â€”"}</Typography>
+                      <Typography variant="body2" color="text.secondary">{asset.assetModel || "—"}</Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">{asset.manufacturer || "â€”"}</Typography>
+                      <Typography variant="body2" color="text.secondary">{asset.manufacturer || "—"}</Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">{asset.serialNumber || "â€”"}</Typography>
+                      <Typography variant="body2" color="text.secondary">{asset.serialNumber || "—"}</Typography>
                     </TableCell>
                     <TableCell>
                       <Tooltip title={proj?.customerName ?? ""}>
@@ -290,14 +290,14 @@ export default function AssetRegistryPage() {
                       </Tooltip>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">{proj?.siteName || "â€”"}</Typography>
+                      <Typography variant="body2" color="text.secondary">{proj?.siteName || "—"}</Typography>
                     </TableCell>
                     <TableCell>
                       <Stack spacing={0.25}>
                         {cfg ? (
                           <Typography variant="body2" color="text.secondary">{cfg.name}</Typography>
                         ) : (
-                          <Typography variant="body2" color="text.disabled">â€”</Typography>
+                          <Typography variant="body2" color="text.disabled">—</Typography>
                         )}
                         {cfg?.configType && (
                           <Typography variant="caption" color="text.disabled">{cfg.configType}</Typography>

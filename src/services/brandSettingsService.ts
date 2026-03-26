@@ -2,6 +2,7 @@ import api from "./api";
 
 export interface BrandSetting {
   logoBase64?: string | null;
+  appName?: string | null;
 }
 
 export const brandSettingsService = {
@@ -16,6 +17,11 @@ export const brandSettingsService = {
 
   async set(logoBase64: string): Promise<BrandSetting> {
     const res = await api.put<BrandSetting>("/brand-settings", { logoBase64 });
+    return res.data;
+  },
+
+  async setAppName(appName: string): Promise<BrandSetting> {
+    const res = await api.put<BrandSetting>("/brand-settings", { appName });
     return res.data;
   },
 

@@ -15,7 +15,6 @@ import {
   Divider,
   FormControlLabel,
   IconButton,
-  LinearProgress,
   MenuItem,
   Select,
   Stack,
@@ -52,13 +51,13 @@ import {
   RefreshOutlined,
   SendOutlined,
   SettingsOutlined,
-  WarningAmberOutlined,
 } from "@mui/icons-material";
 import { useAppSelector } from "../../store/hooks";
 import { projectContactService } from "../../services/projectContactService";
 import { projectAssetService } from "../../services/projectAssetService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { quickbaseService } from "../../services/quickbaseService";
+import { settingsService } from "../../services/settingsService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import type {
   InboundCondition,
@@ -127,14 +126,6 @@ const emptyInbound = (): InboundFormState => ({
 
 const PANEL_MAX_W = 900;
 
-// ─── QB enabled check ─────────────────────────────────────────────────────────
-
-function isQbEnabled(): boolean {
-  try {
-    const s = JSON.parse(localStorage.getItem("qb_settings") ?? "{}");
-    return !!s?.enabled && !!s?.goodsMovementsTableId;
-  } catch { return false; }
-}
 
 // ─── Goods Movement table ─────────────────────────────────────────────────────
 
@@ -347,10 +338,6 @@ export default function ProjectChevronPanel({
   const [qbFilterQuery, setQbFilterQuery] = useState("");
 
   const syncQb = useCallback(async () => {
-    if (!isQbEnabled()) {
-      setQbError("Quickbase integration is not enabled. Configure it in Settings → Integrations.");
-      return;
-    }
     setQbLoading(true);
     setQbError(null);
     try {
@@ -889,6 +876,7 @@ export default function ProjectChevronPanel({
                 value={contactForm.phone} onChange={e => setCF("phone", e.target.value)} />
               <TextField label="Address" size="small" fullWidth
                 placeholder="Street, City, State / Country"
+                InputLabelProps={{ shrink: true }}
                 value={contactForm.address} onChange={e => setCF("address", e.target.value)} />
               <Stack direction="row" spacing={1.5} alignItems="center">
                 <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
@@ -1038,6 +1026,7 @@ export default function ProjectChevronPanel({
                 value={sigRecipName} onChange={e => setSigRecipName(e.target.value)} />
               <TextField label="Custom message (optional)" size="small" fullWidth multiline minRows={2}
                 placeholder="Add a personal note to the email…"
+                InputLabelProps={{ shrink: true }}
                 value={sigMessage} onChange={e => setSigMessage(e.target.value)} />
               <Typography variant="caption" color="text.secondary">
                 A secure signing link will be emailed to the recipient. Link expires in 72 hours.
@@ -1100,6 +1089,7 @@ export default function ProjectChevronPanel({
                     <TextField label="Qty" type="number" size="small" sx={{ width: 80 }}
                       value={inboundForm.quantity} onChange={e => setIF("quantity", e.target.value)} />
                     <TextField label="Unit" size="small" sx={{ width: 80 }} placeholder="pcs, kg…"
+                      InputLabelProps={{ shrink: true }}
                       value={inboundForm.unit} onChange={e => setIF("unit", e.target.value)} />
                     <Select size="small" fullWidth value={inboundForm.condition}
                       onChange={e => setIF("condition", e.target.value)}>

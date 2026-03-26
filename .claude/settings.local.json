@@ -10,7 +10,8 @@
       "Bash(dotnet ef database:*)",
       "Bash(dotnet build:*)",
       "Bash(sqlite3:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(python3 -c \":*)"
     ]
   }
 }

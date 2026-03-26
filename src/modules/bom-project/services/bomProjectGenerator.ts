@@ -75,6 +75,7 @@ export function generateDraftProject(input: GeneratorInput): DraftProject {
       draftAssetId,
       draftProjectId,
       assetName,
+      partNumber: assetRow.partNumber,
       assetType: assetRow.vehicleType,
       configType: cl.workflowGroup,
       workflowTemplateCandidate: undefined, // resolved by adapter

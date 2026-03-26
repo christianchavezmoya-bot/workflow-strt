@@ -2,6 +2,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Divider,
@@ -11,6 +12,12 @@ import {
   DialogTitle,
   FormControl,
   IconButton,
+  InputAdornment,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
   Menu,
   MenuItem,
   Select,
@@ -21,15 +28,16 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   TextField,
   Tooltip,
   Typography
 } from "@mui/material";
-import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined, CheckCircleOutline, BlockOutlined } from "@mui/icons-material";
+import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined, CheckCircleOutline, BlockOutlined, ExpandMoreOutlined, ExpandLessOutlined, UploadFileOutlined } from "@mui/icons-material";
 import { quickbaseService, type QbFieldInfo } from "../../services/quickbaseService";
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { workflowTypeService } from "../../services/workflowTypeService";
@@ -48,6 +56,8 @@ import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/set
 import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
 import { useAuth } from "../../hooks/useAuth";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import * as XLSX from "xlsx";
+import PasswordField from "../../components/ui/PasswordField";
 
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
 function BusinessLogoTab() {
@@ -57,10 +67,15 @@ function BusinessLogoTab() {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [appName, setAppName] = useState("");
+  const [appNameSaving, setAppNameSaving] = useState(false);
+  const [appNameSuccess, setAppNameSuccess] = useState(false);
+  const [appNameError, setAppNameError] = useState<string | null>(null);
 
   useEffect(() => {
     brandSettingsService.get().then((data) => {
       setLogo(data.logoBase64 ?? null);
+      setAppName(data.appName ?? "");
       setLoading(false);
     });
   }, []);
@@ -107,8 +122,53 @@ function BusinessLogoTab() {
     }
   }
 
+  async function handleSaveAppName() {
+    setAppNameSaving(true);
+    setAppNameError(null);
+    try {
+      await brandSettingsService.setAppName(appName.trim());
+      const resolvedName = appName.trim() || "Field Operations";
+      document.title = resolvedName;
+      window.dispatchEvent(new CustomEvent("brand-name-changed", { detail: { appName: resolvedName } }));
+      setAppNameSuccess(true);
+      setTimeout(() => setAppNameSuccess(false), 3000);
+    } catch {
+      setAppNameError("Failed to save app name.");
+    } finally {
+      setAppNameSaving(false);
+    }
+  }
+
   return (
     <Stack spacing={2} sx={{ marginTop: 2 }}>
+      <Typography variant="h6">App Name</Typography>
+      <Typography variant="body2" color="text.secondary">
+        The name shown in the browser tab, invite emails, and throughout the app.
+      </Typography>
+      <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+
+      {!loading && (
+        <>
+          <TextField
+            label="App Name"
+            value={appName}
+            onChange={(e) => setAppName(e.target.value)}
+            placeholder="e.g. Field Operations"
+            sx={{ maxWidth: 360 }}
+            size="small"
+            InputLabelProps={{ shrink: true }}
+          />
+          {appNameError && <Alert severity="error" sx={{ maxWidth: 500 }}>{appNameError}</Alert>}
+          {appNameSuccess && <Alert severity="success" sx={{ maxWidth: 500 }}>App name saved.</Alert>}
+          <Box>
+            <Button variant="contained" onClick={handleSaveAppName} disabled={appNameSaving} sx={{ minWidth: 120 }}>
+              {appNameSaving ? "Saving…" : "Save Name"}
+            </Button>
+          </Box>
+        </>
+      )}
+
+      <Divider sx={{ borderColor: "rgba(255,255,255,0.08)", mt: 1 }} />
       <Typography variant="h6">Business Logo</Typography>
       <Typography variant="body2" color="text.secondary">
         Upload your company logo. It will appear in the left header of generated PDF reports.
@@ -207,17 +267,7 @@ const defaultSettings: QuickbaseSettingsForm = {
   goodsMovementsDirectionFid: ""
 };
 
-const loadSettings = (): QuickbaseSettingsForm => {
-  try {
-    const raw = localStorage.getItem("qb_settings");
-    if (!raw) {
-      return defaultSettings;
-    }
-    return { ...defaultSettings, ...JSON.parse(raw) } as QuickbaseSettingsForm;
-  } catch {
-    return defaultSettings;
-  }
-};
+const loadSettings = (): QuickbaseSettingsForm => defaultSettings;
 
 const parseJsonMap = (value: string) => {
   try {
@@ -294,25 +344,17 @@ const Settings = () => {
   const [migrateLoading, setMigrateLoading] = useState(false);
   const [migrateResult, setMigrateResult] = useState<{ migrated: number; message?: string } | null>(null);
   const [lookupRows, setLookupRows] = useState<Record<string, Array<{ id: string; label: string }>>>({});
-  const [notifySettings, setNotifySettings] = useState(() => {
-    try {
-      const raw = localStorage.getItem("notify_settings");
-      if (raw) return JSON.parse(raw) as Record<string, string | boolean>;
-    } catch {
-      // ignore
-    }
-    return {
-      smtpHost: "",
-      smtpPort: "587",
-      smtpUser: "",
-      smtpPass: "",
-      smtpFrom: "",
-      smtpUseSsl: true,
-      frontendBaseUrl: window.location.origin,
-      smsProvider: "",
-      smsApiKey: "",
-      smsSender: ""
-    };
+  const [notifySettings, setNotifySettings] = useState<Record<string, string | boolean>>({
+    smtpHost: "",
+    smtpPort: "587",
+    smtpUser: "",
+    smtpPass: "",
+    smtpFrom: "",
+    smtpUseSsl: true,
+    frontendBaseUrl: window.location.origin,
+    smsProvider: "",
+    smsApiKey: "",
+    smsSender: ""
   });
   const [notifySending, setNotifySending] = useState(false);
   const [notifyStatus, setNotifyStatus] = useState<"" | "saved" | "sent" | "error">("");
@@ -388,18 +430,38 @@ const Settings = () => {
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [featurePickerProductId, setFeaturePickerProductId] = useState<string | null>(null);
   const [featurePickerAnchor, setFeaturePickerAnchor] = useState<HTMLElement | null>(null);
+  const [featurePickerSearch, setFeaturePickerSearch] = useState("");
+  const [featurePickerSelected, setFeaturePickerSelected] = useState<string[]>([]);
+  const [featurePickerLinking, setFeaturePickerLinking] = useState(false);
+  const [deleteImpactDialog, setDeleteImpactDialog] = useState<{
+    open: boolean;
+    productId: string;
+    productName: string;
+    loading: boolean;
+    features: Array<{ id: string; name: string; valueType: string; alsoUsedIn: string[] }>;
+    projects: Array<{ id: string; name: string; jobNumber?: string }>;
+    assets: Array<{ id: string; assetName: string; projectName?: string }>;
+    workflows: Array<{ id: string; name: string; workflowType?: string }>;
+    selectedDeleteFeatureIds: string[];
+    selectedDeleteAssetIds: string[];
+    selectedDeleteWorkflowIds: string[];
+  }>({
+    open: false, productId: "", productName: "", loading: false,
+    features: [], projects: [], assets: [], workflows: [],
+    selectedDeleteFeatureIds: [], selectedDeleteAssetIds: [], selectedDeleteWorkflowIds: [],
+  });
+
+  const [productsError, setProductsError] = useState<string | null>(null);
 
   async function loadProducts() {
     setProductsLoading(true);
-    setProductsLoadError(null);
+    setProductsError(null);
     try {
       const data = await productService.getProducts();
       setProducts(data.sort((a, b) => a.name.localeCompare(b.name)));
-    } catch (err: any) {
-      const status = err?.response?.status;
-      const msg = err?.response?.data?.message ?? err?.message ?? "Unknown error";
-      setProductsLoadError(`Failed to load products (${status ?? "network error"}): ${msg}`);
-      console.warn("Failed to load products", err);
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      setProductsError(status ? `Failed to load products (HTTP ${status})` : "Failed to load products — check server connection.");
     } finally {
       setProductsLoading(false);
     }
@@ -439,18 +501,69 @@ const Settings = () => {
       }
       await loadProducts();
       setProductDialog(false);
-    } catch { setProductError("Failed to save product."); } finally {
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number; data?: { message?: string } } })?.response;
+      setProductError(status?.status === 403 ? "Permission denied — Admin or Project Manager role required." : status?.data?.message ?? "Failed to save product. Check server logs.");
+    } finally {
       setProductSaving(false);
     }
   }
 
   async function removeProduct(id: string) {
-    if (!confirm("Delete this product? Assets using this product will keep their existing data.")) return;
+    const product = products.find((p) => p.id === id);
+    setDeleteImpactDialog({
+      open: true, productId: id, productName: product?.name ?? "", loading: true,
+      features: [], projects: [], assets: [], workflows: [],
+      selectedDeleteFeatureIds: [], selectedDeleteAssetIds: [], selectedDeleteWorkflowIds: [],
+    });
     try {
-      await productService.deleteProduct(id);
-      setProducts((prev) => prev.filter((p) => p.id !== id));
-      if (expandedProductId === id) setExpandedProductId(null);
-    } catch { alert("Failed to delete product."); }
+      const res = await api.get<{
+        productName: string;
+        features: Array<{ id: string; name: string; valueType: string; alsoUsedIn: string[] }>;
+        projects: Array<{ id: string; name: string; jobNumber?: string }>;
+        assets: Array<{ id: string; assetName: string; projectName?: string }>;
+        workflows: Array<{ id: string; name: string; workflowType?: string }>;
+      }>(`/products/${id}/impact`);
+      setDeleteImpactDialog((prev) => ({
+        ...prev,
+        productName: res.data.productName,
+        features: res.data.features ?? [],
+        projects: res.data.projects ?? [],
+        assets: res.data.assets ?? [],
+        workflows: res.data.workflows ?? [],
+        // Pre-select all for deletion by default
+        selectedDeleteFeatureIds: (res.data.features ?? []).map((f) => f.id),
+        selectedDeleteAssetIds: (res.data.assets ?? []).map((a) => a.id),
+        selectedDeleteWorkflowIds: (res.data.workflows ?? []).map((w) => w.id),
+        loading: false,
+      }));
+    } catch {
+      setDeleteImpactDialog((prev) => ({ ...prev, loading: false }));
+    }
+  }
+
+  async function confirmDeleteProduct() {
+    const { productId, selectedDeleteFeatureIds, selectedDeleteAssetIds, selectedDeleteWorkflowIds } = deleteImpactDialog;
+    setDeleteImpactDialog((prev) => ({ ...prev, loading: true }));
+    try {
+      await api.delete(`/products/${productId}`, {
+        data: {
+          deleteFeatureIds: selectedDeleteFeatureIds,
+          deleteAssetIds: selectedDeleteAssetIds,
+          deleteWorkflowIds: selectedDeleteWorkflowIds,
+        },
+      });
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      if (expandedProductId === productId) setExpandedProductId(null);
+      setDeleteImpactDialog({
+        open: false, productId: "", productName: "", loading: false,
+        features: [], projects: [], assets: [], workflows: [],
+        selectedDeleteFeatureIds: [], selectedDeleteAssetIds: [], selectedDeleteWorkflowIds: [],
+      });
+    } catch {
+      alert("Failed to delete product.");
+      setDeleteImpactDialog((prev) => ({ ...prev, loading: false }));
+    }
   }
 
   // After link/unlink, re-fetch products so p.features reflects the change.
@@ -461,6 +574,24 @@ const Settings = () => {
       setFeaturePickerAnchor(null);
       setFeaturePickerProductId(null);
     } catch { alert("Failed to link feature."); }
+  }
+
+  function closeFeaturePicker() {
+    setFeaturePickerAnchor(null);
+    setFeaturePickerProductId(null);
+    setFeaturePickerSearch("");
+    setFeaturePickerSelected([]);
+  }
+
+  async function linkSelectedFeatures() {
+    if (!featurePickerProductId || featurePickerSelected.length === 0) return;
+    setFeaturePickerLinking(true);
+    try {
+      await Promise.all(featurePickerSelected.map((fid) => featureService.linkToProduct(featurePickerProductId!, fid)));
+      await loadProducts();
+      closeFeaturePicker();
+    } catch { alert("Failed to link some features."); }
+    finally { setFeaturePickerLinking(false); }
   }
 
   async function unlinkFeatureFromProduct(productId: string, featureId: string) {
@@ -474,35 +605,166 @@ const Settings = () => {
   // Feature library manager
   const [features, setFeatures] = useState<Feature[]>([]);
   const [featuresLoading, setFeaturesLoading] = useState(false);
-  const [featuresLoadError, setFeaturesLoadError] = useState<string | null>(null);
+  const [featuresError, setFeaturesError] = useState<string | null>(null);
   const [featureDialog, setFeatureDialog] = useState(false);
   const [featureEditId, setFeatureEditId] = useState<string | null>(null);
   const [featureJustCreatedId, setFeatureJustCreatedId] = useState<string | null>(null);
-  const [featureForm, setFeatureForm] = useState({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] as string[] });
+  const [featureForm, setFeatureForm] = useState({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] as string[], brand: "", supplier: "", alternativePartNumber: "", manufacturerPartNumber: "", unitPrice: "", productLink: "", productLinks: [] as string[] });
   const [featureSaving, setFeatureSaving] = useState(false);
   const [featureError, setFeatureError] = useState<string | null>(null);
 
+  // Bulk feature import state
+  interface ImportRow { name: string; description: string; valueType: string; supplier: string; partNumber: string; manufacturerPartNumber: string; unitPrice: string; brand: string; }
+  const [featureImportDialog, setFeatureImportDialog] = useState(false);
+  const [featureImportRows, setFeatureImportRows] = useState<ImportRow[]>([]);
+  const [featureImportProduct, setFeatureImportProduct] = useState<string>("");
+  const [featureImportError, setFeatureImportError] = useState<string | null>(null);
+  const [featureImporting, setFeatureImporting] = useState(false);
+  const [featureImportDone, setFeatureImportDone] = useState<{ created: number; skipped: number } | null>(null);
+  const featureImportFileRef = useRef<HTMLInputElement>(null);
+  const [exportMenuAnchor, setExportMenuAnchor] = useState<HTMLElement | null>(null);
+
+  function exportFeaturesCSV() {
+    const headers = ["name","description","valueType","brand","supplier","partNumber","manufacturerPartNumber","unitPrice"];
+    const rows = features.map(f => [f.name, f.description??"", f.valueType, f.brand??"", f.supplier??"", f.alternativePartNumber??"", f.manufacturerPartNumber??"", f.unitPrice!=null?String(f.unitPrice):""]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "features.csv"; a.click(); URL.revokeObjectURL(url);
+  }
+
+  function exportFeaturesXLSX() {
+    const headers = ["Name/Part#","Description","Type","Brand","Supplier","Business Part#","Mfr Part#","Unit Price"];
+    const rows = features.map(f => [f.name, f.description??"", f.valueType, f.brand??"", f.supplier??"", f.alternativePartNumber??"", f.manufacturerPartNumber??"", f.unitPrice!=null?String(f.unitPrice):""]);
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Features");
+    XLSX.writeFile(wb, "features.xlsx");
+  }
+
+  function exportFeaturesJSON() {
+    const blob = new Blob([JSON.stringify(features, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "features.json"; a.click(); URL.revokeObjectURL(url);
+  }
+
+  function exportFeaturesPDF() {
+    const win = window.open("", "_blank");
+    if (!win) return;
+    const rows = features.map(f => `<tr><td>${f.name}</td><td>${f.description??""}</td><td>${f.valueType}</td><td>${f.brand??""}</td><td>${f.supplier??""}</td><td>${f.alternativePartNumber??""}</td><td>${f.manufacturerPartNumber??""}</td><td>${f.unitPrice??""}</td></tr>`).join("");
+    win.document.write(`<html><head><title>Feature Library</title><style>table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px;font-size:12px}th{background:#f5f5f5}</style></head><body><h2>Feature Library</h2><table><thead><tr><th>Name/Part#</th><th>Description</th><th>Type</th><th>Brand</th><th>Supplier</th><th>Business Part#</th><th>Mfr Part#</th><th>Unit Price</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    win.document.close();
+    win.print();
+  }
+
+  function downloadFeatureTemplate() {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["name", "description", "valueType", "brand", "supplier", "partNumber", "manufacturerPartNumber", "unitPrice"],
+      ["IP Camera 4MP", "Indoor dome camera", "text", "Hikvision", "AV Security", "DS-2CD2143G2-I", "MFR-DS-2143G2", "149.00"],
+      ["* required", "optional", "optional (default: text)", "optional", "optional", "optional", "optional", "optional"],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Features");
+    XLSX.writeFile(wb, "features-template.xlsx");
+  }
+
+  function handleFeatureImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFeatureImportError(null);
+    setFeatureImportDone(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = new Uint8Array(ev.target!.result as ArrayBuffer);
+        const wb = XLSX.read(data, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
+        const parsed: ImportRow[] = rows.map((r) => ({
+          name: String(r["name"] || r["Name"] || "").trim(),
+          description: String(r["description"] || r["Description"] || "").trim(),
+          valueType: String(r["valueType"] || r["type"] || r["Type"] || "text").trim() || "text",
+          supplier: String(r["supplier"] || r["Supplier"] || "").trim(),
+          partNumber: String(r["partNumber"] || r["part_number"] || r["PartNumber"] || r["part#"] || "").trim(),
+          manufacturerPartNumber: String(r["manufacturerPartNumber"] || r["manufacturer_part_number"] || r["ManufacturerPartNumber"] || r["mfr_part"] || "").trim(),
+          unitPrice: String(r["unitPrice"] || r["unit_price"] || r["UnitPrice"] || r["price"] || "").trim(),
+          brand: String(r["brand"] || r["Brand"] || "").trim(),
+        })).filter((r) => r.name);
+        if (!parsed.length) { setFeatureImportError("No valid rows found. Make sure the file has a 'name' column."); return; }
+        setFeatureImportRows(parsed);
+      } catch {
+        setFeatureImportError("Could not parse file. Use the template for correct format.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
+  }
+
+  async function runFeatureImport() {
+    setFeatureImporting(true);
+    setFeatureImportError(null);
+    let created = 0; let skipped = 0;
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const existing = await featureService.getAll();
+    const existingKeys = new Set(existing.map((f) => normalize(f.name)));
+    for (const row of featureImportRows) {
+      if (existingKeys.has(normalize(row.name))) { skipped++; continue; }
+      try {
+        const created_ = await featureService.create({
+          name: row.name,
+          description: row.description || undefined,
+          valueType: row.valueType,
+          supplier: row.supplier || undefined,
+          alternativePartNumber: row.partNumber || undefined,
+          manufacturerPartNumber: row.manufacturerPartNumber || undefined,
+          unitPrice: row.unitPrice ? Number(row.unitPrice) : undefined,
+          brand: row.brand || undefined,
+        });
+        if (featureImportProduct) {
+          await featureService.linkToProduct(featureImportProduct, created_.id);
+        }
+        existingKeys.add(normalize(row.name));
+        created++;
+      } catch { skipped++; }
+    }
+    await loadFeatures();
+    setFeatureImporting(false);
+    setFeatureImportDone({ created, skipped });
+  }
+
   async function loadFeatures() {
     setFeaturesLoading(true);
-    setFeaturesLoadError(null);
+    setFeaturesError(null);
     try {
       const data = await featureService.getAll();
       setFeatures(data.sort((a, b) => a.name.localeCompare(b.name)));
-    } catch (err: any) {
-      const status = err?.response?.status;
-      const msg = err?.response?.data?.message ?? err?.message ?? "Unknown error";
-      setFeaturesLoadError(`Failed to load features (${status ?? "network error"}): ${msg}`);
-      console.warn("Failed to load features", err);
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      setFeaturesError(status ? `Failed to load features (HTTP ${status})` : "Failed to load features — check server connection.");
     } finally {
       setFeaturesLoading(false);
     }
   }
+
+  // Load features whenever Features tab becomes active.
+  useEffect(() => {
+    if (tab === 5) loadFeatures();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   async function saveFeature() {
     if (!featureForm.name.trim()) { setFeatureError("Name is required."); return; }
     setFeatureSaving(true);
     setFeatureError(null);
     try {
+      const procurementFields = {
+        brand: featureForm.brand.trim() || undefined,
+        supplier: featureForm.supplier.trim() || undefined,
+        alternativePartNumber: featureForm.alternativePartNumber.trim() || undefined,
+        manufacturerPartNumber: featureForm.manufacturerPartNumber.trim() || undefined,
+        unitPrice: featureForm.unitPrice.trim() ? Number(featureForm.unitPrice) : undefined,
+        productLink: featureForm.productLink.trim() || undefined,
+      };
       if (featureEditId) {
         await featureService.update(featureEditId, {
           name: featureForm.name.trim(),
@@ -510,6 +772,7 @@ const Settings = () => {
           valueType: featureForm.valueType,
           isInventory: featureForm.isInventory,
           captureFields: featureForm.captureFields,
+          ...procurementFields,
         });
         await loadFeatures();
         setFeatureDialog(false);
@@ -520,14 +783,23 @@ const Settings = () => {
           valueType: featureForm.valueType,
           isInventory: featureForm.isInventory,
           captureFields: featureForm.captureFields,
+          ...procurementFields,
         });
+        // Link to all selected products
+        if (featureForm.productLinks.length > 0) {
+          await Promise.all(featureForm.productLinks.map((pid) => featureService.linkToProduct(pid, created.id)));
+          await loadProducts();
+        }
         await loadFeatures();
         // Stay open so user can add dependencies immediately
         setFeatureJustCreatedId(created.id);
         setExpandedFeatureId(created.id);
         loadDeps(created.id);
       }
-    } catch { setFeatureError("Failed to save feature."); } finally {
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number; data?: { message?: string } } })?.response;
+      setFeatureError(status?.status === 403 ? "Permission denied — Admin or Project Manager role required." : status?.data?.message ?? "Failed to save feature. Check server logs.");
+    } finally {
       setFeatureSaving(false);
     }
   }
@@ -721,9 +993,18 @@ const Settings = () => {
     );
   }, [settings.enabled, payload, projectsMap.error, installationsMap.error]);
 
-  const handleSave = () => {
-    localStorage.setItem("qb_settings", JSON.stringify(settings));
-    setStatus("saved");
+  const handleSave = async () => {
+    setSending(true);
+    setSendError(null);
+    try {
+      await settingsService.saveQuickbaseSettings(payload);
+      setStatus("saved");
+    } catch {
+      setSendError("Failed to save settings to backend.");
+      setStatus("error");
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleDiscoverFields = async () => {
@@ -793,12 +1074,10 @@ const Settings = () => {
 
   const handleReset = () => {
     setSettings(defaultSettings);
-    localStorage.removeItem("qb_settings");
     setStatus("");
   };
 
   const handleSaveNotify = async () => {
-    localStorage.setItem("notify_settings", JSON.stringify(notifySettings));
 
     if (!isAdmin) {
       setNotifyStatus("saved");
@@ -1263,10 +1542,35 @@ const Settings = () => {
           smsSender: s.smsSender ?? ""
         }));
       } catch {
-        // Fall back to localStorage.
+        // ignore
       }
     })();
   }, [isAdmin]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const qb = await settingsService.getQuickbaseSettings();
+        if (qb) {
+          setSettings({
+            enabled: qb.enabled ?? false,
+            realmHostname: qb.realmHostname ?? "",
+            userToken: qb.userToken ?? "",
+            projectsTableId: qb.projectsTableId ?? "",
+            installationsTableId: qb.installationsTableId ?? "",
+            projectsFieldMap: JSON.stringify(qb.projectsFieldMap ?? {}),
+            installationsFieldMap: JSON.stringify(qb.installationsFieldMap ?? {}),
+            goodsMovementsTableId: qb.goodsMovementsTableId ?? "",
+            goodsMovementsJobFid: String(qb.goodsMovementsJobFid ?? ""),
+            goodsMovementsOrderRefFid: String(qb.goodsMovementsOrderRefFid ?? ""),
+            goodsMovementsDirectionFid: String(qb.goodsMovementsDirectionFid ?? ""),
+          });
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
 
   return (
     <Stack spacing={3}>
@@ -1332,6 +1636,7 @@ const Settings = () => {
               }
               placeholder="your-realm.quickbase.com"
               fullWidth
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="User token"
@@ -1341,6 +1646,7 @@ const Settings = () => {
               }
               placeholder="QB-USER-TOKEN"
               fullWidth
+              InputLabelProps={{ shrink: true }}
             />
             <Stack direction="row" alignItems="center" spacing={1.5}>
               <Button
@@ -1420,6 +1726,7 @@ const Settings = () => {
                 onChange={(e) => setSettings((p) => ({ ...p, goodsMovementsTableId: e.target.value }))}
                 fullWidth
                 placeholder="e.g. bpqxy123"
+                InputLabelProps={{ shrink: true }}
               />
               <Button
                 variant="outlined"
@@ -1472,7 +1779,8 @@ const Settings = () => {
                   <Alert severity="error" sx={{ m: 2 }}>{discoverError}</Alert>
                 )}
                 {!discoverLoading && !discoverError && discoverFields.length > 0 && (
-                  <Table size="small">
+                  <TableContainer sx={{ overflowX: "auto" }}>
+                  <Table size="small" sx={{ minWidth: 650 }}>
                     <TableHead>
                       <TableRow>
                         <TableCell sx={{ width: 60 }}>FID</TableCell>
@@ -1507,6 +1815,7 @@ const Settings = () => {
                       ))}
                     </TableBody>
                   </Table>
+                  </TableContainer>
                 )}
               </DialogContent>
               <DialogActions>
@@ -1587,9 +1896,8 @@ const Settings = () => {
               />
               <Typography variant="body2">Use SSL</Typography>
             </Stack>
-            <TextField
+            <PasswordField
               label="SMTP Password"
-              type="password"
               value={String(notifySettings.smtpPass || "")}
               onChange={(event) => setNotifySettings((prev) => ({ ...prev, smtpPass: event.target.value }))}
               fullWidth
@@ -1665,7 +1973,8 @@ const Settings = () => {
                 <Button size="small" onClick={loadDivisions}>Refresh</Button>
               </Alert>
             ) : (
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 650 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
@@ -1712,6 +2021,7 @@ const Settings = () => {
                   ))}
                 </TableBody>
               </Table>
+              </TableContainer>
             )}
             <Button size="small" variant="outlined" onClick={loadDivisions} disabled={divisionsLoading}>
               {divisionsLoading ? "Refreshing…" : "Refresh"}
@@ -1743,6 +2053,9 @@ const Settings = () => {
               </Button>
             </Stack>
             <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            {productsError && (
+              <Alert severity="error" onClose={() => setProductsError(null)}>{productsError}</Alert>
+            )}
             {productsLoading ? (
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />
@@ -1757,7 +2070,8 @@ const Settings = () => {
                 <Button size="small" onClick={loadProducts}>Refresh</Button>
               </Alert>
             ) : (
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 650 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
@@ -1784,9 +2098,9 @@ const Settings = () => {
                         }}>
                           <TableCell>
                             <Stack direction="row" alignItems="center" spacing={1}>
-                              <Typography variant="body2" sx={{ fontSize: "0.75rem", opacity: 0.5, userSelect: "none" }}>
-                                {isExpanded ? "▼" : "▶"}
-                              </Typography>
+                              <IconButton size="small" onClick={(e) => { e.stopPropagation(); if (isExpanded) { setExpandedProductId(null); } else { setExpandedProductId(p.id); if (features.length === 0) loadFeatures(); } }}>
+                                {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
+                              </IconButton>
                               <Stack>
                                 <Typography variant="body2" fontWeight={600}>{p.name}</Typography>
                                 {p.description && <Typography variant="caption" color="text.secondary">{p.description}</Typography>}
@@ -1865,6 +2179,7 @@ const Settings = () => {
                   })}
                 </TableBody>
               </Table>
+              </TableContainer>
             )}
             <Button size="small" variant="outlined" onClick={loadProducts} disabled={productsLoading}>
               {productsLoading ? "Refreshing…" : "Refresh"}
@@ -1881,22 +2196,50 @@ const Settings = () => {
                   Global reusable features that can be linked to any product (e.g. IP Camera, Room, NVR).
                 </Typography>
               </Box>
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<AddOutlined />}
-                onClick={() => {
-                  setFeatureEditId(null);
-                  setFeatureJustCreatedId(null);
-                  setFeatureForm({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] });
-                  setFeatureError(null);
-                  setFeatureDialog(true);
-                }}
-              >
-                Add feature
-              </Button>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<UploadFileOutlined />}
+                  onClick={() => {
+                    setFeatureImportRows([]);
+                    setFeatureImportProduct("");
+                    setFeatureImportError(null);
+                    setFeatureImportDone(null);
+                    setFeatureImportDialog(true);
+                  }}
+                >
+                  Import
+                </Button>
+                <Button variant="outlined" size="small" startIcon={<Download />} onClick={(e) => setExportMenuAnchor(e.currentTarget)}>
+                  Export
+                </Button>
+                <Menu anchorEl={exportMenuAnchor} open={Boolean(exportMenuAnchor)} onClose={() => setExportMenuAnchor(null)}>
+                  <MenuItem onClick={() => { exportFeaturesCSV(); setExportMenuAnchor(null); }}>CSV</MenuItem>
+                  <MenuItem onClick={() => { exportFeaturesXLSX(); setExportMenuAnchor(null); }}>Excel (.xlsx)</MenuItem>
+                  <MenuItem onClick={() => { exportFeaturesJSON(); setExportMenuAnchor(null); }}>JSON</MenuItem>
+                  <MenuItem onClick={() => { exportFeaturesPDF(); setExportMenuAnchor(null); }}>PDF (print)</MenuItem>
+                </Menu>
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<AddOutlined />}
+                  onClick={() => {
+                    setFeatureEditId(null);
+                    setFeatureJustCreatedId(null);
+                    setFeatureForm({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [], brand: "", supplier: "", alternativePartNumber: "", manufacturerPartNumber: "", unitPrice: "", productLink: "", productLinks: [] });
+                    setFeatureError(null);
+                    setFeatureDialog(true);
+                  }}
+                >
+                  Add feature
+                </Button>
+              </Stack>
             </Stack>
             <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            {featuresError && (
+              <Alert severity="error" onClose={() => setFeaturesError(null)}>{featuresError}</Alert>
+            )}
             {featuresLoading ? (
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />
@@ -1911,12 +2254,29 @@ const Settings = () => {
                 <Button size="small" onClick={loadFeatures}>Refresh</Button>
               </Alert>
             ) : (
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto", "& th": { resize: "horizontal", overflow: "auto", whiteSpace: "nowrap" } }}>
+              <Table size="small" sx={{ minWidth: 1100, tableLayout: "fixed" }}>
+                <colgroup>
+                  <col style={{ minWidth: 160 }} />
+                  <col style={{ minWidth: 90 }} />
+                  <col style={{ minWidth: 140 }} />
+                  <col style={{ minWidth: 150 }} />
+                  <col style={{ minWidth: 160 }} />
+                  <col style={{ minWidth: 110 }} />
+                  <col style={{ minWidth: 220 }} />
+                  <col style={{ minWidth: 100 }} />
+                  <col style={{ minWidth: 180 }} />
+                </colgroup>
                 <TableHead>
                   <TableRow>
                     <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
                     <TableCell><Typography variant="caption" fontWeight={700}>Type</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Brand</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Supplier</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Mfr. Part #</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Price / Unit</Typography></TableCell>
                     <TableCell><Typography variant="caption" fontWeight={700}>Description</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={700}>Products</Typography></TableCell>
                     <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
                   </TableRow>
                 </TableHead>
@@ -1937,14 +2297,27 @@ const Settings = () => {
                         }}>
                           <TableCell>
                             <Stack direction="row" alignItems="center" spacing={1}>
-                              <Typography variant="body2" sx={{ fontSize: "0.75rem", opacity: 0.5, userSelect: "none" }}>
-                                {isExpanded ? "▼" : "▶"}
-                              </Typography>
+                              <IconButton size="small" onClick={(e) => { e.stopPropagation(); if (isExpanded) { setExpandedFeatureId(null); } else { setExpandedFeatureId(f.id); if (!dependencies[f.id]) loadDeps(f.id); } }}>
+                                {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
+                              </IconButton>
                               <Typography variant="body2" fontWeight={600}>{f.name}</Typography>
                             </Stack>
                           </TableCell>
                           <TableCell><Chip size="small" label={f.valueType} variant="outlined" /></TableCell>
-                          <TableCell><Typography variant="body2" color="text.secondary">{f.description || "—"}</Typography></TableCell>
+                          <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.brand || "—"}</Typography></TableCell>
+                          <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.supplier || "—"}</Typography></TableCell>
+                          <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.manufacturerPartNumber || "—"}</Typography></TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {f.unitPrice != null ? `$${Number(f.unitPrice).toFixed(2)}` : "—"}
+                            </Typography>
+                          </TableCell>
+                          <TableCell><Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-word" }}>{f.description || "—"}</Typography></TableCell>
+                          <TableCell>
+                            {f.linkedProducts && f.linkedProducts.length > 0
+                              ? <Stack direction="row" flexWrap="wrap" gap={0.5}>{f.linkedProducts.map((p) => <Chip key={p} label={p} size="small" variant="outlined" />)}</Stack>
+                              : <Typography variant="body2" color="text.disabled">—</Typography>}
+                          </TableCell>
                           <TableCell align="right">
                             <Stack direction="row" spacing={0.5} justifyContent="flex-end">
                               <Tooltip title="Edit">
@@ -1952,7 +2325,7 @@ const Settings = () => {
                                   e.stopPropagation();
                                   setFeatureEditId(f.id);
                                   setFeatureJustCreatedId(null);
-                                  setFeatureForm({ name: f.name, description: f.description ?? "", valueType: f.valueType, isInventory: f.isInventory ?? false, captureFields: f.captureFields ?? [] });
+                                  setFeatureForm({ name: f.name, description: f.description ?? "", valueType: f.valueType, isInventory: f.isInventory ?? false, captureFields: f.captureFields ?? [], brand: f.brand ?? "", supplier: f.supplier ?? "", alternativePartNumber: f.alternativePartNumber ?? "", manufacturerPartNumber: f.manufacturerPartNumber ?? "", unitPrice: f.unitPrice != null ? String(f.unitPrice) : "", productLink: f.productLink ?? "", productLinks: [] });
                                   setFeatureError(null);
                                   setFeatureDialog(true);
                                 }}>
@@ -2023,6 +2396,7 @@ const Settings = () => {
                   })}
                 </TableBody>
               </Table>
+              </TableContainer>
             )}
             <Button size="small" variant="outlined" onClick={loadFeatures} disabled={featuresLoading}>
               {featuresLoading ? "Refreshing…" : "Refresh"}
@@ -2064,7 +2438,8 @@ const Settings = () => {
                 <Button size="small" onClick={loadWfTypes}>Refresh</Button>
               </Alert>
             ) : (
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 650 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
@@ -2111,6 +2486,7 @@ const Settings = () => {
                   ))}
                 </TableBody>
               </Table>
+              </TableContainer>
             )}
             <Button size="small" variant="outlined" onClick={loadWfTypes} disabled={wfTypesLoading}>
               {wfTypesLoading ? "Refreshing…" : "Refresh"}
@@ -2145,7 +2521,8 @@ const Settings = () => {
               {auditLoading ? "Loading..." : "Load audit log"}
             </Button>
             {auditLogs.length > 0 && (
-              <Table size="small">
+              <TableContainer sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 650 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell>Timestamp</TableCell>
@@ -2182,6 +2559,7 @@ const Settings = () => {
                   ))}
                 </TableBody>
               </Table>
+              </TableContainer>
             )}
             {auditLogs.length === 0 && !auditLoading && (
               <Typography variant="body2" color="text.secondary">
@@ -2400,7 +2778,8 @@ const Settings = () => {
                   </Typography>
                 </Stack>
               ) : (
-                <Table sx={{ marginTop: 1 }}>
+                <TableContainer sx={{ overflowX: "auto" }}>
+                <Table sx={{ marginTop: 1, minWidth: 900 }}>
                   <TableHead>
                     <TableRow>
                       <TableCell sx={fieldLabelStyle}>Created field</TableCell>
@@ -2529,6 +2908,7 @@ const Settings = () => {
                     )}
                   </TableBody>
                 </Table>
+                </TableContainer>
               )}
             </Box>
           </Stack>
@@ -2667,7 +3047,8 @@ const Settings = () => {
             >
               Add row
             </Button>
-            <Table>
+            <TableContainer sx={{ overflowX: "auto" }}>
+            <Table sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>#</TableCell>
@@ -2715,6 +3096,7 @@ const Settings = () => {
                 ))}
               </TableBody>
             </Table>
+            </TableContainer>
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -2775,29 +3157,333 @@ const Settings = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Feature picker for product linking */}
-      <Menu
-        anchorEl={featurePickerAnchor}
-        open={Boolean(featurePickerAnchor) && featurePickerProductId !== null}
-        onClose={() => { setFeaturePickerAnchor(null); setFeaturePickerProductId(null); }}
-        slotProps={{ paper: { sx: { maxHeight: 300 } } }}
-      >
-        {featurePickerProductId && (() => {
-          const pickerProduct = products.find((p) => p.id === featurePickerProductId);
-          const alreadyLinked = pickerProduct?.features ?? [];
-          const available = features.filter((f) => !alreadyLinked.some((l) => l.id === f.id));
-          return available.length === 0
-            ? <MenuItem disabled><Typography variant="caption">All features already linked</Typography></MenuItem>
-            : available.map((f) => (
-              <MenuItem key={f.id} onClick={() => linkFeatureToProduct(featurePickerProductId!, f.id)}>
-                <Stack spacing={0.25}>
-                  <Typography variant="body2">{f.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">{f.valueType}{f.isInventory ? " · inventory" : ""}</Typography>
+      {/* Product delete impact warning dialog */}
+      {(() => {
+        const di = deleteImpactDialog;
+        const hasImpact = di.features.length > 0 || di.projects.length > 0 || di.assets.length > 0 || di.workflows.length > 0;
+        const allFeaturesSelected = di.features.length > 0 && di.features.every((f) => di.selectedDeleteFeatureIds.includes(f.id));
+        const allAssetsSelected = di.assets.length > 0 && di.assets.every((a) => di.selectedDeleteAssetIds.includes(a.id));
+        const allWorkflowsSelected = di.workflows.length > 0 && di.workflows.every((w) => di.selectedDeleteWorkflowIds.includes(w.id));
+        const emptyState = {
+          open: false, productId: "", productName: "", loading: false,
+          features: [], projects: [], assets: [], workflows: [],
+          selectedDeleteFeatureIds: [], selectedDeleteAssetIds: [], selectedDeleteWorkflowIds: [],
+        } as typeof di;
+        return (
+          <Dialog
+            open={di.open}
+            onClose={() => !di.loading && setDeleteImpactDialog(emptyState)}
+            maxWidth="sm"
+            fullWidth
+          >
+            <DialogTitle>Delete {di.productName ? `"${di.productName}"` : "Product"}?</DialogTitle>
+            <DialogContent sx={{ pb: 1 }}>
+              {di.loading && di.features.length === 0 && di.assets.length === 0 && di.workflows.length === 0 && di.projects.length === 0 ? (
+                <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
+                  <CircularProgress size={24} />
+                </Box>
+              ) : (
+                <Stack spacing={2}>
+                  {!hasImpact && (
+                    <Typography variant="body2" color="text.secondary">No linked data — only the product record will be removed.</Typography>
+                  )}
+
+                  {/* Features section */}
+                  {di.features.length > 0 && (
+                    <Box>
+                      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+                        <Typography variant="caption" fontWeight={700} color="text.secondary">
+                          FEATURES ({di.features.length})
+                        </Typography>
+                        <Button
+                          size="small"
+                          sx={{ fontSize: 11, py: 0 }}
+                          onClick={() => setDeleteImpactDialog((prev) => ({
+                            ...prev,
+                            selectedDeleteFeatureIds: allFeaturesSelected ? [] : prev.features.map((f) => f.id),
+                          }))}
+                        >
+                          {allFeaturesSelected ? "Deselect all" : "Select all"}
+                        </Button>
+                      </Stack>
+                      <Box sx={{ maxHeight: 400, overflowY: "auto", border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                        {di.features.map((f) => {
+                          const checked = di.selectedDeleteFeatureIds.includes(f.id);
+                          return (
+                            <ListItem key={f.id} disablePadding dense>
+                              <ListItemButton
+                                dense
+                                onClick={() => setDeleteImpactDialog((prev) => ({
+                                  ...prev,
+                                  selectedDeleteFeatureIds: checked
+                                    ? prev.selectedDeleteFeatureIds.filter((x) => x !== f.id)
+                                    : [...prev.selectedDeleteFeatureIds, f.id],
+                                }))}
+                              >
+                                <ListItemIcon sx={{ minWidth: 36 }}>
+                                  <Checkbox size="small" checked={checked} disableRipple edge="start" />
+                                </ListItemIcon>
+                                <ListItemText
+                                  primary={
+                                    <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+                                      <Typography variant="body2">{f.name}</Typography>
+                                      <Chip size="small" label={f.valueType} variant="outlined" sx={{ fontSize: 10 }} />
+                                      {f.alsoUsedIn.length > 0 && (
+                                        <Chip size="small" label={`Also in: ${f.alsoUsedIn.join(", ")}`} color="warning" variant="outlined" sx={{ fontSize: 10 }} />
+                                      )}
+                                    </Stack>
+                                  }
+                                  secondary={<Typography variant="caption" color="text.secondary">Uncheck to keep in library</Typography>}
+                                />
+                              </ListItemButton>
+                            </ListItem>
+                          );
+                        })}
+                      </Box>
+                    </Box>
+                  )}
+
+                  {/* Projects section — no checkboxes, always unlinked */}
+                  {di.projects.length > 0 && (
+                    <Box>
+                      <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                        PROJECTS ({di.projects.length})
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                        Product will be removed from these projects (projects are never deleted)
+                      </Typography>
+                      <Box sx={{ maxHeight: 200, overflowY: "auto", border: "1px solid", borderColor: "divider", borderRadius: 1, px: 1.5, py: 0.5 }}>
+                        {di.projects.map((p) => (
+                          <Typography key={p.id} variant="body2" sx={{ py: 0.25 }}>
+                            • {p.name}{p.jobNumber ? ` (${p.jobNumber})` : ""}
+                          </Typography>
+                        ))}
+                      </Box>
+                    </Box>
+                  )}
+
+                  {/* Assets section */}
+                  {di.assets.length > 0 && (
+                    <Box>
+                      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+                        <Typography variant="caption" fontWeight={700} color="text.secondary">
+                          ASSETS ({di.assets.length})
+                        </Typography>
+                        <Button
+                          size="small"
+                          sx={{ fontSize: 11, py: 0 }}
+                          onClick={() => setDeleteImpactDialog((prev) => ({
+                            ...prev,
+                            selectedDeleteAssetIds: allAssetsSelected ? [] : prev.assets.map((a) => a.id),
+                          }))}
+                        >
+                          {allAssetsSelected ? "Deselect all" : "Select all"}
+                        </Button>
+                      </Stack>
+                      <Box sx={{ maxHeight: 400, overflowY: "auto", border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                        {di.assets.map((a) => {
+                          const checked = di.selectedDeleteAssetIds.includes(a.id);
+                          return (
+                            <ListItem key={a.id} disablePadding dense>
+                              <ListItemButton
+                                dense
+                                onClick={() => setDeleteImpactDialog((prev) => ({
+                                  ...prev,
+                                  selectedDeleteAssetIds: checked
+                                    ? prev.selectedDeleteAssetIds.filter((x) => x !== a.id)
+                                    : [...prev.selectedDeleteAssetIds, a.id],
+                                }))}
+                              >
+                                <ListItemIcon sx={{ minWidth: 36 }}>
+                                  <Checkbox size="small" checked={checked} disableRipple edge="start" />
+                                </ListItemIcon>
+                                <ListItemText
+                                  primary={<Typography variant="body2">{a.assetName}</Typography>}
+                                  secondary={a.projectName && <Typography variant="caption" color="text.secondary">{a.projectName}</Typography>}
+                                />
+                              </ListItemButton>
+                            </ListItem>
+                          );
+                        })}
+                      </Box>
+                    </Box>
+                  )}
+
+                  {/* Workflows section */}
+                  {di.workflows.length > 0 && (
+                    <Box>
+                      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+                        <Typography variant="caption" fontWeight={700} color="text.secondary">
+                          WORKFLOWS ({di.workflows.length})
+                        </Typography>
+                        <Button
+                          size="small"
+                          sx={{ fontSize: 11, py: 0 }}
+                          onClick={() => setDeleteImpactDialog((prev) => ({
+                            ...prev,
+                            selectedDeleteWorkflowIds: allWorkflowsSelected ? [] : prev.workflows.map((w) => w.id),
+                          }))}
+                        >
+                          {allWorkflowsSelected ? "Deselect all" : "Select all"}
+                        </Button>
+                      </Stack>
+                      <Box sx={{ maxHeight: 400, overflowY: "auto", border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                        {di.workflows.map((w) => {
+                          const checked = di.selectedDeleteWorkflowIds.includes(w.id);
+                          return (
+                            <ListItem key={w.id} disablePadding dense>
+                              <ListItemButton
+                                dense
+                                onClick={() => setDeleteImpactDialog((prev) => ({
+                                  ...prev,
+                                  selectedDeleteWorkflowIds: checked
+                                    ? prev.selectedDeleteWorkflowIds.filter((x) => x !== w.id)
+                                    : [...prev.selectedDeleteWorkflowIds, w.id],
+                                }))}
+                              >
+                                <ListItemIcon sx={{ minWidth: 36 }}>
+                                  <Checkbox size="small" checked={checked} disableRipple edge="start" />
+                                </ListItemIcon>
+                                <ListItemText
+                                  primary={
+                                    <Stack direction="row" spacing={0.75} alignItems="center">
+                                      <Typography variant="body2">{w.name}</Typography>
+                                      {w.workflowType && <Chip size="small" label={w.workflowType} variant="outlined" sx={{ fontSize: 10 }} />}
+                                    </Stack>
+                                  }
+                                />
+                              </ListItemButton>
+                            </ListItem>
+                          );
+                        })}
+                      </Box>
+                    </Box>
+                  )}
+
+                  <Alert severity="warning" sx={{ fontSize: 12 }}>This action cannot be undone.</Alert>
                 </Stack>
-              </MenuItem>
-            ));
-        })()}
-      </Menu>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button
+                onClick={() => setDeleteImpactDialog(emptyState)}
+                disabled={di.loading}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                color="error"
+                onClick={confirmDeleteProduct}
+                disabled={di.loading || (di.features.length === 0 && di.projects.length === 0 && di.assets.length === 0 && di.workflows.length === 0 && di.loading)}
+                startIcon={di.loading && (hasImpact || !di.loading) ? <CircularProgress size={14} /> : undefined}
+              >
+                {di.loading ? "Deleting…" : "Delete permanently"}
+              </Button>
+            </DialogActions>
+          </Dialog>
+        );
+      })()}
+
+      {/* Feature picker for product linking */}
+      {(() => {
+        const pickerProduct = products.find((p) => p.id === featurePickerProductId);
+        const alreadyLinked = pickerProduct?.features ?? [];
+        const available = features.filter((f) => !alreadyLinked.some((l) => l.id === f.id));
+        const q = featurePickerSearch.trim().toLowerCase();
+        const filtered = q
+          ? available.filter((f) => {
+              const nameWords = f.name.toLowerCase().split(/\s+/);
+              const queryWords = q.split(/\s+/);
+              return queryWords.every((qw) => nameWords.some((nw) => nw.startsWith(qw)));
+            })
+          : available;
+        return (
+          <Dialog
+            open={Boolean(featurePickerAnchor) && featurePickerProductId !== null}
+            onClose={closeFeaturePicker}
+            maxWidth="xs"
+            fullWidth
+          >
+            <DialogTitle sx={{ pb: 1 }}>
+              Link features to {pickerProduct?.name ?? "product"}
+            </DialogTitle>
+            <DialogContent sx={{ pt: 1, pb: 0 }}>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="Search features…"
+                value={featurePickerSearch}
+                onChange={(e) => setFeaturePickerSearch(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchOutlined fontSize="small" />
+                    </InputAdornment>
+                  )
+                }}
+                sx={{ mb: 1 }}
+                autoFocus
+              />
+              {available.length === 0 ? (
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", py: 2, textAlign: "center" }}>
+                  All features are already linked.
+                </Typography>
+              ) : filtered.length === 0 ? (
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", py: 2, textAlign: "center" }}>
+                  No features match "{featurePickerSearch}".
+                </Typography>
+              ) : (
+                <List dense disablePadding sx={{ maxHeight: 320, overflowY: "auto" }}>
+                  {filtered.map((f) => {
+                    const checked = featurePickerSelected.includes(f.id);
+                    return (
+                      <ListItem key={f.id} disablePadding>
+                        <ListItemButton
+                          dense
+                          onClick={() => setFeaturePickerSelected((prev) =>
+                            checked ? prev.filter((id) => id !== f.id) : [...prev, f.id]
+                          )}
+                        >
+                          <Checkbox
+                            edge="start"
+                            checked={checked}
+                            tabIndex={-1}
+                            disableRipple
+                            size="small"
+                          />
+                          <ListItemText
+                            primary={f.name}
+                            secondary={`${f.valueType}${f.isInventory ? " · inventory" : ""}`}
+                            primaryTypographyProps={{ variant: "body2" }}
+                            secondaryTypographyProps={{ variant: "caption" }}
+                          />
+                        </ListItemButton>
+                      </ListItem>
+                    );
+                  })}
+                </List>
+              )}
+            </DialogContent>
+            <DialogActions sx={{ justifyContent: "space-between", px: 3, py: 2 }}>
+              <Typography variant="caption" color="text.secondary">
+                {featurePickerSelected.length > 0 ? `${featurePickerSelected.length} selected` : "Select features to link"}
+              </Typography>
+              <Stack direction="row" spacing={1}>
+                <Button onClick={closeFeaturePicker} size="small">Cancel</Button>
+                <Button
+                  variant="contained"
+                  size="small"
+                  disabled={featurePickerSelected.length === 0 || featurePickerLinking}
+                  onClick={linkSelectedFeatures}
+                >
+                  {featurePickerLinking ? <CircularProgress size={16} /> : `Link ${featurePickerSelected.length > 0 ? featurePickerSelected.length : ""} feature${featurePickerSelected.length !== 1 ? "s" : ""}`}
+                </Button>
+              </Stack>
+            </DialogActions>
+          </Dialog>
+        );
+      })()}
 
       {/* Add / Edit Division dialog */}
       <Dialog open={divisionDialog} onClose={() => !divisionSaving && setDivisionDialog(false)} maxWidth="xs" fullWidth>
@@ -2843,6 +3529,96 @@ const Settings = () => {
           >
             {divisionSaving ? "Saving…" : divisionEditId ? "Save changes" : "Add division"}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Feature Import dialog */}
+      <Dialog open={featureImportDialog} onClose={() => { if (!featureImporting) setFeatureImportDialog(false); }} maxWidth="md" fullWidth>
+        <DialogTitle>Import Features from CSV / Excel</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Button size="small" variant="outlined" startIcon={<Download />} onClick={downloadFeatureTemplate}>
+                Download template
+              </Button>
+              <Typography variant="caption" color="text.secondary">
+                Columns: name, description, valueType, supplier, partNumber, unitPrice, brand
+              </Typography>
+            </Stack>
+
+            <Stack direction="row" spacing={1} alignItems="center">
+              <input ref={featureImportFileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }} onChange={handleFeatureImportFile} />
+              <Button variant="contained" size="small" startIcon={<UploadFileOutlined />} onClick={() => featureImportFileRef.current?.click()}>
+                Choose file
+              </Button>
+              {featureImportRows.length > 0 && (
+                <Typography variant="body2" color="success.main">{featureImportRows.length} rows ready</Typography>
+              )}
+            </Stack>
+
+            {featureImportError && <Alert severity="error">{featureImportError}</Alert>}
+
+            {featureImportRows.length > 0 && (
+              <>
+                <FormControl size="small" fullWidth>
+                  <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ mb: 0.5 }}>
+                    Link all imported features to product (optional)
+                  </Typography>
+                  <Select
+                    value={featureImportProduct}
+                    onChange={(e) => setFeatureImportProduct(e.target.value)}
+                    displayEmpty
+                  >
+                    <MenuItem value=""><em>— No product —</em></MenuItem>
+                    {products.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
+                  </Select>
+                </FormControl>
+
+                <TableContainer sx={{ overflowX: "auto", maxHeight: 300 }}>
+                  <Table size="small" stickyHeader sx={{ minWidth: 600 }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Name</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell>Supplier</TableCell>
+                        <TableCell>Part #</TableCell>
+                        <TableCell>Mfr. Part #</TableCell>
+                        <TableCell>Unit Price</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {featureImportRows.map((r, i) => (
+                        <TableRow key={i}>
+                          <TableCell><Typography variant="body2" fontWeight={600}>{r.name}</Typography>{r.description && <Typography variant="caption" color="text.secondary" display="block">{r.description}</Typography>}</TableCell>
+                          <TableCell><Chip size="small" label={r.valueType} variant="outlined" /></TableCell>
+                          <TableCell>{r.supplier || "—"}</TableCell>
+                          <TableCell>{r.partNumber || "—"}</TableCell>
+                          <TableCell>{r.manufacturerPartNumber || "—"}</TableCell>
+                          <TableCell>{r.unitPrice ? `$${r.unitPrice}` : "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </>
+            )}
+
+            {featureImportDone && (
+              <Alert severity="success">
+                Done — {featureImportDone.created} feature{featureImportDone.created !== 1 ? "s" : ""} created
+                {featureImportDone.skipped > 0 ? `, ${featureImportDone.skipped} skipped (already exist)` : ""}.
+                {featureImportProduct && " All linked to selected product."}
+              </Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFeatureImportDialog(false)} disabled={featureImporting}>Close</Button>
+          {featureImportRows.length > 0 && !featureImportDone && (
+            <Button variant="contained" onClick={runFeatureImport} disabled={featureImporting}>
+              {featureImporting ? <><CircularProgress size={14} sx={{ mr: 1 }} />Importing…</> : `Import ${featureImportRows.length} features`}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -2904,7 +3680,7 @@ const Settings = () => {
             /* ── Create / Edit form ── */
             <Stack spacing={2} sx={{ mt: 1 }}>
               <TextField
-                label="Name *"
+                label="Name / Part Number *"
                 size="small"
                 fullWidth
                 value={featureForm.name}
@@ -3015,6 +3791,100 @@ const Settings = () => {
                   </Stack>
                 </FormControl>
               )}
+              {/* Link to products (only shown when creating, not editing) */}
+              {!featureEditId && (
+                <>
+                  <Divider><Typography variant="caption" color="text.secondary">Link to products (optional)</Typography></Divider>
+                  <FormControl size="small" fullWidth>
+                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
+                      Select products to link this feature to
+                    </Typography>
+                    <Box sx={{ maxHeight: 200, overflowY: "auto", border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                      {products.length === 0 ? (
+                        <Typography variant="caption" color="text.secondary" sx={{ px: 1.5, py: 1, display: "block" }}>No products available.</Typography>
+                      ) : (
+                        products.map((p) => {
+                          const checked = featureForm.productLinks.includes(p.id);
+                          return (
+                            <ListItem key={p.id} disablePadding dense>
+                              <ListItemButton
+                                dense
+                                onClick={() => setFeatureForm((prev) => ({
+                                  ...prev,
+                                  productLinks: checked
+                                    ? prev.productLinks.filter((x) => x !== p.id)
+                                    : [...prev.productLinks, p.id],
+                                }))}
+                              >
+                                <ListItemIcon sx={{ minWidth: 36 }}>
+                                  <Checkbox size="small" checked={checked} disableRipple edge="start" />
+                                </ListItemIcon>
+                                <ListItemText primary={<Typography variant="body2">{p.name}</Typography>} />
+                              </ListItemButton>
+                            </ListItem>
+                          );
+                        })
+                      )}
+                    </Box>
+                  </FormControl>
+                </>
+              )}
+              {/* Procurement fields */}
+              <Divider><Typography variant="caption" color="text.secondary">Procurement (optional)</Typography></Divider>
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="Brand"
+                  size="small"
+                  fullWidth
+                  value={featureForm.brand}
+                  onChange={(e) => setFeatureForm((p) => ({ ...p, brand: e.target.value }))}
+                  placeholder="e.g. Hikvision"
+                />
+                <TextField
+                  label="Supplier / Manufacturer"
+                  size="small"
+                  fullWidth
+                  value={featureForm.supplier}
+                  onChange={(e) => setFeatureForm((p) => ({ ...p, supplier: e.target.value }))}
+                  placeholder="e.g. Hikvision Australia"
+                />
+              </Stack>
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="Business Part Number"
+                  size="small"
+                  fullWidth
+                  value={featureForm.alternativePartNumber}
+                  onChange={(e) => setFeatureForm((p) => ({ ...p, alternativePartNumber: e.target.value }))}
+                  placeholder="e.g. DS-2CD2143G2-I"
+                />
+                <TextField
+                  label="Manufacturer Part Number"
+                  size="small"
+                  fullWidth
+                  value={featureForm.manufacturerPartNumber}
+                  onChange={(e) => setFeatureForm((p) => ({ ...p, manufacturerPartNumber: e.target.value }))}
+                  placeholder="e.g. MFR-DS-2143G2"
+                />
+                <TextField
+                  label="Price / Unit ($)"
+                  size="small"
+                  fullWidth
+                  type="number"
+                  inputProps={{ min: 0, step: "0.01" }}
+                  value={featureForm.unitPrice}
+                  onChange={(e) => setFeatureForm((p) => ({ ...p, unitPrice: e.target.value }))}
+                  placeholder="e.g. 185.00"
+                />
+              </Stack>
+              <TextField
+                label="Product Link (URL)"
+                size="small"
+                fullWidth
+                value={featureForm.productLink}
+                onChange={(e) => setFeatureForm((p) => ({ ...p, productLink: e.target.value }))}
+                placeholder="https://..."
+              />
               {featureError && <Alert severity="error" sx={{ fontSize: 12 }}>{featureError}</Alert>}
             </Stack>
           )}

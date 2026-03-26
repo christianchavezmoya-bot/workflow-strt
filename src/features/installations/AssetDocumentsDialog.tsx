@@ -63,6 +63,7 @@ import {
   type AssetDocumentLink,
 } from "../../services/assetDocumentLinkService";
 import { documentService, type DocumentRecord } from "../../services/documentService";
+import QRUploadButton from "../../components/QRUploadButton";
 
 const MAX_DOCS = 3;
 const ACCEPTED_TYPES = ".pdf,.xlsx,.xls,.docx,.doc,.json,.png,.jpg,.jpeg";
@@ -694,6 +695,18 @@ export default function AssetDocumentsDialog({
                   accept={ACCEPTED_TYPES}
                   style={{ display: "none" }}
                   onChange={handleFileChosen}
+                />
+
+                <QRUploadButton
+                  docType="asset-document"
+                  linkedTo={asset.assetName ?? asset.id ?? ""}
+                  disabled={links.length >= MAX_DOCS}
+                  onUploaded={async (documentId) => {
+                    const link = await assetDocumentLinkService.attach(asset.id, documentId, currentUserName);
+                    setLinks((prev) => [...prev, link]);
+                    onDocsChanged(asset.id, links.length + 1);
+                    setSnack({ msg: "Document uploaded and attached via phone.", sev: "success" });
+                  }}
                 />
 
                 {links.length >= MAX_DOCS && (

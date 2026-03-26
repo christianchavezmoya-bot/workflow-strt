@@ -19,6 +19,10 @@ export interface AssetIssue {
   reportedAt: string;
   resolved: boolean;
   comments?: IssueComment[];
+  /** Base64 data URLs attached when the issue was reported */
+  reportMedia?: string[];
+  /** Base64 data URLs attached when the issue was closed (evidence of fix) */
+  resolutionMedia?: string[];
   resolutionNote?: string;
   resolvedAt?: string;
   resolvedBy?: string;

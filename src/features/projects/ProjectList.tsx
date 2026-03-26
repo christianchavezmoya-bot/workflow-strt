@@ -331,6 +331,10 @@ const ProjectList = () => {
   const products = productsState.items.length ? productsState.items : demoProducts;
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
+  const officeIdsForRegion = useMemo(() => {
+    if (activeOffice === "All") return null;
+    return new Set(globalOffices.filter((o) => o.country === activeOffice).map((o) => o.id));
+  }, [activeOffice, globalOffices]);
 
   const projectAccessors = useMemo(
     () => ({

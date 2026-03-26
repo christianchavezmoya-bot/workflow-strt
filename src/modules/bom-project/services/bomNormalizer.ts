@@ -64,6 +64,7 @@ export function normalizeRow(
     groupName: str("groupName"),
     itemScope: normalizeItemScope(get("itemScope")),
     notes: str("notes"),
+    itemTypeHint: str("itemTypeHint"),
   };
 }
 
@@ -80,6 +81,9 @@ export function normalizeAllRows(
 /** Auto-suggest column mappings by fuzzy-matching header names to canonical fields */
 export function suggestMappings(headers: string[]): ColumnMappingEntry[] {
   const CANONICAL_ALIASES: Record<string, string[]> = {
+    // itemTypeHint must come first — "type" is a substring of "vehicle type", "asset type", etc.
+    // so if vehicleType were checked first, any "Type" column would incorrectly match it.
+    itemTypeHint: ["type", "item type", "classification", "category type", "bom type"],
     partNumber: ["part number", "part#", "part no", "partno", "item number", "item#", "sku", "part_number"],
     description: ["description", "desc", "item description", "name", "item name", "product"],
     supplier: ["supplier", "vendor", "manufacturer", "mfr"],

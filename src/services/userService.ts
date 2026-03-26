@@ -14,6 +14,7 @@ export interface UpdateUserPayload {
   role?: UserRole;
   office?: User["office"];
   isActive?: boolean;
+  isFirstLogin?: boolean;
 }
 
 export const userService = {
@@ -39,6 +40,10 @@ export const userService = {
   async deleteUser(id: string) {
     await api.delete(`/users/${id}`);
     return id;
+  },
+  async resetOnboarding(id: string) {
+    const response = await api.put<User>(`/users/${id}`, { isFirstLogin: true });
+    return response.data;
   },
   async reset2fa(id: string) {
     const response = await api.post<User>(`/users/${id}/reset-2fa`);

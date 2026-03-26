@@ -563,7 +563,7 @@ export default function GlobalOfficeMap({
                   {...params}
                   label="City *"
                   fullWidth
-                  InputLabelProps={{ sx: fieldLabelStyle }}
+                  InputLabelProps={{ shrink: true, sx: fieldLabelStyle }}
                   placeholder="Start typing city name..."
                   helperText={citySuggestions.length > 0 ? `${citySuggestions.length} cities found - select one to auto-populate` : "Type at least 2 characters to search cities"}
                   InputProps={{

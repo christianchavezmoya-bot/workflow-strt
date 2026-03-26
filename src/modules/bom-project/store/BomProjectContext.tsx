@@ -11,6 +11,7 @@ import type { ClassificationResult, RuleProfile } from "../types/classification"
 import type { DraftProject } from "../types/projectDraft";
 import type { ValidationResult } from "../types/validation";
 import type { ComparisonState } from "./comparisonState";
+import type { Product } from "../../../types/product";
 
 // ── State shape ──────────────────────────────────────────────────────────────
 
@@ -47,6 +48,9 @@ export interface BomProjectState {
   // Comparison UI state
   comparison: ComparisonState;
 
+  // Selected product (set before upload)
+  selectedProduct: Product | null;
+
   // General
   loading: boolean;
   error: string | null;
@@ -63,12 +67,16 @@ export type BomAction =
   | { type: "SET_MAPPINGS"; payload: ColumnMappingEntry[] }
   | { type: "SET_MAPPING_PROFILES"; payload: MappingProfile[] }
   | { type: "SET_NORMALIZED_ROWS"; payload: CanonicalBomRow[] }
+  | { type: "UPDATE_NORMALIZED_ROW"; payload: Partial<CanonicalBomRow> & { sourceRowId: string } }
+  | { type: "DELETE_ROW"; payload: string }
+  | { type: "ADD_ROW"; payload: { row: CanonicalBomRow; classification: ClassificationResult } }
   | { type: "SET_CLASSIFICATIONS"; payload: ClassificationResult[] }
   | { type: "OVERRIDE_CLASSIFICATION"; payload: ClassificationResult }
   | { type: "SET_RULE_PROFILES"; payload: RuleProfile[] }
   | { type: "SET_DRAFT"; payload: DraftProject | null }
   | { type: "SET_VALIDATION"; payload: ValidationResult | null }
   | { type: "SET_COMPARISON"; payload: Partial<ComparisonState> }
+  | { type: "SET_SELECTED_PRODUCT"; payload: Product | null }
   | { type: "SET_LOADING"; payload: boolean }
   | { type: "SET_ERROR"; payload: string | null }
   | { type: "RESET" };
@@ -98,6 +106,7 @@ const initialState: BomProjectState = {
   draftProject: null,
   validationResult: null,
   comparison: initialComparison,
+  selectedProduct: null,
   loading: false,
   error: null,
 };
@@ -114,6 +123,25 @@ function reducer(state: BomProjectState, action: BomAction): BomProjectState {
     case "SET_MAPPINGS":       return { ...state, activeMappings: action.payload };
     case "SET_MAPPING_PROFILES": return { ...state, mappingProfiles: action.payload };
     case "SET_NORMALIZED_ROWS": return { ...state, normalizedRows: action.payload };
+    case "UPDATE_NORMALIZED_ROW":
+      return {
+        ...state,
+        normalizedRows: state.normalizedRows.map((r) =>
+          r.sourceRowId === action.payload.sourceRowId ? { ...r, ...action.payload } : r
+        ),
+      };
+    case "DELETE_ROW":
+      return {
+        ...state,
+        normalizedRows: state.normalizedRows.filter((r) => r.sourceRowId !== action.payload),
+        classifications: state.classifications.filter((c) => c.sourceRowId !== action.payload),
+      };
+    case "ADD_ROW":
+      return {
+        ...state,
+        normalizedRows: [...state.normalizedRows, action.payload.row],
+        classifications: [...state.classifications, action.payload.classification],
+      };
     case "SET_CLASSIFICATIONS": return { ...state, classifications: action.payload };
     case "OVERRIDE_CLASSIFICATION":
       return {
@@ -128,6 +156,7 @@ function reducer(state: BomProjectState, action: BomAction): BomProjectState {
     case "SET_DRAFT":          return { ...state, draftProject: action.payload };
     case "SET_VALIDATION":     return { ...state, validationResult: action.payload };
     case "SET_COMPARISON":     return { ...state, comparison: { ...state.comparison, ...action.payload } };
+    case "SET_SELECTED_PRODUCT": return { ...state, selectedProduct: action.payload };
     case "SET_LOADING":        return { ...state, loading: action.payload };
     case "SET_ERROR":          return { ...state, error: action.payload };
     case "RESET":              return initialState;

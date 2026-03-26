@@ -12,15 +12,18 @@ namespace Commtrac.Api.Controllers;
 public class BrandSettingsController : ControllerBase
 {
     private const string LogoKey = "logo";
+    private const string AppNameKey = "app-name";
     private readonly AppDbContext _db;
     public BrandSettingsController(AppDbContext db) => _db = db;
 
-    // GET api/brand-settings
+    // GET api/brand-settings — public so unauthenticated pages (invite/reset) can read the app name
     [HttpGet]
+    [AllowAnonymous]
     public async Task<IActionResult> Get()
     {
-        var setting = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == LogoKey);
-        return Ok(new BrandSettingDto(setting?.Value));
+        var logo = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == LogoKey);
+        var appName = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == AppNameKey);
+        return Ok(new BrandSettingDto(logo?.Value, appName?.Value));
     }
 
     // PUT api/brand-settings
@@ -28,22 +31,41 @@ public class BrandSettingsController : ControllerBase
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Set([FromBody] UpdateBrandSettingRequest req)
     {
-        var setting = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == LogoKey);
-        if (setting is null)
+        if (req.LogoBase64 is not null)
         {
-            setting = new BrandSettingEntity { Key = LogoKey, Value = req.LogoBase64 ?? string.Empty };
-            _db.BrandSettings.Add(setting);
+            var logo = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == LogoKey);
+            if (logo is null)
+            {
+                _db.BrandSettings.Add(new BrandSettingEntity { Key = LogoKey, Value = req.LogoBase64 });
+            }
+            else
+            {
+                logo.Value = req.LogoBase64;
+                logo.UpdatedAt = DateTime.UtcNow;
+            }
         }
-        else
+
+        if (req.AppName is not null)
         {
-            setting.Value     = req.LogoBase64 ?? string.Empty;
-            setting.UpdatedAt = DateTime.UtcNow;
+            var appName = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == AppNameKey);
+            if (appName is null)
+            {
+                _db.BrandSettings.Add(new BrandSettingEntity { Key = AppNameKey, Value = req.AppName });
+            }
+            else
+            {
+                appName.Value = req.AppName;
+                appName.UpdatedAt = DateTime.UtcNow;
+            }
         }
+
         await _db.SaveChangesAsync();
-        return Ok(new BrandSettingDto(setting.Value));
+        var logoResult = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == LogoKey);
+        var appNameResult = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == AppNameKey);
+        return Ok(new BrandSettingDto(logoResult?.Value, appNameResult?.Value));
     }
 
-    // DELETE api/brand-settings
+    // DELETE api/brand-settings (removes logo only)
     [HttpDelete]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Remove()

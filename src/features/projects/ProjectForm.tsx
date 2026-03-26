@@ -198,7 +198,7 @@ const ProjectForm = () => {
         description: localProject.description,
         startDate: localProject.startDate,
         finishDate: localProject.finishDate,
-        office: localProject.office,
+        office: localProject.officeId || globalOffices.find((o) => o.city === localProject.office)?.id || "",
         region: localProject.region,
         projectManager: localProject.projectManager,
         projectType: localProject.projectType,
@@ -221,7 +221,7 @@ const ProjectForm = () => {
         description: project.description,
         startDate: project.startDate,
         finishDate: project.finishDate,
-        office: project.office,
+        office: project.officeId || globalOffices.find((o) => o.city === project.office)?.id || "",
         region: project.region,
         projectManager: project.projectManager,
         projectType: project.projectType,
@@ -292,23 +292,22 @@ const ProjectForm = () => {
       });
   }, [selectedCustomerId]);
 
-  // When creating a new project, default the office city based on the active country filter.
-  // Project.office is stored as the office city (to map back to globalOffices).
+  // When creating a new project, default the office based on the active country filter.
+  // Project.office now stores the officeId (UUID) so filtering is FK-based.
   useEffect(() => {
     if (id) return;
     if (activeOffice === "All") return;
     if (globalOffices.length === 0) return;
 
-    const currentCountry = office ? countryForOffice(office) : "";
-    if (currentCountry === activeOffice) return;
+    const currentOfficeEntity = globalOffices.find((o) => o.id === office);
+    if (currentOfficeEntity?.country === activeOffice) return;
 
-    const defaultCity =
-      globalOffices.find(
-        (o) => (o.country || "").toLowerCase() === activeOffice.toLowerCase() && !!o.city
-      )?.city || "";
+    const defaultOffice = globalOffices.find(
+      (o) => (o.country || "").toLowerCase() === activeOffice.toLowerCase() && !!o.city
+    );
 
-    setValue("office", defaultCity, { shouldValidate: true });
-  }, [id, activeOffice, globalOffices, office, countryForOffice, setValue]);
+    if (defaultOffice) setValue("office", defaultOffice.id, { shouldValidate: true });
+  }, [id, activeOffice, globalOffices, office, setValue]);
 
   const matchedCustomerId = useMemo(() => {
     if (!customerId) return "";
@@ -329,25 +328,22 @@ const ProjectForm = () => {
     setValue("customerName", selected.name, { shouldValidate: true });
     setValue("customerId", selected.customerId, { shouldValidate: true });
     if (selected.office && selected.office !== "All") {
-      // Customer.office is usually a country. Project.office is stored as an office city.
-      const officeIsCity = globalOffices.some((o) => o.city === selected.office);
-      if (officeIsCity) {
-        setValue("office", selected.office, { shouldValidate: true });
+      // Customer.office is a country or city string — resolve to an officeId.
+      const officeByCity = globalOffices.find((o) => o.city === selected.office);
+      if (officeByCity) {
+        setValue("office", officeByCity.id, { shouldValidate: true });
       } else {
-        const defaultCity =
-          globalOffices.find(
-            (o) => (o.country || "").toLowerCase() === selected.office.toLowerCase() && !!o.city
-          )?.city || "";
-        if (defaultCity) {
-          setValue("office", defaultCity, { shouldValidate: true });
-        }
+        const defaultOffice = globalOffices.find(
+          (o) => (o.country || "").toLowerCase() === selected.office.toLowerCase() && !!o.city
+        );
+        if (defaultOffice) setValue("office", defaultOffice.id, { shouldValidate: true });
       }
     }
   }, [selectedCustomerId, filteredCustomers, globalOffices, setValue]);
 
   useEffect(() => {
     if (!office || globalOffices.length === 0) return;
-    const selectedOffice = globalOffices.find((o) => o.city === office);
+    const selectedOffice = globalOffices.find((o) => o.id === office);
     if (selectedOffice && selectedOffice.country) {
       setValue("region", selectedOffice.country, { shouldValidate: true });
     }
@@ -368,29 +364,25 @@ const ProjectForm = () => {
     const managerCountry = countryForOffice(managerOfficeRaw);
     if (!managerCountry) return;
 
-    let managerCity = "";
-    const officeByCity = globalOffices.find(
+    // Resolve manager's office string (city/country) to a GlobalOffice entity → store its id
+    let resolvedOffice: (typeof globalOffices)[number] | undefined;
+    resolvedOffice = globalOffices.find(
       (o) => (o.city || "").trim().toLowerCase() === managerOfficeRaw.toLowerCase()
     );
-    if (officeByCity?.city) {
-      managerCity = officeByCity.city;
-    } else {
+    if (!resolvedOffice) {
       const possibleCity = managerOfficeRaw.split(",")[0]?.trim();
-      const officeByPrefix = globalOffices.find(
+      resolvedOffice = globalOffices.find(
         (o) => (o.city || "").trim().toLowerCase() === String(possibleCity || "").toLowerCase()
       );
-      if (officeByPrefix?.city) {
-        managerCity = officeByPrefix.city;
-      } else {
-        managerCity =
-          globalOffices.find(
-            (o) => (o.country || "").trim().toLowerCase() === managerCountry.toLowerCase() && !!o.city
-          )?.city || "";
-      }
+    }
+    if (!resolvedOffice) {
+      resolvedOffice = globalOffices.find(
+        (o) => (o.country || "").trim().toLowerCase() === managerCountry.toLowerCase() && !!o.city
+      );
     }
 
-    if (managerCity) {
-      setValue("office", managerCity, { shouldValidate: true });
+    if (resolvedOffice) {
+      setValue("office", resolvedOffice.id, { shouldValidate: true });
     }
     setValue("region", managerCountry, { shouldValidate: true });
 
@@ -553,7 +545,8 @@ const ProjectForm = () => {
       description: data.description || "",
       startDate: data.startDate || "",
       finishDate: data.finishDate || "",
-      office: data.office || "",
+      officeId: data.office || undefined,
+      office: globalOffices.find((o) => o.id === data.office)?.city || data.office || "",
       region: data.region,
       projectType: (data.projectType as any) || "Internal",
       status: (data.status as any) || "Draft",
@@ -593,8 +586,13 @@ const ProjectForm = () => {
         }
       }
       navigate("/projects");
-    } catch {
-      setSubmitError("Unable to save project. Check API availability.");
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 403 || status === 401) {
+        setSubmitError("You don't have permission to save projects. Contact your Project Manager or Admin.");
+      } else {
+        setSubmitError("Unable to save project. Check API availability.");
+      }
       pushUiLog("ProjectForm submit failed", "API error");
     }
   };
@@ -657,17 +655,14 @@ const ProjectForm = () => {
       setValue("customerName", selected.name, { shouldValidate: true });
       setValue("customerId", selected.customerId, { shouldValidate: true });
       if (selected.office && selected.office !== "All") {
-        const officeIsCity = globalOffices.some((o) => o.city === selected.office);
-        if (officeIsCity) {
-          setValue("office", selected.office, { shouldValidate: true });
+        const officeByCity = globalOffices.find((o) => o.city === selected.office);
+        if (officeByCity) {
+          setValue("office", officeByCity.id, { shouldValidate: true });
         } else {
-          const defaultCity =
-            globalOffices.find(
-              (o) => (o.country || "").toLowerCase() === selected.office.toLowerCase() && !!o.city
-            )?.city || "";
-          if (defaultCity) {
-            setValue("office", defaultCity, { shouldValidate: true });
-          }
+          const defaultOffice = globalOffices.find(
+            (o) => (o.country || "").toLowerCase() === selected.office.toLowerCase() && !!o.city
+          );
+          if (defaultOffice) setValue("office", defaultOffice.id, { shouldValidate: true });
         }
       }
     }
@@ -1057,8 +1052,8 @@ const ProjectForm = () => {
                 >
                   <option value="">Select office</option>
                   {sortedGlobalOffices.map((office) => (
-                    <option key={office.id} value={office.city}>
-                      {office.city}
+                    <option key={office.id} value={office.id}>
+                      {office.city}{office.country ? `, ${office.country}` : ""}
                     </option>
                   ))}
                 </TextField>
@@ -1398,175 +1393,6 @@ const ProjectForm = () => {
 
             {visibleIdSet.has("products") && renderFormField("products")}
             <Grid item xs={12} md={6} />
-            {selectedProductFeatures.length > 0 && (
-              <Grid item xs={12}>
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  Product Features: {selectedProduct?.name}
-                </Typography>
-                <Grid container spacing={2}>
-                  {selectedProductFeatures.map((feature) => {
-                    const key = `${selectedProductId}:${feature.id}`;
-                    const value = productFeatureValues[key] || "";
-                    const setVal = (v: string) => setProductFeatureValues((prev) => ({ ...prev, [key]: v }));
-
-                    if (feature.valueType === "tri-state") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <Stack spacing={0.5}>
-                            <Typography variant="caption" color="text.secondary">{feature.name}</Typography>
-                            <ToggleButtonGroup
-                              value={value || null}
-                              exclusive
-                              onChange={(_, next) => { if (next !== null) setVal(next); }}
-                              size="small"
-                            >
-                              <ToggleButton value="yes">Yes</ToggleButton>
-                              <ToggleButton value="no">No</ToggleButton>
-                              <ToggleButton value="na">N/A</ToggleButton>
-                            </ToggleButtonGroup>
-                          </Stack>
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "single-select") {
-                      const options = feature.options || [];
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <FormControl fullWidth size="small">
-                            <InputLabel>{feature.name}</InputLabel>
-                            <Select label={feature.name} value={value} onChange={(event) => setVal(event.target.value)}>
-                              {options.map((option) => (
-                                <MenuItem key={option} value={option}>{option}</MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "multi-select") {
-                      const options = feature.options || [];
-                      const selectedValues = value ? value.split(",").map((x) => x.trim()).filter(Boolean) : [];
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <FormControl fullWidth>
-                            <FormLabel>{feature.name}</FormLabel>
-                            <Select
-                              multiple
-                              value={selectedValues}
-                              onChange={(event) => {
-                                const next = Array.isArray(event.target.value) ? event.target.value : [];
-                                setVal(next.join(","));
-                              }}
-                              renderValue={(selected) => (Array.isArray(selected) ? selected.join(", ") : "")}
-                            >
-                              {options.map((option) => (
-                                <MenuItem key={option} value={option}>
-                                  <Checkbox checked={selectedValues.includes(option)} />
-                                  <ListItemText primary={option} />
-                                </MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "rating") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <Stack spacing={0.5}>
-                            <Typography variant="caption" color="text.secondary">{feature.name}</Typography>
-                            <Rating
-                              value={parseInt(value) || 0}
-                              onChange={(_, next) => setVal(next ? String(next) : "")}
-                            />
-                          </Stack>
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "percentage") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <TextField
-                            label={`${feature.name} (%)`}
-                            fullWidth
-                            type="number"
-                            inputProps={{ min: 0, max: 100 }}
-                            value={value}
-                            onChange={(event) => setVal(event.target.value)}
-                          />
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "date") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <TextField
-                            label={feature.name}
-                            fullWidth
-                            type="date"
-                            value={value}
-                            onChange={(event) => setVal(event.target.value)}
-                            InputLabelProps={{ shrink: true }}
-                          />
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "rich-text") {
-                      return (
-                        <Grid item xs={12} key={key}>
-                          <TextField
-                            label={feature.name}
-                            fullWidth
-                            multiline
-                            rows={3}
-                            value={value}
-                            onChange={(event) => setVal(event.target.value)}
-                          />
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "link") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <TextField
-                            label={feature.name}
-                            fullWidth
-                            type="url"
-                            placeholder="https://"
-                            value={value}
-                            onChange={(event) => setVal(event.target.value)}
-                          />
-                        </Grid>
-                      );
-                    }
-                    if (feature.valueType === "file") {
-                      return (
-                        <Grid item xs={12} md={6} key={key}>
-                          <TextField
-                            label={feature.name}
-                            fullWidth
-                            placeholder="File URL or path"
-                            value={value}
-                            onChange={(event) => setVal(event.target.value)}
-                          />
-                        </Grid>
-                      );
-                    }
-                    return (
-                      <Grid item xs={12} md={6} key={key}>
-                        <TextField
-                          label={feature.name}
-                          fullWidth
-                          type={feature.valueType === "number" ? "number" : "text"}
-                          value={value}
-                          onChange={(event) => setVal(event.target.value)}
-                        />
-                      </Grid>
-                    );
-                  })}
-                </Grid>
-              </Grid>
-            )}
 
             {visibleIdSet.has("projectManager") && renderFormField("projectManager")}
             {visibleIdSet.has("office") ? renderFormField("office") : <Grid item xs={12} md={6} />}

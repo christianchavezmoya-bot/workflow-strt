@@ -46,10 +46,24 @@ export const projectAssetService = {
     return res.data.map(fromDto);
   },
 
+  async getById(id: string): Promise<ProjectAsset | null> {
+    try {
+      const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
+      return fromDto(res.data);
+    } catch {
+      return null;
+    }
+  },
+
   async update(id: string, patch: Partial<CreateProjectAssetInput> & { status?: string; workOrderId?: string }): Promise<ProjectAsset> {
     const result = await AssetRepository.update(id, patch as Partial<ProjectAsset> & Record<string, unknown>);
     if (result === null) throw new Error("Offline — change queued");
     return result;
+  },
+
+  async patchIssues(id: string, issuesJson: string): Promise<ProjectAsset> {
+    const res = await api.patch<ProjectAsset>(`/project-assets/${id}/issues`, { issuesJson });
+    return fromDto(res.data);
   },
 
   async remove(id: string): Promise<void> {
@@ -82,7 +96,31 @@ export const projectAssetService = {
       return [];
     }
   },
+
+  async listOpen(): Promise<OpenAssetItem[]> {
+    try {
+      const res = await api.get<OpenAssetItem[]>("/project-assets/open");
+      return res.data;
+    } catch {
+      return [];
+    }
+  },
 };
+
+export interface OpenAssetItem {
+  id: string;
+  projectId: string;
+  jobNumber: string;
+  office: string;
+  officeId?: string;
+  assetTag?: string;
+  assetName?: string;
+  assetModel?: string;
+  manufacturer?: string;
+  status: string;
+  assignedUserId?: string;
+  location?: string;
+}
 
 export interface WorkloadSummaryItem {
   userId: string;
@@ -90,6 +128,11 @@ export interface WorkloadSummaryItem {
   notStarted: number;
   inProgress: number;
   totalAssigned: number;
+  jobNumbers: string[];
+  hasIssues: boolean;
+  completedSteps: number;
+  totalSteps: number;
+  startedAt?: string;
 }
 
 export interface ProjectAssetSummaryItem {

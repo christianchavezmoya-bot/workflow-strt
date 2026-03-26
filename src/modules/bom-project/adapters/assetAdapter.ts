@@ -9,18 +9,21 @@ export const assetAdapter = {
   async createAssets(
     projectId: string,
     assets: DraftAsset[],
-    importRunId: string
+    importRunId: string,
+    productId?: string
   ): Promise<string[]> {
     const ids: string[] = [];
     for (const asset of assets) {
-      const payload = {
+      const payload: Record<string, unknown> = {
         projectId,
+        assetTag: asset.partNumber ?? "",
         assetName: asset.assetName,
         assetType: asset.assetType ?? "",
         location: asset.location ?? "",
         status: "Pending",
         sourceImportRunId: importRunId,
       };
+      if (productId) payload.productId = productId;
       const { data } = await api.post<{ id: string }>("/project-assets", payload);
       ids.push(data.id);
     }

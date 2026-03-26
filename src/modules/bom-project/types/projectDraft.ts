@@ -20,6 +20,7 @@ export interface DraftAsset {
   draftAssetId: string;
   draftProjectId: string;
   assetName: string;
+  partNumber?: string;
   assetType?: string;
   configType?: string;
   workflowTemplateCandidate?: string;
