@@ -1263,3 +1263,21 @@ public record WorkflowTypeHealthDto(
     int RunCount,
     int Score
 );
+
+// ── User bulk import ───────────────────────────────────────────────────────
+
+public record BulkImportUserRow(
+    string FullName,
+    string Email,
+    string Role,
+    string? Office
+);
+
+public record BulkImportUsersRequest(List<BulkImportUserRow> Users);
+
+public record BulkImportUsersResult(
+    int Created,
+    int Skipped,
+    List<string> SkippedEmails,
+    List<string> Errors
+);

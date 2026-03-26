@@ -87,6 +87,59 @@ public class UsersController : ControllerBase
         return await Update(id, request);
     }
 
+    [HttpPost("bulk-import")]
+    public async Task<ActionResult<BulkImportUsersResult>> BulkImport([FromBody] BulkImportUsersRequest request)
+    {
+        var created = 0;
+        var skippedEmails = new List<string>();
+        var errors = new List<string>();
+
+        var existingEmails = new HashSet<string>(
+            await _db.Users.Select(u => u.Email.ToLower()).ToListAsync()
+        );
+
+        foreach (var row in request.Users)
+        {
+            if (string.IsNullOrWhiteSpace(row.FullName) || string.IsNullOrWhiteSpace(row.Email) || string.IsNullOrWhiteSpace(row.Role))
+            {
+                errors.Add($"Row skipped — missing required field (fullName, email, or role): '{row.Email}'");
+                continue;
+            }
+
+            var emailLower = row.Email.Trim().ToLower();
+            if (existingEmails.Contains(emailLower))
+            {
+                skippedEmails.Add(row.Email.Trim());
+                continue;
+            }
+
+            try
+            {
+                var user = new UserEntity
+                {
+                    Email = row.Email.Trim(),
+                    FullName = row.FullName.Trim(),
+                    Role = row.Role.Trim(),
+                    Office = row.Office?.Trim() ?? string.Empty,
+                    IsActive = false,
+                    IsFirstLogin = true,
+                    PasswordHash = string.Empty  // no password — inactive users can't log in
+                };
+                _db.Users.Add(user);
+                existingEmails.Add(emailLower);
+                created++;
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"Failed to create '{row.Email}': {ex.Message}");
+            }
+        }
+
+        await _db.SaveChangesAsync();
+
+        return Ok(new BulkImportUsersResult(created, skippedEmails.Count, skippedEmails, errors));
+    }
+
     [HttpPost("{id}/invite")]
     public async Task<IActionResult> Invite(string id)
     {

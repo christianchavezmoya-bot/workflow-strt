@@ -45,6 +45,8 @@ import {
   PersonOffOutlined,
   LockResetOutlined,
   ReplayOutlined,
+  UploadFileOutlined,
+  DownloadOutlined,
 } from "@mui/icons-material";
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
@@ -266,6 +268,10 @@ export const UserManagement: React.FC = () => {
 
   const [roles, setRoles] = useState<string[]>(["Admin", "Project Manager", "Engineer", "Viewer"]);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [bulkImportRows, setBulkImportRows] = useState<{ fullName: string; email: string; role: string; office: string }[]>([]);
+  const [bulkImporting, setBulkImporting] = useState(false);
+  const [bulkImportResult, setBulkImportResult] = useState<{ created: number; skipped: number; skippedEmails: string[]; errors: string[] } | null>(null);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [editUserOpen, setEditUserOpen] = useState(false);
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
@@ -1636,6 +1642,58 @@ export const UserManagement: React.FC = () => {
     setUserDynamicValues({});
   };
 
+  // ── Bulk import helpers ──────────────────────────────────────────────────
+  function parseBulkCSV(text: string) {
+    const lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) return [];
+    const cols = lines[0].split(",").map((c) => c.trim().toLowerCase().replace(/\s+/g, "").replace(/^"|"$/g, ""));
+    return lines.slice(1).map((row) => {
+      const vals = row.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+      const obj: Record<string, string> = {};
+      cols.forEach((c, i) => { obj[c] = vals[i] ?? ""; });
+      return obj;
+    }).filter((r) => Object.values(r).some(Boolean));
+  }
+
+  function handleBulkCSVFile(file: File) {
+    file.text().then((text) => {
+      const raw = parseBulkCSV(text);
+      const rows = raw.map((r) => ({
+        fullName: r.fullname || r.full_name || r.name || "",
+        email: r.email || "",
+        role: r.role || "",
+        office: r.office || "",
+      })).filter((r) => r.fullName && r.email && r.role);
+      setBulkImportRows(rows);
+      setBulkImportResult(null);
+    });
+  }
+
+  async function runBulkImport() {
+    if (bulkImportRows.length === 0) return;
+    setBulkImporting(true);
+    try {
+      const res = await api.post("/users/bulk-import", { users: bulkImportRows });
+      setBulkImportResult(res.data);
+      dispatch(fetchUsers());
+    } catch {
+      setBulkImportResult({ created: 0, skipped: 0, skippedEmails: [], errors: ["Import failed. Please check your file and try again."] });
+    } finally {
+      setBulkImporting(false);
+    }
+  }
+
+  function downloadBulkTemplate() {
+    const csv = "fullName,email,role,office\nJohn Smith,john.smith@example.com,Installer,Brisbane\nSarah Jones,sarah.jones@example.com,Engineer,";
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "users-import-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const handleCreateCustomer = async () => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: Array<{ id: string; time: string; method?: string; url?: string; status?: number; error?: string }> };
     if (!anyWindow.__apiDebugLogs) {
@@ -1955,9 +2013,15 @@ export const UserManagement: React.FC = () => {
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
           {adminTabsConfig[tab]?.type === "users" && can.createUsers && (
-            <Button variant="contained" onClick={() => setInviteOpen(true)}>
-              Invite user
-            </Button>
+            <>
+              <Button variant="outlined" startIcon={<UploadFileOutlined />}
+                onClick={() => { setBulkImportRows([]); setBulkImportResult(null); setBulkImportOpen(true); }}>
+                Import CSV
+              </Button>
+              <Button variant="contained" onClick={() => setInviteOpen(true)}>
+                Invite user
+              </Button>
+            </>
           )}
           {can.createDeleteTables && (
             <IconButton
@@ -3654,6 +3718,113 @@ export const UserManagement: React.FC = () => {
             </Stack>
           );
         })}
+
+      {/* ── Bulk import dialog ── */}
+      <Dialog open={bulkImportOpen} onClose={() => !bulkImporting && setBulkImportOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" justifyContent="space-between">
+            <span>Import Users from CSV</span>
+            <Button size="small" startIcon={<DownloadOutlined />} onClick={downloadBulkTemplate} variant="text">
+              Download template
+            </Button>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          {bulkImportResult ? (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <Alert severity={bulkImportResult.errors.length > 0 ? "warning" : "success"}>
+                <strong>{bulkImportResult.created}</strong> user{bulkImportResult.created !== 1 ? "s" : ""} created (inactive).
+                {bulkImportResult.skipped > 0 && <> <strong>{bulkImportResult.skipped}</strong> skipped (email already exists).</>}
+              </Alert>
+              {bulkImportResult.skippedEmails.length > 0 && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Skipped emails:</Typography>
+                  <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.75rem", mt: 0.5 }}>
+                    {bulkImportResult.skippedEmails.join(", ")}
+                  </Typography>
+                </Box>
+              )}
+              {bulkImportResult.errors.length > 0 && (
+                <Box>
+                  <Typography variant="caption" color="error.main">Errors:</Typography>
+                  <Stack spacing={0.25} sx={{ mt: 0.5 }}>
+                    {bulkImportResult.errors.map((e, i) => (
+                      <Typography key={i} variant="body2" color="error.main" sx={{ fontSize: "0.75rem" }}>{e}</Typography>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+            </Stack>
+          ) : bulkImportRows.length === 0 ? (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                Upload a CSV with columns: <strong>fullName, email, role, office</strong> (office is optional).
+                Users will be created as <strong>inactive</strong> — they cannot log in until you activate them.
+              </Typography>
+              <Box
+                sx={{
+                  border: "2px dashed rgba(255,255,255,0.2)", borderRadius: 2, p: 4,
+                  textAlign: "center", cursor: "pointer",
+                  "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
+                }}
+                onClick={() => document.getElementById("bulk-user-csv-input")?.click()}
+              >
+                <UploadFileOutlined sx={{ fontSize: 40, color: "text.disabled", mb: 1 }} />
+                <Typography variant="body2" color="text.secondary">Click to upload CSV file</Typography>
+                <input id="bulk-user-csv-input" type="file" accept=".csv" hidden
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleBulkCSVFile(f); e.target.value = ""; }} />
+              </Box>
+            </Stack>
+          ) : (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <Alert severity="info">
+                <strong>{bulkImportRows.length}</strong> valid row{bulkImportRows.length !== 1 ? "s" : ""} found. Review before importing.
+              </Alert>
+              <Box sx={{ maxHeight: 320, overflowY: "auto" }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Full Name</TableCell>
+                      <TableCell>Email</TableCell>
+                      <TableCell>Role</TableCell>
+                      <TableCell>Office</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {bulkImportRows.map((r, i) => (
+                      <TableRow key={i}>
+                        <TableCell>{r.fullName}</TableCell>
+                        <TableCell>{r.email}</TableCell>
+                        <TableCell><Chip label={r.role} size="small" variant="outlined" /></TableCell>
+                        <TableCell>{r.office || "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          {bulkImportResult ? (
+            <Button onClick={() => setBulkImportOpen(false)}>Close</Button>
+          ) : (
+            <>
+              <Button onClick={() => setBulkImportOpen(false)} disabled={bulkImporting}>Cancel</Button>
+              {bulkImportRows.length > 0 && (
+                <Button variant="outlined" onClick={() => setBulkImportRows([])} disabled={bulkImporting}>
+                  Change file
+                </Button>
+              )}
+              {bulkImportRows.length > 0 && (
+                <Button variant="contained" onClick={runBulkImport} disabled={bulkImporting}>
+                  {bulkImporting ? "Importing…" : `Import ${bulkImportRows.length} users`}
+                </Button>
+              )}
+            </>
+          )}
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Invite new user</DialogTitle>
