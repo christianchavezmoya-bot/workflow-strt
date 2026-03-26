@@ -98,6 +98,12 @@ const Dashboard = () => {
   // For Supervisor: runs completed today count
   const [completedToday, setCompletedToday] = useState(0);
 
+  // PM: auto-assign flags from installers self-assigning
+  type AutoAssignFlag = { id: string; assetId: string; assetTag: string; jobNumber: string; assignedBy: string; assignedAt: string };
+  const [autoAssignFlags, setAutoAssignFlags] = useState<AutoAssignFlag[]>(() =>
+    JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]")
+  );
+
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
     if (activeOffice === "All") return null;
@@ -137,6 +143,14 @@ const Dashboard = () => {
       }).catch(() => {});
     }
   }, [dispatch, loadAttention, isEngineer]);
+
+  // PM: listen for new auto-assign flags written by AssetInstallationPage
+  useEffect(() => {
+    if (!isManager) return;
+    const reload = () => setAutoAssignFlags(JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]"));
+    window.addEventListener("pm-auto-assign-flags-changed", reload);
+    return () => window.removeEventListener("pm-auto-assign-flags-changed", reload);
+  }, [isManager]);
 
   // Phase 4 — evidence completeness
   useEffect(() => {
@@ -1100,6 +1114,50 @@ const Dashboard = () => {
                     onClick={() => navigate(`/projects/${p.id}`)}
                     color="warning" variant="outlined"
                     sx={{ flexShrink: 0, cursor: "pointer" }} />
+                ))}
+              </Stack>
+            </Box>
+          )}
+
+          {/* Auto-assignment flags — installer self-assigned */}
+          {autoAssignFlags.length > 0 && (
+            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                <PersonOutlined sx={{ fontSize: 18, color: "info.main" }} />
+                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                  New Auto-assignments
+                </Typography>
+                <Chip label={autoAssignFlags.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
+                  onClick={() => {
+                    localStorage.removeItem("pm_auto_assign_flags");
+                    setAutoAssignFlags([]);
+                  }}>
+                  Dismiss all
+                </Button>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                Assets that were auto-assigned when an installer started a workflow
+              </Typography>
+              <Stack spacing={0.25}>
+                {autoAssignFlags.map((f) => (
+                  <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
+                    <Box sx={{ flex: 1 }}>
+                      <ItemRow
+                        label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
+                        sub={`Assigned to ${f.assignedBy} · ${fmtDate(f.assignedAt)}`}
+                        onClick={() => navigate("/installations")}
+                      />
+                    </Box>
+                    <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
+                      onClick={() => {
+                        const updated = autoAssignFlags.filter((x) => x.id !== f.id);
+                        localStorage.setItem("pm_auto_assign_flags", JSON.stringify(updated));
+                        setAutoAssignFlags(updated);
+                      }}>
+                      ✕
+                    </Button>
+                  </Stack>
                 ))}
               </Stack>
             </Box>

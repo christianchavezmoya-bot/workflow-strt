@@ -300,6 +300,13 @@ const AssetInstallationPage = () => {
   // Work order runner
   const [runnerOpen, setRunnerOpen] = useState(false);
   const [runnerAsset, setRunnerAsset] = useState<ProjectAsset | null>(null);
+  // Auto-assign warning dialog
+  const [autoAssignConfirm, setAutoAssignConfirm] = useState<{
+    asset: ProjectAsset;
+    assignment?: WorkflowAssignment;
+    reason: "unassigned" | "other";
+    otherName?: string;
+  } | null>(null);
   const [runnerWorkflow, setRunnerWorkflow] = useState<Workflow | null>(null);
   const [runnerLoading, setRunnerLoading] = useState<string | null>(null);
   const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>(undefined);
@@ -1130,6 +1137,53 @@ const AssetInstallationPage = () => {
   }
 
   // ------------------------------------------------------------------
+  // Auto-assign check — intercepts start/continue before opening runner
+  // ------------------------------------------------------------------
+
+  function checkAssignmentThenStart(asset: ProjectAsset, assignment?: WorkflowAssignment) {
+    if (!asset.assignedUserId) {
+      // Unassigned — warn and auto-assign
+      setAutoAssignConfirm({ asset, assignment, reason: "unassigned" });
+      return;
+    }
+    if (asset.assignedUserId !== currentUser.id) {
+      // Assigned to someone else — warn before taking over
+      const otherName = users.find((u) => u.id === asset.assignedUserId)?.fullName ?? "another technician";
+      setAutoAssignConfirm({ asset, assignment, reason: "other", otherName });
+      return;
+    }
+    // Assigned to me — start directly
+    assignment ? handleStartAssignmentRun(asset, assignment) : handleStartWorkOrder(asset);
+  }
+
+  async function confirmAutoAssignAndStart() {
+    if (!autoAssignConfirm) return;
+    const { asset, assignment } = autoAssignConfirm;
+    setAutoAssignConfirm(null);
+    try {
+      // Auto-assign to current user
+      await projectAssetService.update(asset.id, { assignedUserId: currentUser.id });
+      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, assignedUserId: currentUser.id } : a));
+      // Flag for PM dashboard (localStorage — picked up by PM's Needs Attention panel)
+      const flags = JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]");
+      flags.push({
+        id: `${asset.id}-${Date.now()}`,
+        assetId: asset.id,
+        assetTag: asset.assetTag || (asset as any).assetName || asset.id,
+        jobNumber: (asset as any).jobNumber || "",
+        assignedBy: currentUser.fullName,
+        assignedAt: new Date().toISOString(),
+      });
+      localStorage.setItem("pm_auto_assign_flags", JSON.stringify(flags));
+      window.dispatchEvent(new Event("pm-auto-assign-flags-changed"));
+    } catch {
+      // Non-fatal — continue with start even if update fails
+    }
+    const updated = { ...asset, assignedUserId: currentUser.id };
+    assignment ? handleStartAssignmentRun(updated, assignment) : handleStartWorkOrder(updated);
+  }
+
+  // ------------------------------------------------------------------
   // Run history + re-run
   // ------------------------------------------------------------------
 
@@ -1701,7 +1755,7 @@ const AssetInstallationPage = () => {
           {progressBadge}
           <Button size="small" variant="outlined" color="success"
             startIcon={loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />}
-            disabled={loading} onClick={() => handleStartWorkOrder(asset)}>
+            disabled={loading} onClick={() => checkAssignmentThenStart(asset)}>
             Start
           </Button>
         </Stack>
@@ -1713,7 +1767,7 @@ const AssetInstallationPage = () => {
           {progressBadge}
           <Button size="small" variant="contained" color="primary"
             startIcon={loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />}
-            disabled={loading} onClick={() => handleStartWorkOrder(asset)}>
+            disabled={loading} onClick={() => checkAssignmentThenStart(asset)}>
             Continue
           </Button>
         </Stack>
@@ -2108,7 +2162,7 @@ const AssetInstallationPage = () => {
                         onClick={() =>
                           latestRun?.status === "Complete"
                             ? openRunHistory(asset, asgn.workflowConfigId, asgn.workflowConfigName)
-                            : handleStartAssignmentRun(asset, asgn)
+                            : checkAssignmentThenStart(asset, asgn)
                         }
                         onContextMenu={(e) => {
                           e.preventDefault();
@@ -3399,6 +3453,32 @@ const AssetInstallationPage = () => {
       </Menu>
 
       {/* Work order runner */}
+      {/* ── Auto-assign warning dialog ── */}
+      <Dialog open={!!autoAssignConfirm} onClose={() => setAutoAssignConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {autoAssignConfirm?.reason === "unassigned" ? "Unassigned asset" : "Asset assigned to someone else"}
+        </DialogTitle>
+        <DialogContent>
+          {autoAssignConfirm?.reason === "unassigned" ? (
+            <Typography variant="body2">
+              <strong>{autoAssignConfirm.asset.assetTag || autoAssignConfirm.asset.assetName}</strong> has no installer assigned.
+              Starting this workflow will assign it to <strong>you ({currentUser.fullName})</strong> and notify the Project Manager.
+            </Typography>
+          ) : (
+            <Typography variant="body2">
+              <strong>{autoAssignConfirm?.asset.assetTag || autoAssignConfirm?.asset.assetName}</strong> is currently assigned to <strong>{autoAssignConfirm?.otherName}</strong>.
+              Starting this workflow will reassign it to <strong>you ({currentUser.fullName})</strong> and notify the Project Manager.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAutoAssignConfirm(null)}>Cancel</Button>
+          <Button variant="contained" color="warning" onClick={confirmAutoAssignAndStart}>
+            Assign to me &amp; Start
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {runnerOpen && runnerWorkflow && runnerAsset && activeProduct && (
         <WorkOrderRunner
           open={runnerOpen}
