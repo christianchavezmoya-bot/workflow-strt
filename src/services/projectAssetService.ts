@@ -1,12 +1,7 @@
-import api, { cachedGet } from "./api";
+import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
-import { pendingAdd, pendingGetAll, entityPutAsset, entityPutAssets } from "./localDB";
-
-/** Return all asset IDs that have a pending action queued. */
-export async function pendingAssetIds(): Promise<Set<string>> {
-  const all = await pendingGetAll();
-  return new Set(all.filter((a) => a.entityType === "asset").map((a) => a.entityId));
-}
+import { pendingGetAll } from "./localDB";
+import { AssetRepository } from "../repositories/AssetRepository";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -17,31 +12,24 @@ function normalizeStatus(raw: unknown): ProjectAssetStatus {
 }
 
 function fromDto(dto: ProjectAsset): ProjectAsset {
-  return {
-    ...dto,
-    status: normalizeStatus(dto.status),
-  };
+  return { ...dto, status: normalizeStatus(dto.status) };
+}
+
+/** Return all asset IDs that have a pending action queued. */
+export async function pendingAssetIds(): Promise<Set<string>> {
+  const all = await pendingGetAll();
+  return new Set(all.filter((a) => a.entityType === "asset").map((a) => a.entityId));
 }
 
 export const projectAssetService = {
   async listByProject(projectId: string): Promise<ProjectAsset[]> {
-    try {
-      const data = await cachedGet<ProjectAsset[]>(`/project-assets/by-project/${projectId}`);
-      entityPutAssets(
-        data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
-      ).catch(() => {});
-      return data.map(fromDto);
-    } catch { return []; }
+    try { return await AssetRepository.getByProject(projectId); }
+    catch { return []; }
   },
 
   async listByProduct(productId: string): Promise<ProjectAsset[]> {
-    try {
-      const data = await cachedGet<ProjectAsset[]>(`/project-assets/by-product/${productId}`);
-      entityPutAssets(
-        data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
-      ).catch(() => {});
-      return data.map(fromDto);
-    } catch { return []; }
+    try { return await AssetRepository.getByProduct(productId); }
+    catch { return []; }
   },
 
   async create(input: CreateProjectAssetInput): Promise<ProjectAsset> {
@@ -59,41 +47,9 @@ export const projectAssetService = {
   },
 
   async update(id: string, patch: Partial<CreateProjectAssetInput> & { status?: string; workOrderId?: string }): Promise<ProjectAsset> {
-    try {
-      const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
-      const updated = fromDto(res.data);
-      // Keep IndexedDB entity store in sync after a successful server write
-      entityPutAsset({
-        id: res.data.id,
-        productId: res.data.productId,
-        projectId: res.data.projectId,
-        data: res.data,
-        dirty: false,
-      }).catch(() => {});
-      return updated;
-    } catch {
-      // Offline or network failure — queue and return optimistic value
-      const patchRecord = patch as Record<string, unknown>;
-      await pendingAdd({
-        id: crypto.randomUUID(),
-        url: `/project-assets/${id}`,
-        method: "PUT",
-        body: patch,
-        entityType: "asset",
-        entityId: id,
-        optimisticPatch: patchRecord,
-        createdAt: new Date().toISOString(),
-      });
-      // Mark the asset as dirty in IndexedDB using whatever we know
-      entityPutAsset({
-        id,
-        productId: (patchRecord.productId as string) ?? "",
-        projectId: (patchRecord.projectId as string) ?? "",
-        data: patchRecord,
-        dirty: true,
-      }).catch(() => {});
-      throw new Error("Offline — change queued");
-    }
+    const result = await AssetRepository.update(id, patch as Partial<ProjectAsset> & Record<string, unknown>);
+    if (result === null) throw new Error("Offline — change queued");
+    return result;
   },
 
   async remove(id: string): Promise<void> {

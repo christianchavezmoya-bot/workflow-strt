@@ -1,5 +1,6 @@
-﻿import api, { cachedGet } from "./api";
+﻿import api from "./api";
 import { Project, ProjectStatus, ProjectType } from "../types/project";
+import { ProjectRepository } from "../repositories/ProjectRepository";
 
 export interface ProjectFilters {
   office?: string;
@@ -25,10 +26,7 @@ export interface ProjectListResponse {
 
 export const projectService = {
   async getProjects(filters?: ProjectFilters) {
-    const params = filters && Object.keys(filters).length ? filters : undefined;
-    const data = await cachedGet<Project[] | ProjectListResponse>("/projects", params as Record<string, unknown>);
-    if (Array.isArray(data)) return { items: data, total: data.length };
-    return data;
+    return ProjectRepository.getAll(filters);
   },
   async getProject(id: string) {
     const response = await api.get<Project>(`/projects/${id}`);

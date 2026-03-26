@@ -1,4 +1,5 @@
 import api, { cachedGet } from "./api";
+import { IssueRepository } from "../repositories/IssueRepository";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 
 export interface PendingSignatureRecord {
@@ -129,7 +130,7 @@ export const assetWorkflowRunService = {
   },
 
   async listOpenIssues(): Promise<OpenIssueRecord[]> {
-    try { return await cachedGet<OpenIssueRecord[]>("/asset-workflow-runs/open-issues"); }
+    try { return await IssueRepository.getAll(); }
     catch { return []; }
   },
 };
