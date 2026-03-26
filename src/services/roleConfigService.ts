@@ -2,11 +2,11 @@ import api from "./api";
 
 // ── Tier 2: per-domain action flags ─────────────────────────────────────────
 export interface DomainPermissions {
-  projects:  { view: boolean; edit: boolean; approve: boolean; delete: boolean };
-  assets:    { view: boolean; edit: boolean; runWorkflow: boolean; delete: boolean };
-  workflows: { view: boolean; build: boolean; publish: boolean; archive: boolean };
-  documents: { view: boolean; upload: boolean; delete: boolean };
-  settings:  { view: boolean; edit: boolean };
+  projects:             { view: boolean; edit: boolean; approve: boolean; delete: boolean };
+  installationAssets:   { view: boolean; edit: boolean; runWorkflow: boolean; delete: boolean };
+  workInstructionsBuilder: { view: boolean; build: boolean; publish: boolean; archive: boolean };
+  documents:            { view: boolean; upload: boolean; delete: boolean };
+  settings:             { view: boolean; edit: boolean };
 }
 
 // ── Tier 1: global flags (kept for backward compat + coarse-grain checks) ───
@@ -29,22 +29,22 @@ export interface RoleConfig {
 export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermissions {
   if (p.viewOnly) {
     return {
-      projects:  { view: true,  edit: false, approve: false,       delete: false },
-      assets:    { view: true,  edit: false, runWorkflow: false,   delete: false },
-      workflows: { view: true,  build: false, publish: false,      archive: false },
-      documents: { view: true,  upload: false, delete: false },
-      settings:  { view: false, edit: false },
+      projects:                { view: true,  edit: false, approve: false,     delete: false },
+      installationAssets:      { view: true,  edit: false, runWorkflow: false, delete: false },
+      workInstructionsBuilder: { view: true,  build: false, publish: false,    archive: false },
+      documents:               { view: true,  upload: false, delete: false },
+      settings:                { view: false, edit: false },
     };
   }
   const canEdit   = p.editFields || p.modifyData;
   const canDelete = p.modifyData;
   const canBuild  = p.editForms;
   return {
-    projects:  { view: true, edit: canEdit,   approve: p.modifyData,  delete: canDelete },
-    assets:    { view: true, edit: canEdit,   runWorkflow: p.editForms, delete: canDelete },
-    workflows: { view: true, build: canBuild, publish: p.modifyData,   archive: p.modifyData },
-    documents: { view: true, upload: canEdit, delete: canDelete },
-    settings:  { view: p.createDeleteTables,  edit: p.createDeleteTables },
+    projects:                { view: true, edit: canEdit,   approve: p.modifyData,   delete: canDelete },
+    installationAssets:      { view: true, edit: canEdit,   runWorkflow: p.editForms, delete: canDelete },
+    workInstructionsBuilder: { view: true, build: canBuild, publish: p.modifyData,   archive: p.modifyData },
+    documents:               { view: true, upload: canEdit, delete: canDelete },
+    settings:                { view: p.createDeleteTables,  edit: p.createDeleteTables },
   };
 }
 

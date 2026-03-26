@@ -53,8 +53,8 @@ export const usePermissions = () => {
         editFields: false, editForms: false, createDeleteTables: false,
         // Tier 2
         projects:  domains.projects,
-        assets:    domains.assets,
-        workflows: domains.workflows,
+        installationAssets:      domains.installationAssets,
+        workInstructionsBuilder: domains.workInstructionsBuilder,
         documents: domains.documents,
         settings:  domains.settings,
       };
@@ -70,8 +70,8 @@ export const usePermissions = () => {
       createDeleteTables: p.createDeleteTables,
       // Tier 2
       projects:  domains.projects,
-      assets:    domains.assets,
-      workflows: domains.workflows,
+      installationAssets:      domains.installationAssets,
+      workInstructionsBuilder: domains.workInstructionsBuilder,
       documents: domains.documents,
       settings:  domains.settings,
     };

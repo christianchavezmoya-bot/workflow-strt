@@ -565,8 +565,8 @@ export const UserManagement: React.FC = () => {
 
   const emptyDomains = (): DomainPermissions => ({
     projects:  { view: false, edit: false, approve: false, delete: false },
-    assets:    { view: false, edit: false, runWorkflow: false, delete: false },
-    workflows: { view: false, build: false, publish: false, archive: false },
+    installationAssets:   { view: false, edit: false, runWorkflow: false, delete: false },
+    workInstructionsBuilder: { view: false, build: false, publish: false, archive: false },
     documents: { view: false, upload: false, delete: false },
     settings:  { view: false, edit: false },
   });
@@ -3795,15 +3795,15 @@ export const UserManagement: React.FC = () => {
 
                   {/* Assets */}
                   <TableRow>
-                    <TableCell><Typography variant="caption" fontWeight={600}>Assets</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Installation Assets</Typography></TableCell>
                     {(["view", "edit", "runWorkflow", "delete"] as const).map((action) => (
                       <TableCell key={action} align="center" sx={{ pb: 0 }}>
                         <Stack alignItems="center" spacing={0}>
                           <Checkbox size="small"
-                            checked={!!roleForm.domains.assets[action]}
+                            checked={!!roleForm.domains.installationAssets[action]}
                             onChange={(e) => setRoleForm((prev) => ({
                               ...prev,
-                              domains: { ...prev.domains, assets: { ...prev.domains.assets, [action]: e.target.checked } },
+                              domains: { ...prev.domains, installationAssets: { ...prev.domains.installationAssets, [action]: e.target.checked } },
                             }))}
                           />
                           <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>
@@ -3816,15 +3816,15 @@ export const UserManagement: React.FC = () => {
 
                   {/* Workflows */}
                   <TableRow>
-                    <TableCell><Typography variant="caption" fontWeight={600}>Workflows</Typography></TableCell>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Work Instructions Builder</Typography></TableCell>
                     {(["view", "build", "publish", "archive"] as const).map((action) => (
                       <TableCell key={action} align="center" sx={{ pb: 0 }}>
                         <Stack alignItems="center" spacing={0}>
                           <Checkbox size="small"
-                            checked={!!roleForm.domains.workflows[action]}
+                            checked={!!roleForm.domains.workInstructionsBuilder[action]}
                             onChange={(e) => setRoleForm((prev) => ({
                               ...prev,
-                              domains: { ...prev.domains, workflows: { ...prev.domains.workflows, [action]: e.target.checked } },
+                              domains: { ...prev.domains, workInstructionsBuilder: { ...prev.domains.workInstructionsBuilder, [action]: e.target.checked } },
                             }))}
                           />
                           <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>{action}</Typography>
