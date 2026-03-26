@@ -1,41 +1,6 @@
 import api, { cachedGet } from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
-import { pendingAdd, pendingGetAll } from "./localDB";
-
-// ── Optimistic cache helpers ──────────────────────────────────────────────────
-
-/** Apply a patch to every localStorage cache entry that contains this asset id. */
-function applyPatchToCache(id: string, patch: Record<string, unknown>): void {
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key || (!key.startsWith("project_assets_v1_") && !key.startsWith("project_assets_prod_v1_"))) continue;
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      const list = JSON.parse(raw) as ProjectAsset[];
-      const idx = list.findIndex((a) => a.id === id);
-      if (idx === -1) continue;
-      list[idx] = { ...list[idx], ...patch };
-      localStorage.setItem(key, JSON.stringify(list));
-    }
-  } catch { /* quota — ignore */ }
-}
-
-/** Build an optimistic asset from cache + patch. Returns null if not in cache. */
-function buildOptimistic(id: string, patch: Record<string, unknown>): ProjectAsset | null {
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key || (!key.startsWith("project_assets_v1_") && !key.startsWith("project_assets_prod_v1_"))) continue;
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      const list = JSON.parse(raw) as ProjectAsset[];
-      const asset = list.find((a) => a.id === id);
-      if (asset) return fromDto({ ...asset, ...patch } as ProjectAsset);
-    }
-  } catch { /* ignore */ }
-  return null;
-}
+import { pendingAdd, pendingGetAll, entityPutAsset, entityPutAssets } from "./localDB";
 
 /** Return all asset IDs that have a pending action queued. */
 export async function pendingAssetIds(): Promise<Set<string>> {
@@ -62,6 +27,9 @@ export const projectAssetService = {
   async listByProject(projectId: string): Promise<ProjectAsset[]> {
     try {
       const data = await cachedGet<ProjectAsset[]>(`/project-assets/by-project/${projectId}`);
+      entityPutAssets(
+        data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
+      ).catch(() => {});
       return data.map(fromDto);
     } catch { return []; }
   },
@@ -69,6 +37,9 @@ export const projectAssetService = {
   async listByProduct(productId: string): Promise<ProjectAsset[]> {
     try {
       const data = await cachedGet<ProjectAsset[]>(`/project-assets/by-product/${productId}`);
+      entityPutAssets(
+        data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
+      ).catch(() => {});
       return data.map(fromDto);
     } catch { return []; }
   },
@@ -91,8 +62,14 @@ export const projectAssetService = {
     try {
       const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
       const updated = fromDto(res.data);
-      // Keep localStorage cache in sync after a successful server write
-      applyPatchToCache(id, res.data as unknown as Record<string, unknown>);
+      // Keep IndexedDB entity store in sync after a successful server write
+      entityPutAsset({
+        id: res.data.id,
+        productId: res.data.productId,
+        projectId: res.data.projectId,
+        data: res.data,
+        dirty: false,
+      }).catch(() => {});
       return updated;
     } catch {
       // Offline or network failure — queue and return optimistic value
@@ -107,9 +84,14 @@ export const projectAssetService = {
         optimisticPatch: patchRecord,
         createdAt: new Date().toISOString(),
       });
-      applyPatchToCache(id, patchRecord);
-      const optimistic = buildOptimistic(id, patchRecord);
-      if (optimistic) return optimistic;
+      // Mark the asset as dirty in IndexedDB using whatever we know
+      entityPutAsset({
+        id,
+        productId: (patchRecord.productId as string) ?? "",
+        projectId: (patchRecord.projectId as string) ?? "",
+        data: patchRecord,
+        dirty: true,
+      }).catch(() => {});
       throw new Error("Offline — change queued");
     }
   },

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { cacheGet, cachePut } from "./localDB";
 
 // Automatically determine API base URL based on current hostname
 const getApiBaseUrl = () => {
@@ -125,22 +126,11 @@ api.interceptors.request.use(async (config) => {
 // in the background. Data is always visible immediately — no waiting on network.
 // If there is no cache yet (first load), the network request runs normally.
 
-function apiCacheKey(url: string, params?: Record<string, unknown>): string {
+export function apiCacheKey(url: string, params?: Record<string, unknown>): string {
   const q = params && Object.keys(params).length
     ? "?" + new URLSearchParams(params as Record<string, string>).toString()
     : "";
   return `api_cache_v2_${url}${q}`;
-}
-
-function cacheRead(key: string): unknown | null {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-
-function cacheWrite(key: string, data: unknown): void {
-  try { localStorage.setItem(key, JSON.stringify(data)); } catch {}
 }
 
 function isNetworkOrTimeoutError(error: unknown): boolean {
@@ -161,19 +151,19 @@ function isNetworkOrTimeoutError(error: unknown): boolean {
 // Falls back to waiting for the network when no cache exists yet.
 export async function cachedGet<T>(url: string, params?: Record<string, unknown>): Promise<T> {
   const key = apiCacheKey(url, params);
-  const cached = cacheRead(key);
+  const cached = await cacheGet<T>(key);
 
   if (cached !== null) {
     // Serve cache immediately — kick off background refresh
     api.get<T>(url, { params }).then((res) => {
-      cacheWrite(key, res.data);
+      cachePut(key, res.data).catch(() => {});
       window.dispatchEvent(new CustomEvent("api-cache-updated", {
         detail: { url, data: res.data }
       }));
     }).catch(() => {
       window.dispatchEvent(new Event("api-serving-cache"));
     });
-    return cached as T;
+    return cached;
   }
 
   // No cache yet — wait for network normally
@@ -196,15 +186,15 @@ api.interceptors.response.use(
 
     // Persist every fresh GET response so the cache stays warm
     if (response.config.method?.toLowerCase() === "get" && response.config.url) {
-      cacheWrite(
+      cachePut(
         apiCacheKey(response.config.url, response.config.params as Record<string, unknown>),
         response.data
-      );
+      ).catch(() => {});
     }
 
     return response;
   },
-  (error) => {
+  async (error) => {
     const status = error?.response?.status;
     const config = error?.config || {};
     const meta = (config as typeof config & { metadata?: { start: number } }).metadata;
@@ -222,7 +212,7 @@ api.interceptors.response.use(
     // Last-resort fallback: if a network request fails (cache miss path) try cache
     if (config.method?.toLowerCase() === "get" && isNetworkOrTimeoutError(error) && config.url) {
       const key = apiCacheKey(config.url, config.params as Record<string, unknown>);
-      const cached = cacheRead(key);
+      const cached = await cacheGet(key);
       if (cached !== null) {
         window.dispatchEvent(new Event("api-serving-cache"));
         return Promise.resolve({

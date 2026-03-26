@@ -1,10 +1,14 @@
 /**
  * localDB.ts — IndexedDB persistence layer for offline sync.
  *
- * Stores three object stores:
- *   cache          — last known API responses keyed by cacheKey
- *   pending_actions — write operations queued while offline
- *   sync_meta      — last sync timestamps per entity
+ * Stores:
+ *   cache            — last known API responses keyed by cacheKey
+ *   pending_actions  — write operations queued while offline
+ *   sync_meta        — last sync timestamps per entity
+ *   projects         — project entity records
+ *   assets           — asset entity records
+ *   workflow_runs    — workflow run entity records
+ *   issues           — issue entity records
  */
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
@@ -37,6 +41,40 @@ export interface SyncMeta {
   lastSyncAt: string;    // ISO
 }
 
+export interface ProjectRecord {
+  id: string;
+  data: unknown;
+  syncedAt: string;
+  dirty: boolean;
+}
+
+export interface AssetRecord {
+  id: string;
+  productId: string;
+  projectId: string;
+  data: unknown;
+  syncedAt: string;
+  dirty: boolean;
+}
+
+export interface WorkflowRunRecord {
+  id: string;
+  assetId: string;
+  projectId: string;
+  data: unknown;
+  syncedAt: string;
+  dirty: boolean;
+}
+
+export interface IssueRecord {
+  id: string;
+  assetId: string;
+  projectId: string;
+  data: unknown;
+  syncedAt: string;
+  dirty: boolean;
+}
+
 interface CommtracDB extends DBSchema {
   cache: {
     key: string;
@@ -51,6 +89,25 @@ interface CommtracDB extends DBSchema {
     key: string;
     value: SyncMeta;
   };
+  projects: {
+    key: string;
+    value: ProjectRecord;
+  };
+  assets: {
+    key: string;
+    value: AssetRecord;
+    indexes: { by_product: string; by_project: string };
+  };
+  workflow_runs: {
+    key: string;
+    value: WorkflowRunRecord;
+    indexes: { by_asset: string; by_project: string };
+  };
+  issues: {
+    key: string;
+    value: IssueRecord;
+    indexes: { by_project: string };
+  };
 }
 
 // ── Singleton ─────────────────────────────────────────────────────────────────
@@ -59,7 +116,7 @@ let _db: IDBPDatabase<CommtracDB> | null = null;
 
 export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
   if (_db) return _db;
-  _db = await openDB<CommtracDB>("commtrac_offline_v1", 1, {
+  _db = await openDB<CommtracDB>("commtrac_offline_v2", 1, {
     upgrade(db) {
       if (!db.objectStoreNames.contains("cache")) {
         db.createObjectStore("cache", { keyPath: "key" });
@@ -70,6 +127,23 @@ export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
       }
       if (!db.objectStoreNames.contains("sync_meta")) {
         db.createObjectStore("sync_meta", { keyPath: "entity" });
+      }
+      if (!db.objectStoreNames.contains("projects")) {
+        db.createObjectStore("projects", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("assets")) {
+        const store = db.createObjectStore("assets", { keyPath: "id" });
+        store.createIndex("by_product", "productId");
+        store.createIndex("by_project", "projectId");
+      }
+      if (!db.objectStoreNames.contains("workflow_runs")) {
+        const store = db.createObjectStore("workflow_runs", { keyPath: "id" });
+        store.createIndex("by_asset", "assetId");
+        store.createIndex("by_project", "projectId");
+      }
+      if (!db.objectStoreNames.contains("issues")) {
+        const store = db.createObjectStore("issues", { keyPath: "id" });
+        store.createIndex("by_project", "projectId");
       }
     },
   });
@@ -154,4 +228,176 @@ export async function syncMetaGet(entity: string): Promise<string | null> {
     const db = await getDB();
     return (await db.get("sync_meta", entity))?.lastSyncAt ?? null;
   } catch { return null; }
+}
+
+// ── Project entity helpers ────────────────────────────────────────────────────
+
+export async function entityPutProject(record: { id: string; data: unknown; dirty?: boolean }): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.put("projects", {
+      id: record.id,
+      data: record.data,
+      syncedAt: new Date().toISOString(),
+      dirty: record.dirty ?? false,
+    });
+  } catch { /* ignore */ }
+}
+
+export async function entityPutProjects(records: Array<{ id: string; data: unknown }>): Promise<void> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction("projects", "readwrite");
+    const now = new Date().toISOString();
+    await Promise.all([
+      ...records.map((r) => tx.store.put({ id: r.id, data: r.data, syncedAt: now, dirty: false })),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
+export async function entityGetAllProjects(): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const all = await db.getAll("projects");
+    return all.map((r) => r.data);
+  } catch { return []; }
+}
+
+// ── Asset entity helpers ──────────────────────────────────────────────────────
+
+export async function entityPutAsset(record: { id: string; productId: string; projectId: string; data: unknown; dirty?: boolean }): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.put("assets", {
+      id: record.id,
+      productId: record.productId,
+      projectId: record.projectId,
+      data: record.data,
+      syncedAt: new Date().toISOString(),
+      dirty: record.dirty ?? false,
+    });
+  } catch { /* ignore */ }
+}
+
+export async function entityPutAssets(records: Array<{ id: string; productId: string; projectId: string; data: unknown }>): Promise<void> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction("assets", "readwrite");
+    const now = new Date().toISOString();
+    await Promise.all([
+      ...records.map((r) =>
+        tx.store.put({ id: r.id, productId: r.productId, projectId: r.projectId, data: r.data, syncedAt: now, dirty: false })
+      ),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
+export async function entityGetAssetsByProduct(productId: string): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const records = await db.getAllFromIndex("assets", "by_product", productId);
+    return records.map((r) => r.data);
+  } catch { return []; }
+}
+
+export async function entityGetAssetsByProject(projectId: string): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const records = await db.getAllFromIndex("assets", "by_project", projectId);
+    return records.map((r) => r.data);
+  } catch { return []; }
+}
+
+// ── Issue entity helpers ──────────────────────────────────────────────────────
+
+export async function entityPutIssue(record: { id: string; assetId: string; projectId: string; data: unknown; dirty?: boolean }): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.put("issues", {
+      id: record.id,
+      assetId: record.assetId,
+      projectId: record.projectId,
+      data: record.data,
+      syncedAt: new Date().toISOString(),
+      dirty: record.dirty ?? false,
+    });
+  } catch { /* ignore */ }
+}
+
+export async function entityPutIssues(records: Array<{ id: string; assetId: string; projectId: string; data: unknown }>): Promise<void> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction("issues", "readwrite");
+    const now = new Date().toISOString();
+    await Promise.all([
+      ...records.map((r) =>
+        tx.store.put({ id: r.id, assetId: r.assetId, projectId: r.projectId, data: r.data, syncedAt: now, dirty: false })
+      ),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
+export async function entityGetIssuesByProject(projectId: string): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const records = await db.getAllFromIndex("issues", "by_project", projectId);
+    return records.map((r) => r.data);
+  } catch { return []; }
+}
+
+export async function entityGetAllIssues(): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const all = await db.getAll("issues");
+    return all.map((r) => r.data);
+  } catch { return []; }
+}
+
+// ── Workflow run entity helpers ───────────────────────────────────────────────
+
+export async function entityPutWorkflowRun(record: { id: string; assetId: string; projectId: string; data: unknown; dirty?: boolean }): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.put("workflow_runs", {
+      id: record.id,
+      assetId: record.assetId,
+      projectId: record.projectId,
+      data: record.data,
+      syncedAt: new Date().toISOString(),
+      dirty: record.dirty ?? false,
+    });
+  } catch { /* ignore */ }
+}
+
+export async function entityPutWorkflowRuns(records: Array<{ id: string; assetId: string; projectId: string; data: unknown }>): Promise<void> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction("workflow_runs", "readwrite");
+    const now = new Date().toISOString();
+    await Promise.all([
+      ...records.map((r) =>
+        tx.store.put({ id: r.id, assetId: r.assetId, projectId: r.projectId, data: r.data, syncedAt: now, dirty: false })
+      ),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
+export async function entityGetWorkflowRunsByAsset(assetId: string): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const records = await db.getAllFromIndex("workflow_runs", "by_asset", assetId);
+    return records.map((r) => r.data);
+  } catch { return []; }
+}
+
+export async function entityGetWorkflowRunsByProject(projectId: string): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const records = await db.getAllFromIndex("workflow_runs", "by_project", projectId);
+    return records.map((r) => r.data);
+  } catch { return []; }
 }
