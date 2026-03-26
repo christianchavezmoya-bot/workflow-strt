@@ -62,7 +62,7 @@ import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { adminTabsService, AdminTab, AdminTabRow } from "../../services/adminTabsService";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
-import { roleConfigService, RolePermissions } from "../../services/roleConfigService";
+import { defaultDomains, roleConfigService, RolePermissions, DomainPermissions } from "../../services/roleConfigService";
 import api from "../../services/api";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer } from "../../store/customersSlice";
@@ -562,17 +562,27 @@ export const UserManagement: React.FC = () => {
   });
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const emptyDomains = (): DomainPermissions => ({
+    projects:  { view: false, edit: false, approve: false, delete: false },
+    assets:    { view: false, edit: false, runWorkflow: false, delete: false },
+    workflows: { view: false, build: false, publish: false, archive: false },
+    documents: { view: false, upload: false, delete: false },
+    settings:  { view: false, edit: false },
+  });
+
   const [roleForm, setRoleForm] = useState({
     name: "",
     originalName: "",
     permissions: {
-      viewOnly: true,
+      viewOnly: false,
       createDeleteTables: false,
       createUsers: false,
       editFields: false,
       modifyData: false,
-      editForms: false
-    } as Record<string, boolean>
+      editForms: false,
+    } as Record<string, boolean>,
+    domains: emptyDomains(),
   });
 
   useEffect(() => {
@@ -803,23 +813,26 @@ export const UserManagement: React.FC = () => {
 
   const openRoleDialog = (roleName?: string) => {
     if (roleName && rolesConfig[roleName]) {
+      const r = rolesConfig[roleName];
       setRoleForm({
         name: roleName,
         originalName: roleName,
-        permissions: { ...rolesConfig[roleName] }
+        permissions: {
+          viewOnly: r.viewOnly, createDeleteTables: r.createDeleteTables,
+          createUsers: r.createUsers, editFields: r.editFields,
+          modifyData: r.modifyData, editForms: r.editForms,
+        },
+        domains: r.domains ?? defaultDomains(r),
       });
     } else {
       setRoleForm({
         name: "",
         originalName: "",
         permissions: {
-          viewOnly: false,
-          createDeleteTables: false,
-          createUsers: false,
-          editFields: false,
-          modifyData: false,
-          editForms: false
-        }
+          viewOnly: false, createDeleteTables: false, createUsers: false,
+          editFields: false, modifyData: false, editForms: false,
+        },
+        domains: emptyDomains(),
       });
     }
     setRoleDialogOpen(true);
@@ -3702,44 +3715,193 @@ export const UserManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={roleDialogOpen} onClose={() => setRoleDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{roleForm.originalName ? "Edit role" : "Create role"}</DialogTitle>
+      <Dialog open={roleDialogOpen} onClose={() => setRoleDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>{roleForm.originalName ? `Edit role: ${roleForm.originalName}` : "Create role"}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ marginTop: 1 }}>
+          <Stack spacing={3} sx={{ mt: 1 }}>
+
             <TextField
               label="Role name"
+              InputLabelProps={{ shrink: true }}
               value={roleForm.name}
-              onChange={(event) => setRoleForm((prev) => ({ ...prev, name: event.target.value }))}
-              fullWidth
+              onChange={(e) => setRoleForm((prev) => ({ ...prev, name: e.target.value }))}
+              fullWidth size="small"
             />
-            <Typography variant="subtitle2">Permissions</Typography>
-            {[
-              { key: "viewOnly", label: "View only" },
-              { key: "createDeleteTables", label: "Create/Delete tables" },
-              { key: "createUsers", label: "Create users" },
-              { key: "editFields", label: "Edit fields" },
-              { key: "modifyData", label: "Modify data" },
-              { key: "editForms", label: "Edit forms" }
-            ].map((perm) => (
-              <Stack key={perm.key} direction="row" spacing={1} alignItems="center">
-                <Checkbox
-                  checked={!!roleForm.permissions[perm.key]}
-                  onChange={(event) =>
-                    setRoleForm((prev) => ({
-                      ...prev,
-                      permissions: { ...prev.permissions, [perm.key]: event.target.checked }
-                    }))
-                  }
-                />
-                <Typography variant="body2">{perm.label}</Typography>
+
+            {/* ── Tier 1: Global flags ── */}
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+                Tier 1 — Global
+              </Typography>
+              <Stack direction="row" flexWrap="wrap" gap={1}>
+                {([
+                  { key: "viewOnly",            label: "View only (read-only across app)" },
+                  { key: "createUsers",          label: "Create users" },
+                  { key: "createDeleteTables",   label: "Create / delete tables" },
+                  { key: "editFields",           label: "Edit fields" },
+                  { key: "modifyData",           label: "Modify data" },
+                  { key: "editForms",            label: "Edit forms" },
+                ] as { key: string; label: string }[]).map((perm) => (
+                  <Stack key={perm.key} direction="row" alignItems="center" spacing={0.5}
+                    sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, px: 1, py: 0.5 }}>
+                    <Checkbox
+                      size="small"
+                      checked={!!roleForm.permissions[perm.key]}
+                      onChange={(e) => setRoleForm((prev) => ({
+                        ...prev,
+                        permissions: { ...prev.permissions, [perm.key]: e.target.checked },
+                      }))}
+                    />
+                    <Typography variant="caption">{perm.label}</Typography>
+                  </Stack>
+                ))}
               </Stack>
-            ))}
+            </Box>
+
+            {/* ── Tier 2: Domain matrix ── */}
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+                Tier 2 — Domain permissions
+              </Typography>
+              <Table size="small" sx={{ "& th": { fontWeight: 700, fontSize: "0.72rem", color: "text.secondary" } }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: 120 }}>Domain</TableCell>
+                    <TableCell align="center">View</TableCell>
+                    <TableCell align="center">Edit</TableCell>
+                    <TableCell align="center">Action 3</TableCell>
+                    <TableCell align="center">Action 4</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {/* Projects */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Projects</Typography></TableCell>
+                    {(["view", "edit", "approve", "delete"] as const).map((action) => (
+                      <TableCell key={action} align="center" sx={{ pb: 0 }}>
+                        <Stack alignItems="center" spacing={0}>
+                          <Checkbox size="small"
+                            checked={!!roleForm.domains.projects[action]}
+                            onChange={(e) => setRoleForm((prev) => ({
+                              ...prev,
+                              domains: { ...prev.domains, projects: { ...prev.domains.projects, [action]: e.target.checked } },
+                            }))}
+                          />
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>{action}</Typography>
+                        </Stack>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+
+                  {/* Assets */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Assets</Typography></TableCell>
+                    {(["view", "edit", "runWorkflow", "delete"] as const).map((action) => (
+                      <TableCell key={action} align="center" sx={{ pb: 0 }}>
+                        <Stack alignItems="center" spacing={0}>
+                          <Checkbox size="small"
+                            checked={!!roleForm.domains.assets[action]}
+                            onChange={(e) => setRoleForm((prev) => ({
+                              ...prev,
+                              domains: { ...prev.domains, assets: { ...prev.domains.assets, [action]: e.target.checked } },
+                            }))}
+                          />
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>
+                            {action === "runWorkflow" ? "run workflow" : action}
+                          </Typography>
+                        </Stack>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+
+                  {/* Workflows */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Workflows</Typography></TableCell>
+                    {(["view", "build", "publish", "archive"] as const).map((action) => (
+                      <TableCell key={action} align="center" sx={{ pb: 0 }}>
+                        <Stack alignItems="center" spacing={0}>
+                          <Checkbox size="small"
+                            checked={!!roleForm.domains.workflows[action]}
+                            onChange={(e) => setRoleForm((prev) => ({
+                              ...prev,
+                              domains: { ...prev.domains, workflows: { ...prev.domains.workflows, [action]: e.target.checked } },
+                            }))}
+                          />
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>{action}</Typography>
+                        </Stack>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+
+                  {/* Documents */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Documents</Typography></TableCell>
+                    <TableCell align="center" sx={{ pb: 0 }}>
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small"
+                          checked={!!roleForm.domains.documents.view}
+                          onChange={(e) => setRoleForm((prev) => ({
+                            ...prev, domains: { ...prev.domains, documents: { ...prev.domains.documents, view: e.target.checked } },
+                          }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>view</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center" sx={{ pb: 0 }}>
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small"
+                          checked={!!roleForm.domains.documents.upload}
+                          onChange={(e) => setRoleForm((prev) => ({
+                            ...prev, domains: { ...prev.domains, documents: { ...prev.domains.documents, upload: e.target.checked } },
+                          }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>upload</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center" sx={{ pb: 0 }}>
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small"
+                          checked={!!roleForm.domains.documents.delete}
+                          onChange={(e) => setRoleForm((prev) => ({
+                            ...prev, domains: { ...prev.domains, documents: { ...prev.domains.documents, delete: e.target.checked } },
+                          }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>delete</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell />
+                  </TableRow>
+
+                  {/* Settings */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Settings</Typography></TableCell>
+                    <TableCell align="center" sx={{ pb: 0 }}>
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small"
+                          checked={!!roleForm.domains.settings.view}
+                          onChange={(e) => setRoleForm((prev) => ({
+                            ...prev, domains: { ...prev.domains, settings: { ...prev.domains.settings, view: e.target.checked } },
+                          }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>view</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center" sx={{ pb: 0 }}>
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small"
+                          checked={!!roleForm.domains.settings.edit}
+                          onChange={(e) => setRoleForm((prev) => ({
+                            ...prev, domains: { ...prev.domains, settings: { ...prev.domains.settings, edit: e.target.checked } },
+                          }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>edit</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell /><TableCell />
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </Box>
+
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button variant="outlined" onClick={() => setRoleDialogOpen(false)}>
-            Cancel
-          </Button>
+          <Button variant="outlined" onClick={() => setRoleDialogOpen(false)}>Cancel</Button>
           <Button
             variant="contained"
             onClick={() => {
@@ -3747,10 +3909,8 @@ export const UserManagement: React.FC = () => {
               if (!name) return;
               setRolesConfig((prev) => {
                 const next = { ...prev };
-                if (roleForm.originalName && roleForm.originalName !== name) {
-                  delete next[roleForm.originalName];
-                }
-                next[name] = { ...roleForm.permissions } as unknown as RolePermissions;
+                if (roleForm.originalName && roleForm.originalName !== name) delete next[roleForm.originalName];
+                next[name] = { ...roleForm.permissions, domains: roleForm.domains } as unknown as RolePermissions;
                 return next;
               });
               setRoleDialogOpen(false);

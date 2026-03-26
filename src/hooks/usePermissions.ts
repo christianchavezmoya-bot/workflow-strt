@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { roleConfigService, RolePermissions } from "../services/roleConfigService";
+import { defaultDomains, roleConfigService, RolePermissions } from "../services/roleConfigService";
 import { useAuth } from "./useAuth";
 
 const FALLBACK_PERMISSIONS: Record<string, RolePermissions> = {
@@ -23,9 +23,7 @@ export const usePermissions = () => {
       if (config.roles && Object.keys(config.roles).length > 0) {
         setRoleConfig(config.roles);
       }
-    }).catch(() => {
-      // Backend unavailable — use fallback
-    });
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -43,21 +41,39 @@ export const usePermissions = () => {
   const can = useMemo(() => {
     const config = roleConfig ?? FALLBACK_PERMISSIONS;
     const perms: RolePermissions | undefined = user?.role ? config[user.role] : undefined;
-
-    // Fall back to hardcoded map if role not found in config
     const p = perms ?? FALLBACK_PERMISSIONS[user?.role ?? ""] ?? FALLBACK_PERMISSIONS.Viewer;
 
+    // Tier 2: use saved domains or derive from Tier 1 flags
+    const domains = p.domains ?? defaultDomains(p);
+
     if (p.viewOnly) {
-      return { viewOnly: true, modifyData: false, createUsers: false, editFields: false, editForms: false, createDeleteTables: false };
+      return {
+        // Tier 1
+        viewOnly: true, modifyData: false, createUsers: false,
+        editFields: false, editForms: false, createDeleteTables: false,
+        // Tier 2
+        projects:  domains.projects,
+        assets:    domains.assets,
+        workflows: domains.workflows,
+        documents: domains.documents,
+        settings:  domains.settings,
+      };
     }
 
     return {
+      // Tier 1
       viewOnly: false,
       modifyData: p.modifyData,
       createUsers: p.createUsers,
       editFields: p.editFields,
       editForms: p.editForms,
       createDeleteTables: p.createDeleteTables,
+      // Tier 2
+      projects:  domains.projects,
+      assets:    domains.assets,
+      workflows: domains.workflows,
+      documents: domains.documents,
+      settings:  domains.settings,
     };
   }, [user?.role, roleConfig]);
 
