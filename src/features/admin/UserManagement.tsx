@@ -813,7 +813,7 @@ export const UserManagement: React.FC = () => {
         name: "",
         originalName: "",
         permissions: {
-          viewOnly: true,
+          viewOnly: false,
           createDeleteTables: false,
           createUsers: false,
           editFields: false,
