@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import {
   CheckCircleOutlined,
   CloudOffOutlined,
@@ -141,6 +143,9 @@ export default function WorkOrderRunner({
   productFeatures,
   featureSelections,
 }: WorkOrderRunnerProps) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+
   const stepsSorted = useMemo(
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
     [workflow.steps],
@@ -1484,11 +1489,10 @@ export default function WorkOrderRunner({
               </>
             )}
           </Stack>
-        </DialogContent>
 
-        {/* Flag issue inline form */}
-        <Collapse in={flagOpen}>
-          <Box sx={{ px: 3, pb: 1.5, pt: 0 }}>
+          {/* Flag issue inline form — inside DialogContent so it scrolls with the page */}
+          <Collapse in={flagOpen}>
+          <Box sx={{ pt: 2 }}>
             <Divider sx={{ mb: 1.5 }} />
             <Typography variant="caption" fontWeight={700} color="error" display="block" mb={0.5}>
               Flag issue on this step
@@ -1651,7 +1655,8 @@ export default function WorkOrderRunner({
               </Stack>
             </Stack>
           </Box>
-        </Collapse>
+          </Collapse>
+        </DialogContent>
 
         <DialogActions sx={{ flexWrap: "wrap", gap: 0.75, justifyContent: "space-between" }}>
           <Stack direction="row" spacing={0.75} alignItems="center">
@@ -2265,7 +2270,7 @@ export default function WorkOrderRunner({
 
   return (
     <>
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth fullScreen={isMobile}>
         {stage === "setup"          && renderSetup()}
         {stage === "running"        && renderRunning()}
         {stage === "summary"        && renderSummary()}
