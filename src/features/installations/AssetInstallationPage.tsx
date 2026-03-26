@@ -2305,28 +2305,6 @@ const AssetInstallationPage = () => {
                 <RefreshOutlined fontSize="small" />
               </IconButton>
             </Tooltip>
-            {/* Product / Project view toggle — mobile only */}
-            {isMobile && (
-              <Stack direction="row" spacing={0.5}>
-                <Chip
-                  label="Product"
-                  size="small"
-                  color={viewMode === "product" ? "primary" : "default"}
-                  variant={viewMode === "product" ? "filled" : "outlined"}
-                  onClick={() => setViewMode("product")}
-                  sx={{ fontSize: "0.68rem", height: 24 }}
-                />
-                <Chip
-                  label="Project"
-                  size="small"
-                  color={viewMode === "project" ? "primary" : "default"}
-                  variant={viewMode === "project" ? "filled" : "outlined"}
-                  onClick={() => { if (selectedProjectId) setViewMode("project"); }}
-                  disabled={!selectedProjectId}
-                  sx={{ fontSize: "0.68rem", height: 24 }}
-                />
-              </Stack>
-            )}
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", md: "block" } }}>
             Track assets across projects — start work orders, record status, and monitor progress.
@@ -2384,8 +2362,8 @@ const AssetInstallationPage = () => {
         </Stack>
       </Stack>
 
-      {/* Product tabs with health dots */}
-      <Paper className="glass-card" sx={{ p: { xs: 0.5, sm: 1.5 } }}>
+      {/* Product tabs with health dots — desktop only; mobile uses project picker */}
+      <Paper className="glass-card" sx={{ p: { xs: 0.5, sm: 1.5 }, display: { xs: "none", sm: "block" } }}>
         <Tabs
           value={tab}
           onChange={(_, next) => { setTab(next); try { sessionStorage.setItem("installations_active_product_id", products[next]?.id ?? ""); } catch {} }}
@@ -2501,9 +2479,20 @@ const AssetInstallationPage = () => {
       <Stack direction="row" spacing={1} alignItems="center">
         <FormControl size="small" sx={{ flex: 1, minWidth: 0 }}>
           <InputLabel>Project</InputLabel>
-          <Select label="Project" value={selectedProjectId} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
-            <MenuItem value="">All projects</MenuItem>
-            {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} — {p.customerName}</MenuItem>)}
+          <Select
+            label="Project"
+            value={selectedProjectId}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSelectedProjectId(val);
+              try { sessionStorage.setItem("installations_selected_project_id", val); } catch {}
+              if (isMobile) setViewMode(val ? "project" : "product");
+            }}
+          >
+            <MenuItem value="">{isMobile ? "Select a project…" : "All projects"}</MenuItem>
+            {(isMobile ? projects : productProjects).map((p) => (
+              <MenuItem key={p.id} value={p.id}>{p.jobNumber} — {p.customerName}</MenuItem>
+            ))}
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ flex: "0 0 120px", display: { xs: "none", sm: "block" } }}>
@@ -2703,16 +2692,12 @@ const AssetInstallationPage = () => {
       {/* ── Mobile card list ── */}
       {isMobile && (
         <Stack spacing={1}>
-          {loadingAssets || loadingProjectView ? (
+          {!selectedProjectId ? (
+            <Alert severity="info">Select a project above to view its assets.</Alert>
+          ) : loadingAssets || loadingProjectView ? (
             <Stack alignItems="center" py={6}><CircularProgress size={28} /></Stack>
           ) : visibleAssets.length === 0 ? (
-            <Alert severity="info">
-              {viewMode === "project" && !selectedProjectId
-                ? "Select a project to see all its assets."
-                : assets.length === 0 && viewMode !== "project"
-                ? `No assets for ${activeProduct?.name ?? "this product"} yet.`
-                : "No assets match the current filters."}
-            </Alert>
+            <Alert severity="info">No assets match the current filters.</Alert>
           ) : visibleAssets.map((asset) => {
             const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
             const proj = projectMap.get(asset.projectId);
