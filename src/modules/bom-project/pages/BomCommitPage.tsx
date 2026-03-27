@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import {
-  Box, Button, Stack, Alert, Paper, Divider, CircularProgress,
+  Box, Button, Collapse, IconButton, Stack, Alert, Paper, Divider, CircularProgress,
   TextField, Typography, Chip, Grid, Autocomplete,
 } from "@mui/material";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import CategoryOutlinedIcon from "@mui/icons-material/CategoryOutlined";
 import ErrorOutlineOutlinedIcon from "@mui/icons-material/ErrorOutlineOutlined";
+import ExpandMoreOutlinedIcon from "@mui/icons-material/ExpandMoreOutlined";
+import ExpandLessOutlinedIcon from "@mui/icons-material/ExpandLessOutlined";
 import { useNavigate, useParams } from "react-router-dom";
 import BomStepHeader from "../components/BomStepHeader";
 import PublishConfirmDialog from "../components/PublishConfirmDialog";
@@ -36,6 +38,7 @@ export default function BomCommitPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warningsExpanded, setWarningsExpanded] = useState(false);
 
   const [sites, setSites] = useState<Site[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -182,17 +185,44 @@ export default function BomCommitPage() {
           <Typography variant="caption" color="text.secondary">Validating…</Typography>
         </Stack>
       ) : validation && (
-        <Alert
-          severity={isBlocking ? "error" : validation.warnings.length > 0 ? "warning" : "success"}
-          icon={isBlocking ? <ErrorOutlineOutlinedIcon /> : <CheckCircleOutlineIcon />}
-          sx={{ mb: 2.5 }}
-        >
-          {isBlocking
-            ? `${validation.errors.length} error(s) must be resolved before creating the project. Go back and fix them.`
-            : validation.warnings.length > 0
-              ? `Ready to create — ${validation.warnings.length} warning(s) noted.`
-              : "Validation passed — ready to create the project."}
-        </Alert>
+        <Box sx={{ mb: 2.5 }}>
+          <Alert
+            severity={isBlocking ? "error" : validation.warnings.length > 0 ? "warning" : "success"}
+            icon={isBlocking ? <ErrorOutlineOutlinedIcon /> : <CheckCircleOutlineIcon />}
+            action={
+              !isBlocking && validation.warnings.length > 0 ? (
+                <IconButton size="small" onClick={() => setWarningsExpanded((v) => !v)}>
+                  {warningsExpanded ? <ExpandLessOutlinedIcon fontSize="small" /> : <ExpandMoreOutlinedIcon fontSize="small" />}
+                </IconButton>
+              ) : undefined
+            }
+          >
+            {isBlocking
+              ? `${validation.errors.length} error(s) must be resolved before creating the project. Go back and fix them.`
+              : validation.warnings.length > 0
+                ? `Ready to create — ${validation.warnings.length} warning(s) noted. Click to review.`
+                : "Validation passed — ready to create the project."}
+          </Alert>
+          {!isBlocking && validation.warnings.length > 0 && (
+            <Collapse in={warningsExpanded}>
+              <Paper variant="outlined" sx={{ mt: 0.5, px: 2, py: 1.5, borderColor: "warning.dark", background: "rgba(237,108,2,0.05)" }}>
+                <Stack spacing={0.75}>
+                  {validation.warnings.map((w) => (
+                    <Stack key={w.id} direction="row" spacing={1} alignItems="flex-start">
+                      <Typography variant="caption" color="warning.main" sx={{ mt: "1px", flexShrink: 0 }}>⚠</Typography>
+                      <Box>
+                        <Typography variant="caption" display="block">{w.message}</Typography>
+                        {w.suggestion && (
+                          <Typography variant="caption" color="text.disabled" display="block">{w.suggestion}</Typography>
+                        )}
+                      </Box>
+                    </Stack>
+                  ))}
+                </Stack>
+              </Paper>
+            </Collapse>
+          )}
+        </Box>
       )}
 
       {/* ── Project details form ── */}
