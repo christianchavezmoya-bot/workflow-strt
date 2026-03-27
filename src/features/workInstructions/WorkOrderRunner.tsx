@@ -54,6 +54,8 @@ import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { signatureService } from "../../services/signatureService";
+import { featureService } from "../../services/featureService";
+import type { Feature } from "../../types/feature";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
@@ -216,6 +218,15 @@ export default function WorkOrderRunner({
   // BOM confirmation
   const [bomActual, setBomActual] = useState<BomActualItem[]>([]);
   const [unlistedConsumables, setUnlistedConsumables] = useState<UnlistedConsumable[]>([]);
+
+  // Consumable features from the product library — drives the end-of-run survey
+  const [libConsumableFeatures, setLibConsumableFeatures] = useState<Feature[]>([]);
+  useEffect(() => {
+    if (!open || !productId) return;
+    featureService.getByProduct(productId)
+      .then((feats) => setLibConsumableFeatures(feats.filter((f) => !f.isInventory)))
+      .catch(() => {});
+  }, [open, productId]);
 
   // Run tracking
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
@@ -2091,10 +2102,17 @@ export default function WorkOrderRunner({
                 onClick={() => {
                   const allBomItems = workflow.bomItems ?? [];
                   const inventoryItems = allBomItems.filter(i => i.isInventory);
-                  const consumableItems = allBomItems.filter(i => !i.isInventory);
-                  if (allBomItems.length > 0 && activeRunId) {
-                    // Initialize all bomActual entries (both inventory + consumable)
-                    setBomActual(allBomItems.map((item) => ({
+                  const bomConsumableItems = allBomItems.filter(i => !i.isInventory);
+                  // Include lib consumable features not already covered by a BOM item
+                  const bomDescriptions = new Set(bomConsumableItems.map(i => i.description.toLowerCase()));
+                  const extraConsumables = libConsumableFeatures.filter(
+                    f => !bomDescriptions.has(f.name.toLowerCase())
+                  );
+                  const hasConsumables = bomConsumableItems.length > 0 || extraConsumables.length > 0;
+
+                  if (activeRunId) {
+                    // Build bomActual: BOM inventory + BOM consumables + library consumable features
+                    const bomEntries: BomActualItem[] = allBomItems.map((item) => ({
                       bomItemId: item.id,
                       description: item.description,
                       isInventory: item.isInventory,
@@ -2106,15 +2124,25 @@ export default function WorkOrderRunner({
                         ? Array.from({ length: item.expectedQty }, () =>
                             Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
                         : undefined,
-                    })));
+                    }));
+                    const libEntries: BomActualItem[] = extraConsumables.map((f) => ({
+                      bomItemId: `lib-${f.id}`,
+                      description: f.name,
+                      isInventory: false,
+                      expectedQty: 1,
+                      actualQty: 1,
+                      unitOfMeasure: "ea",
+                      isNA: false,
+                    }));
+                    setBomActual([...bomEntries, ...libEntries]);
                     setUnlistedConsumables([]);
                     if (inventoryItems.length > 0) {
                       setStage("bom");
-                    } else {
+                    } else if (hasConsumables) {
                       setStage("consumables");
+                    } else {
+                      handleSave();
                     }
-                  } else if (consumableItems.length > 0 && !activeRunId) {
-                    handleSave();
                   } else {
                     handleSave();
                   }
@@ -2135,7 +2163,7 @@ export default function WorkOrderRunner({
   function renderBom() {
     // Only show inventory items here; consumables handled in the next stage
     const inventoryItems = (workflow.bomItems ?? []).filter(i => i.isInventory);
-    const hasConsumables = (workflow.bomItems ?? []).some(i => !i.isInventory);
+    const hasConsumables = (workflow.bomItems ?? []).some(i => !i.isInventory) || libConsumableFeatures.length > 0;
     return (
       <>
         <DialogTitle>

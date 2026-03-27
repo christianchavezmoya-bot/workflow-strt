@@ -60,6 +60,8 @@ import { workflowConfigFeatureService } from "../../services/workflowConfigFeatu
 import type { WorkflowConfigFeature } from "../../types/workflowConfigFeature";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import type { FeatureDependency } from "../../types/featureDependency";
+import { featureService } from "../../services/featureService";
+import type { Feature } from "../../types/feature";
 import WorkOrderRunner from "./WorkOrderRunner";
 
 // ------------------------------------------------------------------
@@ -230,6 +232,15 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   const productFeaturesRef = useRef<ProductFeatureDefinition[]>(productFeatures);
   productFeaturesRef.current = productFeatures;
 
+  // Feature library entries (with captureFields) for the active product
+  const [libFeatures, setLibFeatures] = useState<Feature[]>([]);
+  const libFeaturesRef = useRef<Feature[]>([]);
+  libFeaturesRef.current = libFeatures;
+  useEffect(() => {
+    if (!productId) return;
+    featureService.getByProduct(productId).then(setLibFeatures).catch(() => {});
+  }, [productId]);
+
   // Feature selections — managed in the builder (not just the publish dialog)
   const [featureSelections, setFeatureSelections] = useState<FeatureSelection[]>(() =>
     productFeatures.map((f) => ({ featureId: f.id, included: false, activeCount: 0 }))
@@ -309,7 +320,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           } catch {}
           // Auto-populate steps when config is brand new (empty)
           if (wf.steps.length === 0 && parsedSels.some((s) => s.activeCount > 0)) {
-            const autoSteps = buildAutoSteps(parsedSels, productFeaturesRef.current);
+            const autoSteps = buildAutoSteps(parsedSels, productFeaturesRef.current, libFeaturesRef.current);
             wf = { ...wf, steps: enforceSequentialNextSteps(normalizeOrders(autoSteps)) };
           }
           justLoadedRef.current = true;
@@ -1034,7 +1045,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
                   onClick={() => {
                     const hasSteps = workflow.steps.length > 0;
                     if (!hasSteps) {
-                      const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current);
+                      const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current);
                       importedRef.current = true;
                       updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
                       importedRef.current = false;
@@ -1043,7 +1054,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
                     setConfirmDialog({
                       message: "This will replace all current steps with a new auto-generated workflow. Continue?",
                       onConfirm: () => {
-                        const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current);
+                        const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current);
                         importedRef.current = true;
                         updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
                         importedRef.current = false;
@@ -1103,6 +1114,22 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               onAddCaptureField={() => addCaptureField(selectedStep.id)}
               onUpdateCaptureField={(fId, patch) => updateCaptureField(selectedStep.id, fId, patch)}
               onDeleteCaptureField={(fId) => deleteCaptureField(selectedStep.id, fId)}
+              libFeatures={libFeatures}
+              onAddCaptureFieldsFromLib={(fieldNames) => {
+                updateWorkflow((wf) => {
+                  const s = wf.steps.find((x) => x.id === selectedStep.id);
+                  if (!s) return wf;
+                  s.captureFields = s.captureFields || [];
+                  const existingKeys = new Set(s.captureFields.map((f) => f.key));
+                  fieldNames.forEach((name) => {
+                    const key = labelToKey(name);
+                    if (existingKeys.has(key)) return;
+                    s.captureFields!.push({ id: uid(), key, label: name, type: "text", required: true, featureId: s.stepFeatureId });
+                    existingKeys.add(key);
+                  });
+                  return wf;
+                });
+              }}
               onWorkflowUpdate={(wf) => { justLoadedRef.current = true; setWorkflow(wf); }}
             />
           ) : (
@@ -1527,6 +1554,8 @@ interface StepEditorPanelProps {
   onAddCaptureField: () => void;
   onUpdateCaptureField: (id: string, patch: Partial<CaptureField>) => void;
   onDeleteCaptureField: (id: string) => void;
+  onAddCaptureFieldsFromLib: (fieldNames: string[]) => void;
+  libFeatures: Feature[];
   onWorkflowUpdate: (wf: Workflow) => void;
 }
 
@@ -1550,6 +1579,8 @@ function StepEditorPanel({
   onAddCaptureField,
   onUpdateCaptureField,
   onDeleteCaptureField,
+  onAddCaptureFieldsFromLib,
+  libFeatures,
   onWorkflowUpdate,
 }: StepEditorPanelProps) {
   const [editorTab, setEditorTab] = useState(0);
@@ -1837,9 +1868,11 @@ function StepEditorPanel({
               step={step}
               productFeatures={productFeatures}
               featureSelections={featureSelections}
+              libFeatures={libFeatures}
               onAddCaptureField={onAddCaptureField}
               onUpdateCaptureField={onUpdateCaptureField}
               onDeleteCaptureField={onDeleteCaptureField}
+              onAddCaptureFieldsFromLib={onAddCaptureFieldsFromLib}
             />
           </TabPanel>
         </Box>
@@ -2163,10 +2196,13 @@ function labelToKey(label: string): string {
 function buildAutoSteps(
   featureSelections: FeatureSelection[],
   productFeatures: ProductFeatureDefinition[],
+  libFeatures: Feature[] = [],
 ): WorkflowStep[] {
   const u = uid;
   const mkCheck = (label: string, fid?: string): StepInput =>
     ({ id: u(), type: "checkbox", label, required: true, ...(fid ? { featureId: fid } : {}) });
+
+  const libMap = new Map(libFeatures.map((f) => [f.id, f]));
 
   const steps: WorkflowStep[] = [];
   let order = 1;
@@ -2217,9 +2253,14 @@ function buildAutoSteps(
   }
 
   // 3 — Data Collection steps (one per feature × unit)
+  // captureFields sourced from Feature.captureFields in the library (serial, firmware, IP, etc.)
   for (const { sel, feat } of activeFeatures) {
     for (let unit = 1; unit <= sel.activeCount; unit++) {
-      const deps = feat.subProperties ?? [];
+      const libFeat = libMap.get(feat.id);
+      // Use library captureFields (["Serial No", "Firmware", ...]) if available, fall back to subProperties
+      const captureFieldNames: string[] = libFeat?.captureFields && libFeat.captureFields.length > 0
+        ? libFeat.captureFields
+        : (feat.subProperties ?? []).map((d) => d.name);
       steps.push({
         ...base, id: u(), order: order++,
         stepType: "data-collection", stepFeatureId: feat.id, stepUnitIndex: unit,
@@ -2228,11 +2269,11 @@ function buildAutoSteps(
         inputs: [
           { id: u(), type: "photo", label: `${feat.name} ${unit} — Installed unit photograph`, required: true },
         ],
-        captureFields: deps.map((dep) => ({
+        captureFields: captureFieldNames.map((fieldName) => ({
           id: u(),
-          key: labelToKey(`${feat.name}_${unit}_${dep.name}`),
-          label: dep.name,
-          type: ((dep.valueType as string) === "number" ? "number" : (dep.valueType as string) === "date" ? "date" : "text") as CaptureFieldType,
+          key: labelToKey(`${feat.name}_${unit}_${fieldName}`),
+          label: fieldName,
+          type: "text" as CaptureFieldType,
           required: true,
           featureId: feat.id,
         })),
@@ -2296,18 +2337,25 @@ function CaptureFieldsSection({
   step,
   productFeatures,
   featureSelections,
+  libFeatures = [],
   onAddCaptureField,
   onUpdateCaptureField,
   onDeleteCaptureField,
+  onAddCaptureFieldsFromLib,
 }: {
   step: WorkflowStep;
   productFeatures: ProductFeatureDefinition[];
   featureSelections?: FeatureSelection[];
+  libFeatures?: Feature[];
   onAddCaptureField: () => void;
   onUpdateCaptureField: (id: string, patch: Partial<CaptureField>) => void;
   onDeleteCaptureField: (id: string) => void;
+  onAddCaptureFieldsFromLib?: (fieldNames: string[]) => void;
 }) {
   const fields = step.captureFields || [];
+
+  // Inventory features that have captureFields defined — shown as quick-add chips
+  const inventoryLibFeatures = libFeatures.filter((f) => f.isInventory && (f.captureFields ?? []).length > 0);
 
   return (
     <Stack spacing={2}>
@@ -2322,9 +2370,35 @@ function CaptureFieldsSection({
         </Stack>
       </Stack>
 
+      {/* Quick-add from feature library */}
+      {inventoryLibFeatures.length > 0 && (
+        <Stack spacing={0.75}>
+          <Typography variant="caption" color="text.secondary" fontWeight={600}>
+            Add capture fields from inventory features:
+          </Typography>
+          <Stack direction="row" flexWrap="wrap" gap={0.75}>
+            {inventoryLibFeatures.map((f) => (
+              <Chip
+                key={f.id}
+                label={f.name}
+                size="small"
+                color="primary"
+                variant="outlined"
+                clickable
+                onClick={() => onAddCaptureFieldsFromLib?.(f.captureFields ?? [])}
+                title={`Add: ${(f.captureFields ?? []).join(", ")}`}
+              />
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.disabled">
+            Tap a feature to add its capture fields (serial, firmware, etc.) to this step.
+          </Typography>
+        </Stack>
+      )}
+
       {fields.length === 0 ? (
         <Alert severity="info" sx={{ fontSize: 12 }}>
-          No capture fields yet. Add fields like Serial Number, Firmware Version, or measured values.
+          No capture fields yet. Use the quick-add above or add fields manually.
         </Alert>
       ) : (
         <Stack spacing={1.5}>
