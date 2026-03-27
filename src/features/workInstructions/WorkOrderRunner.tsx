@@ -99,6 +99,12 @@ interface WorkOrderRunnerProps {
   onPause?: (progress: { done: number; total: number; completedTitles: string[]; partialFeatureValues: Record<string, string> }) => void;
   /** Full name of the currently logged-in user, stored on each issue. */
   currentUserName?: string;
+  /** ID of the currently logged-in user — used for missing-media flag ownership. */
+  currentUserId?: string;
+  /** Asset tag shown in dashboard flags. */
+  assetTag?: string;
+  /** Job number shown in dashboard flags. */
+  jobNumber?: string;
   /** Product feature definitions — used to look up feature names for repeatFeatureId steps. */
   productFeatures?: ProductFeatureDefinition[];
   /** Feature selections from the workflow config — provides expected qty per feature. */
@@ -153,6 +159,9 @@ export default function WorkOrderRunner({
   onComplete,
   onPause,
   currentUserName,
+  currentUserId,
+  assetTag,
+  jobNumber,
   productFeatures,
   featureSelections,
 }: WorkOrderRunnerProps) {
@@ -727,6 +736,32 @@ export default function WorkOrderRunner({
         await flushTimeQueue();
         const lockedRun = await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName, bomJson);
         setActiveRun(lockedRun);
+
+        // Check if any photo/video steps exist but have no captures — flag for PM + installer
+        const mediaSteps = stepsSorted.flatMap(step =>
+          (step.inputs ?? []).filter(inp => inp.type === "photo" || inp.type === "video")
+            .map(inp => ({ stepId: step.id, inputId: inp.id }))
+        );
+        const mediaCaptured = mediaSteps.some(({ stepId, inputId }) => {
+          try { const arr = JSON.parse(values[stepId]?.[inputId] ?? "[]"); return Array.isArray(arr) && arr.length > 0; }
+          catch { return false; }
+        });
+        if (mediaSteps.length > 0 && !mediaCaptured) {
+          const flag = {
+            id: crypto.randomUUID(),
+            runId: activeRunId,
+            assetId: projectAssetId ?? "",
+            assetTag: assetTag ?? "",
+            jobNumber: jobNumber ?? "",
+            workflowName: workflow.name,
+            technicianUserId: currentUserId ?? "",
+            technicianName: currentUserName ?? "",
+            completedAt: new Date().toISOString(),
+          };
+          const existing = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
+          localStorage.setItem("pm_missing_media_flags", JSON.stringify([...existing, flag]));
+          window.dispatchEvent(new Event("missing-media-flags-changed"));
+        }
       }
       // Note: if no activeRunId (preview mode), skip signature stages
       setSaved(true);
@@ -1830,6 +1865,17 @@ export default function WorkOrderRunner({
     const blockingIssues = issues.filter((i) => i.isBlocking && !i.resolved);
     const hasBlockingIssues = blockingIssues.length > 0;
 
+    // Detect missing media: workflow has photo/video steps but none were captured
+    const mediaSteps = stepsSorted.flatMap(step =>
+      (step.inputs ?? []).filter(inp => inp.type === "photo" || inp.type === "video")
+        .map(inp => ({ stepId: step.id, inputId: inp.id }))
+    );
+    const mediaCaptured = mediaSteps.some(({ stepId, inputId }) => {
+      try { const arr = JSON.parse(values[stepId]?.[inputId] ?? "[]"); return Array.isArray(arr) && arr.length > 0; }
+      catch { return false; }
+    });
+    const isMissingMedia = mediaSteps.length > 0 && !mediaCaptured;
+
     return (
       <>
         <DialogTitle>
@@ -1854,6 +1900,13 @@ export default function WorkOrderRunner({
                 <Chip size="small" color="success" variant="outlined" label={`Productive ${formatDuration(productiveSecondsLive)}`} />
                 <Chip size="small" color={downtimeSecondsLive > 0 ? "warning" : "default"} variant="outlined" label={`Downtime ${formatDuration(downtimeSecondsLive)}`} />
               </Stack>
+            )}
+
+            {/* Missing media warning */}
+            {isMissingMedia && (
+              <Alert severity="warning" icon={<PhotoCameraOutlined />}>
+                No photos or videos captured. PM and assigned users will be notified. Go back to add media, or proceed to complete.
+              </Alert>
             )}
 
             {/* Issues summary */}

@@ -3503,6 +3503,9 @@ const AssetInstallationPage = () => {
           existingRunId={runnerExistingRunId}
           prefillValues={runnerPrefillValues}
           currentUserName={currentUser.fullName}
+          currentUserId={currentUser.id}
+          assetTag={runnerAsset.assetTag || (runnerAsset as any).assetName || ""}
+          jobNumber={(runnerAsset as any).jobNumber || ""}
           productFeatures={activeProduct.features}
           featureSelections={runnerFeatureSelections}
           onComplete={(vals) => {

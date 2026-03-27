@@ -6,7 +6,7 @@ import {
   AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined,
   ErrorOutlineOutlined, ExpandLessOutlined, ExpandMoreOutlined,
   FactCheckOutlined, OpenInNewOutlined, PendingActionsOutlined, PersonOutlined,
-  ReportOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
+  PhotoCameraOutlined, ReportOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
   WarningAmberOutlined, WorkOutlineOutlined,
 } from "@mui/icons-material";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -104,6 +104,12 @@ const Dashboard = () => {
     JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]")
   );
 
+  // Missing media flags — runs completed without photos/videos
+  type MissingMediaFlag = { id: string; runId: string; assetId: string; assetTag: string; jobNumber: string; workflowName: string; technicianUserId: string; technicianName: string; completedAt: string };
+  const [missingMediaFlags, setMissingMediaFlags] = useState<MissingMediaFlag[]>(() =>
+    JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]")
+  );
+
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
     if (activeOffice === "All") return null;
@@ -151,6 +157,13 @@ const Dashboard = () => {
     window.addEventListener("pm-auto-assign-flags-changed", reload);
     return () => window.removeEventListener("pm-auto-assign-flags-changed", reload);
   }, [isManager]);
+
+  // Listen for missing-media flags (all users see their own; PM sees all)
+  useEffect(() => {
+    const reload = () => setMissingMediaFlags(JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]"));
+    window.addEventListener("missing-media-flags-changed", reload);
+    return () => window.removeEventListener("missing-media-flags-changed", reload);
+  }, []);
 
   // Phase 4 — evidence completeness
   useEffect(() => {
@@ -889,6 +902,43 @@ const Dashboard = () => {
             )}
           </Box>
 
+          {/* My runs missing photos */}
+          {missingMediaFlags.filter(f => f.technicianUserId === user.id).length > 0 && (
+            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                <PhotoCameraOutlined sx={{ fontSize: 18, color: "warning.main" }} />
+                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                  Runs Missing Photos
+                </Typography>
+                <Chip label={missingMediaFlags.filter(f => f.technicianUserId === user.id).length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                Your completed runs with no photos or videos — tap to open and add media
+              </Typography>
+              <Stack spacing={0.25}>
+                {missingMediaFlags.filter(f => f.technicianUserId === user.id).map((f) => (
+                  <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
+                    <Box sx={{ flex: 1 }}>
+                      <ItemRow
+                        label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
+                        sub={`${f.workflowName} · ${fmtDate(f.completedAt)}`}
+                        onClick={() => navigate("/installations")}
+                      />
+                    </Box>
+                    <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
+                      onClick={() => {
+                        const updated = missingMediaFlags.filter((x) => x.id !== f.id);
+                        localStorage.setItem("pm_missing_media_flags", JSON.stringify(updated));
+                        setMissingMediaFlags(updated);
+                      }}>
+                      ✕
+                    </Button>
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
+          )}
+
           {/* My Blocking Issues + My Pending Signatures */}
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
@@ -1154,6 +1204,50 @@ const Dashboard = () => {
                         const updated = autoAssignFlags.filter((x) => x.id !== f.id);
                         localStorage.setItem("pm_auto_assign_flags", JSON.stringify(updated));
                         setAutoAssignFlags(updated);
+                      }}>
+                      ✕
+                    </Button>
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
+          )}
+
+          {/* Missing media flags — PM sees all runs without photos */}
+          {missingMediaFlags.length > 0 && (
+            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                <PhotoCameraOutlined sx={{ fontSize: 18, color: "warning.main" }} />
+                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                  Runs Missing Photos
+                </Typography>
+                <Chip label={missingMediaFlags.length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                <Button size="small" variant="text" color="warning" sx={{ fontSize: "0.72rem" }}
+                  onClick={() => {
+                    localStorage.removeItem("pm_missing_media_flags");
+                    setMissingMediaFlags([]);
+                  }}>
+                  Dismiss all
+                </Button>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                Workflow runs completed without any photos or videos captured
+              </Typography>
+              <Stack spacing={0.25}>
+                {missingMediaFlags.map((f) => (
+                  <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
+                    <Box sx={{ flex: 1 }}>
+                      <ItemRow
+                        label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
+                        sub={`${f.workflowName} · ${f.technicianName} · ${fmtDate(f.completedAt)}`}
+                        onClick={() => navigate("/installations")}
+                      />
+                    </Box>
+                    <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
+                      onClick={() => {
+                        const updated = missingMediaFlags.filter((x) => x.id !== f.id);
+                        localStorage.setItem("pm_missing_media_flags", JSON.stringify(updated));
+                        setMissingMediaFlags(updated);
                       }}>
                       ✕
                     </Button>
