@@ -550,15 +550,33 @@ const AssetInstallationPage = () => {
     return () => window.removeEventListener("online", handleOnline);
   }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load assets for "See all in project" view mode
+  // Mobile: always load by project (all projects when none selected, one project when selected)
+  // Desktop: only load when viewMode === "project" and a project is selected
   useEffect(() => {
-    if (viewMode !== "project" || !selectedProjectId) { setProjectViewAssets([]); return; }
+    if (!isMobile) {
+      if (viewMode !== "project" || !selectedProjectId) { setProjectViewAssets([]); return; }
+      setLoadingProjectView(true);
+      projectAssetService.listByProject(selectedProjectId)
+        .then(setProjectViewAssets)
+        .catch(() => setProjectViewAssets([]))
+        .finally(() => setLoadingProjectView(false));
+      return;
+    }
+    // Mobile path
     setLoadingProjectView(true);
-    projectAssetService.listByProject(selectedProjectId)
-      .then(setProjectViewAssets)
-      .catch(() => setProjectViewAssets([]))
-      .finally(() => setLoadingProjectView(false));
-  }, [viewMode, selectedProjectId]);
+    if (selectedProjectId) {
+      projectAssetService.listByProject(selectedProjectId)
+        .then(setProjectViewAssets)
+        .catch(() => setProjectViewAssets([]))
+        .finally(() => setLoadingProjectView(false));
+    } else {
+      if (projects.length === 0) { setProjectViewAssets([]); setLoadingProjectView(false); return; }
+      Promise.all(projects.map((p) => projectAssetService.listByProject(p.id).catch(() => [])))
+        .then((results) => setProjectViewAssets(results.flat()))
+        .catch(() => setProjectViewAssets([]))
+        .finally(() => setLoadingProjectView(false));
+    }
+  }, [isMobile, viewMode, selectedProjectId, projects]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   const selectedAddConfig = useMemo(
@@ -585,13 +603,15 @@ const AssetInstallationPage = () => {
   }, [selectedAddConfig?.workflowTemplateId]);
 
   const visibleAssets = useMemo(() => {
-    const pool = viewMode === "project" && selectedProjectId ? projectViewAssets : assets;
+    // Mobile always uses projectViewAssets (all projects or selected project)
+    // Desktop uses projectViewAssets only when viewMode=project + project selected
+    const pool = isMobile ? projectViewAssets : (viewMode === "project" && selectedProjectId ? projectViewAssets : assets);
     const q = search.trim().toLowerCase();
     return pool.filter((a) => {
       if (archiveMode) {
         if (a.status !== "Complete") return false;
       } else {
-        if (viewMode !== "project" && selectedProjectId && a.projectId !== selectedProjectId) return false;
+        if (!isMobile && viewMode !== "project" && selectedProjectId && a.projectId !== selectedProjectId) return false;
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
       }
       if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q)))) return false;
@@ -602,7 +622,7 @@ const AssetInstallationPage = () => {
       if (healthFilter === "noWorkflow" && !(!a.productConfigId && !a.workflowTemplateId)) return false;
       return true;
     });
-  }, [assets, projectViewAssets, viewMode, selectedProjectId, statusFilter, search, archiveMode, healthFilter]);
+  }, [isMobile, assets, projectViewAssets, viewMode, selectedProjectId, statusFilter, search, archiveMode, healthFilter]);
 
   // Projects filtered to those linked to the active product (used in add/edit dialogs)
   const productProjects = useMemo(
@@ -2489,9 +2509,28 @@ const AssetInstallationPage = () => {
               if (isMobile) setViewMode(val ? "project" : "product");
             }}
           >
-            <MenuItem value="">{isMobile ? "Select a project…" : "All projects"}</MenuItem>
+            <MenuItem value="">All projects</MenuItem>
             {(isMobile ? projects : productProjects).map((p) => (
-              <MenuItem key={p.id} value={p.id}>{p.jobNumber} — {p.customerName}</MenuItem>
+              <MenuItem key={p.id} value={p.id}>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ width: "100%", gap: 1 }}>
+                  <Stack direction="row" alignItems="center" spacing={0.75} sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" fontWeight={600} noWrap>{p.jobNumber}</Typography>
+                    {p.customerName && (
+                      <Typography variant="body2" color="text.secondary" noWrap>— {p.customerName}</Typography>
+                    )}
+                  </Stack>
+                  {(p.assetCount ?? 0) > 0 && (
+                    <Box component="span" sx={{
+                      px: 0.75, py: 0.1, borderRadius: 999, flexShrink: 0,
+                      fontSize: "0.6rem", fontWeight: 700, lineHeight: 1.6,
+                      background: "rgba(45,212,191,0.2)", color: "rgba(45,212,191,1)",
+                      border: "1px solid rgba(45,212,191,0.35)",
+                    }}>
+                      {p.assetCount}
+                    </Box>
+                  )}
+                </Stack>
+              </MenuItem>
             ))}
           </Select>
         </FormControl>
@@ -2692,9 +2731,7 @@ const AssetInstallationPage = () => {
       {/* ── Mobile card list ── */}
       {isMobile && (
         <Stack spacing={1}>
-          {!selectedProjectId ? (
-            <Alert severity="info">Select a project above to view its assets.</Alert>
-          ) : loadingAssets || loadingProjectView ? (
+          {loadingProjectView ? (
             <Stack alignItems="center" py={6}><CircularProgress size={28} /></Stack>
           ) : visibleAssets.length === 0 ? (
             <Alert severity="info">No assets match the current filters.</Alert>
