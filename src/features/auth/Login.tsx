@@ -81,7 +81,7 @@ const Login = () => {
         setTwoFactorStep(true);
         return;
       }
-      handleLoginSuccess(result);
+      await handleLoginSuccess(result);
     } catch (err: any) {
       setError(err?.response?.status === 429
         ? "Too many failed attempts. Please wait 15 minutes and try again."
@@ -97,7 +97,7 @@ const Login = () => {
     setError(null);
     try {
       const result = await authService.verify2fa(twoFactorToken, totpCode, rememberDevice);
-      handleLoginSuccess(result);
+      await handleLoginSuccess(result);
     } catch (err: any) {
       setError(err?.response?.status === 429
         ? "Too many failed attempts. Please wait 15 minutes and try again."

@@ -62,25 +62,29 @@ export async function initSecureStorage(): Promise<void> {
     const plugin = await getPlugin();
 
     for (const key of SECURE_KEYS) {
+      // Skip keys that were already written by secureSet() while we were loading
+      if (cache.has(key) && cache.get(key) !== null) continue;
+
       if (plugin) {
         try {
           // 800 ms timeout per key — if Keychain hangs, fall back to localStorage
           const result = await withTimeout(plugin.get({ key }), 800, { value: null as string | null });
           if (result.value !== null) {
-            cache.set(key, result.value);
+            // Only set if nothing was written since we started
+            if (!cache.has(key) || cache.get(key) === null) cache.set(key, result.value);
           } else {
             // Not in Keychain yet — check localStorage for migration
             const legacy = localStorage.getItem(key);
             if (legacy) {
-              cache.set(key, legacy);
+              if (!cache.has(key) || cache.get(key) === null) cache.set(key, legacy);
               try { await withTimeout(plugin.set({ key, value: legacy }), 800, undefined); } catch { /* non-fatal */ }
               localStorage.removeItem(key);
             } else {
-              cache.set(key, null);
+              if (!cache.has(key)) cache.set(key, null);
             }
           }
         } catch {
-          cache.set(key, localStorage.getItem(key));
+          if (!cache.has(key)) cache.set(key, localStorage.getItem(key));
         }
       } else {
         // Web fallback: mirror localStorage
