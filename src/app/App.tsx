@@ -2,10 +2,11 @@
 import AppRoutes from "./routes";
 import { brandSettingsService } from "../services/brandSettingsService";
 import { getLaunchAuthMode } from "../services/biometricAuth";
+import { initSecureStorage } from "../services/secureStorage";
 import BiometricLockScreen from "../components/BiometricLockScreen";
 
 const App = () => {
-  // "checking" → "locked" → "unlocked"
+  // "checking" → "locked" | "unlocked"
   const [authMode, setAuthMode] = useState<"checking" | "locked" | "unlocked">("checking");
 
   useEffect(() => {
@@ -13,16 +14,19 @@ const App = () => {
       if (s.appName) document.title = s.appName;
     }).catch(() => {});
 
-    const mode = getLaunchAuthMode();
-    if (mode === "biometric-needed") {
-      setAuthMode("locked");
-    } else {
-      // "not-native" (web), "no-session" (login page handles it), "grace-expired" (login page)
-      setAuthMode("unlocked");
-    }
+    // Init Keychain after mount (native bridge is ready at this point)
+    initSecureStorage()
+      .then(() => {
+        const mode = getLaunchAuthMode();
+        setAuthMode(mode === "biometric-needed" ? "locked" : "unlocked");
+      })
+      .catch(() => {
+        // If Keychain init fails for any reason, fall through to normal app
+        setAuthMode("unlocked");
+      });
   }, []);
 
-  if (authMode === "checking") return null; // brief flash prevention
+  if (authMode === "checking") return null;
 
   if (authMode === "locked") {
     return <BiometricLockScreen onUnlocked={() => setAuthMode("unlocked")} />;
