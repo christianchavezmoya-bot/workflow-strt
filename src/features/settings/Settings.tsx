@@ -35,7 +35,7 @@ import {
   Tooltip,
   Typography
 } from "@mui/material";
-import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined, CheckCircleOutline, BlockOutlined, ExpandMoreOutlined, ExpandLessOutlined, UploadFileOutlined } from "@mui/icons-material";
+import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined, CheckCircleOutline, BlockOutlined, ExpandMoreOutlined, ExpandLessOutlined, UploadFileOutlined, ArrowUpwardOutlined, ArrowDownwardOutlined, UnfoldMoreOutlined } from "@mui/icons-material";
 import { quickbaseService, type QbFieldInfo } from "../../services/quickbaseService";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -613,6 +613,52 @@ const Settings = () => {
   const [featureForm, setFeatureForm] = useState({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] as string[], brand: "", supplier: "", alternativePartNumber: "", manufacturerPartNumber: "", unitPrice: "", productLink: "", productLinks: [] as string[] });
   const [featureSaving, setFeatureSaving] = useState(false);
   const [featureError, setFeatureError] = useState<string | null>(null);
+
+  // Feature library filters + sort
+  const [featureSearch, setFeatureSearch] = useState("");
+  const [featureFilterProduct, setFeatureFilterProduct] = useState<string>("all");
+  const [featureFilterInventory, setFeatureFilterInventory] = useState<"all" | "inventory" | "non-inventory">("all");
+  type FeatureSortKey = "name" | "valueType" | "isInventory" | "brand" | "supplier" | "manufacturerPartNumber" | "unitPrice";
+  const [featureSort, setFeatureSort] = useState<{ key: FeatureSortKey; dir: "asc" | "desc" }>({ key: "name", dir: "asc" });
+
+  function toggleFeatureSort(key: FeatureSortKey) {
+    setFeatureSort((prev) => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  }
+
+  const filteredSortedFeatures = useMemo(() => {
+    let list = [...features];
+    // Global search
+    if (featureSearch.trim()) {
+      const q = featureSearch.trim().toLowerCase();
+      list = list.filter((f) =>
+        f.name.toLowerCase().includes(q) ||
+        (f.description ?? "").toLowerCase().includes(q) ||
+        (f.brand ?? "").toLowerCase().includes(q) ||
+        (f.supplier ?? "").toLowerCase().includes(q) ||
+        (f.manufacturerPartNumber ?? "").toLowerCase().includes(q) ||
+        (f.alternativePartNumber ?? "").toLowerCase().includes(q)
+      );
+    }
+    // Product filter
+    if (featureFilterProduct !== "all") {
+      list = list.filter((f) => f.linkedProducts?.includes(featureFilterProduct));
+    }
+    // Inventory filter
+    if (featureFilterInventory === "inventory") list = list.filter((f) => f.isInventory);
+    if (featureFilterInventory === "non-inventory") list = list.filter((f) => !f.isInventory);
+    // Sort
+    list.sort((a, b) => {
+      let av: string | number = "";
+      let bv: string | number = "";
+      if (featureSort.key === "isInventory") { av = a.isInventory ? 1 : 0; bv = b.isInventory ? 1 : 0; }
+      else if (featureSort.key === "unitPrice") { av = a.unitPrice ?? 0; bv = b.unitPrice ?? 0; }
+      else { av = (a[featureSort.key] as string ?? "").toLowerCase(); bv = (b[featureSort.key] as string ?? "").toLowerCase(); }
+      if (av < bv) return featureSort.dir === "asc" ? -1 : 1;
+      if (av > bv) return featureSort.dir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [features, featureSearch, featureFilterProduct, featureFilterInventory, featureSort]);
 
   // Bulk feature import state
   interface ImportRow { name: string; description: string; valueType: string; supplier: string; partNumber: string; manufacturerPartNumber: string; unitPrice: string; brand: string; }
@@ -2237,6 +2283,48 @@ const Settings = () => {
             {featuresError && (
               <Alert severity="error" onClose={() => setFeaturesError(null)}>{featuresError}</Alert>
             )}
+            {/* ── Filter bar ── */}
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ px: 0, pb: 1.5 }} flexWrap="wrap">
+              <TextField
+                size="small"
+                placeholder="Search name, brand, supplier, part #…"
+                value={featureSearch}
+                onChange={(e) => setFeatureSearch(e.target.value)}
+                InputProps={{ startAdornment: <InputAdornment position="start"><SearchOutlined sx={{ fontSize: 16 }} /></InputAdornment> }}
+                sx={{ minWidth: 260, flex: 1 }}
+                InputLabelProps={{ shrink: true }}
+              />
+              <FormControl size="small" sx={{ minWidth: 200 }}>
+                <Select
+                  displayEmpty
+                  value={featureFilterProduct}
+                  onChange={(e) => setFeatureFilterProduct(e.target.value)}
+                >
+                  <MenuItem value="all">All products</MenuItem>
+                  {products.map((p) => <MenuItem key={p.id} value={p.name}>{p.name}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ minWidth: 160 }}>
+                <Select
+                  displayEmpty
+                  value={featureFilterInventory}
+                  onChange={(e) => setFeatureFilterInventory(e.target.value as "all" | "inventory" | "non-inventory")}
+                >
+                  <MenuItem value="all">All types</MenuItem>
+                  <MenuItem value="inventory">Inventory only</MenuItem>
+                  <MenuItem value="non-inventory">Non-inventory only</MenuItem>
+                </Select>
+              </FormControl>
+              {(featureSearch || featureFilterProduct !== "all" || featureFilterInventory !== "all") && (
+                <Button size="small" variant="text" onClick={() => { setFeatureSearch(""); setFeatureFilterProduct("all"); setFeatureFilterInventory("all"); }}>
+                  Clear filters
+                </Button>
+              )}
+              <Typography variant="caption" color="text.secondary" alignSelf="center" sx={{ ml: "auto" }}>
+                {filteredSortedFeatures.length} / {features.length} features
+              </Typography>
+            </Stack>
+
             {featuresLoading ? (
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />
@@ -2248,13 +2336,14 @@ const Settings = () => {
               </Alert>
             ) : (
               <TableContainer sx={{ overflowX: "auto", "& th": { resize: "horizontal", overflow: "auto", whiteSpace: "nowrap" } }}>
-              <Table size="small" sx={{ minWidth: 1100, tableLayout: "fixed" }}>
+              <Table size="small" sx={{ minWidth: 1200, tableLayout: "fixed" }}>
                 <colgroup>
                   <col style={{ minWidth: 160 }} />
                   <col style={{ minWidth: 90 }} />
+                  <col style={{ minWidth: 110 }} />
+                  <col style={{ minWidth: 130 }} />
                   <col style={{ minWidth: 140 }} />
                   <col style={{ minWidth: 150 }} />
-                  <col style={{ minWidth: 160 }} />
                   <col style={{ minWidth: 110 }} />
                   <col style={{ minWidth: 220 }} />
                   <col style={{ minWidth: 100 }} />
@@ -2262,19 +2351,44 @@ const Settings = () => {
                 </colgroup>
                 <TableHead>
                   <TableRow>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Type</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Brand</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Supplier</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Mfr. Part #</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Price / Unit</Typography></TableCell>
+                    {([
+                      { key: "name",                   label: "Name" },
+                      { key: "valueType",              label: "Type" },
+                      { key: "isInventory",            label: "Inventory" },
+                      { key: "brand",                  label: "Brand" },
+                      { key: "supplier",               label: "Supplier" },
+                      { key: "manufacturerPartNumber", label: "Mfr. Part #" },
+                      { key: "unitPrice",              label: "Price / Unit" },
+                    ] as { key: FeatureSortKey; label: string }[]).map(({ key, label }) => (
+                      <TableCell key={key} onClick={() => toggleFeatureSort(key)}
+                        sx={{ cursor: "pointer", userSelect: "none", "&:hover": { bgcolor: "action.hover" } }}>
+                        <Stack direction="row" alignItems="center" spacing={0.5}>
+                          <Typography variant="caption" fontWeight={700}>{label}</Typography>
+                          {featureSort.key === key
+                            ? featureSort.dir === "asc"
+                              ? <ArrowUpwardOutlined sx={{ fontSize: 13, color: "primary.main" }} />
+                              : <ArrowDownwardOutlined sx={{ fontSize: 13, color: "primary.main" }} />
+                            : <UnfoldMoreOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
+                          }
+                        </Stack>
+                      </TableCell>
+                    ))}
                     <TableCell><Typography variant="caption" fontWeight={700}>Description</Typography></TableCell>
                     <TableCell><Typography variant="caption" fontWeight={700}>Products</Typography></TableCell>
                     <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {features.map((f) => {
+                  {filteredSortedFeatures.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={10}>
+                        <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
+                          No features match the current filters.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {filteredSortedFeatures.map((f) => {
                     const isExpanded = expandedFeatureId === f.id;
                     const featureDeps = dependencies[f.id] ?? [];
                     const featureDepsLoading = depsLoading[f.id] ?? false;
@@ -2297,6 +2411,13 @@ const Settings = () => {
                             </Stack>
                           </TableCell>
                           <TableCell><Chip size="small" label={f.valueType} variant="outlined" /></TableCell>
+                          <TableCell>
+                            <Chip size="small"
+                              label={f.isInventory ? "Inventory" : "Non-inventory"}
+                              color={f.isInventory ? "primary" : "default"}
+                              variant={f.isInventory ? "filled" : "outlined"}
+                            />
+                          </TableCell>
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.brand || "—"}</Typography></TableCell>
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.supplier || "—"}</Typography></TableCell>
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.manufacturerPartNumber || "—"}</Typography></TableCell>
