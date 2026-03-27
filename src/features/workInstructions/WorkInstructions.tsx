@@ -53,6 +53,7 @@ import {
 import { demoProducts } from "../../data/demo";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
+import { featureService } from "../../services/featureService";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
@@ -547,6 +548,18 @@ const WorkInstructions = () => {
   const activeProduct = products[tab];
   const activeFeatures = activeProduct?.features ?? [];
 
+  // Track which feature IDs are inventory (from the feature library)
+  const [inventoryFeatureIds, setInventoryFeatureIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!activeProduct?.id) { setInventoryFeatureIds(new Set()); return; }
+    featureService.getByProduct(activeProduct.id).then((libFeatures) => {
+      setInventoryFeatureIds(new Set(libFeatures.filter(f => f.isInventory).map(f => f.id)));
+    }).catch(() => setInventoryFeatureIds(new Set()));
+  }, [activeProduct?.id]);
+
+  // Only pass inventory features to the workflow builder — consumables confirmed at end of run
+  const inventoryFeatures = activeFeatures.filter(f => inventoryFeatureIds.has(f.id));
+
   useEffect(() => {
     setSelectedConfigId(null);
   }, [activeProduct?.id]);
@@ -609,7 +622,7 @@ const WorkInstructions = () => {
     setEditingConfig(null);
     setConfigForm({
       ...emptyConfigForm(),
-      featureSelections: activeFeatures.map((f) => ({ featureId: f.id, included: false, activeCount: 0 })),
+      featureSelections: inventoryFeatures.map((f) => ({ featureId: f.id, included: false, activeCount: 0 })),
     });
     setConfigError(null);
     setConfigDialogOpen(true);
@@ -626,7 +639,7 @@ const WorkInstructions = () => {
       name: cfg.name,
       configType: cfg.configType ?? "",
       notes: cfg.notes ?? "",
-      featureSelections: activeFeatures.map(
+      featureSelections: inventoryFeatures.map(
         (f) => selMap.get(f.id) ?? { featureId: f.id, included: false, activeCount: 0 },
       ),
     });
@@ -993,7 +1006,7 @@ const WorkInstructions = () => {
           <WorkflowBuilder
             productId={activeProduct.id}
             productName={activeProduct.name}
-            productFeatures={activeFeatures}
+            productFeatures={inventoryFeatures}
             initialConfigId={selectedConfig?.id ?? null}
             configName={selectedConfig?.name}
             onConfigSaved={handleConfigSaved}
@@ -1090,13 +1103,13 @@ const WorkInstructions = () => {
               placeholder="Optional description or notes"
               InputLabelProps={{ shrink: true }}
             />
-            {activeFeatures.length > 0 && (
+            {inventoryFeatures.length > 0 && (
               <Stack spacing={1}>
                 <Typography variant="subtitle2">Installed Features</Typography>
                 <Typography variant="caption" color="text.secondary">
                   Set how many of each feature are installed. 0 = not included.
                 </Typography>
-                {activeFeatures.map((feat) => {
+                {inventoryFeatures.map((feat) => {
                   const sel = configForm.featureSelections.find((s) => s.featureId === feat.id);
                   const count = sel?.activeCount ?? 0;
                   const setCount = (n: number) =>
