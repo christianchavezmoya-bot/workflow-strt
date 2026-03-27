@@ -58,6 +58,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import * as XLSX from "xlsx";
 import PasswordField from "../../components/ui/PasswordField";
+import { secureGet, secureRemove } from "../../services/secureStorage";
 
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
 function BusinessLogoTab() {
@@ -297,7 +298,7 @@ const Settings = () => {
   const { addNotification } = useFieldNotifications();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isAdmin = user?.role === "Admin" || localStorage.getItem("local_auth_user")?.includes('"Admin"');
+  const isAdmin = user?.role === "Admin" || secureGet("local_auth_user")?.includes('"Admin"');
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [tab, setTab] = useState(() => {
@@ -949,7 +950,7 @@ const Settings = () => {
     } catch { alert("Failed to delete workflow type."); }
   }
   const localUser = useMemo(() => {
-    const raw = localStorage.getItem("local_auth_user");
+    const raw = secureGet("local_auth_user");
     if (!raw) return null;
     try {
       return JSON.parse(raw) as { email: string; fullName: string; role: string; office: string };
@@ -1110,8 +1111,8 @@ const Settings = () => {
   };
 
   const handleClearLocalAuth = () => {
-    localStorage.removeItem("local_auth_user");
-    localStorage.removeItem("auth_token");
+    secureRemove("local_auth_user");
+    secureRemove("auth_token");
   };
 
   const fieldTypes = [

@@ -8,21 +8,26 @@ import { store } from "./store";
 import theme from "./theme/theme";
 import { FieldNotificationProvider } from "./contexts/FieldNotificationContext";
 import { ViewModeProvider } from "./contexts/ViewModeContext";
+import { initSecureStorage } from "./services/secureStorage";
 import "./index.css";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <Provider store={store}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <BrowserRouter>
-          <ViewModeProvider>
-            <FieldNotificationProvider>
-              <App />
-            </FieldNotificationProvider>
-          </ViewModeProvider>
-        </BrowserRouter>
-      </ThemeProvider>
-    </Provider>
-  </React.StrictMode>
-);
+// Load auth tokens from iOS Keychain into memory cache before the app renders.
+// Also migrates any existing localStorage tokens to Keychain on first run.
+initSecureStorage().finally(() => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <Provider store={store}>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <BrowserRouter>
+            <ViewModeProvider>
+              <FieldNotificationProvider>
+                <App />
+              </FieldNotificationProvider>
+            </ViewModeProvider>
+          </BrowserRouter>
+        </ThemeProvider>
+      </Provider>
+    </React.StrictMode>
+  );
+});

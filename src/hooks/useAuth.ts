@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { authService } from "../services/authService";
+import { secureGet, secureSet } from "../services/secureStorage";
 import { User } from "../types/user";
 
 const defaultUser: User = {
@@ -28,9 +29,9 @@ export const useAuth = () => {
 
   useEffect(() => {
     const syncFromStorage = () => {
-      const storedBackendUser = localStorage.getItem("auth_user");
-      const storedLocalUser = localStorage.getItem("local_auth_user");
-      const token = localStorage.getItem("auth_token");
+      const storedBackendUser = secureGet("auth_user");
+      const storedLocalUser = secureGet("local_auth_user");
+      const token = secureGet("auth_token");
 
       if (storedBackendUser) {
         try {
@@ -60,7 +61,7 @@ export const useAuth = () => {
           .then((profile) => {
             setUser(profile);
             setIsAuthenticated(true);
-            localStorage.setItem("auth_user", JSON.stringify(profile));
+            secureSet("auth_user", JSON.stringify(profile));
           })
           .catch(() => {
             setUser(defaultUser);

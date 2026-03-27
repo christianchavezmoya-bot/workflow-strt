@@ -160,7 +160,7 @@ const PdfThumbnail = ({ downloadUrl, size }: { downloadUrl: string; size: number
         if (!canvas) return;
         canvas.width = scaled.width;
         canvas.height = scaled.height;
-        await page.render({ canvasContext: canvas.getContext("2d")!, viewport: scaled }).promise;
+        await page.render({ canvas, viewport: scaled }).promise;
         if (!cancelled) setReady(true);
       } catch {
         // silently fall back to icon

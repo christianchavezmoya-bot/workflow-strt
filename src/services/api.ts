@@ -1,5 +1,6 @@
 import axios from "axios";
 import { cacheGet, cachePut } from "./localDB";
+import { secureGet, secureSet, secureRemove } from "./secureStorage";
 
 // Automatically determine API base URL based on current hostname
 const getApiBaseUrl = () => {
@@ -61,7 +62,7 @@ const REFRESH_THRESHOLD_MINUTES = 30;
 let refreshPromise: Promise<void> | null = null;
 
 const silentRefresh = async () => {
-  const token = localStorage.getItem("auth_token");
+  const token = secureGet("auth_token");
   if (!token || token === "local") return;
 
   const exp = getTokenExpiry(token);
@@ -85,9 +86,9 @@ const silentRefresh = async () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.data?.token) {
-        localStorage.setItem("auth_token", res.data.token);
+        secureSet("auth_token", res.data.token);
         if (res.data.user) {
-          localStorage.setItem("auth_user", JSON.stringify(res.data.user));
+          secureSet("auth_user", JSON.stringify(res.data.user));
         }
       }
     } catch {
@@ -106,7 +107,7 @@ api.interceptors.request.use(async (config) => {
     await silentRefresh();
   }
 
-  const token = localStorage.getItem("auth_token");
+  const token = secureGet("auth_token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -234,8 +235,8 @@ api.interceptors.response.use(
       // Don't redirect for login/refresh calls — they handle their own errors
       if (!reqUrl.includes("/auth/login") && !reqUrl.includes("/auth/refresh") && !reqUrl.includes("/brand-settings")) {
         window.dispatchEvent(new Event("api-auth-error"));
-        localStorage.removeItem("auth_token");
-        localStorage.removeItem("auth_user");
+        secureRemove("auth_token");
+        secureRemove("auth_user");
         window.location.href = "/login";
       }
     }

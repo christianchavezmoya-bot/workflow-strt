@@ -39,9 +39,7 @@ async function renderPdfThumbnail(blobUrl: string, width: number, height: number
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(scaled.width);
   canvas.height = Math.round(scaled.height);
-  const ctx = canvas.getContext("2d")!;
-
-  await page.render({ canvasContext: ctx, viewport: scaled }).promise;
+  await page.render({ canvas, viewport: scaled }).promise;
   return canvas.toDataURL("image/jpeg", 0.85);
 }
 

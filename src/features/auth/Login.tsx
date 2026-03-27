@@ -13,6 +13,7 @@ import { Visibility, VisibilityOff } from "@mui/icons-material";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authService } from "../../services/authService";
+import { secureGet, secureSet } from "../../services/secureStorage";
 import strataLogo from "../../assets/strata_transparent.png";
 
 // Must be outside Login so it doesn't remount on every keystroke
@@ -58,11 +59,11 @@ const Login = () => {
   const [recoveryCode, setRecoveryCode] = useState("");
   const [rememberDevice, setRememberDevice] = useState(false);
 
-  const handleLoginSuccess = (result: { token?: string; user?: unknown; isFirstLogin: boolean; trustedDeviceToken?: string; passwordExpired?: boolean }) => {
-    localStorage.setItem("auth_token", result.token!);
-    localStorage.setItem("auth_user", JSON.stringify(result.user));
+  const handleLoginSuccess = async (result: { token?: string; user?: unknown; isFirstLogin: boolean; trustedDeviceToken?: string; passwordExpired?: boolean }) => {
+    await secureSet("auth_token", result.token!);
+    await secureSet("auth_user", JSON.stringify(result.user));
     if (result.trustedDeviceToken) {
-      localStorage.setItem("trusted_device_token", result.trustedDeviceToken);
+      await secureSet("trusted_device_token", result.trustedDeviceToken);
     }
     navigate(result.isFirstLogin || result.passwordExpired ? "/profile" : "/");
   };
@@ -71,7 +72,7 @@ const Login = () => {
     setLoading(true);
     setError(null);
     try {
-      const trustedDeviceToken = localStorage.getItem("trusted_device_token") || undefined;
+      const trustedDeviceToken = secureGet("trusted_device_token") || undefined;
       const result = await authService.login({ email, password, trustedDeviceToken });
       if (result.requires2fa && result.twoFactorToken) {
         setTwoFactorToken(result.twoFactorToken);

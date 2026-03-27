@@ -2,6 +2,7 @@ import { Box, Button, Divider, IconButton, Stack, Typography } from "@mui/materi
 import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
 import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import { useEffect, useState } from "react";
+import { secureGet } from "../../services/secureStorage";
 
 type DebugLog = {
   id: string;
@@ -22,8 +23,8 @@ const DebugPanel = () => {
   const [open, setOpen] = useState(false);
   const [logs, setLogs] = useState<DebugLog[]>(() => getLogs());
   const [authInfo, setAuthInfo] = useState({
-    token: localStorage.getItem("auth_token") || "",
-    user: localStorage.getItem("auth_user") || localStorage.getItem("local_auth_user") || ""
+    token: secureGet("auth_token") || "",
+    user: secureGet("auth_user") || secureGet("local_auth_user") || ""
   });
 
   useEffect(() => {
@@ -35,8 +36,8 @@ const DebugPanel = () => {
     const handler = () => {
       setLogs(getLogs());
       setAuthInfo({
-        token: localStorage.getItem("auth_token") || "",
-        user: localStorage.getItem("auth_user") || localStorage.getItem("local_auth_user") || ""
+        token: secureGet("auth_token") || "",
+        user: secureGet("auth_user") || secureGet("local_auth_user") || ""
       });
     };
     window.addEventListener("api-debug-log", handler);

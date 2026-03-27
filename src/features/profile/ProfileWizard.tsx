@@ -3,6 +3,7 @@ import { ContentCopy } from "@mui/icons-material";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authService, Session, LoginHistoryEntry } from "../../services/authService";
+import { secureGet, secureSet } from "../../services/secureStorage";
 import { useAuth } from "../../hooks/useAuth";
 import TwoFactorSetup from "../auth/TwoFactorSetup";
 import PasswordField from "../../components/ui/PasswordField";
@@ -55,12 +56,12 @@ const ProfileWizard = () => {
     authService.getProfile().then((fresh) => {
       setFullName(fresh.fullName || "");
       setOffice(fresh.office || "");
-      // Keep localStorage in sync
-      const stored = localStorage.getItem("auth_user");
+      // Keep secure storage in sync
+      const stored = secureGet("auth_user");
       if (stored) {
         try {
           const parsed = JSON.parse(stored);
-          localStorage.setItem("auth_user", JSON.stringify({ ...parsed, fullName: fresh.fullName, office: fresh.office }));
+          secureSet("auth_user", JSON.stringify({ ...parsed, fullName: fresh.fullName, office: fresh.office }));
           window.dispatchEvent(new Event("auth-user-updated"));
         } catch { /* ignore */ }
       }
@@ -85,12 +86,12 @@ const ProfileWizard = () => {
   };
 
   const updateCachedUser = (updates: Partial<ReturnType<typeof JSON.parse>>) => {
-    const stored = localStorage.getItem("auth_user");
+    const stored = secureGet("auth_user");
     if (!stored) return;
     try {
       const parsed = JSON.parse(stored);
       const merged = { ...parsed, ...updates };
-      localStorage.setItem("auth_user", JSON.stringify(merged));
+      secureSet("auth_user", JSON.stringify(merged));
       notifyAuthUserUpdated();
     } catch {
       // ignore malformed cached auth_user
@@ -106,7 +107,7 @@ const ProfileWizard = () => {
     setLoading(true);
     try {
       const updated = await authService.updateProfile({ fullName: fullName.trim(), office });
-      localStorage.setItem("auth_user", JSON.stringify(updated));
+      await secureSet("auth_user", JSON.stringify(updated));
       notifyAuthUserUpdated();
       navigate("/");
     } catch {
