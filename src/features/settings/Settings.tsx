@@ -618,7 +618,7 @@ const Settings = () => {
   const [featureSearch, setFeatureSearch] = useState("");
   const [featureFilterProduct, setFeatureFilterProduct] = useState<string>("all");
   const [featureFilterInventory, setFeatureFilterInventory] = useState<"all" | "inventory" | "non-inventory">("all");
-  type FeatureSortKey = "name" | "valueType" | "isInventory" | "brand" | "supplier" | "manufacturerPartNumber" | "unitPrice";
+  type FeatureSortKey = "name" | "valueType" | "isInventory" | "brand" | "supplier" | "manufacturerPartNumber" | "alternativePartNumber" | "unitPrice";
   const [featureSort, setFeatureSort] = useState<{ key: FeatureSortKey; dir: "asc" | "desc" }>({ key: "name", dir: "asc" });
 
   function toggleFeatureSort(key: FeatureSortKey) {
@@ -2348,11 +2348,11 @@ const Settings = () => {
                 <colgroup>
                   <col style={{ minWidth: 160 }} />
                   <col style={{ minWidth: 90 }} />
+                  <col style={{ minWidth: 130 }} />
                   <col style={{ minWidth: 110 }} />
                   <col style={{ minWidth: 130 }} />
                   <col style={{ minWidth: 140 }} />
                   <col style={{ minWidth: 150 }} />
-                  <col style={{ minWidth: 110 }} />
                   <col style={{ minWidth: 220 }} />
                   <col style={{ minWidth: 100 }} />
                   <col style={{ minWidth: 180 }} />
@@ -2362,11 +2362,11 @@ const Settings = () => {
                     {([
                       { key: "name",                   label: "Name" },
                       { key: "valueType",              label: "Type" },
+                      { key: "alternativePartNumber",  label: "Business Part #" },
                       { key: "isInventory",            label: "Inventory" },
                       { key: "brand",                  label: "Brand" },
                       { key: "supplier",               label: "Supplier" },
                       { key: "manufacturerPartNumber", label: "Mfr. Part #" },
-                      { key: "unitPrice",              label: "Price / Unit" },
                     ] as { key: FeatureSortKey; label: string }[]).map(({ key, label }) => (
                       <TableCell key={key} onClick={() => toggleFeatureSort(key)}
                         sx={{ cursor: "pointer", userSelect: "none", "&:hover": { bgcolor: "action.hover" } }}>
@@ -2419,6 +2419,7 @@ const Settings = () => {
                             </Stack>
                           </TableCell>
                           <TableCell><Chip size="small" label={f.valueType} variant="outlined" /></TableCell>
+                          <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.alternativePartNumber || "—"}</Typography></TableCell>
                           <TableCell>
                             <Chip size="small"
                               label={f.isInventory ? "Inventory" : "Non-inventory"}
@@ -2429,11 +2430,6 @@ const Settings = () => {
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.brand || "—"}</Typography></TableCell>
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.supplier || "—"}</Typography></TableCell>
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.manufacturerPartNumber || "—"}</Typography></TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {f.unitPrice != null ? `$${Number(f.unitPrice).toFixed(2)}` : "—"}
-                            </Typography>
-                          </TableCell>
                           <TableCell><Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-word" }}>{f.description || "—"}</Typography></TableCell>
                           <TableCell>
                             {f.linkedProducts && f.linkedProducts.length > 0
