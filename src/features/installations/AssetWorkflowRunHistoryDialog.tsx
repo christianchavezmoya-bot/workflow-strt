@@ -317,6 +317,7 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
                 rows={2}
                 label="Resolution note"
                 placeholder="Describe how this was resolved or add context…"
+                InputLabelProps={{ shrink: true }}
                 value={pendingNotes[issue.id] ?? ""}
                 onChange={(e) => setPendingNotes((prev) => ({ ...prev, [issue.id]: e.target.value }))}
               />

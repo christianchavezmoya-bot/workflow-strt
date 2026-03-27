@@ -236,6 +236,7 @@ export default function BomCommitPage() {
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
             placeholder="e.g. Security Upgrade — Brisbane Office"
+            InputLabelProps={{ shrink: true }}
           />
           <Stack direction="row" spacing={1.5}>
             <Autocomplete

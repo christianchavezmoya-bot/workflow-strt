@@ -3236,6 +3236,7 @@ const Settings = () => {
               value={productForm.name}
               onChange={(e) => setProductForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. AIM-100 Camera, NVR-4000"
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Description (optional)"
@@ -3629,6 +3630,7 @@ const Settings = () => {
               value={divisionForm.name}
               onChange={(e) => setDivisionForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. Strata AI, Strata Connect"
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Description (optional)"
@@ -3818,6 +3820,7 @@ const Settings = () => {
                 value={featureForm.name}
                 onChange={(e) => setFeatureForm((p) => ({ ...p, name: e.target.value }))}
                 placeholder="e.g. IP Camera, Room, NVR"
+                InputLabelProps={{ shrink: true }}
               />
               <TextField
                 label="Description (optional)"
@@ -3971,6 +3974,7 @@ const Settings = () => {
                   value={featureForm.brand}
                   onChange={(e) => setFeatureForm((p) => ({ ...p, brand: e.target.value }))}
                   placeholder="e.g. Hikvision"
+                  InputLabelProps={{ shrink: true }}
                 />
                 <TextField
                   label="Supplier / Manufacturer"
@@ -3979,6 +3983,7 @@ const Settings = () => {
                   value={featureForm.supplier}
                   onChange={(e) => setFeatureForm((p) => ({ ...p, supplier: e.target.value }))}
                   placeholder="e.g. Hikvision Australia"
+                  InputLabelProps={{ shrink: true }}
                 />
               </Stack>
               <Stack direction="row" spacing={1}>
@@ -3989,6 +3994,7 @@ const Settings = () => {
                   value={featureForm.alternativePartNumber}
                   onChange={(e) => setFeatureForm((p) => ({ ...p, alternativePartNumber: e.target.value }))}
                   placeholder="e.g. DS-2CD2143G2-I"
+                  InputLabelProps={{ shrink: true }}
                 />
                 <TextField
                   label="Manufacturer Part Number"
@@ -3997,6 +4003,7 @@ const Settings = () => {
                   value={featureForm.manufacturerPartNumber}
                   onChange={(e) => setFeatureForm((p) => ({ ...p, manufacturerPartNumber: e.target.value }))}
                   placeholder="e.g. MFR-DS-2143G2"
+                  InputLabelProps={{ shrink: true }}
                 />
                 <TextField
                   label="Price / Unit ($)"
@@ -4007,6 +4014,7 @@ const Settings = () => {
                   value={featureForm.unitPrice}
                   onChange={(e) => setFeatureForm((p) => ({ ...p, unitPrice: e.target.value }))}
                   placeholder="e.g. 185.00"
+                  InputLabelProps={{ shrink: true }}
                 />
               </Stack>
               <TextField
@@ -4016,6 +4024,7 @@ const Settings = () => {
                 value={featureForm.productLink}
                 onChange={(e) => setFeatureForm((p) => ({ ...p, productLink: e.target.value }))}
                 placeholder="https://..."
+                InputLabelProps={{ shrink: true }}
               />
               {featureError && <Alert severity="error" sx={{ fontSize: 12 }}>{featureError}</Alert>}
             </Stack>
@@ -4052,6 +4061,7 @@ const Settings = () => {
               value={depForm.name}
               onChange={(e) => setDepForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. Camera Body, Cat6 Cable, Bracket"
+              InputLabelProps={{ shrink: true }}
             />
             <Stack direction="row" alignItems="center" spacing={1}>
               <Typography variant="body2">Type:</Typography>
@@ -4087,6 +4097,7 @@ const Settings = () => {
                 value={depForm.unit}
                 onChange={(e) => setDepForm((p) => ({ ...p, unit: e.target.value }))}
                 placeholder="ea, m, kg"
+                InputLabelProps={{ shrink: true }}
               />
               {!depForm.isInventory && (
                 <TextField
@@ -4195,6 +4206,7 @@ const Settings = () => {
               value={wfTypeForm.name}
               onChange={(e) => setWfTypeForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. Installation, Inspection"
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Icon (emoji or code)"
@@ -4203,6 +4215,7 @@ const Settings = () => {
               value={wfTypeForm.icon}
               onChange={(e) => setWfTypeForm((p) => ({ ...p, icon: e.target.value }))}
               placeholder="e.g. 🔧 or wrench"
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Sort Order"

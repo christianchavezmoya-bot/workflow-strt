@@ -3075,6 +3075,7 @@ const AssetInstallationPage = () => {
               value={issueForm.description}
               onChange={(e) => setIssueForm((p) => ({ ...p, description: e.target.value }))}
               placeholder="Describe the issue…"
+              InputLabelProps={{ shrink: true }}
             />
             <FormControl size="small" fullWidth>
               <InputLabel shrink>Severity</InputLabel>

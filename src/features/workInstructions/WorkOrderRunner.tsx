@@ -1070,6 +1070,7 @@ export default function WorkOrderRunner({
               placeholder="e.g. serial number, job ID, batch…"
               value={jobReference}
               onChange={(e) => setJobReference(e.target.value)}
+              InputLabelProps={{ shrink: true }}
             />
             {startError && <Alert severity="error" sx={{ fontSize: 12 }}>{startError}</Alert>}
           </Stack>
@@ -1318,6 +1319,7 @@ export default function WorkOrderRunner({
                       fullWidth
                       label="Reason"
                       placeholder="Waiting for parts / access / permit…"
+                      InputLabelProps={{ shrink: true }}
                       value={downtimeReason}
                       onChange={(e) => setDowntimeReason(e.target.value)}
                       onKeyDown={(e) => {
@@ -1685,6 +1687,7 @@ export default function WorkOrderRunner({
                 rows={2}
                 label={flagIssueType === "scope-deviation" ? "Describe the scope variation" : "Describe/Add issue here"}
                 placeholder={flagIssueType === "scope-deviation" ? "e.g. Additional conduit run required due to obstructed original route…" : "Describe what you observed…"}
+                InputLabelProps={{ shrink: true }}
                 value={flagDescription}
                 onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
               />
@@ -1703,6 +1706,7 @@ export default function WorkOrderRunner({
                     size="small"
                     label="Cost impact (optional)"
                     placeholder="e.g. £250 materials"
+                    InputLabelProps={{ shrink: true }}
                     value={flagCostImpact}
                     onChange={(e) => setFlagCostImpact(e.target.value)}
                     sx={{ flex: 1 }}
@@ -2122,6 +2126,7 @@ export default function WorkOrderRunner({
                               size="small"
                               fullWidth
                               placeholder={`Enter ${fieldName}`}
+                              InputLabelProps={{ shrink: true }}
                               value={fields[fieldName] ?? ""}
                               onChange={(e) => setBomActual((prev) => prev.map((a) => {
                                 if (a.bomItemId !== item.id) return a;
@@ -2449,6 +2454,7 @@ export default function WorkOrderRunner({
               value={modifyQtyReason}
               onChange={(e) => setModifyQtyReason(e.target.value)}
               placeholder="e.g. Only 3 cameras were delivered on site…"
+              InputLabelProps={{ shrink: true }}
               multiline
               rows={2}
               fullWidth

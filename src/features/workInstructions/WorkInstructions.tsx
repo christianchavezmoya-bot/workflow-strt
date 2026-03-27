@@ -1069,6 +1069,7 @@ const WorkInstructions = () => {
               required
               autoFocus
               placeholder="e.g. AIM-100 Front Camera Install"
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Configuration Type"
@@ -1077,6 +1078,7 @@ const WorkInstructions = () => {
               fullWidth
               placeholder="e.g. Installation, Maintenance, Inspection"
               helperText="Used to identify this instruction type when assigning to an asset"
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Description"
@@ -1086,6 +1088,7 @@ const WorkInstructions = () => {
               multiline
               rows={2}
               placeholder="Optional description or notes"
+              InputLabelProps={{ shrink: true }}
             />
             {activeFeatures.length > 0 && (
               <Stack spacing={1}>

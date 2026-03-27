@@ -311,6 +311,7 @@ export default function TimeEntriesEditorDialog({ open, run, readOnly = false, o
                 value={form.reason}
                 onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
                 placeholder={form.category === "downtime" ? "Waiting for parts..." : ""}
+                InputLabelProps={{ shrink: true }}
                 sx={{ flex: 1, minWidth: 180 }}
               />
               <TextField

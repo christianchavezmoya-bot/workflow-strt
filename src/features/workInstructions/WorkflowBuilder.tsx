@@ -1194,6 +1194,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               fullWidth
               placeholder="e.g. Installation, Maintenance, Inspection"
               helperText="Used to identify this instruction type when assigning to an asset"
+              InputLabelProps={{ shrink: true }}
             />
             <Box>
               <Typography variant="body2" color="text.secondary">
@@ -1213,6 +1214,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               multiline
               rows={2}
               placeholder="Optional description or notes"
+              InputLabelProps={{ shrink: true }}
             />
           </Stack>
         </DialogContent>
@@ -1496,6 +1498,7 @@ function OptionsField({ options, onCommit }: { options: string[]; onCommit: (opt
       onChange={(e) => setRaw(e.target.value)}
       onBlur={() => onCommit(raw.split(",").map((x) => x.trim()).filter(Boolean))}
       placeholder="Option A, Option B, Option C"
+      InputLabelProps={{ shrink: true }}
     />
   );
 }
@@ -2370,6 +2373,7 @@ function CaptureFieldsSection({
                       });
                     }}
                     placeholder="e.g. Serial Number"
+                    InputLabelProps={{ shrink: true }}
                   />
                   <TextField
                     label="Key (auto)"
@@ -2379,6 +2383,7 @@ function CaptureFieldsSection({
                     onChange={(e) => onUpdateCaptureField(field.id, { key: e.target.value.replace(/[^a-zA-Z0-9_]/g, "") })}
                     placeholder="serialNumber"
                     helperText="Auto-generated · edit to override"
+                    InputLabelProps={{ shrink: true }}
                   />
                 </Stack>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
@@ -2401,6 +2406,7 @@ function CaptureFieldsSection({
                     value={field.unit || ""}
                     onChange={(e) => onUpdateCaptureField(field.id, { unit: e.target.value || undefined })}
                     placeholder="dBm, V, °C"
+                    InputLabelProps={{ shrink: true }}
                   />
                   <TextField
                     label="Hint (optional)"
@@ -2409,6 +2415,7 @@ function CaptureFieldsSection({
                     value={field.hint || ""}
                     onChange={(e) => onUpdateCaptureField(field.id, { hint: e.target.value || undefined })}
                     placeholder="Placeholder hint for the technician"
+                    InputLabelProps={{ shrink: true }}
                   />
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
                     <Switch
@@ -2768,6 +2775,7 @@ function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, produ
                         value={item.description}
                         onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, description: e.target.value } : i))}
                         placeholder="e.g. IP Camera, BNC Cable"
+                        InputLabelProps={{ shrink: true }}
                       />
                       <Stack direction="row" spacing={1}>
                         <TextField
@@ -2778,6 +2786,7 @@ function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, produ
                           value={item.partNumber || ""}
                           onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, partNumber: e.target.value } : i))}
                           placeholder="SKU / part number"
+                          InputLabelProps={{ shrink: true }}
                         />
                         <TextField
                           label="Qty"
@@ -2796,6 +2805,7 @@ function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, produ
                           value={item.unitOfMeasure}
                           onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, unitOfMeasure: e.target.value } : i))}
                           placeholder="ea"
+                          InputLabelProps={{ shrink: true }}
                         />
                       </Stack>
                       <Stack direction="row" alignItems="center" spacing={1}>

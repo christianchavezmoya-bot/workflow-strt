@@ -1052,7 +1052,8 @@ export default function DocumentsPage() {
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField label="Name" size="small" fullWidth value={editName} onChange={(e) => setEditName(e.target.value)} />
             <TextField label="Linked To" size="small" fullWidth value={editLinkedTo}
-              onChange={(e) => setEditLinkedTo(e.target.value)} placeholder="Asset tag, product name, or leave blank" />
+              onChange={(e) => setEditLinkedTo(e.target.value)} placeholder="Asset tag, product name, or leave blank"
+              InputLabelProps={{ shrink: true }} />
             <TextField label="Notes / Description" size="small" fullWidth multiline rows={3} value={editNotes}
               onChange={(e) => setEditNotes(e.target.value)} />
 

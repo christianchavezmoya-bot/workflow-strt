@@ -195,6 +195,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                       value={rule.description}
                       onChange={(e) => updateRule(rule.id, { description: e.target.value })}
                       placeholder="e.g. Classify modules as assets"
+                      InputLabelProps={{ shrink: true }}
                     />
                     <Tooltip title="Remove rule">
                       <IconButton
@@ -258,6 +259,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                               updateCondition(rule.id, idx, { value: e.target.value })
                             }
                             placeholder="e.g. MOD, Cable, ..."
+                            InputLabelProps={{ shrink: true }}
                           />
                         )}
 
@@ -355,6 +357,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
             size="small"
             label="Save as profile"
             placeholder="Profile name…"
+            InputLabelProps={{ shrink: true }}
             value={profileName}
             onChange={(e) => setProfileName(e.target.value)}
             sx={{ flex: 1 }}
