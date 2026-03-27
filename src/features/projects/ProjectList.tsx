@@ -536,13 +536,20 @@ const ProjectList = () => {
           padding: 2,
           paddingBottom: 0,
           marginBottom: '80px',
-          minHeight: 'calc(100vh - 280px)',
           display: 'flex',
           flexDirection: 'column'
         }}
       >
-        <Box sx={{ overflowX: 'auto', width: '100%', flex: 1 }}>
-          <Table sx={{ minWidth: 2000 }} size="small">
+        <Box sx={{
+          overflowX: 'auto',
+          overflowY: 'auto',
+          width: '100%',
+          flex: 1,
+          maxHeight: 'calc(100vh - 280px)',
+          // Scrollbar always visible at bottom of the box — not the page
+          scrollbarWidth: 'thin',
+        }}>
+          <Table sx={{ minWidth: 2000 }} size="small" stickyHeader>
           <TableHead>
             <TableRow>
               <TableCell sx={{ width: 40, padding: '8px 12px' }} />
