@@ -544,10 +544,7 @@ const ProjectList = () => {
           overflowX: 'auto',
           overflowY: 'auto',
           width: '100%',
-          flex: 1,
           maxHeight: 'calc(100vh - 280px)',
-          // Scrollbar always visible at bottom of the box — not the page
-          scrollbarWidth: 'thin',
         }}>
           <Table sx={{ minWidth: 2000 }} size="small" stickyHeader>
           <TableHead>
