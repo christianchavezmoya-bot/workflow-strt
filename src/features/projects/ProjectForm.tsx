@@ -963,6 +963,7 @@ const ProjectForm = () => {
                   fullWidth
                   select
                   SelectProps={{ native: true }}
+                  InputLabelProps={{ shrink: true }}
                   error={!!errors.siteId}
                   helperText={
                     errors.siteId?.message ||
@@ -1045,6 +1046,7 @@ const ProjectForm = () => {
                   fullWidth
                   select
                   SelectProps={{ native: true }}
+                  InputLabelProps={{ shrink: true }}
                   error={!!errors.office}
                   helperText={
                     errors.office?.message || "Office city responsible for this project (sets Country/State)."
@@ -1095,6 +1097,7 @@ const ProjectForm = () => {
                     fullWidth
                     select
                     SelectProps={{ native: true }}
+                    InputLabelProps={{ shrink: true }}
                     error={!!errors.projectManager}
                     helperText={
                       errors.projectManager?.message ||
@@ -1200,6 +1203,7 @@ const ProjectForm = () => {
                   fullWidth
                   select
                   SelectProps={{ native: true }}
+                  InputLabelProps={{ shrink: true }}
                   error={!!errors.status}
                   helperText={errors.status?.message || "Current workflow status for this project."}
                 >
@@ -1300,6 +1304,7 @@ const ProjectForm = () => {
             fullWidth
             select
             SelectProps={{ native: true }}
+            InputLabelProps={{ shrink: true }}
             value={value}
             error={!!dynamicError}
             helperText={dynamicError || dynamicHelp.replace("custom field.", "custom field (select an existing site).")}
