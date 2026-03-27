@@ -661,7 +661,7 @@ const Settings = () => {
   }, [features, featureSearch, featureFilterProduct, featureFilterInventory, featureSort]);
 
   // Bulk feature import state
-  interface ImportRow { name: string; description: string; valueType: string; supplier: string; partNumber: string; manufacturerPartNumber: string; unitPrice: string; brand: string; }
+  interface ImportRow { name: string; description: string; valueType: string; supplier: string; partNumber: string; manufacturerPartNumber: string; unitPrice: string; brand: string; isInventory?: boolean; }
   const [featureImportDialog, setFeatureImportDialog] = useState(false);
   const [featureImportRows, setFeatureImportRows] = useState<ImportRow[]>([]);
   const [featureImportProduct, setFeatureImportProduct] = useState<string>("");
@@ -727,16 +727,20 @@ const Settings = () => {
         const wb = XLSX.read(data, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
-        const parsed: ImportRow[] = rows.map((r) => ({
-          name: String(r["name"] || r["Name"] || "").trim(),
-          description: String(r["description"] || r["Description"] || "").trim(),
-          valueType: String(r["valueType"] || r["type"] || r["Type"] || "text").trim() || "text",
-          supplier: String(r["supplier"] || r["Supplier"] || "").trim(),
-          partNumber: String(r["partNumber"] || r["part_number"] || r["PartNumber"] || r["part#"] || "").trim(),
-          manufacturerPartNumber: String(r["manufacturerPartNumber"] || r["manufacturer_part_number"] || r["ManufacturerPartNumber"] || r["mfr_part"] || "").trim(),
-          unitPrice: String(r["unitPrice"] || r["unit_price"] || r["UnitPrice"] || r["price"] || "").trim(),
-          brand: String(r["brand"] || r["Brand"] || "").trim(),
-        })).filter((r) => r.name);
+        const parsed: ImportRow[] = rows.map((r) => {
+          const invRaw = String(r["isInventory"] || r["is_inventory"] || r["inventory"] || r["Inventory"] || "").trim().toLowerCase();
+          return {
+            name: String(r["name"] || r["Name"] || "").trim(),
+            description: String(r["description"] || r["Description"] || "").trim(),
+            valueType: String(r["valueType"] || r["type"] || r["Type"] || "text").trim() || "text",
+            supplier: String(r["supplier"] || r["Supplier"] || "").trim(),
+            partNumber: String(r["partNumber"] || r["part_number"] || r["PartNumber"] || r["part#"] || "").trim(),
+            manufacturerPartNumber: String(r["manufacturerPartNumber"] || r["manufacturer_part_number"] || r["ManufacturerPartNumber"] || r["mfr_part"] || "").trim(),
+            unitPrice: String(r["unitPrice"] || r["unit_price"] || r["UnitPrice"] || r["price"] || "").trim(),
+            brand: String(r["brand"] || r["Brand"] || "").trim(),
+            isInventory: invRaw === "true" || invRaw === "yes" || invRaw === "1",
+          };
+        }).filter((r) => r.name);
         if (!parsed.length) { setFeatureImportError("No valid rows found. Make sure the file has a 'name' column."); return; }
         setFeatureImportRows(parsed);
       } catch {
@@ -761,6 +765,7 @@ const Settings = () => {
           name: row.name,
           description: row.description || undefined,
           valueType: row.valueType,
+          isInventory: row.isInventory ?? false,
           supplier: row.supplier || undefined,
           alternativePartNumber: row.partNumber || undefined,
           manufacturerPartNumber: row.manufacturerPartNumber || undefined,
@@ -793,9 +798,12 @@ const Settings = () => {
     }
   }
 
-  // Load features whenever Features tab becomes active.
+  // Load features (and products for the filter dropdown) whenever Features tab becomes active.
   useEffect(() => {
-    if (tab === 5) loadFeatures();
+    if (tab === 5) {
+      loadFeatures();
+      if (products.length === 0) loadProducts();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
