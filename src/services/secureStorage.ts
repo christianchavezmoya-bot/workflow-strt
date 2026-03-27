@@ -44,6 +44,11 @@ async function getPlugin() {
   }
 }
 
+// Wrap a promise with a timeout — resolves to fallback value on timeout
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([p, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+}
+
 /**
  * Call once before the app renders (in main.tsx).
  * Loads every secure key from Keychain into the in-memory cache.
@@ -59,18 +64,23 @@ export async function initSecureStorage(): Promise<void> {
     for (const key of SECURE_KEYS) {
       if (plugin) {
         try {
-          const { value } = await plugin.get({ key });
-          cache.set(key, value ?? null);
-        } catch {
-          // Key not in Keychain yet — check localStorage for migration
-          const legacy = localStorage.getItem(key);
-          if (legacy) {
-            cache.set(key, legacy);
-            try { await plugin.set({ key, value: legacy }); } catch { /* non-fatal */ }
-            localStorage.removeItem(key); // Remove from insecure storage
+          // 800 ms timeout per key — if Keychain hangs, fall back to localStorage
+          const result = await withTimeout(plugin.get({ key }), 800, { value: null as string | null });
+          if (result.value !== null) {
+            cache.set(key, result.value);
           } else {
-            cache.set(key, null);
+            // Not in Keychain yet — check localStorage for migration
+            const legacy = localStorage.getItem(key);
+            if (legacy) {
+              cache.set(key, legacy);
+              try { await withTimeout(plugin.set({ key, value: legacy }), 800, undefined); } catch { /* non-fatal */ }
+              localStorage.removeItem(key);
+            } else {
+              cache.set(key, null);
+            }
           }
+        } catch {
+          cache.set(key, localStorage.getItem(key));
         }
       } else {
         // Web fallback: mirror localStorage
