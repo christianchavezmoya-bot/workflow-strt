@@ -14,6 +14,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authService } from "../../services/authService";
 import { secureGet, secureSet } from "../../services/secureStorage";
+import { recordOnlineLogin } from "../../services/biometricAuth";
 import strataLogo from "../../assets/strata_transparent.png";
 
 // Must be outside Login so it doesn't remount on every keystroke
@@ -65,6 +66,7 @@ const Login = () => {
     if (result.trustedDeviceToken) {
       await secureSet("trusted_device_token", result.trustedDeviceToken);
     }
+    await recordOnlineLogin(); // stamp last online login for offline grace period
     navigate(result.isFirstLogin || result.passwordExpired ? "/profile" : "/");
   };
 
