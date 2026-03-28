@@ -33,9 +33,12 @@ import { assetWorkflowRunService } from "../../services/assetWorkflowRunService"
 
 export type MissingStep = {
   stepId: string;
+  stepOrder: number;
   stepTitle: string;
+  stepDescription?: string;
   inputId: string;
   inputLabel: string;
+  inputType: "photo" | "video";
   captured: number;
 };
 
@@ -111,20 +114,27 @@ function derivePhotoSteps(
 ): { allSteps: MissingStep[]; missingSteps: MissingStep[] } {
   try {
     const snapshot = JSON.parse(workflowSnapshotJson ?? "{}");
-    const steps: { id: string; title?: string; inputs?: { id: string; label?: string; type?: string }[] }[] =
-      snapshot.steps ?? [];
+    const steps: {
+      id: string; order?: number; title?: string; description?: string;
+      inputs?: { id: string; label?: string; type?: string }[];
+    }[] = snapshot.steps ?? [];
     const values: Record<string, Record<string, string>> = JSON.parse(stepResultsJson ?? "{}");
 
     const allSteps: MissingStep[] = [];
+    let stepIndex = 0;
     for (const step of steps) {
+      stepIndex++;
       for (const inp of step.inputs ?? []) {
         if (inp.type === "photo" || inp.type === "video") {
           const captured = parseCaptures(values[step.id]?.[inp.id]).length;
           allSteps.push({
             stepId: step.id,
+            stepOrder: step.order ?? stepIndex,
             stepTitle: step.title ?? step.id,
+            stepDescription: step.description,
             inputId: inp.id,
             inputLabel: inp.label ?? (inp.type === "video" ? "Video" : "Photo"),
+            inputType: (inp.type as "photo" | "video"),
             captured,
           });
         }
@@ -379,7 +389,7 @@ export default function PhotoUploadDialog({
                     RUN PHOTO STATUS — {flag.technicianName} · {new Date(flag.completedAt).toLocaleDateString()}
                   </Typography>
                 </Stack>
-                {allPhotoSteps.map(({ stepId, stepTitle, inputId, inputLabel, captured }) => (
+                {allPhotoSteps.map(({ stepId, stepOrder, stepTitle, inputId, inputLabel, captured }) => (
                   <Card
                     key={`${stepId}-${inputId}`}
                     variant="outlined"
@@ -387,6 +397,7 @@ export default function PhotoUploadDialog({
                   >
                     <CardContent sx={{ py: 1, "&:last-child": { pb: 1 } }}>
                       <Stack direction="row" alignItems="center" spacing={1}>
+                        <Chip label={`Step ${stepOrder}`} size="small" variant="outlined" sx={{ fontSize: "0.65rem", height: 18, borderRadius: 1, flexShrink: 0 }} />
                         <Box sx={{ flex: 1 }}>
                           <Typography variant="body2" fontWeight={600}>{stepTitle}</Typography>
                           <Typography variant="caption" color="text.secondary">{inputLabel}</Typography>
@@ -422,28 +433,45 @@ export default function PhotoUploadDialog({
             )}
 
             {/* Installer mode: show only missing steps with upload */}
-            {!isPM && effectiveMissingSteps.map(({ stepId, stepTitle, inputId, inputLabel }) => {
+            {!isPM && effectiveMissingSteps.map(({ stepId, stepOrder, stepTitle, stepDescription, inputId, inputLabel, inputType }) => {
               const key = `${stepId}-${inputId}`;
               const currentCount = getCurrentCaptures(stepId, inputId).length;
               const isDone = currentCount > 0;
+              const isVideo = inputType === "video";
+              const mediaLabel = isVideo ? "video" : "photo";
               return (
                 <Card key={key} variant="outlined" sx={{ borderColor: isDone ? "success.main" : "warning.main" }}>
                   <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
-                    <Stack direction="row" alignItems="flex-start" spacing={1}>
+                    {/* Step header */}
+                    <Stack direction="row" alignItems="center" spacing={1} mb={0.5}>
+                      <Chip label={`Step ${stepOrder}`} size="small" variant="outlined" sx={{ fontSize: "0.65rem", height: 18, borderRadius: 1 }} />
+                      <Typography variant="body2" fontWeight={700} sx={{ lineHeight: 1.2 }}>{stepTitle}</Typography>
+                    </Stack>
+
+                    {/* Step description */}
+                    {stepDescription && (
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1, lineHeight: 1.4 }}>
+                        {stepDescription}
+                      </Typography>
+                    )}
+
+                    {/* Input label + status + action */}
+                    <Stack direction="row" alignItems="center" spacing={1} mt={0.5}>
                       <Box sx={{ flex: 1 }}>
-                        <Typography variant="body2" fontWeight={600}>{stepTitle}</Typography>
-                        <Typography variant="caption" color="text.secondary">{inputLabel}</Typography>
-                        <Box mt={0.5}>
+                        <Typography variant="caption" fontWeight={600} color={isDone ? "success.main" : "warning.main"}>
+                          {inputLabel}
+                        </Typography>
+                        <Box mt={0.25}>
                           {isDone ? (
                             <Chip
                               icon={<CheckCircleOutlined />}
-                              label={`${currentCount} photo${currentCount !== 1 ? "s" : ""} added`}
+                              label={`${currentCount} ${mediaLabel}${currentCount !== 1 ? "s" : ""} added`}
                               size="small"
                               color="success"
                               variant="outlined"
                             />
                           ) : (
-                            <Chip label="No photos yet" size="small" color="warning" variant="outlined" />
+                            <Chip label={`No ${mediaLabel}s yet`} size="small" color="warning" variant="outlined" />
                           )}
                         </Box>
                       </Box>
@@ -458,12 +486,13 @@ export default function PhotoUploadDialog({
                           onChange={(e) => handleFilesSelected(stepId, inputId, e.target.files)}
                         />
                         <Button
-                          variant="outlined"
+                          variant="contained"
                           size="small"
                           color={isDone ? "success" : "warning"}
+                          startIcon={<PhotoCameraOutlined sx={{ fontSize: 16 }} />}
                           onClick={() => fileInputRefs.current[key]?.click()}
                         >
-                          {isDone ? "Add More" : "Add Photos"}
+                          {isDone ? `Add more` : `Add ${mediaLabel}`}
                         </Button>
                       </Box>
                     </Stack>
