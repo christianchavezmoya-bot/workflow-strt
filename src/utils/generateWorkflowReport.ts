@@ -488,8 +488,9 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         bodyRows.push(["(No inputs captured)", ""]);
       } else {
         for (const [inputId, val] of entries) {
-          const inputDef = inputDefs.find((i) => i.id === inputId);
-          const label    = inputDef?.label ?? inputId;
+          const inputDef   = inputDefs.find((i) => i.id === inputId);
+          const captureDef = !inputDef ? (step.captureFields ?? []).find((f) => f.id === inputId) : undefined;
+          const label      = inputDef?.label ?? captureDef?.label ?? inputId;
           const isMedia  = inputDef?.type === "photo" || inputDef?.type === "signature" || inputDef?.type === "video";
 
           if (isMedia) {

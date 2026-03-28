@@ -779,7 +779,10 @@ export default function WorkflowRunHistoryDialog({
                                               const inputDef = inputDefs.find(
                                                 (inp) => inp.id === inputId
                                               );
-                                              const label = inputDef?.label ?? inputId;
+                                              const captureDef = !inputDef
+                                                ? (step?.captureFields ?? []).find((f) => f.id === inputId)
+                                                : undefined;
+                                              const label = inputDef?.label ?? captureDef?.label ?? inputId;
 
                                               // Component inputs: decode JSON sub-fields
                                               if (inputDef?.type === "component" && inputDef.subFields?.length && val) {
