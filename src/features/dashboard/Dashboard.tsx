@@ -121,6 +121,7 @@ const Dashboard = () => {
     JSON.parse(localStorage.getItem("installer_photo_reminders") ?? "[]")
   );
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
+  const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
@@ -983,7 +984,7 @@ const Dashboard = () => {
                       )}
                     </Box>
                     <Button size="small" variant="outlined" color="warning" sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
-                      onClick={() => setPhotoUploadTarget(f as MissingMediaFlag)}>
+                      onClick={() => { setPhotoUploadMode("installer"); setPhotoUploadTarget(f as MissingMediaFlag); }}>
                       Upload Photos
                     </Button>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
@@ -1370,6 +1371,15 @@ const Dashboard = () => {
                     <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
                       <Button
                         size="small"
+                        variant="outlined"
+                        color="info"
+                        sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
+                        onClick={() => { setPhotoUploadMode("pm"); setPhotoUploadTarget(f); }}
+                      >
+                        Preview
+                      </Button>
+                      <Button
+                        size="small"
                         variant="text"
                         color="warning"
                         sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
@@ -1478,11 +1488,13 @@ const Dashboard = () => {
         <PhotoUploadDialog
           open={!!photoUploadTarget}
           flag={photoUploadTarget}
+          mode={photoUploadMode}
           currentUserName={user.fullName ?? ""}
           onClose={() => setPhotoUploadTarget(null)}
           onUpdated={() => {
             setPhotoUploadTarget(null);
-            setMissingMediaFlags(JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]"));
+            const raw: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
+            setMissingMediaFlags(raw.map((f) => ({ ...f, missingSteps: f.missingSteps ?? [], totalExpected: f.totalExpected ?? 0, totalCaptured: f.totalCaptured ?? 0 })));
           }}
         />
       )}
