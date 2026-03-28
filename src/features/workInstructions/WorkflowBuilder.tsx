@@ -2246,6 +2246,7 @@ function buildAutoSteps(
         inputs: [
           ...deps.map((dep) => mkCheck(`${dep.name} installed and connected`, feat.id)),
           mkCheck(`${feat.name} ${unit} — Installation complete and verified`),
+          { id: u(), type: "photo", label: `${feat.name} ${unit} — Installation photo`, required: true },
         ],
         captureFields: [],
       });
@@ -2291,6 +2292,7 @@ function buildAutoSteps(
       mkCheck("All installed equipment — Functional test passed"),
       mkCheck("System operates within specified parameters"),
       mkCheck("Test results documented"),
+      { id: u(), type: "photo", label: "Test results / readings photo", required: true },
     ],
     captureFields: [],
   });
@@ -2305,7 +2307,7 @@ function buildAutoSteps(
     stepType: "final-inspection",
     title: "Final Inspection",
     description: "Conduct a comprehensive final inspection of all installed equipment and the surrounding work area. Verify all units are correctly labelled, secured and connected. Confirm the site is clean, all temporary works are removed and the installation meets the required quality standards.",
-    inputs: inspBoxes, captureFields: [],
+    inputs: [...inspBoxes, { id: u(), type: "photo", label: "Final inspection photo", required: true }], captureFields: [],
   });
 
   // 6 — Return to Service
@@ -2319,6 +2321,7 @@ function buildAutoSteps(
       mkCheck("Stakeholders notified of completion"),
       mkCheck("System confirmed operational"),
       mkCheck("Work order ready to close"),
+      { id: u(), type: "photo", label: "Site handover / completion photo", required: true },
     ],
     captureFields: [],
   });
