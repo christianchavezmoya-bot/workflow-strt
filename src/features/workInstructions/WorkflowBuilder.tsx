@@ -3176,7 +3176,8 @@ function MediaLibraryPanel({ workflow, step, templateId, ensureConfigId, onStepC
               setUploading(true);
               try {
                 const updatedConfig = await workflowConfigService.uploadMedia(cfgId, file);
-                onWorkflowUpdate(updatedConfig.workflow as unknown as Workflow);
+                const updatedMedia = (() => { try { return JSON.parse(updatedConfig.mediaJson); } catch { return []; } })();
+                onWorkflowUpdate({ ...workflow, media: updatedMedia });
               } catch {
                 setUploadError("Upload failed.");
               } finally {

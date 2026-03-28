@@ -846,6 +846,7 @@ public record CompleteRunRequest(
 );
 
 public record PatchTimeEntriesRequest(string TimeEntriesJson);
+public record PatchStepResultsRequest(string StepResultsJson, string? AmendedByName, string? AmendedAt);
 public record TrackRunTimeRequest(
     string Action,
     string? Reason,

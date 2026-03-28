@@ -1,5 +1,5 @@
 import {
-  Box, Button, Chip, CircularProgress, Collapse, Divider, Grid,
+  Alert, Box, Button, Chip, CircularProgress, Collapse, Divider, Grid,
   IconButton, LinearProgress, MenuItem, Paper, Select, Stack, Tooltip, Typography,
 } from "@mui/material";
 import {
@@ -24,6 +24,7 @@ import { generateTechnicianReport, type TechnicianReportData } from "../../utils
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
+import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag, type PhotoUpdateNotification } from "./PhotoUploadDialog";
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "—";
@@ -104,11 +105,21 @@ const Dashboard = () => {
     JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]")
   );
 
-  // Missing media flags — runs completed without photos/videos
-  type MissingMediaFlag = { id: string; runId: string; assetId: string; assetTag: string; jobNumber: string; workflowName: string; technicianUserId: string; technicianName: string; completedAt: string };
+  // Missing media flags — runs completed without photos/videos (uses shared type from PhotoUploadDialog)
+  type MissingMediaFlag = PhotoMissingMediaFlag;
+  type PhotoReminder = { id: string; runId: string; assetTag: string; jobNumber: string; workflowName: string; sentAt: string; sentByName: string };
+
   const [missingMediaFlags, setMissingMediaFlags] = useState<MissingMediaFlag[]>(() =>
     JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]")
   );
+  const [photoUpdateNotifications, setPhotoUpdateNotifications] = useState<PhotoUpdateNotification[]>(() =>
+    JSON.parse(localStorage.getItem("pm_photo_update_notifications") ?? "[]")
+  );
+  const [photoReminders, setPhotoReminders] = useState<PhotoReminder[]>(() =>
+    JSON.parse(localStorage.getItem("installer_photo_reminders") ?? "[]")
+  );
+  const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
+  const [reminderSentId, setReminderSentId] = useState<string | null>(null);
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
@@ -163,6 +174,20 @@ const Dashboard = () => {
     const reload = () => setMissingMediaFlags(JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]"));
     window.addEventListener("missing-media-flags-changed", reload);
     return () => window.removeEventListener("missing-media-flags-changed", reload);
+  }, []);
+
+  // Listen for photo update notifications (installer uploaded photos → PM notified)
+  useEffect(() => {
+    const reload = () => setPhotoUpdateNotifications(JSON.parse(localStorage.getItem("pm_photo_update_notifications") ?? "[]"));
+    window.addEventListener("photo-update-notifications-changed", reload);
+    return () => window.removeEventListener("photo-update-notifications-changed", reload);
+  }, []);
+
+  // Listen for photo reminders (PM sent reminder → installer notified)
+  useEffect(() => {
+    const reload = () => setPhotoReminders(JSON.parse(localStorage.getItem("installer_photo_reminders") ?? "[]"));
+    window.addEventListener("installer-photo-reminders-changed", reload);
+    return () => window.removeEventListener("installer-photo-reminders-changed", reload);
   }, []);
 
   // Phase 4 — evidence completeness
@@ -902,6 +927,27 @@ const Dashboard = () => {
             )}
           </Box>
 
+          {/* Photo reminders from PM */}
+          {photoReminders.length > 0 && (
+            <Stack spacing={0.5}>
+              {photoReminders.map((r) => (
+                <Alert
+                  key={r.id}
+                  severity="info"
+                  onClose={() => {
+                    const updated = photoReminders.filter((x) => x.id !== r.id);
+                    localStorage.setItem("installer_photo_reminders", JSON.stringify(updated));
+                    setPhotoReminders(updated);
+                  }}
+                >
+                  <Typography variant="caption" fontWeight={600}>
+                    {r.sentByName} requested photos for: {r.assetTag} — {r.workflowName}
+                  </Typography>
+                </Alert>
+              ))}
+            </Stack>
+          )}
+
           {/* My runs missing photos */}
           {missingMediaFlags.filter(f => f.technicianUserId === user.id).length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
@@ -913,18 +959,28 @@ const Dashboard = () => {
                 <Chip label={missingMediaFlags.filter(f => f.technicianUserId === user.id).length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
               </Stack>
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Your completed runs with no photos or videos — tap to open and add media
+                Your completed runs with no photos or videos — tap to upload missing media
               </Typography>
-              <Stack spacing={0.25}>
+              <Stack spacing={0.5}>
                 {missingMediaFlags.filter(f => f.technicianUserId === user.id).map((f) => (
                   <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
                     <Box sx={{ flex: 1 }}>
-                      <ItemRow
-                        label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
-                        sub={`${f.workflowName} · ${fmtDate(f.completedAt)}`}
-                        onClick={() => navigate("/installations")}
-                      />
+                      <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.3 }}>
+                        {f.jobNumber ? `${f.jobNumber}: ` : ""}{f.assetTag}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {f.workflowName} · {fmtDate(f.completedAt)}
+                      </Typography>
+                      {"totalExpected" in f && (
+                        <Typography variant="caption" color="warning.main" display="block">
+                          {(f as MissingMediaFlag).totalCaptured} of {(f as MissingMediaFlag).totalExpected} photo steps done
+                        </Typography>
+                      )}
                     </Box>
+                    <Button size="small" variant="outlined" color="warning" sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
+                      onClick={() => setPhotoUploadTarget(f as MissingMediaFlag)}>
+                      Upload Photos
+                    </Button>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
                       onClick={() => {
                         const updated = missingMediaFlags.filter((x) => x.id !== f.id);
@@ -1213,6 +1269,51 @@ const Dashboard = () => {
             </Box>
           )}
 
+          {/* Installer Photo Updates — PM notification when installers upload missing photos */}
+          {photoUpdateNotifications.length > 0 && (
+            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                <PhotoCameraOutlined sx={{ fontSize: 18, color: "info.main" }} />
+                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                  Installer Photo Updates
+                </Typography>
+                <Chip label={photoUpdateNotifications.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
+                  onClick={() => {
+                    localStorage.removeItem("pm_photo_update_notifications");
+                    setPhotoUpdateNotifications([]);
+                  }}>
+                  Dismiss all
+                </Button>
+              </Stack>
+              <Stack spacing={0.5} mt={1}>
+                {photoUpdateNotifications.map((n) => (
+                  <Stack key={n.id} direction="row" alignItems="center" spacing={1}>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.3 }}>
+                        {n.installerName} updated photos for {n.assetTag}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {n.workflowName} · {fmtDate(n.updatedAt)}
+                      </Typography>
+                      <Typography variant="caption" display="block" color={n.wasComplete ? "success.main" : "warning.main"}>
+                        {n.wasComplete ? "All photos added ✓" : `${n.stillMissing} step${n.stillMissing !== 1 ? "s" : ""} still missing`}
+                      </Typography>
+                    </Box>
+                    <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
+                      onClick={() => {
+                        const updated = photoUpdateNotifications.filter((x) => x.id !== n.id);
+                        localStorage.setItem("pm_photo_update_notifications", JSON.stringify(updated));
+                        setPhotoUpdateNotifications(updated);
+                      }}>
+                      ✕
+                    </Button>
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
+          )}
+
           {/* Missing media flags — PM sees all runs without photos */}
           {missingMediaFlags.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
@@ -1231,26 +1332,71 @@ const Dashboard = () => {
                 </Button>
               </Stack>
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Workflow runs completed without any photos or videos captured
+                Workflow runs completed without all photos or videos captured
               </Typography>
-              <Stack spacing={0.25}>
+              <Stack spacing={0.75}>
                 {missingMediaFlags.map((f) => (
-                  <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
+                  <Stack key={f.id} direction="row" alignItems="flex-start" spacing={1}>
                     <Box sx={{ flex: 1 }}>
-                      <ItemRow
-                        label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
-                        sub={`${f.workflowName} · ${f.technicianName} · ${fmtDate(f.completedAt)}`}
-                        onClick={() => navigate("/installations")}
-                      />
+                      <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.3 }}>
+                        {f.jobNumber ? `${f.jobNumber}: ` : ""}{f.assetTag}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {f.workflowName} · {f.technicianName} · {fmtDate(f.completedAt)}
+                      </Typography>
+                      {"totalExpected" in f && (
+                        <>
+                          <Typography variant="caption" color="warning.main" display="block">
+                            {(f as MissingMediaFlag).totalCaptured}/{(f as MissingMediaFlag).totalExpected} photo steps captured
+                          </Typography>
+                          {(f as MissingMediaFlag).missingSteps?.slice(0, 3).map((ms) => (
+                            <Typography key={`${ms.stepId}-${ms.inputId}`} variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
+                              · {ms.stepTitle} — {ms.inputLabel}: {ms.captured} captured
+                            </Typography>
+                          ))}
+                          {((f as MissingMediaFlag).missingSteps?.length ?? 0) > 3 && (
+                            <Typography variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
+                              +{(f as MissingMediaFlag).missingSteps.length - 3} more…
+                            </Typography>
+                          )}
+                        </>
+                      )}
                     </Box>
-                    <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                      onClick={() => {
-                        const updated = missingMediaFlags.filter((x) => x.id !== f.id);
-                        localStorage.setItem("pm_missing_media_flags", JSON.stringify(updated));
-                        setMissingMediaFlags(updated);
-                      }}>
-                      ✕
-                    </Button>
+                    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
+                      <Button
+                        size="small"
+                        variant="text"
+                        color="warning"
+                        sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
+                        disabled={reminderSentId === f.id}
+                        onClick={() => {
+                          const reminder = {
+                            id: crypto.randomUUID(),
+                            runId: f.runId,
+                            assetTag: f.assetTag,
+                            jobNumber: f.jobNumber,
+                            workflowName: f.workflowName,
+                            sentAt: new Date().toISOString(),
+                            sentByName: user.fullName ?? "PM",
+                          };
+                          const existing = JSON.parse(localStorage.getItem("installer_photo_reminders") ?? "[]");
+                          localStorage.setItem("installer_photo_reminders", JSON.stringify([...existing, reminder]));
+                          window.dispatchEvent(new Event("installer-photo-reminders-changed"));
+                          setReminderSentId(f.id);
+                          setTimeout(() => setReminderSentId(null), 2000);
+                        }}
+                      >
+                        {reminderSentId === f.id ? "Sent ✓" : "Remind Installer"}
+                      </Button>
+                      <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
+                        onClick={() => {
+                          const updated = missingMediaFlags.filter((x) => x.id !== f.id);
+                          localStorage.setItem("pm_missing_media_flags", JSON.stringify(updated));
+                          setMissingMediaFlags(updated);
+                        }}>
+                        ✕
+                      </Button>
+                    </Stack>
                   </Stack>
                 ))}
               </Stack>
@@ -1320,6 +1466,20 @@ const Dashboard = () => {
             </Grid>
           </Grid>
         </>
+      )}
+
+      {/* Photo upload dialog — installer adds missing photos to a completed run */}
+      {photoUploadTarget && (
+        <PhotoUploadDialog
+          open={!!photoUploadTarget}
+          flag={photoUploadTarget}
+          currentUserName={user.fullName ?? ""}
+          onClose={() => setPhotoUploadTarget(null)}
+          onUpdated={() => {
+            setPhotoUploadTarget(null);
+            setMissingMediaFlags(JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]"));
+          }}
+        />
       )}
 
     </Stack>

@@ -749,15 +749,28 @@ export default function WorkOrderRunner({
         setActiveRun(lockedRun);
 
         // Check if any photo/video steps exist but have no captures — flag for PM + installer
-        const mediaSteps = stepsSorted.flatMap(step =>
+        function countCaptured(stepId: string, inputId: string): number {
+          try {
+            const arr = JSON.parse(values[stepId]?.[inputId] ?? "[]");
+            return Array.isArray(arr) ? arr.length : 0;
+          } catch { return 0; }
+        }
+
+        const allMediaInputs = stepsSorted.flatMap(step =>
           (step.inputs ?? []).filter(inp => inp.type === "photo" || inp.type === "video")
-            .map(inp => ({ stepId: step.id, inputId: inp.id }))
+            .map(inp => ({ stepId: step.id, stepTitle: step.title ?? step.id, inputId: inp.id, inputLabel: inp.label ?? inp.id }))
         );
-        const mediaCaptured = mediaSteps.some(({ stepId, inputId }) => {
-          try { const arr = JSON.parse(values[stepId]?.[inputId] ?? "[]"); return Array.isArray(arr) && arr.length > 0; }
-          catch { return false; }
-        });
-        if (mediaSteps.length > 0 && !mediaCaptured) {
+
+        const totalExpected = allMediaInputs.length;
+        const capturedCounts = allMediaInputs.map(({ stepId, inputId }) => countCaptured(stepId, inputId));
+        const totalCaptured = capturedCounts.filter(c => c > 0).length;
+
+        if (totalExpected > 0 && totalCaptured < totalExpected) {
+          const missingSteps = allMediaInputs
+            .map((inp, i) => ({ ...inp, captured: capturedCounts[i] }))
+            .filter(inp => inp.captured === 0)
+            .map(({ stepId, stepTitle, inputId, inputLabel, captured }) => ({ stepId, stepTitle, inputId, inputLabel, captured }));
+
           const flag = {
             id: crypto.randomUUID(),
             runId: activeRunId,
@@ -768,9 +781,14 @@ export default function WorkOrderRunner({
             technicianUserId: currentUserId ?? "",
             technicianName: currentUserName ?? "",
             completedAt: new Date().toISOString(),
+            missingSteps,
+            totalExpected,
+            totalCaptured,
           };
           const existing = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
-          localStorage.setItem("pm_missing_media_flags", JSON.stringify([...existing, flag]));
+          // Deduplicate by runId — remove any prior flag for this run then push new one
+          const deduped = existing.filter((e: { runId: string }) => e.runId !== activeRunId);
+          localStorage.setItem("pm_missing_media_flags", JSON.stringify([...deduped, flag]));
           window.dispatchEvent(new Event("missing-media-flags-changed"));
         }
       }
