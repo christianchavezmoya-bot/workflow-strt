@@ -95,11 +95,19 @@ async function readFilesAsBase64(files: FileList): Promise<string[]> {
 
 export default function PhotoUploadDialog({
   open,
-  flag,
+  flag: rawFlag,
   currentUserName,
   onClose,
   onUpdated,
 }: PhotoUploadDialogProps) {
+  // Normalize for backward-compat: old flags written before missingSteps field existed
+  const flag: MissingMediaFlag = {
+    ...rawFlag,
+    missingSteps: rawFlag.missingSteps ?? [],
+    totalExpected: rawFlag.totalExpected ?? 0,
+    totalCaptured: rawFlag.totalCaptured ?? 0,
+  };
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

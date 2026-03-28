@@ -109,9 +109,11 @@ const Dashboard = () => {
   type MissingMediaFlag = PhotoMissingMediaFlag;
   type PhotoReminder = { id: string; runId: string; assetTag: string; jobNumber: string; workflowName: string; sentAt: string; sentByName: string };
 
-  const [missingMediaFlags, setMissingMediaFlags] = useState<MissingMediaFlag[]>(() =>
-    JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]")
-  );
+  const [missingMediaFlags, setMissingMediaFlags] = useState<MissingMediaFlag[]>(() => {
+    const raw: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
+    // Normalize old-format flags that predate missingSteps field
+    return raw.map((f) => ({ ...f, missingSteps: f.missingSteps ?? [], totalExpected: f.totalExpected ?? 0, totalCaptured: f.totalCaptured ?? 0 }));
+  });
   const [photoUpdateNotifications, setPhotoUpdateNotifications] = useState<PhotoUpdateNotification[]>(() =>
     JSON.parse(localStorage.getItem("pm_photo_update_notifications") ?? "[]")
   );
@@ -171,7 +173,10 @@ const Dashboard = () => {
 
   // Listen for missing-media flags (all users see their own; PM sees all)
   useEffect(() => {
-    const reload = () => setMissingMediaFlags(JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]"));
+    const reload = () => {
+      const raw: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
+      setMissingMediaFlags(raw.map((f) => ({ ...f, missingSteps: f.missingSteps ?? [], totalExpected: f.totalExpected ?? 0, totalCaptured: f.totalCaptured ?? 0 })));
+    };
     window.addEventListener("missing-media-flags-changed", reload);
     return () => window.removeEventListener("missing-media-flags-changed", reload);
   }, []);
@@ -1356,7 +1361,7 @@ const Dashboard = () => {
                           ))}
                           {((f as MissingMediaFlag).missingSteps?.length ?? 0) > 3 && (
                             <Typography variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
-                              +{(f as MissingMediaFlag).missingSteps.length - 3} more…
+                              +{((f as MissingMediaFlag).missingSteps?.length ?? 0) - 3} more…
                             </Typography>
                           )}
                         </>
