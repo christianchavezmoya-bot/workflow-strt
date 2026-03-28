@@ -291,7 +291,7 @@ public class WorkflowConfigsController : ControllerBase
 
     // DELETE api/workflow-configs/{id}  — only if no runs reference it
     [HttpDelete("{id}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
         var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);

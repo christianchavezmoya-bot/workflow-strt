@@ -1728,7 +1728,10 @@ const AssetInstallationPage = () => {
 
   function actionButton(asset: ProjectAsset) {
     const loading = runnerLoading === asset.id;
-    if (!asset.productConfigId && !asset.workflowTemplateId) {
+    const assignments = assignmentsMap[asset.id];
+    // If assignments have been loaded and are empty, no workflow is assigned
+    const hasAssignments = assignments !== undefined ? assignments.length > 0 : (!!asset.productConfigId || !!asset.workflowTemplateId);
+    if (!hasAssignments) {
       return <Typography variant="caption" color="text.secondary">No workflow</Typography>;
     }
     const progress = pausedProgress[asset.id];

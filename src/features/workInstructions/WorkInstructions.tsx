@@ -692,6 +692,9 @@ const WorkInstructions = () => {
       setConfigs((prev) => prev.filter((c) => c.id !== deleteConfig.id));
       if (selectedConfigId === deleteConfig.id) setSelectedConfigId(null);
       setDeleteConfig(null);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      alert(msg ?? "Delete failed. If this workflow has existing runs, archive it instead of deleting.");
     } finally {
       setDeleting(false);
     }
