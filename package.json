@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@capacitor/ios": "^8.2.0",
+    "@capacitor/network": "^8.0.1",
     "@capacitor/status-bar": "^8.0.1",
     "@cyntler/react-doc-viewer": "^1.17.1",
     "@emotion/react": "^11.11.3",

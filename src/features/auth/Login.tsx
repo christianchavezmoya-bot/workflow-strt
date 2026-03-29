@@ -1,4 +1,5 @@
 import {
+  Alert,
   Box,
   Button,
   Checkbox,
@@ -9,12 +10,13 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { Visibility, VisibilityOff } from "@mui/icons-material";
-import { useState } from "react";
+import { Visibility, VisibilityOff, WifiOff, CloudOff } from "@mui/icons-material";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { authService } from "../../services/authService";
 import { secureGet, secureSet } from "../../services/secureStorage";
 import { recordOnlineLogin } from "../../services/biometricAuth";
+import { getNetworkStatus, getNetworkMessage, NetworkStatus } from "../../services/networkService";
 import strataLogo from "../../assets/strata_transparent.png";
 
 // Must be outside Login so it doesn't remount on every keystroke
@@ -51,6 +53,34 @@ const Login = () => {
   const [resetSent, setResetSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>({ hasInternet: true, serverReachable: true, status: "online" });
+  
+  // Check if this is a first-time user (no previous session)
+  const isFirstTimeUser = !secureGet("auth_user") && !secureGet("auth_token");
+
+  // Check network and server status
+  useEffect(() => {
+    const checkNetwork = async () => {
+      const status = await getNetworkStatus();
+      console.log("[Login] Network status:", status);
+      setNetworkStatus(status);
+    };
+    
+    // Check initial status
+    checkNetwork();
+    
+    // Re-check periodically (every 30 seconds)
+    const interval = setInterval(checkNetwork, 30000);
+    
+    // Also re-check when window gains focus
+    const handleFocus = () => checkNetwork();
+    window.addEventListener("focus", handleFocus);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, []);
 
   // 2FA state
   const [twoFactorStep, setTwoFactorStep] = useState(false);
@@ -61,13 +91,55 @@ const Login = () => {
   const [rememberDevice, setRememberDevice] = useState(false);
 
   const handleLoginSuccess = async (result: { token?: string; user?: unknown; isFirstLogin: boolean; trustedDeviceToken?: string; passwordExpired?: boolean }) => {
-    await secureSet("auth_token", result.token!);
-    await secureSet("auth_user", JSON.stringify(result.user));
-    if (result.trustedDeviceToken) {
-      await secureSet("trusted_device_token", result.trustedDeviceToken);
+    console.log("[Login] handleLoginSuccess called", { 
+      hasToken: !!result.token, 
+      hasUser: !!result.user,
+      isFirstLogin: result.isFirstLogin,
+      passwordExpired: result.passwordExpired 
+    });
+    
+    if (!result.token) {
+      setError("No token received from server");
+      setLoading(false);
+      return;
     }
-    await recordOnlineLogin(); // stamp last online login for offline grace period
-    navigate(result.isFirstLogin || result.passwordExpired ? "/profile" : "/");
+    
+    // Set just_authenticated flag FIRST (before any async operations)
+    // This ensures the flag is in cache even if storage operations timeout
+    await secureSet("just_authenticated", "true");
+    console.log("[Login] Set just_authenticated flag");
+    
+    try {
+      // Save all auth data in parallel with timeout protection
+      const savePromises = [
+        secureSet("auth_token", result.token),
+        result.user ? secureSet("auth_user", JSON.stringify(result.user)) : Promise.resolve(),
+        result.trustedDeviceToken ? secureSet("trusted_device_token", result.trustedDeviceToken) : Promise.resolve(),
+        recordOnlineLogin()
+      ];
+      
+      // Wait for all saves with timeout
+      await Promise.race([
+        Promise.all(savePromises),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Storage timeout")), 5000))
+      ]);
+      
+      console.log("[Login] All data saved successfully");
+    } catch (error) {
+      console.warn("[Login] Storage save warning:", error);
+      // Continue anyway - cache is updated
+    }
+    
+    // Notify App.tsx that auth state has changed
+    window.dispatchEvent(new Event("auth-change"));
+    
+    console.log("[Login] Login success, navigating to:", result.isFirstLogin || result.passwordExpired ? "/profile" : "/");
+    setLoading(false);
+    
+    // Use setTimeout to ensure state updates propagate
+    setTimeout(() => {
+      navigate(result.isFirstLogin || result.passwordExpired ? "/profile" : "/");
+    }, 100);
   };
 
   const handleSubmit = async () => {
@@ -96,9 +168,13 @@ const Login = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log("[Login] Verifying 2FA code...");
       const result = await authService.verify2fa(twoFactorToken, totpCode, rememberDevice);
+      console.log("[Login] 2FA verify response:", result);
       await handleLoginSuccess(result);
+      console.log("[Login] handleLoginSuccess completed");
     } catch (err: any) {
+      console.error("[Login] 2FA verify error:", err);
       setError(err?.response?.status === 429
         ? "Too many failed attempts. Please wait 15 minutes and try again."
         : "Invalid verification code. Please try again."
@@ -113,7 +189,7 @@ const Login = () => {
     setError(null);
     try {
       const result = await authService.useRecoveryCode(twoFactorToken, recoveryCode, rememberDevice);
-      handleLoginSuccess(result);
+      await handleLoginSuccess(result);
     } catch (err: any) {
       setError(err?.response?.status === 429
         ? "Too many failed attempts. Please wait 15 minutes and try again."
@@ -214,12 +290,30 @@ const Login = () => {
   return (
     <PageWrapper>
       <Stack spacing={2.5}>
+        {/* Network status warning for first-time users */}
+        {networkStatus.status !== "online" && (
+          <Alert 
+            severity="warning" 
+            icon={networkStatus.status === "offline" ? <WifiOff /> : <CloudOff />}
+            sx={{ mb: 1 }}
+          >
+            <Typography variant="body2" fontWeight={600}>
+              {getNetworkMessage(networkStatus).title}
+            </Typography>
+            <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
+              {getNetworkMessage(networkStatus).description}
+            </Typography>
+          </Alert>
+        )}
+
         <Box>
           <Typography variant="h5" fontWeight={700} sx={{ fontFamily: "Sora" }}>
-            Welcome back
+            {isFirstTimeUser ? "Welcome to Kinet" : "Welcome back"}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Sign in to manage projects and installations.
+            {isFirstTimeUser 
+              ? "Sign in to get started. First-time login requires internet connection."
+              : "Sign in to manage projects and installations."}
           </Typography>
         </Box>
 
