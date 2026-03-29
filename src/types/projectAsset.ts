@@ -65,6 +65,8 @@ export interface ProjectAsset {
 export interface ProjectAssetWorkflowSummary {
   hasWorkflow: boolean;
   evidenceStatus: "None" | "Pending" | "Running" | "Paused" | "Complete" | "MissingData";
+  completedInventoryFeatures: number;
+  totalInventoryFeatures: number;
   requiredItems: number;
   completedItems: number;
   missingItems: number;

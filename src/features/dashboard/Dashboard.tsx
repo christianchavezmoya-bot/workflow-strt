@@ -120,8 +120,19 @@ const Dashboard = () => {
   // For Supervisor: runs completed today count
   const [completedToday, setCompletedToday] = useState(0);
 
-  // PM: auto-assign flags from installers self-assigning
-  type AutoAssignFlag = { id: string; assetId: string; assetTag: string; jobNumber: string; assignedBy: string; assignedAt: string };
+  // PM: assignment updates from manager dispatch or field takeovers
+  type AutoAssignFlag = {
+    id: string;
+    assetId: string;
+    assetTag: string;
+    jobNumber: string;
+    assignedAt: string;
+    eventType?: "manager-assigned" | "self-assigned" | "takeover";
+    actorName?: string;
+    targetName?: string;
+    previousAssigneeName?: string;
+    assignedBy?: string;
+  };
   const [autoAssignFlags, setAutoAssignFlags] = useState<AutoAssignFlag[]>(() =>
     JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]")
   );
@@ -717,6 +728,10 @@ const Dashboard = () => {
             <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "action.disabled" }} />
             <Typography variant="caption" color="text.secondary">Queued</Typography>
           </Stack>
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "success.main" }} />
+            <Typography variant="caption" color="text.secondary">Step progress</Typography>
+          </Stack>
         </Stack>
       </Stack>
       {workloadLoading ? <LinearProgress /> : workload.length === 0 ? (
@@ -730,7 +745,7 @@ const Dashboard = () => {
             const stepPct  = w.totalSteps > 0 ? Math.min(100, (w.completedSteps / w.totalSteps) * 100) : 0;
             const load     = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
             const loadLabel = w.totalAssigned >= 10 ? "Heavy" : w.totalAssigned >= 5 ? "Moderate" : "Light";
-            const barColor = w.hasIssues ? "warning.main" : "primary.main";
+            const progressColor = w.hasIssues ? "warning.main" : stepPct >= 100 ? "success.main" : "success.light";
             const startLabel = w.startedAt
               ? new Date(w.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
               : null;
@@ -766,24 +781,28 @@ const Dashboard = () => {
                           ? `${w.completedSteps} / ${w.totalSteps} steps Â· ${w.inProgress} in-progress Â· ${w.paused} paused Â· ${w.notStarted} queued`
                           : `${w.inProgress} in progress Â· ${w.paused} paused Â· ${w.notStarted} not started`
                       } arrow>
-                        <Box sx={{ position: "relative", height: 10, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.08)", display: "flex" }}>
-                          {w.totalSteps > 0 ? (
-                            // Step-based progress bar
-                            <Box sx={{ width: `${stepPct}%`, bgcolor: barColor, transition: "width 0.4s" }} />
-                          ) : (
-                            // Asset-based progress bar
-                            <>
-                              {inPct > 0 && <Box sx={{ width: `${inPct}%`, bgcolor: barColor, transition: "width 0.4s" }} />}
-                              {pausedPct > 0 && <Box sx={{ width: `${pausedPct}%`, bgcolor: "warning.main", transition: "width 0.4s" }} />}
-                              {notPct > 0 && <Box sx={{ width: `${notPct}%`, bgcolor: "action.disabled", transition: "width 0.4s" }} />}
-                            </>
+                        <Stack spacing={0.5}>
+                          <Box sx={{ position: "relative", height: 10, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.08)", display: "flex" }}>
+                            {inPct > 0 && <Box sx={{ width: `${inPct}%`, bgcolor: "primary.main", transition: "width 0.4s" }} />}
+                            {pausedPct > 0 && <Box sx={{ width: `${pausedPct}%`, bgcolor: "warning.main", transition: "width 0.4s" }} />}
+                            {notPct > 0 && <Box sx={{ width: `${notPct}%`, bgcolor: "action.disabled", transition: "width 0.4s" }} />}
+                          </Box>
+                          {w.totalSteps > 0 && (
+                            <Box sx={{ position: "relative", height: 6, borderRadius: 4, overflow: "hidden", background: "rgba(255,255,255,0.08)" }}>
+                              <Box sx={{ width: `${stepPct}%`, bgcolor: progressColor, height: "100%", transition: "width 0.4s" }} />
+                            </Box>
                           )}
-                        </Box>
+                        </Stack>
                       </Tooltip>
                       {w.totalSteps > 0 && (
-                        <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.65rem" }}>
-                          {w.completedSteps}/{w.totalSteps} steps
-                        </Typography>
+                        <Stack direction="row" spacing={0.75} alignItems="center">
+                          <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.65rem" }}>
+                            {w.completedSteps}/{w.totalSteps} steps
+                          </Typography>
+                          <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.65rem" }}>
+                            {Math.round(stepPct)}%
+                          </Typography>
+                        </Stack>
                       )}
                     </Box>
                     <Chip label={w.totalAssigned} size="small" color={load} sx={{ fontWeight: 700, minWidth: 40 }} />
@@ -1268,13 +1287,16 @@ const Dashboard = () => {
             </Box>
           )}
 
-          {/* Auto-assignment flags â€” installer self-assigned */}
+          {(autoAssignFlags.length > 0 || missingMediaFlags.length > 0) && (
+            <Grid container spacing={2}>
+          {/* Assignment updates â€” PM/Admin dispatch + field takeovers */}
           {autoAssignFlags.length > 0 && (
-            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
+            <Grid item xs={12} md={6}>
+            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)", height: "100%" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PersonOutlined sx={{ fontSize: 18, color: "info.main" }} />
                 <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-                  New Auto-assignments
+                  Assignment Updates
                 </Typography>
                 <Chip label={autoAssignFlags.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
                 <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
@@ -1286,17 +1308,34 @@ const Dashboard = () => {
                 </Button>
               </Stack>
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Assets that were auto-assigned when an installer started a workflow
+                Planned assignments from PM/Admin and field self-assignment or takeover events
               </Typography>
               <Stack spacing={0.25}>
                 {autoAssignFlags.map((f) => (
                   <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
                     <Box sx={{ flex: 1 }}>
-                      <ItemRow
-                        label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
-                        sub={`Assigned to ${f.assignedBy} Â· ${fmtDate(f.assignedAt)}`}
-                        onClick={() => navigate("/installations")}
-                      />
+                      {(() => {
+                        const actor = f.actorName ?? f.assignedBy ?? "User";
+                        const target = f.targetName ?? f.assignedBy ?? "User";
+                        const labelPrefix = f.jobNumber ? `${f.jobNumber}: ` : "";
+                        let sub = "";
+                        if (f.eventType === "manager-assigned") {
+                          sub = `${actor} assigned asset to ${target}`;
+                          if (f.previousAssigneeName) sub += ` · previously ${f.previousAssigneeName}`;
+                        } else if (f.eventType === "takeover") {
+                          sub = `${actor} took over asset`;
+                          if (f.previousAssigneeName) sub += ` from ${f.previousAssigneeName}`;
+                        } else {
+                          sub = `${actor} assigned asset to self`;
+                        }
+                        return (
+                          <ItemRow
+                            label={`${labelPrefix}${f.assetTag}`}
+                            sub={`${sub} · ${fmtDate(f.assignedAt)}`}
+                            onClick={() => navigate("/installations")}
+                          />
+                        );
+                      })()}
                     </Box>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
                       onClick={() => {
@@ -1310,6 +1349,7 @@ const Dashboard = () => {
                 ))}
               </Stack>
             </Box>
+            </Grid>
           )}
 
           {/* Installer media updates â€” PM notification when installers upload missing media */}
@@ -1359,7 +1399,8 @@ const Dashboard = () => {
 
           {/* Missing media flags â€” PM sees all runs without required media */}
           {missingMediaFlags.length > 0 && (
-            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
+            <Grid item xs={12} md={6}>
+            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)", height: "100%" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PhotoCameraOutlined sx={{ fontSize: 18, color: "warning.main" }} />
                 <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
@@ -1453,6 +1494,9 @@ const Dashboard = () => {
                 ))}
               </Stack>
             </Box>
+            </Grid>
+          )}
+            </Grid>
           )}
 
           {/* Regional Snapshot */}

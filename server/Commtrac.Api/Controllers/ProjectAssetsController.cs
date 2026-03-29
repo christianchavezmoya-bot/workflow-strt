@@ -370,27 +370,67 @@ public class ProjectAssetsController : ControllerBase
             .GroupBy(r => r.AssetId)
             .ToDictionary(g => g.Key, g => g.First());
 
+        var configIds = assetList
+            .Select(a => a.ProductConfigId)
+            .Concat(latestRuns.Select(r => r.WorkflowConfigId))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct()
+            .ToList()!;
+
+        var workflowConfigs = configIds.Count == 0
+            ? []
+            : await _db.WorkflowConfigs
+                .Where(c => configIds.Contains(c.Id))
+                .Select(c => new { c.Id, c.FeatureSelectionsJson })
+                .ToListAsync();
+
+        var selectedFeatureIds = workflowConfigs
+            .SelectMany(c => ParseSelectedFeatureIds(c.FeatureSelectionsJson))
+            .Distinct()
+            .ToList();
+
+        var inventoryFeatureIds = selectedFeatureIds.Count == 0
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : (await _db.Features
+                .Where(f => selectedFeatureIds.Contains(f.Id) && f.IsInventory)
+                .Select(f => f.Id)
+                .ToListAsync())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var workflowSelectionByConfigId = workflowConfigs.ToDictionary(
+            c => c.Id,
+            c => BuildSelectionSummary(c.FeatureSelectionsJson, inventoryFeatureIds));
+
         var summaries = new Dictionary<string, ProjectAssetWorkflowSummaryDto>(assetIds.Count);
         foreach (var asset in assetList)
         {
             latestRunByAsset.TryGetValue(asset.Id, out var latestRun);
-            summaries[asset.Id] = BuildWorkflowSummary(asset, latestRun);
+            var workflowConfigId = asset.ProductConfigId ?? latestRun?.WorkflowConfigId;
+            workflowSelectionByConfigId.TryGetValue(workflowConfigId ?? string.Empty, out var selectionSummary);
+            summaries[asset.Id] = BuildWorkflowSummary(asset, latestRun, selectionSummary);
         }
 
         return summaries;
     }
 
-    private static ProjectAssetWorkflowSummaryDto BuildWorkflowSummary(ProjectAssetEntity asset, AssetWorkflowRunEntity? latestRun)
+    private static ProjectAssetWorkflowSummaryDto BuildWorkflowSummary(
+        ProjectAssetEntity asset,
+        AssetWorkflowRunEntity? latestRun,
+        WorkflowSelectionSummary? selectionSummary = null)
     {
         var hasWorkflow = !string.IsNullOrWhiteSpace(asset.ProductConfigId)
             || !string.IsNullOrWhiteSpace(asset.WorkflowTemplateId)
             || latestRun is not null;
+        var inventorySummary = selectionSummary ?? BuildSelectionSummaryFromSnapshot(latestRun?.WorkflowSnapshotJson);
+        var completedInventoryFeatures = CountCompletedInventoryFeatures(asset.FeatureValuesJson, inventorySummary.InventoryFeatureIds);
 
         if (latestRun is null)
         {
             return new ProjectAssetWorkflowSummaryDto(
                 hasWorkflow,
                 hasWorkflow ? "Pending" : "None",
+                completedInventoryFeatures,
+                inventorySummary.TotalInventoryFeatures,
                 0,
                 0,
                 0,
@@ -428,6 +468,8 @@ public class ProjectAssetsController : ControllerBase
         return new ProjectAssetWorkflowSummaryDto(
             true,
             evidenceStatus,
+            completedInventoryFeatures,
+            inventorySummary.TotalInventoryFeatures,
             counts.RequiredItems,
             counts.CompletedItems,
             counts.MissingItems,
@@ -596,6 +638,80 @@ public class ProjectAssetsController : ControllerBase
             a.FeatureValuesJson, a.IssuesJson, a.ConfigLabel, a.InstalledAt, a.InstalledBy,
             a.AsBuiltJson, a.CreatedAt, a.UpdatedAt, workflowSummary);
 
+    private static WorkflowSelectionSummary BuildSelectionSummary(string? featureSelectionsJson, HashSet<string> inventoryFeatureIds)
+    {
+        var selectedInventoryIds = ParseSelectedFeatureIds(featureSelectionsJson)
+            .Where(id => inventoryFeatureIds.Contains(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return new WorkflowSelectionSummary(selectedInventoryIds, selectedInventoryIds.Count);
+    }
+
+    private static IEnumerable<string> ParseSelectedFeatureIds(string? featureSelectionsJson)
+    {
+        if (string.IsNullOrWhiteSpace(featureSelectionsJson) || featureSelectionsJson == "[]")
+            return [];
+
+        try
+        {
+            var selections = JsonSerializer.Deserialize<List<FeatureSelectionDto>>(featureSelectionsJson, _json) ?? [];
+            return selections
+                .Where(s => s.Included && s.ActiveCount > 0 && !string.IsNullOrWhiteSpace(s.FeatureId))
+                .Select(s => s.FeatureId);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static WorkflowSelectionSummary BuildSelectionSummaryFromSnapshot(string? workflowSnapshotJson)
+    {
+        var featureIds = ParseWorkflowSteps(workflowSnapshotJson)
+            .SelectMany(step =>
+                (step.CaptureFields ?? [])
+                    .Where(field => !string.IsNullOrWhiteSpace(field.FeatureId))
+                    .Select(field => field.FeatureId!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return new WorkflowSelectionSummary(featureIds, featureIds.Count);
+    }
+
+    private static int CountCompletedInventoryFeatures(string? featureValuesJson, HashSet<string> inventoryFeatureIds)
+    {
+        if (inventoryFeatureIds.Count == 0 || string.IsNullOrWhiteSpace(featureValuesJson))
+            return 0;
+
+        try
+        {
+            var values = JsonSerializer.Deserialize<Dictionary<string, string>>(featureValuesJson, _json) ?? new();
+            return inventoryFeatureIds.Count(id => HasStoredFeatureValue(values.GetValueOrDefault(id)));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static bool HasStoredFeatureValue(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return false;
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, string>>(raw, _json);
+            if (parsed is not null)
+                return parsed.Values.Any(value => !string.IsNullOrWhiteSpace(value));
+        }
+        catch
+        {
+        }
+
+        return !string.IsNullOrWhiteSpace(raw);
+    }
+
     private sealed class WorkflowStepSummary
     {
         [System.Text.Json.Serialization.JsonPropertyName("id")]
@@ -620,9 +736,13 @@ public class ProjectAssetsController : ControllerBase
     {
         [System.Text.Json.Serialization.JsonPropertyName("id")]
         public string Id { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("featureId")]
+        public string? FeatureId { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("required")]
         public bool Required { get; set; }
     }
+
+    private sealed record WorkflowSelectionSummary(HashSet<string> InventoryFeatureIds, int TotalInventoryFeatures);
 
     private sealed class WorkflowStepResultSummary
     {

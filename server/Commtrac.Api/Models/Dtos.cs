@@ -711,6 +711,8 @@ public record ProjectAssetDto(
 public record ProjectAssetWorkflowSummaryDto(
     bool HasWorkflow,
     string EvidenceStatus,
+    int CompletedInventoryFeatures,
+    int TotalInventoryFeatures,
     int RequiredItems,
     int CompletedItems,
     int MissingItems,

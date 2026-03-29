@@ -17,6 +17,7 @@ import {
   FolderOutlined,
   HistoryOutlined,
   HourglassEmptyOutlined,
+  InfoOutlined,
   DragIndicatorOutlined,
   PlayArrowOutlined,
   PrintOutlined,
@@ -241,6 +242,18 @@ type FeatureDef = {
   isInventory?: boolean;
 };
 
+type AssignmentEventFlag = {
+  id: string;
+  assetId: string;
+  assetTag: string;
+  jobNumber: string;
+  assignedAt: string;
+  eventType: "manager-assigned" | "self-assigned" | "takeover";
+  actorName: string;
+  targetName: string;
+  previousAssigneeName?: string;
+};
+
 // ------------------------------------------------------------------
 // Component
 // ------------------------------------------------------------------
@@ -253,6 +266,7 @@ const AssetInstallationPage = () => {
   const projects = useAppSelector((s) => s.projects.items);
   const users = useAppSelector((s) => s.users.items);
   const [searchParams] = useSearchParams();
+  const isManagerRole = (role?: string | null) => role === "Admin" || role === "Project Manager";
 
   // Stale-load guard: incremented every time activeProduct changes so that
   // results from a superseded fetch (triggered before the tab restoration
@@ -772,6 +786,7 @@ const AssetInstallationPage = () => {
     setEditSaving(true);
     setEditError(null);
     try {
+      const previousAssignedUserId = editAsset.assignedUserId ?? "";
       const updated = await projectAssetService.update(editAsset.id, {
         assetTag: tag,
         assetName: editForm.assetName.trim() || undefined,
@@ -788,6 +803,32 @@ const AssetInstallationPage = () => {
           : undefined,
       });
       setAssets((prev) => prev.map((a) => (a.id === editAsset.id ? updated : a)));
+      if (
+        isManagerRole(currentUser.role) &&
+        editForm.assignedUserId &&
+        editForm.assignedUserId !== previousAssignedUserId
+      ) {
+        const targetUser = users.find((u) => u.id === editForm.assignedUserId);
+        if (targetUser && !isManagerRole(targetUser.role)) {
+          const previousAssigneeName = previousAssignedUserId
+            ? users.find((u) => u.id === previousAssignedUserId)?.fullName ?? undefined
+            : undefined;
+          const flags: AssignmentEventFlag[] = JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]");
+          flags.push({
+            id: `${editAsset.id}-${Date.now()}`,
+            assetId: editAsset.id,
+            assetTag: editAsset.assetTag || editAsset.assetName || editAsset.id,
+            jobNumber: (editAsset as any).jobNumber || "",
+            assignedAt: new Date().toISOString(),
+            eventType: "manager-assigned",
+            actorName: currentUser.fullName,
+            targetName: targetUser.fullName,
+            previousAssigneeName,
+          });
+          localStorage.setItem("pm_auto_assign_flags", JSON.stringify(flags));
+          window.dispatchEvent(new Event("pm-auto-assign-flags-changed"));
+        }
+      }
       setEditOpen(false);
       setEditAsset(null);
     } catch {
@@ -1166,18 +1207,25 @@ const AssetInstallationPage = () => {
       // Auto-assign to current user
       await projectAssetService.update(asset.id, { assignedUserId: currentUser.id });
       setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, assignedUserId: currentUser.id } : a));
-      // Flag for PM dashboard (localStorage â€” picked up by PM's Needs Attention panel)
-      const flags = JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]");
-      flags.push({
-        id: `${asset.id}-${Date.now()}`,
-        assetId: asset.id,
-        assetTag: asset.assetTag || (asset as any).assetName || asset.id,
-        jobNumber: (asset as any).jobNumber || "",
-        assignedBy: currentUser.fullName,
-        assignedAt: new Date().toISOString(),
-      });
-      localStorage.setItem("pm_auto_assign_flags", JSON.stringify(flags));
-      window.dispatchEvent(new Event("pm-auto-assign-flags-changed"));
+      if (!isManagerRole(currentUser.role)) {
+        const previousAssigneeName = asset.assignedUserId
+          ? users.find((u) => u.id === asset.assignedUserId)?.fullName ?? undefined
+          : undefined;
+        const flags: AssignmentEventFlag[] = JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]");
+        flags.push({
+          id: `${asset.id}-${Date.now()}`,
+          assetId: asset.id,
+          assetTag: asset.assetTag || (asset as any).assetName || asset.id,
+          jobNumber: (asset as any).jobNumber || "",
+          assignedAt: new Date().toISOString(),
+          eventType: asset.assignedUserId ? "takeover" : "self-assigned",
+          actorName: currentUser.fullName,
+          targetName: currentUser.fullName,
+          previousAssigneeName,
+        });
+        localStorage.setItem("pm_auto_assign_flags", JSON.stringify(flags));
+        window.dispatchEvent(new Event("pm-auto-assign-flags-changed"));
+      }
     } catch {
       // Non-fatal â€” continue with start even if update fails
     }
@@ -1810,9 +1858,9 @@ const AssetInstallationPage = () => {
     let fv: Record<string, string> = {};
     try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
     const inventoryFeatures = activeFeatures.filter((feat) => feat.isInventory);
-    const total = inventoryFeatures.length;
-
-    const filled = inventoryFeatures.filter((feat) => {
+    const workflowInventoryTotal = asset.workflowSummary?.totalInventoryFeatures ?? 0;
+    const workflowInventoryCompleted = asset.workflowSummary?.completedInventoryFeatures ?? 0;
+    const fallbackFilled = inventoryFeatures.filter((feat) => {
       const raw = fv[feat.id];
       if (!raw) return false;
       if (feat.valueType === "component") {
@@ -1822,49 +1870,65 @@ const AssetInstallationPage = () => {
       return true;
     }).length;
 
+    const total = workflowInventoryTotal > 0 ? workflowInventoryTotal : inventoryFeatures.length;
+    const filled = workflowInventoryTotal > 0 ? Math.min(workflowInventoryCompleted, workflowInventoryTotal) : fallbackFilled;
+
     const latestRun = [...(runsMap[asset.id] ?? [])]
       .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
     const paused = Boolean(pausedProgress[asset.id]);
 
-    let evidenceLabel = "Workflow pending";
-    let evidenceColor: "warning" | "success" | "error" = "warning";
+    let evidenceLabel = "Pending";
+    let evidenceTitle = "Workflow pending";
+    let evidenceColor: "warning" | "success" | "error" | "primary" = "warning";
 
     if (paused || latestRun?.status === "Paused" || asset.workflowSummary?.evidenceStatus === "Paused") {
-      evidenceLabel = "Workflow paused";
+      evidenceLabel = "Paused";
+      evidenceTitle = "Workflow paused";
     } else if (asset.status === "InProgress" || latestRun?.status === "InProgress") {
-      evidenceLabel = "Workflow running";
+      evidenceLabel = "Running";
+      evidenceTitle = "Workflow running";
+      evidenceColor = "primary";
     } else if (asset.workflowSummary?.hasWorkflow) {
       if (asset.workflowSummary.evidenceStatus === "Running") {
-        evidenceLabel = "Workflow running";
+        evidenceLabel = "Running";
+        evidenceTitle = "Workflow running";
+        evidenceColor = "primary";
       } else if (asset.workflowSummary.evidenceStatus === "Complete") {
-        evidenceLabel = "Evidence complete";
+        evidenceLabel = "Done";
+        evidenceTitle = "Evidence complete";
         evidenceColor = "success";
       } else if (asset.workflowSummary.evidenceStatus === "MissingData") {
-        evidenceLabel = "Missing data";
+        evidenceLabel = "Missing";
+        evidenceTitle = "Missing data";
         evidenceColor = "error";
       }
     } else if (latestRun) {
       if (!latestRun.isLocked) {
-        evidenceLabel = "Workflow running";
+        evidenceLabel = "Running";
+        evidenceTitle = "Workflow running";
+        evidenceColor = "primary";
       } else {
         const missingCount = countMissingWorkflowItems(latestRun);
         if (missingCount > 0) {
-          evidenceLabel = "Missing data";
+          evidenceLabel = "Missing";
+          evidenceTitle = "Missing data";
           evidenceColor = "error";
         } else {
-          evidenceLabel = "Evidence complete";
+          evidenceLabel = "Done";
+          evidenceTitle = "Evidence complete";
           evidenceColor = "success";
         }
       }
     }
 
     const inventoryColor = total > 0 && filled === total ? "success" : filled > 0 ? "warning" : "default";
+    const inventoryVariant = total > 0 ? "filled" : "outlined";
     return (
-      <Tooltip title={`${total === 0 ? "No inventory features on this asset." : `Inventory features ${filled}/${total}.`} ${evidenceLabel}.`}>
+      <Tooltip title={`${total === 0 ? "No inventory features selected on this workflow." : `Inventory features ${filled}/${total}.`} ${evidenceTitle}.`}>
         <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
           <Chip size="small" label={`${filled}/${total} inv`}
             color={inventoryColor as "success" | "warning" | "default"}
-            variant={total > 0 && filled === total ? "filled" : "outlined"} />
+            variant={inventoryVariant} />
           <Chip size="small" label={evidenceLabel} color={evidenceColor} variant="outlined" />
         </Stack>
       </Tooltip>
@@ -2676,7 +2740,28 @@ const AssetInstallationPage = () => {
                 <TableCell><Typography variant="caption" fontWeight={700}>Asset Tag</Typography></TableCell>
                 {visibleColumns.map((col) => (
                   <TableCell key={col.id}>
-                    <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
+                    {col.id === "features" ? (
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
+                        <Tooltip
+                          title={
+                            <Stack spacing={0.5}>
+                              <Typography variant="caption" sx={{ fontWeight: 700, color: "common.white" }}>
+                                Feature Colors
+                              </Typography>
+                              <Typography variant="caption">Amber: Pending or Paused</Typography>
+                              <Typography variant="caption">Blue: Running</Typography>
+                              <Typography variant="caption">Green: Complete</Typography>
+                              <Typography variant="caption">Red: Missing data</Typography>
+                            </Stack>
+                          }
+                        >
+                          <InfoOutlined sx={{ fontSize: 14, color: "text.disabled", cursor: "help" }} />
+                        </Tooltip>
+                      </Stack>
+                    ) : (
+                      <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
+                    )}
                   </TableCell>
                 ))}
                 <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
@@ -3662,11 +3747,40 @@ const AssetInstallationPage = () => {
             onClick={async () => {
               setBulkTechSaving(true);
               try {
+                const selectedAssets = [...selectedAssetIds]
+                  .map((assetId) => assets.find((a) => a.id === assetId))
+                  .filter((a): a is ProjectAsset => Boolean(a));
                 await Promise.all(
                   [...selectedAssetIds].map((assetId) =>
                     projectAssetService.update(assetId, { assignedUserId: bulkTechId || null } as Parameters<typeof projectAssetService.update>[1])
                   )
                 );
+                if (isManagerRole(currentUser.role) && bulkTechId) {
+                  const targetUser = users.find((u) => u.id === bulkTechId);
+                  if (targetUser && !isManagerRole(targetUser.role)) {
+                    const flags: AssignmentEventFlag[] = JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]");
+                    const nowIso = new Date().toISOString();
+                    selectedAssets.forEach((asset) => {
+                      if (asset.assignedUserId === bulkTechId) return;
+                      const previousAssigneeName = asset.assignedUserId
+                        ? users.find((u) => u.id === asset.assignedUserId)?.fullName ?? undefined
+                        : undefined;
+                      flags.push({
+                        id: `${asset.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                        assetId: asset.id,
+                        assetTag: asset.assetTag || asset.assetName || asset.id,
+                        jobNumber: (asset as any).jobNumber || "",
+                        assignedAt: nowIso,
+                        eventType: "manager-assigned",
+                        actorName: currentUser.fullName,
+                        targetName: targetUser.fullName,
+                        previousAssigneeName,
+                      });
+                    });
+                    localStorage.setItem("pm_auto_assign_flags", JSON.stringify(flags));
+                    window.dispatchEvent(new Event("pm-auto-assign-flags-changed"));
+                  }
+                }
                 refreshAssets();
                 setSelectedAssetIds(new Set());
                 setBulkTechOpen(false);
