@@ -738,7 +738,7 @@ export default function DocumentsPage() {
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchOutlined fontSize="small" /></InputAdornment> }}
         />
         <FormControl size="small" sx={{ minWidth: 170 }}>
-          <InputLabel>Sort By</InputLabel>
+          <InputLabel shrink>Sort By</InputLabel>
           <Select label="Sort By" value={sortBy} onChange={(e) => setSortBy(e.target.value as DocumentSortKey)}>
             <MenuItem value="dateCreated">Date Created</MenuItem>
             <MenuItem value="name">Name</MenuItem>
@@ -749,7 +749,7 @@ export default function DocumentsPage() {
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ minWidth: 150 }}>
-          <InputLabel>Order</InputLabel>
+          <InputLabel shrink>Order</InputLabel>
           <Select label="Order" value={sortDir} onChange={(e) => setSortDir(e.target.value as "asc" | "desc")}>
             <MenuItem value="asc">Ascending</MenuItem>
             <MenuItem value="desc">Descending</MenuItem>
@@ -900,7 +900,7 @@ export default function DocumentsPage() {
                 InputLabelProps={{ shrink: true }} />
             )}
             <FormControl size="small" fullWidth>
-              <InputLabel>Category</InputLabel>
+              <InputLabel shrink>Category</InputLabel>
               <Select label="Category" value={addForm.type}
                 onChange={(e) => setAddForm((p) => ({ ...p, type: e.target.value }))}>
                 {tabs.filter((t) => t.id !== "all").map((tab) => (
@@ -926,7 +926,7 @@ export default function DocumentsPage() {
                     const opts = relationOptions(cf);
                     return (
                       <FormControl key={cf.id} size="small" fullWidth>
-                        <InputLabel>{cf.label}</InputLabel>
+                        <InputLabel shrink>{cf.label}</InputLabel>
                         <Select label={cf.label} value={addForm.customValues[cf.id] ?? ""}
                           onChange={(e) => setAddForm((p) => ({ ...p, customValues: { ...p.customValues, [cf.id]: e.target.value } }))}>
                           <MenuItem value=""><em>None</em></MenuItem>
@@ -945,7 +945,7 @@ export default function DocumentsPage() {
                   );
                   if (cf.type === "select") return (
                     <FormControl key={cf.id} size="small" fullWidth>
-                      <InputLabel>{cf.label}</InputLabel>
+                      <InputLabel shrink>{cf.label}</InputLabel>
                       <Select label={cf.label} value={addForm.customValues[cf.id] ?? ""}
                         onChange={(e) => setAddForm((p) => ({ ...p, customValues: { ...p.customValues, [cf.id]: e.target.value } }))}>
                         {(cf.options ?? []).map((opt) => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
@@ -1051,7 +1051,8 @@ export default function DocumentsPage() {
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField label="Name" size="small" fullWidth value={editName} onChange={(e) => setEditName(e.target.value)} />
             <TextField label="Linked To" size="small" fullWidth value={editLinkedTo}
-              onChange={(e) => setEditLinkedTo(e.target.value)} placeholder="Asset tag, product name, or leave blank" />
+              onChange={(e) => setEditLinkedTo(e.target.value)} placeholder="Asset tag, product name, or leave blank"
+              InputLabelProps={{ shrink: true }} />
             <TextField label="Notes / Description" size="small" fullWidth multiline rows={3} value={editNotes}
               onChange={(e) => setEditNotes(e.target.value)} />
 
@@ -1064,7 +1065,7 @@ export default function DocumentsPage() {
                     const opts = relationOptions(cf);
                     return (
                       <FormControl key={cf.id} size="small" fullWidth>
-                        <InputLabel>{cf.label}</InputLabel>
+                        <InputLabel shrink>{cf.label}</InputLabel>
                         <Select label={cf.label} value={editCustomValues[cf.id] ?? ""}
                           onChange={(e) => setEditCustomValues((p) => ({ ...p, [cf.id]: e.target.value }))}>
                           <MenuItem value=""><em>None</em></MenuItem>
@@ -1083,7 +1084,7 @@ export default function DocumentsPage() {
                   );
                   if (cf.type === "select") return (
                     <FormControl key={cf.id} size="small" fullWidth>
-                      <InputLabel>{cf.label}</InputLabel>
+                      <InputLabel shrink>{cf.label}</InputLabel>
                       <Select label={cf.label} value={editCustomValues[cf.id] ?? ""}
                         onChange={(e) => setEditCustomValues((p) => ({ ...p, [cf.id]: e.target.value }))}>
                         {(cf.options ?? []).map((opt) => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
@@ -1176,7 +1177,7 @@ export default function DocumentsPage() {
               onChange={(e) => setMgrNewLabel(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") mgrAddTab(); }} />
             <FormControl size="small" sx={{ minWidth: 110 }}>
-              <InputLabel>Color</InputLabel>
+              <InputLabel shrink>Color</InputLabel>
               <Select label="Color" value={mgrNewColor} onChange={(e) => setMgrNewColor(e.target.value as DocTab["color"])}>
                 {TAB_COLOR_OPTIONS.map((c) => (
                   <MenuItem key={c} value={c}>
@@ -1319,7 +1320,7 @@ export default function DocumentsPage() {
                 onChange={(e) => setCfgNewLabel(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") cfgAddField(); }} />
               <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel>Type</InputLabel>
+                <InputLabel shrink>Type</InputLabel>
                 <Select label="Type" value={cfgNewType} onChange={(e) => setCfgNewType(e.target.value as CustomField["type"])}>
                   <MenuItem value="text">Text</MenuItem>
                   <MenuItem value="textarea">Textarea</MenuItem>
@@ -1333,7 +1334,7 @@ export default function DocumentsPage() {
             </Stack>
             {cfgNewType === "relation" && (
               <FormControl size="small" sx={{ maxWidth: 260 }}>
-                <InputLabel>Relates to</InputLabel>
+                <InputLabel shrink>Relates to</InputLabel>
                 <Select label="Relates to" value={cfgNewRelatesTo ?? "products"}
                   onChange={(e) => setCfgNewRelatesTo(e.target.value as CustomField["relatesTo"])}>
                   {RELATION_TARGETS.map((t) => (

@@ -60,6 +60,8 @@ import { workflowConfigFeatureService } from "../../services/workflowConfigFeatu
 import type { WorkflowConfigFeature } from "../../types/workflowConfigFeature";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import type { FeatureDependency } from "../../types/featureDependency";
+import { featureService } from "../../services/featureService";
+import type { Feature } from "../../types/feature";
 import WorkOrderRunner from "./WorkOrderRunner";
 
 // ------------------------------------------------------------------
@@ -230,6 +232,15 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   const productFeaturesRef = useRef<ProductFeatureDefinition[]>(productFeatures);
   productFeaturesRef.current = productFeatures;
 
+  // Feature library entries (with captureFields) for the active product
+  const [libFeatures, setLibFeatures] = useState<Feature[]>([]);
+  const libFeaturesRef = useRef<Feature[]>([]);
+  libFeaturesRef.current = libFeatures;
+  useEffect(() => {
+    if (!productId) return;
+    featureService.getByProduct(productId).then(setLibFeatures).catch(() => {});
+  }, [productId]);
+
   // Feature selections — managed in the builder (not just the publish dialog)
   const [featureSelections, setFeatureSelections] = useState<FeatureSelection[]>(() =>
     productFeatures.map((f) => ({ featureId: f.id, included: false, activeCount: 0 }))
@@ -309,7 +320,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           } catch {}
           // Auto-populate steps when config is brand new (empty)
           if (wf.steps.length === 0 && parsedSels.some((s) => s.activeCount > 0)) {
-            const autoSteps = buildAutoSteps(parsedSels, productFeaturesRef.current);
+            const autoSteps = buildAutoSteps(parsedSels, productFeaturesRef.current, libFeaturesRef.current);
             wf = { ...wf, steps: enforceSequentialNextSteps(normalizeOrders(autoSteps)) };
           }
           justLoadedRef.current = true;
@@ -1034,7 +1045,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
                   onClick={() => {
                     const hasSteps = workflow.steps.length > 0;
                     if (!hasSteps) {
-                      const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current);
+                      const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current);
                       importedRef.current = true;
                       updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
                       importedRef.current = false;
@@ -1043,7 +1054,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
                     setConfirmDialog({
                       message: "This will replace all current steps with a new auto-generated workflow. Continue?",
                       onConfirm: () => {
-                        const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current);
+                        const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current);
                         importedRef.current = true;
                         updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
                         importedRef.current = false;
@@ -1103,6 +1114,22 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               onAddCaptureField={() => addCaptureField(selectedStep.id)}
               onUpdateCaptureField={(fId, patch) => updateCaptureField(selectedStep.id, fId, patch)}
               onDeleteCaptureField={(fId) => deleteCaptureField(selectedStep.id, fId)}
+              libFeatures={libFeatures}
+              onAddCaptureFieldsFromLib={(fieldNames) => {
+                updateWorkflow((wf) => {
+                  const s = wf.steps.find((x) => x.id === selectedStep.id);
+                  if (!s) return wf;
+                  s.captureFields = s.captureFields || [];
+                  const existingKeys = new Set(s.captureFields.map((f) => f.key));
+                  fieldNames.forEach((name) => {
+                    const key = labelToKey(name);
+                    if (existingKeys.has(key)) return;
+                    s.captureFields!.push({ id: uid(), key, label: name, type: "text", required: true, featureId: s.stepFeatureId });
+                    existingKeys.add(key);
+                  });
+                  return wf;
+                });
+              }}
               onWorkflowUpdate={(wf) => { justLoadedRef.current = true; setWorkflow(wf); }}
             />
           ) : (
@@ -1194,6 +1221,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               fullWidth
               placeholder="e.g. Installation, Maintenance, Inspection"
               helperText="Used to identify this instruction type when assigning to an asset"
+              InputLabelProps={{ shrink: true }}
             />
             <Box>
               <Typography variant="body2" color="text.secondary">
@@ -1213,6 +1241,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               multiline
               rows={2}
               placeholder="Optional description or notes"
+              InputLabelProps={{ shrink: true }}
             />
           </Stack>
         </DialogContent>
@@ -1496,6 +1525,7 @@ function OptionsField({ options, onCommit }: { options: string[]; onCommit: (opt
       onChange={(e) => setRaw(e.target.value)}
       onBlur={() => onCommit(raw.split(",").map((x) => x.trim()).filter(Boolean))}
       placeholder="Option A, Option B, Option C"
+      InputLabelProps={{ shrink: true }}
     />
   );
 }
@@ -1524,6 +1554,8 @@ interface StepEditorPanelProps {
   onAddCaptureField: () => void;
   onUpdateCaptureField: (id: string, patch: Partial<CaptureField>) => void;
   onDeleteCaptureField: (id: string) => void;
+  onAddCaptureFieldsFromLib: (fieldNames: string[]) => void;
+  libFeatures: Feature[];
   onWorkflowUpdate: (wf: Workflow) => void;
 }
 
@@ -1547,6 +1579,8 @@ function StepEditorPanel({
   onAddCaptureField,
   onUpdateCaptureField,
   onDeleteCaptureField,
+  onAddCaptureFieldsFromLib,
+  libFeatures,
   onWorkflowUpdate,
 }: StepEditorPanelProps) {
   const [editorTab, setEditorTab] = useState(0);
@@ -1622,7 +1656,7 @@ function StepEditorPanel({
                 <Chip size="small" color="primary" label={STEP_TYPE_LABELS[step.stepType]} sx={{ fontWeight: 600 }} />
               )}
               <FormControl size="small" sx={{ minWidth: 200 }}>
-                <InputLabel>Apply step template</InputLabel>
+                <InputLabel shrink>Apply step template</InputLabel>
                 <Select
                   label="Apply step template"
                   value={pendingType}
@@ -1643,7 +1677,7 @@ function StepEditorPanel({
             {needsFeaturePicker && (
               <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                 <FormControl size="small" sx={{ minWidth: 150 }}>
-                  <InputLabel>Feature</InputLabel>
+                  <InputLabel shrink>Feature</InputLabel>
                   <Select label="Feature" value={pendingFeatureId} onChange={(e) => { setPendingFeatureId(e.target.value); setPendingUnit(1); }}>
                     <MenuItem value=""><em>No feature</em></MenuItem>
                     {includedFeatures.map((f) => (
@@ -1653,7 +1687,7 @@ function StepEditorPanel({
                 </FormControl>
                 {pendingFeatureId && (
                   <FormControl size="small" sx={{ minWidth: 80 }}>
-                    <InputLabel>Unit #</InputLabel>
+                    <InputLabel shrink>Unit #</InputLabel>
                     <Select label="Unit #" value={pendingUnit} onChange={(e) => setPendingUnit(Number(e.target.value))}>
                       {Array.from({ length: maxUnits }, (_, i) => i + 1).map((n) => (
                         <MenuItem key={n} value={n}>{n}</MenuItem>
@@ -1834,9 +1868,11 @@ function StepEditorPanel({
               step={step}
               productFeatures={productFeatures}
               featureSelections={featureSelections}
+              libFeatures={libFeatures}
               onAddCaptureField={onAddCaptureField}
               onUpdateCaptureField={onUpdateCaptureField}
               onDeleteCaptureField={onDeleteCaptureField}
+              onAddCaptureFieldsFromLib={onAddCaptureFieldsFromLib}
             />
           </TabPanel>
         </Box>
@@ -2160,10 +2196,13 @@ function labelToKey(label: string): string {
 function buildAutoSteps(
   featureSelections: FeatureSelection[],
   productFeatures: ProductFeatureDefinition[],
+  libFeatures: Feature[] = [],
 ): WorkflowStep[] {
   const u = uid;
   const mkCheck = (label: string, fid?: string): StepInput =>
     ({ id: u(), type: "checkbox", label, required: true, ...(fid ? { featureId: fid } : {}) });
+
+  const libMap = new Map(libFeatures.map((f) => [f.id, f]));
 
   const steps: WorkflowStep[] = [];
   let order = 1;
@@ -2207,6 +2246,7 @@ function buildAutoSteps(
         inputs: [
           ...deps.map((dep) => mkCheck(`${dep.name} installed and connected`, feat.id)),
           mkCheck(`${feat.name} ${unit} — Installation complete and verified`),
+          { id: u(), type: "photo", label: `${feat.name} ${unit} — Installation photo`, required: true },
         ],
         captureFields: [],
       });
@@ -2214,9 +2254,14 @@ function buildAutoSteps(
   }
 
   // 3 — Data Collection steps (one per feature × unit)
+  // captureFields sourced from Feature.captureFields in the library (serial, firmware, IP, etc.)
   for (const { sel, feat } of activeFeatures) {
     for (let unit = 1; unit <= sel.activeCount; unit++) {
-      const deps = feat.subProperties ?? [];
+      const libFeat = libMap.get(feat.id);
+      // Use library captureFields (["Serial No", "Firmware", ...]) if available, fall back to subProperties
+      const captureFieldNames: string[] = libFeat?.captureFields && libFeat.captureFields.length > 0
+        ? libFeat.captureFields
+        : (feat.subProperties ?? []).map((d) => d.name);
       steps.push({
         ...base, id: u(), order: order++,
         stepType: "data-collection", stepFeatureId: feat.id, stepUnitIndex: unit,
@@ -2225,11 +2270,11 @@ function buildAutoSteps(
         inputs: [
           { id: u(), type: "photo", label: `${feat.name} ${unit} — Installed unit photograph`, required: true },
         ],
-        captureFields: deps.map((dep) => ({
+        captureFields: captureFieldNames.map((fieldName) => ({
           id: u(),
-          key: labelToKey(`${feat.name}_${unit}_${dep.name}`),
-          label: dep.name,
-          type: ((dep.valueType as string) === "number" ? "number" : (dep.valueType as string) === "date" ? "date" : "text") as CaptureFieldType,
+          key: labelToKey(`${feat.name}_${unit}_${fieldName}`),
+          label: fieldName,
+          type: "text" as CaptureFieldType,
           required: true,
           featureId: feat.id,
         })),
@@ -2247,6 +2292,7 @@ function buildAutoSteps(
       mkCheck("All installed equipment — Functional test passed"),
       mkCheck("System operates within specified parameters"),
       mkCheck("Test results documented"),
+      { id: u(), type: "photo", label: "Test results / readings photo", required: true },
     ],
     captureFields: [],
   });
@@ -2261,7 +2307,7 @@ function buildAutoSteps(
     stepType: "final-inspection",
     title: "Final Inspection",
     description: "Conduct a comprehensive final inspection of all installed equipment and the surrounding work area. Verify all units are correctly labelled, secured and connected. Confirm the site is clean, all temporary works are removed and the installation meets the required quality standards.",
-    inputs: inspBoxes, captureFields: [],
+    inputs: [...inspBoxes, { id: u(), type: "photo", label: "Final inspection photo", required: true }], captureFields: [],
   });
 
   // 6 — Return to Service
@@ -2275,6 +2321,7 @@ function buildAutoSteps(
       mkCheck("Stakeholders notified of completion"),
       mkCheck("System confirmed operational"),
       mkCheck("Work order ready to close"),
+      { id: u(), type: "photo", label: "Site handover / completion photo", required: true },
     ],
     captureFields: [],
   });
@@ -2293,18 +2340,25 @@ function CaptureFieldsSection({
   step,
   productFeatures,
   featureSelections,
+  libFeatures = [],
   onAddCaptureField,
   onUpdateCaptureField,
   onDeleteCaptureField,
+  onAddCaptureFieldsFromLib,
 }: {
   step: WorkflowStep;
   productFeatures: ProductFeatureDefinition[];
   featureSelections?: FeatureSelection[];
+  libFeatures?: Feature[];
   onAddCaptureField: () => void;
   onUpdateCaptureField: (id: string, patch: Partial<CaptureField>) => void;
   onDeleteCaptureField: (id: string) => void;
+  onAddCaptureFieldsFromLib?: (fieldNames: string[]) => void;
 }) {
   const fields = step.captureFields || [];
+
+  // Inventory features that have captureFields defined — shown as quick-add chips
+  const inventoryLibFeatures = libFeatures.filter((f) => f.isInventory && (f.captureFields ?? []).length > 0);
 
   return (
     <Stack spacing={2}>
@@ -2319,9 +2373,35 @@ function CaptureFieldsSection({
         </Stack>
       </Stack>
 
+      {/* Quick-add from feature library */}
+      {inventoryLibFeatures.length > 0 && (
+        <Stack spacing={0.75}>
+          <Typography variant="caption" color="text.secondary" fontWeight={600}>
+            Add capture fields from inventory features:
+          </Typography>
+          <Stack direction="row" flexWrap="wrap" gap={0.75}>
+            {inventoryLibFeatures.map((f) => (
+              <Chip
+                key={f.id}
+                label={f.name}
+                size="small"
+                color="primary"
+                variant="outlined"
+                clickable
+                onClick={() => onAddCaptureFieldsFromLib?.(f.captureFields ?? [])}
+                title={`Add: ${(f.captureFields ?? []).join(", ")}`}
+              />
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.disabled">
+            Tap a feature to add its capture fields (serial, firmware, etc.) to this step.
+          </Typography>
+        </Stack>
+      )}
+
       {fields.length === 0 ? (
         <Alert severity="info" sx={{ fontSize: 12 }}>
-          No capture fields yet. Add fields like Serial Number, Firmware Version, or measured values.
+          No capture fields yet. Use the quick-add above or add fields manually.
         </Alert>
       ) : (
         <Stack spacing={1.5}>
@@ -2370,6 +2450,7 @@ function CaptureFieldsSection({
                       });
                     }}
                     placeholder="e.g. Serial Number"
+                    InputLabelProps={{ shrink: true }}
                   />
                   <TextField
                     label="Key (auto)"
@@ -2379,11 +2460,12 @@ function CaptureFieldsSection({
                     onChange={(e) => onUpdateCaptureField(field.id, { key: e.target.value.replace(/[^a-zA-Z0-9_]/g, "") })}
                     placeholder="serialNumber"
                     helperText="Auto-generated · edit to override"
+                    InputLabelProps={{ shrink: true }}
                   />
                 </Stack>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
                   <FormControl size="small" sx={{ minWidth: 120 }}>
-                    <InputLabel>Type</InputLabel>
+                    <InputLabel shrink>Type</InputLabel>
                     <Select
                       label="Type"
                       value={field.type}
@@ -2401,6 +2483,7 @@ function CaptureFieldsSection({
                     value={field.unit || ""}
                     onChange={(e) => onUpdateCaptureField(field.id, { unit: e.target.value || undefined })}
                     placeholder="dBm, V, °C"
+                    InputLabelProps={{ shrink: true }}
                   />
                   <TextField
                     label="Hint (optional)"
@@ -2409,6 +2492,7 @@ function CaptureFieldsSection({
                     value={field.hint || ""}
                     onChange={(e) => onUpdateCaptureField(field.id, { hint: e.target.value || undefined })}
                     placeholder="Placeholder hint for the technician"
+                    InputLabelProps={{ shrink: true }}
                   />
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
                     <Switch
@@ -2768,6 +2852,7 @@ function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, produ
                         value={item.description}
                         onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, description: e.target.value } : i))}
                         placeholder="e.g. IP Camera, BNC Cable"
+                        InputLabelProps={{ shrink: true }}
                       />
                       <Stack direction="row" spacing={1}>
                         <TextField
@@ -2778,6 +2863,7 @@ function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, produ
                           value={item.partNumber || ""}
                           onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, partNumber: e.target.value } : i))}
                           placeholder="SKU / part number"
+                          InputLabelProps={{ shrink: true }}
                         />
                         <TextField
                           label="Qty"
@@ -2796,6 +2882,7 @@ function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, produ
                           value={item.unitOfMeasure}
                           onChange={(e) => updateBom((items) => items.map((i) => i.id === item.id ? { ...i, unitOfMeasure: e.target.value } : i))}
                           placeholder="ea"
+                          InputLabelProps={{ shrink: true }}
                         />
                       </Stack>
                       <Stack direction="row" alignItems="center" spacing={1}>
@@ -3092,7 +3179,8 @@ function MediaLibraryPanel({ workflow, step, templateId, ensureConfigId, onStepC
               setUploading(true);
               try {
                 const updatedConfig = await workflowConfigService.uploadMedia(cfgId, file);
-                onWorkflowUpdate(JSON.parse(updatedConfig.stepsJson) as Workflow);
+                const updatedMedia = (() => { try { return JSON.parse(updatedConfig.mediaJson); } catch { return []; } })();
+                onWorkflowUpdate({ ...workflow, media: updatedMedia });
               } catch {
                 setUploadError("Upload failed.");
               } finally {

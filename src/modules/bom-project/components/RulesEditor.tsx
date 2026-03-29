@@ -195,6 +195,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                       value={rule.description}
                       onChange={(e) => updateRule(rule.id, { description: e.target.value })}
                       placeholder="e.g. Classify modules as assets"
+                      InputLabelProps={{ shrink: true }}
                     />
                     <Tooltip title="Remove rule">
                       <IconButton
@@ -215,7 +216,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                     {rule.conditions.map((cond, idx) => (
                       <Stack key={idx} direction="row" spacing={1} alignItems="center">
                         <FormControl size="small" sx={{ minWidth: 140 }}>
-                          <InputLabel>Field</InputLabel>
+                          <InputLabel shrink>Field</InputLabel>
                           <Select
                             label="Field"
                             value={cond.field}
@@ -232,7 +233,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                         </FormControl>
 
                         <FormControl size="small" sx={{ minWidth: 130 }}>
-                          <InputLabel>Operator</InputLabel>
+                          <InputLabel shrink>Operator</InputLabel>
                           <Select
                             label="Operator"
                             value={cond.operator}
@@ -258,6 +259,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                               updateCondition(rule.id, idx, { value: e.target.value })
                             }
                             placeholder="e.g. MOD, Cable, ..."
+                            InputLabelProps={{ shrink: true }}
                           />
                         )}
 
@@ -288,7 +290,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                   </Typography>
                   <Stack direction="row" spacing={1.5} alignItems="center" sx={{ pl: 1 }}>
                     <FormControl size="small" sx={{ minWidth: 140 }}>
-                      <InputLabel>Item type</InputLabel>
+                      <InputLabel shrink>Item type</InputLabel>
                       <Select
                         label="Item type"
                         value={rule.result.itemType ?? "component"}
@@ -312,7 +314,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                       </Select>
                     </FormControl>
                     <FormControl size="small" sx={{ minWidth: 130 }}>
-                      <InputLabel>Inventory</InputLabel>
+                      <InputLabel shrink>Inventory</InputLabel>
                       <Select
                         label="Inventory"
                         value={rule.result.inventoryTracked ? "yes" : "no"}
@@ -327,7 +329,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
                       </Select>
                     </FormControl>
                     <FormControl size="small" sx={{ minWidth: 130 }}>
-                      <InputLabel>Serial</InputLabel>
+                      <InputLabel shrink>Serial</InputLabel>
                       <Select
                         label="Serial"
                         value={rule.result.serialRequired ? "yes" : "no"}
@@ -355,6 +357,7 @@ export default function RulesEditor({ open, initialRules, onClose, onApply, onSa
             size="small"
             label="Save as profile"
             placeholder="Profile name…"
+            InputLabelProps={{ shrink: true }}
             value={profileName}
             onChange={(e) => setProfileName(e.target.value)}
             sx={{ flex: 1 }}

@@ -123,8 +123,9 @@ export default function BomClassificationPage() {
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [productFeatures, setProductFeatures] = useState<Feature[]>([]);
+  const [libraryFeatures, setLibraryFeatures] = useState<Feature[]>([]);
 
-  // Load existing product features for match display
+  // Load product-linked features (for display badge) + full library (for classification)
   useEffect(() => {
     if (state.selectedProduct?.id) {
       featureService.getByProduct(state.selectedProduct.id)
@@ -133,9 +134,10 @@ export default function BomClassificationPage() {
     } else {
       setProductFeatures([]);
     }
+    featureService.getAll().then(setLibraryFeatures).catch(() => setLibraryFeatures([]));
   }, [state.selectedProduct?.id]);
 
-  /** Returns matched feature name if BOM row description matches an existing feature */
+  /** Returns matched feature from the global library by description or part number */
   const matchedFeature = (row: CanonicalBomRow): Feature | undefined => {
     if (productFeatures.length === 0) return undefined;
     const rowKey = normalize(row.description || row.partNumber || "");
@@ -143,14 +145,48 @@ export default function BomClassificationPage() {
     return productFeatures.find((f) => normalize(f.name) === rowKey);
   };
 
-  // Auto-classify on mount
+  /** Find a library feature matching a BOM row by name, part number, or manufacturer part number */
+  function findLibraryMatch(row: CanonicalBomRow): Feature | undefined {
+    if (libraryFeatures.length === 0) return undefined;
+    const descKey = normalize(row.description || "");
+    const pnKey   = (row.partNumber || "").trim().toLowerCase();
+    return libraryFeatures.find((f) => {
+      if (descKey && normalize(f.name) === descKey) return true;
+      if (pnKey && f.alternativePartNumber && f.alternativePartNumber.trim().toLowerCase() === pnKey) return true;
+      if (pnKey && f.manufacturerPartNumber && f.manufacturerPartNumber.trim().toLowerCase() === pnKey) return true;
+      return false;
+    });
+  }
+
+  // Auto-classify on mount, then apply library overrides
   useEffect(() => {
-    if (state.normalizedRows.length > 0 && state.classifications.length === 0) {
-      const cls = classifyAllRows(state.normalizedRows, [], id ?? "");
-      dispatch({ type: "SET_CLASSIFICATIONS", payload: cls });
-    }
+    if (state.normalizedRows.length === 0 || state.classifications.length > 0) return;
+    const cls = classifyAllRows(state.normalizedRows, [], id ?? "");
+    dispatch({ type: "SET_CLASSIFICATIONS", payload: cls });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.normalizedRows, state.classifications.length, dispatch, id]);
+
+  // Once library is loaded, apply library matches to un-overridden classifications
+  useEffect(() => {
+    if (libraryFeatures.length === 0 || state.classifications.length === 0) return;
+    let changed = false;
+    const updated = state.classifications.map((cl) => {
+      // Skip rows the user has manually overridden or that are already assets/ignored
+      if (cl.isManualOverride || cl.itemType === "asset" || cl.itemType === "ignore") return cl;
+      const row = state.normalizedRows.find((r) => r.sourceRowId === cl.sourceRowId);
+      if (!row) return cl;
+      const match = findLibraryMatch(row);
+      if (!match) return cl;
+      // Apply library's isInventory setting
+      const itemType: ItemType = match.isInventory ? "component" : "consumable";
+      const inventoryTracked = !!match.isInventory;
+      if (cl.itemType === itemType && cl.inventoryTracked === inventoryTracked) return cl;
+      changed = true;
+      return { ...cl, itemType, inventoryTracked, ruleSource: "feature-library", confidenceScore: 0.95 };
+    });
+    if (changed) dispatch({ type: "SET_CLASSIFICATIONS", payload: updated });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libraryFeatures]);
 
   if (state.normalizedRows.length === 0) {
     return (

@@ -11,9 +11,12 @@ import {
   HourglassEmptyOutlined,
   LinkOutlined,
   LockOutlined,
+  PhotoCameraOutlined,
   PlayArrowOutlined,
   ReplayOutlined,
   ReportProblemOutlined,
+  VideocamOutlined,
+  WarningAmberOutlined,
 } from "@mui/icons-material";
 import SignatureBadge from "../../components/ui/SignatureBadge";
 import SignatureDialog from "../../components/ui/SignatureDialog";
@@ -48,6 +51,7 @@ import {
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
+import { countMissingWorkflowItems, getMissingWorkflowItems } from "../../utils/workflowCompleteness";
 import type { AssetWorkflowRun, RunIssue, RunTimeEntry, StepResult } from "../../types/assetWorkflowRun";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import type { WorkflowConfig } from "../../types/workflowConfig";
@@ -438,6 +442,7 @@ export default function WorkflowRunHistoryDialog({
                 const stepMap = run.workflowSnapshotJson
                   ? buildStepMap(run.workflowSnapshotJson)
                   : {};
+                const missingMedia = countMissingWorkflowItems(run);
 
                 return (
                   <Box key={run.id}>
@@ -524,6 +529,16 @@ export default function WorkflowRunHistoryDialog({
                                 fontSize: 10,
                                 "& .MuiChip-label": { px: 0.5 },
                               }}
+                            />
+                          )}
+                          {missingMedia > 0 && (
+                            <Chip
+                              size="small"
+                              icon={<WarningAmberOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                              label={`${missingMedia} missing items`}
+                              color="warning"
+                              variant="outlined"
+                              sx={{ height: 16, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
                             />
                           )}
                         </Stack>
@@ -762,6 +777,7 @@ export default function WorkflowRunHistoryDialog({
                                   const stepTitle =
                                     step?.title ?? sr.stepId.slice(0, 8) + "…";
                                   const inputDefs: StepInput[] = step?.inputs ?? [];
+                                  const missingInputs = getMissingWorkflowItems(step, sr.values);
                                   const entries = Object.entries(sr.values ?? {}).filter(
                                     ([, v]) => v
                                   );
@@ -770,16 +786,54 @@ export default function WorkflowRunHistoryDialog({
                                       <TableCell
                                         sx={{ fontSize: 12, py: 0.75, fontWeight: 500 }}
                                       >
-                                        {stepTitle}
+                                        <Stack spacing={0.5}>
+                                          <Typography variant="body2" sx={{ fontSize: 12, fontWeight: 500 }}>
+                                            {stepTitle}
+                                          </Typography>
+                                          {missingInputs.length > 0 && (
+                                            <Chip
+                                              size="small"
+                                              color="warning"
+                                              variant="outlined"
+                                              icon={<WarningAmberOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                                              label={missingInputs.length === 1 ? "Missing data" : `${missingInputs.length} missing items`}
+                                              sx={{ width: "fit-content", height: 18, fontSize: 10 }}
+                                            />
+                                          )}
+                                        </Stack>
                                       </TableCell>
                                       <TableCell sx={{ fontSize: 12, py: 0.75 }}>
-                                        {entries.length > 0 ? (
+                                        {entries.length > 0 || missingInputs.length > 0 ? (
                                           <Stack spacing={0.25}>
+                                            {missingInputs.map((input) => (
+                                              <Stack key={`missing-${input.id}`} direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                                                <Typography variant="caption" color="warning.main" sx={{ minWidth: 80, flexShrink: 0 }}>
+                                                  {input.label}:
+                                                </Typography>
+                                                <Chip
+                                                  size="small"
+                                                  color="warning"
+                                                  icon={input.kind === "video"
+                                                    ? <VideocamOutlined sx={{ fontSize: "0.75rem !important" }} />
+                                                    : <PhotoCameraOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                                                  label={
+                                                    input.kind === "video" ? "Video missing"
+                                                      : input.kind === "photo" ? "Photo missing"
+                                                      : input.kind === "capture" ? "Capture missing"
+                                                      : "Required field missing"
+                                                  }
+                                                  sx={{ height: 18, fontSize: 10 }}
+                                                />
+                                              </Stack>
+                                            ))}
                                             {entries.map(([inputId, val]) => {
                                               const inputDef = inputDefs.find(
                                                 (inp) => inp.id === inputId
                                               );
-                                              const label = inputDef?.label ?? inputId;
+                                              const captureDef = !inputDef
+                                                ? (step?.captureFields ?? []).find((f) => f.id === inputId)
+                                                : undefined;
+                                              const label = inputDef?.label ?? captureDef?.label ?? inputId;
 
                                               // Component inputs: decode JSON sub-fields
                                               if (inputDef?.type === "component" && inputDef.subFields?.length && val) {

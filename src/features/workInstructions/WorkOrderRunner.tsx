@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useTheme } from "@mui/material/styles";
-import useMediaQuery from "@mui/material/useMediaQuery";
 import {
   AccessTimeOutlined,
   AttachMoneyOutlined,
@@ -56,6 +54,8 @@ import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { signatureService } from "../../services/signatureService";
+import { featureService } from "../../services/featureService";
+import type { Feature } from "../../types/feature";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
@@ -101,13 +101,26 @@ interface WorkOrderRunnerProps {
   onPause?: (progress: { done: number; total: number; completedTitles: string[]; partialFeatureValues: Record<string, string> }) => void;
   /** Full name of the currently logged-in user, stored on each issue. */
   currentUserName?: string;
+  /** ID of the currently logged-in user — used for missing-media flag ownership. */
+  currentUserId?: string;
+  /** Asset tag shown in dashboard flags. */
+  assetTag?: string;
+  /** Job number shown in dashboard flags. */
+  jobNumber?: string;
   /** Product feature definitions — used to look up feature names for repeatFeatureId steps. */
   productFeatures?: ProductFeatureDefinition[];
   /** Feature selections from the workflow config — provides expected qty per feature. */
   featureSelections?: FeatureSelection[];
 }
 
-type Stage = "setup" | "running" | "summary" | "bom" | "installer-sign" | "customer-sign";
+type Stage = "setup" | "running" | "summary" | "bom" | "consumables" | "installer-sign" | "customer-sign";
+
+interface UnlistedConsumable {
+  id: string;
+  description: string;
+  qty: number;
+  unit: string;
+}
 
 function parseRunTimeEntries(json: string): RunTimeEntry[] {
   try {
@@ -148,12 +161,12 @@ export default function WorkOrderRunner({
   onComplete,
   onPause,
   currentUserName,
+  currentUserId,
+  assetTag,
+  jobNumber,
   productFeatures,
   featureSelections,
 }: WorkOrderRunnerProps) {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-
   const stepsSorted = useMemo(
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
     [workflow.steps],
@@ -204,6 +217,16 @@ export default function WorkOrderRunner({
 
   // BOM confirmation
   const [bomActual, setBomActual] = useState<BomActualItem[]>([]);
+  const [unlistedConsumables, setUnlistedConsumables] = useState<UnlistedConsumable[]>([]);
+
+  // Consumable features from the product library — drives the end-of-run survey
+  const [libConsumableFeatures, setLibConsumableFeatures] = useState<Feature[]>([]);
+  useEffect(() => {
+    if (!open || !productId) return;
+    featureService.getByProduct(productId)
+      .then((feats) => setLibConsumableFeatures(feats.filter((f) => !f.isInventory)))
+      .catch(() => {});
+  }, [open, productId]);
 
   // Run tracking
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
@@ -332,6 +355,7 @@ export default function WorkOrderRunner({
     setTrackingStartedAt(null);
     setTickNow(Date.now());
     setRepeatPickerCount(1);
+    setUnlistedConsumables([]);
   }
 
   function syncRunTimeState(run: {
@@ -465,7 +489,7 @@ export default function WorkOrderRunner({
         // non-fatal — idle state will be restored on next open
       }
     }
-    await autosaveProgress();
+    await autosaveProgress(undefined, undefined, "Paused");
     const completedTitles = history
       .map((id) => stepsSorted.find((s) => s.id === id)?.title ?? "")
       .filter(Boolean);
@@ -682,20 +706,21 @@ export default function WorkOrderRunner({
     return result;
   }
 
-  async function autosaveProgress(navStepId?: string, navHistory?: string[]) {
+  async function autosaveProgress(navStepId?: string, navHistory?: string[], status?: "InProgress" | "Paused") {
     if (!activeRunId) return;
     try {
       await assetWorkflowRunService.saveProgress(
         activeRunId,
         JSON.stringify(buildStepsData(navStepId, navHistory)),
         JSON.stringify(issues),
+        status,
       );
     } catch {
       // silent — not critical
     }
   }
 
-  async function handleSave() {
+  async function handleSave(finalBomActual?: BomActualItem[]) {
     setSaving(true);
     setSaveError(null);
     setBlockingError(null);
@@ -715,13 +740,58 @@ export default function WorkOrderRunner({
       }));
       const allIssues = [...issues, ...qtyModIssues];
       const issuesJson = JSON.stringify(allIssues);
-      const bomJson = bomActual.length > 0 ? JSON.stringify(bomActual) : undefined;
+      const bomToSave = finalBomActual ?? bomActual;
+      const bomJson = bomToSave.length > 0 ? JSON.stringify(bomToSave) : undefined;
 
       if (activeRunId) {
         // Flush any queued time-tracking actions before locking — run rejects changes once locked.
         await flushTimeQueue();
         const lockedRun = await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName, bomJson);
         setActiveRun(lockedRun);
+
+        // Check if any photo/video steps exist but have no captures — flag for PM + installer
+        function countCaptured(stepId: string, inputId: string): number {
+          try {
+            const arr = JSON.parse(values[stepId]?.[inputId] ?? "[]");
+            return Array.isArray(arr) ? arr.length : 0;
+          } catch { return 0; }
+        }
+
+        const allMediaInputs = stepsSorted.flatMap(step =>
+          (step.inputs ?? []).filter(inp => inp.type === "photo" || inp.type === "video")
+            .map(inp => ({ stepId: step.id, stepTitle: step.title ?? step.id, inputId: inp.id, inputLabel: inp.label ?? inp.id }))
+        );
+
+        const totalExpected = allMediaInputs.length;
+        const capturedCounts = allMediaInputs.map(({ stepId, inputId }) => countCaptured(stepId, inputId));
+        const totalCaptured = capturedCounts.filter(c => c > 0).length;
+
+        if (totalExpected > 0 && totalCaptured < totalExpected) {
+          const missingSteps = allMediaInputs
+            .map((inp, i) => ({ ...inp, captured: capturedCounts[i] }))
+            .filter(inp => inp.captured === 0)
+            .map(({ stepId, stepTitle, inputId, inputLabel, captured }) => ({ stepId, stepTitle, inputId, inputLabel, captured }));
+
+          const flag = {
+            id: crypto.randomUUID(),
+            runId: activeRunId,
+            assetId: projectAssetId ?? "",
+            assetTag: assetTag ?? "",
+            jobNumber: jobNumber ?? "",
+            workflowName: workflow.name,
+            technicianUserId: currentUserId ?? "",
+            technicianName: currentUserName ?? "",
+            completedAt: new Date().toISOString(),
+            missingSteps,
+            totalExpected,
+            totalCaptured,
+          };
+          const existing = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
+          // Deduplicate by runId — remove any prior flag for this run then push new one
+          const deduped = existing.filter((e: { runId: string }) => e.runId !== activeRunId);
+          localStorage.setItem("pm_missing_media_flags", JSON.stringify([...deduped, flag]));
+          window.dispatchEvent(new Event("missing-media-flags-changed"));
+        }
       }
       // Note: if no activeRunId (preview mode), skip signature stages
       setSaved(true);
@@ -1075,6 +1145,7 @@ export default function WorkOrderRunner({
               placeholder="e.g. serial number, job ID, batch…"
               value={jobReference}
               onChange={(e) => setJobReference(e.target.value)}
+              InputLabelProps={{ shrink: true }}
             />
             {startError && <Alert severity="error" sx={{ fontSize: 12 }}>{startError}</Alert>}
           </Stack>
@@ -1323,6 +1394,7 @@ export default function WorkOrderRunner({
                       fullWidth
                       label="Reason"
                       placeholder="Waiting for parts / access / permit…"
+                      InputLabelProps={{ shrink: true }}
                       value={downtimeReason}
                       onChange={(e) => setDowntimeReason(e.target.value)}
                       onKeyDown={(e) => {
@@ -1573,23 +1645,26 @@ export default function WorkOrderRunner({
               </>
             )}
           </Stack>
+        </DialogContent>
 
-          {/* Flag issue inline form — inside DialogContent so it scrolls with the page */}
-          <Collapse in={flagOpen}>
-          <Box sx={{ pt: 2 }}>
-            <Divider sx={{ mb: 1.5 }} />
-            <Typography variant="caption" fontWeight={700} color="error" display="block" mb={0.5}>
-              Flag issue on this step
-            </Typography>
-            <Typography variant="caption" color="text.secondary" display="block" mb={1.25}>
-              <strong>High</strong> severity = <strong>blocking</strong> — workflow cannot be completed until resolved.&nbsp;
-              <strong>Medium</strong> or <strong>Low</strong> = observation — noted but does not block completion.
-            </Typography>
+        <Dialog open={flagOpen} onClose={() => { setFlagOpen(false); setFlagSubmitted(false); }} maxWidth="sm" fullWidth>
+          <DialogTitle sx={{ pb: 1 }}>
+            <Stack spacing={0.5}>
+              <Typography variant="subtitle2" fontWeight={700} color="error">
+                Flag issue on this step
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                <strong>High</strong> severity = <strong>blocking</strong> — workflow cannot be completed until resolved.{" "}
+                <strong>Medium</strong> or <strong>Low</strong> = observation — noted but does not block completion.
+              </Typography>
+            </Stack>
+          </DialogTitle>
+          <DialogContent dividers>
             <Stack spacing={1.25}>
               {/* Severity selector */}
               <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
                 <FormControl size="small" sx={{ minWidth: 240 }}>
-                  <InputLabel>Severity</InputLabel>
+                  <InputLabel shrink>Severity</InputLabel>
                   <Select
                     label="Severity"
                     value={flagSeverity}
@@ -1636,7 +1711,7 @@ export default function WorkOrderRunner({
                           <TextField size="small" fullWidth multiline rows={2} label="Description"
                             value={editIssueDesc} onChange={(e) => setEditIssueDesc(e.target.value)} />
                           <FormControl size="small" sx={{ maxWidth: 220 }}>
-                            <InputLabel>Severity</InputLabel>
+                            <InputLabel shrink>Severity</InputLabel>
                             <Select label="Severity" value={editIssueSeverity}
                               onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
                               <MenuItem value="low">Low — observation only</MenuItem>
@@ -1689,6 +1764,7 @@ export default function WorkOrderRunner({
                 rows={2}
                 label={flagIssueType === "scope-deviation" ? "Describe the scope variation" : "Describe/Add issue here"}
                 placeholder={flagIssueType === "scope-deviation" ? "e.g. Additional conduit run required due to obstructed original route…" : "Describe what you observed…"}
+                InputLabelProps={{ shrink: true }}
                 value={flagDescription}
                 onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
               />
@@ -1707,6 +1783,7 @@ export default function WorkOrderRunner({
                     size="small"
                     label="Cost impact (optional)"
                     placeholder="e.g. £250 materials"
+                    InputLabelProps={{ shrink: true }}
                     value={flagCostImpact}
                     onChange={(e) => setFlagCostImpact(e.target.value)}
                     sx={{ flex: 1 }}
@@ -1718,31 +1795,32 @@ export default function WorkOrderRunner({
                 onChange={setFlagMedia}
                 label="Attach Photo / Video (optional)"
               />
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Button
-                  size="small"
-                  variant="contained"
-                  color="success"
-                  disabled={!flagDescription.trim()}
-                  onClick={submitFlag}
-                  sx={{ flexShrink: 0 }}
-                >
-                  Add issue
-                </Button>
-                {flagSubmitted && (
-                  <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
-                    ✓ Issue added — type another or close
-                  </Typography>
-                )}
-                <Box sx={{ flex: 1 }} />
-                <Button size="small" variant="text" color="inherit" onClick={() => { setFlagOpen(false); setFlagSubmitted(false); }}>
-                  Close
-                </Button>
-              </Stack>
             </Stack>
-          </Box>
-          </Collapse>
-        </DialogContent>
+          </DialogContent>
+          <DialogActions sx={{ justifyContent: "space-between", gap: 1, px: 3, py: 1.5 }}>
+            {flagSubmitted ? (
+              <Typography variant="caption" color="success.main" sx={{ fontWeight: 600, mr: "auto" }}>
+                ✓ Issue added — type another or close
+              </Typography>
+            ) : (
+              <Box />
+            )}
+            <Stack direction="row" spacing={1}>
+              <Button size="small" variant="text" color="inherit" onClick={() => { setFlagOpen(false); setFlagSubmitted(false); }}>
+                Close
+              </Button>
+              <Button
+                size="small"
+                variant="contained"
+                color="success"
+                disabled={!flagDescription.trim()}
+                onClick={submitFlag}
+              >
+                Add issue
+              </Button>
+            </Stack>
+          </DialogActions>
+        </Dialog>
 
         <DialogActions sx={{ flexWrap: "wrap", gap: 0.75, justifyContent: "space-between" }}>
           <Stack direction="row" spacing={0.75} alignItems="center">
@@ -1821,6 +1899,17 @@ export default function WorkOrderRunner({
     const blockingIssues = issues.filter((i) => i.isBlocking && !i.resolved);
     const hasBlockingIssues = blockingIssues.length > 0;
 
+    // Detect missing media: workflow has photo/video steps but none were captured
+    const mediaSteps = stepsSorted.flatMap(step =>
+      (step.inputs ?? []).filter(inp => inp.type === "photo" || inp.type === "video")
+        .map(inp => ({ stepId: step.id, inputId: inp.id }))
+    );
+    const mediaCaptured = mediaSteps.some(({ stepId, inputId }) => {
+      try { const arr = JSON.parse(values[stepId]?.[inputId] ?? "[]"); return Array.isArray(arr) && arr.length > 0; }
+      catch { return false; }
+    });
+    const isMissingMedia = mediaSteps.length > 0 && !mediaCaptured;
+
     return (
       <>
         <DialogTitle>
@@ -1847,6 +1936,13 @@ export default function WorkOrderRunner({
               </Stack>
             )}
 
+            {/* Missing media warning */}
+            {isMissingMedia && (
+              <Alert severity="warning" icon={<PhotoCameraOutlined />}>
+                No photos or videos captured. PM and assigned users will be notified. Go back to add media, or proceed to complete.
+              </Alert>
+            )}
+
             {/* Issues summary */}
             {issues.length > 0 && (
               <Stack spacing={1}>
@@ -1871,7 +1967,7 @@ export default function WorkOrderRunner({
                         <TextField size="small" fullWidth multiline rows={2} label="Description"
                           value={editIssueDesc} onChange={(e) => setEditIssueDesc(e.target.value)} />
                         <FormControl size="small" sx={{ maxWidth: 220 }}>
-                          <InputLabel>Severity</InputLabel>
+                          <InputLabel shrink>Severity</InputLabel>
                           <Select label="Severity" value={editIssueSeverity}
                             onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
                             <MenuItem value="low">Low — observation only</MenuItem>
@@ -2027,21 +2123,49 @@ export default function WorkOrderRunner({
               <Button
                 variant="contained"
                 onClick={() => {
-                  const hasBom = (workflow.bomItems ?? []).length > 0;
-                  if (hasBom && activeRunId) {
-                    setBomActual((workflow.bomItems ?? []).map((item) => ({
+                  const allBomItems = workflow.bomItems ?? [];
+                  const inventoryItems = allBomItems.filter(i => i.isInventory);
+                  const bomConsumableItems = allBomItems.filter(i => !i.isInventory);
+                  // Include lib consumable features not already covered by a BOM item
+                  const bomDescriptions = new Set(bomConsumableItems.map(i => i.description.toLowerCase()));
+                  const extraConsumables = libConsumableFeatures.filter(
+                    f => !bomDescriptions.has(f.name.toLowerCase())
+                  );
+                  const hasConsumables = bomConsumableItems.length > 0 || extraConsumables.length > 0;
+
+                  if (activeRunId) {
+                    // Build bomActual: BOM inventory + BOM consumables + library consumable features
+                    const bomEntries: BomActualItem[] = allBomItems.map((item) => ({
                       bomItemId: item.id,
                       description: item.description,
                       isInventory: item.isInventory,
                       expectedQty: item.expectedQty,
                       actualQty: item.expectedQty,
                       unitOfMeasure: item.unitOfMeasure,
+                      isNA: false,
                       unitCaptures: item.isInventory
                         ? Array.from({ length: item.expectedQty }, () =>
                             Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
                         : undefined,
-                    })));
-                    setStage("bom");
+                    }));
+                    const libEntries: BomActualItem[] = extraConsumables.map((f) => ({
+                      bomItemId: `lib-${f.id}`,
+                      description: f.name,
+                      isInventory: false,
+                      expectedQty: 1,
+                      actualQty: 1,
+                      unitOfMeasure: "ea",
+                      isNA: false,
+                    }));
+                    setBomActual([...bomEntries, ...libEntries]);
+                    setUnlistedConsumables([]);
+                    if (inventoryItems.length > 0) {
+                      setStage("bom");
+                    } else if (hasConsumables) {
+                      setStage("consumables");
+                    } else {
+                      handleSave();
+                    }
                   } else {
                     handleSave();
                   }
@@ -2058,31 +2182,33 @@ export default function WorkOrderRunner({
     );
   }
 
-  // ── Stage: BOM confirmation ───────────────────────────────────────────────
+  // ── Stage: BOM confirmation (inventory items only — serial number capture) ──
   function renderBom() {
-    const bomItems = workflow.bomItems ?? [];
+    // Only show inventory items here; consumables handled in the next stage
+    const inventoryItems = (workflow.bomItems ?? []).filter(i => i.isInventory);
+    const hasConsumables = (workflow.bomItems ?? []).some(i => !i.isInventory) || libConsumableFeatures.length > 0;
     return (
       <>
         <DialogTitle>
           <Stack direction="row" alignItems="center" spacing={1}>
             <CheckCircleOutlined color="primary" />
-            <Typography variant="subtitle1" fontWeight={600}>Confirm Parts Used</Typography>
+            <Typography variant="subtitle1" fontWeight={600}>Confirm Inventory Parts</Typography>
           </Stack>
+          <Typography variant="caption" color="text.secondary">
+            Enter serial numbers and quantities for tracked components.
+            {hasConsumables && " Consumables will be confirmed in the next step."}
+          </Typography>
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              Verify the parts installed. Adjust quantities and enter serial numbers where required.
-            </Typography>
-            {bomItems.map((item) => {
+            {inventoryItems.map((item) => {
               const actual = bomActual.find((a) => a.bomItemId === item.id);
               if (!actual) return null;
               return (
                 <Paper key={item.id} variant="outlined" sx={{ p: 1.5 }}>
                   <Stack spacing={1.5}>
                     <Stack direction="row" alignItems="center" spacing={1}>
-                      <Chip label={item.isInventory ? "Inventory" : "Consumable"} size="small"
-                        color={item.isInventory ? "primary" : "default"} variant="outlined" />
+                      <Chip label="Inventory" size="small" color="primary" variant="outlined" />
                       <Typography variant="body2" fontWeight={600}>{item.description}</Typography>
                       {item.partNumber && (
                         <Typography variant="caption" color="text.secondary">· {item.partNumber}</Typography>
@@ -2099,10 +2225,8 @@ export default function WorkOrderRunner({
                           const qty = Math.max(0, Number(e.target.value) || 0);
                           setBomActual((prev) => prev.map((a) => a.bomItemId !== item.id ? a : {
                             ...a, actualQty: qty,
-                            unitCaptures: item.isInventory
-                              ? Array.from({ length: qty }, (_, i) =>
-                                  a.unitCaptures?.[i] ?? Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
-                              : undefined,
+                            unitCaptures: Array.from({ length: qty }, (_, i) =>
+                              a.unitCaptures?.[i] ?? Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""]))),
                           }));
                         }}
                       />
@@ -2110,7 +2234,7 @@ export default function WorkOrderRunner({
                         of {item.expectedQty} {item.unitOfMeasure} expected
                       </Typography>
                     </Stack>
-                    {item.isInventory && (actual.unitCaptures ?? []).map((fields, unitIdx) => (
+                    {(actual.unitCaptures ?? []).map((fields, unitIdx) => (
                       <Stack key={unitIdx} spacing={0.75} sx={{ pl: 1, borderLeft: "2px solid", borderColor: "divider" }}>
                         <Typography variant="caption" color="text.secondary" fontWeight={600}>
                           Unit {unitIdx + 1}
@@ -2127,6 +2251,7 @@ export default function WorkOrderRunner({
                               size="small"
                               fullWidth
                               placeholder={`Enter ${fieldName}`}
+                              InputLabelProps={{ shrink: true }}
                               value={fields[fieldName] ?? ""}
                               onChange={(e) => setBomActual((prev) => prev.map((a) => {
                                 if (a.bomItemId !== item.id) return a;
@@ -2149,7 +2274,198 @@ export default function WorkOrderRunner({
           <Button onClick={() => setStage("summary")} disabled={saving}>Back</Button>
           <Button
             variant="contained"
-            onClick={handleSave}
+            onClick={() => hasConsumables ? setStage("consumables") : handleSave()}
+            disabled={saving}
+            startIcon={saving ? <CircularProgress size={14} /> : undefined}
+          >
+            {saving ? "Saving…" : hasConsumables ? "Next: Consumables →" : "Complete & sign"}
+          </Button>
+        </DialogActions>
+      </>
+    );
+  }
+
+  // ── Stage: Consumables confirm / adjust ───────────────────────────────────
+  function renderConsumables() {
+    const consumableItems = (workflow.bomItems ?? []).filter(i => !i.isInventory);
+    const hasInventory = (workflow.bomItems ?? []).some(i => i.isInventory);
+    const allConfirmedAsPlanned = bomActual
+      .filter(a => !a.isInventory)
+      .every(a => !a.isNA && a.actualQty === a.expectedQty);
+
+    const hasDeviations = bomActual.some(a => !a.isInventory && (a.isNA || a.actualQty !== a.expectedQty))
+      || unlistedConsumables.length > 0;
+
+    return (
+      <>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <CheckCircleOutlined color="primary" />
+            <Typography variant="subtitle1" fontWeight={600}>Consumables Used</Typography>
+          </Stack>
+          <Typography variant="caption" color="text.secondary">
+            Confirm what was used. Tap "Confirm all as planned" if nothing changed.
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ mt: 1 }}>
+            {/* One-tap confirm all */}
+            <Button
+              variant={allConfirmedAsPlanned && unlistedConsumables.length === 0 ? "contained" : "outlined"}
+              color="success"
+              size="small"
+              onClick={() => {
+                setBomActual(prev => prev.map(a =>
+                  a.isInventory ? a : { ...a, actualQty: a.expectedQty, isNA: false }
+                ));
+                setUnlistedConsumables([]);
+              }}
+            >
+              Confirm all as planned
+            </Button>
+
+            {/* Per-item rows */}
+            {consumableItems.map((item) => {
+              const actual = bomActual.find(a => a.bomItemId === item.id);
+              if (!actual) return null;
+              const isDifferent = actual.isNA || actual.actualQty !== actual.expectedQty;
+              return (
+                <Paper
+                  key={item.id}
+                  variant="outlined"
+                  sx={{ p: 1.5, borderColor: isDifferent ? "warning.main" : "divider" }}
+                >
+                  <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+                    <Typography variant="body2" fontWeight={600} sx={{ flex: 1, minWidth: 120 }}>
+                      {item.description}
+                    </Typography>
+                    {item.partNumber && (
+                      <Typography variant="caption" color="text.secondary">{item.partNumber}</Typography>
+                    )}
+                    {/* N/A toggle */}
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={!!actual.isNA}
+                          onChange={(e) => setBomActual(prev => prev.map(a =>
+                            a.bomItemId !== item.id ? a : { ...a, isNA: e.target.checked, actualQty: e.target.checked ? 0 : a.expectedQty }
+                          ))}
+                        />
+                      }
+                      label={<Typography variant="caption">N/A</Typography>}
+                      sx={{ m: 0 }}
+                    />
+                    {/* Qty field — hidden when N/A */}
+                    {!actual.isNA && (
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <TextField
+                          size="small"
+                          type="number"
+                          label="Used"
+                          InputLabelProps={{ shrink: true }}
+                          sx={{ width: 80 }}
+                          value={actual.actualQty}
+                          onChange={(e) => {
+                            const qty = Math.max(0, Number(e.target.value) || 0);
+                            setBomActual(prev => prev.map(a =>
+                              a.bomItemId !== item.id ? a : { ...a, actualQty: qty }
+                            ));
+                          }}
+                        />
+                        <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+                          / {item.expectedQty} {item.unitOfMeasure}
+                        </Typography>
+                      </Stack>
+                    )}
+                    {actual.isNA && (
+                      <Typography variant="caption" color="text.secondary" fontStyle="italic">Not used</Typography>
+                    )}
+                  </Stack>
+                </Paper>
+              );
+            })}
+
+            {/* Unlisted consumables */}
+            {unlistedConsumables.map((u) => (
+              <Paper key={u.id} variant="outlined" sx={{ p: 1.5, borderColor: "warning.main" }}>
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                  <Chip label="Unlisted" size="small" color="warning" variant="outlined" />
+                  <TextField
+                    size="small"
+                    label="Description"
+                    InputLabelProps={{ shrink: true }}
+                    value={u.description}
+                    onChange={(e) => setUnlistedConsumables(prev => prev.map(x => x.id !== u.id ? x : { ...x, description: e.target.value }))}
+                    sx={{ flex: 1, minWidth: 140 }}
+                  />
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="Qty"
+                    InputLabelProps={{ shrink: true }}
+                    sx={{ width: 70 }}
+                    value={u.qty}
+                    onChange={(e) => setUnlistedConsumables(prev => prev.map(x => x.id !== u.id ? x : { ...x, qty: Math.max(0, Number(e.target.value) || 0) }))}
+                  />
+                  <TextField
+                    size="small"
+                    label="Unit"
+                    InputLabelProps={{ shrink: true }}
+                    sx={{ width: 60 }}
+                    value={u.unit}
+                    onChange={(e) => setUnlistedConsumables(prev => prev.map(x => x.id !== u.id ? x : { ...x, unit: e.target.value }))}
+                  />
+                  <IconButton size="small" onClick={() => setUnlistedConsumables(prev => prev.filter(x => x.id !== u.id))}>
+                    <DeleteOutlineOutlined fontSize="small" />
+                  </IconButton>
+                </Stack>
+              </Paper>
+            ))}
+
+            {/* Add unlisted button */}
+            <Button
+              size="small"
+              variant="text"
+              onClick={() => setUnlistedConsumables(prev => [
+                ...prev,
+                { id: crypto.randomUUID(), description: "", qty: 1, unit: "ea" }
+              ])}
+            >
+              + Add unlisted item
+            </Button>
+
+            {/* Deviation summary */}
+            {hasDeviations && (
+              <Alert severity="warning" sx={{ mt: 1 }}>
+                Deviations noted — PM will be notified on completion.
+              </Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStage(hasInventory ? "bom" : "summary")} disabled={saving}>Back</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              // Merge unlisted consumables into bomActual and pass directly to handleSave
+              const unlistedActual: BomActualItem[] = unlistedConsumables
+                .filter(u => u.description.trim())
+                .map(u => ({
+                  bomItemId: `unlisted-${u.id}`,
+                  description: u.description,
+                  isInventory: false,
+                  isUnlisted: true,
+                  expectedQty: 0,
+                  actualQty: u.qty,
+                  unitOfMeasure: u.unit,
+                }));
+              const merged = [
+                ...bomActual.filter(a => !a.isUnlisted),
+                ...unlistedActual,
+              ];
+              handleSave(merged);
+            }}
             disabled={saving}
             startIcon={saving ? <CircularProgress size={14} /> : undefined}
           >
@@ -2377,11 +2693,12 @@ export default function WorkOrderRunner({
 
   return (
     <>
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth fullScreen={isMobile}>
+      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
         {stage === "setup"          && renderSetup()}
         {stage === "running"        && renderRunning()}
         {stage === "summary"        && renderSummary()}
         {stage === "bom"            && renderBom()}
+        {stage === "consumables"    && renderConsumables()}
         {stage === "installer-sign" && renderInstallerSign()}
         {stage === "customer-sign"  && renderCustomerSign()}
         {/* ── Persistent offline / sync bar ── */}
@@ -2454,6 +2771,7 @@ export default function WorkOrderRunner({
               value={modifyQtyReason}
               onChange={(e) => setModifyQtyReason(e.target.value)}
               placeholder="e.g. Only 3 cameras were delivered on site…"
+              InputLabelProps={{ shrink: true }}
               multiline
               rows={2}
               fullWidth

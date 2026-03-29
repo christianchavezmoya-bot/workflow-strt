@@ -295,7 +295,7 @@ export default function TimeEntriesEditorDialog({ open, run, readOnly = false, o
             </Typography>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
               <FormControl size="small" sx={{ minWidth: 140 }}>
-                <InputLabel>Category</InputLabel>
+                <InputLabel shrink>Category</InputLabel>
                 <Select
                   label="Category"
                   value={form.category}
@@ -311,6 +311,7 @@ export default function TimeEntriesEditorDialog({ open, run, readOnly = false, o
                 value={form.reason}
                 onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
                 placeholder={form.category === "downtime" ? "Waiting for parts..." : ""}
+                InputLabelProps={{ shrink: true }}
                 sx={{ flex: 1, minWidth: 180 }}
               />
               <TextField

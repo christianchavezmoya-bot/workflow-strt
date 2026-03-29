@@ -59,6 +59,22 @@ export interface ProjectAsset {
   asBuiltJson?: string;
   createdAt: string;
   updatedAt: string;
+  workflowSummary?: ProjectAssetWorkflowSummary;
+}
+
+export interface ProjectAssetWorkflowSummary {
+  hasWorkflow: boolean;
+  evidenceStatus: "None" | "Pending" | "Running" | "Paused" | "Complete" | "MissingData";
+  requiredItems: number;
+  completedItems: number;
+  missingItems: number;
+  latestRunId?: string;
+  latestRunStatus?: string;
+  latestRunLocked: boolean;
+  signatureStatus?: string;
+  hasOpenIssues: boolean;
+  latestRunStartedAt?: string;
+  latestRunCompletedAt?: string;
 }
 
 export interface CreateProjectAssetInput {

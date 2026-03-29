@@ -181,14 +181,14 @@ export default function AssetRegistryPage() {
       {/* Filters */}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} flexWrap="wrap" useFlexGap>
         <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel>Product</InputLabel>
+          <InputLabel shrink>Product</InputLabel>
           <Select label="Product" value={productFilter} onChange={(e) => setProductFilter(e.target.value)}>
             <MenuItem value="">All products</MenuItem>
             {products.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ minWidth: 160 }}>
-          <InputLabel>Status</InputLabel>
+          <InputLabel shrink>Status</InputLabel>
           <Select label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as ProjectAssetStatus | "All")}>
             <MenuItem value="All">All statuses</MenuItem>
             <MenuItem value="NotStarted">Not Started</MenuItem>
@@ -208,7 +208,7 @@ export default function AssetRegistryPage() {
           }}
         />
         <FormControl size="small" sx={{ minWidth: 170 }}>
-          <InputLabel>Sort By</InputLabel>
+          <InputLabel shrink>Sort By</InputLabel>
           <Select label="Sort By" value={sortBy} onChange={(e) => setSortBy(e.target.value as RegistrySortKey)}>
             <MenuItem value="assetTag">Asset Tag</MenuItem>
             <MenuItem value="product">Product</MenuItem>
@@ -222,7 +222,7 @@ export default function AssetRegistryPage() {
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ minWidth: 150 }}>
-          <InputLabel>Order</InputLabel>
+          <InputLabel shrink>Order</InputLabel>
           <Select label="Order" value={sortDir} onChange={(e) => setSortDir(e.target.value as "asc" | "desc")}>
             <MenuItem value="asc">Ascending</MenuItem>
             <MenuItem value="desc">Descending</MenuItem>

@@ -148,7 +148,7 @@ export default function BomProductSelector() {
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="flex-start">
         {/* Division */}
         <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel>Division (optional)</InputLabel>
+          <InputLabel shrink>Division (optional)</InputLabel>
           <Select
             value={divisionId}
             label="Division (optional)"
@@ -163,7 +163,7 @@ export default function BomProductSelector() {
 
         {/* Product */}
         <FormControl size="small" sx={{ minWidth: 240 }}>
-          <InputLabel>Product *</InputLabel>
+          <InputLabel shrink>Product *</InputLabel>
           <Select
             value={productId}
             label="Product *"
@@ -259,7 +259,7 @@ export default function BomProductSelector() {
               onChange={(e) => setNewDesc(e.target.value)}
             />
             <FormControl size="small" fullWidth>
-              <InputLabel>Division (optional)</InputLabel>
+              <InputLabel shrink>Division (optional)</InputLabel>
               <Select
                 value={divisionId}
                 label="Division (optional)"

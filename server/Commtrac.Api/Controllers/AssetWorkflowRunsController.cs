@@ -438,6 +438,20 @@ public class AssetWorkflowRunsController : ControllerBase
         return Ok(ToDto(run));
     }
 
+    // PATCH api/asset-workflow-runs/{id}/step-results — update step results on a locked/complete run (e.g. adding photos)
+    [HttpPatch("{id}/step-results")]
+    public async Task<IActionResult> PatchStepResults(string id, [FromBody] PatchStepResultsRequest req)
+    {
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
+        if (run is null) return NotFound();
+
+        run.StepResultsJson = req.StepResultsJson;
+        run.UpdatedAt       = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        return Ok(ToDto(run));
+    }
+
     // PATCH api/asset-workflow-runs/{id}/time-entries — replace time entries (works on locked runs for retroactive correction)
     [HttpPatch("{id}/time-entries")]
     public async Task<IActionResult> PatchTimeEntries(string id, [FromBody] PatchTimeEntriesRequest req)
@@ -533,6 +547,7 @@ public class AssetWorkflowRunsController : ControllerBase
             case "pause":
                 // Close whatever is open (productive or downtime) → idle state
                 CloseAnyOpenTimeEntry(run, endAt);
+                run.Status = "Paused";
                 break;
             default:
                 return BadRequest(new { message = "Unknown action. Use StartProductive, ResumeProductive, StartDowntime, StopDowntime, StopAll." });

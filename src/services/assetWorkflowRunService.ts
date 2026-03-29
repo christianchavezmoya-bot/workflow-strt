@@ -109,6 +109,16 @@ export const assetWorkflowRunService = {
     return await this.completeRun(runId, run.stepResultsJson ?? "[]", run.issuesJson ?? "[]", completedByName, run.bomActualJson);
   },
 
+  /** Patch step results on a locked/complete run — used to add missing photos after completion. */
+  async patchStepResults(runId: string, stepResultsJson: string, amendedByName?: string): Promise<AssetWorkflowRun> {
+    const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/step-results`, {
+      stepResultsJson,
+      amendedByName: amendedByName ?? null,
+      amendedAt: new Date().toISOString(),
+    });
+    return res.data;
+  },
+
   /** Replace the full time-entries array and recompute metrics. Works on locked runs. */
   async patchTimeEntries(runId: string, timeEntriesJson: string): Promise<AssetWorkflowRun> {
     const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entries`, { timeEntriesJson });

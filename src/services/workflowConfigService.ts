@@ -15,7 +15,39 @@ function lsWrite(productId: string, configs: WorkflowConfig[]) {
   try { localStorage.setItem(LS_KEY(productId), JSON.stringify(configs)); } catch {}
 }
 
+function lsReadAll(): WorkflowConfig[] {
+  try {
+    const prefix = "workflow_configs_v1_";
+    const all: WorkflowConfig[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(prefix)) {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const items = JSON.parse(raw) as WorkflowConfig[];
+          for (const item of items) {
+            if (!seen.has(item.id)) { seen.add(item.id); all.push(item); }
+          }
+        }
+      }
+    }
+    return all;
+  } catch { return []; }
+}
+
 export const workflowConfigService = {
+  async getAll(status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
+    try {
+      const params = status ? `?status=${status}` : "";
+      const res = await api.get<WorkflowConfig[]>(`/workflow-configs${params}`);
+      return res.data;
+    } catch {
+      const cached = lsReadAll();
+      return status ? cached.filter((c) => c.status === status) : cached;
+    }
+  },
+
   async listByProduct(productId: string, status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
     try {
       const params = status ? `?status=${status}` : "";

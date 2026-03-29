@@ -135,6 +135,10 @@ export interface BomActualItem {
   /** Per-unit captured values: one Record per unit, keyed by field name */
   unitCaptures?: Array<Record<string, string>>;
   notes?: string;
+  /** Consumable was not applicable for this job */
+  isNA?: boolean;
+  /** Item was used but not in the original BOM (added by technician) */
+  isUnlisted?: boolean;
 }
 
 export interface Workflow {

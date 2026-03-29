@@ -1,6 +1,6 @@
 import type { IssueComment } from "./projectAsset";
 
-export type RunStatus = "InProgress" | "Complete" | "Issue";
+export type RunStatus = "InProgress" | "Paused" | "Complete" | "Issue";
 
 export interface RunTimeEntry {
   id: string;

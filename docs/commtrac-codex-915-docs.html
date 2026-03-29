@@ -1,0 +1,2261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Commtrac Codex 915 — Full System Documentation</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #070d10;
+    --surface: #0c1a20;
+    --surface2: #112530;
+    --surface3: #1a3040;
+    --border: #1e3a4a;
+    --border2: #2a4a5e;
+    --accent: #00c8ff;
+    --accent2: #00ff9d;
+    --accent3: #ff6b35;
+    --accent4: #b06cff;
+    --warn: #ffb830;
+    --text: #d8eef5;
+    --text2: #7aabb8;
+    --text3: #3d6b7a;
+    --white: #ffffff;
+    --glow: 0 0 20px rgba(0,200,255,0.15);
+    --glow2: 0 0 20px rgba(0,255,157,0.12);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ── NOISE OVERLAY ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    width: 240px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+    overflow-y: auto;
+  }
+  .sidebar-logo {
+    padding: 24px 20px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-logo .brand {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .sidebar-logo .sub {
+    font-size: 10px;
+    color: var(--text3);
+    letter-spacing: 0.08em;
+    margin-top: 2px;
+  }
+  .nav-group { padding: 16px 0 8px; }
+  .nav-label {
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text3);
+    padding: 0 20px 8px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 20px;
+    font-size: 12px;
+    color: var(--text2);
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.15s;
+    border-left: 2px solid transparent;
+  }
+  .nav-item:hover, .nav-item.active {
+    color: var(--accent);
+    background: rgba(0,200,255,0.05);
+    border-left-color: var(--accent);
+  }
+  .nav-item .dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--text3);
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  .nav-item.active .dot, .nav-item:hover .dot { background: var(--accent); }
+
+  /* ── MAIN ── */
+  #main {
+    margin-left: 240px;
+    min-height: 100vh;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    padding: 64px 60px 48px;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: '';
+    position: absolute;
+    top: -80px; right: -80px;
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, rgba(0,200,255,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero-tag {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .hero h1 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 42px;
+    line-height: 1.1;
+    color: var(--white);
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+  }
+  .hero h1 span { color: var(--accent); }
+  .hero p {
+    font-size: 15px;
+    color: var(--text2);
+    max-width: 640px;
+    line-height: 1.7;
+    margin-bottom: 28px;
+  }
+  .hero-badges { display: flex; gap: 10px; flex-wrap: wrap; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    border: 1px solid;
+  }
+  .badge-blue { color: var(--accent); border-color: rgba(0,200,255,0.25); background: rgba(0,200,255,0.06); }
+  .badge-green { color: var(--accent2); border-color: rgba(0,255,157,0.25); background: rgba(0,255,157,0.06); }
+  .badge-orange { color: var(--accent3); border-color: rgba(255,107,53,0.25); background: rgba(255,107,53,0.06); }
+  .badge-purple { color: var(--accent4); border-color: rgba(176,108,255,0.25); background: rgba(176,108,255,0.06); }
+  .badge-warn { color: var(--warn); border-color: rgba(255,184,48,0.25); background: rgba(255,184,48,0.06); }
+
+  /* ── SECTIONS ── */
+  .section {
+    padding: 52px 60px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 32px;
+  }
+  .section-num {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--text3);
+  }
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--white);
+    letter-spacing: -0.01em;
+  }
+  .section-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border2), transparent);
+  }
+
+  /* ── GRID CARDS ── */
+  .cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--c, var(--accent)), transparent);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .card:hover { border-color: var(--border2); box-shadow: var(--glow); }
+  .card:hover::before { opacity: 1; }
+  .card-icon {
+    font-size: 22px;
+    margin-bottom: 10px;
+  }
+  .card-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--white);
+    margin-bottom: 6px;
+  }
+  .card-desc {
+    font-size: 12px;
+    color: var(--text2);
+    line-height: 1.6;
+  }
+
+  /* ── ARCH DIAGRAM ── */
+  .arch-canvas {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 32px;
+    overflow-x: auto;
+  }
+  .arch-row {
+    display: flex;
+    gap: 16px;
+    align-items: stretch;
+    margin-bottom: 12px;
+    justify-content: center;
+  }
+  .arch-layer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 6px;
+    border: 1px solid;
+    font-size: 12px;
+    font-family: 'DM Mono', monospace;
+    white-space: nowrap;
+    min-width: 140px;
+    text-align: center;
+    flex-direction: column;
+  }
+  .arch-layer .lbl { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.6; margin-bottom: 2px; }
+  .arch-layer .val { font-weight: 500; }
+  .al-blue  { color: var(--accent);  border-color: rgba(0,200,255,0.3);  background: rgba(0,200,255,0.05); }
+  .al-green { color: var(--accent2); border-color: rgba(0,255,157,0.3);  background: rgba(0,255,157,0.05); }
+  .al-orange{ color: var(--accent3); border-color: rgba(255,107,53,0.3); background: rgba(255,107,53,0.05); }
+  .al-purple{ color: var(--accent4); border-color: rgba(176,108,255,0.3);background: rgba(176,108,255,0.05); }
+  .al-warn  { color: var(--warn);    border-color: rgba(255,184,48,0.3); background: rgba(255,184,48,0.05); }
+  .arch-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text3);
+    font-size: 18px;
+    padding: 0 4px;
+  }
+  .arch-vdivider {
+    width: 1px;
+    background: var(--border);
+    margin: 0 8px;
+  }
+
+  /* ── TABLE ── */
+  .doc-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin: 16px 0;
+  }
+  .doc-table th {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text3);
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.2);
+  }
+  .doc-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(30,58,74,0.4);
+    color: var(--text2);
+    vertical-align: top;
+  }
+  .doc-table tr:hover td { background: rgba(0,200,255,0.03); color: var(--text); }
+  .doc-table .mono { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--accent2); }
+  .doc-table .role-tag {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+
+  /* ── CODE BLOCK ── */
+  .code-block {
+    background: #040a0d;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text2);
+    overflow-x: auto;
+    margin: 16px 0;
+    position: relative;
+  }
+  .code-block .comment { color: var(--text3); }
+  .code-block .key { color: var(--accent); }
+  .code-block .val { color: var(--accent2); }
+  .code-block .str { color: var(--warn); }
+  .code-block .type-kw { color: var(--accent4); }
+  .code-block-label {
+    position: absolute;
+    top: 8px; right: 12px;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text3);
+  }
+
+  /* ── FLOW ── */
+  .flow-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+  }
+  .flow-steps::before {
+    content: '';
+    position: absolute;
+    left: 20px;
+    top: 20px;
+    bottom: 20px;
+    width: 1px;
+    background: linear-gradient(180deg, var(--accent), var(--accent2));
+    opacity: 0.3;
+  }
+  .flow-step {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    padding: 16px 0;
+  }
+  .step-num {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
+    flex-shrink: 0;
+    z-index: 1;
+  }
+  .step-content { flex: 1; padding-top: 8px; }
+  .step-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--white);
+    margin-bottom: 4px;
+  }
+  .step-desc { font-size: 12px; color: var(--text2); line-height: 1.6; }
+  .step-sub { margin-top: 8px; }
+  .step-sub code {
+    display: block;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--accent2);
+    margin-top: 4px;
+  }
+
+  /* ── PERMISSIONS ── */
+  .perm-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .perm-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .perm-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .perm-icon { font-size: 16px; }
+  .perm-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--white);
+  }
+  .perm-list { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .perm-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text2);
+  }
+  .perm-item.yes::before { content: '✓'; color: var(--accent2); font-weight: bold; }
+  .perm-item.no::before  { content: '✗'; color: var(--text3); }
+
+  /* ── DATABASE SCHEMA ── */
+  .schema-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .schema-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .schema-card:hover { border-color: var(--accent); }
+  .schema-card-header {
+    padding: 10px 14px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .schema-table-name {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+  }
+  .schema-col-count {
+    font-size: 9px;
+    color: var(--text3);
+    font-family: 'DM Mono', monospace;
+  }
+  .schema-fields { padding: 10px 14px; display: flex; flex-direction: column; gap: 3px; }
+  .schema-field {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    font-family: 'DM Mono', monospace;
+  }
+  .field-name { color: var(--text2); }
+  .field-name.pk { color: var(--warn); }
+  .field-name.fk { color: var(--accent4); }
+  .field-type { color: var(--text3); font-size: 9px; }
+
+  /* ── WORKFLOW BUILDER ── */
+  .wf-builder {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .wf-toolbar {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .wf-tool-btn {
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    border: 1px solid var(--border2);
+    background: transparent;
+    color: var(--text2);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .wf-tool-btn:hover, .wf-tool-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0,200,255,0.06);
+  }
+  .wf-canvas {
+    padding: 24px;
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    position: relative;
+  }
+  .wf-step-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .wf-node-box {
+    width: 100px; min-height: 60px;
+    border-radius: 6px;
+    border: 1px solid;
+    padding: 8px;
+    text-align: center;
+    font-size: 10px;
+    font-family: 'DM Mono', monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    position: relative;
+  }
+  .wf-node-box .wf-icon { font-size: 16px; }
+  .wf-node-box .wf-label { line-height: 1.3; }
+  .wf-connector {
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+    color: var(--text3);
+    font-size: 14px;
+  }
+  .wf-connector-line {
+    width: 24px; height: 1px;
+    background: var(--border2);
+    position: relative;
+  }
+  .wf-connector-line::after {
+    content: '▶';
+    position: absolute;
+    right: -8px;
+    top: -7px;
+    font-size: 8px;
+    color: var(--text3);
+  }
+
+  /* ── iOS SECTION ── */
+  .ios-container {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 32px;
+    align-items: start;
+  }
+  .iphone-mockup {
+    width: 260px;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 36px;
+    padding: 12px;
+    position: relative;
+    box-shadow: 0 0 60px rgba(0,200,255,0.08), 0 20px 60px rgba(0,0,0,0.6);
+  }
+  .iphone-screen {
+    background: #0b1d24;
+    border-radius: 28px;
+    overflow: hidden;
+    min-height: 520px;
+    position: relative;
+  }
+  .iphone-notch {
+    position: absolute;
+    top: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 80px; height: 24px;
+    background: var(--surface);
+    border-radius: 0 0 16px 16px;
+    z-index: 2;
+  }
+  .iphone-status-bar {
+    height: 32px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 0 16px 4px;
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    color: var(--text2);
+  }
+  .iphone-topbar {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .iphone-topbar .title {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--white);
+  }
+  .iphone-content { padding: 12px; }
+  .iphone-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+  }
+  .iphone-card .ic-title { font-size: 11px; font-weight: 600; color: var(--white); margin-bottom: 3px; }
+  .iphone-card .ic-meta { font-size: 10px; color: var(--text2); }
+  .iphone-card .ic-status { font-size: 9px; font-family: 'DM Mono', monospace; }
+  .iphone-tab-bar {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: var(--surface2);
+    border-top: 1px solid var(--border);
+    display: flex;
+    padding: 8px 0 12px;
+  }
+  .iphone-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 8px;
+    font-family: 'DM Mono', monospace;
+    color: var(--text3);
+    cursor: pointer;
+  }
+  .iphone-tab.active { color: var(--accent); }
+  .iphone-tab-icon { font-size: 14px; }
+
+  /* ── OFFLINE SECTION ── */
+  .offline-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+  }
+  .od-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .od-node {
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    border: 1px solid;
+    text-align: center;
+    min-width: 130px;
+  }
+
+  /* ── INTEGRATION CARDS ── */
+  .int-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 14px;
+  }
+  .int-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 0.2s;
+  }
+  .int-card:hover { border-color: var(--border2); }
+  .int-card-icon { font-size: 24px; }
+  .int-card-name { font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 600; color: var(--white); }
+  .int-card-desc { font-size: 11px; color: var(--text2); line-height: 1.5; }
+  .int-card-status {
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 3px;
+    width: fit-content;
+  }
+  .status-live { color: var(--accent2); background: rgba(0,255,157,0.08); border: 1px solid rgba(0,255,157,0.2); }
+  .status-optional { color: var(--warn); background: rgba(255,184,48,0.08); border: 1px solid rgba(255,184,48,0.2); }
+
+  /* ── TABS ── */
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  .tab-btn {
+    padding: 10px 20px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    color: var(--text3);
+    cursor: pointer;
+    border: none;
+    background: none;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .tab-btn:hover { color: var(--text2); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── INFO BOXES ── */
+  .info-box {
+    padding: 14px 18px;
+    border-radius: 6px;
+    border: 1px solid;
+    margin: 16px 0;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .info-blue  { border-color: rgba(0,200,255,0.2);  background: rgba(0,200,255,0.04);  color: var(--text2); }
+  .info-green { border-color: rgba(0,255,157,0.2);  background: rgba(0,255,157,0.04);  color: var(--text2); }
+  .info-warn  { border-color: rgba(255,184,48,0.2); background: rgba(255,184,48,0.04); color: var(--text2); }
+  .info-box strong { color: var(--white); }
+
+  /* ── TOC / OVERVIEW ── */
+  .overview-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .stat-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    min-width: 120px;
+  }
+  .stat-val {
+    font-family: 'Syne', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .stat-label { font-size: 11px; color: var(--text2); margin-top: 4px; }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 900px) {
+    #sidebar { display: none; }
+    #main { margin-left: 0; }
+    .hero, .section { padding: 32px 24px; }
+    .perm-grid { grid-template-columns: 1fr 1fr; }
+    .ios-container { grid-template-columns: 1fr; }
+  }
+
+  .highlight { color: var(--accent); }
+  .highlight2 { color: var(--accent2); }
+  .highlight3 { color: var(--accent3); }
+  h3 { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 600; color: var(--white); margin: 20px 0 10px; }
+  h4 { font-size: 13px; font-weight: 500; color: var(--text); margin: 16px 0 8px; }
+  p { color: var(--text2); line-height: 1.7; margin-bottom: 12px; }
+  ul { padding-left: 20px; color: var(--text2); font-size: 13px; line-height: 1.8; }
+  li { margin-bottom: 2px; }
+  code { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--accent2); background: rgba(0,255,157,0.06); padding: 1px 5px; border-radius: 3px; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) {
+    .two-col, .three-col, .perm-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<nav id="sidebar">
+  <div class="sidebar-logo">
+    <div class="brand">Commtrac</div>
+    <div class="sub">Codex 915 · System Docs</div>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Overview</div>
+    <a class="nav-item active" href="#overview"><span class="dot"></span>What is Codex 915</a>
+    <a class="nav-item" href="#capabilities"><span class="dot"></span>Capabilities</a>
+    <a class="nav-item" href="#field-use"><span class="dot"></span>Field Use Cases</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Architecture</div>
+    <a class="nav-item" href="#architecture"><span class="dot"></span>System Architecture</a>
+    <a class="nav-item" href="#frontend"><span class="dot"></span>Frontend</a>
+    <a class="nav-item" href="#backend"><span class="dot"></span>Backend & API</a>
+    <a class="nav-item" href="#database"><span class="dot"></span>Database Schema</a>
+    <a class="nav-item" href="#offline"><span class="dot"></span>Offline & Sync</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Access Control</div>
+    <a class="nav-item" href="#roles"><span class="dot"></span>Roles & Permissions</a>
+    <a class="nav-item" href="#auth"><span class="dot"></span>Auth & Security</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Workflows</div>
+    <a class="nav-item" href="#workflows-manual"><span class="dot"></span>Manual Workflows</a>
+    <a class="nav-item" href="#workflows-auto"><span class="dot"></span>Automated Workflows</a>
+    <a class="nav-item" href="#workflow-json"><span class="dot"></span>JSON Builder Guide</a>
+    <a class="nav-item" href="#reference-fields"><span class="dot"></span>Reference Fields</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Platforms</div>
+    <a class="nav-item" href="#ios"><span class="dot"></span>iPhone / iOS</a>
+    <a class="nav-item" href="#integrations"><span class="dot"></span>Integrations</a>
+  </div>
+</nav>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- HERO -->
+  <div class="hero" id="overview">
+    <div class="hero-tag">◈ System Documentation — v1.0 · 2026</div>
+    <h1>Commtrac <span>Codex 915</span></h1>
+    <p>A full-stack project & asset management platform built for field-service teams. Codex 915 manages the complete lifecycle of projects, asset installations, workflow execution, inspections, and issue tracking — from the office and from the field — on web and native iOS.</p>
+    <div class="hero-badges">
+      <span class="badge badge-blue">⚛ React 18 + TypeScript</span>
+      <span class="badge badge-orange">.NET ASP.NET Core 8</span>
+      <span class="badge badge-green">SQLite + EF Core 8</span>
+      <span class="badge badge-purple">Capacitor iOS Native</span>
+      <span class="badge badge-warn">Offline-First Sync</span>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="section" style="padding-bottom: 32px;">
+    <div class="stat-row">
+      <div class="stat"><div class="stat-val">25</div><div class="stat-label">Database Tables</div></div>
+      <div class="stat"><div class="stat-val">40+</div><div class="stat-label">API Controllers</div></div>
+      <div class="stat"><div class="stat-val">4</div><div class="stat-label">User Roles</div></div>
+      <div class="stat"><div class="stat-val" style="color:var(--accent2);">100%</div><div class="stat-label">Shared React Source</div></div>
+      <div class="stat"><div class="stat-val" style="color:var(--accent3);">iOS</div><div class="stat-label">Native App via Capacitor</div></div>
+      <div class="stat"><div class="stat-val" style="color:var(--accent4);">∞</div><div class="stat-label">Custom Field Types</div></div>
+    </div>
+  </div>
+
+  <!-- CAPABILITIES -->
+  <div class="section" id="capabilities">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <span class="section-title">Platform Capabilities</span>
+      <div class="section-line"></div>
+    </div>
+    <div class="cards-grid">
+      <div class="card" style="--c: var(--accent)">
+        <div class="card-icon">📋</div>
+        <div class="card-title">Project Management</div>
+        <div class="card-desc">Create, track, and manage installation projects from quote through completion. Job numbers, contract values, probability stages, start/finish dates, and linked customers.</div>
+      </div>
+      <div class="card" style="--c: var(--accent2)">
+        <div class="card-icon">⚙️</div>
+        <div class="card-title">Asset Installation Tracking</div>
+        <div class="card-desc">Track individual machine assets with serial numbers, PM schedules, and as-built JSON data. Assign workflows per asset type.</div>
+      </div>
+      <div class="card" style="--c: var(--accent4)">
+        <div class="card-icon">🔧</div>
+        <div class="card-title">Workflow Builder</div>
+        <div class="card-desc">Design custom installation and commissioning workflows with steps, checklists, and BOM tracking. Draft → Publish → Archive lifecycle.</div>
+      </div>
+      <div class="card" style="--c: var(--accent3)">
+        <div class="card-icon">🐛</div>
+        <div class="card-title">Issues Board</div>
+        <div class="card-desc">Kanban and list-style issue tracking linked to specific assets, projects, or workflow runs. Block completion on unresolved issues.</div>
+      </div>
+      <div class="card" style="--c: var(--warn)">
+        <div class="card-icon">✍️</div>
+        <div class="card-title">Digital Signatures</div>
+        <div class="card-desc">Generate tokenised signature links, send to customers via email/SMS. Public signature page — no account required for customers.</div>
+      </div>
+      <div class="card" style="--c: var(--accent)">
+        <div class="card-icon">📄</div>
+        <div class="card-title">Document Library</div>
+        <div class="card-desc">Upload, index, and full-text-search documents. Link documents to projects or assets. Background indexing worker for searchability.</div>
+      </div>
+      <div class="card" style="--c: var(--accent2)">
+        <div class="card-icon">🗺️</div>
+        <div class="card-title">Global Office Map</div>
+        <div class="card-desc">Geo-coded offices and customer sites displayed on a map. Region-filtered views per user.</div>
+      </div>
+      <div class="card" style="--c: var(--accent4)">
+        <div class="card-icon">📦</div>
+        <div class="card-title">BOM Module</div>
+        <div class="card-desc">Import Bills of Materials, classify features, compare actuals, and commit to project records. Feature-flagged — enabled per deployment.</div>
+      </div>
+      <div class="card" style="--c: var(--accent3)">
+        <div class="card-icon">🚚</div>
+        <div class="card-title">Dispatch Orders</div>
+        <div class="card-desc">Track dispatch orders linked to projects and assets. Manage inbound parts, delivery profiles, and goods movements.</div>
+      </div>
+      <div class="card" style="--c: var(--warn)">
+        <div class="card-icon">🔎</div>
+        <div class="card-title">Dynamic Fields & Tables</div>
+        <div class="card-desc">Configure custom fields per table — reference, text, dropdown, composite keys, formulas. No-code table customization via the builder UI.</div>
+      </div>
+      <div class="card" style="--c: var(--accent)">
+        <div class="card-icon">📱</div>
+        <div class="card-title">iOS Native App</div>
+        <div class="card-desc">Full app available on iPhone via Capacitor. Bottom tab nav, notch-safe layout, offline support with sync on reconnect.</div>
+      </div>
+      <div class="card" style="--c: var(--accent2)">
+        <div class="card-icon">🔗</div>
+        <div class="card-title">Quickbase Integration</div>
+        <div class="card-desc">Sync goods movements and field definitions with Quickbase. Configurable table/field mappings stored in settings.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FIELD USE CASES -->
+  <div class="section" id="field-use">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <span class="section-title">Real-World Field Use Cases</span>
+      <div class="section-line"></div>
+    </div>
+    <p>Codex 915 is designed for installation and service teams who manage complex equipment at customer sites. Here are the primary scenarios:</p>
+    <div class="two-col">
+      <div>
+        <h3>🏭 New Equipment Installation</h3>
+        <p>A Project Manager creates a new project linked to a customer and site. Assets (machines) are added to the project. Each asset is assigned a workflow config matching the machine type. Engineers are dispatched, open the app on their iPhone, execute each workflow step on-site — logging serial numbers, photos, and passing inspection checks. Issues found mid-installation are logged and must be resolved before the run can complete. A signature token is generated, emailed to the customer, and they sign on their phone.</p>
+
+        <h3>🔁 Preventive Maintenance Rounds</h3>
+        <p>Maintenance engineers use work orders to track PM visits. Work instructions guide them through standard procedures. Inspections are recorded with photos. Completion data syncs back even if cell coverage drops mid-job.</p>
+      </div>
+      <div>
+        <h3>📋 Commissioning Sign-Off</h3>
+        <p>After installation, as-built data is captured into the asset's JSON blob. A BOM comparison confirms actual installed components match the spec. Project Manager reviews the dashboard health card showing workflow completion %. Customer receives a signature link and approves remotely.</p>
+
+        <h3>🏢 Multi-Office Management</h3>
+        <p>Admins configure multiple offices (regions). Each user belongs to an office. Engineers see only their assigned jobs. Project Managers can filter the dashboard by office. Global admin views all regions simultaneously from the office map.</p>
+
+        <h3>📷 QR-Code Photo Upload</h3>
+        <p>Engineers in the field can generate a QR code from the app, scan it with a second phone's camera, and upload photos directly — no login required on the secondary device. Photos are linked to the relevant asset or inspection record.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ARCHITECTURE -->
+  <div class="section" id="architecture">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <span class="section-title">System Architecture</span>
+      <div class="section-line"></div>
+    </div>
+    <div class="arch-canvas">
+      <!-- CLIENTS ROW -->
+      <div style="text-align:center;margin-bottom:6px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);">CLIENT LAYER</div>
+      <div class="arch-row">
+        <div class="arch-layer al-blue" style="min-width:160px">
+          <div class="lbl">Web Browser</div>
+          <div class="val">React 18 + Vite</div>
+          <div style="font-size:9px;opacity:0.5;margin-top:2px">:5173</div>
+        </div>
+        <div class="arch-layer al-purple" style="min-width:160px">
+          <div class="lbl">iOS Native App</div>
+          <div class="val">Capacitor 8</div>
+          <div style="font-size:9px;opacity:0.5;margin-top:2px">Kinet (App Store)</div>
+        </div>
+        <div class="arch-layer al-green" style="min-width:160px">
+          <div class="lbl">External (Public)</div>
+          <div class="val">Signature Pages</div>
+          <div style="font-size:9px;opacity:0.5;margin-top:2px">No auth required</div>
+        </div>
+      </div>
+      <div class="arch-row" style="margin-bottom:4px">
+        <div style="color:var(--text3);font-size:13px;margin:0 8px">↓ HTTP/HTTPS REST</div>
+      </div>
+      <!-- API ROW -->
+      <div style="text-align:center;margin-bottom:6px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);">API LAYER</div>
+      <div class="arch-row">
+        <div class="arch-layer al-orange" style="min-width:360px">
+          <div class="lbl">ASP.NET Core 8 · REST API</div>
+          <div class="val">40+ Controllers · JWT Auth · EF Core 8</div>
+          <div style="font-size:9px;opacity:0.5;margin-top:2px">:4000/api</div>
+        </div>
+      </div>
+      <div class="arch-row" style="margin-bottom:4px">
+        <div style="color:var(--text3);font-size:13px;margin:0 8px">↓ Entity Framework Core</div>
+      </div>
+      <!-- DB ROW -->
+      <div style="text-align:center;margin-bottom:6px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);">DATA LAYER</div>
+      <div class="arch-row">
+        <div class="arch-layer al-warn" style="min-width:200px">
+          <div class="lbl">SQLite Database</div>
+          <div class="val">commtrac.db</div>
+          <div style="font-size:9px;opacity:0.5;margin-top:2px">25 tables · 40+ migrations</div>
+        </div>
+        <div class="arch-layer al-green" style="min-width:160px">
+          <div class="lbl">File Storage</div>
+          <div class="val">Local Filesystem</div>
+          <div style="font-size:9px;opacity:0.5;margin-top:2px">Storage/ directory</div>
+        </div>
+        <div class="arch-layer al-blue" style="min-width:160px">
+          <div class="lbl">IndexedDB (Client)</div>
+          <div class="val">Offline Cache</div>
+          <div style="font-size:9px;opacity:0.5;margin-top:2px">idb · stale-while-revalidate</div>
+        </div>
+      </div>
+      <div class="arch-row" style="margin-top:8px;margin-bottom:4px">
+        <div style="color:var(--text3);font-size:13px;margin:0 8px">↔ External integrations</div>
+      </div>
+      <!-- INTEGRATIONS -->
+      <div class="arch-row">
+        <div class="arch-layer al-purple" style="min-width:120px"><div class="lbl">Email</div><div class="val">SMTP</div></div>
+        <div class="arch-layer al-blue" style="min-width:120px"><div class="lbl">SMS</div><div class="val">Provider</div></div>
+        <div class="arch-layer al-warn" style="min-width:120px"><div class="lbl">Quickbase</div><div class="val">Goods Sync</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FRONTEND -->
+  <div class="section" id="frontend">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <span class="section-title">Frontend Architecture</span>
+      <div class="section-line"></div>
+    </div>
+    <div class="info-box info-blue">
+      <strong>One Codebase, Two Platforms:</strong> The entire React application is shared 100% between the web browser and the iOS native app. Platform differences are handled via MUI breakpoints (<code>useMediaQuery</code>) and Capacitor plugin calls only.
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="showTab(this,'fe-structure')">Structure</button>
+      <button class="tab-btn" onclick="showTab(this,'fe-state')">State Management</button>
+      <button class="tab-btn" onclick="showTab(this,'fe-services')">Service Layer</button>
+      <button class="tab-btn" onclick="showTab(this,'fe-routes')">Routes</button>
+    </div>
+
+    <div id="fe-structure" class="tab-panel active">
+      <div class="two-col">
+        <div>
+          <h3>src/ Structure</h3>
+          <div class="code-block">
+<span class="key">src/</span>
+├── <span class="val">app/</span>          <span class="comment"># Root, providers, router</span>
+├── <span class="val">components/</span>   <span class="comment"># Layout + shared UI atoms</span>
+│   ├── <span class="type-kw">AppShell</span>     <span class="comment"># Sidebar ↔ bottom tabs</span>
+│   ├── <span class="type-kw">DynamicFieldsForm</span>
+│   └── <span class="type-kw">TableConfigDialog</span>
+├── <span class="val">features/</span>     <span class="comment"># Page-level modules</span>
+│   ├── <span class="type-kw">dashboard/</span>
+│   ├── <span class="type-kw">projects/</span>
+│   ├── <span class="type-kw">installations/</span>
+│   ├── <span class="type-kw">workInstructions/</span>
+│   ├── <span class="type-kw">issues/</span>
+│   ├── <span class="type-kw">documents/</span>
+│   ├── <span class="type-kw">dispatch/</span>
+│   └── <span class="type-kw">sign/</span>        <span class="comment"># Public, no auth</span>
+├── <span class="val">hooks/</span>        <span class="comment"># useAuth, usePermissions…</span>
+├── <span class="val">services/</span>     <span class="comment"># Axios service per domain</span>
+├── <span class="val">store/</span>        <span class="comment"># Redux Toolkit slices</span>
+├── <span class="val">modules/</span>      <span class="comment"># bom-project (feature-flagged)</span>
+└── <span class="val">types/</span>        <span class="comment"># TS interfaces = backend DTOs</span>
+          </div>
+        </div>
+        <div>
+          <h3>Key Components</h3>
+          <table class="doc-table">
+            <thead><tr><th>Component</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">AppShell</td><td>Sidebar (desktop) / bottom tabs (iOS)</td></tr>
+              <tr><td class="mono">DynamicFieldsForm</td><td>Renders runtime-configured fields</td></tr>
+              <tr><td class="mono">TableConfigDialog</td><td>No-code table column builder</td></tr>
+              <tr><td class="mono">GlobalOfficeMap</td><td>Geocoded office/site map</td></tr>
+              <tr><td class="mono">QRUploadButton</td><td>Token-gated QR file upload</td></tr>
+              <tr><td class="mono">FieldNotificationBar</td><td>Dynamic field alerts</td></tr>
+            </tbody>
+          </table>
+          <h3>Tech Stack</h3>
+          <ul>
+            <li><strong>React 18</strong> + TypeScript</li>
+            <li><strong>MUI v5</strong> (Material UI components)</li>
+            <li><strong>Vite</strong> (build tool, hot reload)</li>
+            <li><strong>React Router v6</strong> (client routing)</li>
+            <li><strong>Redux Toolkit</strong> (global state)</li>
+            <li><strong>Axios</strong> (HTTP client)</li>
+            <li><strong>idb</strong> (IndexedDB wrapper)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div id="fe-state" class="tab-panel">
+      <table class="doc-table">
+        <thead><tr><th>Layer</th><th>Tool</th><th>Used For</th></tr></thead>
+        <tbody>
+          <tr><td>Server state</td><td><span class="mono">useState + service calls</span></td><td>Per-page data fetching</td></tr>
+          <tr><td>Global client</td><td><span class="mono">Redux Toolkit</span></td><td>Projects, installations, customers, products, users</td></tr>
+          <tr><td>Offline queue</td><td><span class="mono">IndexedDB (idb)</span></td><td>Pending writes while offline</td></tr>
+          <tr><td>Auth</td><td><span class="mono">localStorage + useAuth</span></td><td>JWT token, user object, role</td></tr>
+          <tr><td>Role config</td><td><span class="mono">localStorage + API</span></td><td>RBAC permission flags cache</td></tr>
+          <tr><td>BOM wizard</td><td><span class="mono">React Context</span></td><td>Multi-step BOM import state</td></tr>
+        </tbody>
+      </table>
+      <h3>Redux Slices</h3>
+      <div class="three-col">
+        <div class="code-block" style="margin:0">
+          <div class="code-block-label">projectSlice</div>
+          projects list<br>
+          active project<br>
+          loading / error
+        </div>
+        <div class="code-block" style="margin:0">
+          <div class="code-block-label">installationSlice</div>
+          installations list<br>
+          tabs config<br>
+          tab rows
+        </div>
+        <div class="code-block" style="margin:0">
+          <div class="code-block-label">customersSlice</div>
+          customers list<br>
+          active customer<br>
+          sites list
+        </div>
+      </div>
+    </div>
+
+    <div id="fe-services" class="tab-panel">
+      <p>Each domain gets its own <code>[domain]Service.ts</code> wrapping Axios calls. The shared <code>api.ts</code> Axios instance provides:</p>
+      <ul style="margin-bottom:16px">
+        <li>Auto-detect <code>baseURL</code> from <code>VITE_API_BASE</code> env var or derived from <code>hostname:4000</code></li>
+        <li>Attaches <code>Authorization: Bearer &lt;token&gt;</code> on every request</li>
+        <li>Silent JWT refresh 30 min before token expiry</li>
+        <li>Stale-while-revalidate: GET responses cached in IndexedDB; served from cache on network failure</li>
+        <li>5s default timeout; auth endpoints override to no timeout</li>
+      </ul>
+      <table class="doc-table">
+        <thead><tr><th>Service File</th><th>Domain</th><th>Key Operations</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">authService</td><td>Auth</td><td>Login, logout, token refresh, 2FA</td></tr>
+          <tr><td class="mono">projectService</td><td>Projects</td><td>CRUD, clone, workload</td></tr>
+          <tr><td class="mono">assetWorkflowRunService</td><td>Workflow Runs</td><td>Start, step completion, finish run</td></tr>
+          <tr><td class="mono">workflowConfigService</td><td>Workflow Builder</td><td>Create/publish/archive configs</td></tr>
+          <tr><td class="mono">issueService</td><td>Issues</td><td>CRUD, comments, escalation</td></tr>
+          <tr><td class="mono">signatureService</td><td>Signatures</td><td>Generate tokens, collect events</td></tr>
+          <tr><td class="mono">documentService</td><td>Documents</td><td>Upload, search, link to assets</td></tr>
+          <tr><td class="mono">installationService</td><td>Installations</td><td>Tab data, rows, config</td></tr>
+          <tr><td class="mono">fieldDefinitionsService</td><td>Dynamic Fields</td><td>CRUD field definitions</td></tr>
+          <tr><td class="mono">quickbaseService</td><td>Quickbase</td><td>Goods movements sync, discovery</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div id="fe-routes" class="tab-panel">
+      <table class="doc-table">
+        <thead><tr><th>Path</th><th>Component</th><th>Auth</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">/login</td><td>Login</td><td><span class="badge badge-green">Public</span></td><td></td></tr>
+          <tr><td class="mono">/sign/:tokenId</td><td>ExternalSignPage</td><td><span class="badge badge-green">Public</span></td><td>Customer signature link</td></tr>
+          <tr><td class="mono">/</td><td>Dashboard</td><td><span class="badge badge-blue">Auth</span></td><td>Role-gated sections</td></tr>
+          <tr><td class="mono">/projects</td><td>ProjectsPage</td><td><span class="badge badge-blue">Auth</span></td><td></td></tr>
+          <tr><td class="mono">/projects/new</td><td>ProjectForm</td><td><span class="badge badge-blue">Auth</span></td><td></td></tr>
+          <tr><td class="mono">/installations/assets</td><td>AssetInstallationPage</td><td><span class="badge badge-blue">Auth</span></td><td></td></tr>
+          <tr><td class="mono">/work-instructions</td><td>WorkInstructions</td><td><span class="badge badge-blue">Auth</span></td><td>Workflow builder</td></tr>
+          <tr><td class="mono">/issues</td><td>IssuesBoard</td><td><span class="badge badge-blue">Auth</span></td><td>Kanban / list view</td></tr>
+          <tr><td class="mono">/documents</td><td>DocumentsPage</td><td><span class="badge badge-blue">Auth</span></td><td></td></tr>
+          <tr><td class="mono">/settings</td><td>Settings</td><td><span class="badge badge-warn">Auth+</span></td><td>Blocked for viewOnly role</td></tr>
+          <tr><td class="mono">/admin</td><td>UserManagement</td><td><span class="badge badge-orange">Admin</span></td><td></td></tr>
+          <tr><td class="mono">/admin/customers/:id/sites</td><td>CustomerSites</td><td><span class="badge badge-orange">Admin</span></td><td></td></tr>
+          <tr><td class="mono">/admin/bom-project/*</td><td>BOM Module</td><td><span class="badge badge-purple">Feature Flag</span></td><td>VITE_ENABLE_BOM_MODULE=true</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- BACKEND -->
+  <div class="section" id="backend">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <span class="section-title">Backend & API</span>
+      <div class="section-line"></div>
+    </div>
+    <div class="two-col">
+      <div>
+        <h3>Technology Stack</h3>
+        <table class="doc-table">
+          <tbody>
+            <tr><td>Framework</td><td class="mono">ASP.NET Core 8</td></tr>
+            <tr><td>ORM</td><td class="mono">Entity Framework Core 8</td></tr>
+            <tr><td>Database</td><td class="mono">SQLite (commtrac.db)</td></tr>
+            <tr><td>Auth</td><td class="mono">JWT Bearer (HS256, 720 min)</td></tr>
+            <tr><td>API Docs</td><td class="mono">Swagger/OpenAPI (/swagger)</td></tr>
+            <tr><td>Port</td><td class="mono">:4000</td></tr>
+          </tbody>
+        </table>
+        <h3>Middleware Pipeline</h3>
+        <div class="code-block">
+CORS (localhost + 10.x + 192.168.x)
+  → <span class="key">Authentication</span> (JWT Bearer)
+    → <span class="key">Authorization</span> (Role-based)
+      → <span class="val">Controllers</span>
+        </div>
+        <h3>HTTP Conventions</h3>
+        <table class="doc-table">
+          <tbody>
+            <tr><td class="mono">GET</td><td>List or single resource</td></tr>
+            <tr><td class="mono">POST</td><td>Create new record</td></tr>
+            <tr><td class="mono">PUT</td><td>Full update</td></tr>
+            <tr><td class="mono">PATCH</td><td>Partial (status, step completion)</td></tr>
+            <tr><td class="mono">DELETE</td><td>Soft or hard delete</td></tr>
+            <tr><td class="mono">422</td><td>Business rule violation</td></tr>
+            <tr><td class="mono">401</td><td>Invalid token → redirect /login</td></tr>
+            <tr><td class="mono">403</td><td>Insufficient role</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h3>Key Controllers</h3>
+        <table class="doc-table">
+          <thead><tr><th>Controller</th><th>Base Path</th></tr></thead>
+          <tbody>
+            <tr><td>AuthController</td><td class="mono">/api/auth</td></tr>
+            <tr><td>ProjectsController</td><td class="mono">/api/projects</td></tr>
+            <tr><td>AssetWorkflowRunsController</td><td class="mono">/api/asset-workflow-runs</td></tr>
+            <tr><td>WorkflowConfigsController</td><td class="mono">/api/workflow-configs</td></tr>
+            <tr><td>IssuesController</td><td class="mono">/api/issues</td></tr>
+            <tr><td>SignatureTokensController</td><td class="mono">/api/signature-tokens</td></tr>
+            <tr><td>PublicSignController</td><td class="mono">/api/public/sign</td></tr>
+            <tr><td>DocumentsController</td><td class="mono">/api/documents</td></tr>
+            <tr><td>DispatchOrdersController</td><td class="mono">/api/dispatch-orders</td></tr>
+            <tr><td>InstallationsController</td><td class="mono">/api/installations</td></tr>
+            <tr><td>FieldDefinitionsController</td><td class="mono">/api/field-definitions</td></tr>
+            <tr><td>TableConfigsController</td><td class="mono">/api/table-configs</td></tr>
+            <tr><td>DashboardController</td><td class="mono">/api/dashboard</td></tr>
+            <tr><td>MobileUploadController</td><td class="mono">/api/mobile-upload</td></tr>
+            <tr><td>QuickbaseGoodsMovementsController</td><td class="mono">/api/quickbase/goods-movements</td></tr>
+          </tbody>
+        </table>
+        <h3>Background Services</h3>
+        <ul>
+          <li><code>DocumentSearchIndexWorker</code> — continuously indexes uploaded docs for full-text search</li>
+          <li><code>DocumentSearchIndexQueue</code> — channel-based job queue for indexing</li>
+          <li><code>NotificationService</code> — orchestrates email + SMS delivery</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- DATABASE -->
+  <div class="section" id="database">
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <span class="section-title">Database Schema</span>
+      <div class="section-line"></div>
+    </div>
+    <div class="info-box info-warn">
+      <strong>Note:</strong> All foreign key relationships are application-enforced (indexed ID columns) rather than database-level FK constraints. Relationships are inferred by convention.
+    </div>
+    <div class="schema-grid">
+      <!-- Core entities -->
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">Projects</span><span class="schema-col-count">18 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">JobNumber</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name fk">CustomerId (FK)</span><span class="field-type">→ Customers</span></div>
+          <div class="schema-field"><span class="field-name fk">SiteId (FK)</span><span class="field-type">→ Sites</span></div>
+          <div class="schema-field"><span class="field-name">Status</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">ContractValue</span><span class="field-type">DECIMAL?</span></div>
+          <div class="schema-field"><span class="field-name">ProductIds</span><span class="field-type">JSON array</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">Assets</span><span class="schema-col-count">7 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">MachineId</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">MachineType</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">SerialNumber</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">PmCount</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Comments</span><span class="field-type">TEXT</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">Installations</span><span class="schema-col-count">12+ cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name fk">ProjectId (FK)</span><span class="field-type">→ Projects</span></div>
+          <div class="schema-field"><span class="field-name">AssignedUsers</span><span class="field-type">JSON array</span></div>
+          <div class="schema-field"><span class="field-name">MachineType</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Pm1–4Serial</span><span class="field-type">TEXT</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">Customers</span><span class="schema-col-count">9 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Name</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">CustomerId</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Industry</span><span class="field-type">TEXT?</span></div>
+          <div class="schema-field"><span class="field-name">Office</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Logo</span><span class="field-type">TEXT?</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">Sites</span><span class="schema-col-count">13 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name fk">CustomerId (FK)</span><span class="field-type">→ Customers</span></div>
+          <div class="schema-field"><span class="field-name">Name</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Address</span><span class="field-type">TEXT?</span></div>
+          <div class="schema-field"><span class="field-name">ContactName</span><span class="field-type">TEXT?</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">Users</span><span class="schema-col-count">14 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Email</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Role</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Office</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Is2faEnabled</span><span class="field-type">BOOL</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">AssetWorkflowRuns</span><span class="schema-col-count">~10 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name fk">AssetId (FK)</span><span class="field-type">→ Assets</span></div>
+          <div class="schema-field"><span class="field-name">ConfigSnapshot</span><span class="field-type">JSON</span></div>
+          <div class="schema-field"><span class="field-name">BomActualJson</span><span class="field-type">JSON</span></div>
+          <div class="schema-field"><span class="field-name">Status</span><span class="field-type">TEXT</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">Issues</span><span class="schema-col-count">~8 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name fk">InstallationId</span><span class="field-type">→ Installations</span></div>
+          <div class="schema-field"><span class="field-name fk">ProjectId</span><span class="field-type">→ Projects</span></div>
+          <div class="schema-field"><span class="field-name">Status</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">IsBlocking</span><span class="field-type">BOOL</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">SignatureTokens</span><span class="schema-col-count">~6 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name fk">RunId (FK)</span><span class="field-type">→ WorkflowRuns</span></div>
+          <div class="schema-field"><span class="field-name">Token</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Status</span><span class="field-type">TEXT</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">FieldDefinitions</span><span class="schema-col-count">8 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">FieldType</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">LinkToFieldId</span><span class="field-type">TEXT?</span></div>
+          <div class="schema-field"><span class="field-name">ActionType</span><span class="field-type">TEXT?</span></div>
+          <div class="schema-field"><span class="field-name">TablesJson</span><span class="field-type">JSON</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">Documents</span><span class="schema-col-count">8 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Name</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">LinkedTo</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">FilePath</span><span class="field-type">TEXT?</span></div>
+          <div class="schema-field"><span class="field-name">ContentType</span><span class="field-type">TEXT?</span></div>
+        </div>
+      </div>
+      <div class="schema-card">
+        <div class="schema-card-header"><span class="schema-table-name">AuditLogs</span><span class="schema-col-count">7 cols</span></div>
+        <div class="schema-fields">
+          <div class="schema-field"><span class="field-name pk">Id (PK)</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name fk">UserId (FK)</span><span class="field-type">→ Users</span></div>
+          <div class="schema-field"><span class="field-name">Action</span><span class="field-type">TEXT</span></div>
+          <div class="schema-field"><span class="field-name">Details</span><span class="field-type">TEXT?</span></div>
+          <div class="schema-field"><span class="field-name">Timestamp</span><span class="field-type">DateTime</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OFFLINE -->
+  <div class="section" id="offline">
+    <div class="section-header">
+      <span class="section-num">07</span>
+      <span class="section-title">Offline & Sync Architecture</span>
+      <div class="section-line"></div>
+    </div>
+    <p>Codex 915 is built for field engineers who work in areas with intermittent connectivity. The sync engine queues writes locally and flushes on reconnect.</p>
+    <div class="offline-diagram">
+      <div class="od-row">
+        <div class="od-node al-blue" style="min-width:160px">
+          <div style="font-size:9px;opacity:0.6;margin-bottom:3px">ENGINEER ACTION</div>
+          Complete Workflow Step
+        </div>
+        <div style="color:var(--text3);font-size:18px;padding:0 8px">→</div>
+        <div class="od-node al-purple">
+          <div style="font-size:9px;opacity:0.6;margin-bottom:3px">api.ts</div>
+          queueOrSend()
+        </div>
+        <div style="color:var(--text3);font-size:18px;padding:0 8px">→</div>
+        <div class="od-node al-green">
+          <div style="font-size:9px;opacity:0.6;margin-bottom:3px">ONLINE</div>
+          POST → Server
+        </div>
+        <div style="font-size:18px;color:var(--text3);padding:0 4px">/</div>
+        <div class="od-node al-warn">
+          <div style="font-size:9px;opacity:0.6;margin-bottom:3px">OFFLINE</div>
+          IndexedDB Queue
+        </div>
+      </div>
+      <div class="od-row" style="margin-top:8px">
+        <div class="od-node al-orange" style="min-width:160px">
+          <div style="font-size:9px;opacity:0.6;margin-bottom:3px">RECONNECT</div>
+          useSyncEngine
+        </div>
+        <div style="color:var(--text3);font-size:18px;padding:0 8px">→</div>
+        <div class="od-node al-green" style="min-width:200px">
+          <div style="font-size:9px;opacity:0.6;margin-bottom:3px">FLUSH QUEUE</div>
+          Process pending_actions
+        </div>
+        <div style="color:var(--text3);font-size:18px;padding:0 8px">→</div>
+        <div class="od-node al-blue" style="min-width:160px">
+          <div style="font-size:9px;opacity:0.6;margin-bottom:3px">STATUS</div>
+          Amber dot clears ✓
+        </div>
+      </div>
+    </div>
+    <h3>IndexedDB Stores</h3>
+    <table class="doc-table" style="margin-top:12px">
+      <thead><tr><th>Store</th><th>Contents</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">cache</td><td>GET response snapshots (stale-while-revalidate)</td></tr>
+        <tr><td class="mono">pending_actions</td><td>Queued write operations awaiting network reconnect</td></tr>
+        <tr><td class="mono">sync_meta</td><td>Last sync timestamps per entity type</td></tr>
+      </tbody>
+    </table>
+    <div class="info-box info-green">
+      <strong>Stale-while-revalidate:</strong> Every GET response is cached in IndexedDB. If the network fails, the cached copy is served instantly, then refreshed in the background when connectivity returns. The user always sees data — never a blank screen.
+    </div>
+  </div>
+
+  <!-- ROLES -->
+  <div class="section" id="roles">
+    <div class="section-header">
+      <span class="section-num">08</span>
+      <span class="section-title">Roles & Permissions</span>
+      <div class="section-line"></div>
+    </div>
+    <p>Permissions are stored as JSON in the <code>RoleConfigs</code> table (<code>ConfigJson</code>) and enforced by both the frontend (<code>usePermissions</code> hook) and backend (controller-level role checks).</p>
+    <div class="perm-grid">
+      <div class="perm-card">
+        <div class="perm-header" style="border-top: 2px solid var(--accent3)">
+          <span class="perm-icon">👑</span>
+          <span class="perm-name">Admin</span>
+        </div>
+        <div class="perm-list">
+          <div class="perm-item yes">Full project/asset access</div>
+          <div class="perm-item yes">User management</div>
+          <div class="perm-item yes">Settings & branding</div>
+          <div class="perm-item yes">Create/delete tables</div>
+          <div class="perm-item yes">Edit field definitions</div>
+          <div class="perm-item yes">Role config management</div>
+          <div class="perm-item yes">All offices visible</div>
+          <div class="perm-item yes">Audit logs</div>
+        </div>
+      </div>
+      <div class="perm-card">
+        <div class="perm-header" style="border-top: 2px solid var(--accent)">
+          <span class="perm-icon">🗂️</span>
+          <span class="perm-name">Project Manager</span>
+        </div>
+        <div class="perm-list">
+          <div class="perm-item yes">Full project/asset access</div>
+          <div class="perm-item yes">Workflow builder access</div>
+          <div class="perm-item yes">Dashboard health cards</div>
+          <div class="perm-item yes">Signature token generation</div>
+          <div class="perm-item yes">Dispatch management</div>
+          <div class="perm-item yes">Modify data</div>
+          <div class="perm-item no">User management</div>
+          <div class="perm-item no">App settings</div>
+        </div>
+      </div>
+      <div class="perm-card">
+        <div class="perm-header" style="border-top: 2px solid var(--accent2)">
+          <span class="perm-icon">🔧</span>
+          <span class="perm-name">Engineer</span>
+        </div>
+        <div class="perm-list">
+          <div class="perm-item yes">Own assigned jobs only</div>
+          <div class="perm-item yes">Execute workflow steps</div>
+          <div class="perm-item yes">Log issues</div>
+          <div class="perm-item yes">Upload photos/docs</div>
+          <div class="perm-item yes">Work orders</div>
+          <div class="perm-item no">Settings</div>
+          <div class="perm-item no">Admin panel</div>
+          <div class="perm-item no">Other users' jobs</div>
+        </div>
+      </div>
+      <div class="perm-card">
+        <div class="perm-header" style="border-top: 2px solid var(--text3)">
+          <span class="perm-icon">👁️</span>
+          <span class="perm-name">Viewer</span>
+        </div>
+        <div class="perm-list">
+          <div class="perm-item yes">Read-only access</div>
+          <div class="perm-item yes">View projects</div>
+          <div class="perm-item yes">View workflow status</div>
+          <div class="perm-item yes">View documents</div>
+          <div class="perm-item no">Create/edit records</div>
+          <div class="perm-item no">Settings</div>
+          <div class="perm-item no">Admin functions</div>
+          <div class="perm-item no">Execute workflows</div>
+        </div>
+      </div>
+    </div>
+    <h3>Permission Flags (RoleConfig JSON)</h3>
+    <div class="code-block">
+<span class="comment">// RoleConfigs.ConfigJson structure</span>
+{
+  <span class="key">"viewOnly"</span>:          <span class="val">false</span>,   <span class="comment">// Viewer role</span>
+  <span class="key">"createDeleteTables"</span>: <span class="val">true</span>,    <span class="comment">// Admin only</span>
+  <span class="key">"createUsers"</span>:        <span class="val">true</span>,    <span class="comment">// Admin only</span>
+  <span class="key">"editFields"</span>:         <span class="val">true</span>,    <span class="comment">// Admin only</span>
+  <span class="key">"modifyData"</span>:         <span class="val">true</span>,    <span class="comment">// PM + Admin</span>
+  <span class="key">"editForms"</span>:          <span class="val">true</span>     <span class="comment">// PM + Admin</span>
+}
+    </div>
+  </div>
+
+  <!-- AUTH -->
+  <div class="section" id="auth">
+    <div class="section-header">
+      <span class="section-num">09</span>
+      <span class="section-title">Auth & Security</span>
+      <div class="section-line"></div>
+    </div>
+    <div class="two-col">
+      <div>
+        <h3>JWT Auth Flow</h3>
+        <div class="code-block">
+<span class="comment">// 1. Login</span>
+<span class="key">POST</span> /api/auth/login
+{ email, password }
+→ { token: <span class="str">"eyJ..."</span>, user: { id, role, office } }
+
+<span class="comment">// 2. All subsequent requests</span>
+Authorization: Bearer &lt;token&gt;
+
+<span class="comment">// 3. Silent refresh (30min before expiry)</span>
+<span class="key">POST</span> /api/auth/refresh { token }
+→ { token: <span class="str">"eyJ..."</span> }
+        </div>
+        <h3>Token Details</h3>
+        <ul>
+          <li>Algorithm: <strong>HS256</strong></li>
+          <li>Expiry: <strong>720 minutes</strong> (12 hours)</li>
+          <li>Silent refresh: <strong>30 min before expiry</strong></li>
+          <li>Storage: <code>localStorage</code></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Additional Security Features</h3>
+        <ul>
+          <li><strong>2FA (TOTP)</strong> — optional per user, via <code>TotpSecret</code></li>
+          <li><strong>Recovery codes</strong> — stored as JSON in <code>RecoveryCodesJson</code></li>
+          <li><strong>Session tracking</strong> — <code>Sessions</code> table with IP, UserAgent, revocation</li>
+          <li><strong>Password reset</strong> — token + expiry stored on user, email flow</li>
+          <li><strong>Audit logs</strong> — every action logged with userId, IP, timestamp</li>
+          <li><strong>Role isolation</strong> — Engineers' <code>useWorkScope</code> hook filters to assigned jobs only</li>
+        </ul>
+        <h3>Dev Override</h3>
+        <div class="code-block">
+<span class="comment">// Dev-only role simulation</span>
+localStorage.setItem(
+  <span class="str">'dev_role_override'</span>,
+  <span class="str">'engineer'</span>
+)
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MANUAL WORKFLOWS -->
+  <div class="section" id="workflows-manual">
+    <div class="section-header">
+      <span class="section-num">10</span>
+      <span class="section-title">Manual Workflow Creation</span>
+      <div class="section-line"></div>
+    </div>
+    <p>Workflows in Codex 915 follow a <strong>Draft → Published → Archived</strong> lifecycle. They are created in the Workflow Builder UI under <code>/work-instructions</code>.</p>
+
+    <h3>Step-by-Step: Creating a Workflow Manually</h3>
+    <div class="flow-steps">
+      <div class="flow-step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Navigate to Work Instructions</div>
+          <div class="step-desc">Open <code>/work-instructions</code> from the sidebar. You'll see existing workflow configs listed by type and status.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-title">Create a New Workflow Config</div>
+          <div class="step-desc">Click "New Workflow Config". Select the <strong>Workflow Type</strong> (e.g. Installation, Commissioning, PM Service). Give it a version label.</div>
+          <div class="step-sub"><code>POST /api/workflow-configs  { type, label, status: "draft" }</code></div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-title">Add Workflow Steps</div>
+          <div class="step-desc">Add individual steps to the config. Each step can have a title, description, type (inspection, checklist, data-entry, photo, signature), and required/optional flag.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <div class="step-title">Link Workflow Features (BOM)</div>
+          <div class="step-desc">Optionally link the workflow config to product features via the <code>WorkflowConfigFeatures</code> join table. This enables BOM tracking during execution.</div>
+          <div class="step-sub"><code>POST /api/workflow-config-features  { workflowConfigId, featureId }</code></div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-num">5</div>
+        <div class="step-content">
+          <div class="step-title">Publish the Workflow</div>
+          <div class="step-desc">Change status from <code>draft</code> to <code>published</code>. Only published workflows can be assigned to assets.</div>
+          <div class="step-sub"><code>PATCH /api/workflow-configs/:id  { status: "published" }</code></div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-num">6</div>
+        <div class="step-content">
+          <div class="step-title">Assign Workflow to Asset</div>
+          <div class="step-desc">In the Asset detail view, assign the published workflow config via the Assignments panel. A workflow type + config pair is stored in <code>AssetWorkflowAssignments</code>.</div>
+          <div class="step-sub"><code>POST /api/asset-workflow-assignments  { assetId, workflowConfigId, workflowTypeId }</code></div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-num">7</div>
+        <div class="step-content">
+          <div class="step-title">Start a Run</div>
+          <div class="step-desc">From the field (or office), start a workflow run for a specific asset. The system takes a snapshot of the config at run-start — so future edits to the workflow don't affect in-progress runs.</div>
+          <div class="step-sub"><code>POST /api/asset-workflow-runs  { assetId, configId }</code></div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-num">8</div>
+        <div class="step-content">
+          <div class="step-title">Execute Steps & Log Issues</div>
+          <div class="step-desc">Engineers check off each step, enter data, upload photos. Any step failure creates an Issue. Blocking issues prevent run completion.</div>
+          <div class="step-sub"><code>PATCH /api/asset-workflow-runs/:id/step/:stepId  { complete: true, notes: "..." }</code></div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-num">9</div>
+        <div class="step-content">
+          <div class="step-title">Complete Run & Collect Signature</div>
+          <div class="step-desc">Once all steps are done and issues resolved, complete the run. Generate a signature token, send to customer, collect their digital sign-off.</div>
+          <div class="step-sub"><code>POST /api/signature-tokens  { runId }  → returns tokenUrl for customer</code></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WORKFLOW DIAGRAM -->
+    <h3 style="margin-top:28px">Workflow Node Diagram</h3>
+    <div class="wf-builder">
+      <div class="wf-toolbar">
+        <button class="wf-tool-btn active">◈ Config</button>
+        <button class="wf-tool-btn">Step: Checklist</button>
+        <button class="wf-tool-btn">Step: Photo</button>
+        <button class="wf-tool-btn">Step: Inspection</button>
+        <button class="wf-tool-btn">Step: Signature</button>
+        <button class="wf-tool-btn">Issue Gate</button>
+      </div>
+      <div class="wf-canvas">
+        <div class="wf-step-node">
+          <div class="wf-node-box al-blue">
+            <div class="wf-icon">⚙️</div>
+            <div class="wf-label">Workflow Config</div>
+          </div>
+        </div>
+        <div class="wf-connector"><div class="wf-connector-line"></div></div>
+        <div class="wf-step-node">
+          <div class="wf-node-box al-purple">
+            <div class="wf-icon">📋</div>
+            <div class="wf-label">Step 1: Checklist</div>
+          </div>
+        </div>
+        <div class="wf-connector"><div class="wf-connector-line"></div></div>
+        <div class="wf-step-node">
+          <div class="wf-node-box al-warn">
+            <div class="wf-icon">📷</div>
+            <div class="wf-label">Step 2: Photo Upload</div>
+          </div>
+        </div>
+        <div class="wf-connector"><div class="wf-connector-line"></div></div>
+        <div class="wf-step-node">
+          <div class="wf-node-box al-green">
+            <div class="wf-icon">🔍</div>
+            <div class="wf-label">Step 3: Inspection</div>
+          </div>
+        </div>
+        <div class="wf-connector"><div class="wf-connector-line"></div></div>
+        <div class="wf-step-node">
+          <div class="wf-node-box al-orange">
+            <div class="wf-icon">⚠️</div>
+            <div class="wf-label">Issue Gate</div>
+          </div>
+        </div>
+        <div class="wf-connector"><div class="wf-connector-line"></div></div>
+        <div class="wf-step-node">
+          <div class="wf-node-box al-blue">
+            <div class="wf-icon">✍️</div>
+            <div class="wf-label">Step 4: Signature</div>
+          </div>
+        </div>
+        <div class="wf-connector"><div class="wf-connector-line"></div></div>
+        <div class="wf-step-node">
+          <div class="wf-node-box al-green" style="border-color: rgba(0,255,157,0.6)">
+            <div class="wf-icon">✅</div>
+            <div class="wf-label">Run Complete</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTO WORKFLOWS -->
+  <div class="section" id="workflows-auto">
+    <div class="section-header">
+      <span class="section-num">11</span>
+      <span class="section-title">Automated Workflow Triggers</span>
+      <div class="section-line"></div>
+    </div>
+    <p>While Codex 915's primary workflow model is engineer-driven, several automated behaviours are built in:</p>
+    <div class="cards-grid">
+      <div class="card" style="--c: var(--accent2)">
+        <div class="card-icon">🔔</div>
+        <div class="card-title">Notification Triggers</div>
+        <div class="card-desc">On specific events (run start, issue created, signature requested), the <code>NotificationService</code> automatically fires email and/or SMS to configured recipients.</div>
+      </div>
+      <div class="card" style="--c: var(--accent4)">
+        <div class="card-icon">🔍</div>
+        <div class="card-title">Document Indexing</div>
+        <div class="card-desc">When a document is uploaded, it is automatically queued for full-text indexing by the background <code>DocumentSearchIndexWorker</code>. No manual trigger needed.</div>
+      </div>
+      <div class="card" style="--c: var(--accent)">
+        <div class="card-icon">🔄</div>
+        <div class="card-title">Quickbase Sync</div>
+        <div class="card-desc">Goods movements are synced with Quickbase on a configured schedule. Field mappings in <code>QuickbaseSettings</code> control which columns synchronise.</div>
+      </div>
+      <div class="card" style="--c: var(--warn)">
+        <div class="card-icon">🔒</div>
+        <div class="card-title">Issue Blocking</div>
+        <div class="card-desc">When a blocking issue is logged against a workflow run, the system automatically prevents run completion (returns 422) until the issue is resolved.</div>
+      </div>
+      <div class="card" style="--c: var(--accent3)">
+        <div class="card-icon">🔑</div>
+        <div class="card-title">JWT Auto-Refresh</div>
+        <div class="card-desc">The Axios interceptor monitors token expiry and silently POSTs to <code>/api/auth/refresh</code> 30 minutes before expiry — users are never logged out mid-session.</div>
+      </div>
+      <div class="card" style="--c: var(--accent2)">
+        <div class="card-icon">📶</div>
+        <div class="card-title">Offline Queue Flush</div>
+        <div class="card-desc"><code>useSyncEngine</code> monitors network status. On reconnect (or tab visibility change), it automatically flushes all queued writes from IndexedDB to the API.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JSON BUILDER GUIDE -->
+  <div class="section" id="workflow-json">
+    <div class="section-header">
+      <span class="section-num">12</span>
+      <span class="section-title">JSON Design Guide for the Builder</span>
+      <div class="section-line"></div>
+    </div>
+    <p>Several core system entities are configured via JSON blobs stored in database columns. This section documents the key JSON structures you'll use when building or importing configurations.</p>
+
+    <h3>1. Workflow Config JSON</h3>
+    <p>The workflow builder saves configs to <code>WorkflowConfigs</code>. The step definitions are stored as a JSON array (config snapshot is copied into <code>AssetWorkflowRuns</code> at run-start).</p>
+    <div class="code-block">
+      <div class="code-block-label">WorkflowConfig steps</div>
+{
+  <span class="key">"id"</span>: <span class="str">"wfc_abc123"</span>,
+  <span class="key">"label"</span>: <span class="str">"Conveyor Installation v2"</span>,
+  <span class="key">"type"</span>: <span class="str">"installation"</span>,
+  <span class="key">"status"</span>: <span class="str">"published"</span>,
+  <span class="key">"steps"</span>: [
+    {
+      <span class="key">"id"</span>: <span class="str">"step_001"</span>,
+      <span class="key">"title"</span>: <span class="str">"Pre-installation Safety Check"</span>,
+      <span class="key">"type"</span>: <span class="str">"checklist"</span>,
+      <span class="key">"required"</span>: <span class="val">true</span>,
+      <span class="key">"items"</span>: [
+        { <span class="key">"id"</span>: <span class="str">"c1"</span>, <span class="key">"label"</span>: <span class="str">"Area cleared of hazards"</span> },
+        { <span class="key">"id"</span>: <span class="str">"c2"</span>, <span class="key">"label"</span>: <span class="str">"PPE confirmed worn"</span> }
+      ]
+    },
+    {
+      <span class="key">"id"</span>: <span class="str">"step_002"</span>,
+      <span class="key">"title"</span>: <span class="str">"Serial Number Photo"</span>,
+      <span class="key">"type"</span>: <span class="str">"photo"</span>,
+      <span class="key">"required"</span>: <span class="val">true</span>,
+      <span class="key">"minPhotos"</span>: <span class="val">1</span>
+    },
+    {
+      <span class="key">"id"</span>: <span class="str">"step_003"</span>,
+      <span class="key">"title"</span>: <span class="str">"Record Serial Numbers"</span>,
+      <span class="key">"type"</span>: <span class="str">"data_entry"</span>,
+      <span class="key">"fields"</span>: [
+        { <span class="key">"key"</span>: <span class="str">"pm1Serial"</span>, <span class="key">"label"</span>: <span class="str">"PM1 Serial"</span>, <span class="key">"type"</span>: <span class="str">"text"</span> },
+        { <span class="key">"key"</span>: <span class="str">"pm2Serial"</span>, <span class="key">"label"</span>: <span class="str">"PM2 Serial"</span>, <span class="key">"type"</span>: <span class="str">"text"</span> }
+      ]
+    },
+    {
+      <span class="key">"id"</span>: <span class="str">"step_004"</span>,
+      <span class="key">"title"</span>: <span class="str">"Customer Sign-Off"</span>,
+      <span class="key">"type"</span>: <span class="str">"signature"</span>,
+      <span class="key">"required"</span>: <span class="val">true</span>
+    }
+  ]
+}
+    </div>
+
+    <h3>2. Table Config JSON</h3>
+    <p>The <code>TableConfigs</code> table controls visible/hidden columns and ordering for every data table in the app.</p>
+    <div class="code-block">
+      <div class="code-block-label">TableConfigs row</div>
+{
+  <span class="key">"tableName"</span>: <span class="str">"projects"</span>,
+  <span class="key">"baseFieldNamesJson"</span>: {
+    <span class="key">"jobNumber"</span>: <span class="str">"Job Number"</span>,
+    <span class="key">"customerName"</span>: <span class="str">"Customer"</span>,
+    <span class="key">"status"</span>: <span class="str">"Status"</span>,
+    <span class="key">"startDate"</span>: <span class="str">"Start Date"</span>
+  },
+  <span class="key">"baseFieldMetaJson"</span>: {
+    <span class="key">"jobNumber"</span>: { <span class="key">"type"</span>: <span class="str">"primary key"</span>, <span class="key">"sortable"</span>: <span class="val">true</span> },
+    <span class="key">"status"</span>:    { <span class="key">"type"</span>: <span class="str">"dropdown"</span>,   <span class="key">"options"</span>: [<span class="str">"Active"</span>, <span class="str">"Complete"</span>] }
+  },
+  <span class="key">"orderJson"</span>: [<span class="str">"jobNumber"</span>, <span class="str">"customerName"</span>, <span class="str">"status"</span>, <span class="str">"startDate"</span>],
+  <span class="key">"hiddenJson"</span>: [<span class="str">"description"</span>, <span class="str">"probabilityStage"</span>]
+}
+    </div>
+
+    <h3>3. Field Definition JSON (Reference Fields)</h3>
+    <p>Field definitions configure dynamic fields across tables. The <code>reference</code> type links tables together.</p>
+    <div class="code-block">
+      <div class="code-block-label">FieldDefinition · reference type</div>
+{
+  <span class="key">"id"</span>:             <span class="str">"fld_cust_ref"</span>,
+  <span class="key">"name"</span>:           <span class="str">"Customer Name"</span>,
+  <span class="key">"fieldType"</span>:      <span class="str">"reference"</span>,
+  <span class="key">"linkToFieldId"</span>:  <span class="str">"field-customer"</span>,
+  <span class="key">"actionType"</span>:     <span class="str">"navigate to reference"</span>,
+  <span class="key">"tablesJson"</span>:     <span class="str">"[\"projects\", \"installations\"]"</span>,
+  <span class="key">"isActive"</span>:       <span class="val">true</span>,
+  <span class="key">"sortOrder"</span>:      <span class="val">1</span>
+}
+<span class="comment">
+// Available actionType values:
+//   "open referenced record"  → opens detail view
+//   "filter by reference"     → filters current table view
+//   "navigate to reference"   → goes to entity's page
+</span>
+    </div>
+
+    <h3>4. Role Config JSON</h3>
+    <div class="code-block">
+      <div class="code-block-label">RoleConfigs.ConfigJson</div>
+<span class="comment">// Admin role config</span>
+{
+  <span class="key">"viewOnly"</span>:          <span class="val">false</span>,
+  <span class="key">"createDeleteTables"</span>: <span class="val">true</span>,
+  <span class="key">"createUsers"</span>:        <span class="val">true</span>,
+  <span class="key">"editFields"</span>:         <span class="val">true</span>,
+  <span class="key">"modifyData"</span>:         <span class="val">true</span>,
+  <span class="key">"editForms"</span>:          <span class="val">true</span>
+}
+
+<span class="comment">// Engineer role config</span>
+{
+  <span class="key">"viewOnly"</span>:          <span class="val">false</span>,
+  <span class="key">"createDeleteTables"</span>: <span class="val">false</span>,
+  <span class="key">"createUsers"</span>:        <span class="val">false</span>,
+  <span class="key">"editFields"</span>:         <span class="val">false</span>,
+  <span class="key">"modifyData"</span>:         <span class="val">true</span>,
+  <span class="key">"editForms"</span>:          <span class="val">false</span>
+}
+    </div>
+
+    <h3>5. As-Built JSON (Asset)</h3>
+    <p>Installation results are stored on the asset as a JSON blob, capturing the actual as-built state.</p>
+    <div class="code-block">
+      <div class="code-block-label">ProjectAssets.AsBuiltJson</div>
+{
+  <span class="key">"pm1Serial"</span>:    <span class="str">"SN-2024-0042"</span>,
+  <span class="key">"pm2Serial"</span>:    <span class="str">"SN-2024-0043"</span>,
+  <span class="key">"installDate"</span>:  <span class="str">"2026-03-20"</span>,
+  <span class="key">"technician"</span>:   <span class="str">"J. Smith"</span>,
+  <span class="key">"notes"</span>:        <span class="str">"Belt tension adjusted +5%"</span>,
+  <span class="key">"inspectionPass"</span>: <span class="val">true</span>,
+  <span class="key">"photos"</span>: [
+    { <span class="key">"label"</span>: <span class="str">"nameplate"</span>, <span class="key">"docId"</span>: <span class="str">"doc_abc"</span> }
+  ]
+}
+    </div>
+  </div>
+
+  <!-- REFERENCE FIELDS -->
+  <div class="section" id="reference-fields">
+    <div class="section-header">
+      <span class="section-num">13</span>
+      <span class="section-title">Reference Fields</span>
+      <div class="section-line"></div>
+    </div>
+    <div class="info-box info-blue">
+      <strong>Reference fields</strong> create cross-table relationships, ensuring data consistency. Instead of typing customer names (prone to typos), users select from a validated dropdown linked to the Customers table.
+    </div>
+    <div class="two-col">
+      <div>
+        <h3>Creating a Reference Field</h3>
+        <div class="flow-steps">
+          <div class="flow-step" style="padding:10px 0">
+            <div class="step-num" style="width:32px;height:32px;font-size:11px">1</div>
+            <div class="step-content" style="padding-top:6px">
+              <div class="step-title">Open Table Settings</div>
+              <div class="step-desc">Click ⚙️ on any table header → Table Configuration dialog</div>
+            </div>
+          </div>
+          <div class="flow-step" style="padding:10px 0">
+            <div class="step-num" style="width:32px;height:32px;font-size:11px">2</div>
+            <div class="step-content" style="padding-top:6px">
+              <div class="step-title">Fill the "Create new field" form</div>
+              <div class="step-desc">Name → Type: <code>reference</code> → Link to → Action</div>
+            </div>
+          </div>
+          <div class="flow-step" style="padding:10px 0">
+            <div class="step-num" style="width:32px;height:32px;font-size:11px">3</div>
+            <div class="step-content" style="padding-top:6px">
+              <div class="step-title">Click Create</div>
+              <div class="step-desc">Field appears in table as a validated dropdown</div>
+            </div>
+          </div>
+        </div>
+        <h3>Available Actions</h3>
+        <table class="doc-table">
+          <tbody>
+            <tr><td class="mono">open referenced record</td><td>Opens the source record's detail view</td></tr>
+            <tr><td class="mono">filter by reference</td><td>Filters current view by the selection</td></tr>
+            <tr><td class="mono">navigate to reference</td><td>Navigates to the referenced entity's page</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h3>Linkable Source Fields</h3>
+        <table class="doc-table">
+          <tbody>
+            <tr><td class="mono">field-customer</td><td>Customers primary key</td></tr>
+            <tr><td class="mono">field-site-name</td><td>Sites table primary key</td></tr>
+            <tr><td class="mono">field-job-number</td><td>Projects job number</td></tr>
+          </tbody>
+        </table>
+        <h3>Field Type Comparison</h3>
+        <table class="doc-table">
+          <thead><tr><th>Type</th><th>Use For</th><th>Data Source</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">reference</td><td>Link to another table</td><td>Another table</td></tr>
+            <tr><td class="mono">text</td><td>Free-form input</td><td>User input</td></tr>
+            <tr><td class="mono">dropdown</td><td>Fixed list</td><td>Predefined options</td></tr>
+            <tr><td class="mono">primary key</td><td>Unique ID</td><td>Auto-generated</td></tr>
+            <tr><td class="mono">composite key</td><td>Multi-part ID</td><td>Combined fields</td></tr>
+            <tr><td class="mono">lookup field</td><td>Derived values</td><td>Related tables</td></tr>
+          </tbody>
+        </table>
+        <div class="info-box info-warn" style="margin-top:16px">
+          <strong>Cascade pattern:</strong> Customer → Sites → Installations. Each level is a reference field filtered by the level above — ensuring engineers only see sites that belong to the selected customer.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- iOS -->
+  <div class="section" id="ios">
+    <div class="section-header">
+      <span class="section-num">14</span>
+      <span class="section-title">iPhone / iOS Integration</span>
+      <div class="section-line"></div>
+    </div>
+    <div class="ios-container">
+      <div>
+        <!-- iPhone Mockup -->
+        <div class="iphone-mockup">
+          <div class="iphone-notch"></div>
+          <div class="iphone-screen">
+            <div class="iphone-status-bar">
+              <span>9:41</span>
+              <span>●●●●</span>
+            </div>
+            <div class="iphone-topbar">
+              <span style="font-size:16px">←</span>
+              <span class="title">Active Jobs</span>
+              <span style="font-size:16px;color:var(--accent)">+</span>
+            </div>
+            <div class="iphone-content">
+              <div class="iphone-card">
+                <div class="ic-title">PRJ-2026-0041</div>
+                <div class="ic-meta">Acme Corp · Brisbane Site</div>
+                <div class="ic-status" style="color:var(--accent2);margin-top:4px">● In Progress</div>
+              </div>
+              <div class="iphone-card">
+                <div class="ic-title">PRJ-2026-0039</div>
+                <div class="ic-meta">Beta Industries · Warehouse A</div>
+                <div class="ic-status" style="color:var(--warn);margin-top:4px">● Awaiting Signature</div>
+              </div>
+              <div class="iphone-card">
+                <div class="ic-title">PRJ-2026-0035</div>
+                <div class="ic-meta">Gamma Tech · Site 3</div>
+                <div class="ic-status" style="color:var(--accent4);margin-top:4px">◌ Workflow Running</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:12px;padding:8px;background:rgba(255,184,48,0.08);border-radius:6px;border:1px solid rgba(255,184,48,0.2)">
+                <span style="font-size:12px">🔄</span>
+                <span style="font-size:10px;color:var(--warn);font-family:'DM Mono',monospace">2 items pending sync</span>
+              </div>
+            </div>
+            <div class="iphone-tab-bar">
+              <div class="iphone-tab active"><span class="iphone-tab-icon">🏠</span>Jobs</div>
+              <div class="iphone-tab"><span class="iphone-tab-icon">⚙️</span>Workflow</div>
+              <div class="iphone-tab"><span class="iphone-tab-icon">🐛</span>Issues</div>
+              <div class="iphone-tab"><span class="iphone-tab-icon">📄</span>Docs</div>
+              <div class="iphone-tab"><span class="iphone-tab-icon">👤</span>Profile</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3>How iOS Works</h3>
+        <p>The React app is compiled by Vite into <code>dist/</code>, then Capacitor copies this bundle into the Xcode project as a local web asset. There is <strong>zero native Swift code</strong> for the app logic — it's 100% the same React source.</p>
+
+        <h3>Capacitor Configuration</h3>
+        <div class="code-block">
+<span class="comment">// capacitor.config.ts</span>
+appId:   <span class="str">'com.christianchavez.kinet'</span>
+appName: <span class="str">'Kinet'</span>
+webDir:  <span class="str">'dist'</span>
+
+plugins:
+  StatusBar:
+    overlaysWebView: <span class="val">false</span>
+    style:           <span class="str">DARK</span>
+    backgroundColor: <span class="str">'#0b1d24'</span>
+        </div>
+
+        <h3>iOS-Specific UI Adaptations</h3>
+        <table class="doc-table">
+          <thead><tr><th>Element</th><th>Web</th><th>iOS</th></tr></thead>
+          <tbody>
+            <tr><td>Navigation</td><td>Left sidebar</td><td>Bottom tab bar</td></tr>
+            <tr><td>Header</td><td>MUI AppBar</td><td>iOS-style top bar with back/title</td></tr>
+            <tr><td>Viewport</td><td>Normal units</td><td><code>100dvh</code> + <code>env(safe-area-inset-*)</code></td></tr>
+            <tr><td>Dialogs</td><td>Centred modal</td><td>Full-screen sheet</td></tr>
+            <tr><td>Tables</td><td>All columns</td><td>Key columns, scroll for more</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Build & Deploy to iOS</h3>
+        <div class="code-block">
+<span class="comment"># 1. Build React app</span>
+npm run build
+
+<span class="comment"># 2. Sync into Xcode project</span>
+npx cap sync ios
+
+<span class="comment"># 3. Set LAN IP for API access</span>
+VITE_API_BASE=http://192.168.1.104:4000/api
+
+<span class="comment"># 4. Open Xcode and run on device/simulator</span>
+open ios/App/App.xcodeproj
+        </div>
+
+        <h3>QR Photo Upload Flow</h3>
+        <p>Engineers can upload photos from a secondary device without login:</p>
+        <ol style="font-size:12px; color:var(--text2); line-height:2; padding-left:20px">
+          <li>Tap <strong>QR Upload</strong> button in asset/inspection view</li>
+          <li>App generates a one-time token URL via <code>POST /api/mobile-upload/token</code></li>
+          <li>QR code is shown on screen — scan with any camera</li>
+          <li>Secondary phone opens upload page (no login needed)</li>
+          <li>Photos uploaded and linked to the asset automatically</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <!-- INTEGRATIONS -->
+  <div class="section" id="integrations">
+    <div class="section-header">
+      <span class="section-num">15</span>
+      <span class="section-title">External Integrations</span>
+      <div class="section-line"></div>
+    </div>
+    <div class="int-grid">
+      <div class="int-card">
+        <div class="int-card-icon">⚡</div>
+        <div class="int-card-name">Quickbase</div>
+        <div class="int-card-desc">Bi-directional sync of goods movements and field discovery. Table/field mappings configured in Settings.</div>
+        <div class="int-card-status status-optional">Configurable</div>
+      </div>
+      <div class="int-card">
+        <div class="int-card-icon">📧</div>
+        <div class="int-card-name">SMTP Email</div>
+        <div class="int-card-desc">User invite emails, password reset links, signature request notifications. Configured in <code>appsettings.json</code>.</div>
+        <div class="int-card-status status-live">Active</div>
+      </div>
+      <div class="int-card">
+        <div class="int-card-icon">📱</div>
+        <div class="int-card-name">SMS</div>
+        <div class="int-card-desc">SMS notifications for signature requests and alerts. Provider-agnostic API key configuration.</div>
+        <div class="int-card-status status-live">Active</div>
+      </div>
+      <div class="int-card">
+        <div class="int-card-icon">📲</div>
+        <div class="int-card-name">iOS / Capacitor</div>
+        <div class="int-card-desc">Native iOS packaging. StatusBar, safe-area CSS insets. Ships as "Kinet" on the App Store.</div>
+        <div class="int-card-status status-live">Native</div>
+      </div>
+      <div class="int-card">
+        <div class="int-card-icon">🗄️</div>
+        <div class="int-card-name">IndexedDB</div>
+        <div class="int-card-desc">Client-side offline cache via <code>idb</code> library. Stale-while-revalidate + pending write queue.</div>
+        <div class="int-card-status status-live">Built-in</div>
+      </div>
+      <div class="int-card">
+        <div class="int-card-icon">📦</div>
+        <div class="int-card-name">BOM Module</div>
+        <div class="int-card-desc">Feature-flagged BOM import (Excel/CSV), classification, comparison, and commit to project. Enable via <code>VITE_ENABLE_BOM_MODULE=true</code>.</div>
+        <div class="int-card-status status-optional">Feature Flag</div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:28px">Environment Variables</h3>
+    <div class="code-block">
+<span class="comment"># .env (frontend)</span>
+<span class="key">VITE_API_BASE</span>=<span class="str">http://192.168.1.104:4000/api</span>   <span class="comment"># LAN IP for iOS testing</span>
+<span class="key">VITE_ENABLE_BOM_MODULE</span>=<span class="str">true</span>                    <span class="comment"># Enable BOM module pages</span>
+
+<span class="comment"># appsettings.json (backend)</span>
+<span class="key">"JwtSecret"</span>:        <span class="str">"..."</span>,
+<span class="key">"Smtp:Host"</span>:        <span class="str">"smtp.provider.com"</span>,
+<span class="key">"Smtp:Port"</span>:        <span class="str">"587"</span>,
+<span class="key">"Sms:ApiKey"</span>:       <span class="str">"..."</span>,
+<span class="key">"Quickbase:Token"</span>:  <span class="str">"..."</span>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="padding:32px 60px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+    <div>
+      <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--white)">Commtrac Codex 915</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">Full System Documentation · Generated 2026-03-26</div>
+    </div>
+    <div style="display:flex;gap:16px;font-family:'DM Mono',monospace;font-size:10px;color:var(--text3)">
+      <span>React 18 + TypeScript</span>
+      <span>·</span>
+      <span>ASP.NET Core 8</span>
+      <span>·</span>
+      <span>SQLite</span>
+      <span>·</span>
+      <span>iOS Capacitor</span>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<script>
+  function showTab(btn, panelId) {
+    const container = btn.closest('.section') || document;
+    container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    container.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    const panel = document.getElementById(panelId);
+    if (panel) panel.classList.add('active');
+  }
+
+  // Active nav highlight on scroll
+  const sections = document.querySelectorAll('[id]');
+  const navItems = document.querySelectorAll('.nav-item');
+  
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.getAttribute('id');
+        navItems.forEach(item => {
+          item.classList.toggle('active', item.getAttribute('href') === '#' + id);
+        });
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

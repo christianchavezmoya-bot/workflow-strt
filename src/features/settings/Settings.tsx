@@ -35,7 +35,7 @@ import {
   Tooltip,
   Typography
 } from "@mui/material";
-import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined, CheckCircleOutline, BlockOutlined, ExpandMoreOutlined, ExpandLessOutlined, UploadFileOutlined } from "@mui/icons-material";
+import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined, CheckCircleOutline, BlockOutlined, ExpandMoreOutlined, ExpandLessOutlined, UploadFileOutlined, ArrowUpwardOutlined, ArrowDownwardOutlined, UnfoldMoreOutlined } from "@mui/icons-material";
 import { quickbaseService, type QbFieldInfo } from "../../services/quickbaseService";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -369,6 +369,7 @@ const Settings = () => {
   const [divisionForm, setDivisionForm] = useState({ name: "", description: "", sortOrder: "99" });
   const [divisionSaving, setDivisionSaving] = useState(false);
   const [divisionError, setDivisionError] = useState<string | null>(null);
+  const [deleteDivisionConfirm, setDeleteDivisionConfirm] = useState<{ id: string; name: string } | null>(null);
 
   async function loadDivisions() {
     setDivisionsLoading(true);
@@ -399,11 +400,17 @@ const Settings = () => {
   }
 
   async function removeDivision(id: string) {
-    if (!confirm("Delete this division? Products assigned to it will keep their data but lose the association.")) return;
+    const div = divisions.find((d) => d.id === id);
+    setDeleteDivisionConfirm({ id, name: div?.name ?? "this division" });
+  }
+
+  async function confirmRemoveDivision() {
+    if (!deleteDivisionConfirm) return;
     try {
-      await divisionService.remove(id);
-      setDivisions((prev) => prev.filter((d) => d.id !== id));
-    } catch { alert("Failed to delete division."); }
+      await divisionService.remove(deleteDivisionConfirm.id);
+      setDivisions((prev) => prev.filter((d) => d.id !== deleteDivisionConfirm.id));
+      setDeleteDivisionConfirm(null);
+    } catch { setDeleteDivisionConfirm(null); alert("Failed to delete division."); }
   }
 
   async function toggleDivisionActive(id: string, currentIsActive: boolean) {
@@ -614,8 +621,54 @@ const Settings = () => {
   const [featureSaving, setFeatureSaving] = useState(false);
   const [featureError, setFeatureError] = useState<string | null>(null);
 
+  // Feature library filters + sort
+  const [featureSearch, setFeatureSearch] = useState("");
+  const [featureFilterProduct, setFeatureFilterProduct] = useState<string>("all");
+  const [featureFilterInventory, setFeatureFilterInventory] = useState<"all" | "inventory" | "non-inventory">("all");
+  type FeatureSortKey = "name" | "valueType" | "isInventory" | "brand" | "supplier" | "manufacturerPartNumber" | "alternativePartNumber" | "unitPrice";
+  const [featureSort, setFeatureSort] = useState<{ key: FeatureSortKey; dir: "asc" | "desc" }>({ key: "name", dir: "asc" });
+
+  function toggleFeatureSort(key: FeatureSortKey) {
+    setFeatureSort((prev) => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  }
+
+  const filteredSortedFeatures = useMemo(() => {
+    let list = [...features];
+    // Global search
+    if (featureSearch.trim()) {
+      const q = featureSearch.trim().toLowerCase();
+      list = list.filter((f) =>
+        f.name.toLowerCase().includes(q) ||
+        (f.description ?? "").toLowerCase().includes(q) ||
+        (f.brand ?? "").toLowerCase().includes(q) ||
+        (f.supplier ?? "").toLowerCase().includes(q) ||
+        (f.manufacturerPartNumber ?? "").toLowerCase().includes(q) ||
+        (f.alternativePartNumber ?? "").toLowerCase().includes(q)
+      );
+    }
+    // Product filter
+    if (featureFilterProduct !== "all") {
+      list = list.filter((f) => f.linkedProducts?.includes(featureFilterProduct));
+    }
+    // Inventory filter
+    if (featureFilterInventory === "inventory") list = list.filter((f) => f.isInventory);
+    if (featureFilterInventory === "non-inventory") list = list.filter((f) => !f.isInventory);
+    // Sort
+    list.sort((a, b) => {
+      let av: string | number = "";
+      let bv: string | number = "";
+      if (featureSort.key === "isInventory") { av = a.isInventory ? 1 : 0; bv = b.isInventory ? 1 : 0; }
+      else if (featureSort.key === "unitPrice") { av = a.unitPrice ?? 0; bv = b.unitPrice ?? 0; }
+      else { av = (a[featureSort.key] as string ?? "").toLowerCase(); bv = (b[featureSort.key] as string ?? "").toLowerCase(); }
+      if (av < bv) return featureSort.dir === "asc" ? -1 : 1;
+      if (av > bv) return featureSort.dir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [features, featureSearch, featureFilterProduct, featureFilterInventory, featureSort]);
+
   // Bulk feature import state
-  interface ImportRow { name: string; description: string; valueType: string; supplier: string; partNumber: string; manufacturerPartNumber: string; unitPrice: string; brand: string; }
+  interface ImportRow { name: string; description: string; valueType: string; supplier: string; partNumber: string; manufacturerPartNumber: string; unitPrice: string; brand: string; isInventory?: boolean; }
   const [featureImportDialog, setFeatureImportDialog] = useState(false);
   const [featureImportRows, setFeatureImportRows] = useState<ImportRow[]>([]);
   const [featureImportProduct, setFeatureImportProduct] = useState<string>("");
@@ -681,16 +734,20 @@ const Settings = () => {
         const wb = XLSX.read(data, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
-        const parsed: ImportRow[] = rows.map((r) => ({
-          name: String(r["name"] || r["Name"] || "").trim(),
-          description: String(r["description"] || r["Description"] || "").trim(),
-          valueType: String(r["valueType"] || r["type"] || r["Type"] || "text").trim() || "text",
-          supplier: String(r["supplier"] || r["Supplier"] || "").trim(),
-          partNumber: String(r["partNumber"] || r["part_number"] || r["PartNumber"] || r["part#"] || "").trim(),
-          manufacturerPartNumber: String(r["manufacturerPartNumber"] || r["manufacturer_part_number"] || r["ManufacturerPartNumber"] || r["mfr_part"] || "").trim(),
-          unitPrice: String(r["unitPrice"] || r["unit_price"] || r["UnitPrice"] || r["price"] || "").trim(),
-          brand: String(r["brand"] || r["Brand"] || "").trim(),
-        })).filter((r) => r.name);
+        const parsed: ImportRow[] = rows.map((r) => {
+          const invRaw = String(r["isInventory"] || r["is_inventory"] || r["inventory"] || r["Inventory"] || "").trim().toLowerCase();
+          return {
+            name: String(r["name"] || r["Name"] || "").trim(),
+            description: String(r["description"] || r["Description"] || "").trim(),
+            valueType: String(r["valueType"] || r["type"] || r["Type"] || "text").trim() || "text",
+            supplier: String(r["supplier"] || r["Supplier"] || "").trim(),
+            partNumber: String(r["partNumber"] || r["part_number"] || r["PartNumber"] || r["part#"] || "").trim(),
+            manufacturerPartNumber: String(r["manufacturerPartNumber"] || r["manufacturer_part_number"] || r["ManufacturerPartNumber"] || r["mfr_part"] || "").trim(),
+            unitPrice: String(r["unitPrice"] || r["unit_price"] || r["UnitPrice"] || r["price"] || "").trim(),
+            brand: String(r["brand"] || r["Brand"] || "").trim(),
+            isInventory: invRaw === "true" || invRaw === "yes" || invRaw === "1",
+          };
+        }).filter((r) => r.name);
         if (!parsed.length) { setFeatureImportError("No valid rows found. Make sure the file has a 'name' column."); return; }
         setFeatureImportRows(parsed);
       } catch {
@@ -715,6 +772,7 @@ const Settings = () => {
           name: row.name,
           description: row.description || undefined,
           valueType: row.valueType,
+          isInventory: row.isInventory ?? false,
           supplier: row.supplier || undefined,
           alternativePartNumber: row.partNumber || undefined,
           manufacturerPartNumber: row.manufacturerPartNumber || undefined,
@@ -747,9 +805,12 @@ const Settings = () => {
     }
   }
 
-  // Load features whenever Features tab becomes active.
+  // Load features (and products for the filter dropdown) whenever Features tab becomes active.
   useEffect(() => {
-    if (tab === 5) loadFeatures();
+    if (tab === 5) {
+      loadFeatures();
+      if (products.length === 0) loadProducts();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -2241,6 +2302,48 @@ const Settings = () => {
             {featuresError && (
               <Alert severity="error" onClose={() => setFeaturesError(null)}>{featuresError}</Alert>
             )}
+            {/* ── Filter bar ── */}
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ px: 0, pb: 1.5 }} flexWrap="wrap">
+              <TextField
+                size="small"
+                placeholder="Search name, brand, supplier, part #…"
+                value={featureSearch}
+                onChange={(e) => setFeatureSearch(e.target.value)}
+                InputProps={{ startAdornment: <InputAdornment position="start"><SearchOutlined sx={{ fontSize: 16 }} /></InputAdornment> }}
+                sx={{ minWidth: 260, flex: 1 }}
+                InputLabelProps={{ shrink: true }}
+              />
+              <FormControl size="small" sx={{ minWidth: 200 }}>
+                <Select
+                  displayEmpty
+                  value={featureFilterProduct}
+                  onChange={(e) => setFeatureFilterProduct(e.target.value)}
+                >
+                  <MenuItem value="all">All products</MenuItem>
+                  {products.map((p) => <MenuItem key={p.id} value={p.name}>{p.name}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ minWidth: 160 }}>
+                <Select
+                  displayEmpty
+                  value={featureFilterInventory}
+                  onChange={(e) => setFeatureFilterInventory(e.target.value as "all" | "inventory" | "non-inventory")}
+                >
+                  <MenuItem value="all">All types</MenuItem>
+                  <MenuItem value="inventory">Inventory only</MenuItem>
+                  <MenuItem value="non-inventory">Non-inventory only</MenuItem>
+                </Select>
+              </FormControl>
+              {(featureSearch || featureFilterProduct !== "all" || featureFilterInventory !== "all") && (
+                <Button size="small" variant="text" onClick={() => { setFeatureSearch(""); setFeatureFilterProduct("all"); setFeatureFilterInventory("all"); }}>
+                  Clear filters
+                </Button>
+              )}
+              <Typography variant="caption" color="text.secondary" alignSelf="center" sx={{ ml: "auto" }}>
+                {filteredSortedFeatures.length} / {features.length} features
+              </Typography>
+            </Stack>
+
             {featuresLoading ? (
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />
@@ -2256,33 +2359,59 @@ const Settings = () => {
               </Alert>
             ) : (
               <TableContainer sx={{ overflowX: "auto", "& th": { resize: "horizontal", overflow: "auto", whiteSpace: "nowrap" } }}>
-              <Table size="small" sx={{ minWidth: 1100, tableLayout: "fixed" }}>
+              <Table size="small" sx={{ minWidth: 1200, tableLayout: "fixed" }}>
                 <colgroup>
                   <col style={{ minWidth: 160 }} />
                   <col style={{ minWidth: 90 }} />
+                  <col style={{ minWidth: 130 }} />
+                  <col style={{ minWidth: 110 }} />
+                  <col style={{ minWidth: 130 }} />
                   <col style={{ minWidth: 140 }} />
                   <col style={{ minWidth: 150 }} />
-                  <col style={{ minWidth: 160 }} />
-                  <col style={{ minWidth: 110 }} />
                   <col style={{ minWidth: 220 }} />
                   <col style={{ minWidth: 100 }} />
                   <col style={{ minWidth: 180 }} />
                 </colgroup>
                 <TableHead>
                   <TableRow>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Name</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Type</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Brand</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Supplier</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Mfr. Part #</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight={700}>Price / Unit</Typography></TableCell>
+                    {([
+                      { key: "name",                   label: "Name" },
+                      { key: "valueType",              label: "Type" },
+                      { key: "alternativePartNumber",  label: "Business Part #" },
+                      { key: "isInventory",            label: "Inventory" },
+                      { key: "brand",                  label: "Brand" },
+                      { key: "supplier",               label: "Supplier" },
+                      { key: "manufacturerPartNumber", label: "Mfr. Part #" },
+                    ] as { key: FeatureSortKey; label: string }[]).map(({ key, label }) => (
+                      <TableCell key={key} onClick={() => toggleFeatureSort(key)}
+                        sx={{ cursor: "pointer", userSelect: "none", "&:hover": { bgcolor: "action.hover" } }}>
+                        <Stack direction="row" alignItems="center" spacing={0.5}>
+                          <Typography variant="caption" fontWeight={700}>{label}</Typography>
+                          {featureSort.key === key
+                            ? featureSort.dir === "asc"
+                              ? <ArrowUpwardOutlined sx={{ fontSize: 13, color: "primary.main" }} />
+                              : <ArrowDownwardOutlined sx={{ fontSize: 13, color: "primary.main" }} />
+                            : <UnfoldMoreOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
+                          }
+                        </Stack>
+                      </TableCell>
+                    ))}
                     <TableCell><Typography variant="caption" fontWeight={700}>Description</Typography></TableCell>
                     <TableCell><Typography variant="caption" fontWeight={700}>Products</Typography></TableCell>
                     <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {features.map((f) => {
+                  {filteredSortedFeatures.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={10}>
+                        <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
+                          No features match the current filters.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {filteredSortedFeatures.map((f) => {
                     const isExpanded = expandedFeatureId === f.id;
                     const featureDeps = dependencies[f.id] ?? [];
                     const featureDepsLoading = depsLoading[f.id] ?? false;
@@ -2305,14 +2434,17 @@ const Settings = () => {
                             </Stack>
                           </TableCell>
                           <TableCell><Chip size="small" label={f.valueType} variant="outlined" /></TableCell>
+                          <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.alternativePartNumber || "—"}</Typography></TableCell>
+                          <TableCell>
+                            <Chip size="small"
+                              label={f.isInventory ? "Inventory" : "Non-inventory"}
+                              color={f.isInventory ? "primary" : "default"}
+                              variant={f.isInventory ? "filled" : "outlined"}
+                            />
+                          </TableCell>
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.brand || "—"}</Typography></TableCell>
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.supplier || "—"}</Typography></TableCell>
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.manufacturerPartNumber || "—"}</Typography></TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {f.unitPrice != null ? `$${Number(f.unitPrice).toFixed(2)}` : "—"}
-                            </Typography>
-                          </TableCell>
                           <TableCell><Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-word" }}>{f.description || "—"}</Typography></TableCell>
                           <TableCell>
                             {f.linkedProducts && f.linkedProducts.length > 0
@@ -3119,6 +3251,7 @@ const Settings = () => {
               value={productForm.name}
               onChange={(e) => setProductForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. AIM-100 Camera, NVR-4000"
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Description (optional)"
@@ -3486,6 +3619,20 @@ const Settings = () => {
         );
       })()}
 
+      {/* Delete Division confirm dialog */}
+      <Dialog open={!!deleteDivisionConfirm} onClose={() => setDeleteDivisionConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete Division?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Delete <strong>{deleteDivisionConfirm?.name}</strong>? Products assigned to it will keep their data but lose the association.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDivisionConfirm(null)}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={confirmRemoveDivision}>Delete</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Add / Edit Division dialog */}
       <Dialog open={divisionDialog} onClose={() => !divisionSaving && setDivisionDialog(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{divisionEditId ? "Edit Division" : "Add Division"}</DialogTitle>
@@ -3498,6 +3645,7 @@ const Settings = () => {
               value={divisionForm.name}
               onChange={(e) => setDivisionForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. Strata AI, Strata Connect"
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Description (optional)"
@@ -3687,6 +3835,7 @@ const Settings = () => {
                 value={featureForm.name}
                 onChange={(e) => setFeatureForm((p) => ({ ...p, name: e.target.value }))}
                 placeholder="e.g. IP Camera, Room, NVR"
+                InputLabelProps={{ shrink: true }}
               />
               <TextField
                 label="Description (optional)"
@@ -3840,6 +3989,7 @@ const Settings = () => {
                   value={featureForm.brand}
                   onChange={(e) => setFeatureForm((p) => ({ ...p, brand: e.target.value }))}
                   placeholder="e.g. Hikvision"
+                  InputLabelProps={{ shrink: true }}
                 />
                 <TextField
                   label="Supplier / Manufacturer"
@@ -3848,6 +3998,7 @@ const Settings = () => {
                   value={featureForm.supplier}
                   onChange={(e) => setFeatureForm((p) => ({ ...p, supplier: e.target.value }))}
                   placeholder="e.g. Hikvision Australia"
+                  InputLabelProps={{ shrink: true }}
                 />
               </Stack>
               <Stack direction="row" spacing={1}>
@@ -3858,6 +4009,7 @@ const Settings = () => {
                   value={featureForm.alternativePartNumber}
                   onChange={(e) => setFeatureForm((p) => ({ ...p, alternativePartNumber: e.target.value }))}
                   placeholder="e.g. DS-2CD2143G2-I"
+                  InputLabelProps={{ shrink: true }}
                 />
                 <TextField
                   label="Manufacturer Part Number"
@@ -3866,6 +4018,7 @@ const Settings = () => {
                   value={featureForm.manufacturerPartNumber}
                   onChange={(e) => setFeatureForm((p) => ({ ...p, manufacturerPartNumber: e.target.value }))}
                   placeholder="e.g. MFR-DS-2143G2"
+                  InputLabelProps={{ shrink: true }}
                 />
                 <TextField
                   label="Price / Unit ($)"
@@ -3876,6 +4029,7 @@ const Settings = () => {
                   value={featureForm.unitPrice}
                   onChange={(e) => setFeatureForm((p) => ({ ...p, unitPrice: e.target.value }))}
                   placeholder="e.g. 185.00"
+                  InputLabelProps={{ shrink: true }}
                 />
               </Stack>
               <TextField
@@ -3885,6 +4039,7 @@ const Settings = () => {
                 value={featureForm.productLink}
                 onChange={(e) => setFeatureForm((p) => ({ ...p, productLink: e.target.value }))}
                 placeholder="https://..."
+                InputLabelProps={{ shrink: true }}
               />
               {featureError && <Alert severity="error" sx={{ fontSize: 12 }}>{featureError}</Alert>}
             </Stack>
@@ -3921,6 +4076,7 @@ const Settings = () => {
               value={depForm.name}
               onChange={(e) => setDepForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. Camera Body, Cat6 Cable, Bracket"
+              InputLabelProps={{ shrink: true }}
             />
             <Stack direction="row" alignItems="center" spacing={1}>
               <Typography variant="body2">Type:</Typography>
@@ -3956,6 +4112,7 @@ const Settings = () => {
                 value={depForm.unit}
                 onChange={(e) => setDepForm((p) => ({ ...p, unit: e.target.value }))}
                 placeholder="ea, m, kg"
+                InputLabelProps={{ shrink: true }}
               />
               {!depForm.isInventory && (
                 <TextField
@@ -4064,6 +4221,7 @@ const Settings = () => {
               value={wfTypeForm.name}
               onChange={(e) => setWfTypeForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. Installation, Inspection"
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Icon (emoji or code)"
@@ -4072,6 +4230,7 @@ const Settings = () => {
               value={wfTypeForm.icon}
               onChange={(e) => setWfTypeForm((p) => ({ ...p, icon: e.target.value }))}
               placeholder="e.g. 🔧 or wrench"
+              InputLabelProps={{ shrink: true }}
             />
             <TextField
               label="Sort Order"

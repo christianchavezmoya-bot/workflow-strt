@@ -118,6 +118,11 @@ export interface OpenAssetItem {
   assetModel?: string;
   manufacturer?: string;
   status: string;
+  runStatus?: string;
+  completedSteps: number;
+  totalSteps: number;
+  missingItems: number;
+  evidenceStatus?: string;
   assignedUserId?: string;
   location?: string;
 }
@@ -127,6 +132,7 @@ export interface WorkloadSummaryItem {
   fullName: string;
   notStarted: number;
   inProgress: number;
+  paused: number;
   totalAssigned: number;
   jobNumbers: string[];
   hasIssues: boolean;

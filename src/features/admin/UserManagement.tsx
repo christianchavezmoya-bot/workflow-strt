@@ -45,6 +45,8 @@ import {
   PersonOffOutlined,
   LockResetOutlined,
   ReplayOutlined,
+  UploadFileOutlined,
+  DownloadOutlined,
 } from "@mui/icons-material";
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
@@ -62,7 +64,7 @@ import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { adminTabsService, AdminTab, AdminTabRow } from "../../services/adminTabsService";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
-import { roleConfigService, RolePermissions } from "../../services/roleConfigService";
+import { defaultDomains, roleConfigService, RolePermissions, DomainPermissions } from "../../services/roleConfigService";
 import api from "../../services/api";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer } from "../../store/customersSlice";
@@ -266,6 +268,10 @@ export const UserManagement: React.FC = () => {
 
   const [roles, setRoles] = useState<string[]>(["Admin", "Project Manager", "Engineer", "Viewer"]);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [bulkImportRows, setBulkImportRows] = useState<{ fullName: string; email: string; role: string; office: string }[]>([]);
+  const [bulkImporting, setBulkImporting] = useState(false);
+  const [bulkImportResult, setBulkImportResult] = useState<{ created: number; skipped: number; skippedEmails: string[]; errors: string[] } | null>(null);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [editUserOpen, setEditUserOpen] = useState(false);
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
@@ -562,17 +568,27 @@ export const UserManagement: React.FC = () => {
   });
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const emptyDomains = (): DomainPermissions => ({
+    projects:  { view: false, edit: false, approve: false, delete: false },
+    installationAssets:   { view: false, edit: false, runWorkflow: false, delete: false },
+    workInstructionsBuilder: { view: false, build: false, publish: false, archive: false },
+    documents: { view: false, upload: false, delete: false },
+    settings:  { view: false, edit: false },
+  });
+
   const [roleForm, setRoleForm] = useState({
     name: "",
     originalName: "",
     permissions: {
-      viewOnly: true,
+      viewOnly: false,
       createDeleteTables: false,
       createUsers: false,
       editFields: false,
       modifyData: false,
-      editForms: false
-    } as Record<string, boolean>
+      editForms: false,
+    } as Record<string, boolean>,
+    domains: emptyDomains(),
   });
 
   useEffect(() => {
@@ -803,23 +819,26 @@ export const UserManagement: React.FC = () => {
 
   const openRoleDialog = (roleName?: string) => {
     if (roleName && rolesConfig[roleName]) {
+      const r = rolesConfig[roleName];
       setRoleForm({
         name: roleName,
         originalName: roleName,
-        permissions: { ...rolesConfig[roleName] }
+        permissions: {
+          viewOnly: r.viewOnly, createDeleteTables: r.createDeleteTables,
+          createUsers: r.createUsers, editFields: r.editFields,
+          modifyData: r.modifyData, editForms: r.editForms,
+        },
+        domains: r.domains ?? defaultDomains(r),
       });
     } else {
       setRoleForm({
         name: "",
         originalName: "",
         permissions: {
-          viewOnly: true,
-          createDeleteTables: false,
-          createUsers: false,
-          editFields: false,
-          modifyData: false,
-          editForms: false
-        }
+          viewOnly: false, createDeleteTables: false, createUsers: false,
+          editFields: false, modifyData: false, editForms: false,
+        },
+        domains: emptyDomains(),
       });
     }
     setRoleDialogOpen(true);
@@ -1623,6 +1642,58 @@ export const UserManagement: React.FC = () => {
     setUserDynamicValues({});
   };
 
+  // ── Bulk import helpers ──────────────────────────────────────────────────
+  function parseBulkCSV(text: string) {
+    const lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) return [];
+    const cols = lines[0].split(",").map((c) => c.trim().toLowerCase().replace(/\s+/g, "").replace(/^"|"$/g, ""));
+    return lines.slice(1).map((row) => {
+      const vals = row.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+      const obj: Record<string, string> = {};
+      cols.forEach((c, i) => { obj[c] = vals[i] ?? ""; });
+      return obj;
+    }).filter((r) => Object.values(r).some(Boolean));
+  }
+
+  function handleBulkCSVFile(file: File) {
+    file.text().then((text) => {
+      const raw = parseBulkCSV(text);
+      const rows = raw.map((r) => ({
+        fullName: r.fullname || r.full_name || r.name || "",
+        email: r.email || "",
+        role: r.role || "",
+        office: r.office || "",
+      })).filter((r) => r.fullName && r.email && r.role);
+      setBulkImportRows(rows);
+      setBulkImportResult(null);
+    });
+  }
+
+  async function runBulkImport() {
+    if (bulkImportRows.length === 0) return;
+    setBulkImporting(true);
+    try {
+      const res = await api.post("/users/bulk-import", { users: bulkImportRows });
+      setBulkImportResult(res.data);
+      dispatch(fetchUsers());
+    } catch {
+      setBulkImportResult({ created: 0, skipped: 0, skippedEmails: [], errors: ["Import failed. Please check your file and try again."] });
+    } finally {
+      setBulkImporting(false);
+    }
+  }
+
+  function downloadBulkTemplate() {
+    const csv = "fullName,email,role,office\nJohn Smith,john.smith@example.com,Installer,Brisbane\nSarah Jones,sarah.jones@example.com,Engineer,";
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "users-import-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const handleCreateCustomer = async () => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: Array<{ id: string; time: string; method?: string; url?: string; status?: number; error?: string }> };
     if (!anyWindow.__apiDebugLogs) {
@@ -1942,9 +2013,15 @@ export const UserManagement: React.FC = () => {
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
           {adminTabsConfig[tab]?.type === "users" && can.createUsers && (
-            <Button variant="contained" onClick={() => setInviteOpen(true)}>
-              Invite user
-            </Button>
+            <>
+              <Button variant="outlined" startIcon={<UploadFileOutlined />}
+                onClick={() => { setBulkImportRows([]); setBulkImportResult(null); setBulkImportOpen(true); }}>
+                Import CSV
+              </Button>
+              <Button variant="contained" onClick={() => setInviteOpen(true)}>
+                Invite user
+              </Button>
+            </>
           )}
           {can.createDeleteTables && (
             <IconButton
@@ -3642,6 +3719,113 @@ export const UserManagement: React.FC = () => {
           );
         })}
 
+      {/* ── Bulk import dialog ── */}
+      <Dialog open={bulkImportOpen} onClose={() => !bulkImporting && setBulkImportOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" justifyContent="space-between">
+            <span>Import Users from CSV</span>
+            <Button size="small" startIcon={<DownloadOutlined />} onClick={downloadBulkTemplate} variant="text">
+              Download template
+            </Button>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          {bulkImportResult ? (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <Alert severity={bulkImportResult.errors.length > 0 ? "warning" : "success"}>
+                <strong>{bulkImportResult.created}</strong> user{bulkImportResult.created !== 1 ? "s" : ""} created (inactive).
+                {bulkImportResult.skipped > 0 && <> <strong>{bulkImportResult.skipped}</strong> skipped (email already exists).</>}
+              </Alert>
+              {bulkImportResult.skippedEmails.length > 0 && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Skipped emails:</Typography>
+                  <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.75rem", mt: 0.5 }}>
+                    {bulkImportResult.skippedEmails.join(", ")}
+                  </Typography>
+                </Box>
+              )}
+              {bulkImportResult.errors.length > 0 && (
+                <Box>
+                  <Typography variant="caption" color="error.main">Errors:</Typography>
+                  <Stack spacing={0.25} sx={{ mt: 0.5 }}>
+                    {bulkImportResult.errors.map((e, i) => (
+                      <Typography key={i} variant="body2" color="error.main" sx={{ fontSize: "0.75rem" }}>{e}</Typography>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+            </Stack>
+          ) : bulkImportRows.length === 0 ? (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                Upload a CSV with columns: <strong>fullName, email, role, office</strong> (office is optional).
+                Users will be created as <strong>inactive</strong> — they cannot log in until you activate them.
+              </Typography>
+              <Box
+                sx={{
+                  border: "2px dashed rgba(255,255,255,0.2)", borderRadius: 2, p: 4,
+                  textAlign: "center", cursor: "pointer",
+                  "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
+                }}
+                onClick={() => document.getElementById("bulk-user-csv-input")?.click()}
+              >
+                <UploadFileOutlined sx={{ fontSize: 40, color: "text.disabled", mb: 1 }} />
+                <Typography variant="body2" color="text.secondary">Click to upload CSV file</Typography>
+                <input id="bulk-user-csv-input" type="file" accept=".csv" hidden
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleBulkCSVFile(f); e.target.value = ""; }} />
+              </Box>
+            </Stack>
+          ) : (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <Alert severity="info">
+                <strong>{bulkImportRows.length}</strong> valid row{bulkImportRows.length !== 1 ? "s" : ""} found. Review before importing.
+              </Alert>
+              <Box sx={{ maxHeight: 320, overflowY: "auto" }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Full Name</TableCell>
+                      <TableCell>Email</TableCell>
+                      <TableCell>Role</TableCell>
+                      <TableCell>Office</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {bulkImportRows.map((r, i) => (
+                      <TableRow key={i}>
+                        <TableCell>{r.fullName}</TableCell>
+                        <TableCell>{r.email}</TableCell>
+                        <TableCell><Chip label={r.role} size="small" variant="outlined" /></TableCell>
+                        <TableCell>{r.office || "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          {bulkImportResult ? (
+            <Button onClick={() => setBulkImportOpen(false)}>Close</Button>
+          ) : (
+            <>
+              <Button onClick={() => setBulkImportOpen(false)} disabled={bulkImporting}>Cancel</Button>
+              {bulkImportRows.length > 0 && (
+                <Button variant="outlined" onClick={() => setBulkImportRows([])} disabled={bulkImporting}>
+                  Change file
+                </Button>
+              )}
+              {bulkImportRows.length > 0 && (
+                <Button variant="contained" onClick={runBulkImport} disabled={bulkImporting}>
+                  {bulkImporting ? "Importing…" : `Import ${bulkImportRows.length} users`}
+                </Button>
+              )}
+            </>
+          )}
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Invite new user</DialogTitle>
         <DialogContent>
@@ -3658,7 +3842,7 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setFormData((prev) => ({ ...prev, email: event.target.value }))}
             />
             <FormControl>
-              <InputLabel sx={fieldLabelStyle}>Role name</InputLabel>
+              <InputLabel shrink sx={fieldLabelStyle}>Role name</InputLabel>
               <Select
                 value={formData.role}
                 label="Role name"
@@ -3702,44 +3886,193 @@ export const UserManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={roleDialogOpen} onClose={() => setRoleDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{roleForm.originalName ? "Edit role" : "Create role"}</DialogTitle>
+      <Dialog open={roleDialogOpen} onClose={() => setRoleDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>{roleForm.originalName ? `Edit role: ${roleForm.originalName}` : "Create role"}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ marginTop: 1 }}>
+          <Stack spacing={3} sx={{ mt: 1 }}>
+
             <TextField
               label="Role name"
+              InputLabelProps={{ shrink: true }}
               value={roleForm.name}
-              onChange={(event) => setRoleForm((prev) => ({ ...prev, name: event.target.value }))}
-              fullWidth
+              onChange={(e) => setRoleForm((prev) => ({ ...prev, name: e.target.value }))}
+              fullWidth size="small"
             />
-            <Typography variant="subtitle2">Permissions</Typography>
-            {[
-              { key: "viewOnly", label: "View only" },
-              { key: "createDeleteTables", label: "Create/Delete tables" },
-              { key: "createUsers", label: "Create users" },
-              { key: "editFields", label: "Edit fields" },
-              { key: "modifyData", label: "Modify data" },
-              { key: "editForms", label: "Edit forms" }
-            ].map((perm) => (
-              <Stack key={perm.key} direction="row" spacing={1} alignItems="center">
-                <Checkbox
-                  checked={!!roleForm.permissions[perm.key]}
-                  onChange={(event) =>
-                    setRoleForm((prev) => ({
-                      ...prev,
-                      permissions: { ...prev.permissions, [perm.key]: event.target.checked }
-                    }))
-                  }
-                />
-                <Typography variant="body2">{perm.label}</Typography>
+
+            {/* ── Tier 1: Global flags ── */}
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+                Tier 1 — Global
+              </Typography>
+              <Stack direction="row" flexWrap="wrap" gap={1}>
+                {([
+                  { key: "viewOnly",            label: "View only (read-only across app)" },
+                  { key: "createUsers",          label: "Create users" },
+                  { key: "createDeleteTables",   label: "Create / delete tables" },
+                  { key: "editFields",           label: "Edit fields" },
+                  { key: "modifyData",           label: "Modify data" },
+                  { key: "editForms",            label: "Edit forms" },
+                ] as { key: string; label: string }[]).map((perm) => (
+                  <Stack key={perm.key} direction="row" alignItems="center" spacing={0.5}
+                    sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, px: 1, py: 0.5 }}>
+                    <Checkbox
+                      size="small"
+                      checked={!!roleForm.permissions[perm.key]}
+                      onChange={(e) => setRoleForm((prev) => ({
+                        ...prev,
+                        permissions: { ...prev.permissions, [perm.key]: e.target.checked },
+                      }))}
+                    />
+                    <Typography variant="caption">{perm.label}</Typography>
+                  </Stack>
+                ))}
               </Stack>
-            ))}
+            </Box>
+
+            {/* ── Tier 2: Domain matrix ── */}
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+                Tier 2 — Domain permissions
+              </Typography>
+              <Table size="small" sx={{ "& th": { fontWeight: 700, fontSize: "0.72rem", color: "text.secondary" } }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: 120 }}>Domain</TableCell>
+                    <TableCell align="center">View</TableCell>
+                    <TableCell align="center">Edit</TableCell>
+                    <TableCell align="center">Action 3</TableCell>
+                    <TableCell align="center">Action 4</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {/* Projects */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Projects</Typography></TableCell>
+                    {(["view", "edit", "approve", "delete"] as const).map((action) => (
+                      <TableCell key={action} align="center" sx={{ pb: 0 }}>
+                        <Stack alignItems="center" spacing={0}>
+                          <Checkbox size="small"
+                            checked={!!roleForm.domains.projects[action]}
+                            onChange={(e) => setRoleForm((prev) => ({
+                              ...prev,
+                              domains: { ...prev.domains, projects: { ...prev.domains.projects, [action]: e.target.checked } },
+                            }))}
+                          />
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>{action}</Typography>
+                        </Stack>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+
+                  {/* Assets */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Installation Assets</Typography></TableCell>
+                    {(["view", "edit", "runWorkflow", "delete"] as const).map((action) => (
+                      <TableCell key={action} align="center" sx={{ pb: 0 }}>
+                        <Stack alignItems="center" spacing={0}>
+                          <Checkbox size="small"
+                            checked={!!roleForm.domains.installationAssets[action]}
+                            onChange={(e) => setRoleForm((prev) => ({
+                              ...prev,
+                              domains: { ...prev.domains, installationAssets: { ...prev.domains.installationAssets, [action]: e.target.checked } },
+                            }))}
+                          />
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>
+                            {action === "runWorkflow" ? "run workflow" : action}
+                          </Typography>
+                        </Stack>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+
+                  {/* Workflows */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Work Instructions Builder</Typography></TableCell>
+                    {(["view", "build", "publish", "archive"] as const).map((action) => (
+                      <TableCell key={action} align="center" sx={{ pb: 0 }}>
+                        <Stack alignItems="center" spacing={0}>
+                          <Checkbox size="small"
+                            checked={!!roleForm.domains.workInstructionsBuilder[action]}
+                            onChange={(e) => setRoleForm((prev) => ({
+                              ...prev,
+                              domains: { ...prev.domains, workInstructionsBuilder: { ...prev.domains.workInstructionsBuilder, [action]: e.target.checked } },
+                            }))}
+                          />
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>{action}</Typography>
+                        </Stack>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+
+                  {/* Documents */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Documents</Typography></TableCell>
+                    <TableCell align="center" sx={{ pb: 0 }}>
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small"
+                          checked={!!roleForm.domains.documents.view}
+                          onChange={(e) => setRoleForm((prev) => ({
+                            ...prev, domains: { ...prev.domains, documents: { ...prev.domains.documents, view: e.target.checked } },
+                          }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>view</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center" sx={{ pb: 0 }}>
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small"
+                          checked={!!roleForm.domains.documents.upload}
+                          onChange={(e) => setRoleForm((prev) => ({
+                            ...prev, domains: { ...prev.domains, documents: { ...prev.domains.documents, upload: e.target.checked } },
+                          }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>upload</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center" sx={{ pb: 0 }}>
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small"
+                          checked={!!roleForm.domains.documents.delete}
+                          onChange={(e) => setRoleForm((prev) => ({
+                            ...prev, domains: { ...prev.domains, documents: { ...prev.domains.documents, delete: e.target.checked } },
+                          }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>delete</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell />
+                  </TableRow>
+
+                  {/* Settings */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Settings</Typography></TableCell>
+                    <TableCell align="center" sx={{ pb: 0 }}>
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small"
+                          checked={!!roleForm.domains.settings.view}
+                          onChange={(e) => setRoleForm((prev) => ({
+                            ...prev, domains: { ...prev.domains, settings: { ...prev.domains.settings, view: e.target.checked } },
+                          }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>view</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center" sx={{ pb: 0 }}>
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small"
+                          checked={!!roleForm.domains.settings.edit}
+                          onChange={(e) => setRoleForm((prev) => ({
+                            ...prev, domains: { ...prev.domains, settings: { ...prev.domains.settings, edit: e.target.checked } },
+                          }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>edit</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell /><TableCell />
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </Box>
+
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button variant="outlined" onClick={() => setRoleDialogOpen(false)}>
-            Cancel
-          </Button>
+          <Button variant="outlined" onClick={() => setRoleDialogOpen(false)}>Cancel</Button>
           <Button
             variant="contained"
             onClick={() => {
@@ -3747,10 +4080,8 @@ export const UserManagement: React.FC = () => {
               if (!name) return;
               setRolesConfig((prev) => {
                 const next = { ...prev };
-                if (roleForm.originalName && roleForm.originalName !== name) {
-                  delete next[roleForm.originalName];
-                }
-                next[name] = { ...roleForm.permissions } as unknown as RolePermissions;
+                if (roleForm.originalName && roleForm.originalName !== name) delete next[roleForm.originalName];
+                next[name] = { ...roleForm.permissions, domains: roleForm.domains } as unknown as RolePermissions;
                 return next;
               });
               setRoleDialogOpen(false);
@@ -4996,7 +5327,7 @@ export const UserManagement: React.FC = () => {
               rows={2}
             />
             <FormControl fullWidth size="small">
-              <InputLabel>Division (optional)</InputLabel>
+              <InputLabel shrink>Division (optional)</InputLabel>
               <Select
                 value={productForm.divisionId}
                 label="Division (optional)"
@@ -5210,7 +5541,7 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setEditUserForm((prev) => ({ ...prev, email: event.target.value }))}
             />
             <FormControl fullWidth>
-              <InputLabel sx={fieldLabelStyle}>Role name</InputLabel>
+              <InputLabel shrink sx={fieldLabelStyle}>Role name</InputLabel>
               <Select
                 value={editUserForm.role}
                 label="Role name"
@@ -5226,7 +5557,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <FormControl fullWidth>
-              <InputLabel sx={fieldLabelStyle}>Office / City</InputLabel>
+              <InputLabel shrink sx={fieldLabelStyle}>Office / City</InputLabel>
               <Select
                 value={editUserForm.office}
                 label="Office / City"
@@ -5320,7 +5651,7 @@ export const UserManagement: React.FC = () => {
               rows={2}
             />
             <FormControl fullWidth size="small">
-              <InputLabel>Division (optional)</InputLabel>
+              <InputLabel shrink>Division (optional)</InputLabel>
               <Select
                 value={editProductForm.divisionId}
                 label="Division (optional)"
@@ -5546,7 +5877,7 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setAssetForm((prev) => ({ ...prev, serialNumber: event.target.value }))}
             />
             <FormControl fullWidth>
-              <InputLabel>{baseFieldNames.assets?.["base-pmCount"] || "PM Count"}</InputLabel>
+              <InputLabel shrink>{baseFieldNames.assets?.["base-pmCount"] || "PM Count"}</InputLabel>
               <Select
                 label={baseFieldNames.assets?.["base-pmCount"] || "PM Count"}
                 value={assetForm.pmCount}

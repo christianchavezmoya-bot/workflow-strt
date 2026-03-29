@@ -6,10 +6,13 @@ import {
   ExpandMoreOutlined,
   HourglassEmptyOutlined,
   LockOutlined,
+  PhotoCameraOutlined,
   RadioButtonUncheckedOutlined,
   ReportProblemOutlined,
   TuneOutlined,
+  VideocamOutlined,
   VisibilityOffOutlined,
+  WarningAmberOutlined,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -40,6 +43,7 @@ import type { AssetWorkflowRun, RunIssue, StepResult } from "../../types/assetWo
 import type { BomActualItem, WorkflowStep } from "../../types/workflow";
 import type { WorkflowAssignment } from "../../types/workflowType";
 import type { ProjectAsset } from "../../types/projectAsset";
+import { countMissingWorkflowItems, getMissingWorkflowItems } from "../../utils/workflowCompleteness";
 
 interface Props {
   open: boolean;
@@ -160,6 +164,10 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
 
   function stepCount(run: AssetWorkflowRun): number {
     return parseStepResults(run.stepResultsJson).length;
+  }
+
+  function missingMediaCount(run: AssetWorkflowRun): number {
+    return countMissingWorkflowItems(run);
   }
 
   function openIssueCount(runId: string): number {
@@ -317,6 +325,7 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
                 rows={2}
                 label="Resolution note"
                 placeholder="Describe how this was resolved or add context…"
+                InputLabelProps={{ shrink: true }}
                 value={pendingNotes[issue.id] ?? ""}
                 onChange={(e) => setPendingNotes((prev) => ({ ...prev, [issue.id]: e.target.value }))}
               />
@@ -423,6 +432,7 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
               const stepResults = parseStepResults(run.stepResultsJson);
               const issues = runIssueMap[run.id] ?? [];
               const openIssues = openIssueCount(run.id);
+              const missingMedia = missingMediaCount(run);
 
               return (
                 <Box key={run.id}>
@@ -476,6 +486,16 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
                             sx={{ height: 16, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
                           />
                         )}
+                        {missingMedia > 0 && (
+                          <Chip
+                            size="small"
+                            icon={<WarningAmberOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                            label={`${missingMedia} missing items`}
+                            color="warning"
+                            variant="outlined"
+                            sx={{ height: 16, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
+                          />
+                        )}
                       </Stack>
                     </Box>
 
@@ -514,17 +534,51 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
                             </TableHead>
                             <TableBody>
                               {(() => {
-                                const stepTitleMap = new Map(parseSnapshotSteps(run.workflowSnapshotJson).map((s) => [s.id, s.title]));
+                                const stepMap = new Map(parseSnapshotSteps(run.workflowSnapshotJson).map((s) => [s.id, s]));
+                                const stepTitleMap = new Map(Array.from(stepMap.values()).map((s) => [s.id, s.title]));
                                 return stepResults.map((sr) => {
+                                  const step = stepMap.get(sr.stepId);
+                                  const missingInputs = getMissingWorkflowItems(step, sr.values);
                                   const entries = Object.entries(sr.values ?? {}).filter(([, v]) => v);
                                   return (
                                     <TableRow key={sr.stepId} sx={{ verticalAlign: "top" }}>
                                       <TableCell sx={{ fontSize: 12, py: 0.75, whiteSpace: "nowrap" }}>
                                         {stepTitleMap.get(sr.stepId) ?? `${sr.stepId.slice(0, 8)}…`}
+                                        {missingInputs.length > 0 && (
+                                          <Chip
+                                            size="small"
+                                            color="warning"
+                                            variant="outlined"
+                                            icon={<WarningAmberOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                                            label={missingInputs.length === 1 ? "Missing data" : `${missingInputs.length} missing items`}
+                                            sx={{ mt: 0.5, width: "fit-content", height: 18, fontSize: 10 }}
+                                          />
+                                        )}
                                       </TableCell>
                                       <TableCell sx={{ py: 0.75 }}>
-                                        {entries.length > 0 ? (
+                                        {entries.length > 0 || missingInputs.length > 0 ? (
                                           <Stack spacing={0.75}>
+                                            {missingInputs.map((input) => (
+                                              <Stack key={`missing-${input.id}`} direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                                                <Typography variant="caption" color="warning.main" sx={{ minWidth: 80, flexShrink: 0 }}>
+                                                  {input.label}
+                                                </Typography>
+                                                <Chip
+                                                  size="small"
+                                                  color="warning"
+                                                  icon={input.kind === "video"
+                                                    ? <VideocamOutlined sx={{ fontSize: "0.75rem !important" }} />
+                                                    : <PhotoCameraOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                                                  label={
+                                                    input.kind === "video" ? "Video missing"
+                                                      : input.kind === "photo" ? "Photo missing"
+                                                      : input.kind === "capture" ? "Capture missing"
+                                                      : "Required field missing"
+                                                  }
+                                                  sx={{ height: 18, fontSize: 10 }}
+                                                />
+                                              </Stack>
+                                            ))}
                                             {entries.map(([k, v]) => (
                                               <Stack key={k} direction="row" spacing={1} alignItems="flex-start">
                                                 <Typography variant="caption" color="text.secondary" sx={{ minWidth: 80, flexShrink: 0, pt: 0.2 }}>
