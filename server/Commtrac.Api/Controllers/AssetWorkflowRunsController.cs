@@ -547,6 +547,7 @@ public class AssetWorkflowRunsController : ControllerBase
             case "pause":
                 // Close whatever is open (productive or downtime) → idle state
                 CloseAnyOpenTimeEntry(run, endAt);
+                run.Status = "Paused";
                 break;
             default:
                 return BadRequest(new { message = "Unknown action. Use StartProductive, ResumeProductive, StartDowntime, StopDowntime, StopAll." });

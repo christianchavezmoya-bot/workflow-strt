@@ -489,7 +489,7 @@ export default function WorkOrderRunner({
         // non-fatal — idle state will be restored on next open
       }
     }
-    await autosaveProgress();
+    await autosaveProgress(undefined, undefined, "Paused");
     const completedTitles = history
       .map((id) => stepsSorted.find((s) => s.id === id)?.title ?? "")
       .filter(Boolean);
@@ -706,13 +706,14 @@ export default function WorkOrderRunner({
     return result;
   }
 
-  async function autosaveProgress(navStepId?: string, navHistory?: string[]) {
+  async function autosaveProgress(navStepId?: string, navHistory?: string[], status?: "InProgress" | "Paused") {
     if (!activeRunId) return;
     try {
       await assetWorkflowRunService.saveProgress(
         activeRunId,
         JSON.stringify(buildStepsData(navStepId, navHistory)),
         JSON.stringify(issues),
+        status,
       );
     } catch {
       // silent — not critical
@@ -1646,17 +1647,19 @@ export default function WorkOrderRunner({
           </Stack>
         </DialogContent>
 
-        {/* Flag issue inline form */}
-        <Collapse in={flagOpen}>
-          <Box sx={{ px: 3, pb: 1.5, pt: 0 }}>
-            <Divider sx={{ mb: 1.5 }} />
-            <Typography variant="caption" fontWeight={700} color="error" display="block" mb={0.5}>
-              Flag issue on this step
-            </Typography>
-            <Typography variant="caption" color="text.secondary" display="block" mb={1.25}>
-              <strong>High</strong> severity = <strong>blocking</strong> — workflow cannot be completed until resolved.&nbsp;
-              <strong>Medium</strong> or <strong>Low</strong> = observation — noted but does not block completion.
-            </Typography>
+        <Dialog open={flagOpen} onClose={() => { setFlagOpen(false); setFlagSubmitted(false); }} maxWidth="sm" fullWidth>
+          <DialogTitle sx={{ pb: 1 }}>
+            <Stack spacing={0.5}>
+              <Typography variant="subtitle2" fontWeight={700} color="error">
+                Flag issue on this step
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                <strong>High</strong> severity = <strong>blocking</strong> — workflow cannot be completed until resolved.{" "}
+                <strong>Medium</strong> or <strong>Low</strong> = observation — noted but does not block completion.
+              </Typography>
+            </Stack>
+          </DialogTitle>
+          <DialogContent dividers>
             <Stack spacing={1.25}>
               {/* Severity selector */}
               <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
@@ -1792,30 +1795,32 @@ export default function WorkOrderRunner({
                 onChange={setFlagMedia}
                 label="Attach Photo / Video (optional)"
               />
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Button
-                  size="small"
-                  variant="contained"
-                  color="success"
-                  disabled={!flagDescription.trim()}
-                  onClick={submitFlag}
-                  sx={{ flexShrink: 0 }}
-                >
-                  Add issue
-                </Button>
-                {flagSubmitted && (
-                  <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
-                    ✓ Issue added — type another or close
-                  </Typography>
-                )}
-                <Box sx={{ flex: 1 }} />
-                <Button size="small" variant="text" color="inherit" onClick={() => { setFlagOpen(false); setFlagSubmitted(false); }}>
-                  Close
-                </Button>
-              </Stack>
             </Stack>
-          </Box>
-        </Collapse>
+          </DialogContent>
+          <DialogActions sx={{ justifyContent: "space-between", gap: 1, px: 3, py: 1.5 }}>
+            {flagSubmitted ? (
+              <Typography variant="caption" color="success.main" sx={{ fontWeight: 600, mr: "auto" }}>
+                ✓ Issue added — type another or close
+              </Typography>
+            ) : (
+              <Box />
+            )}
+            <Stack direction="row" spacing={1}>
+              <Button size="small" variant="text" color="inherit" onClick={() => { setFlagOpen(false); setFlagSubmitted(false); }}>
+                Close
+              </Button>
+              <Button
+                size="small"
+                variant="contained"
+                color="success"
+                disabled={!flagDescription.trim()}
+                onClick={submitFlag}
+              >
+                Add issue
+              </Button>
+            </Stack>
+          </DialogActions>
+        </Dialog>
 
         <DialogActions sx={{ flexWrap: "wrap", gap: 0.75, justifyContent: "space-between" }}>
           <Stack direction="row" spacing={0.75} alignItems="center">

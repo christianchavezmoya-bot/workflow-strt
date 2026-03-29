@@ -704,7 +704,23 @@ public record ProjectAssetDto(
     string? InstalledBy,
     string AsBuiltJson,
     DateTime CreatedAt,
-    DateTime UpdatedAt
+    DateTime UpdatedAt,
+    ProjectAssetWorkflowSummaryDto? WorkflowSummary
+);
+
+public record ProjectAssetWorkflowSummaryDto(
+    bool HasWorkflow,
+    string EvidenceStatus,
+    int RequiredItems,
+    int CompletedItems,
+    int MissingItems,
+    string? LatestRunId,
+    string? LatestRunStatus,
+    bool LatestRunLocked,
+    string? SignatureStatus,
+    bool HasOpenIssues,
+    DateTime? LatestRunStartedAt,
+    DateTime? LatestRunCompletedAt
 );
 
 public record UpsertProjectAssetRequest(
@@ -1197,7 +1213,7 @@ public record CloneAssetsResult(int AssetsCloned, int AssignmentsCloned);
 /// <summary>Per-technician open-asset counts for the Dashboard workload panel.</summary>
 public record WorkloadSummaryDto(
     string UserId, string FullName,
-    int NotStarted, int InProgress, int TotalAssigned,
+    int NotStarted, int InProgress, int Paused, int TotalAssigned,
     List<string> JobNumbers,
     bool HasIssues,
     int CompletedSteps, int TotalSteps,
@@ -1215,6 +1231,11 @@ public record OpenAssetDto(
     string? AssetModel,
     string? Manufacturer,
     string Status,
+    string? RunStatus,
+    int CompletedSteps,
+    int TotalSteps,
+    int MissingItems,
+    string? EvidenceStatus,
     string? AssignedUserId,
     string? Location
 );

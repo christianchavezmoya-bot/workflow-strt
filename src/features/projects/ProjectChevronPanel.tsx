@@ -650,6 +650,8 @@ export default function ProjectChevronPanel({
     const total    = installAssets.length;
     const complete = installAssets.filter(a => a.status === "Complete").length;
     const pct      = total > 0 ? Math.round((complete / total) * 100) : 0;
+    const paused   = installAssets.filter(a => a.workflowSummary?.latestRunStatus === "Paused").length;
+    const missingEvidence = installAssets.filter(a => (a.workflowSummary?.missingItems ?? 0) > 0).length;
 
     let blocking = 0;
     for (const run of latestRuns) {
@@ -666,7 +668,7 @@ export default function ProjectChevronPanel({
     const locked   = latestRuns.filter(r => r.isLocked).length;
     const bomDone  = latestRuns.filter(r => r.isLocked && r.bomActualJson).length;
 
-    return { total, complete, pct, blocking, pendingSig, locked, bomDone };
+    return { total, complete, pct, blocking, pendingSig, locked, bomDone, paused, missingEvidence };
   }, [installAssets, latestRuns]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -707,6 +709,22 @@ export default function ProjectChevronPanel({
               {healthKpis.pendingSig}
             </Typography>
             <Typography variant="caption" color="text.secondary">pending sig</Typography>
+          </Stack>
+
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            <BuildOutlined sx={{ fontSize: 14, color: healthKpis.paused > 0 ? "warning.main" : "text.secondary" }} />
+            <Typography variant="caption" fontWeight={700} color={healthKpis.paused > 0 ? "warning.main" : "text.secondary"}>
+              {healthKpis.paused}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">paused</Typography>
+          </Stack>
+
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            <ErrorOutlineOutlined sx={{ fontSize: 14, color: healthKpis.missingEvidence > 0 ? "warning.main" : "text.secondary" }} />
+            <Typography variant="caption" fontWeight={700} color={healthKpis.missingEvidence > 0 ? "warning.main" : "text.secondary"}>
+              {healthKpis.missingEvidence}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">missing evidence</Typography>
           </Stack>
 
           {/* BOM */}
@@ -812,10 +830,20 @@ export default function ProjectChevronPanel({
                   } catch {}
                   const hasHigh   = openIssues.some(i => i.severity === "high" || i.isBlocking);
                   const hasMedium = openIssues.some(i => i.severity === "medium");
+                  const isPaused = a.workflowSummary?.latestRunStatus === "Paused";
+                  const stepSummary = a.workflowSummary?.requiredItems
+                    ? `${a.workflowSummary.completedItems}/${a.workflowSummary.requiredItems} captured`
+                    : run?.stepResultsJson
+                      ? `${(() => { try { return (JSON.parse(run.stepResultsJson || "[]") as Array<unknown>).length; } catch { return 0; } })()} steps`
+                      : "";
+                  const missingSummary = (a.workflowSummary?.missingItems ?? 0) > 0
+                    ? `${a.workflowSummary?.missingItems} missing`
+                    : "";
                   const awaitingSignature = a.status === "Complete" && !!run
                     && run.isLocked && !run.customerSignedAt && run.signatureStatus !== "WaivedCustomer";
                   const statusColor: "error" | "warning" | "success" | "primary" | "default" =
                     hasHigh            ? "error"   :
+                    isPaused           ? "warning" :
                     hasMedium          ? "warning" :
                     awaitingSignature  ? "warning" :
                     a.status === "Complete"   ? "success" :
@@ -823,6 +851,7 @@ export default function ProjectChevronPanel({
                     a.status === "Issue"      ? "error"   : "default";
                   const statusLabel =
                     awaitingSignature && !hasHigh && !hasMedium ? "Awaiting Signature" :
+                    isPaused                 ? "Paused"     :
                     a.status === "Complete"   ? "Complete"   :
                     a.status === "InProgress" ? "In Progress" :
                     a.status === "Issue"      ? "Issue"      : a.status;
@@ -839,13 +868,20 @@ export default function ProjectChevronPanel({
                         <Typography variant="caption" color="text.secondary">{a.assetTag || "—"}</Typography>
                       </TableCell>
                       <TableCell sx={{ py: 0.4 }}>
-                        <Chip
-                          label={statusLabel}
-                          size="small"
-                          color={statusColor}
-                          variant="outlined"
-                          sx={{ height: 18, fontSize: "0.65rem" }}
-                        />
+                        <Stack spacing={0.25} alignItems="flex-start">
+                          <Chip
+                            label={statusLabel}
+                            size="small"
+                            color={statusColor}
+                            variant="outlined"
+                            sx={{ height: 18, fontSize: "0.65rem" }}
+                          />
+                          {(stepSummary || missingSummary) && (
+                            <Typography variant="caption" color={missingSummary ? "warning.main" : "text.secondary"} sx={{ fontSize: "0.62rem", lineHeight: 1.2 }}>
+                              {[stepSummary, missingSummary].filter(Boolean).join(" · ")}
+                            </Typography>
+                          )}
+                        </Stack>
                       </TableCell>
                       <TableCell sx={{ fontSize: "0.72rem", py: 0.4 }}>
                         {tech
