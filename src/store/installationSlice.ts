@@ -15,8 +15,8 @@ const initialState: InstallationState = {
 
 export const fetchInstallations = createAsyncThunk(
   "installations/fetch",
-  async (projectId?: string) => {
-    return installationService.getInstallations(projectId);
+  async (params?: { projectId?: string; includeDeleted?: boolean }) => {
+    return installationService.getInstallations(params?.projectId, params?.includeDeleted);
   }
 );
 

@@ -16,8 +16,10 @@ const BASE = "/bom-import-runs";
 
 export const bomApiService = {
   /** List all import runs */
-  async listRuns(): Promise<BomImportRun[]> {
-    const { data } = await api.get<BomImportRun[]>(BASE);
+  async listRuns(includeDeleted = false): Promise<BomImportRun[]> {
+    const { data } = await api.get<BomImportRun[]>(BASE, {
+      params: includeDeleted ? { includeDeleted: true } : undefined,
+    });
     return data;
   },
 
@@ -48,6 +50,11 @@ export const bomApiService = {
   /** Delete (archive) an import run */
   async deleteRun(id: string): Promise<void> {
     await api.delete(`${BASE}/${id}`);
+  },
+
+  /** Restore an archived import run */
+  async restoreRun(id: string): Promise<void> {
+    await api.post(`${BASE}/${id}/restore`);
   },
 
   /** Permanently delete an import run (cannot be undone) */

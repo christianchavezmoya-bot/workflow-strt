@@ -4,11 +4,13 @@ import {
   Button,
   Checkbox,
   Collapse,
+  FormControlLabel,
   IconButton,
   ListItemText,
   Menu,
   MenuItem,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -18,7 +20,7 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { ArrowDropDown, DeleteOutline, EditOutlined, ExpandLess, ExpandMore } from "@mui/icons-material";
+import { ArrowDropDown, DeleteForeverOutlined, DeleteOutline, EditOutlined, ExpandLess, ExpandMore, RestoreOutlined } from "@mui/icons-material";
 import ProjectChevronPanel from "./ProjectChevronPanel";
 import { Link } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
@@ -38,6 +40,7 @@ import { createCountryResolver } from "../../utils/officeCountry";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { deleteProject, fetchProjects, updateProjectStatus } from "../../store/projectSlice";
+import { projectService } from "../../services/projectService";
 import { Project } from "../../types/project";
 
 // Style for field definition labels (yellow bold)
@@ -270,7 +273,9 @@ const ProjectList = () => {
   });
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [purgeTarget, setPurgeTarget] = useState<Project | null>(null);
   const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const canDeleteProjects = can.modifyData;
@@ -287,10 +292,15 @@ const ProjectList = () => {
         // Filter by country on the server so pagination doesn't hide matching projects.
         country: activeOffice !== "All" ? activeOffice : undefined,
         page: page + 1,
-        pageSize: rowsPerPage
+        pageSize: rowsPerPage,
+        includeDeleted: showArchived
       })
     );
-  }, [dispatch, activeOffice, page, rowsPerPage]);
+  }, [dispatch, activeOffice, page, rowsPerPage, showArchived]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [showArchived]);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -507,10 +517,14 @@ const ProjectList = () => {
             Projects
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Showing {activeOffice === "All" ? "all offices" : activeOffice} projects.
+            Showing {activeOffice === "All" ? "all offices" : activeOffice} {showArchived ? "projects including archived records." : "projects."}
           </Typography>
         </Box>
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+          <FormControlLabel
+            control={<Switch size="small" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />}
+            label="Show archived"
+          />
           {can.modifyData && (
             <Button variant="contained" component={Link} to="/projects/new">
               Create project
@@ -526,7 +540,7 @@ const ProjectList = () => {
 
       {error && (
         <Typography variant="body2" color="warning.main">
-          API unavailable. Showing demo data for local testing.
+          Unable to load the latest server project data.
         </Typography>
       )}
 
@@ -608,13 +622,13 @@ const ProjectList = () => {
                     ))}
                     <TableCell sx={{ padding: '8px 12px' }}>
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
-                        {renderActions(project)}
-                        {can.modifyData && (
+                        {!project.isDeleted && renderActions(project)}
+                        {can.modifyData && !project.isDeleted && (
                           <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
                             <EditOutlined fontSize="small" />
                           </IconButton>
                         )}
-                        {canDeleteProjects && (
+                        {canDeleteProjects && !project.isDeleted && (
                           <IconButton
                             size="small"
                             disabled={deleteSavingId === project.id}
@@ -622,6 +636,39 @@ const ProjectList = () => {
                           >
                             <DeleteOutline fontSize="small" />
                           </IconButton>
+                        )}
+                        {canDeleteProjects && project.isDeleted && (
+                          <>
+                            <IconButton
+                              size="small"
+                              disabled={deleteSavingId === project.id}
+                              onClick={async () => {
+                                try {
+                                  setDeleteSavingId(project.id);
+                                  await projectService.restoreProject(project.id);
+                                  await dispatch(
+                                    fetchProjects({
+                                      country: activeOffice !== "All" ? activeOffice : undefined,
+                                      page: page + 1,
+                                      pageSize: rowsPerPage,
+                                      includeDeleted: showArchived
+                                    })
+                                  );
+                                } finally {
+                                  setDeleteSavingId(null);
+                                }
+                              }}
+                            >
+                              <RestoreOutlined fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              disabled={deleteSavingId === project.id}
+                              onClick={() => setPurgeTarget(project)}
+                            >
+                              <DeleteForeverOutlined fontSize="small" />
+                            </IconButton>
+                          </>
                         )}
                       </Stack>
                     </TableCell>
@@ -741,6 +788,9 @@ const ProjectList = () => {
         open={!!deleteTarget}
         entityType="project"
         entityLabel={deleteTarget?.jobNumber || deleteTarget?.id}
+        title="Archive Project"
+        message={`Archive project ${(deleteTarget?.jobNumber || deleteTarget?.id) ? `(${deleteTarget?.jobNumber || deleteTarget?.id})` : ""}? It will be removed from active lists for all users and can be restored later.`}
+        confirmLabel="Archive"
         loading={!!deleteTarget && deleteSavingId === deleteTarget.id}
         onClose={() => {
           if (deleteSavingId) return;
@@ -753,8 +803,43 @@ const ProjectList = () => {
             await dispatch(deleteProject(deleteTarget.id)).unwrap();
             setDeleteTarget(null);
           } catch (e) {
-            console.error("Delete project failed:", e);
-            alert("Unable to delete project. Check your permissions and API availability.");
+            console.error("Archive project failed:", e);
+            alert("Unable to archive project. Check your permissions and API availability.");
+          } finally {
+            setDeleteSavingId(null);
+          }
+        }}
+      />
+
+      <DeleteConfirmDialog
+        open={!!purgeTarget}
+        entityType="project"
+        entityLabel={purgeTarget?.jobNumber || purgeTarget?.id}
+        title="Delete Project Permanently"
+        message={`Permanently delete project ${(purgeTarget?.jobNumber || purgeTarget?.id) ? `(${purgeTarget?.jobNumber || purgeTarget?.id})` : ""}? This cannot be undone.`}
+        confirmLabel="Delete permanently"
+        loading={!!purgeTarget && deleteSavingId === purgeTarget.id}
+        onClose={() => {
+          if (deleteSavingId) return;
+          setPurgeTarget(null);
+        }}
+        onConfirm={async () => {
+          if (!purgeTarget) return;
+          try {
+            setDeleteSavingId(purgeTarget.id);
+            await projectService.purgeProject(purgeTarget.id);
+            setPurgeTarget(null);
+            await dispatch(
+              fetchProjects({
+                country: activeOffice !== "All" ? activeOffice : undefined,
+                page: page + 1,
+                pageSize: rowsPerPage,
+                includeDeleted: showArchived
+              })
+            );
+          } catch (e) {
+            console.error("Purge project failed:", e);
+            alert("Unable to permanently delete project. Check your permissions and API availability.");
           } finally {
             setDeleteSavingId(null);
           }

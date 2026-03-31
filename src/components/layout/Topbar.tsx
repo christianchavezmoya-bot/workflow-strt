@@ -1,4 +1,4 @@
-import { Avatar, Badge, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, IconButton, InputAdornment, ListItemIcon, Menu, MenuItem, Popover, Stack, TextField, Tooltip, Typography, Chip } from "@mui/material";
+import { Avatar, Badge, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, IconButton, InputAdornment, InputLabel, ListItemIcon, Menu, MenuItem, Popover, Select, Stack, Tab, Tabs, TextField, Tooltip, Typography, Chip } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import SwitchAccountOutlinedIcon from "@mui/icons-material/SwitchAccountOutlined";
 import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
@@ -11,6 +11,7 @@ import StarBorderOutlinedIcon from "@mui/icons-material/StarBorderOutlined";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
+import { useNotificationInbox } from "../../contexts/NotificationInboxContext";
 import { useViewMode } from "../../contexts/ViewModeContext";
 import { useFavoritesContext } from "../../contexts/FavoritesContext";
 import { useAppSelector } from "../../store/hooks";
@@ -84,6 +85,7 @@ const Topbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { notifications, unreadNotifications, loading: notificationsLoading, acknowledge } = useNotificationInbox();
   const { viewMode, toggleViewMode } = useViewMode();
   const { isFavorited, getFavorite, add, remove } = useFavoritesContext();
   const products = useAppSelector((s) => s.products.items);
@@ -92,6 +94,7 @@ const Topbar = () => {
   const [appName, setAppName] = useState("Field Operations");
   const [qbEnabled, setQbEnabled] = useState(false);
   const [qbHost, setQbHost] = useState("");
+  const isAdminUser = useMemo(() => /admin/i.test(user?.role ?? ""), [user?.role]);
 
   useEffect(() => {
     brandSettingsService.get().then((s) => {
@@ -106,22 +109,43 @@ const Topbar = () => {
   }, []);
 
   useEffect(() => {
+    if (!isAdminUser) {
+      setQbEnabled(false);
+      setQbHost("");
+      return;
+    }
+
     import("../../services/settingsService").then(({ settingsService }) => {
       settingsService.getQuickbaseSettings().then((s) => {
         setQbEnabled(!!s?.enabled);
         setQbHost(s?.realmHostname ?? "");
       }).catch(() => {});
     });
-  }, []);
+  }, [isAdminUser]);
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [notificationsAnchor, setNotificationsAnchor] = useState<null | HTMLElement>(null);
+  const [notificationView, setNotificationView] = useState<"unread" | "history">("unread");
+  const [notificationTypeFilter, setNotificationTypeFilter] = useState("all");
   const menuOpen = Boolean(anchorEl);
   const [roleMenuAnchor, setRoleMenuAnchor] = useState<null | HTMLElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [indexStatus, setIndexStatus] = useState<SearchIndexStatus | null>(null);
   const [indexLoading, setIndexLoading] = useState(false);
   const [indexPopoverAnchor, setIndexPopoverAnchor] = useState<null | HTMLElement>(null);
-  const isAdminUser = useMemo(() => /admin/i.test(user?.role ?? ""), [user?.role]);
+
+  const notificationGroup = (eventType: string) => {
+    if (eventType.includes("assign")) return "assignments";
+    if (eventType.includes("reminder")) return "reminders";
+    if (eventType.includes("media")) return "media";
+    if (eventType.includes("issue")) return "issues";
+    return "workflow";
+  };
+  const visibleNotifications = useMemo(() => {
+    const source = notificationView === "unread" ? unreadNotifications : notifications;
+    return source.filter((notification) =>
+      notificationTypeFilter === "all" || notificationGroup(notification.eventType) === notificationTypeFilter);
+  }, [notificationView, unreadNotifications, notifications, notificationTypeFilter]);
 
   // ── Favorites star ───────────────────────────────────────────────────────────
   const currentPath = location.pathname + location.search;
@@ -327,6 +351,13 @@ const Topbar = () => {
       u.email.toLowerCase().includes(testUserSearch.toLowerCase())
     ), [testUserList, testUserSearch]);
 
+  const notificationColor = (severity: string) => {
+    if (severity === "success") return "success";
+    if (severity === "warning") return "warning";
+    if (severity === "error") return "error";
+    return "info";
+  };
+
   return (
     <Box className="topbar">
       <Stack direction="row" spacing={2} alignItems="center">
@@ -469,9 +500,106 @@ const Topbar = () => {
         <IconButton color="inherit" onClick={() => setSearchOpen(true)}>
           <SearchOutlinedIcon />
         </IconButton>
-        <IconButton color="inherit">
-          <NotificationsNoneOutlinedIcon />
+        <IconButton color="inherit" onClick={(e) => setNotificationsAnchor(e.currentTarget)}>
+          <Badge badgeContent={unreadNotifications.length} color="warning">
+            <NotificationsNoneOutlinedIcon />
+          </Badge>
         </IconButton>
+        <Popover
+          open={Boolean(notificationsAnchor)}
+          anchorEl={notificationsAnchor}
+          onClose={() => setNotificationsAnchor(null)}
+          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+          transformOrigin={{ vertical: "top", horizontal: "right" }}
+          slotProps={{ paper: { sx: { p: 2, width: 440, maxHeight: 560 } } }}
+        >
+          <Stack spacing={1.5}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Box>
+                <Typography variant="subtitle2" fontWeight={700}>Notifications</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {unreadNotifications.length} unread
+                </Typography>
+              </Box>
+              <Button
+                size="small"
+                disabled={notificationsLoading || unreadNotifications.length === 0}
+                onClick={() => void acknowledge()}
+              >
+                Acknowledge all
+              </Button>
+            </Stack>
+            <Tabs
+              value={notificationView}
+              onChange={(_, value) => setNotificationView(value)}
+              sx={{ minHeight: 32, "& .MuiTab-root": { minHeight: 32, py: 0.5 } }}
+            >
+              <Tab value="unread" label={`Unread (${unreadNotifications.length})`} />
+              <Tab value="history" label={`History (${notifications.length})`} />
+            </Tabs>
+            <FormControl size="small" fullWidth>
+              <InputLabel shrink>Type</InputLabel>
+              <Select
+                label="Type"
+                value={notificationTypeFilter}
+                onChange={(e) => setNotificationTypeFilter(e.target.value)}
+              >
+                <MenuItem value="all">All types</MenuItem>
+                <MenuItem value="assignments">Assignments</MenuItem>
+                <MenuItem value="workflow">Workflow</MenuItem>
+                <MenuItem value="media">Media</MenuItem>
+                <MenuItem value="issues">Issues</MenuItem>
+                <MenuItem value="reminders">Reminders</MenuItem>
+              </Select>
+            </FormControl>
+            <Divider />
+            <Stack spacing={1} sx={{ maxHeight: 400, overflowY: "auto" }}>
+              {visibleNotifications.length === 0 && (
+                <Typography variant="body2" color="text.secondary">
+                  No notifications yet.
+                </Typography>
+              )}
+              {visibleNotifications.map((notification) => (
+                <Box
+                  key={notification.id}
+                  sx={{
+                    p: 1.25,
+                    borderRadius: 1.5,
+                    border: "1px solid",
+                    borderColor: notification.isRead ? "divider" : "warning.light",
+                    bgcolor: notification.isRead ? "background.paper" : "rgba(245, 158, 11, 0.08)",
+                  }}
+                >
+                  <Stack direction="row" spacing={1} alignItems="flex-start">
+                    <Chip
+                      label={notification.severity}
+                      size="small"
+                      color={notificationColor(notification.severity) as "success" | "warning" | "error" | "info"}
+                      variant="outlined"
+                      sx={{ textTransform: "capitalize", height: 20, fontSize: "0.68rem" }}
+                    />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={700}>
+                        {notification.title}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.25 }}>
+                        {notification.message}
+                      </Typography>
+                      <Typography variant="caption" color="text.disabled" sx={{ display: "block", mt: 0.5 }}>
+                        {new Date(notification.createdAtUtc).toLocaleString()} · {notificationGroup(notification.eventType)}
+                      </Typography>
+                    </Box>
+                    {!notification.isRead && (
+                      <Button size="small" onClick={() => void acknowledge([notification.id])}>
+                        Ack
+                      </Button>
+                    )}
+                  </Stack>
+                </Box>
+              ))}
+            </Stack>
+          </Stack>
+        </Popover>
         <IconButton color="inherit" onClick={handleOpen}>
           <Badge
             overlap="circular"

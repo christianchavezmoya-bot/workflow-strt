@@ -13,6 +13,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import BomStepHeader from "../components/BomStepHeader";
 import { useBomProject } from "../store/BomProjectContext";
 import { classifyAllRows } from "../services/bomClassifier";
+import { createBomId } from "../services/bomId";
 import { generateDraftProject } from "../services/bomProjectGenerator";
 import { featureService } from "../../../services/featureService";
 import type { CanonicalBomRow } from "../types/canonicalBom";
@@ -217,7 +218,7 @@ export default function BomClassificationPage() {
   };
 
   const addRow = () => {
-    const sourceRowId = crypto.randomUUID();
+    const sourceRowId = createBomId("source-row");
     const assetNumber = state.normalizedRows.filter((r) => {
       const cl = new Map(state.classifications.map((c) => [c.sourceRowId, c])).get(r.sourceRowId);
       return cl?.itemType === "asset";
@@ -230,7 +231,7 @@ export default function BomClassificationPage() {
       description: `Asset ${assetNumber}`,
     };
     const classification: ClassificationResult = {
-      classificationId: crypto.randomUUID(),
+      classificationId: createBomId("classification"),
       sourceRowId,
       importRunId: id ?? "",
       itemType: "asset",

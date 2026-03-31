@@ -21,6 +21,7 @@ const CANONICAL_FIELDS: { value: string; label: string; group: string }[] = [
   { value: "differenceQty", label: "Difference Qty", group: "Inventory" },
   { value: "vehicleType", label: "Vehicle / Asset Type", group: "Asset" },
   { value: "assetNameCandidate", label: "Asset Name", group: "Asset" },
+  { value: "itemTypeHint", label: "Item Type Hint", group: "Asset" },
   { value: "groupName", label: "Group / Section", group: "Asset" },
   { value: "itemScope", label: "Item Scope", group: "Asset" },
   { value: "notes", label: "Notes", group: "General" },

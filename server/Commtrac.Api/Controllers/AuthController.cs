@@ -25,6 +25,8 @@ public class AuthController : ControllerBase
     private readonly IConfiguration _config;
     private readonly IEmailSender _emailSender;
     private readonly NotificationSettingsService _notificationSettings;
+    private readonly NotificationFeedService _feed;
+    private readonly OfficeNormalizationService _officeNormalization;
 
     // Login rate limiting: max 5 failed attempts per email, 15-minute lockout
     private const int MaxLoginAttempts = 5;
@@ -35,12 +37,14 @@ public class AuthController : ControllerBase
     private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
     private static readonly ConcurrentDictionary<string, (int Count, DateTime FirstAttempt)> _2faAttempts = new();
 
-    public AuthController(AppDbContext db, IConfiguration config, IEmailSender emailSender, NotificationSettingsService notificationSettings)
+    public AuthController(AppDbContext db, IConfiguration config, IEmailSender emailSender, NotificationSettingsService notificationSettings, NotificationFeedService feed, OfficeNormalizationService officeNormalization)
     {
         _db = db;
         _config = config;
         _emailSender = emailSender;
         _notificationSettings = notificationSettings;
+        _feed = feed;
+        _officeNormalization = officeNormalization;
     }
 
     // Password expiry: 90 days
@@ -72,6 +76,8 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
+        await NormalizeUserOfficeAsync(user);
+
         ClearLoginAttempts(emailKey);
 
         if (user.Is2faEnabled && !string.IsNullOrEmpty(user.TotpSecret))
@@ -95,6 +101,7 @@ public class AuthController : ControllerBase
         var token = CreateToken(user, loginSession.Id);
         var dto = ToDto(user);
         await LogAuditEvent(user.Id, user.Email, "login_success");
+        await NotifyLoginAsync(user);
         return Ok(new LoginResponse(token, dto, user.IsFirstLogin, PasswordExpired: IsPasswordExpired(user)));
     }
 
@@ -119,6 +126,8 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
+        await NormalizeUserOfficeAsync(user);
+
         var secretBytes = Base32Encoding.ToBytes(user.TotpSecret);
         var totp = new Totp(secretBytes);
         if (!totp.VerifyTotp(request.Code, out _, VerificationWindow.RfcSpecifiedNetworkDelay))
@@ -134,6 +143,7 @@ public class AuthController : ControllerBase
         var token = CreateToken(user, session2fa.Id);
         var dto = ToDto(user);
         var deviceToken = request.RememberDevice ? CreateTrustedDeviceToken(user.Id) : null;
+        await NotifyLoginAsync(user);
         return Ok(new LoginResponse(token, dto, user.IsFirstLogin, TrustedDeviceToken: deviceToken, PasswordExpired: IsPasswordExpired(user)));
     }
 
@@ -158,6 +168,8 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
+        await NormalizeUserOfficeAsync(user);
+
         var codes = JsonSerializer.Deserialize<List<string>>(user.RecoveryCodesJson, JsonOptions) ?? new List<string>();
         var normalizedInput = request.RecoveryCode.Trim().ToUpperInvariant();
 
@@ -180,6 +192,7 @@ public class AuthController : ControllerBase
         var tokenRec = CreateToken(user, sessionRec.Id);
         var dtoRec = ToDto(user);
         var deviceTokenRec = request.RememberDevice ? CreateTrustedDeviceToken(user.Id) : null;
+        await NotifyLoginAsync(user);
         return Ok(new LoginResponse(tokenRec, dtoRec, user.IsFirstLogin, TrustedDeviceToken: deviceTokenRec, PasswordExpired: IsPasswordExpired(user)));
     }
 
@@ -327,6 +340,8 @@ public class AuthController : ControllerBase
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
         if (user is null || !user.IsActive) return Unauthorized();
 
+        await NormalizeUserOfficeAsync(user);
+
         var token = CreateToken(user, sessionId);
         var dto = ToDto(user);
         return Ok(new { token, user = dto, passwordExpired = IsPasswordExpired(user) });
@@ -348,6 +363,8 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
+        await NormalizeUserOfficeAsync(user);
+
         return Ok(ToDto(user));
     }
 
@@ -368,7 +385,7 @@ public class AuthController : ControllerBase
         }
 
         user.FullName = request.FullName;
-        user.Office = request.Office;
+        user.Office = await _officeNormalization.NormalizeOfficeAsync(request.Office);
         user.IsFirstLogin = false;
 
         await _db.SaveChangesAsync();
@@ -853,6 +870,38 @@ public class AuthController : ControllerBase
             IpAddress = ip
         });
         await _db.SaveChangesAsync();
+    }
+
+    private async Task NotifyLoginAsync(UserEntity user)
+    {
+        if (!user.Role.Contains("installer", StringComparison.OrdinalIgnoreCase) &&
+            !user.Role.Contains("engineer", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        await _feed.NotifyRolesAsync(
+            "installer-login",
+            "info",
+            $"{user.FullName} logged in",
+            $"{user.FullName} ({user.Role}) logged into the app.",
+            ["Admin", "Project Manager"],
+            null,
+            null,
+            null,
+            "user",
+            user.Id,
+            user.Id,
+            user.FullName
+        );
+    }
+
+    private async Task NormalizeUserOfficeAsync(UserEntity user)
+    {
+        if (await _officeNormalization.NormalizeUserOfficeAsync(user))
+        {
+            await _db.SaveChangesAsync();
+        }
     }
 
     private string ResolveFrontendBaseUrl(string? configuredBaseUrl)

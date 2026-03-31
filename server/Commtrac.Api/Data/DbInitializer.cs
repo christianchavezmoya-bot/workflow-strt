@@ -1,6 +1,7 @@
 using System.Text.Json;
 using BCrypt.Net;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Commtrac.Api.Data;
@@ -20,6 +21,7 @@ public static class DbInitializer
         db.Database.Migrate();
         EnsureAuditLogTable(db);
         EnsureSessionsTable(db);
+        EnsureNotificationInboxTable(db);
         EnsurePasswordChangedAtColumn(db);
         EnsureDocumentTables(db);
         EnsureAssetDocumentTables(db);
@@ -27,6 +29,7 @@ public static class DbInitializer
         EnsureRunTimeTrackingColumns(db);
         EnsureMarch15Columns(db);
         EnsureFeatureProcurementColumns(db);
+        EnsureRecoverableDeleteColumns(db);
         EnsureLinkableKeyFieldDefinitions(db);
 
         if (!db.Users.Any())
@@ -75,6 +78,7 @@ public static class DbInitializer
         CleanupSeederArtifacts(db);
         SeedDivisions(db);
         SeedProducts(db);
+        CleanupLegacySeedProducts(db);
         db.SaveChanges(); // flush products before feature patch so LINQ queries can find them
 
         EnsureAim100Features(db);
@@ -157,6 +161,7 @@ public static class DbInitializer
             });
         }
 
+        NormalizeExistingUserOffices(db);
         db.SaveChanges();
     }
 
@@ -357,8 +362,6 @@ public static class DbInitializer
         ("Hazard Avert",          "Hazard detection and avoidance",         DivSafetyId),
         ("Hazard Avert - Gen 2",  "Hazard Avert second generation",         DivSafetyId),
         ("Ping Alert",            "Personnel alerting system",              DivSafetyId),
-        ("New Ice Cream",         null,                                     null),
-        ("Coffee",                null,                                     null),
     ];
 
     private static void SeedProducts(AppDbContext db)
@@ -390,6 +393,78 @@ public static class DbInitializer
                 if (divId != null && productsByName.TryGetValue(name, out var p) && p.DivisionId == null)
                     p.DivisionId = divId;
             }
+        }
+    }
+
+    private static void CleanupLegacySeedProducts(AppDbContext db)
+    {
+        var legacyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "New Ice Cream",
+            "Coffee"
+        };
+
+        var candidates = db.Products
+            .Where(p => legacyNames.Contains(p.Name) && p.Description == null && p.DivisionId == null)
+            .ToList();
+
+        foreach (var product in candidates)
+        {
+            var hasFeatureLinks = db.ProductFeatures.Any(pf => pf.ProductId == product.Id);
+            var usedByAssets = db.ProjectAssets.Any(a => a.ProductId == product.Id);
+            var usedByWorkflows = db.WorkflowConfigs.Any(w => w.ProductId == product.Id);
+            var usedByProjects = db.Projects
+                .AsEnumerable()
+                .Any(p => p.ProductIds != null && p.ProductIds.Contains(product.Id));
+
+            if (!hasFeatureLinks && !usedByAssets && !usedByWorkflows && !usedByProjects)
+            {
+                db.Products.Remove(product);
+            }
+        }
+    }
+
+    private static void EnsureNotificationInboxTable(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS NotificationInbox (
+                    Id TEXT PRIMARY KEY NOT NULL,
+                    RecipientUserId TEXT NULL,
+                    RecipientRole TEXT NULL,
+                    EventType TEXT NOT NULL DEFAULT '',
+                    Severity TEXT NOT NULL DEFAULT 'info',
+                    Title TEXT NOT NULL DEFAULT '',
+                    Message TEXT NOT NULL DEFAULT '',
+                    ProjectId TEXT NULL,
+                    AssetId TEXT NULL,
+                    RunId TEXT NULL,
+                    EntityType TEXT NULL,
+                    EntityId TEXT NULL,
+                    TriggeredByUserId TEXT NULL,
+                    TriggeredByName TEXT NULL,
+                    CreatedAtUtc TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                    ReadAtUtc TEXT NULL,
+                    ReadByUserId TEXT NULL
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_NotificationInbox_RecipientUserId ON NotificationInbox (RecipientUserId)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_NotificationInbox_RecipientRole ON NotificationInbox (RecipientRole)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_NotificationInbox_CreatedAtUtc ON NotificationInbox (CreatedAtUtc)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
         }
     }
 
@@ -856,6 +931,52 @@ public static class DbInitializer
         finally
         {
             conn.Close();
+        }
+    }
+
+    private static void EnsureRecoverableDeleteColumns(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            void AddIfMissing(string table, string column, string columnDef)
+            {
+                cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{column}'";
+                if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+                {
+                    cmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {columnDef}";
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            foreach (var table in new[] { "Projects", "Installations", "ProjectAssets", "BomImportRuns" })
+            {
+                AddIfMissing(table, "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+                AddIfMissing(table, "DeletedAtUtc", "TEXT NULL");
+                AddIfMissing(table, "DeletedByUserId", "TEXT NULL");
+                AddIfMissing(table, "DeleteReason", "TEXT NULL");
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void NormalizeExistingUserOffices(AppDbContext db)
+    {
+        var offices = db.Offices.AsNoTracking().ToList();
+        if (offices.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var user in db.Users)
+        {
+            user.Office = OfficeNormalizationService.NormalizeOfficeValue(user.Office, offices);
         }
     }
 }

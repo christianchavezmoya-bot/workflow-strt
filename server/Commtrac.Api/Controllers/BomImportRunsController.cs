@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
@@ -18,12 +19,14 @@ public class BomImportRunsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly AuditLogService _audit;
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
-    public BomImportRunsController(AppDbContext db, IConfiguration config)
+    public BomImportRunsController(AppDbContext db, IConfiguration config, AuditLogService audit)
     {
         _db = db;
         _config = config;
+        _audit = audit;
     }
 
     private bool ModuleEnabled =>
@@ -36,10 +39,13 @@ public class BomImportRunsController : ControllerBase
     // ── CRUD: Import Runs ──────────────────────────────────────────────────────
 
     [HttpGet]
-    public async Task<IActionResult> List()
+    public async Task<IActionResult> List([FromQuery] bool includeDeleted = false)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var runs = await _db.BomImportRuns
+        var query = includeDeleted
+            ? _db.BomImportRuns.IgnoreQueryFilters()
+            : _db.BomImportRuns;
+        var runs = await query
             .OrderByDescending(r => r.UploadedAt)
             .Select(r => MapToDto(r))
             .ToListAsync();
@@ -50,7 +56,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Get(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var run = await _db.BomImportRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
         return Ok(MapToDto(run));
     }
@@ -79,7 +85,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Update(string id, [FromBody] UpdateBomRunRequest req)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var run = await _db.BomImportRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
 
         if (req.Status != null) run.Status = req.Status;
@@ -100,11 +106,41 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Delete(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var run = await _db.BomImportRuns
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
+        if (run.IsDeleted) return NoContent();
+        run.IsDeleted = true;
+        run.DeletedAtUtc = DateTime.UtcNow;
+        run.DeletedByUserId = HttpContext.User.FindFirst("sub")?.Value ?? HttpContext.User.FindFirst("nameid")?.Value;
         run.Status = "archived";
         run.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "bom_run_archived", $"{run.FileName} ({run.Id})");
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        if (!ModuleEnabled) return ModuleDisabled();
+        var run = await _db.BomImportRuns
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(r => r.Id == id);
+        if (run == null) return NotFound();
+
+        run.IsDeleted = false;
+        run.DeletedAtUtc = null;
+        run.DeletedByUserId = null;
+        run.DeleteReason = null;
+        if (string.Equals(run.Status, "archived", StringComparison.OrdinalIgnoreCase))
+        {
+            run.Status = "ready";
+        }
+        run.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "bom_run_restored", $"{run.FileName} ({run.Id})");
         return NoContent();
     }
 
@@ -112,10 +148,13 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Purge(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var run = await _db.BomImportRuns
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
         _db.BomImportRuns.Remove(run);
         await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "bom_run_purged", $"{run.FileName} ({run.Id})");
         return NoContent();
     }
 
@@ -125,7 +164,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> SaveDraft(string id, [FromBody] JsonElement draft)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var run = await _db.BomImportRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
         run.DraftProjectJson = JsonSerializer.Serialize(draft, JsonOpts);
         run.Status = "ready";
@@ -138,7 +177,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> GetDraft(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var run = await _db.BomImportRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run == null || string.IsNullOrWhiteSpace(run.DraftProjectJson)) return NotFound();
         return Content(run.DraftProjectJson, "application/json");
     }
@@ -149,7 +188,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> SaveValidation(string id, [FromBody] JsonElement validationResult)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var run = await _db.BomImportRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
         run.ValidationResultJson = JsonSerializer.Serialize(validationResult, JsonOpts);
 
@@ -170,7 +209,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Publish(string id, [FromBody] PublishBomRequest req)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var run = await _db.BomImportRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
 
         if (req.Mode == "publish" && run.ValidationErrors > 0)

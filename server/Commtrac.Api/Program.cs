@@ -2,7 +2,9 @@ using System.Net;
 using System.Text;
 using Commtrac.Api.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Commtrac.Api.Services;
@@ -12,11 +14,18 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"))
+           .AddInterceptors(new SqliteForeignKeyPragmaInterceptor()));
 
 builder.Services.AddScoped<NotificationSettingsService>();
+builder.Services.AddScoped<NotificationFeedService>();
+builder.Services.AddScoped<OfficeNormalizationService>();
+builder.Services.AddScoped<AuditLogService>();
+builder.Services.AddSingleton<SqliteBackupService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.AddScoped<IEmailSender, EmailSender>();
 builder.Services.Configure<SmsSettings>(builder.Configuration.GetSection("Sms"));

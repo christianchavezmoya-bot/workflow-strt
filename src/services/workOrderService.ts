@@ -14,8 +14,6 @@ export interface WorkOrderDto {
   updatedAt: string;
 }
 
-const LS_KEY = (productId: string) => `work_orders_v1_${productId}`;
-
 function fromDto(dto: WorkOrderDto): WorkOrder {
   let stepsData: StepCapture[] = [];
   try { stepsData = JSON.parse(dto.stepsDataJson) || []; } catch {}
@@ -33,31 +31,10 @@ function fromDto(dto: WorkOrderDto): WorkOrder {
   };
 }
 
-function lsRead(productId: string): WorkOrder[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY(productId));
-    if (raw) return JSON.parse(raw) as WorkOrder[];
-  } catch {}
-  return [];
-}
-
-function lsWrite(productId: string, orders: WorkOrder[]) {
-  try { localStorage.setItem(LS_KEY(productId), JSON.stringify(orders)); } catch {}
-}
-
 export const workOrderService = {
   async listByProduct(productId: string): Promise<WorkOrder[]> {
-    try {
-      const res = await api.get<WorkOrderDto[]>(`/work-orders/by-product/${productId}`);
-      const orders = res.data.map(fromDto);
-      lsWrite(productId, orders);
-      return orders;
-    } catch (err: unknown) {
-      const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status === 404) return [];
-      console.warn("[workOrderService] API unavailable, falling back to localStorage", err);
-      return lsRead(productId);
-    }
+    const res = await api.get<WorkOrderDto[]>(`/work-orders/by-product/${productId}`);
+    return res.data.map(fromDto);
   },
 
   async create(input: CreateWorkOrderInput): Promise<WorkOrder> {
@@ -69,10 +46,7 @@ export const workOrderService = {
       projectAssetId: input.projectAssetId ?? null,
       notes: input.notes ?? null,
     });
-    const order = fromDto(res.data);
-    const existing = lsRead(order.productId);
-    lsWrite(order.productId, [order, ...existing]);
-    return order;
+    return fromDto(res.data);
   },
 
   async update(id: string, stepsData: StepCapture[], status: WorkOrderStatus): Promise<WorkOrder> {
@@ -88,9 +62,7 @@ export const workOrderService = {
     return fromDto(res.data);
   },
 
-  async remove(id: string, productId: string): Promise<void> {
-    try { await api.delete(`/work-orders/${id}`); } catch {}
-    const existing = lsRead(productId);
-    lsWrite(productId, existing.filter((o) => o.id !== id));
+  async remove(id: string, _productId: string): Promise<void> {
+    await api.delete(`/work-orders/${id}`);
   },
 };

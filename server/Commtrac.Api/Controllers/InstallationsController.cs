@@ -15,17 +15,21 @@ public class InstallationsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly NotificationService _notifications;
+    private readonly AuditLogService _audit;
 
-    public InstallationsController(AppDbContext db, NotificationService notifications)
+    public InstallationsController(AppDbContext db, NotificationService notifications, AuditLogService audit)
     {
         _db = db;
         _notifications = notifications;
+        _audit = audit;
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<InstallationDto>>> GetAll([FromQuery] string? projectId)
+    public async Task<ActionResult<IEnumerable<InstallationDto>>> GetAll([FromQuery] string? projectId, [FromQuery] bool includeDeleted = false)
     {
-        var query = _db.Installations.AsQueryable();
+        var query = includeDeleted
+            ? _db.Installations.IgnoreQueryFilters().AsQueryable()
+            : _db.Installations.AsQueryable();
         if (!string.IsNullOrWhiteSpace(projectId))
         {
             query = query.Where(i => i.ProjectId == projectId);
@@ -128,14 +132,73 @@ public class InstallationsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
-        var installation = await _db.Installations.FirstOrDefaultAsync(i => i.Id == id);
+        var installation = await _db.Installations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.Id == id);
+        if (installation is null)
+        {
+            return NotFound();
+        }
+        if (installation.IsDeleted)
+        {
+            return NoContent();
+        }
+
+        installation.IsDeleted = true;
+        installation.DeletedAtUtc = DateTime.UtcNow;
+        installation.DeletedByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "installation_archived", $"{installation.InstallationNumber} ({installation.Id})");
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        var installation = await _db.Installations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.Id == id);
         if (installation is null)
         {
             return NotFound();
         }
 
+        installation.IsDeleted = false;
+        installation.DeletedAtUtc = null;
+        installation.DeletedByUserId = null;
+        installation.DeleteReason = null;
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "installation_restored", $"{installation.InstallationNumber} ({installation.Id})");
+        return NoContent();
+    }
+
+    [HttpDelete("{id}/purge")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Purge(string id)
+    {
+        var installation = await _db.Installations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.Id == id);
+        if (installation is null)
+        {
+            return NotFound();
+        }
+
+        _db.Issues.RemoveRange(_db.Issues.Where(i => i.InstallationId == id));
+        var inspectionIds = await _db.Inspections
+            .Where(i => i.InstallationId == id)
+            .Select(i => i.Id)
+            .ToListAsync();
+        if (inspectionIds.Count > 0)
+        {
+            _db.InspectionPhotos.RemoveRange(_db.InspectionPhotos.Where(p => inspectionIds.Contains(p.InspectionId)));
+        }
+        _db.Inspections.RemoveRange(_db.Inspections.Where(i => i.InstallationId == id));
+
         _db.Installations.Remove(installation);
         await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "installation_purged", $"{installation.InstallationNumber} ({installation.Id})");
         return NoContent();
     }
 

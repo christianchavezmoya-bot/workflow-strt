@@ -14,6 +14,7 @@ import { Link, useNavigate } from "react-router-dom";
 import StatusStepper from "../../components/ui/StatusStepper";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
+import { useNotificationInbox } from "../../contexts/NotificationInboxContext";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProjects } from "../../store/projectSlice";
 import { officesService } from "../../services/officesService";
@@ -24,7 +25,9 @@ import { generateTechnicianReport, type TechnicianReportData } from "../../utils
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
-import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag, type PhotoUpdateNotification } from "./PhotoUploadDialog";
+import { notificationService } from "../../services/notificationService";
+import type { AppNotification } from "../../types/notification";
+import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag } from "./PhotoUploadDialog";
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "â€”";
@@ -79,9 +82,47 @@ function GaugeCircle({ value, size = 80, color = "primary.main" }: { value: numb
 
 const WINDOW_OPTIONS = [30, 60, 90, 180];
 
+function parseMissingMediaNotification(notification: AppNotification) {
+  const assetTag = notification.title.replace(/^Missing media:\s*/i, "").trim();
+  const [workflowName = "Workflow", jobNumber = "", captureText = "0/0 media steps captured"] =
+    notification.message.split("|").map((part) => part.trim());
+  return { assetTag, workflowName, jobNumber, captureText };
+}
+
+function parseWorkflowStepsFromSnapshot(snapshotJson: string) {
+  try {
+    const snapshot = JSON.parse(snapshotJson ?? "{}");
+    const stepsRaw = typeof snapshot.stepsJson === "string" ? snapshot.stepsJson : "[]";
+    const parsed = JSON.parse(stepsRaw);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && Array.isArray(parsed.steps)) return parsed.steps;
+  } catch {}
+  return [] as Array<{ id: string; order?: number; title?: string; description?: string; inputs?: Array<{ id: string; label?: string; type?: string }>; }>;
+}
+
+function parseStepResults(stepResultsJson: string) {
+  try {
+    const parsed = JSON.parse(stepResultsJson ?? "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [] as Array<{ stepId: string; values?: Record<string, string>; iterationIndex?: number }>;
+  }
+}
+
+function countCaptures(raw: string | undefined) {
+  if (!raw) return 0;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(Boolean).length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 const Dashboard = () => {
   const navigate   = useNavigate();
   const { user }   = useAuth();
+  const { unreadNotifications, acknowledge, refresh: refreshNotifications } = useNotificationInbox();
   const isManager    = user.role === "Admin" || user.role === "Project Manager";
   const isSupervisor = user.role === "Supervisor";
   const isEngineer   = user.role === "Engineer" || user.role === "QA Inspector";
@@ -120,38 +161,8 @@ const Dashboard = () => {
   // For Supervisor: runs completed today count
   const [completedToday, setCompletedToday] = useState(0);
 
-  // PM: assignment updates from manager dispatch or field takeovers
-  type AutoAssignFlag = {
-    id: string;
-    assetId: string;
-    assetTag: string;
-    jobNumber: string;
-    assignedAt: string;
-    eventType?: "manager-assigned" | "self-assigned" | "takeover";
-    actorName?: string;
-    targetName?: string;
-    previousAssigneeName?: string;
-    assignedBy?: string;
-  };
-  const [autoAssignFlags, setAutoAssignFlags] = useState<AutoAssignFlag[]>(() =>
-    JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]")
-  );
-
   // Missing media flags â€” runs completed without photos/videos (uses shared type from PhotoUploadDialog)
   type MissingMediaFlag = PhotoMissingMediaFlag;
-  type PhotoReminder = { id: string; runId: string; assetTag: string; jobNumber: string; workflowName: string; sentAt: string; sentByName: string };
-
-  const [missingMediaFlags, setMissingMediaFlags] = useState<MissingMediaFlag[]>(() => {
-    const raw: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
-    // Normalize old-format flags that predate missingSteps field
-    return raw.map((f) => ({ ...f, missingSteps: f.missingSteps ?? [], totalExpected: f.totalExpected ?? 0, totalCaptured: f.totalCaptured ?? 0 }));
-  });
-  const [photoUpdateNotifications, setPhotoUpdateNotifications] = useState<PhotoUpdateNotification[]>(() =>
-    JSON.parse(localStorage.getItem("pm_photo_update_notifications") ?? "[]")
-  );
-  const [photoReminders, setPhotoReminders] = useState<PhotoReminder[]>(() =>
-    JSON.parse(localStorage.getItem("installer_photo_reminders") ?? "[]")
-  );
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
   const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
@@ -195,38 +206,6 @@ const Dashboard = () => {
       }).catch(() => {});
     }
   }, [dispatch, loadAttention, isEngineer]);
-
-  // PM: listen for new auto-assign flags written by AssetInstallationPage
-  useEffect(() => {
-    if (!isManager) return;
-    const reload = () => setAutoAssignFlags(JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]"));
-    window.addEventListener("pm-auto-assign-flags-changed", reload);
-    return () => window.removeEventListener("pm-auto-assign-flags-changed", reload);
-  }, [isManager]);
-
-  // Listen for missing-media flags (all users see their own; PM sees all)
-  useEffect(() => {
-    const reload = () => {
-      const raw: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
-      setMissingMediaFlags(raw.map((f) => ({ ...f, missingSteps: f.missingSteps ?? [], totalExpected: f.totalExpected ?? 0, totalCaptured: f.totalCaptured ?? 0 })));
-    };
-    window.addEventListener("missing-media-flags-changed", reload);
-    return () => window.removeEventListener("missing-media-flags-changed", reload);
-  }, []);
-
-  // Listen for photo update notifications (installer uploaded photos â†’ PM notified)
-  useEffect(() => {
-    const reload = () => setPhotoUpdateNotifications(JSON.parse(localStorage.getItem("pm_photo_update_notifications") ?? "[]"));
-    window.addEventListener("photo-update-notifications-changed", reload);
-    return () => window.removeEventListener("photo-update-notifications-changed", reload);
-  }, []);
-
-  // Listen for photo reminders (PM sent reminder â†’ installer notified)
-  useEffect(() => {
-    const reload = () => setPhotoReminders(JSON.parse(localStorage.getItem("installer_photo_reminders") ?? "[]"));
-    window.addEventListener("installer-photo-reminders-changed", reload);
-    return () => window.removeEventListener("installer-photo-reminders-changed", reload);
-  }, []);
 
   // Phase 4 â€” evidence completeness
   useEffect(() => {
@@ -293,6 +272,76 @@ const Dashboard = () => {
   const myPendingSigs = useMemo(() =>
     pendingSigs.filter(s => myAssets.some(a => a.id === s.assetId || a.jobNumber === s.jobNumber)),
     [pendingSigs, myAssets]);
+
+  const assignmentUpdateNotifications = useMemo(
+    () => unreadNotifications.filter((n) =>
+      ["manager-assigned", "asset-self-assigned", "asset-takeover", "asset-assignment-updated"].includes(n.eventType)),
+    [unreadNotifications]
+  );
+  const mediaUpdateNotifications = useMemo(
+    () => unreadNotifications.filter((n) => n.eventType === "workflow-media-updated"),
+    [unreadNotifications]
+  );
+  const photoReminderNotifications = useMemo(
+    () => unreadNotifications.filter((n) => n.eventType === "missing-media-reminder"),
+    [unreadNotifications]
+  );
+  const missingMediaNotifications = useMemo(
+    () => unreadNotifications.filter((n) => n.eventType === "workflow-missing-media"),
+    [unreadNotifications]
+  );
+
+  const openPhotoUploadFromNotification = useCallback(async (notification: AppNotification, mode: "installer" | "pm") => {
+    if (!notification.runId || !notification.assetId) return;
+    const run = await assetWorkflowRunService.getById(notification.runId);
+    if (!run) return;
+
+    const steps = parseWorkflowStepsFromSnapshot(run.workflowSnapshotJson ?? "{}");
+    const results = parseStepResults(run.stepResultsJson ?? "[]");
+    const { assetTag, workflowName, jobNumber } = parseMissingMediaNotification(notification);
+    const missingSteps: MissingMediaFlag["missingSteps"] = [];
+    let totalExpected = 0;
+    let totalCaptured = 0;
+
+    for (const step of steps) {
+      const resultEntries = results.filter((entry) => entry.stepId === step.id);
+      for (const input of step.inputs ?? []) {
+        if (input.type !== "photo" && input.type !== "video") continue;
+        totalExpected += 1;
+        const captured = Math.max(0, ...resultEntries.map((entry) => countCaptures(entry.values?.[input.id])));
+        if (captured > 0) {
+          totalCaptured += 1;
+        } else {
+          missingSteps.push({
+            stepId: step.id,
+            stepOrder: step.order ?? totalExpected,
+            stepTitle: step.title ?? step.id,
+            stepDescription: step.description,
+            inputId: input.id,
+            inputLabel: input.label ?? (input.type === "video" ? "Video" : "Photo"),
+            inputType: input.type,
+            captured,
+          });
+        }
+      }
+    }
+
+    setPhotoUploadMode(mode);
+    setPhotoUploadTarget({
+      id: notification.id,
+      runId: notification.runId,
+      assetId: notification.assetId,
+      assetTag,
+      jobNumber,
+      workflowName,
+      technicianUserId: notification.triggeredByUserId ?? "",
+      technicianName: notification.triggeredByName ?? "",
+      completedAt: notification.createdAtUtc,
+      missingSteps,
+      totalExpected,
+      totalCaptured,
+    });
+  }, []);
 
   // Project status chart
   const statusGroups = useMemo(() => {
@@ -990,69 +1039,63 @@ const Dashboard = () => {
           </Box>
 
           {/* Photo reminders from PM */}
-          {photoReminders.length > 0 && (
+          {photoReminderNotifications.length > 0 && (
             <Stack spacing={0.5}>
-              {photoReminders.map((r) => (
+              {photoReminderNotifications.map((r) => {
+                const { assetTag, workflowName } = parseMissingMediaNotification(r);
+                return (
                 <Alert
                   key={r.id}
                   severity="info"
-                  onClose={() => {
-                    const updated = photoReminders.filter((x) => x.id !== r.id);
-                    localStorage.setItem("installer_photo_reminders", JSON.stringify(updated));
-                    setPhotoReminders(updated);
-                  }}
+                  onClose={() => { void acknowledge([r.id]); }}
                 >
                   <Typography variant="caption" fontWeight={600}>
-                    {r.sentByName} requested photos for: {r.assetTag} â€” {r.workflowName}
+                    {r.triggeredByName ?? "PM"} requested photos for: {assetTag} — {workflowName}
                   </Typography>
                 </Alert>
-              ))}
+              )})}
             </Stack>
           )}
 
           {/* My runs missing media */}
-          {missingMediaFlags.filter(f => f.technicianUserId === user.id).length > 0 && (
+          {missingMediaNotifications.filter((n) => n.triggeredByUserId === user.id || !n.triggeredByUserId).length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PhotoCameraOutlined sx={{ fontSize: 18, color: "warning.main" }} />
                 <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                   Runs Missing Media
                 </Typography>
-                <Chip label={missingMediaFlags.filter(f => f.technicianUserId === user.id).length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                <Chip label={missingMediaNotifications.filter((n) => n.triggeredByUserId === user.id || !n.triggeredByUserId).length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
               </Stack>
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
                 Your completed runs with missing photo or video evidence â€” tap to upload missing media
               </Typography>
               <Stack spacing={0.5}>
-                {missingMediaFlags.filter(f => f.technicianUserId === user.id).map((f) => (
+                {missingMediaNotifications.filter((n) => n.triggeredByUserId === user.id || !n.triggeredByUserId).map((f) => {
+                  const parsed = parseMissingMediaNotification(f);
+                  return (
                   <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
                     <Box sx={{ flex: 1 }}>
                       <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.3 }}>
-                        {f.jobNumber ? `${f.jobNumber}: ` : ""}{f.assetTag}
+                        {parsed.jobNumber ? `${parsed.jobNumber}: ` : ""}{parsed.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {f.workflowName} Â· {fmtDate(f.completedAt)}
+                        {parsed.workflowName} Â· {fmtDate(f.createdAtUtc)}
                       </Typography>
-                      {"totalExpected" in f && (
-                        <Typography variant="caption" color="warning.main" display="block">
-                          {(f as MissingMediaFlag).totalCaptured} of {(f as MissingMediaFlag).totalExpected} media steps done
-                        </Typography>
-                      )}
+                      <Typography variant="caption" color="warning.main" display="block">
+                        {parsed.captureText}
+                      </Typography>
                     </Box>
                     <Button size="small" variant="outlined" color="warning" sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
-                      onClick={() => { setPhotoUploadMode("installer"); setPhotoUploadTarget(f as MissingMediaFlag); }}>
+                      onClick={() => { void openPhotoUploadFromNotification(f, "installer"); }}>
                       Upload Media
                     </Button>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                      onClick={() => {
-                        const updated = missingMediaFlags.filter((x) => x.id !== f.id);
-                        localStorage.setItem("pm_missing_media_flags", JSON.stringify(updated));
-                        setMissingMediaFlags(updated);
-                      }}>
+                      onClick={() => { void acknowledge([f.id]); }}>
                       âœ•
                     </Button>
                   </Stack>
-                ))}
+                )})}
               </Stack>
             </Box>
           )}
@@ -1287,10 +1330,10 @@ const Dashboard = () => {
             </Box>
           )}
 
-          {(autoAssignFlags.length > 0 || missingMediaFlags.length > 0) && (
+          {(assignmentUpdateNotifications.length > 0 || missingMediaNotifications.length > 0 || mediaUpdateNotifications.length > 0) && (
             <Grid container spacing={2}>
           {/* Assignment updates â€” PM/Admin dispatch + field takeovers */}
-          {autoAssignFlags.length > 0 && (
+          {assignmentUpdateNotifications.length > 0 && (
             <Grid item xs={12} md={6}>
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)", height: "100%" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -1298,12 +1341,9 @@ const Dashboard = () => {
                 <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                   Assignment Updates
                 </Typography>
-                <Chip label={autoAssignFlags.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                <Chip label={assignmentUpdateNotifications.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
                 <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
-                  onClick={() => {
-                    localStorage.removeItem("pm_auto_assign_flags");
-                    setAutoAssignFlags([]);
-                  }}>
+                  onClick={() => { void acknowledge(assignmentUpdateNotifications.map((n) => n.id)); }}>
                   Dismiss all
                 </Button>
               </Stack>
@@ -1311,38 +1351,17 @@ const Dashboard = () => {
                 Planned assignments from PM/Admin and field self-assignment or takeover events
               </Typography>
               <Stack spacing={0.25}>
-                {autoAssignFlags.map((f) => (
+                {assignmentUpdateNotifications.map((f) => (
                   <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
                     <Box sx={{ flex: 1 }}>
-                      {(() => {
-                        const actor = f.actorName ?? f.assignedBy ?? "User";
-                        const target = f.targetName ?? f.assignedBy ?? "User";
-                        const labelPrefix = f.jobNumber ? `${f.jobNumber}: ` : "";
-                        let sub = "";
-                        if (f.eventType === "manager-assigned") {
-                          sub = `${actor} assigned asset to ${target}`;
-                          if (f.previousAssigneeName) sub += ` · previously ${f.previousAssigneeName}`;
-                        } else if (f.eventType === "takeover") {
-                          sub = `${actor} took over asset`;
-                          if (f.previousAssigneeName) sub += ` from ${f.previousAssigneeName}`;
-                        } else {
-                          sub = `${actor} assigned asset to self`;
-                        }
-                        return (
-                          <ItemRow
-                            label={`${labelPrefix}${f.assetTag}`}
-                            sub={`${sub} · ${fmtDate(f.assignedAt)}`}
-                            onClick={() => navigate("/installations")}
-                          />
-                        );
-                      })()}
+                      <ItemRow
+                        label={f.title}
+                        sub={`${f.message} · ${fmtDate(f.createdAtUtc)}`}
+                        onClick={() => navigate("/installations")}
+                      />
                     </Box>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                      onClick={() => {
-                        const updated = autoAssignFlags.filter((x) => x.id !== f.id);
-                        localStorage.setItem("pm_auto_assign_flags", JSON.stringify(updated));
-                        setAutoAssignFlags(updated);
-                      }}>
+                      onClick={() => { void acknowledge([f.id]); }}>
                       âœ•
                     </Button>
                   </Stack>
@@ -1353,42 +1372,35 @@ const Dashboard = () => {
           )}
 
           {/* Installer media updates â€” PM notification when installers upload missing media */}
-          {photoUpdateNotifications.length > 0 && (
+          {mediaUpdateNotifications.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PhotoCameraOutlined sx={{ fontSize: 18, color: "info.main" }} />
                 <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                   Installer Media Updates
                 </Typography>
-                <Chip label={photoUpdateNotifications.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                <Chip label={mediaUpdateNotifications.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
                 <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
-                  onClick={() => {
-                    localStorage.removeItem("pm_photo_update_notifications");
-                    setPhotoUpdateNotifications([]);
-                  }}>
+                  onClick={() => { void acknowledge(mediaUpdateNotifications.map((n) => n.id)); }}>
                   Dismiss all
                 </Button>
               </Stack>
               <Stack spacing={0.5} mt={1}>
-                {photoUpdateNotifications.map((n) => (
+                {mediaUpdateNotifications.map((n) => (
                   <Stack key={n.id} direction="row" alignItems="center" spacing={1}>
                     <Box sx={{ flex: 1 }}>
                       <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.3 }}>
-                        {n.installerName} updated media for {n.assetTag}
+                        {n.title}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {n.workflowName} Â· {fmtDate(n.updatedAt)}
+                        {fmtDate(n.createdAtUtc)}
                       </Typography>
-                      <Typography variant="caption" display="block" color={n.wasComplete ? "success.main" : "warning.main"}>
-                        {n.wasComplete ? "All media added âœ“" : `${n.stillMissing} step${n.stillMissing !== 1 ? "s" : ""} still missing`}
+                      <Typography variant="caption" display="block" color="info.main">
+                        {n.message}
                       </Typography>
                     </Box>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                      onClick={() => {
-                        const updated = photoUpdateNotifications.filter((x) => x.id !== n.id);
-                        localStorage.setItem("pm_photo_update_notifications", JSON.stringify(updated));
-                        setPhotoUpdateNotifications(updated);
-                      }}>
+                      onClick={() => { void acknowledge([n.id]); }}>
                       âœ•
                     </Button>
                   </Stack>
@@ -1398,7 +1410,7 @@ const Dashboard = () => {
           )}
 
           {/* Missing media flags â€” PM sees all runs without required media */}
-          {missingMediaFlags.length > 0 && (
+          {missingMediaNotifications.length > 0 && (
             <Grid item xs={12} md={6}>
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)", height: "100%" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -1406,12 +1418,9 @@ const Dashboard = () => {
                 <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                   Runs Missing Media
                 </Typography>
-                <Chip label={missingMediaFlags.length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                <Chip label={missingMediaNotifications.length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
                 <Button size="small" variant="text" color="warning" sx={{ fontSize: "0.72rem" }}
-                  onClick={() => {
-                    localStorage.removeItem("pm_missing_media_flags");
-                    setMissingMediaFlags([]);
-                  }}>
+                  onClick={() => { void acknowledge(missingMediaNotifications.map((n) => n.id)); }}>
                   Dismiss all
                 </Button>
               </Stack>
@@ -1419,32 +1428,20 @@ const Dashboard = () => {
                 Workflow runs completed without all required photos or videos captured
               </Typography>
               <Stack spacing={0.75}>
-                {missingMediaFlags.map((f) => (
+                {missingMediaNotifications.map((f) => {
+                  const parsed = parseMissingMediaNotification(f);
+                  return (
                   <Stack key={f.id} direction="row" alignItems="flex-start" spacing={1}>
                     <Box sx={{ flex: 1 }}>
                       <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.3 }}>
-                        {f.jobNumber ? `${f.jobNumber}: ` : ""}{f.assetTag}
+                        {parsed.jobNumber ? `${parsed.jobNumber}: ` : ""}{parsed.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {f.workflowName} Â· {f.technicianName} Â· {fmtDate(f.completedAt)}
+                        {parsed.workflowName} Â· {f.triggeredByName ?? "Installer"} Â· {fmtDate(f.createdAtUtc)}
                       </Typography>
-                      {"totalExpected" in f && (
-                        <>
-                          <Typography variant="caption" color="warning.main" display="block">
-                            {(f as MissingMediaFlag).totalCaptured}/{(f as MissingMediaFlag).totalExpected} media steps captured
-                          </Typography>
-                          {(f as MissingMediaFlag).missingSteps?.slice(0, 3).map((ms) => (
-                            <Typography key={`${ms.stepId}-${ms.inputId}`} variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
-                              Â· {ms.stepTitle} â€” {ms.inputLabel}: {ms.captured} captured
-                            </Typography>
-                          ))}
-                          {((f as MissingMediaFlag).missingSteps?.length ?? 0) > 3 && (
-                            <Typography variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
-                              +{((f as MissingMediaFlag).missingSteps?.length ?? 0) - 3} moreâ€¦
-                            </Typography>
-                          )}
-                        </>
-                      )}
+                      <Typography variant="caption" color="warning.main" display="block">
+                        {parsed.captureText}
+                      </Typography>
                     </Box>
                     <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
                       <Button
@@ -1452,7 +1449,7 @@ const Dashboard = () => {
                         variant="outlined"
                         color="info"
                         sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
-                        onClick={() => { setPhotoUploadMode("pm"); setPhotoUploadTarget(f); }}
+                        onClick={() => { void openPhotoUploadFromNotification(f, "pm"); }}
                       >
                         Preview
                       </Button>
@@ -1463,35 +1460,34 @@ const Dashboard = () => {
                         sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
                         disabled={reminderSentId === f.id}
                         onClick={() => {
-                          const reminder = {
-                            id: crypto.randomUUID(),
+                          void notificationService.create({
+                            eventType: "missing-media-reminder",
+                            severity: "warning",
+                            title: `Reminder: upload media for ${parsed.assetTag}`,
+                            message: `${parsed.workflowName} | ${parsed.jobNumber} | requested by ${user.fullName ?? "PM"}`,
+                            recipientUserIds: f.triggeredByUserId ? [f.triggeredByUserId] : [],
+                            assetId: f.assetId,
                             runId: f.runId,
-                            assetTag: f.assetTag,
-                            jobNumber: f.jobNumber,
-                            workflowName: f.workflowName,
-                            sentAt: new Date().toISOString(),
-                            sentByName: user.fullName ?? "PM",
-                          };
-                          const existing = JSON.parse(localStorage.getItem("installer_photo_reminders") ?? "[]");
-                          localStorage.setItem("installer_photo_reminders", JSON.stringify([...existing, reminder]));
-                          window.dispatchEvent(new Event("installer-photo-reminders-changed"));
-                          setReminderSentId(f.id);
-                          setTimeout(() => setReminderSentId(null), 2000);
+                            entityType: "asset-workflow-run",
+                            entityId: f.runId,
+                            triggeredByUserId: user.id,
+                            triggeredByName: user.fullName ?? "PM",
+                          }).then(async () => {
+                            setReminderSentId(f.id);
+                            await refreshNotifications();
+                            window.setTimeout(() => setReminderSentId(null), 2000);
+                          });
                         }}
                       >
                         {reminderSentId === f.id ? "Sent âœ“" : "Remind Installer"}
                       </Button>
                       <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                        onClick={() => {
-                          const updated = missingMediaFlags.filter((x) => x.id !== f.id);
-                          localStorage.setItem("pm_missing_media_flags", JSON.stringify(updated));
-                          setMissingMediaFlags(updated);
-                        }}>
+                        onClick={() => { void acknowledge([f.id]); }}>
                         âœ•
                       </Button>
                     </Stack>
                   </Stack>
-                ))}
+                )})}
               </Stack>
             </Box>
             </Grid>
@@ -1572,10 +1568,9 @@ const Dashboard = () => {
           mode={photoUploadMode}
           currentUserName={user.fullName ?? ""}
           onClose={() => setPhotoUploadTarget(null)}
-          onUpdated={() => {
+          onUpdated={async () => {
             setPhotoUploadTarget(null);
-            const raw: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
-            setMissingMediaFlags(raw.map((f) => ({ ...f, missingSteps: f.missingSteps ?? [], totalExpected: f.totalExpected ?? 0, totalCaptured: f.totalCaptured ?? 0 })));
+            await refreshNotifications();
           }}
         />
       )}

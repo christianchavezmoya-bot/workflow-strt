@@ -28,6 +28,13 @@ export const useAuth = () => {
 
   useEffect(() => {
     const syncFromStorage = () => {
+      const path = window.location.pathname;
+      const isPublicRoute =
+        path === "/login" ||
+        path === "/reset-password" ||
+        path.startsWith("/sign/") ||
+        path === "/mobile-upload";
+
       const storedBackendUser = localStorage.getItem("auth_user");
       const storedLocalUser = localStorage.getItem("local_auth_user");
       const token = localStorage.getItem("auth_token");
@@ -36,7 +43,7 @@ export const useAuth = () => {
         try {
           const parsed = JSON.parse(storedBackendUser) as User;
           setUser(parsed);
-          setIsAuthenticated(true);
+          setIsAuthenticated(!isPublicRoute);
           return true;
         } catch {
           // continue fallback
@@ -47,7 +54,7 @@ export const useAuth = () => {
         try {
           const parsed = JSON.parse(storedLocalUser) as User;
           setUser(parsed);
-          setIsAuthenticated(true);
+          setIsAuthenticated(!isPublicRoute);
           return true;
         } catch {
           // continue fallback
@@ -76,7 +83,7 @@ export const useAuth = () => {
         role: (storedRole as User["role"]) || defaultUser.role,
         office: (storedOffice as User["office"]) || defaultUser.office
       });
-      setIsAuthenticated(true);
+      setIsAuthenticated(false);
       return true;
     };
 

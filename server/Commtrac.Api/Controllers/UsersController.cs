@@ -19,21 +19,28 @@ public class UsersController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IEmailSender _emailSender;
     private readonly NotificationSettingsService _notificationSettings;
+    private readonly OfficeNormalizationService _officeNormalization;
 
     public UsersController(
         AppDbContext db,
         IEmailSender emailSender,
-        NotificationSettingsService notificationSettings)
+        NotificationSettingsService notificationSettings,
+        OfficeNormalizationService officeNormalization)
     {
         _db = db;
         _emailSender = emailSender;
         _notificationSettings = notificationSettings;
+        _officeNormalization = officeNormalization;
     }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<UserDto>>> GetAll()
     {
         var users = await _db.Users.OrderBy(u => u.FullName).ToListAsync();
+        if (await _officeNormalization.NormalizeUserOfficesAsync(users) > 0)
+        {
+            await _db.SaveChangesAsync();
+        }
         return Ok(users.Select(ToDto));
     }
 
@@ -45,7 +52,7 @@ public class UsersController : ControllerBase
             Email = request.Email,
             FullName = request.FullName,
             Role = request.Role,
-            Office = request.Office,
+            Office = await _officeNormalization.NormalizeOfficeAsync(request.Office),
             IsActive = true,
             IsFirstLogin = true,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword("Temp123!")
@@ -69,7 +76,7 @@ public class UsersController : ControllerBase
         if (!string.IsNullOrWhiteSpace(request.FullName)) user.FullName = request.FullName;
         if (!string.IsNullOrWhiteSpace(request.Email)) user.Email = request.Email;
         if (!string.IsNullOrWhiteSpace(request.Role)) user.Role = request.Role;
-        if (!string.IsNullOrWhiteSpace(request.Office)) user.Office = request.Office;
+        if (!string.IsNullOrWhiteSpace(request.Office)) user.Office = await _officeNormalization.NormalizeOfficeAsync(request.Office);
         if (request.IsActive.HasValue) user.IsActive = request.IsActive.Value;
         if (request.IsFirstLogin.HasValue) user.IsFirstLogin = request.IsFirstLogin.Value;
         if (!string.IsNullOrWhiteSpace(request.Password))
@@ -120,7 +127,7 @@ public class UsersController : ControllerBase
                     Email = row.Email.Trim(),
                     FullName = row.FullName.Trim(),
                     Role = row.Role.Trim(),
-                    Office = row.Office?.Trim() ?? string.Empty,
+                    Office = await _officeNormalization.NormalizeOfficeAsync(row.Office),
                     IsActive = false,
                     IsFirstLogin = true,
                     PasswordHash = string.Empty  // no password — inactive users can't log in
@@ -159,7 +166,14 @@ public class UsersController : ControllerBase
         var emailSettings = await _notificationSettings.GetEmailSettingsAsync();
         var baseUrl = ResolveFrontendBaseUrl(emailSettings.FrontendBaseUrl);
         var link = $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}&invite=true";
-        await _emailSender.SendInviteAsync(user.Email, link);
+        try
+        {
+            await _emailSender.SendInviteAsync(user.Email, link);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message, inviteLink = link });
+        }
         return NoContent();
     }
 

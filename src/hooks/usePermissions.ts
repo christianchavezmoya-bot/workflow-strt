@@ -17,16 +17,19 @@ const FALLBACK_PERMISSIONS: Record<string, RolePermissions> = {
 export const usePermissions = () => {
   const { user } = useAuth();
   const [roleConfig, setRoleConfig] = useState<Record<string, RolePermissions> | null>(null);
+  const shouldLoadRoleConfig = /admin/i.test(user?.role ?? "");
 
   useEffect(() => {
+    if (!shouldLoadRoleConfig) return;
     roleConfigService.get().then((config) => {
       if (config.roles && Object.keys(config.roles).length > 0) {
         setRoleConfig(config.roles);
       }
     }).catch(() => {});
-  }, []);
+  }, [shouldLoadRoleConfig]);
 
   useEffect(() => {
+    if (!shouldLoadRoleConfig) return;
     const reload = () => {
       roleConfigService.get().then((config) => {
         if (config.roles && Object.keys(config.roles).length > 0) {
@@ -36,7 +39,7 @@ export const usePermissions = () => {
     };
     window.addEventListener("roles-config-changed", reload);
     return () => window.removeEventListener("roles-config-changed", reload);
-  }, []);
+  }, [shouldLoadRoleConfig]);
 
   const can = useMemo(() => {
     const config = roleConfig ?? FALLBACK_PERMISSIONS;

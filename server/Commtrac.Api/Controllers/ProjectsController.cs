@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,11 +14,13 @@ namespace Commtrac.Api.Controllers;
 public class ProjectsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly AuditLogService _audit;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public ProjectsController(AppDbContext db)
+    public ProjectsController(AppDbContext db, AuditLogService audit)
     {
         _db = db;
+        _audit = audit;
     }
 
     [HttpGet]
@@ -30,10 +33,13 @@ public class ProjectsController : ControllerBase
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int? page,
-        [FromQuery] int? pageSize
+        [FromQuery] int? pageSize,
+        [FromQuery] bool includeDeleted = false
     )
     {
-        var query = _db.Projects.AsQueryable();
+        var query = includeDeleted
+            ? _db.Projects.IgnoreQueryFilters().AsQueryable()
+            : _db.Projects.AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(country) && country != "All")
         {
@@ -144,9 +150,10 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    public async Task<ActionResult<ProjectDto>> GetById(string id)
+    public async Task<ActionResult<ProjectDto>> GetById(string id, [FromQuery] bool includeDeleted = false)
     {
-        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id);
+        var projects = includeDeleted ? _db.Projects.IgnoreQueryFilters() : _db.Projects;
+        var project = await projects.FirstOrDefaultAsync(p => p.Id == id);
         if (project is null)
         {
             return NotFound();
@@ -283,14 +290,160 @@ public class ProjectsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
-        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id);
+        var project = await _db.Projects
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == id);
+        if (project is null)
+        {
+            return NotFound();
+        }
+        if (project.IsDeleted)
+        {
+            return NoContent();
+        }
+
+        var deletedByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        var deletedAt = DateTime.UtcNow;
+
+        project.IsDeleted = true;
+        project.DeletedAtUtc = deletedAt;
+        project.DeletedByUserId = deletedByUserId;
+
+        var installations = await _db.Installations
+            .IgnoreQueryFilters()
+            .Where(i => i.ProjectId == id && !i.IsDeleted)
+            .ToListAsync();
+        foreach (var installation in installations)
+        {
+            installation.IsDeleted = true;
+            installation.DeletedAtUtc = deletedAt;
+            installation.DeletedByUserId = deletedByUserId;
+        }
+
+        var assets = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .Where(a => a.ProjectId == id && !a.IsDeleted)
+            .ToListAsync();
+        foreach (var asset in assets)
+        {
+            asset.IsDeleted = true;
+            asset.DeletedAtUtc = deletedAt;
+            asset.DeletedByUserId = deletedByUserId;
+        }
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "project_archived", $"{project.JobNumber} ({project.Id})");
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        var project = await _db.Projects
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == id);
         if (project is null)
         {
             return NotFound();
         }
 
+        project.IsDeleted = false;
+        project.DeletedAtUtc = null;
+        project.DeletedByUserId = null;
+        project.DeleteReason = null;
+
+        var installations = await _db.Installations
+            .IgnoreQueryFilters()
+            .Where(i => i.ProjectId == id && i.IsDeleted)
+            .ToListAsync();
+        foreach (var installation in installations)
+        {
+            installation.IsDeleted = false;
+            installation.DeletedAtUtc = null;
+            installation.DeletedByUserId = null;
+            installation.DeleteReason = null;
+        }
+
+        var assets = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .Where(a => a.ProjectId == id && a.IsDeleted)
+            .ToListAsync();
+        foreach (var asset in assets)
+        {
+            asset.IsDeleted = false;
+            asset.DeletedAtUtc = null;
+            asset.DeletedByUserId = null;
+            asset.DeleteReason = null;
+        }
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "project_restored", $"{project.JobNumber} ({project.Id})");
+        return NoContent();
+    }
+
+    [HttpDelete("{id}/purge")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Purge(string id)
+    {
+        var project = await _db.Projects
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == id);
+        if (project is null)
+        {
+            return NotFound();
+        }
+
+        var installations = await _db.Installations
+            .IgnoreQueryFilters()
+            .Where(i => i.ProjectId == id)
+            .ToListAsync();
+        var installationIds = installations.Select(i => i.Id).ToList();
+        if (installationIds.Count > 0)
+        {
+            _db.Issues.RemoveRange(_db.Issues.Where(i => installationIds.Contains(i.InstallationId)));
+            var inspectionIds = await _db.Inspections
+                .Where(i => installationIds.Contains(i.InstallationId))
+                .Select(i => i.Id)
+                .ToListAsync();
+            if (inspectionIds.Count > 0)
+            {
+                _db.InspectionPhotos.RemoveRange(_db.InspectionPhotos.Where(p => inspectionIds.Contains(p.InspectionId)));
+            }
+            _db.Inspections.RemoveRange(_db.Inspections.Where(i => installationIds.Contains(i.InstallationId)));
+        }
+        _db.Installations.RemoveRange(installations);
+
+        var assetIds = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .Where(a => a.ProjectId == id)
+            .Select(a => a.Id)
+            .ToListAsync();
+        if (assetIds.Count > 0)
+        {
+            _db.AssetWorkflowAssignments.RemoveRange(_db.AssetWorkflowAssignments.Where(a => assetIds.Contains(a.AssetId)));
+            _db.AssetWorkflowRuns.RemoveRange(_db.AssetWorkflowRuns.Where(r => assetIds.Contains(r.AssetId)));
+            _db.AssetDocumentLinks.RemoveRange(_db.AssetDocumentLinks.Where(l => assetIds.Contains(l.AssetId)));
+            var docIds = await _db.AssetDocuments
+                .Where(d => assetIds.Contains(d.AssetId))
+                .Select(d => d.Id)
+                .ToListAsync();
+            if (docIds.Count > 0)
+            {
+                _db.AssetDocumentRevisions.RemoveRange(_db.AssetDocumentRevisions.Where(r => docIds.Contains(r.DocumentId)));
+            }
+            _db.AssetDocuments.RemoveRange(_db.AssetDocuments.Where(d => assetIds.Contains(d.AssetId)));
+            var assets = await _db.ProjectAssets.IgnoreQueryFilters().Where(a => a.ProjectId == id).ToListAsync();
+            _db.ProjectAssets.RemoveRange(assets);
+        }
+
+        _db.ProjectContacts.RemoveRange(_db.ProjectContacts.Where(c => c.ProjectId == id));
+        _db.ProjectDeliveryProfiles.RemoveRange(_db.ProjectDeliveryProfiles.Where(d => d.ProjectId == id));
+        _db.ProjectInboundItems.RemoveRange(_db.ProjectInboundItems.Where(i => i.ProjectId == id));
+
         _db.Projects.Remove(project);
         await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "project_purged", $"{project.JobNumber} ({project.Id})");
         return NoContent();
     }
 

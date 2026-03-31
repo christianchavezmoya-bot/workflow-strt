@@ -1,0 +1,5 @@
+#!/bin/sh
+set -e
+
+node scripts/refresh-docs.mjs
+git add docs/ARCHITECTURE.md docs/commtrac-codex-915-docs.html docs/commtrac-codex-915-docs.txt docs/about-metadata.json

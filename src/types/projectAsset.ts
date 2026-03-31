@@ -60,6 +60,10 @@ export interface ProjectAsset {
   createdAt: string;
   updatedAt: string;
   workflowSummary?: ProjectAssetWorkflowSummary;
+  isDeleted?: boolean;
+  deletedAtUtc?: string;
+  deletedByUserId?: string;
+  deleteReason?: string;
 }
 
 export interface ProjectAssetWorkflowSummary {

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 
 namespace Commtrac.Api.Controllers;
 
@@ -13,10 +14,12 @@ namespace Commtrac.Api.Controllers;
 public class AssetWorkflowRunsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly NotificationFeedService _feed;
     private readonly ILogger<AssetWorkflowRunsController> _logger;
-    public AssetWorkflowRunsController(AppDbContext db, ILogger<AssetWorkflowRunsController> logger)
+    public AssetWorkflowRunsController(AppDbContext db, NotificationFeedService feed, ILogger<AssetWorkflowRunsController> logger)
     {
         _db = db;
+        _feed = feed;
         _logger = logger;
     }
 
@@ -299,6 +302,13 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        await NotifyRunEventAsync(
+            run,
+            "workflow-started",
+            "info",
+            "Workflow started",
+            $"{ResolveActorName()} started workflow for asset {{asset}} on job {{job}}.",
+            notifyInstaller: false);
         return CreatedAtAction(nameof(GetById), new { id = run.Id }, ToDto(run));
     }
 
@@ -310,6 +320,8 @@ public class AssetWorkflowRunsController : ControllerBase
         if (run is null) return NotFound();
         if (run.IsLocked)
             return BadRequest(new { message = "This run is locked (completed). Re-run to create a new run." });
+        var previousStatus = run.Status;
+        var previousIssuesJson = run.IssuesJson;
 
         run.StepResultsJson = req.StepResultsJson;
         if (req.IssuesJson is not null) run.IssuesJson = req.IssuesJson;
@@ -333,6 +345,42 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        if (!string.Equals(previousStatus, run.Status, StringComparison.OrdinalIgnoreCase))
+        {
+            var eventType = run.Status switch
+            {
+                "Paused" => "workflow-paused",
+                "InProgress" => "workflow-resumed",
+                "Issue" => "workflow-issue",
+                _ => "workflow-updated"
+            };
+            var severity = run.Status == "Issue" ? "warning" : "info";
+            var title = run.Status switch
+            {
+                "Paused" => "Workflow paused",
+                "InProgress" => "Workflow resumed",
+                "Issue" => "Workflow issue raised",
+                _ => $"Workflow status changed to {run.Status}"
+            };
+            await NotifyRunEventAsync(
+                run,
+                eventType,
+                severity,
+                title,
+                $"{ResolveActorName()} changed workflow status to {run.Status} for asset {{asset}} on job {{job}}.",
+                notifyInstaller: string.Equals(run.Status, "Issue", StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (req.IssuesJson is not null && CountOpenIssues(req.IssuesJson) > CountOpenIssues(previousIssuesJson))
+        {
+            await NotifyRunEventAsync(
+                run,
+                "workflow-issue",
+                "warning",
+                "New workflow issue",
+                $"{ResolveActorName()} added or reopened issues for asset {{asset}} on job {{job}}.",
+                notifyInstaller: true);
+        }
         return Ok(ToDto(run));
     }
 
@@ -402,6 +450,25 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        await NotifyRunEventAsync(
+            run,
+            "workflow-completed",
+            "success",
+            "Workflow completed",
+            $"{(req.CompletedByName ?? ResolveActorName())} completed workflow for asset {{asset}} on job {{job}}.",
+            notifyInstaller: false);
+
+        if (asset is not null && string.Equals(asset.Status, "Complete", StringComparison.OrdinalIgnoreCase))
+        {
+            await NotifyAssetEventAsync(
+                asset,
+                "asset-completed",
+                "success",
+                "Asset completed",
+                $"{asset.AssetTag} was fully completed on job {{job}} by {(req.CompletedByName ?? ResolveActorName())}.",
+                notifyInstaller: false,
+                runId: run.Id);
+        }
         return Ok(ToDto(run));
     }
 
@@ -412,7 +479,7 @@ public class AssetWorkflowRunsController : ControllerBase
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
 
-        run.IssuesJson = req.IssuesJson;
+        run.IssuesJson = req.IssuesJson ?? "[]";
         run.UpdatedAt  = DateTime.UtcNow;
 
         // Recalculate asset status now that issues may have changed
@@ -422,7 +489,7 @@ public class AssetWorkflowRunsController : ControllerBase
             var allRuns = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
             // Any open issue (blocking OR non-blocking) keeps the asset in "Issue" state
             var anyOpenIssue = allRuns.Any(r => {
-                var json = r.Id == id ? req.IssuesJson : r.IssuesJson;
+                var json = r.Id == id ? (req.IssuesJson ?? "[]") : r.IssuesJson;
                 return ParseIssues(json).Any(i =>
                     i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean());
             });
@@ -435,6 +502,16 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        if (CountOpenIssues(req.IssuesJson) > 0)
+        {
+            await NotifyRunEventAsync(
+                run,
+                "workflow-issues-updated",
+                "warning",
+                "Workflow issues updated",
+                $"{ResolveActorName()} updated workflow issues for asset {{asset}} on job {{job}}.",
+                notifyInstaller: true);
+        }
         return Ok(ToDto(run));
     }
 
@@ -449,6 +526,13 @@ public class AssetWorkflowRunsController : ControllerBase
         run.UpdatedAt       = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+        await NotifyRunEventAsync(
+            run,
+            "workflow-media-updated",
+            "info",
+            "Workflow media updated",
+            $"{req.AmendedByName ?? ResolveActorName()} uploaded or amended workflow media for asset {{asset}} on job {{job}}.",
+            notifyInstaller: false);
         return Ok(ToDto(run));
     }
 
@@ -510,6 +594,13 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        await NotifyRunEventAsync(
+            newRun,
+            "workflow-reopened",
+            "warning",
+            "Workflow reopened",
+            $"{ResolveActorName()} reopened workflow for asset {{asset}} on job {{job}}.",
+            notifyInstaller: false);
         return CreatedAtAction(nameof(GetById), new { id = newRun.Id }, ToDto(newRun));
     }
 
@@ -556,6 +647,26 @@ public class AssetWorkflowRunsController : ControllerBase
         run.UpdatedAt = now;
         RecomputeRunTimeMetrics(run, now);
         await _db.SaveChangesAsync();
+        if (action is "pause" or "stopall")
+        {
+            await NotifyRunEventAsync(
+                run,
+                "workflow-paused",
+                "warning",
+                "Workflow paused",
+                $"{ResolveActorName()} paused workflow for asset {{asset}} on job {{job}}.",
+                notifyInstaller: false);
+        }
+        else if (action is "resumeproductive" or "startproductive")
+        {
+            await NotifyRunEventAsync(
+                run,
+                "workflow-resumed",
+                "info",
+                "Workflow resumed",
+                $"{ResolveActorName()} resumed workflow for asset {{asset}} on job {{job}}.",
+                notifyInstaller: false);
+        }
         return Ok(ToDto(run));
     }
 
@@ -564,6 +675,13 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         try { return JsonSerializer.Deserialize<List<JsonElement>>(json) ?? new(); }
         catch { return new(); }
+    }
+
+    private static int CountOpenIssues(string? json)
+    {
+        return ParseIssues(json ?? "[]").Count(i =>
+            !i.TryGetProperty("resolved", out var resolvedEl) ||
+            resolvedEl.ValueKind != JsonValueKind.True);
     }
 
     private static DateTime ParseUtcOr(string? value, DateTime fallbackUtc)
@@ -684,6 +802,75 @@ public class AssetWorkflowRunsController : ControllerBase
     }
 
     // ── as-built builder ─────────────────────────────────────────────────────
+
+    private string ResolveActorName()
+    {
+        return User.Identity?.Name
+            ?? User.FindFirst("email")?.Value
+            ?? User.FindFirst("name")?.Value
+            ?? "System";
+    }
+
+    private async Task NotifyRunEventAsync(
+        AssetWorkflowRunEntity run,
+        string eventType,
+        string severity,
+        string title,
+        string template,
+        bool notifyInstaller)
+    {
+        var asset = await _db.ProjectAssets.AsNoTracking().FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return;
+        await NotifyAssetEventAsync(asset, eventType, severity, title, template, notifyInstaller, run.Id);
+    }
+
+    private async Task NotifyAssetEventAsync(
+        ProjectAssetEntity asset,
+        string eventType,
+        string severity,
+        string title,
+        string template,
+        bool notifyInstaller,
+        string? runId)
+    {
+        var project = await _db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+        var message = template
+            .Replace("{asset}", asset.AssetTag, StringComparison.Ordinal)
+            .Replace("{job}", project?.JobNumber ?? "unknown", StringComparison.Ordinal);
+        var actorUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        var actorName = ResolveActorName();
+
+        await _feed.NotifyRolesAsync(
+            eventType,
+            severity,
+            title,
+            message,
+            ["Admin", "Project Manager"],
+            asset.ProjectId,
+            asset.Id,
+            runId,
+            "project-asset",
+            asset.Id,
+            actorUserId,
+            actorName);
+
+        if (notifyInstaller && !string.IsNullOrWhiteSpace(asset.AssignedUserId))
+        {
+            await _feed.NotifyUsersAsync(
+                eventType,
+                severity,
+                title,
+                message,
+                [asset.AssignedUserId],
+                asset.ProjectId,
+                asset.Id,
+                runId,
+                "project-asset",
+                asset.Id,
+                actorUserId,
+                actorName);
+        }
+    }
 
     private sealed class CaptureFieldDef
     {

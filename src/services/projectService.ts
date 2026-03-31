@@ -11,6 +11,7 @@ export interface ProjectFilters {
   sortDir?: "asc" | "desc";
   page?: number;
   pageSize?: number;
+  includeDeleted?: boolean;
 }
 
 export interface UpdateProjectStatusRequest {
@@ -37,6 +38,12 @@ export const projectService = {
     const response = await api.get<Project>(`/projects/${id}`);
     return response.data;
   },
+  async getProjectIncludingArchived(id: string) {
+    const response = await api.get<Project>(`/projects/${id}`, {
+      params: { includeDeleted: true }
+    });
+    return response.data;
+  },
   async createProject(payload: Project) {
     const response = await api.post<Project>("/projects", payload);
     return response.data;
@@ -51,6 +58,14 @@ export const projectService = {
   },
   async deleteProject(id: string) {
     await api.delete(`/projects/${id}`);
+    return id;
+  },
+  async restoreProject(id: string) {
+    const response = await api.post<Project>(`/projects/${id}/restore`);
+    return response.data;
+  },
+  async purgeProject(id: string) {
+    await api.delete(`/projects/${id}/purge`);
     return id;
   },
 

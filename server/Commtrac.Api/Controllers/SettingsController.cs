@@ -15,11 +15,15 @@ public class SettingsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly NotificationSettingsService _notificationSettings;
+    private readonly SqliteBackupService _backupService;
+    private readonly AuditLogService _audit;
 
-    public SettingsController(AppDbContext db, NotificationSettingsService notificationSettings)
+    public SettingsController(AppDbContext db, NotificationSettingsService notificationSettings, SqliteBackupService backupService, AuditLogService audit)
     {
         _db = db;
         _notificationSettings = notificationSettings;
+        _backupService = backupService;
+        _audit = audit;
     }
 
     [HttpGet("quickbase")]
@@ -73,5 +77,32 @@ public class SettingsController : ControllerBase
     public async Task<ActionResult<NotificationSettingsDto>> SaveNotifications([FromBody] NotificationSettingsDto request)
     {
         return Ok(await _notificationSettings.SaveAsync(request));
+    }
+
+    [HttpGet("backups")]
+    public async Task<ActionResult<IEnumerable<object>>> ListBackups()
+    {
+        var backups = await _backupService.ListBackupsAsync();
+        return Ok(backups.Select(b => new
+        {
+            b.FileName,
+            b.FullPath,
+            b.SizeBytes,
+            b.CreatedAtUtc
+        }));
+    }
+
+    [HttpPost("backups/create")]
+    public async Task<ActionResult<object>> CreateBackup()
+    {
+        var backup = await _backupService.CreateBackupAsync("manual");
+        await _audit.LogAsync(User, HttpContext, "database_backup_requested", backup.FileName);
+        return Ok(new
+        {
+            backup.FileName,
+            backup.FullPath,
+            backup.SizeBytes,
+            backup.CreatedAtUtc
+        });
     }
 }

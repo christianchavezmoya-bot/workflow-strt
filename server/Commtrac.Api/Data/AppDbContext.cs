@@ -31,6 +31,7 @@ public class AppDbContext : DbContext
     public DbSet<DocumentConfigEntity> DocumentConfigs => Set<DocumentConfigEntity>();
     public DbSet<QuickbaseSettingsEntity> QuickbaseSettings => Set<QuickbaseSettingsEntity>();
     public DbSet<NotificationSettingsEntity> NotificationSettings => Set<NotificationSettingsEntity>();
+    public DbSet<NotificationInboxEntity> NotificationInbox => Set<NotificationInboxEntity>();
     public DbSet<FieldDefinitionEntity> FieldDefinitions => Set<FieldDefinitionEntity>();
     public DbSet<FieldValueEntity> FieldValues => Set<FieldValueEntity>();
     public DbSet<AdminTabEntity> AdminTabs => Set<AdminTabEntity>();
@@ -91,6 +92,18 @@ public class AppDbContext : DbContext
             .Property(p => p.ProductIds)
             .HasConversion(listConverter)
             .Metadata.SetValueComparer(listComparer);
+
+        modelBuilder.Entity<ProjectEntity>()
+            .HasQueryFilter(p => !p.IsDeleted);
+
+        modelBuilder.Entity<InstallationEntity>()
+            .HasQueryFilter(i => !i.IsDeleted);
+
+        modelBuilder.Entity<ProjectAssetEntity>()
+            .HasQueryFilter(a => !a.IsDeleted);
+
+        modelBuilder.Entity<BomImportRunEntity>()
+            .HasQueryFilter(r => !r.IsDeleted);
 
         modelBuilder.Entity<FeatureDependencyEntity>()
             .HasIndex(d => d.FeatureId);
@@ -162,14 +175,111 @@ public class AppDbContext : DbContext
             .Property(t => t.BaseFieldMetaJson)
             .HasDefaultValue("{}");
 
+        modelBuilder.Entity<NotificationInboxEntity>()
+            .HasIndex(n => n.RecipientUserId);
+
+        modelBuilder.Entity<NotificationInboxEntity>()
+            .HasIndex(n => n.RecipientRole);
+
+        modelBuilder.Entity<NotificationInboxEntity>()
+            .HasIndex(n => n.CreatedAtUtc);
+
         // Foreign key relationships and indexes
         modelBuilder.Entity<SiteEntity>()
             .HasIndex(s => s.CustomerId);
 
-        // Sites must belong to a Customer
-        // Note: Using string IDs without navigation properties for simplicity
-        // Foreign keys are enforced at application level rather than database level
-        // to avoid circular dependencies and maintain flexibility
+        // ─── Cascade delete relationships ─────────────────────────────────────
+
+        // Project → Installations
+        modelBuilder.Entity<ProjectEntity>()
+            .HasMany<InstallationEntity>()
+            .WithOne()
+            .HasForeignKey(i => i.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Project → ProjectAssets
+        modelBuilder.Entity<ProjectEntity>()
+            .HasMany<ProjectAssetEntity>()
+            .WithOne()
+            .HasForeignKey(a => a.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Project → ProjectContacts
+        modelBuilder.Entity<ProjectEntity>()
+            .HasMany<ProjectContactEntity>()
+            .WithOne()
+            .HasForeignKey(c => c.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Project → ProjectDeliveryProfiles
+        modelBuilder.Entity<ProjectEntity>()
+            .HasMany<ProjectDeliveryProfileEntity>()
+            .WithOne()
+            .HasForeignKey(d => d.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Project → ProjectInboundItems
+        modelBuilder.Entity<ProjectEntity>()
+            .HasMany<ProjectInboundItemEntity>()
+            .WithOne()
+            .HasForeignKey(i => i.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Installation → Issues
+        modelBuilder.Entity<InstallationEntity>()
+            .HasMany<IssueEntity>()
+            .WithOne()
+            .HasForeignKey(i => i.InstallationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Installation → Inspections
+        modelBuilder.Entity<InstallationEntity>()
+            .HasMany<InspectionEntity>()
+            .WithOne()
+            .HasForeignKey(i => i.InstallationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Inspection → InspectionPhotos
+        modelBuilder.Entity<InspectionEntity>()
+            .HasMany<InspectionPhotoEntity>()
+            .WithOne()
+            .HasForeignKey(p => p.InspectionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // ProjectAsset → AssetWorkflowAssignments
+        modelBuilder.Entity<ProjectAssetEntity>()
+            .HasMany<AssetWorkflowAssignmentEntity>()
+            .WithOne()
+            .HasForeignKey(a => a.AssetId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // ProjectAsset → AssetWorkflowRuns
+        modelBuilder.Entity<ProjectAssetEntity>()
+            .HasMany<AssetWorkflowRunEntity>()
+            .WithOne()
+            .HasForeignKey(r => r.AssetId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // ProjectAsset → AssetDocuments
+        modelBuilder.Entity<ProjectAssetEntity>()
+            .HasMany<AssetDocumentEntity>()
+            .WithOne()
+            .HasForeignKey(d => d.AssetId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // ProjectAsset → AssetDocumentLinks
+        modelBuilder.Entity<ProjectAssetEntity>()
+            .HasMany<AssetDocumentLinkEntity>()
+            .WithOne()
+            .HasForeignKey(l => l.AssetId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // AssetDocument → AssetDocumentRevisions
+        modelBuilder.Entity<AssetDocumentEntity>()
+            .HasMany<AssetDocumentRevisionEntity>()
+            .WithOne()
+            .HasForeignKey(r => r.DocumentId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<InspectionEntity>()
             .HasIndex(i => i.InstallationId);

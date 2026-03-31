@@ -241,6 +241,12 @@ public class ProjectEntity
     public string? ProbabilityStage { get; set; }
     public List<string> ProductIds { get; set; } = new();
     public string ProductFeatureValuesJson { get; set; } = "{}";
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(400)]
+    public string? DeleteReason { get; set; }
 }
 
 public class InstallationEntity
@@ -295,6 +301,12 @@ public class InstallationEntity
     [MaxLength(200)]
     public string? Pm4Serial { get; set; }
     public string CustomFieldsJson { get; set; } = "{}";
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(400)]
+    public string? DeleteReason { get; set; }
 }
 
 public class CustomFieldDefinitionEntity
@@ -536,6 +548,42 @@ public class NotificationSettingsEntity
     public string SmsSender { get; set; } = "";
 }
 
+public class NotificationInboxEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string? RecipientUserId { get; set; }
+    [MaxLength(80)]
+    public string? RecipientRole { get; set; }
+    [MaxLength(80)]
+    public string EventType { get; set; } = string.Empty;
+    [MaxLength(20)]
+    public string Severity { get; set; } = "info";
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+    [MaxLength(2000)]
+    public string Message { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string? ProjectId { get; set; }
+    [MaxLength(80)]
+    public string? AssetId { get; set; }
+    [MaxLength(100)]
+    public string? RunId { get; set; }
+    [MaxLength(120)]
+    public string? EntityType { get; set; }
+    [MaxLength(120)]
+    public string? EntityId { get; set; }
+    [MaxLength(80)]
+    public string? TriggeredByUserId { get; set; }
+    [MaxLength(200)]
+    public string? TriggeredByName { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? ReadAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? ReadByUserId { get; set; }
+}
+
 public class OfficeEntity
 {
     [Key]
@@ -708,6 +756,12 @@ public class ProjectAssetEntity
     public string AsBuiltJson { get; set; } = "{}";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(400)]
+    public string? DeleteReason { get; set; }
 }
 
 // ─── Workflow Config Unification (v2 architecture) ────────────────────────────
@@ -1175,6 +1229,12 @@ public class BomImportRunEntity
     public string? DraftProjectJson { get; set; }
     public string? ValidationResultJson { get; set; }
     public string? CommitLogsJson { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(400)]
+    public string? DeleteReason { get; set; }
 }
 
 public class BomMappingProfileEntity

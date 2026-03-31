@@ -29,21 +29,21 @@ export default function BomDashboard() {
   useEffect(() => {
     dispatch({ type: "SET_RUNS_LOADING", payload: true });
     bomApiService
-      .listRuns()
+      .listRuns(showArchived)
       .then((runs) => dispatch({ type: "SET_RUNS", payload: runs }))
       .catch((err) => dispatch({ type: "SET_ERROR", payload: String(err) }))
       .finally(() => dispatch({ type: "SET_RUNS_LOADING", payload: false }));
-  }, [dispatch]);
+  }, [dispatch, showArchived]);
 
   const handleArchive = async (id: string, restore: boolean) => {
     setArchiving(id);
     try {
       if (restore) {
-        await bomApiService.updateRun(id, { status: "ready" } as never);
+        await bomApiService.restoreRun(id);
       } else {
         await bomApiService.deleteRun(id);
       }
-      const runs = await bomApiService.listRuns();
+      const runs = await bomApiService.listRuns(showArchived);
       dispatch({ type: "SET_RUNS", payload: runs });
     } catch { /* ignore */ }
     finally { setArchiving(null); }
@@ -54,7 +54,7 @@ export default function BomDashboard() {
     setDeleting(true);
     try {
       await bomApiService.purgeRun(deleteTarget.id);
-      const runs = await bomApiService.listRuns();
+      const runs = await bomApiService.listRuns(showArchived);
       dispatch({ type: "SET_RUNS", payload: runs });
     } catch { /* ignore */ }
     finally { setDeleting(false); setDeleteTarget(null); }
@@ -172,10 +172,14 @@ export default function BomDashboard() {
         ) : visibleRuns.length === 0 ? (
           <Box p={6} textAlign="center">
             <FolderOpenOutlinedIcon sx={{ fontSize: 48, color: "text.disabled", mb: 1 }} />
-            <Typography color="text.secondary">No imports yet. Start by uploading a BOM file.</Typography>
-            <Button variant="outlined" sx={{ mt: 2 }} onClick={() => navigate("/admin/bom-project/upload")}>
-              Upload BOM
-            </Button>
+            <Typography color="text.secondary">
+              {showArchived ? "No archived imports found." : "No imports yet. Start by uploading a BOM file."}
+            </Typography>
+            {!showArchived && (
+              <Button variant="outlined" sx={{ mt: 2 }} onClick={() => navigate("/admin/bom-project/upload")}>
+                Upload BOM
+              </Button>
+            )}
           </Box>
         ) : (
           <Table size="small">

@@ -43,4 +43,8 @@ export interface Project {
   productIds?: string[];
   productFeatureValues?: Record<string, string>;
   assetCount?: number;
+  isDeleted?: boolean;
+  deletedAtUtc?: string;
+  deletedByUserId?: string;
+  deleteReason?: string;
 }

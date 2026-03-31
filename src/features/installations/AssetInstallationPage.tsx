@@ -7,6 +7,7 @@ import {
   CheckBoxOutlineBlankOutlined,
   CheckBoxOutlined,
   CheckCircleOutlined,
+  DeleteForeverOutlined,
   DeleteOutline,
   EditOutlined,
   ErrorOutlined,
@@ -23,6 +24,7 @@ import {
   PrintOutlined,
   RefreshOutlined,
   ReportProblemOutlined,
+  RestoreOutlined,
   ViewColumnOutlined,
 } from "@mui/icons-material";
 import {
@@ -308,6 +310,8 @@ const AssetInstallationPage = () => {
   // Delete (single)
   const [deleteAsset, setDeleteAsset] = useState<ProjectAsset | null>(null);
   const [deletingAsset, setDeletingAsset] = useState(false);
+  const [purgeAsset, setPurgeAsset] = useState<ProjectAsset | null>(null);
+  const [purgingAsset, setPurgingAsset] = useState(false);
 
   // Bulk delete
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -489,7 +493,7 @@ const AssetInstallationPage = () => {
     const loadId = ++assetLoadIdRef.current;
     setLoadingAssets(true);
     Promise.all([
-      projectAssetService.listByProduct(activeProduct.id),
+      projectAssetService.listByProduct(activeProduct.id, archiveMode),
       productConfigService.listByProduct(activeProduct.id),
       workflowConfigService.listByProduct(activeProduct.id, "Published"),
     ]).then(([a, c, wc]) => {
@@ -527,11 +531,11 @@ const AssetInstallationPage = () => {
     }).finally(() => {
       if (loadId === assetLoadIdRef.current) setLoadingAssets(false);
     });
-  }, [activeProduct?.id]);
+  }, [activeProduct?.id, archiveMode]);
 
   const refreshAssets = () => {
     if (!activeProduct?.id) return;
-    projectAssetService.listByProduct(activeProduct.id).then((a) => {
+    projectAssetService.listByProduct(activeProduct.id, archiveMode).then((a) => {
       setAssets(a);
       setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
     });
@@ -564,8 +568,9 @@ const AssetInstallationPage = () => {
     const q = search.trim().toLowerCase();
     return assets.filter((a) => {
       if (archiveMode) {
-        if (a.status !== "Complete") return false;
+        if (!a.isDeleted) return false;
       } else {
+        if (a.isDeleted) return false;
         if (selectedProjectId && a.projectId !== selectedProjectId) return false;
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
       }
@@ -803,32 +808,6 @@ const AssetInstallationPage = () => {
           : undefined,
       });
       setAssets((prev) => prev.map((a) => (a.id === editAsset.id ? updated : a)));
-      if (
-        isManagerRole(currentUser.role) &&
-        editForm.assignedUserId &&
-        editForm.assignedUserId !== previousAssignedUserId
-      ) {
-        const targetUser = users.find((u) => u.id === editForm.assignedUserId);
-        if (targetUser && !isManagerRole(targetUser.role)) {
-          const previousAssigneeName = previousAssignedUserId
-            ? users.find((u) => u.id === previousAssignedUserId)?.fullName ?? undefined
-            : undefined;
-          const flags: AssignmentEventFlag[] = JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]");
-          flags.push({
-            id: `${editAsset.id}-${Date.now()}`,
-            assetId: editAsset.id,
-            assetTag: editAsset.assetTag || editAsset.assetName || editAsset.id,
-            jobNumber: (editAsset as any).jobNumber || "",
-            assignedAt: new Date().toISOString(),
-            eventType: "manager-assigned",
-            actorName: currentUser.fullName,
-            targetName: targetUser.fullName,
-            previousAssigneeName,
-          });
-          localStorage.setItem("pm_auto_assign_flags", JSON.stringify(flags));
-          window.dispatchEvent(new Event("pm-auto-assign-flags-changed"));
-        }
-      }
       setEditOpen(false);
       setEditAsset(null);
     } catch {
@@ -868,6 +847,32 @@ const AssetInstallationPage = () => {
       alert("One or more assets could not be deleted.");
     } finally {
       setBulkDeleting(false);
+    }
+  }
+
+  async function confirmRestoreAsset(asset: ProjectAsset) {
+    setDeletingAsset(true);
+    try {
+      await projectAssetService.restore(asset.id);
+      refreshAssets();
+    } catch {
+      alert("Failed to restore asset.");
+    } finally {
+      setDeletingAsset(false);
+    }
+  }
+
+  async function confirmPurgeAsset() {
+    if (!purgeAsset) return;
+    setPurgingAsset(true);
+    try {
+      await projectAssetService.purge(purgeAsset.id);
+      setPurgeAsset(null);
+      refreshAssets();
+    } catch {
+      alert("Failed to permanently delete asset.");
+    } finally {
+      setPurgingAsset(false);
     }
   }
 
@@ -1207,25 +1212,6 @@ const AssetInstallationPage = () => {
       // Auto-assign to current user
       await projectAssetService.update(asset.id, { assignedUserId: currentUser.id });
       setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, assignedUserId: currentUser.id } : a));
-      if (!isManagerRole(currentUser.role)) {
-        const previousAssigneeName = asset.assignedUserId
-          ? users.find((u) => u.id === asset.assignedUserId)?.fullName ?? undefined
-          : undefined;
-        const flags: AssignmentEventFlag[] = JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]");
-        flags.push({
-          id: `${asset.id}-${Date.now()}`,
-          assetId: asset.id,
-          assetTag: asset.assetTag || (asset as any).assetName || asset.id,
-          jobNumber: (asset as any).jobNumber || "",
-          assignedAt: new Date().toISOString(),
-          eventType: asset.assignedUserId ? "takeover" : "self-assigned",
-          actorName: currentUser.fullName,
-          targetName: currentUser.fullName,
-          previousAssigneeName,
-        });
-        localStorage.setItem("pm_auto_assign_flags", JSON.stringify(flags));
-        window.dispatchEvent(new Event("pm-auto-assign-flags-changed"));
-      }
     } catch {
       // Non-fatal â€” continue with start even if update fails
     }
@@ -2645,15 +2631,16 @@ const AssetInstallationPage = () => {
             Export CSV
           </Button>
 
-          {/* Bulk delete */}
-          <Button
-            size="small"
-            variant="outlined"
-            color="error"
-            onClick={() => setBulkDeleteOpen(true)}
-          >
-            Delete selected
-          </Button>
+          {!archiveMode && (
+            <Button
+              size="small"
+              variant="outlined"
+              color="error"
+              onClick={() => setBulkDeleteOpen(true)}
+            >
+              Archive selected
+            </Button>
+          )}
 
           <Button size="small" color="inherit" onClick={() => setSelectedAssetIds(new Set())}>
             Clear
@@ -2701,7 +2688,7 @@ const AssetInstallationPage = () => {
         )}
         {archiveMode && (
           <Typography variant="caption" color="text.secondary">
-            Showing completed assets Â· read-only view
+            Showing archived assets from the server
           </Typography>
         )}
       </Box>
@@ -2716,7 +2703,9 @@ const AssetInstallationPage = () => {
           <Box sx={{ p: 3 }}>
             <Alert severity="info">
               {assets.length === 0
-                ? `No assets added for ${activeProduct?.name ?? "this product"} yet. Click "Add asset" to get started.`
+                ? archiveMode
+                  ? "No archived assets found for this product."
+                  : `No assets added for ${activeProduct?.name ?? "this product"} yet. Click "Add asset" to get started.`
                 : "No assets match the current filters."}
             </Alert>
           </Box>
@@ -2848,18 +2837,36 @@ const AssetInstallationPage = () => {
                             </span>
                           </Tooltip>
                         )}
-                        {can.modifyData && (
+                        {can.modifyData && !archiveMode && (
                           <Tooltip title="Edit asset">
                             <IconButton size="small" onClick={() => openEditAsset(asset)}>
                               <EditOutlined fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
-                        {can.modifyData && (
-                          <Tooltip title="Delete asset">
+                        {can.modifyData && !archiveMode && (
+                          <Tooltip title="Archive asset">
                             <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
                               <DeleteOutline fontSize="small" />
                             </IconButton>
+                          </Tooltip>
+                        )}
+                        {can.modifyData && archiveMode && (
+                          <Tooltip title="Restore asset">
+                            <span>
+                              <IconButton size="small" disabled={deletingAsset} onClick={() => confirmRestoreAsset(asset)}>
+                                <RestoreOutlined fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        )}
+                        {can.modifyData && archiveMode && (
+                          <Tooltip title="Delete asset permanently">
+                            <span>
+                              <IconButton size="small" color="error" disabled={purgingAsset} onClick={() => setPurgeAsset(asset)}>
+                                <DeleteForeverOutlined fontSize="small" />
+                              </IconButton>
+                            </span>
                           </Tooltip>
                         )}
                       </Stack>
@@ -3148,37 +3155,55 @@ const AssetInstallationPage = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Delete confirmation */}
+      {/* Archive confirmation */}
       <Dialog open={Boolean(deleteAsset)} onClose={() => !deletingAsset && setDeleteAsset(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete Asset?</DialogTitle>
+        <DialogTitle>Archive Asset?</DialogTitle>
         <DialogContent>
-          <Typography>Delete asset <strong>{deleteAsset?.assetTag}</strong>? This cannot be undone.</Typography>
+          <Typography>
+            Archive asset <strong>{deleteAsset?.assetTag}</strong>? It will be removed from active lists for all users and can be restored later.
+          </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteAsset(null)} disabled={deletingAsset}>Cancel</Button>
           <Button variant="contained" color="error" onClick={confirmDeleteAsset} disabled={deletingAsset}
             startIcon={deletingAsset ? <CircularProgress size={14} /> : undefined}>
-            {deletingAsset ? "Deletingâ€¦" : "Delete"}
+            {deletingAsset ? "Archiving..." : "Archive"}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Bulk delete confirmation */}
+      {/* Bulk archive confirmation */}
       <Dialog open={bulkDeleteOpen} onClose={() => !bulkDeleting && setBulkDeleteOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete {selectedAssetIds.size} Asset{selectedAssetIds.size !== 1 ? "s" : ""}?</DialogTitle>
+        <DialogTitle>Archive {selectedAssetIds.size} Asset{selectedAssetIds.size !== 1 ? "s" : ""}?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" gutterBottom>
-            You are about to permanently delete <strong>{selectedAssetIds.size}</strong> asset{selectedAssetIds.size !== 1 ? "s" : ""}. This cannot be undone.
+            You are about to archive <strong>{selectedAssetIds.size}</strong> asset{selectedAssetIds.size !== 1 ? "s" : ""}. They will be removed from active lists for all users and can be restored later.
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Associated workflow runs, issues, and documents will also be removed.
+            Associated workflow runs, issues, and documents will be hidden with the asset.
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setBulkDeleteOpen(false)} disabled={bulkDeleting}>Cancel</Button>
           <Button variant="contained" color="error" onClick={confirmBulkDelete} disabled={bulkDeleting}
             startIcon={bulkDeleting ? <CircularProgress size={14} /> : undefined}>
-            {bulkDeleting ? "Deletingâ€¦" : `Delete ${selectedAssetIds.size}`}
+            {bulkDeleting ? "Archiving..." : `Archive ${selectedAssetIds.size}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(purgeAsset)} onClose={() => !purgingAsset && setPurgeAsset(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete Asset Permanently?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Permanently delete asset <strong>{purgeAsset?.assetTag}</strong>? This cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPurgeAsset(null)} disabled={purgingAsset}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={confirmPurgeAsset} disabled={purgingAsset}
+            startIcon={purgingAsset ? <CircularProgress size={14} /> : undefined}>
+            {purgingAsset ? "Deleting..." : "Delete permanently"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3755,32 +3780,6 @@ const AssetInstallationPage = () => {
                     projectAssetService.update(assetId, { assignedUserId: bulkTechId || null } as Parameters<typeof projectAssetService.update>[1])
                   )
                 );
-                if (isManagerRole(currentUser.role) && bulkTechId) {
-                  const targetUser = users.find((u) => u.id === bulkTechId);
-                  if (targetUser && !isManagerRole(targetUser.role)) {
-                    const flags: AssignmentEventFlag[] = JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]");
-                    const nowIso = new Date().toISOString();
-                    selectedAssets.forEach((asset) => {
-                      if (asset.assignedUserId === bulkTechId) return;
-                      const previousAssigneeName = asset.assignedUserId
-                        ? users.find((u) => u.id === asset.assignedUserId)?.fullName ?? undefined
-                        : undefined;
-                      flags.push({
-                        id: `${asset.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                        assetId: asset.id,
-                        assetTag: asset.assetTag || asset.assetName || asset.id,
-                        jobNumber: (asset as any).jobNumber || "",
-                        assignedAt: nowIso,
-                        eventType: "manager-assigned",
-                        actorName: currentUser.fullName,
-                        targetName: targetUser.fullName,
-                        previousAssigneeName,
-                      });
-                    });
-                    localStorage.setItem("pm_auto_assign_flags", JSON.stringify(flags));
-                    window.dispatchEvent(new Event("pm-auto-assign-flags-changed"));
-                  }
-                }
                 refreshAssets();
                 setSelectedAssetIds(new Set());
                 setBulkTechOpen(false);

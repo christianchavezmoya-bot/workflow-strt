@@ -1,47 +1,57 @@
 /**
  * BomProductSelector
- * Step shown before file upload — user picks Division → Product (or creates one).
+ * Step shown before file upload; user picks Division -> Product (or creates one).
  * Stores the selected product in BomProjectContext.
  */
 import { useEffect, useState } from "react";
 import {
-  Box, Button, Stack, Typography, Alert,
-  FormControl, InputLabel, Select, MenuItem,
-  Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, CircularProgress, Chip, Divider,
+  Alert,
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
+  TextField,
+  Typography,
 } from "@mui/material";
 import AddOutlinedIcon from "@mui/icons-material/AddOutlined";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
 import { divisionService } from "../../../services/divisionService";
-import { productService } from "../../../services/productService";
 import { featureService } from "../../../services/featureService";
+import { productService } from "../../../services/productService";
 import type { Division } from "../../../types/division";
-import type { Product } from "../../../types/product";
 import type { Feature } from "../../../types/feature";
+import type { Product } from "../../../types/product";
 import { useBomProject } from "../store/BomProjectContext";
 
 export default function BomProductSelector() {
   const { state, dispatch } = useBomProject();
 
-  const [divisions, setDivisions]     = useState<Division[]>([]);
-  const [products, setProducts]       = useState<Product[]>([]);
-  const [features, setFeatures]       = useState<Feature[]>([]);
-  const [loading, setLoading]         = useState(true);
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [features, setFeatures] = useState<Feature[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const [divisionId, setDivisionId]   = useState<string>("");
-  const [productId, setProductId]     = useState<string>(state.selectedProduct?.id ?? "");
+  const [divisionId, setDivisionId] = useState<string>("");
+  const [productId, setProductId] = useState<string>(state.selectedProduct?.id ?? "");
 
-  // Create product dialog
-  const [createOpen, setCreateOpen]   = useState(false);
-  const [newName, setNewName]         = useState("");
-  const [newDesc, setNewDesc]         = useState("");
-  const [creating, setCreating]       = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Load divisions + products on mount
   useEffect(() => {
     setLoading(true);
     setLoadError(null);
@@ -49,7 +59,6 @@ export default function BomProductSelector() {
       .then(([divs, prods]) => {
         setDivisions(divs.filter((d) => d.isActive).sort((a, b) => a.sortOrder - b.sortOrder));
         setProducts(prods.sort((a, b) => a.name.localeCompare(b.name)));
-        // If product already selected, restore division
         if (state.selectedProduct) {
           setDivisionId(state.selectedProduct.divisionId ?? "");
           setProductId(state.selectedProduct.id);
@@ -59,15 +68,16 @@ export default function BomProductSelector() {
         const msg = err?.response?.status
           ? `API error ${err.response.status}: ${err.response.data?.message ?? err.message}`
           : String(err?.message ?? err);
-        setLoadError(`Could not load divisions/products — ${msg}. Check that the server is running and migrations have been applied (dotnet ef database update).`);
+        setLoadError(`Could not load divisions/products - ${msg}. Check that the server is running and migrations have been applied (dotnet ef database update).`);
       })
       .finally(() => setLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [state.selectedProduct]);
 
-  // Load features when product changes
   useEffect(() => {
-    if (!productId) { setFeatures([]); return; }
+    if (!productId) {
+      setFeatures([]);
+      return;
+    }
     featureService.getByProduct(productId).then(setFeatures).catch(() => setFeatures([]));
   }, [productId]);
 
@@ -79,15 +89,13 @@ export default function BomProductSelector() {
 
   const handleProductChange = (id: string) => {
     setProductId(id);
-    const prod = products.find((p) => p.id === id) ?? null;
-    dispatch({ type: "SET_SELECTED_PRODUCT", payload: prod });
-    // Auto-populate division from the selected product
-    if (prod?.divisionId) setDivisionId(prod.divisionId);
+    const product = products.find((p) => p.id === id) ?? null;
+    dispatch({ type: "SET_SELECTED_PRODUCT", payload: product });
+    if (product?.divisionId) setDivisionId(product.divisionId);
   };
 
   const handleDivisionChange = (id: string) => {
     setDivisionId(id);
-    // Clear product if it doesn't belong to new division
     const current = products.find((p) => p.id === productId);
     if (current && id && current.divisionId !== id) {
       setProductId("");
@@ -123,7 +131,7 @@ export default function BomProductSelector() {
     return (
       <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 2 }}>
         <CircularProgress size={16} />
-        <Typography variant="body2" color="text.secondary">Loading products…</Typography>
+        <Typography variant="body2" color="text.secondary">Loading products...</Typography>
       </Stack>
     );
   }
@@ -146,7 +154,6 @@ export default function BomProductSelector() {
       </Typography>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="flex-start">
-        {/* Division */}
         <FormControl size="small" sx={{ minWidth: 200 }}>
           <InputLabel shrink>Division (optional)</InputLabel>
           <Select
@@ -161,7 +168,6 @@ export default function BomProductSelector() {
           </Select>
         </FormControl>
 
-        {/* Product */}
         <FormControl size="small" sx={{ minWidth: 240 }}>
           <InputLabel shrink>Product *</InputLabel>
           <Select
@@ -170,7 +176,7 @@ export default function BomProductSelector() {
             onChange={(e) => handleProductChange(e.target.value)}
             displayEmpty
           >
-            <MenuItem value=""><em>Select a product…</em></MenuItem>
+            <MenuItem value=""><em>Select a product...</em></MenuItem>
             {filteredProducts.map((p) => (
               <MenuItem key={p.id} value={p.id}>
                 <Stack>
@@ -195,7 +201,6 @@ export default function BomProductSelector() {
         </Button>
       </Stack>
 
-      {/* Warning if no products in division */}
       {divisionId && filteredProducts.length === 0 && (
         <Alert severity="warning" icon={<WarningAmberOutlinedIcon />} sx={{ mt: 2, maxWidth: 480 }}>
           No products found in this division.{" "}
@@ -203,9 +208,18 @@ export default function BomProductSelector() {
         </Alert>
       )}
 
-      {/* Selected product summary */}
       {selectedProduct && (
-        <Box mt={2} p={1.5} sx={{ border: "1px solid", borderColor: "success.main", borderRadius: 1.5, background: "rgba(46,125,50,0.04)", maxWidth: 520 }}>
+        <Box
+          mt={2}
+          p={1.5}
+          sx={{
+            border: "1px solid",
+            borderColor: "success.main",
+            borderRadius: 1.5,
+            background: "rgba(46,125,50,0.04)",
+            maxWidth: 520
+          }}
+        >
           <Stack direction="row" spacing={1} alignItems="center" mb={features.length > 0 ? 1 : 0}>
             <CheckCircleOutlineIcon sx={{ color: "success.main", fontSize: 16 }} />
             <Typography variant="body2" fontWeight={600}>{selectedProduct.name}</Typography>
@@ -213,28 +227,24 @@ export default function BomProductSelector() {
               <Chip label={selectedProduct.divisionName} size="small" variant="outlined" />
             )}
           </Stack>
+
           {features.length > 0 && (
             <>
               <Divider sx={{ mb: 1 }} />
-              <Typography variant="caption" color="text.secondary" display="block" mb={0.75}>
-                {features.length} existing feature{features.length !== 1 ? "s" : ""} — BOM rows will be matched against these:
+              <Typography variant="caption" color="text.secondary" display="block">
+                {features.length} matching feature{features.length !== 1 ? "s" : ""} (components & consumables) found for this product.
               </Typography>
-              <Stack direction="row" flexWrap="wrap" gap={0.5}>
-                {features.map((f) => (
-                  <Chip key={f.id} label={f.name} size="small" variant="outlined" color="primary" />
-                ))}
-              </Stack>
             </>
           )}
+
           {features.length === 0 && (
             <Typography variant="caption" color="text.secondary">
-              No features yet — all BOM rows will be added as new features.
+              No matching features (components & consumables) yet - BOM rows will be added as new features.
             </Typography>
           )}
         </Box>
       )}
 
-      {/* Create product dialog */}
       <Dialog open={createOpen} onClose={() => !creating && setCreateOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Create New Product</DialogTitle>
         <DialogContent>
@@ -282,7 +292,7 @@ export default function BomProductSelector() {
             disabled={creating || !newName.trim()}
             startIcon={creating ? <CircularProgress size={14} /> : undefined}
           >
-            {creating ? "Creating…" : "Create Product"}
+            {creating ? "Creating..." : "Create Product"}
           </Button>
         </DialogActions>
       </Dialog>

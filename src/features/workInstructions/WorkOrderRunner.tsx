@@ -53,6 +53,7 @@ import type { BomActualItem, BomItem, CaptureField, StepInput, Workflow, Workflo
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { notificationService } from "../../services/notificationService";
 import { signatureService } from "../../services/signatureService";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
@@ -786,11 +787,20 @@ export default function WorkOrderRunner({
             totalExpected,
             totalCaptured,
           };
-          const existing = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
-          // Deduplicate by runId — remove any prior flag for this run then push new one
-          const deduped = existing.filter((e: { runId: string }) => e.runId !== activeRunId);
-          localStorage.setItem("pm_missing_media_flags", JSON.stringify([...deduped, flag]));
-          window.dispatchEvent(new Event("missing-media-flags-changed"));
+          void notificationService.create({
+            eventType: "workflow-missing-media",
+            severity: "warning",
+            title: `Missing media: ${assetTag ?? "Asset"}`,
+            message: `${workflow.name} | ${jobNumber || "Unknown job"} | ${totalCaptured}/${totalExpected} media steps captured`,
+            recipientUserIds: currentUserId ? [currentUserId] : [],
+            recipientRoles: ["Admin", "Project Manager"],
+            assetId: projectAssetId ?? null,
+            runId: activeRunId,
+            entityType: "asset-workflow-run",
+            entityId: activeRunId,
+            triggeredByUserId: currentUserId ?? null,
+            triggeredByName: currentUserName ?? null,
+          });
         }
       }
       // Note: if no activeRunId (preview mode), skip signature stages

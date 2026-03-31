@@ -66,8 +66,8 @@ public sealed class EmailSender : IEmailSender
 
         if (string.IsNullOrWhiteSpace(settings.SmtpHost))
         {
-            _logger.LogInformation("Email (simulated). To: {To} Subject: {Subject} Body: {Body}", toEmail, subject, body);
-            return;
+            _logger.LogError("Email send failed because SMTP is not configured. To: {To} Subject: {Subject}", toEmail, subject);
+            throw new InvalidOperationException("SMTP is not configured. Set Notification Settings SMTP Host before sending invitation emails.");
         }
 
         using var client = new SmtpClient(settings.SmtpHost, settings.SmtpPort)

@@ -1,9 +1,6 @@
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 
-const LS_KEY_PROJECT = (projectId: string) => `project_assets_v1_${projectId}`;
-const LS_KEY_PRODUCT = (productId: string) => `project_assets_prod_v1_${productId}`;
-
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
   if (value === "inprogress") return "InProgress";
@@ -20,34 +17,18 @@ function fromDto(dto: ProjectAsset): ProjectAsset {
 }
 
 export const projectAssetService = {
-  async listByProject(projectId: string): Promise<ProjectAsset[]> {
-    try {
-      const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`);
-      try { localStorage.setItem(LS_KEY_PROJECT(projectId), JSON.stringify(res.data)); } catch {}
-      return res.data.map(fromDto);
-    } catch (err: unknown) {
-      console.warn("[projectAssetService] API unavailable, falling back to localStorage", err);
-      try {
-        const raw = localStorage.getItem(LS_KEY_PROJECT(projectId));
-        if (raw) return (JSON.parse(raw) as ProjectAsset[]).map(fromDto);
-      } catch {}
-      return [];
-    }
+  async listByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, {
+      params: includeDeleted ? { includeDeleted: true } : undefined,
+    });
+    return res.data.map(fromDto);
   },
 
-  async listByProduct(productId: string): Promise<ProjectAsset[]> {
-    try {
-      const res = await api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`);
-      try { localStorage.setItem(LS_KEY_PRODUCT(productId), JSON.stringify(res.data)); } catch {}
-      return res.data.map(fromDto);
-    } catch (err: unknown) {
-      console.warn("[projectAssetService] API unavailable, falling back to localStorage", err);
-      try {
-        const raw = localStorage.getItem(LS_KEY_PRODUCT(productId));
-        if (raw) return (JSON.parse(raw) as ProjectAsset[]).map(fromDto);
-      } catch {}
-      return [];
-    }
+  async listByProduct(productId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    const res = await api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`, {
+      params: includeDeleted ? { includeDeleted: true } : undefined,
+    });
+    return res.data.map(fromDto);
   },
 
   async create(input: CreateProjectAssetInput): Promise<ProjectAsset> {
@@ -64,9 +45,11 @@ export const projectAssetService = {
     return res.data.map(fromDto);
   },
 
-  async getById(id: string): Promise<ProjectAsset | null> {
+  async getById(id: string, includeDeleted = false): Promise<ProjectAsset | null> {
     try {
-      const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
+      const res = await api.get<ProjectAsset>(`/project-assets/${id}`, {
+        params: includeDeleted ? { includeDeleted: true } : undefined,
+      });
       return fromDto(res.data);
     } catch {
       return null;
@@ -85,6 +68,15 @@ export const projectAssetService = {
 
   async remove(id: string): Promise<void> {
     await api.delete(`/project-assets/${id}`);
+  },
+
+  async restore(id: string): Promise<ProjectAsset> {
+    const res = await api.post<ProjectAsset>(`/project-assets/${id}/restore`);
+    return fromDto(res.data);
+  },
+
+  async purge(id: string): Promise<void> {
+    await api.delete(`/project-assets/${id}/purge`);
   },
 
   async workloadSummary(): Promise<WorkloadSummaryItem[]> {

@@ -21,9 +21,13 @@ public class BrandSettingsController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> Get()
     {
-        var logo = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == LogoKey);
-        var appName = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == AppNameKey);
-        return Ok(new BrandSettingDto(logo?.Value, appName?.Value));
+        var settings = await _db.BrandSettings
+            .Where(s => s.Key == LogoKey || s.Key == AppNameKey)
+            .ToDictionaryAsync(s => s.Key, s => s.Value);
+
+        settings.TryGetValue(LogoKey, out var logo);
+        settings.TryGetValue(AppNameKey, out var appName);
+        return Ok(new BrandSettingDto(logo, appName));
     }
 
     // PUT api/brand-settings
@@ -60,9 +64,13 @@ public class BrandSettingsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
-        var logoResult = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == LogoKey);
-        var appNameResult = await _db.BrandSettings.FirstOrDefaultAsync(s => s.Key == AppNameKey);
-        return Ok(new BrandSettingDto(logoResult?.Value, appNameResult?.Value));
+        var settings = await _db.BrandSettings
+            .Where(s => s.Key == LogoKey || s.Key == AppNameKey)
+            .ToDictionaryAsync(s => s.Key, s => s.Value);
+
+        settings.TryGetValue(LogoKey, out var logoResult);
+        settings.TryGetValue(AppNameKey, out var appNameResult);
+        return Ok(new BrandSettingDto(logoResult, appNameResult));
     }
 
     // DELETE api/brand-settings (removes logo only)

@@ -1,0 +1,16 @@
+{
+  "refreshedAt": "2026-03-31",
+  "generatedFrom": {
+    "architecture": "docs/ARCHITECTURE.md",
+    "schema": "docs/schema.json",
+    "routes": "src/app/routes.tsx",
+    "controllers": "server/Commtrac.Api/Controllers"
+  },
+  "stats": {
+    "tables": 25,
+    "columns": 212,
+    "relationships": 15,
+    "controllerCount": 54,
+    "routeCount": 29
+  }
+}

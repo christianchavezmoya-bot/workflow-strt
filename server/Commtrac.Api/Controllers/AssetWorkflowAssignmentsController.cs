@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 
 namespace Commtrac.Api.Controllers;
 
@@ -12,10 +13,12 @@ namespace Commtrac.Api.Controllers;
 public class AssetWorkflowAssignmentsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly NotificationFeedService _feed;
     private readonly ILogger<AssetWorkflowAssignmentsController> _logger;
-    public AssetWorkflowAssignmentsController(AppDbContext db, ILogger<AssetWorkflowAssignmentsController> logger)
+    public AssetWorkflowAssignmentsController(AppDbContext db, NotificationFeedService feed, ILogger<AssetWorkflowAssignmentsController> logger)
     {
         _db = db;
+        _feed = feed;
         _logger = logger;
     }
 
@@ -89,6 +92,42 @@ public class AssetWorkflowAssignmentsController : ControllerBase
 
         var typeName   = (await _db.WorkflowTypes.FirstOrDefaultAsync(t => t.Id == req.WorkflowTypeId))?.Name ?? req.WorkflowTypeId;
         var configName = config.Name;
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == req.AssetId);
+        var project = asset is null ? null : await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+
+        await _feed.NotifyRolesAsync(
+            "workflow-assigned",
+            "info",
+            $"Workflow assigned to {asset?.AssetTag ?? req.AssetId}",
+            $"{typeName} / {configName} was assigned to asset {asset?.AssetTag ?? req.AssetId} on job {project?.JobNumber ?? "unknown"}.",
+            ["Admin", "Project Manager"],
+            asset?.ProjectId,
+            asset?.Id,
+            null,
+            "asset-workflow-assignment",
+            entity.Id,
+            null,
+            assignedBy
+        );
+
+        if (!string.IsNullOrWhiteSpace(asset?.AssignedUserId))
+        {
+            await _feed.NotifyUsersAsync(
+                "workflow-assigned-to-installer",
+                "info",
+                $"New workflow assigned: {typeName}",
+                $"{typeName} / {configName} was assigned to asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"}.",
+                [asset.AssignedUserId],
+                asset.ProjectId,
+                asset.Id,
+                null,
+                "asset-workflow-assignment",
+                entity.Id,
+                null,
+                assignedBy
+            );
+        }
+
         return Ok(new AssetWorkflowAssignmentDto(
             entity.Id, entity.AssetId, entity.WorkflowConfigId, entity.WorkflowTypeId,
             typeName, configName, entity.Active, entity.AssignedBy, entity.AssignedAt));
@@ -103,6 +142,23 @@ public class AssetWorkflowAssignmentsController : ControllerBase
         if (entity is null) return NotFound();
         entity.Active = false;
         await _db.SaveChangesAsync();
+
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == entity.AssetId);
+        var project = asset is null ? null : await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+        await _feed.NotifyRolesAsync(
+            "workflow-unassigned",
+            "warning",
+            $"Workflow assignment removed from {asset?.AssetTag ?? entity.AssetId}",
+            $"A workflow assignment was removed from asset {asset?.AssetTag ?? entity.AssetId} on job {project?.JobNumber ?? "unknown"}.",
+            ["Admin", "Project Manager"],
+            asset?.ProjectId,
+            asset?.Id,
+            null,
+            "asset-workflow-assignment",
+            entity.Id,
+            null,
+            User.Identity?.Name ?? User.FindFirst("email")?.Value
+        );
         return NoContent();
     }
 }
