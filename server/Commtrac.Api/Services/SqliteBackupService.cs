@@ -61,16 +61,25 @@ public sealed class SqliteBackupService : BackgroundService
         await _mutex.WaitAsync(cancellationToken);
         try
         {
-            var directory = GetBackupDirectory();
-            Directory.CreateDirectory(directory);
+            return await CreateBackupCoreAsync(reason, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
 
-            var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
-            var fileName = $"commtrac-{timestamp}.db";
-            var backupPath = Path.Combine(directory, fileName);
-            var sourcePath = GetDatabasePath();
+    public async Task<(SqliteBackupInfo SafeguardBackup, DateTime RestoredAtUtc)> RestoreBackupAsync(string fileName, CancellationToken cancellationToken = default)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var sourcePath = ResolveBackupPath(fileName);
+            var destinationPath = GetDatabasePath();
+            var safeguard = await CreateBackupCoreAsync("pre-restore", cancellationToken);
 
             var sourceBuilder = new SqliteConnectionStringBuilder { DataSource = sourcePath, Mode = SqliteOpenMode.ReadOnly };
-            var destinationBuilder = new SqliteConnectionStringBuilder { DataSource = backupPath, Mode = SqliteOpenMode.ReadWriteCreate };
+            var destinationBuilder = new SqliteConnectionStringBuilder { DataSource = destinationPath, Mode = SqliteOpenMode.ReadWrite };
 
             await using (var source = new SqliteConnection(sourceBuilder.ToString()))
             await using (var destination = new SqliteConnection(destinationBuilder.ToString()))
@@ -80,19 +89,34 @@ public sealed class SqliteBackupService : BackgroundService
                 source.BackupDatabase(destination);
             }
 
-            await PruneOldBackupsAsync(cancellationToken);
-
+            var restoredAtUtc = DateTime.UtcNow;
             using var scope = _scopeFactory.CreateScope();
             var audit = scope.ServiceProvider.GetRequiredService<AuditLogService>();
-            await audit.LogSystemAsync("database_backup_created", $"{fileName} ({reason})");
+            await audit.LogSystemAsync("database_backup_restored", $"{fileName} -> {Path.GetFileName(destinationPath)}");
 
-            var file = new FileInfo(backupPath);
-            return new SqliteBackupInfo(file.Name, file.FullName, file.Length, file.CreationTimeUtc);
+            return (safeguard, restoredAtUtc);
         }
         finally
         {
             _mutex.Release();
         }
+    }
+
+    public string ResolveBackupPath(string fileName)
+    {
+        var safeFileName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(safeFileName))
+        {
+            throw new FileNotFoundException("Backup file name is required.");
+        }
+
+        var backupPath = Path.Combine(GetBackupDirectory(), safeFileName);
+        if (!File.Exists(backupPath))
+        {
+            throw new FileNotFoundException($"Backup '{safeFileName}' was not found.", safeFileName);
+        }
+
+        return backupPath;
     }
 
     private async Task EnsureRecentBackupAsync(CancellationToken cancellationToken)
@@ -121,6 +145,37 @@ public sealed class SqliteBackupService : BackgroundService
     }
 
     private string GetBackupDirectory() => Path.GetFullPath(Path.Combine(_environment.ContentRootPath, _options.Directory));
+
+    private async Task<SqliteBackupInfo> CreateBackupCoreAsync(string reason, CancellationToken cancellationToken)
+    {
+        var directory = GetBackupDirectory();
+        Directory.CreateDirectory(directory);
+
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+        var fileName = $"commtrac-{timestamp}.db";
+        var backupPath = Path.Combine(directory, fileName);
+        var sourcePath = GetDatabasePath();
+
+        var sourceBuilder = new SqliteConnectionStringBuilder { DataSource = sourcePath, Mode = SqliteOpenMode.ReadOnly };
+        var destinationBuilder = new SqliteConnectionStringBuilder { DataSource = backupPath, Mode = SqliteOpenMode.ReadWriteCreate };
+
+        await using (var source = new SqliteConnection(sourceBuilder.ToString()))
+        await using (var destination = new SqliteConnection(destinationBuilder.ToString()))
+        {
+            await source.OpenAsync(cancellationToken);
+            await destination.OpenAsync(cancellationToken);
+            source.BackupDatabase(destination);
+        }
+
+        await PruneOldBackupsAsync(cancellationToken);
+
+        using var scope = _scopeFactory.CreateScope();
+        var audit = scope.ServiceProvider.GetRequiredService<AuditLogService>();
+        await audit.LogSystemAsync("database_backup_created", $"{fileName} ({reason})");
+
+        var file = new FileInfo(backupPath);
+        return new SqliteBackupInfo(file.Name, file.FullName, file.Length, file.CreationTimeUtc);
+    }
 
     private string GetDatabasePath()
     {

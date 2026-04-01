@@ -58,6 +58,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import * as XLSX from "xlsx";
 import PasswordField from "../../components/ui/PasswordField";
+import RecoveryCenter from "./RecoveryCenter";
 
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
 function BusinessLogoTab() {
@@ -291,13 +292,6 @@ interface AuditLogEntry {
   timestamp: string;
 }
 
-interface BackupEntry {
-  fileName: string;
-  fullPath: string;
-  sizeBytes: number;
-  createdAtUtc: string;
-}
-
 const SETTINGS_TAB_KEYS = ["quickbase", "sms", "fields", "divisions", "products", "features", "workflow-types", "logo", "audit"];
 
 const Settings = () => {
@@ -307,9 +301,6 @@ const Settings = () => {
   const isAdmin = user?.role === "Admin" || localStorage.getItem("local_auth_user")?.includes('"Admin"');
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
-  const [backups, setBackups] = useState<BackupEntry[]>([]);
-  const [backupLoading, setBackupLoading] = useState(false);
-  const [backupCreating, setBackupCreating] = useState(false);
   const [tab, setTab] = useState(() => {
     // URL param takes priority over localStorage
     const urlKey = new URLSearchParams(window.location.search).get("tab");
@@ -2648,38 +2639,6 @@ const Settings = () => {
               >
                 {auditLoading ? "Loading..." : "Load audit log"}
               </Button>
-              <Button
-                variant="outlined"
-                disabled={backupLoading}
-                onClick={async () => {
-                  setBackupLoading(true);
-                  try {
-                    const response = await api.get<BackupEntry[]>("/settings/backups");
-                    setBackups(response.data);
-                  } catch {
-                    setBackups([]);
-                  }
-                  setBackupLoading(false);
-                }}
-              >
-                {backupLoading ? "Loading backups..." : "Load backups"}
-              </Button>
-              <Button
-                variant="contained"
-                disabled={backupCreating}
-                onClick={async () => {
-                  setBackupCreating(true);
-                  try {
-                    await api.post("/settings/backups/create");
-                    const response = await api.get<BackupEntry[]>("/settings/backups");
-                    setBackups(response.data);
-                  } finally {
-                    setBackupCreating(false);
-                  }
-                }}
-              >
-                {backupCreating ? "Creating backup..." : "Create backup now"}
-              </Button>
             </Stack>
             {auditLogs.length > 0 && (
               <TableContainer sx={{ overflowX: "auto" }}>
@@ -2728,39 +2687,7 @@ const Settings = () => {
               </Typography>
             )}
             <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-            <Typography variant="h6">Database Backups</Typography>
-            <Typography variant="body2" color="text.secondary">
-              SQLite snapshots stored on the server for recovery.
-            </Typography>
-            {backups.length > 0 && (
-              <TableContainer sx={{ overflowX: "auto" }}>
-                <Table size="small" sx={{ minWidth: 650 }}>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Created</TableCell>
-                      <TableCell>File</TableCell>
-                      <TableCell>Size</TableCell>
-                      <TableCell>Path</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {backups.map((backup) => (
-                      <TableRow key={backup.fullPath}>
-                        <TableCell sx={{ whiteSpace: "nowrap" }}>{new Date(backup.createdAtUtc).toLocaleString()}</TableCell>
-                        <TableCell>{backup.fileName}</TableCell>
-                        <TableCell>{(backup.sizeBytes / (1024 * 1024)).toFixed(2)} MB</TableCell>
-                        <TableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{backup.fullPath}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-            {backups.length === 0 && !backupLoading && (
-              <Typography variant="body2" color="text.secondary">
-                Click "Load backups" to view available database snapshots.
-              </Typography>
-            )}
+            <RecoveryCenter />
           </Stack>
         )}
 

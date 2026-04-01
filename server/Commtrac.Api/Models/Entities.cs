@@ -385,6 +385,12 @@ public class DocumentEntity
     public string? CustomValuesJson { get; set; }
     [MaxLength(2000)]
     public string? DownloadUrl { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(400)]
+    public string? DeleteReason { get; set; }
 }
 
 public class DocumentConfigEntity

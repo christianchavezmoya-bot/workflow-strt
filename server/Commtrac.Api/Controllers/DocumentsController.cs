@@ -18,12 +18,14 @@ public class DocumentsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
     private readonly IDocumentSearchIndexQueue _searchIndexQueue;
+    private readonly AuditLogService _audit;
 
-    public DocumentsController(AppDbContext db, IWebHostEnvironment env, IDocumentSearchIndexQueue searchIndexQueue)
+    public DocumentsController(AppDbContext db, IWebHostEnvironment env, IDocumentSearchIndexQueue searchIndexQueue, AuditLogService audit)
     {
         _db = db;
         _env = env;
         _searchIndexQueue = searchIndexQueue;
+        _audit = audit;
     }
 
     [HttpGet]
@@ -126,20 +128,65 @@ public class DocumentsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
-        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+        if (doc.IsDeleted) return NoContent();
+
+        doc.IsDeleted = true;
+        doc.DeletedAtUtc = DateTime.UtcNow;
+        doc.DeletedByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        await _db.SaveChangesAsync();
+        _searchIndexQueue.RemoveLibraryDocument(id);
+        await _audit.LogAsync(User, HttpContext, "document_archived", $"{doc.Name} ({doc.Id})");
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
         if (doc is null) return NotFound();
 
-        // Delete the physical file if one exists
+        if (!string.IsNullOrWhiteSpace(doc.FilePath))
+        {
+            var fullPath = Path.Combine(_env.ContentRootPath, doc.FilePath);
+            if (!System.IO.File.Exists(fullPath))
+            {
+                return Conflict("Physical file is missing from storage.");
+            }
+        }
+
+        doc.IsDeleted = false;
+        doc.DeletedAtUtc = null;
+        doc.DeletedByUserId = null;
+        doc.DeleteReason = null;
+        await _db.SaveChangesAsync();
+        _searchIndexQueue.EnqueueLibraryDocument(id);
+        await _audit.LogAsync(User, HttpContext, "document_restored", $"{doc.Name} ({doc.Id})");
+        return NoContent();
+    }
+
+    [HttpDelete("{id}/purge")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Purge(string id)
+    {
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+
         if (!string.IsNullOrWhiteSpace(doc.FilePath))
         {
             var fullPath = Path.Combine(_env.ContentRootPath, doc.FilePath);
             if (System.IO.File.Exists(fullPath))
+            {
                 System.IO.File.Delete(fullPath);
+            }
         }
 
         _db.Documents.Remove(doc);
         await _db.SaveChangesAsync();
         _searchIndexQueue.RemoveLibraryDocument(id);
+        await _audit.LogAsync(User, HttpContext, "document_purged", $"{doc.Name} ({doc.Id})");
         return NoContent();
     }
 

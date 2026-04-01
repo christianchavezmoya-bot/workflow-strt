@@ -952,7 +952,7 @@ public static class DbInitializer
                 }
             }
 
-            foreach (var table in new[] { "Projects", "Installations", "ProjectAssets", "BomImportRuns" })
+            foreach (var table in new[] { "Projects", "Installations", "ProjectAssets", "BomImportRuns", "Documents" })
             {
                 AddIfMissing(table, "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
                 AddIfMissing(table, "DeletedAtUtc", "TEXT NULL");

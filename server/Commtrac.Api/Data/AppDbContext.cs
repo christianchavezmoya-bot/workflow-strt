@@ -105,6 +105,9 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<BomImportRunEntity>()
             .HasQueryFilter(r => !r.IsDeleted);
 
+        modelBuilder.Entity<DocumentEntity>()
+            .HasQueryFilter(d => !d.IsDeleted);
+
         modelBuilder.Entity<FeatureDependencyEntity>()
             .HasIndex(d => d.FeatureId);
 

@@ -596,6 +596,50 @@ public record DocumentDto(
     string? CustomValuesJson
 );
 
+public record RecycleBinItemDto(
+    string EntityType,
+    string Id,
+    string Title,
+    string? Subtitle,
+    string? ParentId,
+    string? ParentTitle,
+    DateTime? DeletedAtUtc,
+    string? DeletedByUserId
+);
+
+public record BackupCatalogItemDto(
+    string EntityType,
+    string Id,
+    string Title,
+    string? Subtitle,
+    string? ParentId,
+    string? ParentTitle,
+    bool IsDeleted,
+    DateTime? DeletedAtUtc
+);
+
+public record RestoreBackupRequest(string FileName);
+
+public record RestoreBackupItemRequest(
+    string FileName,
+    string EntityType,
+    string EntityId
+);
+
+public record RestoreBackupResponse(
+    string RestoredFromFileName,
+    string SafeguardBackupFileName,
+    DateTime RestoredAtUtc
+);
+
+public record SelectiveRestoreResultDto(
+    string EntityType,
+    string EntityId,
+    string Title,
+    int RecordsRestored,
+    string? Note
+);
+
 public record DocumentConfigDto(string TabsJson, string FieldsJson);
 
 public record InspectionPhotoDto(

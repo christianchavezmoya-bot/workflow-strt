@@ -50,11 +50,8 @@ const ProjectDetail = () => {
     if (!project) return [];
 
     const list: string[] = [];
-    if (project.status === "Draft" && user?.role === "Project Manager") {
-      list.push("Submit for Approval");
-    }
     if (project.status === "Pending Approval" && user?.role === "Admin") {
-      list.push("Approve", "Request Info", "Reject");
+      list.push("Approve", "Reject");
     }
     if (project.status === "Approved" && can.modifyData) {
       list.push("Start Work");
@@ -68,11 +65,6 @@ const ProjectDetail = () => {
   const handleAction = (label: string) => {
     if (!project || !project.id) return;
 
-    if (label === "Submit for Approval") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Pending Approval" } }));
-      setProject({ ...project, status: "Pending Approval" });
-    }
-
     if (label === "Approve") {
       dispatch(
         updateProjectStatus({
@@ -81,16 +73,6 @@ const ProjectDetail = () => {
         })
       );
       setProject({ ...project, status: "Approved", approvalDecision: "Approved" });
-    }
-
-    if (label === "Request Info") {
-      dispatch(
-        updateProjectStatus({
-          id: project.id,
-          payload: { status: "Pending Approval", approvalDecision: "More Info Required" }
-        })
-      );
-      setProject({ ...project, approvalDecision: "More Info Required" });
     }
 
     if (label === "Reject") {

@@ -359,6 +359,22 @@ export default function WorkOrderRunner({
     setUnlistedConsumables([]);
   }
 
+  function resetFlagDraft() {
+    setFlagDescription("");
+    setFlagSeverity("medium");
+    setFlagIssueType("observation");
+    setFlagIsScopeDeviation(false);
+    setFlagExtraHours("");
+    setFlagCostImpact("");
+    setFlagMedia([]);
+    setFlagSubmitted(false);
+  }
+
+  function closeFlagDialog() {
+    setFlagOpen(false);
+    resetFlagDraft();
+  }
+
   function syncRunTimeState(run: {
     timeTrackingJson?: string;
     productiveSeconds?: number;
@@ -412,7 +428,7 @@ export default function WorkOrderRunner({
     }
   }
 
-  function submitFlag() {
+  function submitFlag(closeAfter = false) {
     if (!flagDescription.trim()) return;
     const derivedIssueType: "blocking" | "observation" | "scope-deviation" =
       flagIsScopeDeviation ? "scope-deviation" : flagSeverity === "high" ? "blocking" : "observation";
@@ -435,10 +451,12 @@ export default function WorkOrderRunner({
       }),
     };
     setIssues((prev) => [...prev, issue]);
-    setFlagDescription("");
-    setFlagExtraHours("");
-    setFlagCostImpact("");
-    setFlagMedia([]);
+    void autosaveProgress();
+    if (closeAfter) {
+      closeFlagDialog();
+      return;
+    }
+    resetFlagDraft();
     setFlagSubmitted(true);
   }
 
@@ -1160,7 +1178,16 @@ export default function WorkOrderRunner({
             {startError && <Alert severity="error" sx={{ fontSize: 12 }}>{startError}</Alert>}
           </Stack>
         </DialogContent>
-        <DialogActions>
+        <DialogActions
+          sx={{
+            position: "sticky",
+            bottom: 0,
+            borderTop: "1px solid",
+            borderColor: "divider",
+            bgcolor: "background.paper",
+            zIndex: 1,
+          }}
+        >
           <Button onClick={handleClose}>Cancel</Button>
           <Button
             variant="contained"
@@ -1657,7 +1684,7 @@ export default function WorkOrderRunner({
           </Stack>
         </DialogContent>
 
-        <Dialog open={flagOpen} onClose={() => { setFlagOpen(false); setFlagSubmitted(false); }} maxWidth="sm" fullWidth>
+        <Dialog open={flagOpen} onClose={closeFlagDialog} maxWidth="sm" fullWidth>
           <DialogTitle sx={{ pb: 1 }}>
             <Stack spacing={0.5}>
               <Typography variant="subtitle2" fontWeight={700} color="error">
@@ -1671,8 +1698,30 @@ export default function WorkOrderRunner({
           </DialogTitle>
           <DialogContent dividers>
             <Stack spacing={1.25}>
+              <Box>
+                <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: "block", mb: 0.75 }}>
+                  1. Describe the issue
+                </Typography>
+                <TextField
+                  size="small"
+                  fullWidth
+                  multiline
+                  rows={2}
+                  label={flagIssueType === "scope-deviation" ? "Describe the scope variation" : "Describe/Add issue here"}
+                  placeholder={flagIssueType === "scope-deviation" ? "e.g. Additional conduit run required due to obstructed original route..." : "Describe what you observed..."}
+                  InputLabelProps={{ shrink: true }}
+                  value={flagDescription}
+                  onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
+                />
+              </Box>
+
               {/* Severity selector */}
-              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+              {flagDescription.trim() && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: "block", mb: 0.75 }}>
+                    2. Choose severity
+                  </Typography>
+                  <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
                 <FormControl size="small" sx={{ minWidth: 240 }}>
                   <InputLabel shrink>Severity</InputLabel>
                   <Select
@@ -1685,24 +1734,40 @@ export default function WorkOrderRunner({
                     <MenuItem value="high">High — blocks completion</MenuItem>
                   </Select>
                 </FormControl>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      size="small"
-                      checked={flagIsScopeDeviation}
-                      onChange={(e) => setFlagIsScopeDeviation(e.target.checked)}
+                  </Stack>
+                </Box>
+              )}
+              {flagDescription.trim() && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: "block", mb: 0.75 }}>
+                    3. Add photo / video and classify
+                  </Typography>
+                  <Stack spacing={1}>
+                    <MediaCapture
+                      media={flagMedia}
+                      onChange={setFlagMedia}
+                      label="Add Photo / Video"
                     />
-                  }
-                  label={
-                    <Stack direction="row" spacing={0.5} alignItems="center">
-                      <Typography variant="caption">Scope variation</Typography>
-                      <AttachMoneyOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
-                      <AccessTimeOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
-                    </Stack>
-                  }
-                />
-              </Stack>
-              {flagIsScopeDeviation && (
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={flagIsScopeDeviation}
+                          onChange={(e) => setFlagIsScopeDeviation(e.target.checked)}
+                        />
+                      }
+                      label={
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Typography variant="caption">Is this a Job Variation?</Typography>
+                          <AttachMoneyOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
+                          <AccessTimeOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
+                        </Stack>
+                      }
+                    />
+                  </Stack>
+                </Box>
+              )}
+              {flagDescription.trim() && flagIsScopeDeviation && (
                 <Typography variant="caption" color="warning.main" display="block">
                   Work discovered outside the original scope (e.g. additional cabling, unforeseen access requirements). This is a scope variation.
                 </Typography>
@@ -1767,19 +1832,12 @@ export default function WorkOrderRunner({
                   ))}
                 </Stack>
               )}
-              <TextField
-                size="small"
-                fullWidth
-                multiline
-                rows={2}
-                label={flagIssueType === "scope-deviation" ? "Describe the scope variation" : "Describe/Add issue here"}
-                placeholder={flagIssueType === "scope-deviation" ? "e.g. Additional conduit run required due to obstructed original route…" : "Describe what you observed…"}
-                InputLabelProps={{ shrink: true }}
-                value={flagDescription}
-                onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
-              />
-              {flagIsScopeDeviation && (
-                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+              {flagDescription.trim() && flagIsScopeDeviation && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: "block", mb: 0.75 }}>
+                    4. Variation details
+                  </Typography>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
                   <TextField
                     size="small"
                     label="Extra hours (est.)"
@@ -1798,13 +1856,9 @@ export default function WorkOrderRunner({
                     onChange={(e) => setFlagCostImpact(e.target.value)}
                     sx={{ flex: 1 }}
                   />
-                </Stack>
+                  </Stack>
+                </Box>
               )}
-              <MediaCapture
-                media={flagMedia}
-                onChange={setFlagMedia}
-                label="Attach Photo / Video (optional)"
-              />
             </Stack>
           </DialogContent>
           <DialogActions sx={{ justifyContent: "space-between", gap: 1, px: 3, py: 1.5 }}>
@@ -1816,15 +1870,24 @@ export default function WorkOrderRunner({
               <Box />
             )}
             <Stack direction="row" spacing={1}>
-              <Button size="small" variant="text" color="inherit" onClick={() => { setFlagOpen(false); setFlagSubmitted(false); }}>
-                Close
+              <Button size="small" variant="text" color="inherit" onClick={closeFlagDialog}>
+                Cancel
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                color="inherit"
+                disabled={!flagDescription.trim()}
+                onClick={() => submitFlag(true)}
+              >
+                Save & close
               </Button>
               <Button
                 size="small"
                 variant="contained"
                 color="success"
                 disabled={!flagDescription.trim()}
-                onClick={submitFlag}
+                onClick={() => submitFlag(false)}
               >
                 Add issue
               </Button>
@@ -2703,7 +2766,19 @@ export default function WorkOrderRunner({
 
   return (
     <>
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      <Dialog
+        open={open}
+        onClose={handleClose}
+        maxWidth="sm"
+        fullWidth
+        scroll="paper"
+        PaperProps={{
+          sx: {
+            maxHeight: "calc(100dvh - 16px)",
+            m: 1,
+          },
+        }}
+      >
         {stage === "setup"          && renderSetup()}
         {stage === "running"        && renderRunning()}
         {stage === "summary"        && renderSummary()}

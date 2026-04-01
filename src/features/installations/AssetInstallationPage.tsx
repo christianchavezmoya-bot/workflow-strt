@@ -66,7 +66,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Tabs,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -275,7 +274,6 @@ const AssetInstallationPage = () => {
   // effect corrects the tab) are silently discarded.
   const assetLoadIdRef = useRef(0);
 
-  const [tab, setTab] = useState(0);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     () => { try { return sessionStorage.getItem("installations_selected_project_id") ?? ""; } catch { return ""; } }
   );
@@ -452,56 +450,51 @@ const AssetInstallationPage = () => {
     [productsState.items],
   );
 
+  // Restore selected project from URL params (priority) or sessionStorage (fallback).
   useEffect(() => {
-    if (tab >= products.length) setTab(Math.max(0, products.length - 1));
-  }, [tab, products.length]);
-
-  // Restore product tab + project from URL params (priority) or sessionStorage (fallback).
-  // Only saves to sessionStorage when a URL param provides a new value (not on SS restore,
-  // which avoids the first-render race where tab=0 would overwrite the stored product).
-  useEffect(() => {
-    if (products.length === 0) return;
-    const productIdFromUrl = searchParams.get("product");
-    if (productIdFromUrl) {
-      const idx = products.findIndex((p) => p.id === productIdFromUrl);
-      if (idx >= 0) {
-        setTab(idx);
-        try { sessionStorage.setItem("installations_active_product_id", productIdFromUrl); } catch {}
-      }
-    } else {
-      try {
-        const stored = sessionStorage.getItem("installations_active_product_id");
-        if (stored) {
-          const idx = products.findIndex((p) => p.id === stored);
-          if (idx >= 0) setTab(idx);
-        }
-      } catch {}
-    }
     const projectIdFromUrl = searchParams.get("project");
     if (projectIdFromUrl) {
       setSelectedProjectId(projectIdFromUrl);
       try { sessionStorage.setItem("installations_selected_project_id", projectIdFromUrl); } catch {}
     }
-  }, [products]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
-  const activeProduct = products[tab];
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId]
+  );
+  const activeProduct = useMemo(() => {
+    const projectProductId = selectedProject?.productIds?.[0];
+    if (projectProductId) {
+      return products.find((p) => p.id === projectProductId);
+    }
+    const productIdFromUrl = searchParams.get("product");
+    if (productIdFromUrl) {
+      return products.find((p) => p.id === productIdFromUrl);
+    }
+    return undefined;
+  }, [products, searchParams, selectedProject]);
   const activeFeatures = useMemo(() => (activeProduct?.features ?? []) as FeatureDef[], [activeProduct]);
 
   useEffect(() => {
-    if (!activeProduct?.id) { setAssets([]); setConfigs([]); setPublishedWfConfigs([]); return; }
+    if (products.length === 0) { setAssets([]); setConfigs([]); setPublishedWfConfigs([]); return; }
     // Increment the load ID so any in-flight load from a previous product is ignored
     const loadId = ++assetLoadIdRef.current;
     setLoadingAssets(true);
-    Promise.all([
-      projectAssetService.listByProduct(activeProduct.id, archiveMode),
-      productConfigService.listByProduct(activeProduct.id),
-      workflowConfigService.listByProduct(activeProduct.id, "Published"),
-    ]).then(([a, c, wc]) => {
+    const assetPromise = selectedProjectId
+      ? projectAssetService.listByProject(selectedProjectId, archiveMode)
+      : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode)))
+          .then((groups) => groups.flat());
+    const configPromise = activeProduct?.id ? productConfigService.listByProduct(activeProduct.id) : Promise.resolve([]);
+    const workflowPromise = activeProduct?.id ? workflowConfigService.listByProduct(activeProduct.id, "Published") : Promise.resolve([]);
+    Promise.all([assetPromise, configPromise, workflowPromise]).then(([a, c, wc]) => {
       if (loadId !== assetLoadIdRef.current) return; // Stale â€” a newer load is in flight
       setAssets(a);
       setConfigs(c);
       setPublishedWfConfigs(wc);
-      setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+      if (activeProduct?.id) {
+        setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+      }
       // Pre-load latest run per asset (for signature status in status chip) â€” fire-and-forget
       const uniqueProjectIds = [...new Set(a.map(asset => asset.projectId).filter(Boolean))];
       Promise.all(uniqueProjectIds.map(pid => assetWorkflowRunService.listLatestByProject(pid)))
@@ -531,13 +524,17 @@ const AssetInstallationPage = () => {
     }).finally(() => {
       if (loadId === assetLoadIdRef.current) setLoadingAssets(false);
     });
-  }, [activeProduct?.id, archiveMode]);
+  }, [activeProduct?.id, archiveMode, products, selectedProjectId]);
 
   const refreshAssets = () => {
-    if (!activeProduct?.id) return;
-    projectAssetService.listByProduct(activeProduct.id, archiveMode).then((a) => {
+    const refreshPromise = selectedProjectId
+      ? projectAssetService.listByProject(selectedProjectId, archiveMode)
+      : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode))).then((groups) => groups.flat());
+    refreshPromise.then((a) => {
       setAssets(a);
-      setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+      if (activeProduct?.id) {
+        setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+      }
     });
   };
 
@@ -581,7 +578,9 @@ const AssetInstallationPage = () => {
 
   // Projects filtered to those linked to the active product (used in add/edit dialogs)
   const productProjects = useMemo(
-    () => projects.filter((p) => p.productIds?.includes(activeProduct?.id ?? "")),
+    () => activeProduct?.id
+      ? projects.filter((p) => p.productIds?.includes(activeProduct.id))
+      : projects,
     [projects, activeProduct?.id],
   );
 
@@ -802,7 +801,7 @@ const AssetInstallationPage = () => {
         assignedUserId: editForm.assignedUserId || undefined,
         notes: editForm.notes.trim() || undefined,
         productConfigId: editForm.configId,
-        status: editStatus,
+        status: currentUser?.role === "Admin" ? editStatus : undefined,
         featureValuesJson: Object.keys(editForm.featureValues).length
           ? JSON.stringify(editForm.featureValues)
           : undefined,
@@ -2369,7 +2368,10 @@ const AssetInstallationPage = () => {
   // Render
   // ------------------------------------------------------------------
 
-  const activeHealth = activeProduct ? healthMap[activeProduct.id] : undefined;
+  const activeHealth = useMemo(
+    () => activeProduct ? healthMap[activeProduct.id] : computeHealth(assets),
+    [activeProduct, assets, healthMap]
+  );
 
   const activeTimeRollup = useMemo(() => {
     let productive = 0;
@@ -2390,9 +2392,14 @@ const AssetInstallationPage = () => {
       {/* Header */}
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
         <Box>
-          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Installation Assets</Typography>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Installation Assets</Typography>
+            {activeProduct?.name && <Chip size="small" color="primary" variant="outlined" label={activeProduct.name} />}
+          </Stack>
           <Typography variant="body2" color="text.secondary">
-            Track assets across projects â€” start work orders, record status, and monitor progress.
+            {selectedProject
+              ? `Track assets for ${selectedProject.jobNumber} â€” start work orders, record status, and monitor progress.`
+              : "Track assets across all projects â€” start work orders, record status, and monitor progress."}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
@@ -2417,35 +2424,13 @@ const AssetInstallationPage = () => {
         </Stack>
       </Stack>
 
-      {/* Product tabs with health dots */}
-      <Paper className="glass-card" sx={{ p: 1.5 }}>
-        <Tabs value={tab} onChange={(_, next) => { setTab(next); try { sessionStorage.setItem("installations_active_product_id", products[next]?.id ?? ""); } catch {} }} variant="scrollable" allowScrollButtonsMobile scrollButtons="auto">
-          {products.map((p) => {
-            const h = healthMap[p.id];
-            const dotColor = tabDotColor(h);
-            return (
-              <Tab
-                key={p.id}
-                label={
-                  <Stack direction="row" alignItems="center" spacing={0.75}>
-                    <span>{p.name}</span>
-                    {dotColor && <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: dotColor, flexShrink: 0 }} />}
-                    {h && h.total > 0 && <Typography variant="caption" sx={{ opacity: 0.65 }}>{h.total}</Typography>}
-                  </Stack>
-                }
-              />
-            );
-          })}
-        </Tabs>
-      </Paper>
-
       {/* Health summary bar */}
       {!loadingAssets && activeHealth && activeHealth.total > 0 && (
         <Paper className="glass-card" sx={{ px: 2.5, py: 1.5 }}>
           <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} spacing={1.5} flexWrap="wrap" useFlexGap>
             <Typography variant="caption" color="text.secondary" fontWeight={700}
               sx={{ textTransform: "uppercase", letterSpacing: 0.5, flexShrink: 0 }}>
-              {activeProduct?.name} health
+              {activeProduct?.name ?? "All projects"} health
             </Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {activeHealth.notStarted > 0 && (
@@ -3021,7 +3006,7 @@ const AssetInstallationPage = () => {
               label="Location" size="small" fullWidth
               value={addForm.location}
               onChange={(e) => setAddForm((p) => ({ ...p, location: e.target.value }))}
-              placeholder="Auto-filled from project site"
+              placeholder="i.e LV workshop, U/G"
               InputLabelProps={{ shrink: true }}
               helperText={
                 addForm.projectId && projects.find((p) => p.id === addForm.projectId)?.siteName
@@ -3119,7 +3104,9 @@ const AssetInstallationPage = () => {
               onChange={(e) => setEditForm((p) => ({ ...p, manufacturer: e.target.value }))} />
             <TextField label="Location" size="small" fullWidth
               value={editForm.location}
-              onChange={(e) => setEditForm((p) => ({ ...p, location: e.target.value }))} />
+              onChange={(e) => setEditForm((p) => ({ ...p, location: e.target.value }))}
+              placeholder="i.e LV workshop, U/G"
+              InputLabelProps={{ shrink: true }} />
             <FormControl size="small" fullWidth>
               <InputLabel shrink>Assigned Technician</InputLabel>
               <Select label="Assigned Technician" value={editForm.assignedUserId}
@@ -3136,7 +3123,8 @@ const AssetInstallationPage = () => {
             <FormControl size="small" fullWidth>
               <InputLabel shrink>Status</InputLabel>
               <Select label="Status" value={editStatus}
-                onChange={(e) => setEditStatus(e.target.value as ProjectAssetStatus)}>
+                onChange={(e) => setEditStatus(e.target.value as ProjectAssetStatus)}
+                disabled={currentUser?.role !== "Admin"}>
                 <MenuItem value="NotStarted">Not Started</MenuItem>
                 <MenuItem value="InProgress">In Progress</MenuItem>
                 <MenuItem value="Complete">Complete</MenuItem>

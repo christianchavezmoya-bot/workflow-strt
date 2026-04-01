@@ -2215,7 +2215,7 @@ open ios/App/App.xcodeproj
   <div style="padding:32px 60px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
     <div>
       <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--white)">Commtrac Codex 915</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:2px">Full System Documentation · Generated 2026-03-31</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">Full System Documentation · Generated 2026-04-01</div>
     </div>
     <div style="display:flex;gap:16px;font-family:'DM Mono',monospace;font-size:10px;color:var(--text3)">
       <span>React 18 + TypeScript</span>

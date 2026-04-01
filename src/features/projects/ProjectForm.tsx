@@ -29,7 +29,7 @@ import {
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs from "dayjs";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -55,6 +55,8 @@ import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import type { Site } from "../../types/site";
 import type { FieldDefinition } from "../../services/fieldService";
+
+const getLocalDateString = (offsetDays = 0) => dayjs().add(offsetDays, "day").format("YYYY-MM-DD");
 
 const schema = z
   .object({
@@ -84,7 +86,7 @@ const schema = z
       .optional(),
     approvalDecision: z
       .union([
-        z.enum(["Approved", "Rejected", "More Info Required"] as [ApprovalDecision, ...ApprovalDecision[]]),
+        z.enum(["Approved", "Rejected"] as [ApprovalDecision, ...ApprovalDecision[]]),
         z.literal("")
       ])
       .optional(),
@@ -120,6 +122,7 @@ const ProjectForm = () => {
     [allFieldDefinitions.definitions]
   );
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
+  const saveModeRef = useRef<"draft" | "final">("final");
   const builtInLabel = useMemo(() => {
     const overrides = projectsTableConfig.config.baseFieldNames || {};
     return (id: string, fallback: string) => {
@@ -151,7 +154,9 @@ const ProjectForm = () => {
     reset,
     setError,
     setValue,
-    setFocus
+    setFocus,
+    getValues,
+    clearErrors
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -161,7 +166,7 @@ const ProjectForm = () => {
       jobNumber: "",
       purchaseOrderNumber: "",
       description: "",
-      startDate: "",
+      startDate: getLocalDateString(),
       finishDate: "",
       office: "",
       region: "",
@@ -185,7 +190,27 @@ const ProjectForm = () => {
   }, []);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id) {
+      reset({
+        customerName: "",
+        customerId: "",
+        siteId: "",
+        jobNumber: "",
+        purchaseOrderNumber: "",
+        description: "",
+        startDate: getLocalDateString(),
+        finishDate: "",
+        office: "",
+        region: "",
+        projectManager: "",
+        projectType: "Internal",
+        status: "Draft",
+        approvalDecision: "",
+        isInstallationProject: false,
+        productIds: []
+      });
+      return;
+    }
 
     const localProject = items.find((item) => item.id === id);
     if (localProject) {
@@ -208,7 +233,6 @@ const ProjectForm = () => {
         productIds: localProject.productIds ?? []
       });
       setProductFeatureValues(localProject.productFeatureValues || {});
-      return;
     }
 
     projectService.getProject(id).then((project) => {
@@ -219,7 +243,7 @@ const ProjectForm = () => {
         jobNumber: project.jobNumber,
         purchaseOrderNumber: project.purchaseOrderNumber || "",
         description: project.description,
-        startDate: project.startDate,
+        startDate: project.startDate || getLocalDateString(),
         finishDate: project.finishDate,
         office: project.officeId || globalOffices.find((o) => o.city === project.office)?.id || "",
         region: project.region,
@@ -232,7 +256,7 @@ const ProjectForm = () => {
       });
       setProductFeatureValues(project.productFeatureValues || {});
     });
-  }, [id, items, reset]);
+  }, [id, items, reset, globalOffices]);
 
   useEffect(() => {
     if (projectsDynamic.definitions.length === 0) return;
@@ -258,7 +282,6 @@ const ProjectForm = () => {
 
   const projectType = watch("projectType");
   const isInstallationProject = watch("isInstallationProject");
-  const status = watch("status");
   const customerId = watch("customerId");
   const siteId = watch("siteId");
   const office = watch("office");
@@ -406,7 +429,9 @@ const ProjectForm = () => {
       anyWindow.__apiDebugLogs = [];
     }
     anyWindow.__apiDebugLogs.push({
-      id: crypto.randomUUID(),
+      id: typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : Math.random().toString(36).slice(2),
       time: new Date().toLocaleTimeString(),
       method: "UI",
       url: message,
@@ -418,6 +443,7 @@ const ProjectForm = () => {
 
   const onSubmit = async (data: FormValues) => {
     setDynamicFieldErrors({});
+    setSubmitError(null);
     // Validate required fields based on table configuration (admin-controlled).
     const hiddenSet = new Set(projectsTableConfig.config.hidden || []);
     const meta = projectsTableConfig.config.baseFieldMeta || {};
@@ -425,57 +451,64 @@ const ProjectForm = () => {
 
     const isRequired = (fieldId: string) => !!meta[fieldId]?.required && !hiddenSet.has(fieldId);
     const isBlank = (value: unknown) => String(value ?? "").trim() === "";
+    const requestedDecision = data.approvalDecision || undefined;
+    const currentSaveMode = saveModeRef.current;
+    const derivedStatus: ProjectStatus =
+      currentSaveMode === "draft"
+        ? "Draft"
+        : requestedDecision === "Approved"
+        ? "Approved"
+        : requestedDecision === "Rejected"
+        ? "Cancelled"
+        : ((data.status as ProjectStatus | undefined) || "Draft");
+    const shouldEnforceRequiredFields = derivedStatus !== "Draft";
 
-    if (isRequired("customerName") && !selectedCustomerId) {
+    if (shouldEnforceRequiredFields && isRequired("customerName") && !selectedCustomerId) {
       // customerName is driven by the separate Select (selectedCustomerId), so set an explicit form error.
       setError("customerName", { type: "required", message: `${labelCustomer} is required` });
       missing.push(labelCustomer);
     }
-    if (isRequired("customerId") && isBlank(data.customerId)) {
+    if (shouldEnforceRequiredFields && isRequired("customerId") && isBlank(data.customerId)) {
       setError("customerId", { type: "required", message: `${labelCustomerId} is required` });
       missing.push(labelCustomerId);
     }
-    if (isRequired("siteName") && isBlank(data.siteId)) {
+    if (shouldEnforceRequiredFields && isRequired("siteName") && isBlank(data.siteId)) {
       setError("siteId", { type: "required", message: `${labelSite} is required` });
       missing.push(labelSite);
     }
-    if (isRequired("jobNumber") && isBlank(data.jobNumber)) {
+    if (shouldEnforceRequiredFields && isRequired("jobNumber") && isBlank(data.jobNumber)) {
       setError("jobNumber", { type: "required", message: `${labelJobNumber} is required` });
       missing.push(labelJobNumber);
     }
-    if (isRequired("description") && isBlank(data.description)) {
+    if (shouldEnforceRequiredFields && isRequired("description") && isBlank(data.description)) {
       setError("description", { type: "required", message: `${labelDescription} is required` });
       missing.push(labelDescription);
     }
-    if (isRequired("startDate") && isBlank(data.startDate)) {
+    if (shouldEnforceRequiredFields && isRequired("startDate") && isBlank(data.startDate)) {
       setError("startDate", { type: "required", message: `${labelStartDate} is required` });
       missing.push(labelStartDate);
     }
-    if (isRequired("finishDate") && isBlank(data.finishDate)) {
+    if (shouldEnforceRequiredFields && isRequired("finishDate") && isBlank(data.finishDate)) {
       setError("finishDate", { type: "required", message: `${labelFinishDate} is required` });
       missing.push(labelFinishDate);
     }
-    if (isRequired("office") && isBlank(data.office)) {
+    if (shouldEnforceRequiredFields && isRequired("office") && isBlank(data.office)) {
       setError("office", { type: "required", message: `${labelOffice} is required` });
       missing.push(labelOffice);
     }
-    if (isRequired("region") && isBlank(data.region)) {
+    if (shouldEnforceRequiredFields && isRequired("region") && isBlank(data.region)) {
       setError("region", { type: "required", message: `${labelRegion} is required` });
       missing.push(labelRegion);
     }
-    if (isRequired("projectManager") && isBlank(data.projectManager)) {
+    if (shouldEnforceRequiredFields && isRequired("projectManager") && isBlank(data.projectManager)) {
       setError("projectManager", { type: "required", message: `${labelProjectManager} is required` });
       missing.push(labelProjectManager);
     }
-    if (isRequired("status") && isBlank(data.status)) {
-      setError("status", { type: "required", message: `${labelStatus} is required` });
-      missing.push(labelStatus);
-    }
-    if (isRequired("projectType") && isBlank(data.projectType)) {
+    if (shouldEnforceRequiredFields && isRequired("projectType") && isBlank(data.projectType)) {
       setError("projectType", { type: "required", message: `${labelProjectType} is required` });
       missing.push(labelProjectType);
     }
-    if (isRequired("products") && (!data.productIds || data.productIds.length === 0)) {
+    if (shouldEnforceRequiredFields && isRequired("products") && (!data.productIds || data.productIds.length === 0)) {
       setError("productIds", { type: "required", message: `${labelProducts} is required` });
       missing.push(labelProducts);
     }
@@ -494,17 +527,19 @@ const ProjectForm = () => {
     };
 
     // Dynamic fields required flags are stored in baseFieldMeta by field id.
-    const missingDynamicDefs = projectsDynamic.definitions
-      .filter((def) => !!meta[def.id]?.required && !hiddenSet.has(def.id))
-      .filter((def) => isBlank(dynamicValueForValidation(def)))
-      .map((def) => ({ id: def.id, name: def.name }));
-    if (missingDynamicDefs.length) {
-      const nextErrors: Record<string, string> = {};
-      missingDynamicDefs.forEach((def) => {
-        nextErrors[def.id] = `${def.name} is required`;
-      });
-      setDynamicFieldErrors(nextErrors);
-      missing.push(...missingDynamicDefs.map((d) => d.name));
+    if (shouldEnforceRequiredFields) {
+      const missingDynamicDefs = projectsDynamic.definitions
+        .filter((def) => !!meta[def.id]?.required && !hiddenSet.has(def.id))
+        .filter((def) => isBlank(dynamicValueForValidation(def)))
+        .map((def) => ({ id: def.id, name: def.name }));
+      if (missingDynamicDefs.length) {
+        const nextErrors: Record<string, string> = {};
+        missingDynamicDefs.forEach((def) => {
+          nextErrors[def.id] = `${def.name} is required`;
+        });
+        setDynamicFieldErrors(nextErrors);
+        missing.push(...missingDynamicDefs.map((d) => d.name));
+      }
     }
 
     if (missing.length) {
@@ -514,7 +549,7 @@ const ProjectForm = () => {
     }
 
     const selected = filteredCustomers.find((customer) => customer.id === selectedCustomerId);
-    if (!selected) {
+    if (shouldEnforceRequiredFields && !selected) {
       // Customer selection can be hidden/optional; only block if a dependent field is required.
       if (isRequired("customerName") || isRequired("customerId") || isRequired("siteName")) {
         setSubmitError(`Select a ${labelCustomer.toLowerCase()} before submitting.`);
@@ -543,14 +578,14 @@ const ProjectForm = () => {
       jobNumber: data.jobNumber || "",
       purchaseOrderNumber: data.purchaseOrderNumber || "",
       description: data.description || "",
-      startDate: data.startDate || "",
+      startDate: data.startDate || getLocalDateString(),
       finishDate: data.finishDate || "",
       officeId: data.office || undefined,
       office: globalOffices.find((o) => o.id === data.office)?.city || data.office || "",
       region: data.region,
       projectType: (data.projectType as any) || "Internal",
-      status: (data.status as any) || "Draft",
-      approvalDecision: data.approvalDecision || undefined,
+      status: derivedStatus,
+      approvalDecision: requestedDecision,
       isInstallationProject: data.isInstallationProject,
       projectManager: data.projectManager,
       productIds: data.productIds ?? [],
@@ -639,6 +674,24 @@ const ProjectForm = () => {
         // ignore
       }
     }
+  };
+
+  const runSave = (mode: "draft" | "final") => {
+    saveModeRef.current = mode;
+    if (mode === "draft") {
+      clearErrors();
+      setDynamicFieldErrors({});
+      setSubmitError(null);
+      setValue("approvalDecision", "", { shouldValidate: false });
+      setValue("status", "Draft", { shouldValidate: false });
+      void onSubmit({
+        ...getValues(),
+        approvalDecision: "",
+        status: "Draft"
+      });
+      return;
+    }
+    void handleSubmit(onSubmit, onInvalid)();
   };
 
   const handleCustomerSelect = (value: string) => {
@@ -1190,42 +1243,6 @@ const ProjectForm = () => {
             />
           </Grid>
         );
-      case "status":
-        return (
-          <Grid item xs={12} md={6} key={fieldId}>
-            <Controller
-              name="status"
-              control={control}
-              render={({ field }) => (
-                <TextField
-                  {...field}
-                  label={labelWithRequired("status", labelStatus)}
-                  fullWidth
-                  select
-                  SelectProps={{ native: true }}
-                  InputLabelProps={{ shrink: true }}
-                  error={!!errors.status}
-                  helperText={errors.status?.message || "Current workflow status for this project."}
-                >
-                  {([
-                    "Draft",
-                    "In Planning",
-                    "Pending Approval",
-                    "Approved",
-                    "In Progress",
-                    "On Hold",
-                    "Completed",
-                    "Cancelled"
-                  ] as ProjectStatus[]).map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </TextField>
-              )}
-            />
-          </Grid>
-        );
       case "projectType":
         return (
           <Grid item xs={12} md={6} key={fieldId}>
@@ -1412,7 +1429,7 @@ const ProjectForm = () => {
             <Grid item xs={12} md={6} />
 
             {visibleIdSet.has("projectType") && renderFormField("projectType")}
-            {visibleIdSet.has("status") ? renderFormField("status") : <Grid item xs={12} md={6} />}
+            <Grid item xs={12} md={6} />
 
             {extraDynamicIds.map((fieldId) => renderFormField(fieldId))}
             <Grid item xs={12} md={6}>
@@ -1443,7 +1460,7 @@ const ProjectForm = () => {
               </Grid>
             )}
 
-            {projectType === "External" && status !== "Draft" && (
+            {projectType === "External" && (
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth>
                   <FormLabel>Approval Decision</FormLabel>
@@ -1452,13 +1469,13 @@ const ProjectForm = () => {
                     control={control}
                     render={({ field }) => (
                       <RadioGroup row {...field}>
-                        {"Approved,Rejected,More Info Required".split(",").map((value) => (
+                        {"Approved,Rejected".split(",").map((value) => (
                           <FormControlLabel key={value} value={value} control={<Radio />} label={value} />
                         ))}
                       </RadioGroup>
                     )}
                   />
-                  <FormHelperText>Record the current approval outcome for External projects.</FormHelperText>
+                  <FormHelperText>Approval updates the project status automatically when you save.</FormHelperText>
                 </FormControl>
               </Grid>
             )}
@@ -1505,8 +1522,19 @@ const ProjectForm = () => {
             <Button variant="outlined" onClick={() => navigate("/projects")}>
               Cancel
             </Button>
-            <Button variant="outlined">Save draft</Button>
-            <Button variant="contained" type="submit" disabled={cloning}>
+            <Button
+              variant="outlined"
+              type="button"
+              onClick={() => runSave("draft")}
+            >
+              Save draft
+            </Button>
+            <Button
+              variant="contained"
+              type="button"
+              disabled={cloning}
+              onClick={() => runSave("final")}
+            >
               {cloning ? "Copying assets…" : id ? "Save changes" : "Submit project"}
             </Button>
           </Stack>

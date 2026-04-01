@@ -429,24 +429,11 @@ const ProjectList = () => {
       return;
     }
 
-    if (label === "Submit for Approval") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Pending Approval" } }));
-    }
-
     if (label === "Approve") {
       dispatch(
         updateProjectStatus({
           id: project.id,
           payload: { status: "Approved", approvalDecision: "Approved" }
-        })
-      );
-    }
-
-    if (label === "Request Info") {
-      dispatch(
-        updateProjectStatus({
-          id: project.id,
-          payload: { status: "Pending Approval", approvalDecision: "More Info Required" }
         })
       );
     }
@@ -472,12 +459,8 @@ const ProjectList = () => {
   const renderActions = (project: Project) => {
     const actions: string[] = [];
 
-    if (project.status === "Draft" && user?.role === "Project Manager") {
-      actions.push("Submit for Approval");
-    }
-
     if (project.status === "Pending Approval" && user?.role === "Admin") {
-      actions.push("Approve", "Request Info", "Reject");
+      actions.push("Approve", "Reject");
     }
 
     if (project.status === "Approved" && can.modifyData) {

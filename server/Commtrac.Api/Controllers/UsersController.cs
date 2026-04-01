@@ -13,7 +13,6 @@ namespace Commtrac.Api.Controllers;
 
 [ApiController]
 [Route("api/users")]
-[Authorize(Roles = "Admin")]
 public class UsersController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -34,6 +33,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<IEnumerable<UserDto>>> GetAll()
     {
         var users = await _db.Users.OrderBy(u => u.FullName).ToListAsync();
@@ -45,6 +45,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<UserDto>> Create([FromBody] CreateUserRequest request)
     {
         var user = new UserEntity
@@ -65,6 +66,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<UserDto>> Update(string id, [FromBody] UpdateUserRequest request)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id);
@@ -89,12 +91,14 @@ public class UsersController : ControllerBase
     }
 
     [HttpPatch("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<UserDto>> Patch(string id, [FromBody] UpdateUserRequest request)
     {
         return await Update(id, request);
     }
 
     [HttpPost("bulk-import")]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<BulkImportUsersResult>> BulkImport([FromBody] BulkImportUsersRequest request)
     {
         var created = 0;
@@ -148,6 +152,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost("{id}/invite")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Invite(string id)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id);
@@ -178,6 +183,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost("{id}/reset-2fa")]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<UserDto>> Reset2fa(string id)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id);
@@ -209,6 +215,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(string id)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id);

@@ -31,6 +31,7 @@ builder.Services.AddScoped<IEmailSender, EmailSender>();
 builder.Services.Configure<SmsSettings>(builder.Configuration.GetSection("Sms"));
 builder.Services.AddScoped<ISmsSender, SmsSender>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<RecoveryService>();
 builder.Services.AddScoped<IDocumentContentSearchService, DocumentContentSearchService>();
 builder.Services.AddSingleton<DocumentSearchIndexStatusStore>();
 builder.Services.AddSingleton<IDocumentSearchIndexMonitor>(sp => sp.GetRequiredService<DocumentSearchIndexStatusStore>());
