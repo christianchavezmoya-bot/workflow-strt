@@ -50,6 +50,7 @@ import { fetchProducts } from "../../store/productsSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { createProject, updateProject } from "../../store/projectSlice";
 import { ApprovalDecision, Office, Project, ProjectStatus } from "../../types/project";
+import { useAuth } from "../../hooks/useAuth";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
@@ -99,6 +100,7 @@ type FormValues = z.infer<typeof schema>;
 const ProjectForm = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const { items } = useAppSelector((state) => state.projects);
@@ -146,6 +148,13 @@ const ProjectForm = () => {
     return customers;
   }, [customers]);
   const products = productsState.items.length ? productsState.items : demoProducts;
+  const editingProject = useMemo(() => items.find((item) => item.id === id) ?? null, [id, items]);
+  const canEditExistingProject = useMemo(() => {
+    if (!id) return true;
+    if (!editingProject || !user) return false;
+    if (user.role === "Admin") return true;
+    return user.role === "Project Manager" && editingProject.assignedPmUserId === user.id;
+  }, [editingProject, id, user]);
   const {
     control,
     handleSubmit,
@@ -257,6 +266,12 @@ const ProjectForm = () => {
       setProductFeatureValues(project.productFeatureValues || {});
     });
   }, [id, items, reset, globalOffices]);
+
+  useEffect(() => {
+    if (id && editingProject && !canEditExistingProject) {
+      navigate(`/projects/${id}`);
+    }
+  }, [canEditExistingProject, editingProject, id, navigate]);
 
   useEffect(() => {
     if (projectsDynamic.definitions.length === 0) return;
@@ -593,6 +608,10 @@ const ProjectForm = () => {
     };
 
     try {
+      if (id && !canEditExistingProject) {
+        setSubmitError("You don't have permission to edit this project.");
+        return;
+      }
       if (id) {
         const result = await dispatch(updateProject({ id, payload })).unwrap();
         await projectsDynamic.upsertForEntity(
@@ -1525,6 +1544,7 @@ const ProjectForm = () => {
             <Button
               variant="outlined"
               type="button"
+              disabled={!!id && !canEditExistingProject}
               onClick={() => runSave("draft")}
             >
               Save draft
@@ -1532,7 +1552,7 @@ const ProjectForm = () => {
             <Button
               variant="contained"
               type="button"
-              disabled={cloning}
+              disabled={cloning || (!!id && !canEditExistingProject)}
               onClick={() => runSave("final")}
             >
               {cloning ? "Copying assets…" : id ? "Save changes" : "Submit project"}

@@ -15,6 +15,11 @@ export interface DocumentRecord {
   customValuesJson?: string | null;
   /** Parsed from customValuesJson — used in the UI */
   customValues?: Record<string, string>;
+  visibilityScope?: "Global" | "Project" | "Asset" | "Legacy" | null;
+  projectId?: string | null;
+  assetId?: string | null;
+  createdByUserId?: string | null;
+  isLegacyUnclassified?: boolean;
 }
 
 export interface DocumentConfig {
@@ -42,11 +47,24 @@ export const documentService = {
     return hydrateCustomValues(response.data);
   },
 
-  async uploadDocument(file: File, type: string, linkedTo: string, createdBy?: string, notes?: string, customValues?: Record<string, string>) {
+  async uploadDocument(
+    file: File,
+    type: string,
+    linkedTo: string,
+    createdBy?: string,
+    notes?: string,
+    customValues?: Record<string, string>,
+    visibilityScope?: DocumentRecord["visibilityScope"],
+    projectId?: string,
+    assetId?: string,
+  ) {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("type", type);
     formData.append("linkedTo", linkedTo);
+    if (visibilityScope) formData.append("visibilityScope", visibilityScope);
+    if (projectId) formData.append("projectId", projectId);
+    if (assetId) formData.append("assetId", assetId);
     if (createdBy) formData.append("createdBy", createdBy);
     if (notes)     formData.append("notes", notes);
     if (customValues && Object.keys(customValues).length > 0)

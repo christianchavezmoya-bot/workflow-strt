@@ -420,6 +420,7 @@ public record ProjectDto(
     bool IsInstallationProject,
     string? InstallationMode,
     string? ProjectManager,
+    string? AssignedPmUserId,
     decimal? ContractValue,
     string? ProbabilityStage,
     List<string>? ProductIds,
@@ -593,7 +594,12 @@ public record DocumentDto(
     string? DownloadUrl,
     string? CreatedBy,
     string? Notes,
-    string? CustomValuesJson
+    string? CustomValuesJson,
+    string? VisibilityScope,
+    string? ProjectId,
+    string? AssetId,
+    string? CreatedByUserId,
+    bool IsLegacyUnclassified
 );
 
 public record RecycleBinItemDto(
@@ -1389,3 +1395,16 @@ public record BulkImportUsersResult(
     List<string> SkippedEmails,
     List<string> Errors
 );
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+/// <summary>Single analytics event as POSTed by the frontend.</summary>
+public record AnalyticsEventRequest(
+    string EventName,
+    string? UserId,
+    string? Role,
+    string? OccurredAtUtc,
+    Dictionary<string, object?>? Payload
+);
+
+/// <summary>Batch POST — frontend flushes the queue as an array.</summary>
+public record AnalyticsEventBatchRequest(List<AnalyticsEventRequest> Events);

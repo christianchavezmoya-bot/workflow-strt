@@ -2,6 +2,9 @@
 import { Project, ProjectStatus, ProjectType } from "../types/project";
 
 export interface ProjectFilters {
+  scope?: "default" | "browse" | "pm-owned" | "participant";
+  ownershipScope?: "all" | "mine";
+  projectNumber?: string;
   office?: string;
   country?: string;
   status?: ProjectStatus | "All";
@@ -36,6 +39,12 @@ export const projectService = {
   },
   async getProject(id: string) {
     const response = await api.get<Project>(`/projects/${id}`);
+    return response.data;
+  },
+  async getProjectForBrowse(id: string) {
+    const response = await api.get<Project>(`/projects/${id}`, {
+      params: { scope: "browse" }
+    });
     return response.data;
   },
   async getProjectIncludingArchived(id: string) {

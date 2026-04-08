@@ -16,20 +16,31 @@ public class ProjectAssetsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly NotificationFeedService _feed;
     private readonly AuditLogService _audit;
+    private readonly IAccessScopeService _accessScope;
+    private readonly IProjectAuthorizationService _projectAuthorization;
     private static readonly JsonSerializerOptions _json = new() { PropertyNameCaseInsensitive = true };
 
-    public ProjectAssetsController(AppDbContext db, NotificationFeedService feed, AuditLogService audit)
+    public ProjectAssetsController(
+        AppDbContext db,
+        NotificationFeedService feed,
+        AuditLogService audit,
+        IAccessScopeService accessScope,
+        IProjectAuthorizationService projectAuthorization)
     {
         _db = db;
         _feed = feed;
         _audit = audit;
+        _accessScope = accessScope;
+        _projectAuthorization = projectAuthorization;
     }
 
     // GET api/project-assets/open  — all assets not yet Complete, joined with parent project info
     [HttpGet("open")]
-    public async Task<ActionResult<IEnumerable<OpenAssetDto>>> GetOpen()
+    public async Task<ActionResult<IEnumerable<OpenAssetDto>>> GetOpen([FromQuery] string? scope = null)
     {
+        var visibleProjectIds = await _accessScope.GetScopedProjectIdsAsync(User, scope);
         var assets = await _db.ProjectAssets
+            .Where(a => visibleProjectIds.Contains(a.ProjectId))
             .Where(a => a.Status == "NotStarted" || a.Status == "InProgress")
             .OrderBy(a => a.ProjectId).ThenBy(a => a.AssetTag)
             .ToListAsync();
@@ -79,9 +90,11 @@ public class ProjectAssetsController : ControllerBase
 
     // GET api/project-assets/workload-summary
     [HttpGet("workload-summary")]
-    public async Task<ActionResult<IEnumerable<WorkloadSummaryDto>>> WorkloadSummary()
+    public async Task<ActionResult<IEnumerable<WorkloadSummaryDto>>> WorkloadSummary([FromQuery] string? scope = null)
     {
+        var visibleProjectIds = await _accessScope.GetScopedProjectIdsAsync(User, scope);
         var assets = await _db.ProjectAssets
+            .Where(a => visibleProjectIds.Contains(a.ProjectId))
             .Where(a => a.AssignedUserId != null && a.AssignedUserId != ""
                      && (a.Status == "NotStarted" || a.Status == "InProgress"))
             .ToListAsync();
@@ -192,6 +205,11 @@ public class ProjectAssetsController : ControllerBase
     [HttpGet("by-project/{projectId}")]
     public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProject(string projectId, [FromQuery] bool includeDeleted = false)
     {
+        if (!await _accessScope.CanViewProjectAsync(User, projectId, includeDeleted))
+        {
+            return NotFound();
+        }
+
         var assetsQuery = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
         var assets = await assetsQuery
             .Where(a => a.ProjectId == projectId)
@@ -205,8 +223,10 @@ public class ProjectAssetsController : ControllerBase
     [HttpGet("by-product/{productId}")]
     public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProduct(string productId, [FromQuery] bool includeDeleted = false)
     {
+        var visibleProjectIds = await _accessScope.GetVisibleProjectIdsAsync(User, includeDeleted);
         var assetsQuery = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
         var assets = await assetsQuery
+            .Where(a => visibleProjectIds.Contains(a.ProjectId))
             .Where(a => a.ProductId == productId)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
@@ -221,6 +241,10 @@ public class ProjectAssetsController : ControllerBase
         var assets = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
         var asset = await assets.FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
+        if (!await _accessScope.CanViewProjectAsync(User, asset.ProjectId, includeDeleted))
+        {
+            return NotFound();
+        }
         return Ok(await ToDtoAsync(asset));
     }
 
@@ -229,6 +253,11 @@ public class ProjectAssetsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<ProjectAssetDto>> Create([FromBody] UpsertProjectAssetRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.ProjectId) || !await _projectAuthorization.CanEditProjectAsync(User, request.ProjectId))
+        {
+            return Forbid();
+        }
+
         var asset = new ProjectAssetEntity
         {
             ProjectId          = request.ProjectId ?? string.Empty,
@@ -258,6 +287,11 @@ public class ProjectAssetsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> BulkCreate([FromBody] BulkCreateProjectAssetsRequest request)
     {
+        if (!await _projectAuthorization.CanEditProjectAsync(User, request.ProjectId))
+        {
+            return Forbid();
+        }
+
         var created = new List<ProjectAssetEntity>();
         foreach (var item in request.Assets)
         {
@@ -295,6 +329,10 @@ public class ProjectAssetsController : ControllerBase
     {
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
         var previousAssignedUserId = asset.AssignedUserId;
 
         if (!string.IsNullOrWhiteSpace(request.AssetTag))   asset.AssetTag        = request.AssetTag.Trim();
@@ -328,6 +366,10 @@ public class ProjectAssetsController : ControllerBase
     {
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
+        if (!await _accessScope.CanParticipateInProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
 
         asset.IssuesJson = string.IsNullOrWhiteSpace(request.IssuesJson) ? "[]" : request.IssuesJson;
         asset.UpdatedAt = DateTime.UtcNow;
@@ -344,6 +386,10 @@ public class ProjectAssetsController : ControllerBase
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId, includeDeleted: true))
+        {
+            return Forbid();
+        }
         if (asset.IsDeleted) return NoContent();
 
         asset.IsDeleted = true;
@@ -362,6 +408,10 @@ public class ProjectAssetsController : ControllerBase
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId, includeDeleted: true))
+        {
+            return Forbid();
+        }
 
         asset.IsDeleted = false;
         asset.DeletedAtUtc = null;

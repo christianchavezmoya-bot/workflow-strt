@@ -15,6 +15,9 @@ public class MobileUploadController : ControllerBase
         string Token,
         string Type,
         string LinkedTo,
+        string? ProjectId,
+        string? AssetId,
+        string? CreatedByUserId,
         string? CustomValuesJson,
         DateTime ExpiresAt,
         string Status,          // "pending" | "complete" | "expired"
@@ -26,12 +29,18 @@ public class MobileUploadController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
     private readonly NotificationSettingsService _notificationSettings;
+    private readonly IDocumentAuthorizationService _documentAuthorization;
 
-    public MobileUploadController(AppDbContext db, IWebHostEnvironment env, NotificationSettingsService notificationSettings)
+    public MobileUploadController(
+        AppDbContext db,
+        IWebHostEnvironment env,
+        NotificationSettingsService notificationSettings,
+        IDocumentAuthorizationService documentAuthorization)
     {
         _db = db;
         _env = env;
         _notificationSettings = notificationSettings;
+        _documentAuthorization = documentAuthorization;
     }
 
     // ── POST /api/mobile-upload/token ────────────────────────────────────────
@@ -44,11 +53,16 @@ public class MobileUploadController : ControllerBase
         var expired = Tokens.Where(kvp => kvp.Value.ExpiresAt < DateTime.UtcNow).Select(kvp => kvp.Key).ToList();
         foreach (var k in expired) Tokens.TryRemove(k, out _);
 
+        var ownership = await _documentAuthorization.ResolveOwnershipAsync(null, null, request.LinkedTo);
+        var createdByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
         var token = Guid.NewGuid().ToString("N")[..16]; // 16-char token
         var entry = new UploadToken(
             Token: token,
             Type: request.Type ?? "tips",
             LinkedTo: request.LinkedTo ?? "",
+            ProjectId: ownership.ProjectId,
+            AssetId: ownership.AssetId,
+            CreatedByUserId: createdByUserId,
             CustomValuesJson: request.CustomValuesJson,
             ExpiresAt: DateTime.UtcNow.AddMinutes(10),
             Status: "pending",
@@ -115,6 +129,8 @@ public class MobileUploadController : ControllerBase
 
         var doc = new Commtrac.Api.Models.DocumentEntity
         {
+            ProjectId = entry.ProjectId,
+            AssetId = entry.AssetId,
             Name = file.FileName,
             Type = entry.Type,
             LinkedTo = entry.LinkedTo,
@@ -123,8 +139,10 @@ public class MobileUploadController : ControllerBase
             ContentType = file.ContentType,
             FileSize = file.Length,
             CreatedBy = "mobile-upload",
+            CreatedByUserId = entry.CreatedByUserId,
             Notes = null,
-            CustomValuesJson = entry.CustomValuesJson
+            CustomValuesJson = entry.CustomValuesJson,
+            IsLegacyUnclassified = false
         };
 
         _db.Documents.Add(doc);

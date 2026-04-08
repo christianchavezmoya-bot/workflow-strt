@@ -20,6 +20,14 @@ const api = axios.create({
   }
 });
 
+const getAccessMode = () => {
+  try {
+    return localStorage.getItem("app_access_mode") === "view-only" ? "view-only" : "normal";
+  } catch {
+    return "normal";
+  }
+};
+
 type DebugLog = {
   id: string;
   time: string;
@@ -105,6 +113,9 @@ api.interceptors.request.use(async (config) => {
   const token = localStorage.getItem("auth_token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (getAccessMode() === "view-only") {
+    config.headers["X-View-Only"] = "true";
   }
   (config as typeof config & { metadata?: { start: number } }).metadata = { start: Date.now() };
   return config;

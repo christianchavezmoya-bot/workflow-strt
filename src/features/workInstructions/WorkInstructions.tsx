@@ -377,7 +377,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                             >
                               {inp.type}
                               {inp.type === "choice" && (inp.options ?? []).length > 0
-                                ? ` Â· ${inp.options!.join(" / ")}`
+                                ? ` | ${inp.options!.join(" / ")}`
                                 : ""}
                             </Typography>
                           </Box>
@@ -418,7 +418,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                       onClick={() => setActiveStep((p) => Math.max(0, p - 1))}
                       disabled={activeStep === 0}
                     >
-                      â† Previous
+                      Previous
                     </Button>
                     <Button
                       size="small"
@@ -426,7 +426,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                       onClick={() => setActiveStep((p) => Math.min(steps.length - 1, p + 1))}
                       disabled={activeStep === steps.length - 1}
                     >
-                      Next â†’
+                      Next
                     </Button>
                     <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
                       Step {activeStep + 1} of {steps.length}
@@ -517,6 +517,7 @@ const WorkInstructions = () => {
     if (products.length === 0) return;
     const productIdFromUrl = searchParams.get("product");
     const viewFromUrl = searchParams.get("view");
+    const configIdFromUrl = searchParams.get("config");
 
     let resolvedTabIdx = 0;
     if (productIdFromUrl) {
@@ -542,6 +543,8 @@ const WorkInstructions = () => {
     const params: Record<string, string> = {};
     if (productId) params.product = productId;
     params.view = resolvedView;
+    if (configIdFromUrl) params.config = configIdFromUrl;
+    setSelectedConfigId(configIdFromUrl ?? null);
     setSearchParams(params, { replace: true });
   }, [products]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -561,8 +564,8 @@ const WorkInstructions = () => {
   const inventoryFeatures = activeFeatures.filter(f => inventoryFeatureIds.has(f.id));
 
   useEffect(() => {
-    setSelectedConfigId(null);
-  }, [activeProduct?.id]);
+    setSelectedConfigId(searchParams.get("config") ?? null);
+  }, [activeProduct?.id, searchParams]);
 
   const loadConfigs = useCallback(async (productId: string) => {
     setConfigsLoading(true);
@@ -727,6 +730,7 @@ const WorkInstructions = () => {
   function openBuilder(cfg: WorkflowConfig) {
     setSelectedConfigId(cfg.id);
     setViewMode("builder");
+    setSearchParams({ product: cfg.productId, view: "builder", config: cfg.id }, { replace: true });
   }
 
   function handleConfigSaved(updated: WorkflowConfig) {
@@ -771,6 +775,7 @@ const WorkInstructions = () => {
                 const params: Record<string, string> = {};
                 if (productId) params.product = productId;
                 params.view = next;
+                if (next === "builder" && selectedConfigId) params.config = selectedConfigId;
                 setSearchParams(params, { replace: true });
               }
             }}
@@ -810,6 +815,7 @@ const WorkInstructions = () => {
             const params: Record<string, string> = {};
             if (productId) params.product = productId;
             params.view = "instructions";
+            setSelectedConfigId(null);
             setSearchParams(params, { replace: true });
           }}
           variant="scrollable"
@@ -992,7 +998,14 @@ const WorkInstructions = () => {
             <Button
               size="small"
               startIcon={<ArrowBackOutlined />}
-              onClick={() => setViewMode("instructions")}
+              onClick={() => {
+                setViewMode("instructions");
+                const params: Record<string, string> = {};
+                if (activeProduct.id) params.product = activeProduct.id;
+                params.view = "instructions";
+                if (selectedConfig?.id) params.config = selectedConfig.id;
+                setSearchParams(params, { replace: true });
+              }}
             >
               Back to Instructions
             </Button>

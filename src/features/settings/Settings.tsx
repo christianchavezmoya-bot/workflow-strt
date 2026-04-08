@@ -298,7 +298,7 @@ const Settings = () => {
   const { addNotification } = useFieldNotifications();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isAdmin = user?.role === "Admin" || localStorage.getItem("local_auth_user")?.includes('"Admin"');
+  const isAdmin = user?.role === "Admin";
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [tab, setTab] = useState(() => {
@@ -1004,16 +1004,6 @@ const Settings = () => {
       setWfTypes((prev) => prev.filter((t) => t.id !== id));
     } catch { alert("Failed to delete workflow type."); }
   }
-  const localUser = useMemo(() => {
-    const raw = localStorage.getItem("local_auth_user");
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as { email: string; fullName: string; role: string; office: string };
-    } catch {
-      return null;
-    }
-  }, []);
-
   const projectsMap = useMemo(() => parseJsonMap(settings.projectsFieldMap), [settings.projectsFieldMap]);
   const installationsMap = useMemo(
     () => parseJsonMap(settings.installationsFieldMap),
@@ -1163,11 +1153,6 @@ const Settings = () => {
     } finally {
       setNotifySending(false);
     }
-  };
-
-  const handleClearLocalAuth = () => {
-    localStorage.removeItem("local_auth_user");
-    localStorage.removeItem("auth_token");
   };
 
   const fieldTypes = [
@@ -4246,17 +4231,6 @@ const Settings = () => {
         </DialogActions>
       </Dialog>
 
-      <Box className="glass-card" sx={{ padding: 3 }}>
-        <Stack spacing={1.5}>
-          <Typography variant="h6">Local auth testing</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Current local user: {localUser ? `${localUser.fullName} (${localUser.role})` : "None"}
-          </Typography>
-          <Button variant="outlined" onClick={handleClearLocalAuth}>
-            Clear local auth
-          </Button>
-        </Stack>
-      </Box>
     </Stack>
   );
 };

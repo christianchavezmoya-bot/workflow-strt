@@ -12,7 +12,10 @@ using Commtrac.Api.Swagger;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<ViewOnlyEnforcementFilter>();
+});
 builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 
@@ -23,6 +26,14 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddScoped<NotificationSettingsService>();
 builder.Services.AddScoped<NotificationFeedService>();
 builder.Services.AddScoped<OfficeNormalizationService>();
+builder.Services.AddScoped<IUserContextService, UserContextService>();
+builder.Services.AddScoped<IViewOnlyContextService, ViewOnlyContextService>();
+builder.Services.AddScoped<IAccessScopeService, AccessScopeService>();
+builder.Services.AddScoped<IProjectAuthorizationService, ProjectAuthorizationService>();
+builder.Services.AddScoped<IInstallationAuthorizationService, InstallationAuthorizationService>();
+builder.Services.AddScoped<IWorkflowRunAuthorizationService, WorkflowRunAuthorizationService>();
+builder.Services.AddScoped<IDocumentAuthorizationService, DocumentAuthorizationService>();
+builder.Services.AddScoped<ViewOnlyEnforcementFilter>();
 builder.Services.AddScoped<AuditLogService>();
 builder.Services.AddSingleton<SqliteBackupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());

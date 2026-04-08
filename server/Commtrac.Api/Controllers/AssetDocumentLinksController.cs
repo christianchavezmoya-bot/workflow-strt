@@ -22,18 +22,33 @@ public class AssetDocumentLinksController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
     private readonly IDocumentSearchIndexQueue _searchIndexQueue;
+    private readonly IAccessScopeService _accessScope;
+    private readonly IProjectAuthorizationService _projectAuthorization;
 
-    public AssetDocumentLinksController(AppDbContext db, IWebHostEnvironment env, IDocumentSearchIndexQueue searchIndexQueue)
+    public AssetDocumentLinksController(
+        AppDbContext db,
+        IWebHostEnvironment env,
+        IDocumentSearchIndexQueue searchIndexQueue,
+        IAccessScopeService accessScope,
+        IProjectAuthorizationService projectAuthorization)
     {
         _db = db;
         _env = env;
         _searchIndexQueue = searchIndexQueue;
+        _accessScope = accessScope;
+        _projectAuthorization = projectAuthorization;
     }
 
     // ── GET /by-asset/{assetId} ───────────────────────────────────────────────
     [HttpGet("by-asset/{assetId}")]
     public async Task<ActionResult<IEnumerable<AssetDocumentLinkDto>>> GetByAsset(string assetId)
     {
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == assetId);
+        if (asset is null || !await _accessScope.CanViewProjectAsync(User, asset.ProjectId))
+        {
+            return NotFound();
+        }
+
         var links = await _db.AssetDocumentLinks
             .Where(l => l.AssetId == assetId)
             .OrderBy(l => l.AttachedAt)
@@ -66,6 +81,13 @@ public class AssetDocumentLinksController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<AssetDocumentLinkDto>> Attach([FromBody] CreateAssetDocumentLinkRequest request)
     {
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == request.AssetId);
+        if (asset is null) return NotFound("Asset not found.");
+        if (!await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
+
         // Count only non-orphan links (library document must still exist).
         var count = await _db.AssetDocumentLinks
             .Where(l => l.AssetId == request.AssetId && _db.Documents.Any(d => d.Id == l.DocumentId))
@@ -82,6 +104,14 @@ public class AssetDocumentLinksController : ControllerBase
         var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == request.DocumentId);
         if (doc is null)
             return NotFound("Library document not found.");
+        if (!string.IsNullOrWhiteSpace(doc.ProjectId) && !string.Equals(doc.ProjectId, asset.ProjectId, StringComparison.OrdinalIgnoreCase))
+            return Conflict("Document belongs to a different project.");
+        if (string.IsNullOrWhiteSpace(doc.ProjectId))
+        {
+            doc.ProjectId = asset.ProjectId;
+            doc.AssetId ??= asset.Id;
+            doc.IsLegacyUnclassified = false;
+        }
 
         var link = new AssetDocumentLinkEntity
         {
@@ -104,6 +134,12 @@ public class AssetDocumentLinksController : ControllerBase
     {
         if (request.File is null || request.File.Length == 0)
             return BadRequest("File is required.");
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == request.AssetId);
+        if (asset is null) return NotFound("Asset not found.");
+        if (!await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
 
         // Count only non-orphan links (library document must still exist).
         var count = await _db.AssetDocumentLinks
@@ -130,12 +166,16 @@ public class AssetDocumentLinksController : ControllerBase
         {
             Name          = request.Name ?? request.File.FileName,
             Type          = request.Type ?? string.Empty,
+            VisibilityScope = "Asset",
+            ProjectId     = asset.ProjectId,
+            AssetId       = asset.Id,
             LinkedTo      = request.LinkedTo ?? string.Empty,
             UploadedAt    = DateTime.UtcNow.ToString("s"),
             FilePath      = Path.Combine("Storage", "Documents", storedName),
             ContentType   = request.File.ContentType,
             FileSize      = request.File.Length,
             CreatedBy        = User.Identity?.Name ?? request.AttachedBy,
+            CreatedByUserId  = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value,
             Notes            = request.Notes,
             CustomValuesJson = request.CustomValuesJson,
         };
@@ -163,6 +203,11 @@ public class AssetDocumentLinksController : ControllerBase
     {
         var link = await _db.AssetDocumentLinks.FirstOrDefaultAsync(l => l.Id == id);
         if (link is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == link.AssetId);
+        if (asset is null || !await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
 
         _db.AssetDocumentLinks.Remove(link);
         await _db.SaveChangesAsync();
@@ -195,7 +240,12 @@ public class AssetDocumentLinksController : ControllerBase
                 : $"{Request.Scheme}://{Request.Host}/api/documents/{doc.Id}/download",
             doc.CreatedBy,
             doc.Notes,
-            doc.CustomValuesJson
+            doc.CustomValuesJson,
+            doc.VisibilityScope,
+            doc.ProjectId,
+            doc.AssetId,
+            doc.CreatedByUserId,
+            doc.IsLegacyUnclassified
         );
 }
 

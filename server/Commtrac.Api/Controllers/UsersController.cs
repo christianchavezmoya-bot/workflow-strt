@@ -33,7 +33,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpGet]
-    [Authorize(Roles = "Admin,Project Manager")]
+    [Authorize]
     public async Task<ActionResult<IEnumerable<UserDto>>> GetAll()
     {
         var users = await _db.Users.OrderBy(u => u.FullName).ToListAsync();

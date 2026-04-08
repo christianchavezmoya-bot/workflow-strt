@@ -1,5 +1,6 @@
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
+import type { DashboardScope } from "./dashboardService";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -79,18 +80,22 @@ export const projectAssetService = {
     await api.delete(`/project-assets/${id}/purge`);
   },
 
-  async workloadSummary(): Promise<WorkloadSummaryItem[]> {
+  async workloadSummary(scope: DashboardScope = "default"): Promise<WorkloadSummaryItem[]> {
     try {
-      const res = await api.get<WorkloadSummaryItem[]>("/project-assets/workload-summary");
+      const res = await api.get<WorkloadSummaryItem[]>("/project-assets/workload-summary", {
+        params: { scope }
+      });
       return res.data;
     } catch {
       return [];
     }
   },
 
-  async listOpen(): Promise<OpenAssetItem[]> {
+  async listOpen(scope: DashboardScope = "default"): Promise<OpenAssetItem[]> {
     try {
-      const res = await api.get<OpenAssetItem[]>("/project-assets/open");
+      const res = await api.get<OpenAssetItem[]>("/project-assets/open", {
+        params: { scope }
+      });
       return res.data;
     } catch {
       return [];

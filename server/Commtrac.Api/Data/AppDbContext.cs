@@ -75,6 +75,8 @@ public class AppDbContext : DbContext
     public DbSet<BomImportRunEntity> BomImportRuns => Set<BomImportRunEntity>();
     public DbSet<BomMappingProfileEntity> BomMappingProfiles => Set<BomMappingProfileEntity>();
     public DbSet<BomRuleProfileEntity> BomRuleProfiles => Set<BomRuleProfileEntity>();
+    // ─── Analytics ────────────────────────────────────────────────────────────
+    public DbSet<AnalyticsEventEntity> AnalyticsEvents => Set<AnalyticsEventEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -18,17 +18,20 @@ public class SearchController : ControllerBase
     private readonly IDocumentSearchIndexMonitor _indexMonitor;
     private readonly IDocumentSearchIndexQueue _indexQueue;
     private readonly IDocumentSearchIndexQueueMetrics _indexMetrics;
+    private readonly IDocumentAuthorizationService _documentAuthorization;
 
     public SearchController(
         AppDbContext db,
         IDocumentSearchIndexMonitor indexMonitor,
         IDocumentSearchIndexQueue indexQueue,
-        IDocumentSearchIndexQueueMetrics indexMetrics)
+        IDocumentSearchIndexQueueMetrics indexMetrics,
+        IDocumentAuthorizationService documentAuthorization)
     {
         _db = db;
         _indexMonitor = indexMonitor;
         _indexQueue = indexQueue;
         _indexMetrics = indexMetrics;
+        _documentAuthorization = documentAuthorization;
     }
 
     [HttpGet]
@@ -124,6 +127,11 @@ public class SearchController : ControllerBase
         var docs = await _db.Documents.AsNoTracking().ToListAsync();
         foreach (var d in docs)
         {
+            if (!await _documentAuthorization.CanViewDocumentAsync(User, d))
+            {
+                continue;
+            }
+
             TryAddResult(
                 results,
                 terms,
@@ -293,7 +301,7 @@ public class SearchController : ControllerBase
         if (normalizedSource == "library")
         {
             var doc = await _db.Documents.AsNoTracking().FirstOrDefaultAsync(d => d.Id == entityId);
-            if (doc is null) return NotFound();
+            if (doc is null || !await _documentAuthorization.CanViewDocumentAsync(User, doc)) return NotFound();
 
             var downloadUrl = string.IsNullOrWhiteSpace(doc.FilePath)
                 ? doc.DownloadUrl

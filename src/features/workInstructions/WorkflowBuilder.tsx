@@ -225,6 +225,8 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   const [workflow, setWorkflow] = useState<Workflow>(() => createDefaultWorkflow(productId, productName));
   const [runnerOpen, setRunnerOpen] = useState(false);
   const [currentConfig, setCurrentConfig] = useState<WorkflowConfig | null>(null);
+  const [draftName, setDraftName] = useState(configName ?? `${productName} Workflow`);
+  const [draftConfigType, setDraftConfigType] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const justLoadedRef = useRef(true); // prevents save from firing on load-triggered state changes
@@ -262,6 +264,16 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     setResolvedConfigId(initialConfigId ?? null);
     resolvedConfigIdRef.current = initialConfigId ?? null;
   }, [initialConfigId]);
+
+  useEffect(() => {
+    if (currentConfig) {
+      setDraftName(currentConfig.name);
+      setDraftConfigType(currentConfig.configType ?? "");
+      return;
+    }
+    setDraftName(configName ?? `${productName} Workflow`);
+    setDraftConfigType("");
+  }, [configName, currentConfig?.id, productName]);
 
   // Load workflow from WorkflowConfig
   useEffect(() => {
@@ -389,6 +401,23 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     }, 800);
     return () => { if (featureSaveTimerRef.current) clearTimeout(featureSaveTimerRef.current); };
   }, [featureSelections]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const activeConfigId = resolvedConfigIdRef.current ?? initialConfigId;
+    if (!activeConfigId) return;
+    if (currentConfig?.status === "Published" || currentConfig?.status === "Archived") return;
+    const timer = setTimeout(async () => {
+      try {
+        const updated = await workflowConfigService.update(activeConfigId, {
+          name: draftName.trim() || undefined,
+          configType: draftConfigType.trim() || undefined,
+        });
+        setCurrentConfig(updated);
+        onConfigSaved?.(updated);
+      } catch { /* silent */ }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [draftConfigType, draftName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedStep = useMemo(
     () => workflow.steps.find((s) => s.id === selectedStepId) || null,
@@ -827,8 +856,9 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     if (resolvedConfigIdRef.current) return resolvedConfigIdRef.current;
     try {
       const created = await workflowConfigService.create({
-        name: workflow.name || `${productName} Workflow`,
+        name: draftName.trim() || workflow.name || `${productName} Workflow`,
         productId,
+        configType: draftConfigType.trim() || undefined,
         stepsJson: JSON.stringify(workflow),
       });
       resolvedConfigIdRef.current = created.id;
@@ -847,8 +877,8 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
 
   function openPublishDialog() {
     setPublishForm({
-      name: currentConfig?.name ?? workflow.name,
-      configType: currentConfig?.configType ?? "",
+      name: draftName.trim() || (currentConfig?.name ?? workflow.name),
+      configType: draftConfigType.trim() || (currentConfig?.configType ?? ""),
       notes: currentConfig?.notes ?? "",
       featureSelections, // already managed in builder state
     });
@@ -911,10 +941,22 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           )}
           <TextField
             size="small"
-            label="Workflow name"
-            value={workflow.name}
-            onChange={(e) => updateWorkflow((wf) => { wf.name = e.target.value; return wf; })}
+            label="Draft name"
+            value={draftName}
+            onChange={(e) => {
+              const nextValue = e.target.value;
+              setDraftName(nextValue);
+              updateWorkflow((wf) => { wf.name = nextValue; return wf; });
+            }}
             sx={{ minWidth: 280 }}
+            disabled={isReadOnly}
+          />
+          <TextField
+            size="small"
+            label="Config type"
+            value={draftConfigType}
+            onChange={(e) => setDraftConfigType(e.target.value)}
+            sx={{ minWidth: 220 }}
             disabled={isReadOnly}
           />
           <Stack direction="row" alignItems="center" spacing={0.75}>

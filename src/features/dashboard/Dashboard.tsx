@@ -1,7 +1,8 @@
 ﻿import {
-  Alert, Box, Button, Chip, CircularProgress, Collapse, Divider, Grid,
-  IconButton, LinearProgress, MenuItem, Paper, Select, Stack, Tooltip, Typography,
+  Alert, Box, Button, Chip, CircularProgress, Collapse, Divider, FormControl, Grid,
+  IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Tab, Tabs, Tooltip, Typography,
 } from "@mui/material";
+import type { SelectChangeEvent } from "@mui/material/Select";
 import {
   AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined,
   ErrorOutlineOutlined, ExpandLessOutlined, ExpandMoreOutlined,
@@ -15,22 +16,26 @@ import StatusStepper from "../../components/ui/StatusStepper";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
 import { useNotificationInbox } from "../../contexts/NotificationInboxContext";
+import { useAccessMode } from "../../contexts/AccessModeContext";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProjects } from "../../store/projectSlice";
 import { officesService } from "../../services/officesService";
 import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
 import { projectAssetService, type OpenAssetItem, type WorkloadSummaryItem } from "../../services/projectAssetService";
-import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
+import { dashboardService, type DashboardScope, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
+import { userService } from "../../services/userService";
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { notificationService } from "../../services/notificationService";
 import type { AppNotification } from "../../types/notification";
+import type { ProjectStatus } from "../../types/project";
+import type { User } from "../../types/user";
 import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag } from "./PhotoUploadDialog";
 
 function fmtDate(iso: string | null | undefined) {
-  if (!iso) return "â€”";
+  if (!iso) return "-";
   try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
 }
 
@@ -119,20 +124,63 @@ function countCaptures(raw: string | undefined) {
   }
 }
 
+function roleFlags(role: string | undefined) {
+  return {
+    isManager: role === "Admin" || role === "Project Manager",
+    isSupervisor: role === "Supervisor",
+    isEngineer: role === "Engineer" || role === "QA Inspector",
+    isInstaller: role === "Installer" || role === "Technician",
+    isViewer: role === "Viewer" || role === "Client",
+  };
+}
+
+function normalizeName(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function normalizeProjectStatus(status: string | undefined) {
+  return (status ?? "").trim().toLowerCase();
+}
+
+function deriveLifecycleStatus(projects: Array<{ status: string }>): ProjectStatus {
+  if (projects.length === 0) return "Draft";
+
+  const priority = [
+    "In Progress",
+    "Pending Approval",
+    "Approved",
+    "In Planning",
+    "Draft",
+    "On Hold",
+    "Completed",
+    "Cancelled",
+  ];
+
+  for (const candidate of priority) {
+    if (projects.some((project) => normalizeProjectStatus(project.status) === normalizeProjectStatus(candidate))) {
+      return candidate as ProjectStatus;
+    }
+  }
+
+  return (projects[0]?.status as ProjectStatus) ?? "Draft";
+}
+
+const ALL_DASHBOARDS_VALUE = "__all__";
+type PmDashboardTab = "pm-projects" | "my-installs";
+
 const Dashboard = () => {
   const navigate   = useNavigate();
   const { user }   = useAuth();
+  const { setAccessMode } = useAccessMode();
   const { unreadNotifications, acknowledge, refresh: refreshNotifications } = useNotificationInbox();
-  const isManager    = user.role === "Admin" || user.role === "Project Manager";
-  const isSupervisor = user.role === "Supervisor";
-  const isEngineer   = user.role === "Engineer" || user.role === "QA Inspector";
-  const isInstaller  = user.role === "Installer" || user.role === "Technician";
-  const isViewer     = user.role === "Viewer" || user.role === "Client";
+  const defaultDashboardUserId = user.id;
 
   const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch      = useAppDispatch();
   const projects      = useAppSelector((s) => s.projects.items);
 
+  const [dashboardUsers,      setDashboardUsers]      = useState<User[]>([]);
+  const [selectedDashboardId, setSelectedDashboardId] = useState(defaultDashboardUserId);
   const [globalOffices,      setGlobalOffices]      = useState<Office[]>([]);
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
   const [openIssues,         setOpenIssues]         = useState<OpenIssueRecord[]>([]);
@@ -142,6 +190,34 @@ const Dashboard = () => {
   const [workload,           setWorkload]           = useState<WorkloadSummaryItem[]>([]);
   const [workloadLoading,    setWorkloadLoading]    = useState(false);
   const [reportingTechId,    setReportingTechId]    = useState<string | null>(null);
+  const [pmDashboardTab,     setPmDashboardTab]     = useState<PmDashboardTab>("pm-projects");
+
+  const availableDashboardUsers = useMemo(() => {
+    const uniqueUsers = new Map<string, User>();
+    [user, ...dashboardUsers].forEach((candidate) => {
+      if (candidate?.id && candidate.isActive !== false) {
+        uniqueUsers.set(candidate.id, candidate);
+      }
+    });
+    return Array.from(uniqueUsers.values()).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }, [dashboardUsers, user]);
+
+  const selectedDashboardUser = useMemo(() => {
+    if (selectedDashboardId === ALL_DASHBOARDS_VALUE) return null;
+    return availableDashboardUsers.find((candidate) => candidate.id === selectedDashboardId) ?? user;
+  }, [availableDashboardUsers, selectedDashboardId, user]);
+
+  const viewedDashboardName = selectedDashboardUser?.fullName ?? "All Users";
+  const viewedDashboardRole = selectedDashboardUser?.role ?? user.role;
+  const viewedDashboardOffice = selectedDashboardUser?.office ?? "All Offices";
+  const viewedDashboardUserId = selectedDashboardUser?.id ?? null;
+  const viewingOwnDashboard = viewedDashboardUserId === user.id;
+  const showPmTabs = viewingOwnDashboard && user.role === "Project Manager";
+  const activeDashboardScope: DashboardScope = showPmTabs
+    ? (pmDashboardTab === "pm-projects" ? "pm-owned" : "participant")
+    : "default";
+  const { isManager, isSupervisor, isEngineer, isInstaller, isViewer } = roleFlags(viewedDashboardRole);
+  const canShowOwnNotifications = viewingOwnDashboard || selectedDashboardId === ALL_DASHBOARDS_VALUE;
 
   // Phase 1 workspace
   const [workspaceExpanded, setWorkspaceExpanded] = useState(!isEngineer ? false : true);
@@ -167,6 +243,41 @@ const Dashboard = () => {
   const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
 
+  useEffect(() => {
+    setSelectedDashboardId(defaultDashboardUserId);
+  }, [defaultDashboardUserId]);
+
+  useEffect(() => {
+    userService.getUsers().then(setDashboardUsers).catch(() => setDashboardUsers([user]));
+  }, [user]);
+
+  useEffect(() => {
+    if (selectedDashboardId !== ALL_DASHBOARDS_VALUE && !availableDashboardUsers.some((candidate) => candidate.id === selectedDashboardId)) {
+      setSelectedDashboardId(defaultDashboardUserId);
+    }
+  }, [availableDashboardUsers, defaultDashboardUserId, selectedDashboardId]);
+
+  useEffect(() => {
+    if (selectedDashboardId === user.id) {
+      setAccessMode("normal");
+      return;
+    }
+
+    setAccessMode("view-only");
+  }, [selectedDashboardId, setAccessMode, user.id]);
+
+  useEffect(() => {
+    if (isEngineer) {
+      setWorkspaceExpanded(true);
+    }
+  }, [isEngineer]);
+
+  useEffect(() => {
+    if (!showPmTabs) {
+      setPmDashboardTab("pm-projects");
+    }
+  }, [showPmTabs]);
+
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
     if (activeOffice === "All") return null;
@@ -184,48 +295,50 @@ const Dashboard = () => {
     setAttentionLoading(true);
     try {
       const [iss, sigs] = await Promise.all([
-        assetWorkflowRunService.listOpenIssues(),
-        assetWorkflowRunService.listPendingSignatures(),
+        assetWorkflowRunService.listOpenIssues(activeDashboardScope),
+        assetWorkflowRunService.listPendingSignatures(activeDashboardScope),
       ]);
       setOpenIssues(iss);
       setPendingSigs(sigs);
     } finally {
       setAttentionLoading(false);
     }
-  }, []);
+  }, [activeDashboardScope]);
 
   useEffect(() => {
-    dispatch(fetchProjects());
+    dispatch(fetchProjects(showPmTabs ? { scope: activeDashboardScope } : undefined));
     loadAttention();
     setWorkloadLoading(true);
-    projectAssetService.workloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
-    projectAssetService.listOpen().then(setOpenAssets);
+    projectAssetService.workloadSummary(activeDashboardScope).then(setWorkload).finally(() => setWorkloadLoading(false));
+    projectAssetService.listOpen(activeDashboardScope).then(setOpenAssets);
     if (isEngineer) {
       workflowConfigService.getAll().then((configs) => {
         setDraftConfigs(configs.filter((c: any) => c.status === "Draft" || c.status === "draft"));
       }).catch(() => {});
+    } else {
+      setDraftConfigs([]);
     }
-  }, [dispatch, loadAttention, isEngineer]);
+  }, [activeDashboardScope, dispatch, loadAttention, isEngineer, showPmTabs]);
 
   // Phase 4 â€” evidence completeness
   useEffect(() => {
     if (!isManager) return;
     setEvidenceLoading(true);
-    dashboardService.evidenceCompleteness(evidenceWindow)
+    dashboardService.evidenceCompleteness(evidenceWindow, activeDashboardScope)
       .then(setEvidenceData)
       .catch(() => setEvidenceData(null))
       .finally(() => setEvidenceLoading(false));
-  }, [isManager, evidenceWindow]);
+  }, [activeDashboardScope, evidenceWindow, isManager]);
 
   // Phase 5 â€” workflow health
   useEffect(() => {
     if (!isManager) return;
     setHealthLoading(true);
-    dashboardService.workflowHealth(healthWindow)
+    dashboardService.workflowHealth(healthWindow, activeDashboardScope)
       .then(setHealthData)
       .catch(() => setHealthData(null))
       .finally(() => setHealthLoading(false));
-  }, [isManager, healthWindow]);
+  }, [activeDashboardScope, healthWindow, isManager]);
 
   // â”€â”€ Derived â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const filteredProjects = useMemo(() => {
@@ -247,7 +360,10 @@ const Dashboard = () => {
   const attentionCount = blockingIssues.length + pendingSigs.length + overdueProjects.length + highIssues.length;
 
   // Phase 1 â€” personal workspace
-  const myAssets   = useMemo(() => openAssets.filter((a) => a.assignedUserId === user.id), [openAssets, user.id]);
+  const myAssets   = useMemo(() => {
+    if (!viewedDashboardUserId) return openAssets;
+    return openAssets.filter((a) => a.assignedUserId === viewedDashboardUserId);
+  }, [openAssets, viewedDashboardUserId]);
   const myBlocking = useMemo(() => openIssues.filter((i) => i.isBlocking && myAssets.some((a) => a.id === i.assetId)), [openIssues, myAssets]);
   const myActive   = useMemo(() => myAssets.filter((a) => isInProgressAsset(a.runStatus) || isInProgressAsset(a.status)), [myAssets]);
   const myPaused   = useMemo(() => myAssets.filter((a) => isPausedAsset(a.runStatus)), [myAssets]);
@@ -272,6 +388,106 @@ const Dashboard = () => {
   const myPendingSigs = useMemo(() =>
     pendingSigs.filter(s => myAssets.some(a => a.id === s.assetId || a.jobNumber === s.jobNumber)),
     [pendingSigs, myAssets]);
+  const technicianUserIds = useMemo(() => {
+    const ids = new Set<string>();
+    availableDashboardUsers.forEach((candidate) => {
+      const role = candidate.role ?? "";
+      if (role === "Installer" || role === "Technician") {
+        ids.add(candidate.id);
+      }
+    });
+    return ids;
+  }, [availableDashboardUsers]);
+
+  const scopedWorkload = useMemo(() => {
+    const workloadProjectIds = new Set<string>();
+    const normalizedViewedName = normalizeName(viewedDashboardName);
+
+    const scopedAssets = openAssets.filter((asset) => {
+      if (!asset.assignedUserId || !technicianUserIds.has(asset.assignedUserId)) return false;
+      if (showPmTabs && pmDashboardTab === "my-installs") {
+        return !!viewedDashboardUserId && asset.assignedUserId === viewedDashboardUserId;
+      }
+      if (selectedDashboardId === ALL_DASHBOARDS_VALUE) return true;
+      if (viewedDashboardRole === "Project Manager") {
+        const project = projects.find((candidate) => candidate.id === asset.projectId);
+        return normalizeName(project?.projectManager) === normalizedViewedName;
+      }
+      if (!viewedDashboardUserId) return true;
+      return asset.assignedUserId === viewedDashboardUserId;
+    });
+
+    scopedAssets.forEach((asset) => workloadProjectIds.add(asset.projectId));
+    const issueAssetIds = new Set(
+      openIssues
+        .filter((issue) => scopedAssets.some((asset) => asset.id === issue.assetId))
+        .map((issue) => issue.assetId)
+    );
+
+    const summaryMap = new Map<string, WorkloadSummaryItem>();
+    scopedAssets.forEach((asset) => {
+      const userId = asset.assignedUserId!;
+      const fullName =
+        availableDashboardUsers.find((candidate) => candidate.id === userId)?.fullName
+        ?? workload.find((item) => item.userId === userId)?.fullName
+        ?? "Unknown";
+      const existing = summaryMap.get(userId) ?? {
+        userId,
+        fullName,
+        notStarted: 0,
+        inProgress: 0,
+        paused: 0,
+        totalAssigned: 0,
+        jobNumbers: [],
+        hasIssues: false,
+        completedSteps: 0,
+        totalSteps: 0,
+        startedAt: undefined,
+      };
+
+      existing.totalAssigned += 1;
+      existing.completedSteps += asset.completedSteps ?? 0;
+      existing.totalSteps += asset.totalSteps ?? 0;
+      if (isPausedAsset(asset.runStatus)) {
+        existing.paused += 1;
+      } else if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) {
+        existing.inProgress += 1;
+      } else {
+        existing.notStarted += 1;
+      }
+      if (asset.jobNumber && !existing.jobNumbers.includes(asset.jobNumber)) {
+        existing.jobNumbers.push(asset.jobNumber);
+      }
+      if (issueAssetIds.has(asset.id)) {
+        existing.hasIssues = true;
+      }
+
+      const apiWorkload = workload.find((item) => item.userId === userId);
+      if (!existing.startedAt && apiWorkload?.startedAt) {
+        existing.startedAt = apiWorkload.startedAt;
+      }
+
+      summaryMap.set(userId, existing);
+    });
+
+    return Array.from(summaryMap.values()).sort((a, b) => {
+      if (b.totalAssigned !== a.totalAssigned) return b.totalAssigned - a.totalAssigned;
+      return a.fullName.localeCompare(b.fullName);
+    });
+  }, [
+    availableDashboardUsers,
+    openAssets,
+    openIssues,
+    projects,
+    selectedDashboardId,
+    technicianUserIds,
+    viewedDashboardName,
+    viewedDashboardRole,
+    viewedDashboardUserId,
+    workload,
+    showPmTabs,
+    pmDashboardTab,
+  ]);
 
   const assignmentUpdateNotifications = useMemo(
     () => unreadNotifications.filter((n) =>
@@ -290,6 +506,18 @@ const Dashboard = () => {
     () => unreadNotifications.filter((n) => n.eventType === "workflow-missing-media"),
     [unreadNotifications]
   );
+  const scopedInstallerMissingMediaNotifications = useMemo(() => {
+    if (!viewedDashboardUserId) return missingMediaNotifications;
+    return missingMediaNotifications.filter((n) => n.triggeredByUserId === viewedDashboardUserId || !n.triggeredByUserId);
+  }, [missingMediaNotifications, viewedDashboardUserId]);
+
+  const handleDashboardChange = useCallback((event: SelectChangeEvent<string>) => {
+    setSelectedDashboardId(event.target.value);
+  }, []);
+
+  const resetToOwnDashboard = useCallback(() => {
+    setSelectedDashboardId(user.id);
+  }, [user.id]);
 
   const openPhotoUploadFromNotification = useCallback(async (notification: AppNotification, mode: "installer" | "pm") => {
     if (!notification.runId || !notification.assetId) return;
@@ -350,6 +578,12 @@ const Dashboard = () => {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }, [filteredProjects]);
 
+  const lifecycleStatus = useMemo(() => deriveLifecycleStatus(filteredProjects), [filteredProjects]);
+  const lifecycleCount = useMemo(
+    () => filteredProjects.filter((project) => normalizeProjectStatus(project.status) === normalizeProjectStatus(lifecycleStatus)).length,
+    [filteredProjects, lifecycleStatus]
+  );
+
   const statusColor: Record<string, string> = {
     "In Progress": "primary", "Completed": "success", "Pending Approval": "warning",
     "Cancelled": "error", "Draft": "default", "Approved": "info", "On Hold": "warning",
@@ -372,7 +606,7 @@ const Dashboard = () => {
         transition: "background 0.15s",
       }}>
       <Typography variant="caption" color="text.secondary" noWrap display="block">
-        â€¢ {label}
+        * {label}
       </Typography>
       {sub && <Typography variant="caption" color="text.disabled" noWrap display="block" sx={{ pl: 1.5, fontSize: "0.65rem" }}>{sub}</Typography>}
     </Box>
@@ -418,7 +652,7 @@ const Dashboard = () => {
                 {blockingIssues.slice(0, 4).map((iss) => (
                   <ItemRow key={iss.issueId}
                     label={`${iss.jobNumber}: ${iss.assetTag}`}
-                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "â€¦" : "")}
+                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "..." : "")}
                     onClick={() => navigate("/issues")} />
                 ))}
                 {blockingIssues.length > 4 && (
@@ -452,7 +686,7 @@ const Dashboard = () => {
               <Stack spacing={0.25} sx={{ mt: 1 }}>
                 {overdueProjects.slice(0, 4).map((p) => (
                   <ItemRow key={p.id}
-                    label={`${p.jobNumber} â€” ${p.customerName || ""}`}
+                    label={`${p.jobNumber} - ${p.customerName || ""}`}
                     sub={`Due ${fmtDate(p.finishDate)}`}
                     onClick={() => navigate(`/projects/${p.id}`)} />
                 ))}
@@ -523,7 +757,7 @@ const Dashboard = () => {
                 {highIssues.slice(0, 4).map((iss) => (
                   <ItemRow key={iss.issueId}
                     label={`${iss.jobNumber}: ${iss.assetTag}`}
-                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "â€¦" : "")}
+                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "..." : "")}
                     onClick={() => navigate("/issues")} />
                 ))}
                 {highIssues.length > 4 && (
@@ -569,7 +803,7 @@ const Dashboard = () => {
                 }}>
                 <Typography variant="subtitle1" sx={{ fontFamily: "Sora" }}>{region}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {rp.length} projects Â· {rp.filter(p => p.status === "In Progress").length} in progress
+                  {rp.length} projects | {rp.filter(p => p.status === "In Progress").length} in progress
                 </Typography>
                 <Typography variant="body2" color="text.secondary">{rAssets} active installations</Typography>
               </Box>
@@ -621,7 +855,10 @@ const Dashboard = () => {
       <Grid item xs={12} md={8}>
         <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
           <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem", mb: 2 }}>Project Lifecycle</Typography>
-          <StatusStepper type="External" status="Pending Approval" />
+          <StatusStepper type="External" status={lifecycleStatus} />
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
+            {lifecycleCount} of {projectCount} visible projects currently in {lifecycleStatus}.
+          </Typography>
         </Box>
       </Grid>
     </Grid>
@@ -747,7 +984,7 @@ const Dashboard = () => {
                   </Stack>
                 </Box>
               )}
-              <Typography variant="caption" color="text.disabled">{healthData.totalRuns} runs in last {healthWindow} days Â· prev score {healthData.previousScore}%</Typography>
+              <Typography variant="caption" color="text.disabled">{healthData.totalRuns} runs in last {healthWindow} days | prev score {healthData.previousScore}%</Typography>
             </Stack>
           ) : (
             <Typography variant="caption" color="text.disabled">No data available for selected window.</Typography>
@@ -761,8 +998,22 @@ const Dashboard = () => {
     <Box className="glass-card" sx={{ p: 3 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
         <Box>
-          <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Technician Workload</Typography>
-          <Typography variant="caption" color="text.secondary">Open assets â€” click to view in installations</Typography>
+          <Typography variant="h6" sx={{ fontFamily: "Sora" }}>
+            {showPmTabs && pmDashboardTab === "my-installs"
+              ? "My Install Workload"
+              : selectedDashboardId === ALL_DASHBOARDS_VALUE || viewedDashboardRole === "Project Manager"
+              ? "Technician Workload"
+              : `${viewedDashboardName} Workload`}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {showPmTabs && pmDashboardTab === "my-installs"
+              ? "Your assigned installation assets and workflow load across projects you participate in"
+              : selectedDashboardId === ALL_DASHBOARDS_VALUE
+              ? "Open assets across all technicians - click to view in installations"
+              : viewedDashboardRole === "Project Manager"
+              ? `Open assets assigned to technicians on ${viewedDashboardName}'s projects - click to view in installations`
+              : "Open assets for the selected dashboard - click to view in installations"}
+          </Typography>
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Stack direction="row" spacing={0.5} alignItems="center">
@@ -783,11 +1034,15 @@ const Dashboard = () => {
           </Stack>
         </Stack>
       </Stack>
-      {workloadLoading ? <LinearProgress /> : workload.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">No open assets currently assigned to technicians.</Typography>
+      {workloadLoading ? <LinearProgress /> : scopedWorkload.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          {showPmTabs && pmDashboardTab === "my-installs"
+            ? "No open assets are currently assigned to you."
+            : selectedDashboardId === ALL_DASHBOARDS_VALUE ? "No open assets currently assigned to technicians." : `No open assets currently assigned to ${viewedDashboardName}.`}
+        </Typography>
       ) : (
         <Stack spacing={1.5}>
-          {workload.map((w) => {
+          {scopedWorkload.map((w) => {
             const inPct    = w.totalAssigned > 0 ? (w.inProgress / w.totalAssigned) * 100 : 0;
             const pausedPct = w.totalAssigned > 0 ? (w.paused / w.totalAssigned) * 100 : 0;
             const notPct   = w.totalAssigned > 0 ? (w.notStarted / w.totalAssigned) * 100 : 0;
@@ -815,11 +1070,11 @@ const Dashboard = () => {
                       </Stack>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <Typography variant="caption" color="text.secondary">
-                          {w.inProgress} active Â· {w.paused} paused Â· {w.notStarted} queued
+                          {w.inProgress} active | {w.paused} paused | {w.notStarted} queued
                         </Typography>
                         {startLabel && (
                           <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.65rem" }}>
-                            Â· since {startLabel}
+                            | since {startLabel}
                           </Typography>
                         )}
                       </Stack>
@@ -827,8 +1082,8 @@ const Dashboard = () => {
                     <Box sx={{ flex: 1 }}>
                       <Tooltip title={
                         w.totalSteps > 0
-                          ? `${w.completedSteps} / ${w.totalSteps} steps Â· ${w.inProgress} in-progress Â· ${w.paused} paused Â· ${w.notStarted} queued`
-                          : `${w.inProgress} in progress Â· ${w.paused} paused Â· ${w.notStarted} not started`
+                          ? `${w.completedSteps} / ${w.totalSteps} steps | ${w.inProgress} in-progress | ${w.paused} paused | ${w.notStarted} queued`
+                          : `${w.inProgress} in progress | ${w.paused} paused | ${w.notStarted} not started`
                       } arrow>
                         <Stack spacing={0.5}>
                           <Box sx={{ position: "relative", height: 10, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.08)", display: "flex" }}>
@@ -885,44 +1140,108 @@ const Dashboard = () => {
   return (
     <Stack spacing={3}>
 
-      {/* â”€â”€ PERSONAL WORKSPACE STRIP â€” all except Viewer â”€â”€ */}
-      {!isViewer && (
-        <Box className="glass-card" sx={{ p: 2.5 }}>
-          <Stack direction="row" alignItems="center" spacing={1.5}>
-            <PersonOutlined sx={{ color: "primary.main", fontSize: 20 }} />
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", lineHeight: 1.2 }}>
-                {user.fullName}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">{user.role} Â· {user.office}</Typography>
-            </Box>
-            <Stack direction="row" spacing={0.75}>
-              <Chip icon={<WorkOutlineOutlined sx={{ fontSize: 13 }} />}
-                label={`${myActive.length} active`} size="small"
-                color={myActive.length > 0 ? "primary" : "default"} variant="outlined"
-                sx={{ height: 22, fontSize: "0.7rem" }} />
-              <Chip label={`${myPaused.length} paused`} size="small"
-                color={myPaused.length > 0 ? "warning" : "default"} variant="outlined"
-                sx={{ height: 22, fontSize: "0.7rem" }} />
-              <Chip label={`${myQueued.length} queued`} size="small"
-                color="default" variant="outlined" sx={{ height: 22, fontSize: "0.7rem" }} />
-              {myBlocking.length > 0 && (
-                <Chip icon={<ErrorOutlineOutlined sx={{ fontSize: 13 }} />}
-                  label={`${myBlocking.length} blocking`} size="small"
-                  color="error" variant="outlined" sx={{ height: 22, fontSize: "0.7rem" }} />
-              )}
-            </Stack>
-            {!isEngineer && (
-              <IconButton size="small" onClick={() => setWorkspaceExpanded((v) => !v)}>
-                {workspaceExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
-              </IconButton>
-            )}
-          </Stack>
+      {selectedDashboardId !== user.id && (
+        <Alert
+          severity="info"
+          onClose={resetToOwnDashboard}
+          sx={{ border: "1px solid", borderColor: "info.main" }}
+        >
+          {selectedDashboardId === ALL_DASHBOARDS_VALUE
+            ? "You are viewing the all-users dashboard, not your personal dashboard. Close this banner to return to your dashboard."
+            : `You are viewing ${viewedDashboardName}'s dashboard, not your personal dashboard. Close this banner to return to your dashboard.`}
+        </Alert>
+      )}
 
+      {/* â”€â”€ PERSONAL WORKSPACE STRIP â€” dashboard selector + scoped workload â”€â”€ */}
+      <Box className="glass-card" sx={{ p: 2.5 }}>
+        <Stack direction={{ xs: "column", lg: "row" }} alignItems={{ xs: "stretch", lg: "center" }} spacing={1.5}>
+          <PersonOutlined sx={{ color: "primary.main", fontSize: 20 }} />
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", lineHeight: 1.2 }}>
+              {viewedDashboardName}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">{viewedDashboardRole} | {viewedDashboardOffice}</Typography>
+          </Box>
+          <FormControl size="small" sx={{ minWidth: { xs: "100%", sm: 260 } }}>
+            <InputLabel id="dashboard-user-select-label">View Other User Dashboard</InputLabel>
+            <Select
+              labelId="dashboard-user-select-label"
+              value={selectedDashboardId}
+              label="View Other User Dashboard"
+              onChange={handleDashboardChange}
+            >
+              <MenuItem value={user.id}>My Dashboard</MenuItem>
+              <MenuItem value={ALL_DASHBOARDS_VALUE}>All Users</MenuItem>
+              {availableDashboardUsers.filter((candidate) => candidate.id !== user.id).map((candidate) => (
+                <MenuItem key={candidate.id} value={candidate.id}>
+                  {candidate.fullName} | {candidate.role}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="caption" color="text.secondary" display="block">
+              {viewingOwnDashboard ? "Dedicated dashboard" : "Alternate dashboard view"}
+            </Typography>
+            <Typography variant="caption" color="text.disabled" display="block">
+              {selectedDashboardId === ALL_DASHBOARDS_VALUE ? "Aggregated across all users" : "Scoped to the selected user"}
+            </Typography>
+          </Box>
+          {!isViewer && (
+            <>
+              <Stack direction="row" spacing={0.75}>
+                <Chip icon={<WorkOutlineOutlined sx={{ fontSize: 13 }} />}
+                  label={`${myActive.length} active`} size="small"
+                  color={myActive.length > 0 ? "primary" : "default"} variant="outlined"
+                  sx={{ height: 22, fontSize: "0.7rem" }} />
+                <Chip label={`${myPaused.length} paused`} size="small"
+                  color={myPaused.length > 0 ? "warning" : "default"} variant="outlined"
+                  sx={{ height: 22, fontSize: "0.7rem" }} />
+                <Chip label={`${myQueued.length} queued`} size="small"
+                  color="default" variant="outlined" sx={{ height: 22, fontSize: "0.7rem" }} />
+                {myBlocking.length > 0 && (
+                  <Chip icon={<ErrorOutlineOutlined sx={{ fontSize: 13 }} />}
+                    label={`${myBlocking.length} blocking`} size="small"
+                    color="error" variant="outlined" sx={{ height: 22, fontSize: "0.7rem" }} />
+                )}
+              </Stack>
+              {!isEngineer && (
+                <IconButton size="small" onClick={() => setWorkspaceExpanded((v) => !v)}>
+                  {workspaceExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
+                </IconButton>
+              )}
+            </>
+          )}
+        </Stack>
+
+        {showPmTabs && (
+          <Box sx={{ mt: 1.5, borderTop: "1px solid rgba(255,255,255,0.08)", pt: 1.25 }}>
+            <Tabs
+              value={pmDashboardTab}
+              onChange={(_, value: PmDashboardTab) => setPmDashboardTab(value)}
+              variant="fullWidth"
+              sx={{ minHeight: 36, "& .MuiTab-root": { minHeight: 36, textTransform: "none", fontSize: "0.85rem" } }}
+            >
+              <Tab value="pm-projects" label="My PM Projects" />
+              <Tab value="my-installs" label="My Installs" />
+            </Tabs>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+              {pmDashboardTab === "pm-projects"
+                ? "Management metrics for projects where you are the assigned PM."
+                : "Installer-participant work across projects where you are assigned to assets or workflow work."}
+            </Typography>
+          </Box>
+        )}
+
+        {!isViewer && (
           <Collapse in={workspaceExpanded || isEngineer}>
             <Box sx={{ mt: 1.5 }}>
               {myAssets.length === 0 ? (
-                <Typography variant="caption" color="text.disabled">No assets currently assigned to you.</Typography>
+                <Typography variant="caption" color="text.disabled">
+                  {selectedDashboardId === ALL_DASHBOARDS_VALUE
+                    ? "No open assets found."
+                    : `No assets currently assigned to ${viewingOwnDashboard ? "you" : viewedDashboardName}.`}
+                </Typography>
               ) : (
                 <Grid container spacing={1.5}>
                   {myAssets.slice(0, 6).map((a) => (
@@ -940,7 +1259,7 @@ const Dashboard = () => {
                               {a.assetTag || a.assetName || a.id}
                             </Typography>
                             <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                              {a.jobNumber} â€” {displayRunState(a)}
+                              {a.jobNumber} - {displayRunState(a)}
                             </Typography>
                           </Box>
                           <Chip label={isPausedAsset(a.runStatus) ? "Paused" : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "Active" : "Queued"}
@@ -955,7 +1274,7 @@ const Dashboard = () => {
                   {myAssets.length > 6 && (
                     <Grid item xs={12}>
                       <Typography variant="caption" color="text.disabled">
-                        +{myAssets.length - 6} more assets â€” <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }} onClick={() => navigate("/installations/assets")}>view all</Box>
+                        +{myAssets.length - 6} more assets - <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }} onClick={() => navigate("/installations/assets")}>view all</Box>
                       </Typography>
                     </Grid>
                   )}
@@ -963,8 +1282,8 @@ const Dashboard = () => {
               )}
             </Box>
           </Collapse>
-        </Box>
-      )}
+        )}
+      </Box>
 
       {/* â•â• INSTALLER / TECHNICIAN VIEW â•â• */}
       {isInstaller && (
@@ -973,13 +1292,17 @@ const Dashboard = () => {
           <Box className="glass-card" sx={{ p: 2.5 }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
               <WorkOutlineOutlined sx={{ color: "primary.main", fontSize: 20 }} />
-              <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Jobs Today</Typography>
+              <Typography variant="h6" sx={{ fontFamily: "Sora" }}>
+                {viewingOwnDashboard ? "My Jobs Today" : `${viewedDashboardName}'s Jobs`}
+              </Typography>
             </Stack>
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-              Sorted by activity â€” tap to open
+              {selectedDashboardId === ALL_DASHBOARDS_VALUE ? "Sorted by activity across all users" : "Sorted by activity - tap to open"}
             </Typography>
             {myAssets.length === 0 ? (
-              <Typography variant="caption" color="text.disabled">No jobs assigned to you.</Typography>
+              <Typography variant="caption" color="text.disabled">
+                {selectedDashboardId === ALL_DASHBOARDS_VALUE ? "No jobs found." : `No jobs assigned to ${viewingOwnDashboard ? "you" : viewedDashboardName}.`}
+              </Typography>
             ) : (
               <>
                 <Grid container spacing={1.5}>
@@ -1027,7 +1350,7 @@ const Dashboard = () => {
                 </Grid>
                 {myAssets.length > 6 && (
                   <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
-                    +{myAssets.length - 6} more â€”{" "}
+                    +{myAssets.length - 6} more -{" "}
                     <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }}
                       onClick={() => navigate("/installations/assets")}>
                       view all
@@ -1039,7 +1362,7 @@ const Dashboard = () => {
           </Box>
 
           {/* Photo reminders from PM */}
-          {photoReminderNotifications.length > 0 && (
+          {canShowOwnNotifications && photoReminderNotifications.length > 0 && (
             <Stack spacing={0.5}>
               {photoReminderNotifications.map((r) => {
                 const { assetTag, workflowName } = parseMissingMediaNotification(r);
@@ -1058,20 +1381,22 @@ const Dashboard = () => {
           )}
 
           {/* My runs missing media */}
-          {missingMediaNotifications.filter((n) => n.triggeredByUserId === user.id || !n.triggeredByUserId).length > 0 && (
+          {canShowOwnNotifications && scopedInstallerMissingMediaNotifications.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PhotoCameraOutlined sx={{ fontSize: 18, color: "warning.main" }} />
                 <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                   Runs Missing Media
                 </Typography>
-                <Chip label={missingMediaNotifications.filter((n) => n.triggeredByUserId === user.id || !n.triggeredByUserId).length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                <Chip label={scopedInstallerMissingMediaNotifications.length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
               </Stack>
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Your completed runs with missing photo or video evidence â€” tap to upload missing media
+                {selectedDashboardId === ALL_DASHBOARDS_VALUE
+                  ? "Completed runs with missing photo or video evidence - tap to upload missing media"
+                  : `${viewingOwnDashboard ? "Your" : `${viewedDashboardName}'s`} completed runs with missing photo or video evidence - tap to upload missing media`}
               </Typography>
               <Stack spacing={0.5}>
-                {missingMediaNotifications.filter((n) => n.triggeredByUserId === user.id || !n.triggeredByUserId).map((f) => {
+                {scopedInstallerMissingMediaNotifications.map((f) => {
                   const parsed = parseMissingMediaNotification(f);
                   return (
                   <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
@@ -1080,7 +1405,7 @@ const Dashboard = () => {
                         {parsed.jobNumber ? `${parsed.jobNumber}: ` : ""}{parsed.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {parsed.workflowName} Â· {fmtDate(f.createdAtUtc)}
+                        {parsed.workflowName} | {fmtDate(f.createdAtUtc)}
                       </Typography>
                       <Typography variant="caption" color="warning.main" display="block">
                         {parsed.captureText}
@@ -1092,7 +1417,7 @@ const Dashboard = () => {
                     </Button>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
                       onClick={() => { void acknowledge([f.id]); }}>
-                      âœ•
+                      Dismiss
                     </Button>
                   </Stack>
                 )})}
@@ -1100,25 +1425,29 @@ const Dashboard = () => {
             </Box>
           )}
 
-          {/* My Blocking Issues + My Pending Signatures */}
+          {/* Blocking Issues + Pending Signatures */}
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
               <Box className="glass-card" sx={{ p: 2.5 }}>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
                   <ErrorOutlineOutlined sx={{ fontSize: 18, color: myBlocking.length > 0 ? "error.main" : "text.disabled" }} />
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>My Blocking Issues</Typography>
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                    {viewingOwnDashboard ? "My Blocking Issues" : `${viewedDashboardName}'s Blocking Issues`}
+                  </Typography>
                   <Chip label={myBlocking.length} size="small"
                     color={myBlocking.length > 0 ? "error" : "default"} variant="outlined"
                     sx={{ height: 20, fontSize: "0.7rem" }} />
                 </Stack>
                 {myBlocking.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">No blocking issues on your jobs</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {viewingOwnDashboard ? "No blocking issues on your jobs" : `No blocking issues on ${viewedDashboardName}'s jobs`}
+                  </Typography>
                 ) : (
                   <Stack spacing={0.25}>
                     {myBlocking.map((iss) => (
                       <ItemRow key={iss.issueId}
                         label={`${iss.jobNumber}: ${iss.assetTag}`}
-                        sub={iss.description.slice(0, 60) + (iss.description.length > 60 ? "â€¦" : "")}
+                        sub={iss.description.slice(0, 60) + (iss.description.length > 60 ? "..." : "")}
                         onClick={() => navigate("/issues")} />
                     ))}
                   </Stack>
@@ -1129,7 +1458,9 @@ const Dashboard = () => {
               <Box className="glass-card" sx={{ p: 2.5 }}>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
                   <PendingActionsOutlined sx={{ fontSize: 18, color: myPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>My Pending Signatures</Typography>
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                    {viewingOwnDashboard ? "My Pending Signatures" : `${viewedDashboardName}'s Pending Signatures`}
+                  </Typography>
                   <Chip label={myPendingSigs.length} size="small"
                     color={myPendingSigs.length > 0 ? "warning" : "default"} variant="outlined"
                     sx={{ height: 20, fontSize: "0.7rem" }} />
@@ -1213,7 +1544,7 @@ const Dashboard = () => {
                     {notStartedAssets.slice(0, 5).map((a) => (
                       <ItemRow key={a.id}
                         label={a.assetTag || a.assetName || a.id}
-                        sub={[a.jobNumber, a.assignedUserId ? `Assigned: ${a.assignedUserId}` : undefined].filter(Boolean).join(" Â· ")}
+                        sub={[a.jobNumber, a.assignedUserId ? `Assigned: ${a.assignedUserId}` : undefined].filter(Boolean).join(" | ")}
                         onClick={() => navigate("/installations/assets")} />
                     ))}
                     {notStartedAssets.length > 5 && (
@@ -1240,25 +1571,27 @@ const Dashboard = () => {
             <Grid item xs={12} md={6}>
               <Box className="glass-card" sx={{ p: 2.5 }}>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-                  <PendingActionsOutlined sx={{ fontSize: 18, color: pendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Sign-offs Waiting on Me</Typography>
-                  <Chip label={pendingSigs.length} size="small"
-                    color={pendingSigs.length > 0 ? "warning" : "default"} variant="outlined"
+                  <PendingActionsOutlined sx={{ fontSize: 18, color: myPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                    {viewingOwnDashboard ? "Sign-offs Waiting on Me" : `Sign-offs Waiting on ${viewedDashboardName}`}
+                  </Typography>
+                  <Chip label={myPendingSigs.length} size="small"
+                    color={myPendingSigs.length > 0 ? "warning" : "default"} variant="outlined"
                     sx={{ height: 20, fontSize: "0.7rem" }} />
                 </Stack>
-                {pendingSigs.length === 0 ? (
+                {myPendingSigs.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">No pending sign-offs</Typography>
                 ) : (
                   <Stack spacing={0.25}>
-                    {pendingSigs.slice(0, 5).map((s) => (
+                    {myPendingSigs.slice(0, 5).map((s) => (
                       <ItemRow key={s.runId}
                         label={`${s.jobNumber}: ${s.assetTag}`}
                         sub={`Completed ${fmtDate(s.completedAt)}`}
                         onClick={() => navigate(`/projects/${s.projectId}`)} />
                     ))}
-                    {pendingSigs.length > 5 && (
+                    {myPendingSigs.length > 5 && (
                       <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                        +{pendingSigs.length - 5} more
+                        +{myPendingSigs.length - 5} more
                       </Typography>
                     )}
                   </Stack>
@@ -1275,7 +1608,7 @@ const Dashboard = () => {
                     sx={{ height: 20, fontSize: "0.7rem" }} />
                 </Stack>
                 <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                  Not yet published â€” review and publish
+                  Not yet published - review and publish
                 </Typography>
                 {draftConfigs.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">No draft configs</Typography>
@@ -1307,7 +1640,7 @@ const Dashboard = () => {
           {NeedsAttentionSection}
 
           {/* Pending Approvals strip â€” if any */}
-          {pendingApprovals.length > 0 && (
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && pendingApprovals.length > 0 && (
             <Box className="glass-card" sx={{ p: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <AssignmentLateOutlined sx={{ fontSize: 18, color: "warning.main" }} />
@@ -1330,7 +1663,7 @@ const Dashboard = () => {
             </Box>
           )}
 
-          {(assignmentUpdateNotifications.length > 0 || missingMediaNotifications.length > 0 || mediaUpdateNotifications.length > 0) && (
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && (assignmentUpdateNotifications.length > 0 || missingMediaNotifications.length > 0 || mediaUpdateNotifications.length > 0) && (
             <Grid container spacing={2}>
           {/* Assignment updates â€” PM/Admin dispatch + field takeovers */}
           {assignmentUpdateNotifications.length > 0 && (
@@ -1362,7 +1695,7 @@ const Dashboard = () => {
                     </Box>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
                       onClick={() => { void acknowledge([f.id]); }}>
-                      âœ•
+                      Dismiss
                     </Button>
                   </Stack>
                 ))}
@@ -1401,7 +1734,7 @@ const Dashboard = () => {
                     </Box>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
                       onClick={() => { void acknowledge([n.id]); }}>
-                      âœ•
+                      Dismiss
                     </Button>
                   </Stack>
                 ))}
@@ -1437,7 +1770,7 @@ const Dashboard = () => {
                         {parsed.jobNumber ? `${parsed.jobNumber}: ` : ""}{parsed.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {parsed.workflowName} Â· {f.triggeredByName ?? "Installer"} Â· {fmtDate(f.createdAtUtc)}
+                        {parsed.workflowName} | {f.triggeredByName ?? "Installer"} | {fmtDate(f.createdAtUtc)}
                       </Typography>
                       <Typography variant="caption" color="warning.main" display="block">
                         {parsed.captureText}
@@ -1479,11 +1812,11 @@ const Dashboard = () => {
                           });
                         }}
                       >
-                        {reminderSentId === f.id ? "Sent âœ“" : "Remind Installer"}
+                        {reminderSentId === f.id ? "Sent" : "Remind Installer"}
                       </Button>
                       <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
                         onClick={() => { void acknowledge([f.id]); }}>
-                        âœ•
+                        Dismiss
                       </Button>
                     </Stack>
                   </Stack>
@@ -1496,13 +1829,13 @@ const Dashboard = () => {
           )}
 
           {/* Regional Snapshot */}
-          {RegionalSnapshotSection}
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && RegionalSnapshotSection}
 
           {/* Project Status + Lifecycle */}
-          {ProjectStatusGrid}
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && ProjectStatusGrid}
 
           {/* Evidence + Health */}
-          {EvidenceHealthGrid}
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && EvidenceHealthGrid}
 
           {/* Workload */}
           {WorkloadPanel}

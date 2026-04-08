@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,14 +13,28 @@ namespace Commtrac.Api.Controllers;
 public class SignatureEventsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IAccessScopeService _accessScope;
+    private readonly IWorkflowRunAuthorizationService _workflowAuthorization;
 
-    public SignatureEventsController(AppDbContext db) => _db = db;
+    public SignatureEventsController(AppDbContext db, IAccessScopeService accessScope, IWorkflowRunAuthorizationService workflowAuthorization)
+    {
+        _db = db;
+        _accessScope = accessScope;
+        _workflowAuthorization = workflowAuthorization;
+    }
 
     // GET /api/signature-events?runId=xxx
     [HttpGet]
     public async Task<ActionResult<List<SignatureEventDto>>> List([FromQuery] string runId)
     {
         if (string.IsNullOrWhiteSpace(runId)) return BadRequest("runId required");
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == runId);
+        if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null || !await _accessScope.CanViewProjectAsync(User, asset.ProjectId))
+        {
+            return NotFound();
+        }
         var events = await _db.SignatureEvents
             .Where(e => e.RunId == runId)
             .OrderBy(e => e.SignedAtUtc)
@@ -39,6 +54,12 @@ public class SignatureEventsController : ControllerBase
 
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == runId);
         if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return NotFound();
+        if (!await _workflowAuthorization.CanMutateWorkflowRunAsync(User, asset, run))
+        {
+            return Forbid();
+        }
         if (!run.IsLocked) return BadRequest(new { message = "Run must be completed before signing." });
 
         var role = req.SignerRole?.Trim() ?? "";

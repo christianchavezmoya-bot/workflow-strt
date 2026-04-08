@@ -96,10 +96,31 @@ public class BomImportRunsController : ControllerBase
         if (req.ValidationErrors.HasValue) run.ValidationErrors = req.ValidationErrors.Value;
         if (req.ValidationWarnings.HasValue) run.ValidationWarnings = req.ValidationWarnings.Value;
         if (req.PublishedProjectId != null) run.PublishedProjectId = req.PublishedProjectId;
+        if (req.RawRowsJson != null) run.RawRowsJson = req.RawRowsJson;
+        if (req.NormalizedRowsJson != null) run.NormalizedRowsJson = req.NormalizedRowsJson;
+        if (req.ClassificationsJson != null) run.ClassificationsJson = req.ClassificationsJson;
+        if (req.MappingsJson != null) run.MappingsJson = req.MappingsJson;
         run.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
         return Ok(MapToDto(run));
+    }
+
+    [HttpGet("{id}/data")]
+    public async Task<IActionResult> GetData(string id)
+    {
+        if (!ModuleEnabled) return ModuleDisabled();
+        var run = await _db.BomImportRuns.FirstOrDefaultAsync(r => r.Id == id);
+        if (run == null) return NotFound();
+
+        return Ok(new
+        {
+            rawRows = DeserializeJson(run.RawRowsJson),
+            normalizedRows = DeserializeJson(run.NormalizedRowsJson),
+            classifications = DeserializeJson(run.ClassificationsJson),
+            mappings = DeserializeJson(run.MappingsJson),
+            draftProject = DeserializeJson(run.DraftProjectJson),
+        });
     }
 
     [HttpDelete("{id}")]
@@ -330,6 +351,12 @@ public class BomImportRunsController : ControllerBase
         publishedProjectId = r.PublishedProjectId,
         notes = r.Notes,
     };
+
+    private static object? DeserializeJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        return JsonSerializer.Deserialize<object>(json, JsonOpts);
+    }
 }
 
 // ── Request models ─────────────────────────────────────────────────────────────
@@ -350,7 +377,11 @@ public record UpdateBomRunRequest(
     int? ClassifiedRows,
     int? ValidationErrors,
     int? ValidationWarnings,
-    string? PublishedProjectId
+    string? PublishedProjectId,
+    string? RawRowsJson,
+    string? NormalizedRowsJson,
+    string? ClassificationsJson,
+    string? MappingsJson
 );
 
 public record PublishBomRequest(string Mode);

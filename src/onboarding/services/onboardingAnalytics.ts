@@ -1,5 +1,5 @@
-// Onboarding analytics — fires events to console in dev, swappable for real analytics
-// Replace the `emit` function body to wire into Segment, Mixpanel, etc.
+// Onboarding analytics — fires events to console in dev, stores to backend in production.
+import { analyticsService } from "../../services/analyticsService";
 
 export type OnboardingEvent =
   | "onboarding_started"
@@ -37,8 +37,16 @@ function emit(event: OnboardingEvent, payload: EventPayload = {}) {
   if (import.meta.env.DEV) {
     console.debug(`[onboarding] ${event}`, payload);
   }
-  // TODO: wire into real analytics provider here
-  // analytics.track(event, payload);
+
+  // Pull userId/role out of payload for indexed columns on the server;
+  // the rest goes into PayloadJson.
+  const { userId, role, ...rest } = payload;
+  void analyticsService.track(
+    event,
+    rest,
+    typeof userId === "string" ? userId : undefined,
+    typeof role   === "string" ? role   : undefined
+  );
 }
 
 export const onboardingAnalytics = { emit };

@@ -8,6 +8,7 @@ import { store } from "./store";
 import theme from "./theme/theme";
 import { FieldNotificationProvider } from "./contexts/FieldNotificationContext";
 import { NotificationInboxProvider } from "./contexts/NotificationInboxContext";
+import { AccessModeProvider } from "./contexts/AccessModeContext";
 import { ViewModeProvider } from "./contexts/ViewModeContext";
 import "./index.css";
 
@@ -17,13 +18,15 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <BrowserRouter>
-          <ViewModeProvider>
-            <NotificationInboxProvider>
-              <FieldNotificationProvider>
-                <App />
-              </FieldNotificationProvider>
-            </NotificationInboxProvider>
-          </ViewModeProvider>
+          <AccessModeProvider>
+            <ViewModeProvider>
+              <NotificationInboxProvider>
+                <FieldNotificationProvider>
+                  <App />
+                </FieldNotificationProvider>
+              </NotificationInboxProvider>
+            </ViewModeProvider>
+          </AccessModeProvider>
         </BrowserRouter>
       </ThemeProvider>
     </Provider>

@@ -72,7 +72,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
@@ -199,6 +199,21 @@ function tabDotColor(h: AssetHealth | undefined): string | null {
   return "warning.main";
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function nextDraftConfigNumber(configs: WorkflowConfig[], productName: string) {
+  const pattern = new RegExp(`^${escapeRegExp(productName)}\\s+Config\\s+(\\d+)$`, "i");
+  const maxMatch = configs.reduce((max, cfg) => {
+    const match = cfg.name.match(pattern);
+    if (!match) return max;
+    const parsed = Number(match[1]);
+    return Number.isFinite(parsed) ? Math.max(max, parsed) : max;
+  }, 0);
+  return maxMatch + 1;
+}
+
 // ------------------------------------------------------------------
 // Asset form
 // ------------------------------------------------------------------
@@ -261,6 +276,7 @@ type AssignmentEventFlag = {
 
 const AssetInstallationPage = () => {
   const dispatch = useAppDispatch();
+  const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const can = usePermissions();
   const productsState = useAppSelector((s) => s.products);
@@ -371,6 +387,7 @@ const AssetInstallationPage = () => {
   const [runsMap, setRunsMap] = useState<Record<string, AssetWorkflowRun[]>>({});
   const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
   const [workflowConfigs, setWorkflowConfigs] = useState<WorkflowConfig[]>([]);
+  const [creatingWorkflowDraft, setCreatingWorkflowDraft] = useState(false);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [assignDialogAsset, setAssignDialogAsset] = useState<ProjectAsset | null>(null);
   const [assignForm, setAssignForm] = useState({ workflowTypeId: "", workflowConfigId: "" });
@@ -474,6 +491,32 @@ const AssetInstallationPage = () => {
     }
     return undefined;
   }, [products, searchParams, selectedProject]);
+  const canCreateWorkflow = can.modifyData && !!activeProduct?.id;
+
+  const openWorkflowBuilderForProduct = useCallback(async () => {
+    if (!activeProduct?.id) return;
+    setCreatingWorkflowDraft(true);
+    try {
+      const existingConfigs = await workflowConfigService.listByProduct(activeProduct.id);
+      const nextNumber = nextDraftConfigNumber(existingConfigs, activeProduct.name);
+      const created = await workflowConfigService.create({
+        name: `${activeProduct.name} Config ${nextNumber}`,
+        productId: activeProduct.id,
+        configType: "Version 1",
+        featureSelectionsJson: JSON.stringify(
+          (activeProduct.features ?? [])
+            .map((feature) => ({
+              featureId: feature.id,
+              included: false,
+              activeCount: 0,
+            }))
+        ),
+      });
+      navigate(`/work-instructions?product=${encodeURIComponent(activeProduct.id)}&view=builder&config=${encodeURIComponent(created.id)}`);
+    } finally {
+      setCreatingWorkflowDraft(false);
+    }
+  }, [activeProduct, navigate]);
   const activeFeatures = useMemo(() => (activeProduct?.features ?? []) as FeatureDef[], [activeProduct]);
 
   useEffect(() => {
@@ -628,14 +671,14 @@ const AssetInstallationPage = () => {
       const runs        = runsMap[a.id] ?? [];
       const latestRun   = runs[0];
       const assignments = assignmentsMap[a.id] ?? [];
-      let wfStatus = "â€”";
+      let wfStatus = "-";
       if (assignments.length > 0) {
         const names = assignments.map((x) => x.workflowTypeName || "Workflow").join(", ");
         wfStatus = latestRun
           ? `${latestRun.status === "Complete" ? "Done" : "In Progress"} (${names})`
           : `Assigned (${names})`;
       }
-      let sigStatus = "â€”";
+      let sigStatus = "-";
       if (latestRun) {
         const ss = latestRun.signatureStatus ?? "";
         if (ss === "PendingCustomer") sigStatus = "Pending Customer";
@@ -651,7 +694,7 @@ const AssetInstallationPage = () => {
         location:     a.location     ?? "",
         assignedTech: tech?.fullName ?? "",
         status:       statusLabel[a.status] ?? a.status,
-        project:      proj ? `${proj.jobNumber} â€” ${proj.customerName}` : "",
+        project:      proj ? `${proj.jobNumber} - ${proj.customerName}` : "",
         siteName:     (proj as unknown as Record<string, unknown>)?.siteName as string ?? "",
         notes:        a.notes        ?? "",
         configType:   a.configLabel  ?? "",
@@ -783,7 +826,7 @@ const AssetInstallationPage = () => {
       try { issues = JSON.parse(editAsset.issuesJson || "[]"); } catch {}
       const blockingOpen = issues.filter((i) => i.isBlocking && !i.resolved);
       if (blockingOpen.length > 0) {
-        setEditError(`Cannot set to Complete â€” ${blockingOpen.length} blocking issue${blockingOpen.length === 1 ? "" : "s"} must be resolved first.`);
+        setEditError(`Cannot set to Complete - ${blockingOpen.length} blocking issue${blockingOpen.length === 1 ? "" : "s"} must be resolved first.`);
         return;
       }
     }
@@ -1592,7 +1635,7 @@ const AssetInstallationPage = () => {
               </Stack>
               {issue.stepTitle && <Typography variant="caption" color="text.secondary" display="block">Step: {issue.stepTitle}</Typography>}
               <Typography variant="caption" color="text.disabled" display="block">
-                {"createdBy" in issue && issue.createdBy ? `${issue.createdBy} Â· ` : ""}{new Date(issue.reportedAt).toLocaleString()}
+                {"createdBy" in issue && issue.createdBy ? `${issue.createdBy} | ` : ""}{new Date(issue.reportedAt).toLocaleString()}
               </Typography>
               {!issue.resolved && (
                 <Box sx={{ mt: 1 }}>
@@ -1644,7 +1687,7 @@ const AssetInstallationPage = () => {
                     fullWidth
                     multiline
                     rows={2}
-                    placeholder="Add a commentâ€¦"
+                    placeholder="Add a comment..."
                     value={commentVal}
                     onChange={(e) => setInlineCommentTexts(prev => ({ ...prev, [issue.id]: e.target.value }))}
                     sx={{ fontSize: 11, mb: 0.5 }}
@@ -1675,7 +1718,7 @@ const AssetInstallationPage = () => {
               </Typography>
               {issue.resolved ? (
                 <Typography variant="caption" display="block" sx={{ fontStyle: "italic", color: "text.secondary" }}>
-                  {issue.resolutionNote ?? "â€”"}
+                  {issue.resolutionNote ?? "-"}
                 </Typography>
               ) : (
                 <>
@@ -1684,7 +1727,7 @@ const AssetInstallationPage = () => {
                     fullWidth
                     multiline
                     rows={3}
-                    placeholder="Describe corrective action takenâ€¦"
+                    placeholder="Describe corrective action taken..."
                     value={correctiveVal}
                     onChange={(e) => setInlineCorrectiveTexts(prev => ({ ...prev, [issue.id]: e.target.value }))}
                     sx={{ fontSize: 11, mb: 0.75 }}
@@ -1955,14 +1998,14 @@ const AssetInstallationPage = () => {
           {inventoryFeatures.flatMap((feat) => {
             const raw = fv[feat.id];
             const isComponent = feat.valueType === "component" && (feat.subProperties ?? []).length > 0;
-            let displayVal = "â€”";
+            let displayVal = "-";
             let filled = !!raw;
 
             if (raw && isComponent) {
               try {
                 const sub: Record<string, string> = JSON.parse(raw);
                 const parts = (feat.subProperties ?? []).map((sp) => sub[sp.id] ? `${sp.name}: ${sub[sp.id]}` : null).filter(Boolean);
-                displayVal = parts.length ? `${parts.length} sub-field${parts.length !== 1 ? "s" : ""} filled` : "â€”";
+                displayVal = parts.length ? `${parts.length} sub-field${parts.length !== 1 ? "s" : ""} filled` : "-";
                 filled = parts.length > 0;
               } catch { filled = false; }
             } else if (raw) {
@@ -1988,9 +2031,9 @@ const AssetInstallationPage = () => {
                     return (feat.subProperties ?? []).map((sp) => (
                       <TableRow key={`${feat.id}-${sp.id}`} sx={{ bgcolor: "rgba(255,255,255,0.03)" }}>
                         <TableCell sx={{ fontSize: 12, pl: 3.5, color: "text.secondary", py: 0.5 }}>
-                          â†³ {sp.name}
+                          {"->"} {sp.name}
                         </TableCell>
-                        <TableCell sx={{ fontSize: 12, py: 0.5 }}>{sub[sp.id] || "â€”"}</TableCell>
+                        <TableCell sx={{ fontSize: 12, py: 0.5 }}>{sub[sp.id] || "-"}</TableCell>
                         <TableCell sx={{ py: 0.5 }}>
                           <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: sub[sp.id] ? "success.main" : "grey.300" }} />
                         </TableCell>
@@ -2067,26 +2110,26 @@ const AssetInstallationPage = () => {
   ) {
     switch (colId) {
       case "assetName":
-        return <Typography variant="body2">{asset.assetName || "â€”"}</Typography>;
+        return <Typography variant="body2">{asset.assetName || "-"}</Typography>;
       case "serialNumber":
-        return <Typography variant="body2" color="text.secondary">{asset.serialNumber || "â€”"}</Typography>;
+        return <Typography variant="body2" color="text.secondary">{asset.serialNumber || "-"}</Typography>;
       case "assetModel":
-        return <Typography variant="body2" color="text.secondary">{asset.assetModel || "â€”"}</Typography>;
+        return <Typography variant="body2" color="text.secondary">{asset.assetModel || "-"}</Typography>;
       case "manufacturer":
-        return <Typography variant="body2" color="text.secondary">{asset.manufacturer || "â€”"}</Typography>;
+        return <Typography variant="body2" color="text.secondary">{asset.manufacturer || "-"}</Typography>;
       case "configType": {
         const cfgType = cfg?.configType
           || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.configType : undefined);
-        return <Typography variant="body2" color="text.secondary">{cfgType || "â€”"}</Typography>;
+        return <Typography variant="body2" color="text.secondary">{cfgType || "-"}</Typography>;
       }
       case "project":
         return <Typography variant="body2" color="text.secondary">{proj ? proj.jobNumber : asset.projectId.slice(0, 8)}</Typography>;
       case "siteName":
-        return <Typography variant="body2" color="text.secondary">{proj?.siteName || "â€”"}</Typography>;
+        return <Typography variant="body2" color="text.secondary">{proj?.siteName || "-"}</Typography>;
       case "location":
-        return <Typography variant="body2" color="text.secondary">{asset.location || "â€”"}</Typography>;
+        return <Typography variant="body2" color="text.secondary">{asset.location || "-"}</Typography>;
       case "assignedTech":
-        return <Typography variant="body2" color="text.secondary">{tech ? tech.fullName : "â€”"}</Typography>;
+        return <Typography variant="body2" color="text.secondary">{tech ? tech.fullName : "-"}</Typography>;
       case "features":
         return featureCompletenessChip(asset);
       case "status":
@@ -2198,7 +2241,7 @@ const AssetInstallationPage = () => {
                           const isBomOpen = expandedBomAsgnId === bomKey;
                           return (
                             <Chip size="small"
-                              label={`${allBom.length} part${allBom.length !== 1 ? "s" : ""}${invCount > 0 ? ` Â· ${invCount} inventory` : ""}`}
+                              label={`${allBom.length} part${allBom.length !== 1 ? "s" : ""}${invCount > 0 ? ` | ${invCount} inventory` : ""}`}
                               color="info" variant="outlined" clickable
                               sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }}
                               onClick={(e) => { e.stopPropagation(); setExpandedBomAsgnId(isBomOpen ? null : bomKey); }}
@@ -2220,11 +2263,11 @@ const AssetInstallationPage = () => {
                             <Box key={idx}>
                               <Stack direction="row" spacing={0.75} alignItems="center">
                                 <Typography variant="caption" fontWeight={600}>{item.description}</Typography>
-                                <Typography variant="caption" color="text.secondary">Ã— {item.actualQty} {item.unitOfMeasure}</Typography>
+                                <Typography variant="caption" color="text.secondary">x {item.actualQty} {item.unitOfMeasure}</Typography>
                               </Stack>
                               {item.isInventory && (item.unitCaptures ?? []).map((fields, i) => (
                                 <Typography key={i} variant="caption" color="text.secondary" display="block" sx={{ pl: 1 }}>
-                                  u{i + 1}: {Object.entries(fields).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(" Â· ") || "â€”"}
+                                  u{i + 1}: {Object.entries(fields).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(" | ") || "-"}
                                 </Typography>
                               ))}
                             </Box>
@@ -2347,13 +2390,13 @@ const AssetInstallationPage = () => {
                 <TableRow key={i}>
                   <TableCell sx={{ fontSize: 11, py: 0.5, color: "text.disabled" }}>#{e.runNumber}</TableCell>
                   <TableCell sx={{ fontSize: 11, py: 0.5 }}>
-                    {e.reason || <Typography component="span" variant="caption" color="text.disabled">â€”</Typography>}
+                    {e.reason || <Typography component="span" variant="caption" color="text.disabled">-</Typography>}
                   </TableCell>
                   <TableCell sx={{ fontSize: 11, py: 0.5, color: "text.secondary", whiteSpace: "nowrap" }}>
                     {new Date(e.startedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
                   </TableCell>
                   <TableCell sx={{ fontSize: 11, py: 0.5, color: "warning.main", whiteSpace: "nowrap" }}>
-                    {e.durationSecs > 0 ? formatRunDur(e.durationSecs) : "â€”"}
+                    {e.durationSecs > 0 ? formatRunDur(e.durationSecs) : "-"}
                   </TableCell>
                 </TableRow>
               ))}
@@ -2398,11 +2441,26 @@ const AssetInstallationPage = () => {
           </Stack>
           <Typography variant="body2" color="text.secondary">
             {selectedProject
-              ? `Track assets for ${selectedProject.jobNumber} â€” start work orders, record status, and monitor progress.`
-              : "Track assets across all projects â€” start work orders, record status, and monitor progress."}
+              ? `Track assets for ${selectedProject.jobNumber} - start work orders, record status, and monitor progress.`
+              : "Track assets across all projects - start work orders, record status, and monitor progress."}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
+          {can.modifyData && (
+            <Tooltip title={activeProduct?.id ? `Open the workflow builder for ${activeProduct.name}` : "Select a project with a product to create a workflow"}>
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<AssignmentOutlined />}
+                  disabled={!canCreateWorkflow || creatingWorkflowDraft}
+                  onClick={() => { void openWorkflowBuilderForProduct(); }}
+                >
+                  {creatingWorkflowDraft ? "Creating Draft..." : "Create Workflow"}
+                </Button>
+              </span>
+            </Tooltip>
+          )}
           <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={refreshAssets}>Refresh</Button>
           {can.modifyData && (
             <Button
@@ -2489,7 +2547,7 @@ const AssetInstallationPage = () => {
           <InputLabel shrink>Project</InputLabel>
           <Select label="Project" value={selectedProjectId} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
             <MenuItem value="">All projects</MenuItem>
-            {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} â€” {p.customerName}</MenuItem>)}
+            {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} - {p.customerName}</MenuItem>)}
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ minWidth: 160 }}>
@@ -2575,13 +2633,13 @@ const AssetInstallationPage = () => {
               const atLimit = sel.filter((a) => (docsCountMap[a.id] ?? 0) >= 3);
               const withDocs = sel.filter((a) => (docsCountMap[a.id] ?? 0) > 0 && (docsCountMap[a.id] ?? 0) < 3);
               const affected = [
-                ...atLimit.map((a) => ({ assetTag: a.assetTag, current: "3/3 docs â€” will be skipped" })),
+                ...atLimit.map((a) => ({ assetTag: a.assetTag, current: "3/3 docs - will be skipped" })),
                 ...withDocs.map((a) => ({ assetTag: a.assetTag, current: `${docsCountMap[a.id]}/3 docs (existing kept)` })),
               ];
               if (affected.length === 0) { setBulkDocsOpen(true); return; }
               setBulkWarnTitle("Some assets already have documents");
               setBulkWarnBody(
-                "Assets at the 3-document limit will be skipped. For assets with fewer than 3 documents, existing documents will NOT be deleted â€” the new document will be added alongside them."
+                "Assets at the 3-document limit will be skipped. For assets with fewer than 3 documents, existing documents will NOT be deleted - the new document will be added alongside them."
               );
               setBulkWarnRows(affected);
               bulkWarnProceedRef.current = () => setBulkDocsOpen(true);
@@ -2645,7 +2703,7 @@ const AssetInstallationPage = () => {
               onClick={() => setArchiveMode((v) => !v)}
               sx={{ fontSize: 12 }}
             >
-              {archiveMode ? "Archive View â€” Exit" : "Archive"}
+              {archiveMode ? "Archive View - Exit" : "Archive"}
             </Button>
           </Tooltip>
           <Tooltip title="Print / Save PDF">
@@ -2926,7 +2984,7 @@ const AssetInstallationPage = () => {
                 )}
                 {productProjects.map((proj) => (
                   <MenuItem key={proj.id} value={proj.id}>
-                    {proj.jobNumber} â€” {proj.customerName}
+                    {proj.jobNumber} - {proj.customerName}
                     {proj.siteName ? ` (${proj.siteName})` : ""}
                   </MenuItem>
                 ))}
@@ -2943,7 +3001,7 @@ const AssetInstallationPage = () => {
                 <MenuItem value="">(None)</MenuItem>
                 {latestPublishedWfConfigs.map((wc) => (
                   <MenuItem key={wc.id} value={wc.id}>
-                    {wc.configType ? `${wc.configType} â€” ` : ""}{wc.name}{wc.version > 1 ? ` (v${wc.version})` : ""}
+                    {wc.configType ? `${wc.configType} - ` : ""}{wc.name}{wc.version > 1 ? ` (v${wc.version})` : ""}
                   </MenuItem>
                 ))}
               </Select>
@@ -3038,14 +3096,14 @@ const AssetInstallationPage = () => {
           <Button onClick={() => setAddOpen(false)} disabled={addSaving}>Cancel</Button>
           <Button variant="contained" onClick={saveAsset} disabled={addSaving}
             startIcon={addSaving ? <CircularProgress size={14} /> : undefined}>
-            {addSaving ? "Savingâ€¦" : "Add asset"}
+            {addSaving ? "Saving..." : "Add asset"}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Edit asset dialog */}
       <Dialog open={editOpen} onClose={() => !editSaving && setEditOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit Asset â€” {editAsset?.assetTag}</DialogTitle>
+        <DialogTitle>Edit Asset - {editAsset?.assetTag}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             {/* Site name from project (read-only) */}
@@ -3088,7 +3146,7 @@ const AssetInstallationPage = () => {
                 <MenuItem value="">(None)</MenuItem>
                 {latestPublishedWfConfigs.map((wc) => (
                   <MenuItem key={wc.id} value={wc.id}>
-                    {wc.configType ? `${wc.configType} â€” ` : ""}{wc.name}{wc.version > 1 ? ` (v${wc.version})` : ""}
+                    {wc.configType ? `${wc.configType} - ` : ""}{wc.name}{wc.version > 1 ? ` (v${wc.version})` : ""}
                   </MenuItem>
                 ))}
               </Select>
@@ -3138,7 +3196,7 @@ const AssetInstallationPage = () => {
           <Button onClick={() => setEditOpen(false)} disabled={editSaving}>Cancel</Button>
           <Button variant="contained" onClick={saveEditAsset} disabled={editSaving}
             startIcon={editSaving ? <CircularProgress size={14} /> : undefined}>
-            {editSaving ? "Savingâ€¦" : "Save changes"}
+            {editSaving ? "Saving..." : "Save changes"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3201,7 +3259,7 @@ const AssetInstallationPage = () => {
         <DialogTitle>
           <Stack direction="row" alignItems="center" spacing={1}>
             <ReportProblemOutlined color="error" fontSize="small" />
-            <span>Add Issue â€” {issueDialogAsset?.assetTag}</span>
+            <span>Add Issue - {issueDialogAsset?.assetTag}</span>
           </Stack>
         </DialogTitle>
         <DialogContent>
@@ -3214,7 +3272,7 @@ const AssetInstallationPage = () => {
               rows={3}
               value={issueForm.description}
               onChange={(e) => setIssueForm((p) => ({ ...p, description: e.target.value }))}
-              placeholder="Describe the issueâ€¦"
+              placeholder="Describe the issue..."
               InputLabelProps={{ shrink: true }}
             />
             <FormControl size="small" fullWidth>
@@ -3251,7 +3309,7 @@ const AssetInstallationPage = () => {
         <DialogTitle>Column Settings</DialogTitle>
         <DialogContent>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
-            Check to show a column. Drag rows to reorder â€” top of the list = leftmost in the table.
+            Check to show a column. Drag rows to reorder - top of the list = leftmost in the table.
           </Typography>
           <Stack spacing={0.75}>
             {settingsOrder.map((id, idx) => {
@@ -3314,7 +3372,7 @@ const AssetInstallationPage = () => {
         <DialogTitle>
           <Stack direction="row" alignItems="center" spacing={1}>
             <AssignmentOutlined fontSize="small" />
-            <span>Assign Workflow â€” {assignDialogAsset?.assetTag}</span>
+            <span>Assign Workflow - {assignDialogAsset?.assetTag}</span>
           </Stack>
         </DialogTitle>
         <DialogContent>
@@ -3344,7 +3402,7 @@ const AssetInstallationPage = () => {
                 {workflowConfigs.map((c) => (
                   <MenuItem key={c.id} value={c.id}>
                     {c.name}
-                    {c.configType ? ` â€” ${c.configType}` : ""}
+                    {c.configType ? ` - ${c.configType}` : ""}
                     <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>v{c.version}</Typography>
                   </MenuItem>
                 ))}
@@ -3360,7 +3418,7 @@ const AssetInstallationPage = () => {
             disabled={assignSaving || !assignForm.workflowTypeId || !assignForm.workflowConfigId}
             startIcon={assignSaving ? <CircularProgress size={14} /> : undefined}
           >
-            {assignSaving ? "Savingâ€¦" : "Assign"}
+            {assignSaving ? "Saving..." : "Assign"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3385,7 +3443,7 @@ const AssetInstallationPage = () => {
               </Box>
             }>
               <IconButton size="small" sx={{ opacity: 0.6 }}>
-                <Typography sx={{ fontSize: 14, fontWeight: 700, lineHeight: 1 }}>â“˜</Typography>
+                <Typography sx={{ fontSize: 14, fontWeight: 700, lineHeight: 1 }}>i</Typography>
               </IconButton>
             </Tooltip>
           </Stack>
@@ -3451,10 +3509,10 @@ const AssetInstallationPage = () => {
                                 <Typography variant="body2">{tag || "(missing)"}</Typography>
                               </Stack>
                             </TableCell>
-                            <TableCell><Typography variant="body2">{r.asset_name || r.assetname || "â€”"}</Typography></TableCell>
-                            <TableCell><Typography variant="body2">{r.config_type || r.configtype || "â€”"}</Typography></TableCell>
-                            <TableCell><Typography variant="body2">{r.serial_number || r["serial_#"] || r.serialnumber || "â€”"}</Typography></TableCell>
-                            <TableCell><Typography variant="body2">{r.model || r.asset_model || "â€”"}</Typography></TableCell>
+                            <TableCell><Typography variant="body2">{r.asset_name || r.assetname || "-"}</Typography></TableCell>
+                            <TableCell><Typography variant="body2">{r.config_type || r.configtype || "-"}</Typography></TableCell>
+                            <TableCell><Typography variant="body2">{r.serial_number || r["serial_#"] || r.serialnumber || "-"}</Typography></TableCell>
+                            <TableCell><Typography variant="body2">{r.model || r.asset_model || "-"}</Typography></TableCell>
                           </TableRow>
                         );
                       })}
@@ -3481,7 +3539,7 @@ const AssetInstallationPage = () => {
             disabled={csvImporting || csvRows.filter((r) => r.asset_tag || r.assettag).length === 0}
             startIcon={csvImporting ? <CircularProgress size={14} /> : <FileUploadOutlined />}
           >
-            {csvImporting ? "Importingâ€¦" : `Import ${csvRows.filter((r) => r.asset_tag || r.assettag).length} asset${csvRows.filter((r) => r.asset_tag || r.assettag).length !== 1 ? "s" : ""}`}
+            {csvImporting ? "Importing..." : `Import ${csvRows.filter((r) => r.asset_tag || r.assettag).length} asset${csvRows.filter((r) => r.asset_tag || r.assettag).length !== 1 ? "s" : ""}`}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3540,7 +3598,7 @@ const AssetInstallationPage = () => {
             <Box>
               <Typography variant="caption" fontWeight={700} color="text.secondary"
                 sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1 }}>
-                Progress â€” {prog.done} of {prog.total} steps
+                Progress - {prog.done} of {prog.total} steps
               </Typography>
               <Stack spacing={0.4}>
                 {prog.completedTitles.map((title, idx) => (
@@ -3733,7 +3791,7 @@ const AssetInstallationPage = () => {
               bulkWarnProceedRef.current?.();
             }}
           >
-            Understood â€” continue
+            Understood - continue
           </Button>
         </DialogActions>
       </Dialog>
@@ -3776,7 +3834,7 @@ const AssetInstallationPage = () => {
               }
             }}
           >
-            {bulkTechSaving ? "Savingâ€¦" : "Apply"}
+            {bulkTechSaving ? "Saving..." : "Apply"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3824,7 +3882,7 @@ const AssetInstallationPage = () => {
               }
             }}
           >
-            {bulkWfSaving ? "Savingâ€¦" : "Apply"}
+            {bulkWfSaving ? "Saving..." : "Apply"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3982,7 +4040,7 @@ const AssetInstallationPage = () => {
             >
               {printRows.length === 0
                 ? "No assets match the current filters."
-                : `${printRows.length} asset${printRows.length !== 1 ? "s" : ""} will be included Â· ${printColumns.length} column${printColumns.length !== 1 ? "s" : ""} Â· grouped by ${printGroupBy}`}
+                : `${printRows.length} asset${printRows.length !== 1 ? "s" : ""} will be included | ${printColumns.length} column${printColumns.length !== 1 ? "s" : ""} | grouped by ${printGroupBy}`}
             </Alert>
           </Stack>
         </DialogContent>
@@ -4005,7 +4063,7 @@ const AssetInstallationPage = () => {
                     filterSummary: printScope === "selection"
                       ? `${printRows.length} selected assets`
                       : printScope === "custom"
-                      ? [printTechId ? `Tech: ${userMap.get(printTechId)?.fullName}` : "", printModel ? `Model: ${printModel}` : "", printPendingSig ? "Pending Sig" : ""].filter(Boolean).join(" Â· ")
+                      ? [printTechId ? `Tech: ${userMap.get(printTechId)?.fullName}` : "", printModel ? `Model: ${printModel}` : "", printPendingSig ? "Pending Sig" : ""].filter(Boolean).join(" | ")
                       : "All visible assets",
                     exportDate: new Date().toLocaleDateString(),
                     logoBase64,
@@ -4018,7 +4076,7 @@ const AssetInstallationPage = () => {
               }
             }}
           >
-            {printGenerating ? "Generatingâ€¦" : "Download PDF"}
+            {printGenerating ? "Generating..." : "Download PDF"}
           </Button>
           <Button
             variant="contained"
@@ -4037,7 +4095,7 @@ const AssetInstallationPage = () => {
                     filterSummary: printScope === "selection"
                       ? `${printRows.length} selected assets`
                       : printScope === "custom"
-                      ? [printTechId ? `Tech: ${userMap.get(printTechId)?.fullName}` : "", printModel ? `Model: ${printModel}` : "", printPendingSig ? "Pending Sig" : ""].filter(Boolean).join(" Â· ")
+                      ? [printTechId ? `Tech: ${userMap.get(printTechId)?.fullName}` : "", printModel ? `Model: ${printModel}` : "", printPendingSig ? "Pending Sig" : ""].filter(Boolean).join(" | ")
                       : "All visible assets",
                     exportDate: new Date().toLocaleDateString(),
                     logoBase64,
@@ -4049,7 +4107,7 @@ const AssetInstallationPage = () => {
               }
             }}
           >
-            {printGenerating ? "Generatingâ€¦" : "Print"}
+            {printGenerating ? "Generating..." : "Print"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -4064,7 +4122,7 @@ const AssetInstallationPage = () => {
             </Alert>
             <Stack direction="row" spacing={1} alignItems="center">
               <Button variant="outlined" component="label" sx={{ justifyContent: "flex-start", textTransform: "none", flex: 1 }}>
-                {bulkDocsFile ? bulkDocsFile.name : "Choose fileâ€¦"}
+                {bulkDocsFile ? bulkDocsFile.name : "Choose file..."}
                 <input
                   type="file"
                   hidden
@@ -4098,7 +4156,7 @@ const AssetInstallationPage = () => {
                   if (uploaded) parts.push(`${uploaded} uploaded`);
                   if (skipped) parts.push(`${skipped} skipped`);
                   if (failed) parts.push(`${failed} failed`);
-                  setBulkDocsResult(`Done â€” ${parts.join(", ")}.`);
+                  setBulkDocsResult(`Done - ${parts.join(", ")}.`);
                   if (failed === 0) setSelectedAssetIds(new Set());
                   setBulkDocsOpen(false);
                 }}
@@ -4163,13 +4221,13 @@ const AssetInstallationPage = () => {
               if (uploaded) parts.push(`${uploaded} uploaded`);
               if (skipped) parts.push(`${skipped} skipped (at limit)`);
               if (failed)  parts.push(`${failed} failed`);
-              setBulkDocsResult(`Done â€” ${parts.join(", ")}.`);
+              setBulkDocsResult(`Done - ${parts.join(", ")}.`);
               if (failed === 0) {
                 setSelectedAssetIds(new Set());
               }
             }}
           >
-            {bulkDocsSaving ? "Uploadingâ€¦" : "Upload to all"}
+            {bulkDocsSaving ? "Uploading..." : "Upload to all"}
           </Button>
         </DialogActions>
       </Dialog>

@@ -15,6 +15,7 @@ import { useBomProject } from "../store/BomProjectContext";
 import { classifyAllRows } from "../services/bomClassifier";
 import { createBomId } from "../services/bomId";
 import { generateDraftProject } from "../services/bomProjectGenerator";
+import { bomApiService } from "../services/bomApiService";
 import { featureService } from "../../../services/featureService";
 import type { CanonicalBomRow } from "../types/canonicalBom";
 import type { ItemType, ClassificationResult } from "../types/classification";
@@ -45,14 +46,16 @@ interface EditableCellProps {
   placeholder?: string;
   numeric?: boolean;
   width?: number;
+  disabled?: boolean;
 }
 
-function EditableCell({ value, onCommit, placeholder, numeric, width = 140 }: EditableCellProps) {
+function EditableCell({ value, onCommit, placeholder, numeric, width = 140, disabled = false }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const start = () => {
+    if (disabled) return;
     setDraft(value);
     setEditing(true);
     setTimeout(() => inputRef.current?.select(), 0);
@@ -89,10 +92,10 @@ function EditableCell({ value, onCommit, placeholder, numeric, width = 140 }: Ed
       spacing={0.5}
       onClick={start}
       sx={{
-        cursor: "text", minWidth: width * 0.6, maxWidth: width,
+        cursor: disabled ? "default" : "text", minWidth: width * 0.6, maxWidth: width,
         px: 0.5, py: 0.25, borderRadius: 1,
-        "&:hover": { background: "rgba(255,255,255,0.06)" },
-        "&:hover .edit-icon": { opacity: 1 },
+        "&:hover": disabled ? {} : { background: "rgba(255,255,255,0.06)" },
+        "&:hover .edit-icon": { opacity: disabled ? 0 : 1 },
       }}
     >
       <Typography
@@ -108,6 +111,12 @@ function EditableCell({ value, onCommit, placeholder, numeric, width = 140 }: Ed
       />
     </Stack>
   );
+}
+
+const SYNTHETIC_ASSET_ROW_ID = "auto-asset-1";
+
+function isSyntheticAssetRow(sourceRowId: string) {
+  return sourceRowId === SYNTHETIC_ASSET_ROW_ID;
 }
 
 // ── Main page ────────────────────────────────────────────────────────────────
@@ -166,6 +175,53 @@ export default function BomClassificationPage() {
     dispatch({ type: "SET_CLASSIFICATIONS", payload: cls });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.normalizedRows, state.classifications.length, dispatch, id]);
+
+  useEffect(() => {
+    if (state.normalizedRows.length === 0 || state.classifications.length === 0) return;
+    const hasAsset = state.classifications.some((c) => c.itemType === "asset");
+    const hasSynthetic = state.normalizedRows.some((r) => isSyntheticAssetRow(r.sourceRowId));
+    if (hasAsset || hasSynthetic) return;
+
+    const firstRow = state.normalizedRows[0];
+    const row: CanonicalBomRow = {
+      sourceRowId: SYNTHETIC_ASSET_ROW_ID,
+      importRunId: id ?? "",
+      sheetName: firstRow?.sheetName ?? "auto",
+      rowIndex: 0,
+      description: "Asset1",
+      assetNameCandidate: "Asset1",
+      itemTypeHint: "asset",
+    };
+    const classification: ClassificationResult = {
+      classificationId: createBomId("classification"),
+      sourceRowId: SYNTHETIC_ASSET_ROW_ID,
+      importRunId: id ?? "",
+      itemType: "asset",
+      inventoryTracked: false,
+      serialRequired: false,
+      configurable: false,
+      installRequired: true,
+      testRequired: false,
+      photoRequired: false,
+      confidenceScore: 1,
+      ruleSource: "system-generated",
+      isManualOverride: true,
+    };
+    dispatch({ type: "ADD_ROW", payload: { row, classification } });
+  }, [dispatch, id, state.classifications, state.normalizedRows]);
+
+  useEffect(() => {
+    if (!id || state.normalizedRows.length === 0 || state.classifications.length === 0) return;
+    void bomApiService.saveRunData(id, {
+      totalRawRows: state.rawRows.length,
+      normalizedRows: state.normalizedRows.length,
+      classifiedRows: state.classifications.length,
+      rawRows: state.rawRows,
+      normalizedRowsData: state.normalizedRows,
+      classifications: state.classifications,
+      mappings: state.activeMappings,
+    });
+  }, [id, state.rawRows, state.normalizedRows, state.classifications, state.activeMappings]);
 
   // Once library is loaded, apply library matches to un-overridden classifications
   useEffect(() => {
@@ -323,15 +379,19 @@ export default function BomClassificationPage() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {state.normalizedRows.map((row) => {
+            {[...state.normalizedRows]
+              .sort((a, b) => Number(isSyntheticAssetRow(b.sourceRowId)) - Number(isSyntheticAssetRow(a.sourceRowId)))
+              .map((row) => {
               const cl = classMap.get(row.sourceRowId);
               const itemType = cl?.itemType ?? "component";
+              const lockedSyntheticAsset = isSyntheticAssetRow(row.sourceRowId);
               return (
                 <TableRow key={row.sourceRowId} hover>
                   <TableCell>
                     <EditableCell
                       value={row.partNumber ?? ""}
                       placeholder="add part no."
+                      disabled={lockedSyntheticAsset}
                       onCommit={(v) => updateRow(row.sourceRowId, { partNumber: v })}
                       width={130}
                     />
@@ -342,6 +402,7 @@ export default function BomClassificationPage() {
                         <EditableCell
                           value={row.description}
                           placeholder="add description"
+                          disabled={lockedSyntheticAsset}
                           onCommit={(v) => updateRow(row.sourceRowId, { description: v })}
                           width={260}
                         />
@@ -352,6 +413,7 @@ export default function BomClassificationPage() {
                     <EditableCell
                       value={row.qty != null ? String(row.qty) : ""}
                       placeholder="—"
+                      disabled={lockedSyntheticAsset}
                       numeric
                       onCommit={(v) => updateRow(row.sourceRowId, { qty: v ? Number(v) : undefined })}
                       width={60}
@@ -361,6 +423,7 @@ export default function BomClassificationPage() {
                     <EditableCell
                       value={row.costUnit != null ? String(row.costUnit) : ""}
                       placeholder="—"
+                      disabled={lockedSyntheticAsset}
                       numeric
                       onCommit={(v) => updateRow(row.sourceRowId, { costUnit: v ? Number(v) : undefined })}
                       width={80}
@@ -371,6 +434,7 @@ export default function BomClassificationPage() {
                       <FormControl size="small">
                         <Select
                           value={itemType}
+                          disabled={lockedSyntheticAsset}
                           onChange={(e) => overrideType(row.sourceRowId, e.target.value as ItemType)}
                           sx={{ fontSize: "0.75rem", minWidth: 120 }}
                           renderValue={(val) => (
@@ -389,11 +453,15 @@ export default function BomClassificationPage() {
                           ))}
                         </Select>
                       </FormControl>
-                      {cl?.isManualOverride && (
+                      {lockedSyntheticAsset ? (
+                        <Tooltip title="System-generated asset row">
+                          <Chip label="locked" size="small" color="info" variant="outlined" sx={{ height: 16, fontSize: "0.6rem" }} />
+                        </Tooltip>
+                      ) : cl?.isManualOverride ? (
                         <Tooltip title="Type manually overridden">
                           <Chip label="edited" size="small" color="warning" variant="outlined" sx={{ height: 16, fontSize: "0.6rem" }} />
                         </Tooltip>
-                      )}
+                      ) : null}
                     </Stack>
                   </TableCell>
                   <TableCell>
@@ -436,19 +504,21 @@ export default function BomClassificationPage() {
                     );
                   })()}
                   <TableCell padding="none" sx={{ pr: 1 }}>
-                    <Tooltip title="Remove this row">
-                      <IconButton
-                        size="small"
-                        onClick={() => dispatch({ type: "DELETE_ROW", payload: row.sourceRowId })}
-                        sx={{ color: "text.disabled", "&:hover": { color: "error.main" } }}
-                      >
-                        <DeleteOutlineIcon sx={{ fontSize: 16 }} />
-                      </IconButton>
-                    </Tooltip>
+                    {lockedSyntheticAsset ? null : (
+                      <Tooltip title="Remove this row">
+                        <IconButton
+                          size="small"
+                          onClick={() => dispatch({ type: "DELETE_ROW", payload: row.sourceRowId })}
+                          sx={{ color: "text.disabled", "&:hover": { color: "error.main" } }}
+                        >
+                          <DeleteOutlineIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                   </TableCell>
                 </TableRow>
-              );
-            })}
+                );
+              })}
           </TableBody>
         </Table>
       </Paper>

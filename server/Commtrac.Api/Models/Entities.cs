@@ -236,6 +236,8 @@ public class ProjectEntity
     public string? InstallationMode { get; set; }
     [MaxLength(200)]
     public string? ProjectManager { get; set; }
+    [MaxLength(80)]
+    public string? AssignedPmUserId { get; set; }
     public decimal? ContractValue { get; set; }
     [MaxLength(120)]
     public string? ProbabilityStage { get; set; }
@@ -365,6 +367,12 @@ public class DocumentEntity
 {
     [Key]
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(20)]
+    public string VisibilityScope { get; set; } = "Global";
+    [MaxLength(80)]
+    public string? ProjectId { get; set; }
+    [MaxLength(80)]
+    public string? AssetId { get; set; }
     [MaxLength(200)]
     public string Name { get; set; } = string.Empty;
     [MaxLength(80)]
@@ -380,11 +388,14 @@ public class DocumentEntity
     public long? FileSize { get; set; }
     [MaxLength(200)]
     public string? CreatedBy { get; set; }
+    [MaxLength(80)]
+    public string? CreatedByUserId { get; set; }
     [MaxLength(2000)]
     public string? Notes { get; set; }
     public string? CustomValuesJson { get; set; }
     [MaxLength(2000)]
     public string? DownloadUrl { get; set; }
+    public bool IsLegacyUnclassified { get; set; }
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAtUtc { get; set; }
     [MaxLength(80)]
@@ -1267,4 +1278,23 @@ public class BomRuleProfileEntity
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     [MaxLength(200)]
     public string? CreatedBy { get; set; }
+}
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+public class AnalyticsEventEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    /// <summary>e.g. "onboarding_started", "tour_step_viewed"</summary>
+    [MaxLength(80)]
+    public string EventName { get; set; } = string.Empty;
+    /// <summary>null when anonymous / pre-auth</summary>
+    [MaxLength(80)]
+    public string? UserId { get; set; }
+    [MaxLength(80)]
+    public string? Role { get; set; }
+    /// <summary>JSON blob of all extra payload fields</summary>
+    public string PayloadJson { get; set; } = "{}";
+    public DateTime OccurredAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime ReceivedAtUtc { get; set; } = DateTime.UtcNow;
 }

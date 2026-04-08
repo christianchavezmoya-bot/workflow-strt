@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { defaultDomains, roleConfigService, RolePermissions } from "../services/roleConfigService";
 import { useAuth } from "./useAuth";
+import { useAccessMode } from "../contexts/AccessModeContext";
 
 const FALLBACK_PERMISSIONS: Record<string, RolePermissions> = {
   Admin:             { viewOnly: false, createDeleteTables: true,  createUsers: true,  editFields: true,  modifyData: true,  editForms: true  },
@@ -16,6 +17,7 @@ const FALLBACK_PERMISSIONS: Record<string, RolePermissions> = {
 
 export const usePermissions = () => {
   const { user } = useAuth();
+  const { isViewOnly } = useAccessMode();
   const [roleConfig, setRoleConfig] = useState<Record<string, RolePermissions> | null>(null);
   const shouldLoadRoleConfig = /admin/i.test(user?.role ?? "");
 
@@ -49,7 +51,7 @@ export const usePermissions = () => {
     // Tier 2: use saved domains or derive from Tier 1 flags
     const domains = p.domains ?? defaultDomains(p);
 
-    if (p.viewOnly) {
+    if (p.viewOnly || isViewOnly) {
       return {
         // Tier 1
         viewOnly: true, modifyData: false, createUsers: false,
@@ -78,7 +80,7 @@ export const usePermissions = () => {
       documents: domains.documents,
       settings:  domains.settings,
     };
-  }, [user?.role, roleConfig]);
+  }, [isViewOnly, user?.role, roleConfig]);
 
   return can;
 };

@@ -25,6 +25,11 @@ const ProjectDetail = () => {
 
   const localProject = useMemo(() => items.find((item) => item.id === id), [id, items]);
   const products = productsState.items.length ? productsState.items : demoProducts;
+  const canEditProject = useMemo(() => {
+    if (!project || !user) return false;
+    if (user.role === "Admin") return true;
+    return user.role === "Project Manager" && project.assignedPmUserId === user.id;
+  }, [project, user]);
 
   useEffect(() => {
     if (!id) return;
@@ -53,14 +58,14 @@ const ProjectDetail = () => {
     if (project.status === "Pending Approval" && user?.role === "Admin") {
       list.push("Approve", "Reject");
     }
-    if (project.status === "Approved" && can.modifyData) {
+    if (project.status === "Approved" && canEditProject) {
       list.push("Start Work");
     }
-    if (project.status === "In Progress" && can.modifyData) {
+    if (project.status === "In Progress" && canEditProject) {
       list.push("Mark Completed");
     }
     return list;
-  }, [project, user]);
+  }, [canEditProject, project, user]);
 
   const handleAction = (label: string) => {
     if (!project || !project.id) return;
@@ -137,9 +142,11 @@ const ProjectDetail = () => {
             {project.customerName} � {project.office}
           </Typography>
         </Box>
-        <Button variant="outlined" component={Link} to={`/projects/${project.id}/edit`}>
-          Edit project
-        </Button>
+        {canEditProject && (
+          <Button variant="outlined" component={Link} to={`/projects/${project.id}/edit`}>
+            Edit project
+          </Button>
+        )}
       </Stack>
 
       <StatusStepper type={project.projectType} status={project.status} />

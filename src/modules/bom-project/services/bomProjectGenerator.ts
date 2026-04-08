@@ -27,49 +27,94 @@ export function generateDraftProject(input: GeneratorInput): DraftProject {
     classifications.map((c) => [c.sourceRowId, c])
   );
 
-  // ── Identify assets ───────────────────────────────────────────────────────
-  const assetRows = rows.filter(
-    (r) => classMap.get(r.sourceRowId)?.itemType === "asset"
+  const sortedRows = [...rows].sort((a, b) => {
+    if (a.sheetName !== b.sheetName) return a.sheetName.localeCompare(b.sheetName);
+    return a.rowIndex - b.rowIndex;
+  });
+
+  const assetRows = sortedRows.filter(
+    (row) => classMap.get(row.sourceRowId)?.itemType === "asset"
   );
 
-  // ── Build asset drafts ────────────────────────────────────────────────────
+  const componentCandidateRows = sortedRows.filter((row) => {
+    const classification = classMap.get(row.sourceRowId);
+    return !!classification
+      && classification.itemType !== "asset"
+      && classification.itemType !== "ignore"
+      && classification.itemType !== "reference";
+  });
+
+  const assignedComponentIds = new Set<string>();
   const draftProjectId = createBomId("draft-project");
+
   const assets: DraftAsset[] = assetRows.map((assetRow) => {
-    const cl = classMap.get(assetRow.sourceRowId)!;
+    const assetClassification = classMap.get(assetRow.sourceRowId)!;
     const draftAssetId = createBomId("draft-asset");
     const assetName = assetRow.assetNameCandidate ?? assetRow.vehicleType ?? assetRow.description;
 
-    // Find component rows that belong to this asset (same group / vehicle type)
-    const componentRows = rows.filter((r) => {
-      const rcl = classMap.get(r.sourceRowId);
-      if (!rcl || rcl.itemType === "asset" || rcl.itemType === "ignore" || rcl.itemType === "reference") return false;
-      // Match by vehicle type or group name
-      if (assetRow.vehicleType && r.vehicleType === assetRow.vehicleType && r.sourceRowId !== assetRow.sourceRowId) return true;
-      if (assetRow.groupName && r.groupName === assetRow.groupName && r.sourceRowId !== assetRow.sourceRowId) return true;
+    const explicitMatches = componentCandidateRows.filter((row) => {
+      if (assignedComponentIds.has(row.sourceRowId)) return false;
+      const rowClassification = classMap.get(row.sourceRowId);
+      if (!rowClassification) return false;
+
+      if (rowClassification.parentPartNumber && assetRow.partNumber && rowClassification.parentPartNumber === assetRow.partNumber) {
+        return true;
+      }
+      if (assetRow.groupName && row.groupName && row.groupName === assetRow.groupName) {
+        return true;
+      }
+      if (assetRow.vehicleType && row.vehicleType && row.vehicleType === assetRow.vehicleType) {
+        return true;
+      }
       return false;
     });
 
-    const components: DraftComponent[] = componentRows.map((cr) => {
-      const ccl = classMap.get(cr.sourceRowId)!;
+    explicitMatches.forEach((row) => assignedComponentIds.add(row.sourceRowId));
+
+    const assetIndex = sortedRows.findIndex((row) => row.sourceRowId === assetRow.sourceRowId);
+    const nextAssetIndex = sortedRows.findIndex(
+      (row, index) =>
+        index > assetIndex &&
+        row.sheetName === assetRow.sheetName &&
+        classMap.get(row.sourceRowId)?.itemType === "asset"
+    );
+    const endIndex = nextAssetIndex >= 0 ? nextAssetIndex : sortedRows.length;
+
+    const sequentialMatches = explicitMatches.length === 0
+      ? sortedRows.slice(assetIndex + 1, endIndex).filter((row) => {
+          if (assignedComponentIds.has(row.sourceRowId)) return false;
+          const rowClassification = classMap.get(row.sourceRowId);
+          return !!rowClassification
+            && rowClassification.itemType !== "asset"
+            && rowClassification.itemType !== "ignore"
+            && rowClassification.itemType !== "reference";
+        })
+      : [];
+
+    sequentialMatches.forEach((row) => assignedComponentIds.add(row.sourceRowId));
+
+    const componentRows = [...explicitMatches, ...sequentialMatches];
+    const components: DraftComponent[] = componentRows.map((row) => {
+      const rowClassification = classMap.get(row.sourceRowId)!;
       return {
         draftComponentId: createBomId("draft-component"),
         draftAssetId,
-        partNumber: cr.partNumber,
-        description: cr.description,
-        qtyRequired: cr.qty ?? cr.requiredQty ?? 1,
-        itemType: ccl.itemType === "consumable" ? "consumable" : "component",
-        inventoryTracked: ccl.inventoryTracked,
-        serialRequired: ccl.serialRequired,
-        stockQty: cr.stockQty,
-        differenceQty: cr.differenceQty,
-        sourceRowId: cr.sourceRowId,
+        partNumber: row.partNumber,
+        description: row.description,
+        qtyRequired: row.qty ?? row.requiredQty ?? 1,
+        itemType: rowClassification.itemType === "consumable" ? "consumable" : "component",
+        inventoryTracked: rowClassification.inventoryTracked,
+        serialRequired: rowClassification.serialRequired,
+        stockQty: row.stockQty,
+        differenceQty: row.differenceQty,
+        sourceRowId: row.sourceRowId,
       };
     });
 
-    const features: DraftFeature[] = buildFeaturesFromClassification(cl, draftAssetId);
-    const captureFields: CaptureFieldPreview[] = buildCaptureFields(cl, components);
+    const features: DraftFeature[] = buildFeaturesFromClassification(assetClassification, draftAssetId);
+    const captureFields: CaptureFieldPreview[] = buildCaptureFields(assetClassification, components);
     const hasShortage = components.some(
-      (c) => c.differenceQty !== undefined && c.differenceQty < 0
+      (component) => component.differenceQty !== undefined && component.differenceQty < 0
     );
 
     return {
@@ -78,15 +123,15 @@ export function generateDraftProject(input: GeneratorInput): DraftProject {
       assetName,
       partNumber: assetRow.partNumber,
       assetType: assetRow.vehicleType,
-      configType: cl.workflowGroup,
-      workflowTemplateCandidate: undefined, // resolved by adapter
+      configType: assetClassification.workflowGroup,
+      workflowTemplateCandidate: undefined,
       location: undefined,
       quantityMode: "single",
       components,
       features,
       dependencies: [],
       captureFields,
-      sourceRowIds: [assetRow.sourceRowId, ...componentRows.map((r) => r.sourceRowId)],
+      sourceRowIds: [assetRow.sourceRowId, ...componentRows.map((row) => row.sourceRowId)],
       inventoryStatus: hasShortage ? "shortage" : components.length > 0 ? "ok" : "unknown",
     };
   });
@@ -101,23 +146,23 @@ export function generateDraftProject(input: GeneratorInput): DraftProject {
 }
 
 function buildFeaturesFromClassification(
-  cl: ClassificationResult,
+  classification: ClassificationResult,
   draftAssetId: string
 ): DraftFeature[] {
   const features: DraftFeature[] = [];
 
-  if (cl.installRequired) {
+  if (classification.installRequired) {
     features.push({
       draftFeatureId: createBomId("draft-feature"),
       draftAssetId,
       featureName: "Installation",
       featureType: "installation",
-      configurable: cl.configurable,
-      testRequired: cl.testRequired,
-      photoRequired: cl.photoRequired,
+      configurable: classification.configurable,
+      testRequired: classification.testRequired,
+      photoRequired: classification.photoRequired,
     });
   }
-  if (cl.testRequired) {
+  if (classification.testRequired) {
     features.push({
       draftFeatureId: createBomId("draft-feature"),
       draftAssetId,
@@ -125,7 +170,7 @@ function buildFeaturesFromClassification(
       featureType: "test",
       configurable: false,
       testRequired: true,
-      photoRequired: cl.photoRequired,
+      photoRequired: classification.photoRequired,
     });
   }
 
@@ -133,19 +178,19 @@ function buildFeaturesFromClassification(
 }
 
 function buildCaptureFields(
-  cl: ClassificationResult,
+  classification: ClassificationResult,
   components: DraftComponent[]
 ): CaptureFieldPreview[] {
   const fields: CaptureFieldPreview[] = [];
-  if (cl.serialRequired || components.some((c) => c.serialRequired)) {
+  if (classification.serialRequired || components.some((component) => component.serialRequired)) {
     fields.push({ fieldType: "serialNumber", label: "Serial Number", required: true });
   }
   fields.push({ fieldType: "assetTag", label: "Asset Tag", required: false });
   fields.push({ fieldType: "location", label: "Install Location", required: false });
-  if (cl.testRequired) {
+  if (classification.testRequired) {
     fields.push({ fieldType: "passFail", label: "Test Result", required: true });
   }
-  if (cl.photoRequired) {
+  if (classification.photoRequired) {
     fields.push({ fieldType: "photo", label: "Photo Evidence", required: true });
   }
   fields.push({ fieldType: "notes", label: "Notes", required: false });

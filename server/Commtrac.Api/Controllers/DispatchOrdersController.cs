@@ -3,6 +3,7 @@ using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Commtrac.Api.Services;
 
 namespace Commtrac.Api.Controllers;
 
@@ -12,8 +13,15 @@ namespace Commtrac.Api.Controllers;
 public class DispatchOrdersController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IAccessScopeService _accessScope;
+    private readonly IProjectAuthorizationService _projectAuthorization;
 
-    public DispatchOrdersController(AppDbContext db) => _db = db;
+    public DispatchOrdersController(AppDbContext db, IAccessScopeService accessScope, IProjectAuthorizationService projectAuthorization)
+    {
+        _db = db;
+        _accessScope = accessScope;
+        _projectAuthorization = projectAuthorization;
+    }
 
     // GET /api/dispatch-orders?projectId=&status=
     [HttpGet]
@@ -21,7 +29,9 @@ public class DispatchOrdersController : ControllerBase
         [FromQuery] string? projectId,
         [FromQuery] string? status)
     {
+        var visibleProjectIds = await _accessScope.GetVisibleProjectIdsAsync(User);
         var q = _db.DispatchOrders.AsQueryable();
+        q = q.Where(o => visibleProjectIds.Contains(o.ProjectId));
         if (!string.IsNullOrWhiteSpace(projectId)) q = q.Where(o => o.ProjectId == projectId);
         if (!string.IsNullOrWhiteSpace(status) && status != "All") q = q.Where(o => o.Status == status);
 
@@ -49,6 +59,10 @@ public class DispatchOrdersController : ControllerBase
     {
         var order = await _db.DispatchOrders.FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound();
+        if (!await _accessScope.CanViewProjectAsync(User, order.ProjectId))
+        {
+            return NotFound();
+        }
 
         var lines = await _db.DispatchLines.Where(l => l.OrderId == id).ToListAsync();
         var events = await _db.DeliveryEvents.Where(e => e.OrderId == id).OrderBy(e => e.OccurredAtUtc).ToListAsync();
@@ -65,6 +79,11 @@ public class DispatchOrdersController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager,Engineer")]
     public async Task<ActionResult<DispatchOrderDto>> Create([FromBody] UpsertDispatchOrderRequest req)
     {
+        if (!await _projectAuthorization.CanEditProjectAsync(User, req.ProjectId))
+        {
+            return Forbid();
+        }
+
         var now = DateTime.UtcNow;
         var order = new DispatchOrderEntity
         {
@@ -94,6 +113,10 @@ public class DispatchOrdersController : ControllerBase
     {
         var order = await _db.DispatchOrders.FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, order.ProjectId))
+        {
+            return Forbid();
+        }
 
         order.DeliveryProfileId = req.DeliveryProfileId;
         order.RequestedByName   = req.RequestedByName;
@@ -119,6 +142,10 @@ public class DispatchOrdersController : ControllerBase
     {
         var order = await _db.DispatchOrders.FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, order.ProjectId))
+        {
+            return Forbid();
+        }
         _db.DispatchOrders.Remove(order);
         await _db.SaveChangesAsync();
         return NoContent();
@@ -129,7 +156,12 @@ public class DispatchOrdersController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager,Engineer")]
     public async Task<ActionResult<DispatchLineDto>> AddLine(string id, [FromBody] UpsertDispatchLineRequest req)
     {
-        if (!await _db.DispatchOrders.AnyAsync(o => o.Id == id)) return NotFound();
+        var order = await _db.DispatchOrders.FirstOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, order.ProjectId))
+        {
+            return Forbid();
+        }
         var line = new DispatchLineEntity
         {
             OrderId           = id,
@@ -154,6 +186,12 @@ public class DispatchOrdersController : ControllerBase
     public async Task<ActionResult<DispatchLineDto>> UpdateLine(string id, string lineId,
         [FromBody] UpsertDispatchLineRequest req)
     {
+        var order = await _db.DispatchOrders.FirstOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, order.ProjectId))
+        {
+            return Forbid();
+        }
         var line = await _db.DispatchLines.FirstOrDefaultAsync(l => l.Id == lineId && l.OrderId == id);
         if (line is null) return NotFound();
         line.Description       = req.Description;
@@ -174,6 +212,12 @@ public class DispatchOrdersController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager,Engineer")]
     public async Task<IActionResult> DeleteLine(string id, string lineId)
     {
+        var order = await _db.DispatchOrders.FirstOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, order.ProjectId))
+        {
+            return Forbid();
+        }
         var line = await _db.DispatchLines.FirstOrDefaultAsync(l => l.Id == lineId && l.OrderId == id);
         if (line is null) return NotFound();
         _db.DispatchLines.Remove(line);
@@ -186,7 +230,12 @@ public class DispatchOrdersController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager,Engineer")]
     public async Task<ActionResult<DeliveryEventDto>> AddEvent(string id, [FromBody] AddDeliveryEventRequest req)
     {
-        if (!await _db.DispatchOrders.AnyAsync(o => o.Id == id)) return NotFound();
+        var order = await _db.DispatchOrders.FirstOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, order.ProjectId))
+        {
+            return Forbid();
+        }
         var evt = new DeliveryEventEntity
         {
             OrderId       = id,
@@ -199,7 +248,6 @@ public class DispatchOrdersController : ControllerBase
         _db.DeliveryEvents.Add(evt);
 
         // Auto-advance order status if event moves it forward
-        var order = await _db.DispatchOrders.FirstOrDefaultAsync(o => o.Id == id);
         if (order is not null)
         {
             order.Status = req.EventType switch

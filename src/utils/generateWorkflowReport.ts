@@ -137,12 +137,12 @@ function fmtDur(totalSeconds: number): string {
 }
 
 function fmt(date: string | undefined): string {
-  if (!date) return "â€”";
+  if (!date) return "-";
   return new Date(date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 function fmtFull(date: string | undefined): string {
-  if (!date) return "â€”";
+  if (!date) return "-";
   return new Date(date).toLocaleString(undefined, {
     year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
@@ -275,14 +275,14 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   y = drawSectionBar(y, "ASSET & RUN DETAILS");
 
   const metaRows: [string, string, string, string][] = [
-    ["Asset Tag",     asset.assetTag     ?? "â€”", "Date Completed",  run.completedAt ? fmtFull(run.completedAt) : "â€”"],
-    ["Asset Name",    asset.assetName    ?? "â€”", "Completed By",    run.completedByName ?? "â€”"],
-    ["Model",         asset.assetModel   ?? "â€”", "Workflow",        workflowConfigName],
-    ["Manufacturer",  asset.manufacturer ?? "â€”", "Run #",           String(run.runNumber ?? 1)],
-    ["Serial #",      (asset.serialNumber ?? "â€”"), "Status",        run.status],
+    ["Asset Tag",     asset.assetTag     ?? "-", "Date Completed",  run.completedAt ? fmtFull(run.completedAt) : "-"],
+    ["Asset Name",    asset.assetName    ?? "-", "Completed By",    run.completedByName ?? "-"],
+    ["Model",         asset.assetModel   ?? "-", "Workflow",        workflowConfigName],
+    ["Manufacturer",  asset.manufacturer ?? "-", "Run #",           String(run.runNumber ?? 1)],
+    ["Serial #",      (asset.serialNumber ?? "-"), "Status",        run.status],
   ];
-  if (customerName || jobNumber) metaRows.push(["Customer", customerName ?? "â€”", "Job #", jobNumber ?? "â€”"]);
-  if (siteName || siteLocation)  metaRows.push(["Site",     siteName    ?? "â€”", "Location", siteLocation ?? "â€”"]);
+  if (customerName || jobNumber) metaRows.push(["Customer", customerName ?? "-", "Job #", jobNumber ?? "-"]);
+  if (siteName || siteLocation)  metaRows.push(["Site",     siteName    ?? "-", "Location", siteLocation ?? "-"]);
   if (assignedTechnician)        metaRows.push(["Technician", assignedTechnician, "", ""]);
 
   autoTable(doc, {
@@ -312,9 +312,9 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     : null;
 
   const timeRows: [string, string, string, string][] = [
-    ["Started",       fmtFull(run.startedAt),                  "Completed",        run.completedAt ? fmtFull(run.completedAt) : "â€”"],
+    ["Started",       fmtFull(run.startedAt),                  "Completed",        run.completedAt ? fmtFull(run.completedAt) : "-"],
     ["Productive",    fmtDur(run.productiveSeconds ?? 0),       "Downtime",         fmtDur(run.downtimeSeconds ?? 0)],
-    ["Downtime Events", String(run.downtimeEvents ?? 0),        "Total Duration",   totalDurationSecs !== null ? fmtDur(totalDurationSecs) : "â€”"],
+    ["Downtime Events", String(run.downtimeEvents ?? 0),        "Total Duration",   totalDurationSecs !== null ? fmtDur(totalDurationSecs) : "-"],
   ];
 
   autoTable(doc, {
@@ -357,10 +357,10 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         ? new Date(e.endedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
         : "Open";
       return [
-        e.reason ?? "â€”",
+        e.reason ?? "-",
         startLabel,
         endLabel,
-        durSecs !== null ? fmtDur(durSecs) : "â€”",
+        durSecs !== null ? fmtDur(durSecs) : "-",
       ];
     });
 
@@ -480,7 +480,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         // Show expected inputs as blank rows
         if (inputDefs.length > 0) {
           for (const inp of inputDefs) {
-            bodyRows.push([inp.label ?? inp.id, "â€”"]);
+            bodyRows.push([inp.label ?? inp.id, "-"]);
           }
         } else {
           bodyRows.push(["(Step not completed)", ""]);
@@ -669,7 +669,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   y = ensureSpace(y, 30);
   const issueLabel = issues.length === 0
     ? "ISSUES  (none recorded)"
-    : `ISSUES  (${issues.length} total Â· ${openIssues.length} open Â· ${issues.length - openIssues.length} resolved)`;
+    : `ISSUES  (${issues.length} total | ${openIssues.length} open | ${issues.length - openIssues.length} resolved)`;
   y = drawSectionBar(y, issueLabel);
 
   if (issues.length === 0) {
@@ -684,8 +684,8 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         ? "Closed"
         : issue.isBlocking ? "Blocking" : "Open";
       const resolution = issue.resolved && issue.resolutionNote
-        ? `${issue.resolutionNote}${issue.resolvedBy ? `\nâ€” ${issue.resolvedBy}` : ""}${issue.resolvedAt ? `, ${fmt(issue.resolvedAt)}` : ""}`
-        : issue.resolved ? `Resolved${issue.resolvedBy ? ` by ${issue.resolvedBy}` : ""}` : "â€”";
+        ? `${issue.resolutionNote}${issue.resolvedBy ? `\n- ${issue.resolvedBy}` : ""}${issue.resolvedAt ? `, ${fmt(issue.resolvedAt)}` : ""}`
+        : issue.resolved ? `Resolved${issue.resolvedBy ? ` by ${issue.resolvedBy}` : ""}` : "-";
       const commentsCount = (issue.comments ?? []).length;
       const typeLabel = issue.issueType === "blocking" ? "Blocking"
         : issue.issueType === "scope-deviation" ? "Scope Dev." : "Observation";
@@ -694,18 +694,18 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
             issue.extraHours != null ? `+${issue.extraHours}h` : null,
             issue.costImpact ?? null,
             issue.approvedBy ? `Approved: ${issue.approvedBy}` : null,
-          ].filter(Boolean).join(" Â· ") || "â€”"
-        : "â€”";
+          ].filter(Boolean).join(" | ") || "-"
+        : "-";
       return [
         issue.description,
         typeLabel,
         issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1),
-        issue.stepTitle ?? "â€”",
+        issue.stepTitle ?? "-",
         statusLabel,
         fmt(issue.reportedAt),
         resolution,
         impact,
-        commentsCount > 0 ? String(commentsCount) : "â€”",
+        commentsCount > 0 ? String(commentsCount) : "-",
       ];
     });
 

@@ -38,6 +38,7 @@ export interface Project {
   isInstallationProject: boolean;
   installationMode?: InstallationMode;
   projectManager?: string;
+  assignedPmUserId?: string;
   contractValue?: number;
   probabilityStage?: string;
   productIds?: string[];

@@ -15,16 +15,7 @@ const defaultUser: User = {
 export const useAuth = () => {
   const [user, setUser] = useState<User>(defaultUser);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [devRoleOverride, setDevRoleOverride] = useState<string | null>(
-    () => localStorage.getItem("dev_role_override")
-  );
-
-  const effectiveUser = useMemo(
-    () => devRoleOverride ? { ...user, role: devRoleOverride as User["role"] } : user,
-    [user, devRoleOverride]
-  );
-
-  const memoized = useMemo(() => ({ user: effectiveUser, isAuthenticated }), [effectiveUser, isAuthenticated]);
+  const memoized = useMemo(() => ({ user, isAuthenticated }), [user, isAuthenticated]);
 
   useEffect(() => {
     const syncFromStorage = () => {
@@ -35,54 +26,26 @@ export const useAuth = () => {
         path.startsWith("/sign/") ||
         path === "/mobile-upload";
 
-      const storedBackendUser = localStorage.getItem("auth_user");
-      const storedLocalUser = localStorage.getItem("local_auth_user");
       const token = localStorage.getItem("auth_token");
-
-      if (storedBackendUser) {
-        try {
-          const parsed = JSON.parse(storedBackendUser) as User;
-          setUser(parsed);
-          setIsAuthenticated(!isPublicRoute);
-          return true;
-        } catch {
-          // continue fallback
-        }
-      }
-
-      if (storedLocalUser) {
-        try {
-          const parsed = JSON.parse(storedLocalUser) as User;
-          setUser(parsed);
-          setIsAuthenticated(!isPublicRoute);
-          return true;
-        } catch {
-          // continue fallback
-        }
-      }
 
       if (token && token !== "local") {
         authService
           .getProfile()
           .then((profile) => {
             setUser(profile);
-            setIsAuthenticated(true);
+            setIsAuthenticated(!isPublicRoute);
             localStorage.setItem("auth_user", JSON.stringify(profile));
           })
           .catch(() => {
             setUser(defaultUser);
             setIsAuthenticated(false);
+            localStorage.removeItem("auth_token");
+            localStorage.removeItem("auth_user");
           });
         return true;
       }
 
-      const storedRole = localStorage.getItem("mock_role");
-      const storedOffice = localStorage.getItem("mock_office");
-      setUser({
-        ...defaultUser,
-        role: (storedRole as User["role"]) || defaultUser.role,
-        office: (storedOffice as User["office"]) || defaultUser.office
-      });
+      setUser(defaultUser);
       setIsAuthenticated(false);
       return true;
     };
@@ -94,23 +57,16 @@ export const useAuth = () => {
     };
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key === "auth_user" || event.key === "local_auth_user" || event.key === "auth_token") {
+      if (event.key === "auth_user" || event.key === "auth_token") {
         syncFromStorage();
       }
     };
 
-    const onDevRoleOverride = (e: Event) => {
-      const role = (e as CustomEvent<{ role: string | null }>).detail.role;
-      setDevRoleOverride(role);
-    };
-
     window.addEventListener("auth-user-updated", onAuthUserUpdated);
     window.addEventListener("storage", onStorage);
-    window.addEventListener("dev-role-override-changed", onDevRoleOverride);
     return () => {
       window.removeEventListener("auth-user-updated", onAuthUserUpdated);
       window.removeEventListener("storage", onStorage);
-      window.removeEventListener("dev-role-override-changed", onDevRoleOverride);
     };
   }, []);
 

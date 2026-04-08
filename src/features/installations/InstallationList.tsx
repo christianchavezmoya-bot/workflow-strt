@@ -1108,7 +1108,7 @@ const InstallationList = () => {
                     setCustomInstallMenu({ tabId: "", anchorEl: null, key: "" });
                   }}
                 >
-                  Sort A â†’ Z
+                        Sort A to Z
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
@@ -1121,7 +1121,7 @@ const InstallationList = () => {
                     setCustomInstallMenu({ tabId: "", anchorEl: null, key: "" });
                   }}
                 >
-                  Sort Z â†’ A
+                        Sort Z to A
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
@@ -1403,7 +1403,7 @@ const InstallationList = () => {
                   setInstallationMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort A â†’ Z
+                        Sort A to Z
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -1411,7 +1411,7 @@ const InstallationList = () => {
                   setInstallationMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort Z â†’ A
+                        Sort Z to A
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -1626,7 +1626,7 @@ const InstallationList = () => {
                         <Box sx={{ p: 2, borderRadius: 2, bgcolor: "rgba(255,255,255,0.04)" }}>
                           <Typography variant="body2">{component}</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            Serial Â· Firmware Â· Checks
+                            Serial | Firmware | Checks
                           </Typography>
                         </Box>
                       </Grid>
@@ -1672,7 +1672,7 @@ const InstallationList = () => {
                         }}
                       >
                         <Typography variant="body2">
-                          {field.name} Â· {field.fieldType}
+                          {field.name} | {field.fieldType}
                         </Typography>
                       </Box>
                     ))}
@@ -1960,7 +1960,7 @@ const InstallationList = () => {
                   setInspectionMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort A â†’ Z
+                        Sort A to Z
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -1968,7 +1968,7 @@ const InstallationList = () => {
                   setInspectionMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort Z â†’ A
+                        Sort Z to A
               </MenuItem>
               <MenuItem
                 onClick={() => {

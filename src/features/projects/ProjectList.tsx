@@ -4,11 +4,14 @@ import {
   Button,
   Checkbox,
   Collapse,
+  FormControl,
   FormControlLabel,
   IconButton,
+  InputLabel,
   ListItemText,
   Menu,
   MenuItem,
+  Select,
   Stack,
   Switch,
   Table,
@@ -278,7 +281,18 @@ const ProjectList = () => {
   const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const canDeleteProjects = can.modifyData;
+  const [projectViewFilter, setProjectViewFilter] = useState<"all" | "mine">("all");
+  const [projectNumberFilter, setProjectNumberFilter] = useState("");
+  const isAdminUser = user?.role === "Admin";
+  const isPmUser = user?.role === "Project Manager";
+  const canCreateProjects = isAdminUser || isPmUser;
+  const canManageProjectTable = isAdminUser || isPmUser;
+
+  const canEditProject = useMemo(() => (project: Project) => {
+    if (isAdminUser) return true;
+    if (!isPmUser) return false;
+    return project.assignedPmUserId === user?.id;
+  }, [isAdminUser, isPmUser, user?.id]);
 
   // Clear column filters when active office changes
   useEffect(() => {
@@ -291,16 +305,19 @@ const ProjectList = () => {
       fetchProjects({
         // Filter by country on the server so pagination doesn't hide matching projects.
         country: activeOffice !== "All" ? activeOffice : undefined,
+        scope: "browse",
+        ownershipScope: isPmUser ? projectViewFilter : "all",
+        projectNumber: projectNumberFilter.trim() || undefined,
         page: page + 1,
         pageSize: rowsPerPage,
         includeDeleted: showArchived
       })
     );
-  }, [dispatch, activeOffice, page, rowsPerPage, showArchived]);
+  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, isPmUser, projectViewFilter, projectNumberFilter]);
 
   useEffect(() => {
     setPage(0);
-  }, [showArchived]);
+  }, [showArchived, projectViewFilter, projectNumberFilter]);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -459,15 +476,15 @@ const ProjectList = () => {
   const renderActions = (project: Project) => {
     const actions: string[] = [];
 
-    if (project.status === "Pending Approval" && user?.role === "Admin") {
+    if (project.status === "Pending Approval" && isAdminUser) {
       actions.push("Approve", "Reject");
     }
 
-    if (project.status === "Approved" && can.modifyData) {
+    if (project.status === "Approved" && canEditProject(project)) {
       actions.push("Start Work");
     }
 
-    if (project.status === "In Progress" && can.modifyData) {
+    if (project.status === "In Progress" && canEditProject(project)) {
       actions.push("Mark Completed");
     }
 
@@ -508,18 +525,55 @@ const ProjectList = () => {
             control={<Switch size="small" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />}
             label="Show archived"
           />
-          {can.modifyData && (
+          {canCreateProjects && (
             <Button variant="contained" component={Link} to="/projects/new">
               Create project
             </Button>
           )}
-          {can.editFields && (
+          {canManageProjectTable && (
             <Button variant="outlined" onClick={() => setTableConfigOpen(true)}>
               Table configuration
             </Button>
           )}
         </Stack>
       </Stack>
+
+      <Box className="glass-card" sx={{ p: 2 }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
+          {isPmUser && (
+            <FormControl size="small" sx={{ minWidth: 220 }}>
+              <InputLabel id="project-view-filter-label">Project View</InputLabel>
+              <Select
+                labelId="project-view-filter-label"
+                label="Project View"
+                value={projectViewFilter}
+                onChange={(event) => setProjectViewFilter(event.target.value as "all" | "mine")}
+              >
+                <MenuItem value="all">All projects</MenuItem>
+                <MenuItem value="mine">My PM projects</MenuItem>
+              </Select>
+            </FormControl>
+          )}
+          <TextField
+            size="small"
+            label="Project number"
+            placeholder="Search job / project number"
+            value={projectNumberFilter}
+            onChange={(event) => setProjectNumberFilter(event.target.value)}
+            sx={{ minWidth: { xs: "100%", md: 280 } }}
+          />
+          <Button
+            variant="outlined"
+            onClick={() => {
+              setProjectViewFilter("all");
+              setProjectNumberFilter("");
+              setAutoFilters({});
+            }}
+          >
+            Clear filters
+          </Button>
+        </Stack>
+      </Box>
 
       {error && (
         <Typography variant="body2" color="warning.main">
@@ -606,12 +660,12 @@ const ProjectList = () => {
                     <TableCell sx={{ padding: '8px 12px' }}>
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
                         {!project.isDeleted && renderActions(project)}
-                        {can.modifyData && !project.isDeleted && (
+                        {canEditProject(project) && !project.isDeleted && (
                           <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
                             <EditOutlined fontSize="small" />
                           </IconButton>
                         )}
-                        {canDeleteProjects && !project.isDeleted && (
+                        {canEditProject(project) && !project.isDeleted && (
                           <IconButton
                             size="small"
                             disabled={deleteSavingId === project.id}
@@ -620,7 +674,7 @@ const ProjectList = () => {
                             <DeleteOutline fontSize="small" />
                           </IconButton>
                         )}
-                        {canDeleteProjects && project.isDeleted && (
+                        {canEditProject(project) && project.isDeleted && (
                           <>
                             <IconButton
                               size="small"
@@ -632,6 +686,9 @@ const ProjectList = () => {
                                   await dispatch(
                                     fetchProjects({
                                       country: activeOffice !== "All" ? activeOffice : undefined,
+                                      scope: "browse",
+                                      ownershipScope: isPmUser ? projectViewFilter : "all",
+                                      projectNumber: projectNumberFilter.trim() || undefined,
                                       page: page + 1,
                                       pageSize: rowsPerPage,
                                       includeDeleted: showArchived
@@ -815,6 +872,9 @@ const ProjectList = () => {
             await dispatch(
               fetchProjects({
                 country: activeOffice !== "All" ? activeOffice : undefined,
+                scope: "browse",
+                ownershipScope: isPmUser ? projectViewFilter : "all",
+                projectNumber: projectNumberFilter.trim() || undefined,
                 page: page + 1,
                 pageSize: rowsPerPage,
                 includeDeleted: showArchived
