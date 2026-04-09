@@ -550,8 +550,11 @@ const AssetInstallationPage = () => {
           });
           setRunsMap(prev => {
             const merged = { ...runMap };
-            // Don't overwrite assets that already have full run lists loaded
-            Object.keys(prev).forEach(id => { merged[id] = prev[id]; });
+            // Only preserve entries that were fully loaded via loadAssignmentsForAsset
+            // (those have ALL runs, not just the latest). Batch load always wins otherwise.
+            Object.keys(prev).forEach(id => {
+              if (prev[id].length > 1) merged[id] = prev[id];
+            });
             return merged;
           });
         }).catch(() => {/* non-blocking */});
@@ -1545,7 +1548,7 @@ const AssetInstallationPage = () => {
       try { return JSON.parse(r.issuesJson || "[]") as RunIssue[]; } catch { return []; }
     });
     const openIssues = [...assetIssuesList.filter(i => !i.resolved), ...runIssuesList.filter(i => !i.resolved)];
-    if (openIssues.some(i => i.severity === "high" || i.isBlocking)) return "red";
+    if (openIssues.some(i => i.severity === "high" || (i.isBlocking && i.severity !== "medium" && i.severity !== "low"))) return "red";
     if (openIssues.some(i => i.severity === "medium")) return "amber";
     if (openIssues.length === 0 && asset.status === "Complete") return "green";
     return null; // no open issues â†’ use default status color
@@ -2286,7 +2289,7 @@ const AssetInstallationPage = () => {
                     />
                   )}
                   {can.modifyData && (
-                    <Tooltip title={latestRun?.status === "Complete" ? "View run history, download report, or re-run workflow" : ""}>
+                    <Tooltip title={latestRun?.status === "Complete" ? "View run history, download report, or re-run workflow" : latestRun?.status === "Issue" ? "Open run to review and resolve open issues" : ""}>
                       <Button
                         size="small"
                         variant={latestRun?.status === "InProgress" ? "contained" : "outlined"}
@@ -2294,7 +2297,7 @@ const AssetInstallationPage = () => {
                         disabled={runLoading}
                         startIcon={runLoading ? <CircularProgress size={12} /> : latestRun?.status === "Complete" ? <HistoryOutlined /> : <PlayArrowOutlined />}
                         onClick={() =>
-                          latestRun?.status === "Complete"
+                          latestRun?.status === "Complete" || latestRun?.status === "Issue"
                             ? openRunHistory(asset, asgn.workflowConfigId, asgn.workflowConfigName)
                             : checkAssignmentThenStart(asset, asgn)
                         }
@@ -2838,7 +2841,7 @@ const AssetInstallationPage = () => {
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={0.75}>
-                        {hasIssue && <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "error.main", flexShrink: 0 }} />}
+                        {hasIssue && <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: computeAssetHealth(asset, runsMap[asset.id] ?? []) === "red" ? "error.main" : "warning.main", flexShrink: 0 }} />}
                         <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
                         {issuesBadge(asset)}
                       </Stack>

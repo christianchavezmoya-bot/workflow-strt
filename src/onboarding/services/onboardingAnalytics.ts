@@ -20,7 +20,7 @@ export type OnboardingEvent =
   | "whats_new_dismissed"
   | "focus_area_selected";
 
-interface EventPayload {
+export interface EventPayload {
   userId?: string;
   role?: string;
   tourId?: string;

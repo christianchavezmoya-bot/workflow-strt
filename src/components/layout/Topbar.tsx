@@ -66,7 +66,7 @@ const Topbar = () => {
   const { user } = useAuth();
   const { notifications, unreadNotifications, loading: notificationsLoading, acknowledge } = useNotificationInbox();
   const { viewMode, toggleViewMode } = useViewMode();
-  const { accessMode, toggleAccessMode } = useAccessMode();
+  useAccessMode(); // keep provider side-effects (view-only banner in AppShell)
   const { isFavorited, getFavorite, add, remove } = useFavoritesContext();
   const products = useAppSelector((s) => s.products.items);
   const projects = useAppSelector((s) => s.projects.items);
@@ -282,13 +282,6 @@ const Topbar = () => {
               background: "rgba(45, 212, 191, 0.28)"
             }
           }}
-        />
-        <Chip
-          label={accessMode === "view-only" ? "View-only" : "Normal Mode"}
-          onClick={toggleAccessMode}
-          color={accessMode === "view-only" ? "warning" : "default"}
-          variant={accessMode === "view-only" ? "filled" : "outlined"}
-          sx={{ cursor: "pointer" }}
         />
         <Stack spacing={0.5}>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>

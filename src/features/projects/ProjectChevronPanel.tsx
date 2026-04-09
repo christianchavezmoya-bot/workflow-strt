@@ -828,7 +828,7 @@ export default function ProjectChevronPanel({
                       openIssues = [...openIssues, ...runIssues];
                     }
                   } catch {}
-                  const hasHigh   = openIssues.some(i => i.severity === "high" || i.isBlocking);
+                  const hasHigh   = openIssues.some(i => i.severity === "high" || (i.isBlocking && i.severity !== "medium" && i.severity !== "low"));
                   const hasMedium = openIssues.some(i => i.severity === "medium");
                   const isPaused = a.workflowSummary?.latestRunStatus === "Paused";
                   const stepSummary = a.workflowSummary?.requiredItems

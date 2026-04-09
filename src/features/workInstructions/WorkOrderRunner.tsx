@@ -1780,7 +1780,7 @@ export default function WorkOrderRunner({
                     Flagged on this step:
                   </Typography>
                   {issues.filter((i) => i.stepId === currentStep?.id).map((issue) => (
-                    <Paper key={issue.id} variant="outlined" sx={{ p: 1, borderColor: issue.isBlocking ? "error.light" : "warning.light" }}>
+                    <Paper key={issue.id} variant="outlined" sx={{ p: 1, borderColor: issue.severity === "high" || (issue.isBlocking && issue.severity !== "medium" && issue.severity !== "low") ? "error.light" : "warning.light" }}>
                       {editingIssueId === issue.id ? (
                         <Stack spacing={0.75}>
                           <TextField size="small" fullWidth multiline rows={2} label="Description"
@@ -2034,7 +2034,7 @@ export default function WorkOrderRunner({
                   )}
                 </Typography>
                 {issues.map((issue) => (
-                  <Paper key={issue.id} variant="outlined" sx={{ p: 1.25, borderColor: issue.isBlocking ? "error.main" : undefined }}>
+                  <Paper key={issue.id} variant="outlined" sx={{ p: 1.25, borderColor: issue.severity === "high" || (issue.isBlocking && issue.severity !== "medium" && issue.severity !== "low") ? "error.main" : issue.severity === "medium" ? "warning.main" : undefined }}>
                     {editingIssueId === issue.id ? (
                       <Stack spacing={0.75}>
                         <TextField size="small" fullWidth multiline rows={2} label="Description"

@@ -1,11 +1,12 @@
 ﻿import {
-  Alert, Box, Button, Chip, CircularProgress, Collapse, Divider, FormControl, Grid,
-  IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Tab, Tabs, Tooltip, Typography,
+  Alert, Box, Button, Checkbox, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent,
+  DialogTitle, Divider, FormControl, FormControlLabel, Grid, IconButton, InputLabel, LinearProgress,
+  MenuItem, Paper, Select, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material/Select";
 import {
-  AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined,
-  ErrorOutlineOutlined, ExpandLessOutlined, ExpandMoreOutlined,
+  AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined, EditOutlined,
+  ErrorOutlineOutlined, ExpandLessOutlined, ExpandMoreOutlined, ForwardToInboxOutlined,
   FactCheckOutlined, OpenInNewOutlined, PendingActionsOutlined, PersonOutlined,
   PhotoCameraOutlined, ReportOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
   WarningAmberOutlined, WorkOutlineOutlined,
@@ -29,6 +30,9 @@ import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { notificationService } from "../../services/notificationService";
+import { signatureService } from "../../services/signatureService";
+import { projectContactService } from "../../services/projectContactService";
+import type { ProjectContact } from "../../types/projectContact";
 import type { AppNotification } from "../../types/notification";
 import type { ProjectStatus } from "../../types/project";
 import type { User } from "../../types/user";
@@ -168,6 +172,218 @@ function deriveLifecycleStatus(projects: Array<{ status: string }>): ProjectStat
 const ALL_DASHBOARDS_VALUE = "__all__";
 type PmDashboardTab = "pm-projects" | "my-installs";
 
+// ── Send-to-Customer widget ───────────────────────────────────────────────────
+// Self-contained per pending-signature row.
+// Tooltip on hover → full "Request Customer Signature" dialog on click,
+// identical to the one in WorkflowRunHistoryDialog.
+const DEFAULT_SIG_MESSAGE =
+  "We are pleased to inform you that the installation work has been completed. " +
+  "Please use the link below to review the completed workflow documentation and provide your sign-off.";
+
+function SendToCustomerWidget({ sig }: { sig: PendingSignatureRecord }) {
+  const [dialogOpen,    setDialogOpen]    = useState(false);
+  const [contacts,      setContacts]      = useState<ProjectContact[]>([]);
+  const [autoContact,   setAutoContact]   = useState<ProjectContact | null>(null);
+  const [editMode,      setEditMode]      = useState(false);
+  const [saveAsNew,     setSaveAsNew]     = useState(false);
+  const [email,         setEmail]         = useState("");
+  const [name,          setName]          = useState("");
+  const [message,       setMessage]       = useState(DEFAULT_SIG_MESSAGE);
+  const [sending,       setSending]       = useState(false);
+  const [tokenLink,     setTokenLink]     = useState<string | null>(null);
+  const [sent,          setSent]          = useState(false);
+
+  const openDialog = async () => {
+    // Reset state
+    setTokenLink(null);
+    setEditMode(false);
+    setSaveAsNew(false);
+    setMessage(DEFAULT_SIG_MESSAGE);
+    try {
+      const list = await projectContactService.listContacts(sig.projectId);
+      setContacts(list);
+      const primary = list.find((c) => c.isPrimarySigner) ?? list[0] ?? null;
+      setAutoContact(primary);
+      setEmail(primary?.email ?? "");
+      setName(primary?.name ?? "");
+    } catch {
+      setContacts([]);
+      setAutoContact(null);
+      setEmail("");
+      setName("");
+    }
+    setDialogOpen(true);
+  };
+
+  const closeDialog = () => {
+    setDialogOpen(false);
+    setTokenLink(null);
+    setEditMode(false);
+    setSaveAsNew(false);
+  };
+
+  const handleSend = async () => {
+    if (!email.trim()) return;
+    setSending(true);
+    try {
+      const isUsingAutoContact = !editMode && autoContact != null;
+      const token = await signatureService.createToken({
+        runId:          sig.runId,
+        contactId:      isUsingAutoContact ? autoContact!.id : undefined,
+        recipientEmail: email.trim(),
+        recipientName:  name.trim() || undefined,
+        expiresInHours: 72,
+        customMessage:  message.trim() || undefined,
+      });
+      setTokenLink(`${window.location.origin}/sign/${token.id}`);
+      setSent(true);
+
+      // Save as new contact (Customer 2) if checkbox ticked
+      if (saveAsNew && email.trim()) {
+        try {
+          await projectContactService.createContact(sig.projectId, {
+            name: name || email, email, phone: "", title: "",
+            preferredSignMethod: "email", isPrimarySigner: false, ccReports: false, address: "",
+          });
+        } catch { /* silently fail — token already created */ }
+      }
+
+      // No contacts existed → save as Customer 1
+      if (contacts.length === 0 && email.trim()) {
+        try {
+          const saved = await projectContactService.createContact(sig.projectId, {
+            name: name || email, email, phone: "", title: "",
+            preferredSignMethod: "email", isPrimarySigner: true, ccReports: false, address: "",
+          });
+          setContacts([saved]);
+          setAutoContact(saved);
+        } catch { /* silently fail */ }
+      }
+    } catch { /* ignore */ }
+    finally { setSending(false); }
+  };
+
+  return (
+    <>
+      <Tooltip title={sent ? "Signature request sent" : "Send Sign Request to Customer"}
+        componentsProps={{ tooltip: { sx: sent ? { color: "success.main", bgcolor: "rgba(46,125,50,0.15)", border: "1px solid", borderColor: "success.main" } : {} } }}>
+        <IconButton
+          size="small"
+          onClick={openDialog}
+          sx={{
+            color: sent ? "success.main" : "warning.main",
+            border: "1px solid",
+            borderColor: sent ? "success.main" : "warning.main",
+            borderRadius: 1,
+            p: 0.5,
+            transition: "all 0.15s",
+            "&:hover": { background: sent ? "rgba(46,125,50,0.12)" : "rgba(237,108,2,0.12)" },
+          }}
+        >
+          <ForwardToInboxOutlined sx={{ fontSize: 15 }} />
+        </IconButton>
+      </Tooltip>
+
+      {/* ── Request Customer Signature dialog — identical to WorkflowRunHistoryDialog ── */}
+      <Dialog open={dialogOpen} onClose={closeDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Request Customer Signature</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {tokenLink ? (
+              <>
+                <Alert severity="success">
+                  Secure link generated and email sent to {email}.
+                </Alert>
+                <Box sx={{ p: 1.5, background: "rgba(0,0,0,0.2)", borderRadius: 1, wordBreak: "break-all" }}>
+                  <Typography variant="caption" fontFamily="monospace">{tokenLink}</Typography>
+                </Box>
+                <Button variant="outlined" onClick={() => { navigator.clipboard.writeText(tokenLink!); }}>
+                  Copy link
+                </Button>
+              </>
+            ) : (
+              <>
+                {/* ── Recipient ── */}
+                <Typography variant="subtitle2">Recipient</Typography>
+                {autoContact && !editMode ? (
+                  <Box sx={{
+                    display: "flex", alignItems: "center", gap: 1,
+                    p: 1, borderRadius: 1,
+                    background: "rgba(45,212,191,0.08)", border: "1px solid rgba(45,212,191,0.25)",
+                  }}>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2" fontWeight="bold">{name || autoContact.name}</Typography>
+                      <Typography variant="caption" color="text.secondary">{email || autoContact.email}</Typography>
+                      {autoContact.address && (
+                        <Typography variant="caption" color="text.disabled" display="block">{autoContact.address}</Typography>
+                      )}
+                    </Box>
+                    <Tooltip title="Send to a different person">
+                      <IconButton size="small" onClick={() => setEditMode(true)}>
+                        <EditOutlined fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                ) : (
+                  <>
+                    {contacts.length === 0 && (
+                      <Alert severity="info" sx={{ py: 0.5, fontSize: "0.8rem" }}>
+                        No contacts on file for this project. Enter details below — they will be saved as Customer 1.
+                      </Alert>
+                    )}
+                    {editMode && autoContact && (
+                      <Alert severity="info" sx={{ py: 0.5, fontSize: "0.8rem" }}>
+                        Sending to a different person. Check the box below to save them as a project contact.
+                      </Alert>
+                    )}
+                    <TextField label="Customer name" value={name}
+                      onChange={(e) => setName(e.target.value)} size="small" fullWidth />
+                    <TextField label="Customer email *" value={email}
+                      onChange={(e) => setEmail(e.target.value)} size="small" fullWidth type="email" />
+                    {editMode && autoContact && (
+                      <FormControlLabel
+                        control={
+                          <Checkbox size="small" checked={saveAsNew}
+                            onChange={(e) => setSaveAsNew(e.target.checked)} />
+                        }
+                        label={<Typography variant="body2">Save as Customer 2 in project contacts</Typography>}
+                      />
+                    )}
+                  </>
+                )}
+
+                <Divider />
+
+                {/* ── Message ── */}
+                <Typography variant="subtitle2">Message to customer</Typography>
+                <TextField
+                  label="Invitation message"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  size="small" fullWidth multiline minRows={4}
+                  helperText="Included in the email sent to the customer. Leave as default or customise."
+                />
+                <Typography variant="caption" color="text.disabled">
+                  A one-time secure link valid for 72 hours will be generated and sent automatically.
+                </Typography>
+              </>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDialog}>{tokenLink ? "Done" : "Cancel"}</Button>
+          {!tokenLink && (
+            <Button variant="contained" onClick={handleSend}
+              disabled={!email.trim() || sending}>
+              {sending ? <CircularProgress size={18} /> : "Send to customer"}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
+
 const Dashboard = () => {
   const navigate   = useNavigate();
   const { user }   = useAuth();
@@ -191,6 +407,7 @@ const Dashboard = () => {
   const [workloadLoading,    setWorkloadLoading]    = useState(false);
   const [reportingTechId,    setReportingTechId]    = useState<string | null>(null);
   const [pmDashboardTab,     setPmDashboardTab]     = useState<PmDashboardTab>("pm-projects");
+  const [showAllStatusProjects, setShowAllStatusProjects] = useState(false);
 
   const availableDashboardUsers = useMemo(() => {
     const uniqueUsers = new Map<string, User>();
@@ -718,12 +935,20 @@ const Dashboard = () => {
               {pendingSigs.length}
             </Typography>
             {pendingSigs.length > 0 ? (
-              <Stack spacing={0.25} sx={{ mt: 1 }}>
+              <Stack spacing={0.5} sx={{ mt: 1 }}>
                 {pendingSigs.slice(0, 4).map((s) => (
-                  <ItemRow key={s.runId}
-                    label={`${s.jobNumber}: ${s.assetTag}`}
-                    sub={`Completed ${fmtDate(s.completedAt)}`}
-                    onClick={() => navigate(`/projects/${s.projectId}`)} />
+                  <Stack key={s.runId} direction="row" alignItems="center" spacing={1}
+                    sx={{ px: 1, py: 0.5, borderRadius: 1, "&:hover": { background: "rgba(255,255,255,0.04)" } }}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="caption" fontWeight={600} noWrap display="block">
+                        {s.jobNumber}: {s.assetTag}
+                      </Typography>
+                      <Typography variant="caption" color="text.disabled" display="block">
+                        Completed {fmtDate(s.completedAt)}
+                      </Typography>
+                    </Box>
+                    <SendToCustomerWidget sig={s} />
+                  </Stack>
                 ))}
                 {pendingSigs.length > 4 && (
                   <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
@@ -737,7 +962,7 @@ const Dashboard = () => {
           </Box>
         </Grid>
 
-        {/* High Observations */}
+        {/* Job Variation */}
         <Grid item xs={12} sm={6} md={3}>
           <Box sx={{
             p: 2, borderRadius: 2, height: "100%",
@@ -747,7 +972,7 @@ const Dashboard = () => {
           }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
               <ReportOutlined sx={{ fontSize: 18, color: highIssues.length > 0 ? "warning.main" : "text.disabled" }} />
-              <Typography variant="subtitle2" fontWeight={700}>High Observations</Typography>
+              <Typography variant="subtitle2" fontWeight={700}>Job Variation</Typography>
             </Stack>
             <Typography variant="h4" fontWeight={700} color={highIssues.length > 0 ? "warning.main" : "text.secondary"}>
               {highIssues.length}
@@ -767,7 +992,7 @@ const Dashboard = () => {
                 )}
               </Stack>
             ) : (
-              <Typography variant="caption" color="success.main">No high-severity observations</Typography>
+              <Typography variant="caption" color="success.main">No job variations</Typography>
             )}
           </Box>
         </Grid>
@@ -820,36 +1045,90 @@ const Dashboard = () => {
         <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
             <TrendingUpOutlined sx={{ fontSize: 18, color: "primary.main" }} />
-            <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem" }}>Project Status</Typography>
+            <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem", flex: 1 }}>Project Status</Typography>
+            <Typography variant="caption" color="text.disabled">{projectCount} total</Typography>
           </Stack>
-          <Stack spacing={1.25}>
-            {statusGroups.map(([status, count]) => (
-              <Stack key={status} direction="row" alignItems="center" spacing={1.5}>
-                <Chip label={status} size="small"
-                  color={(statusColor[status] ?? "default") as "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning"}
-                  variant="outlined" sx={{ fontSize: "0.68rem", height: 20, minWidth: 100 }} />
-                <Box sx={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                  <Box sx={{
-                    height: "100%", borderRadius: 3,
-                    width: `${Math.round((count / projectCount) * 100)}%`,
-                    background: status === "Completed" ? "#2e7d32" : status === "In Progress" ? "#1976d2" :
-                      status === "Pending Approval" ? "#ed6c02" : status === "Cancelled" ? "#d32f2f" : "#555",
-                  }} />
+          <Stack spacing={1.5}>
+            {(showAllStatusProjects ? filteredProjects : filteredProjects.slice(0, 4)).map((project) => {
+              const projAssets = openAssets.filter((a) => a.jobNumber === project.jobNumber);
+              const total      = project.assetCount ?? projAssets.length;
+              const notStarted = projAssets.filter((a) => isNotStartedAsset(a.status)).length;
+              const issues     = openIssues.filter((i) => i.jobNumber === project.jobNumber).length;
+              const completed  = Math.max(0, total - projAssets.length);
+              const pct        = total > 0 ? Math.round((completed / total) * 100) : 0;
+              return (
+                <Box key={project.id}
+                  onClick={() => navigate(`/projects/${project.id}`)}
+                  sx={{ cursor: "pointer", "&:hover": { "& .proj-row": { background: "rgba(255,255,255,0.04)" } } }}>
+                  <Stack className="proj-row" direction="row" alignItems="center" spacing={1}
+                    sx={{ px: 1, py: 0.5, borderRadius: 1, transition: "background 0.15s" }}>
+                    <Typography variant="caption" fontWeight={700} noWrap sx={{ flex: 1 }}>
+                      {project.jobNumber}
+                    </Typography>
+                    <Chip
+                      label={project.status}
+                      size="small"
+                      color={(statusColor[project.status] ?? "default") as "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning"}
+                      variant="outlined"
+                      sx={{ fontSize: "0.62rem", height: 18 }}
+                    />
+                  </Stack>
+                  {total > 0 && (
+                    <Box sx={{ px: 1, pb: 0.5 }}>
+                      <Stack direction="row" spacing={0.75} sx={{ mb: 0.5 }} flexWrap="wrap" useFlexGap>
+                        <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.6rem" }}>
+                          {total} total
+                        </Typography>
+                        {completed > 0 && (
+                          <Typography variant="caption" color="success.main" sx={{ fontSize: "0.6rem" }}>
+                            {completed} completed
+                          </Typography>
+                        )}
+                        {issues > 0 && (
+                          <Typography variant="caption" color="error.main" sx={{ fontSize: "0.6rem" }}>
+                            {issues} issues
+                          </Typography>
+                        )}
+                        {notStarted > 0 && (
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                            {notStarted} not started
+                          </Typography>
+                        )}
+                      </Stack>
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <Box sx={{ flex: 1, height: 5, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                          <Box sx={{
+                            height: "100%", borderRadius: 3,
+                            width: `${pct}%`,
+                            background: issues > 0 ? "#d32f2f" : pct === 100 ? "#2e7d32" : "#1976d2",
+                            transition: "width 0.3s",
+                          }} />
+                        </Box>
+                        <Typography variant="caption" fontWeight={700} sx={{ minWidth: 28, textAlign: "right", fontSize: "0.65rem" }}>
+                          {pct}%
+                        </Typography>
+                      </Stack>
+                    </Box>
+                  )}
                 </Box>
-                <Typography variant="caption" fontWeight={700} sx={{ minWidth: 24, textAlign: "right" }}>{count}</Typography>
-              </Stack>
-            ))}
-            {statusGroups.length === 0 && (
+              );
+            })}
+            {filteredProjects.length === 0 && (
               <Typography variant="caption" color="text.disabled">No projects loaded.</Typography>
             )}
           </Stack>
-          <Divider sx={{ my: 2 }} />
-          <Stack direction="row" spacing={1}>
-            <CheckCircleOutlineOutlined sx={{ fontSize: 14, color: "success.main", mt: 0.25 }} />
-            <Typography variant="caption" color="text.secondary">
-              {filteredProjects.filter(p => p.status === "Completed").length} of {projectCount} completed
-            </Typography>
-          </Stack>
+          {filteredProjects.length >= 5 && (
+            <Box sx={{ mt: 1.5, textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                color="primary.main"
+                sx={{ cursor: "pointer", "&:hover": { textDecoration: "underline" } }}
+                onClick={() => setShowAllStatusProjects((v) => !v)}
+              >
+                {showAllStatusProjects ? "Show less" : `See more (${filteredProjects.length - 4} more)`}
+              </Typography>
+            </Box>
+          )}
         </Box>
       </Grid>
       <Grid item xs={12} md={8}>
@@ -1468,12 +1747,20 @@ const Dashboard = () => {
                 {myPendingSigs.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">No signatures waiting</Typography>
                 ) : (
-                  <Stack spacing={0.25}>
+                  <Stack spacing={0.5}>
                     {myPendingSigs.map((s) => (
-                      <ItemRow key={s.runId}
-                        label={`${s.jobNumber}: ${s.assetTag}`}
-                        sub={`Completed ${fmtDate(s.completedAt)}`}
-                        onClick={() => navigate(`/projects/${s.projectId}`)} />
+                      <Stack key={s.runId} direction="row" alignItems="center" spacing={1}
+                        sx={{ px: 1, py: 0.5, borderRadius: 1, "&:hover": { background: "rgba(255,255,255,0.04)" } }}>
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Typography variant="caption" fontWeight={600} noWrap display="block">
+                            {s.jobNumber}: {s.assetTag}
+                          </Typography>
+                          <Typography variant="caption" color="text.disabled" display="block">
+                            Completed {fmtDate(s.completedAt)}
+                          </Typography>
+                        </Box>
+                        <SendToCustomerWidget sig={s} />
+                      </Stack>
                     ))}
                   </Stack>
                 )}
@@ -1582,12 +1869,20 @@ const Dashboard = () => {
                 {myPendingSigs.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">No pending sign-offs</Typography>
                 ) : (
-                  <Stack spacing={0.25}>
+                  <Stack spacing={0.5}>
                     {myPendingSigs.slice(0, 5).map((s) => (
-                      <ItemRow key={s.runId}
-                        label={`${s.jobNumber}: ${s.assetTag}`}
-                        sub={`Completed ${fmtDate(s.completedAt)}`}
-                        onClick={() => navigate(`/projects/${s.projectId}`)} />
+                      <Stack key={s.runId} direction="row" alignItems="center" spacing={1}
+                        sx={{ px: 1, py: 0.5, borderRadius: 1, "&:hover": { background: "rgba(255,255,255,0.04)" } }}>
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Typography variant="caption" fontWeight={600} noWrap display="block">
+                            {s.jobNumber}: {s.assetTag}
+                          </Typography>
+                          <Typography variant="caption" color="text.disabled" display="block">
+                            Completed {fmtDate(s.completedAt)}
+                          </Typography>
+                        </Box>
+                        <SendToCustomerWidget sig={s} />
+                      </Stack>
                     ))}
                     {myPendingSigs.length > 5 && (
                       <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>

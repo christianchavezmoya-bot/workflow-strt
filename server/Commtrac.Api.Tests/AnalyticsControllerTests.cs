@@ -23,17 +23,29 @@ public class AnalyticsControllerTests
     public async Task IngestBatch_EmptyEvents_ReturnsNoContent()
     {
         using var db = CreateDb();
-        var controller = new AnalyticsController(db);
+        var controller = CreateController(db);
         var result = await controller.IngestBatch(
             new AnalyticsEventBatchRequest(new List<AnalyticsEventRequest>()));
         Assert.IsType<NoContentResult>(result);
     }
 
+    private static AnalyticsController CreateController(AppDbContext db) =>
+        new(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity())
+                }
+            }
+        };
+
     [Fact]
     public async Task IngestBatch_ValidBatch_PersistsEvents()
     {
         using var db = CreateDb();
-        var controller = new AnalyticsController(db);
+        var controller = CreateController(db);
         var request = new AnalyticsEventBatchRequest(new List<AnalyticsEventRequest>
         {
             new("onboarding_started", "user-1", "Admin", null, null),
@@ -80,7 +92,7 @@ public class AnalyticsControllerTests
     public async Task IngestBatch_CapsAt100Events()
     {
         using var db = CreateDb();
-        var controller = new AnalyticsController(db);
+        var controller = CreateController(db);
         var events = Enumerable.Range(0, 150)
             .Select(_ => new AnalyticsEventRequest("tour_step_viewed", null, null, null, null))
             .ToList();

@@ -53,7 +53,7 @@ async function flush(): Promise<void> {
         payload:       e.payload,
       })),
     });
-    writeQueue([]);
+    localStorage.removeItem(QUEUE_KEY);
   } catch {
     // Leave queue intact — will retry on next flush
   }
