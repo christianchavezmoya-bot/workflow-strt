@@ -1,5 +1,5 @@
 {
-  "refreshedAt": "2026-04-09",
+  "refreshedAt": "2026-04-13",
   "generatedFrom": {
     "architecture": "docs/ARCHITECTURE.md",
     "schema": "docs/schema.json",
@@ -11,6 +11,6 @@
     "columns": 212,
     "relationships": 15,
     "controllerCount": 55,
-    "routeCount": 29
+    "routeCount": 28
   }
 }

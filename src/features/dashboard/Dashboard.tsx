@@ -605,23 +605,12 @@ const Dashboard = () => {
   const myPendingSigs = useMemo(() =>
     pendingSigs.filter(s => myAssets.some(a => a.id === s.assetId || a.jobNumber === s.jobNumber)),
     [pendingSigs, myAssets]);
-  const technicianUserIds = useMemo(() => {
-    const ids = new Set<string>();
-    availableDashboardUsers.forEach((candidate) => {
-      const role = candidate.role ?? "";
-      if (role === "Installer" || role === "Technician") {
-        ids.add(candidate.id);
-      }
-    });
-    return ids;
-  }, [availableDashboardUsers]);
-
   const scopedWorkload = useMemo(() => {
     const workloadProjectIds = new Set<string>();
     const normalizedViewedName = normalizeName(viewedDashboardName);
 
     const scopedAssets = openAssets.filter((asset) => {
-      if (!asset.assignedUserId || !technicianUserIds.has(asset.assignedUserId)) return false;
+      if (!asset.assignedUserId) return false;
       if (showPmTabs && pmDashboardTab === "my-installs") {
         return !!viewedDashboardUserId && asset.assignedUserId === viewedDashboardUserId;
       }
@@ -697,7 +686,6 @@ const Dashboard = () => {
     openIssues,
     projects,
     selectedDashboardId,
-    technicianUserIds,
     viewedDashboardName,
     viewedDashboardRole,
     viewedDashboardUserId,
@@ -1281,16 +1269,16 @@ const Dashboard = () => {
             {showPmTabs && pmDashboardTab === "my-installs"
               ? "My Install Workload"
               : selectedDashboardId === ALL_DASHBOARDS_VALUE || viewedDashboardRole === "Project Manager"
-              ? "Technician Workload"
+              ? "Assigned Workload"
               : `${viewedDashboardName} Workload`}
           </Typography>
           <Typography variant="caption" color="text.secondary">
             {showPmTabs && pmDashboardTab === "my-installs"
               ? "Your assigned installation assets and workflow load across projects you participate in"
               : selectedDashboardId === ALL_DASHBOARDS_VALUE
-              ? "Open assets across all technicians - click to view in installations"
+              ? "Open assigned assets across all users - click to view in installations"
               : viewedDashboardRole === "Project Manager"
-              ? `Open assets assigned to technicians on ${viewedDashboardName}'s projects - click to view in installations`
+              ? `Open assigned assets on ${viewedDashboardName}'s projects - click to view in installations`
               : "Open assets for the selected dashboard - click to view in installations"}
           </Typography>
         </Box>
@@ -1317,7 +1305,7 @@ const Dashboard = () => {
         <Typography variant="body2" color="text.secondary">
           {showPmTabs && pmDashboardTab === "my-installs"
             ? "No open assets are currently assigned to you."
-            : selectedDashboardId === ALL_DASHBOARDS_VALUE ? "No open assets currently assigned to technicians." : `No open assets currently assigned to ${viewedDashboardName}.`}
+            : selectedDashboardId === ALL_DASHBOARDS_VALUE ? "No open assets are currently assigned to users." : `No open assets currently assigned to ${viewedDashboardName}.`}
         </Typography>
       ) : (
         <Stack spacing={1.5}>
@@ -1507,7 +1495,7 @@ const Dashboard = () => {
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
               {pmDashboardTab === "pm-projects"
                 ? "Management metrics for projects where you are the assigned PM."
-                : "Installer-participant work across projects where you are assigned to assets or workflow work."}
+                : "Your assigned asset work across projects where you participate."}
             </Typography>
           </Box>
         )}
@@ -2208,4 +2196,3 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
-

@@ -4,6 +4,9 @@ import {
   Button,
   Checkbox,
   Collapse,
+  Dialog,
+  DialogContent,
+  DialogTitle,
   FormControl,
   FormControlLabel,
   IconButton,
@@ -25,7 +28,7 @@ import {
 } from "@mui/material";
 import { ArrowDropDown, DeleteForeverOutlined, DeleteOutline, EditOutlined, ExpandLess, ExpandMore, RestoreOutlined } from "@mui/icons-material";
 import ProjectChevronPanel from "./ProjectChevronPanel";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import TableConfigDialog from "../../components/TableConfigDialog";
@@ -45,6 +48,8 @@ import { fetchProducts } from "../../store/productsSlice";
 import { deleteProject, fetchProjects, updateProjectStatus } from "../../store/projectSlice";
 import { projectService } from "../../services/projectService";
 import { Project } from "../../types/project";
+import ProjectForm from "./ProjectForm";
+import { getProjectCompletionSummary, notifyProjectReadyForCompletion } from "./projectActionUtils";
 
 // Style for field definition labels (yellow bold)
 const fieldLabelStyle = {
@@ -238,6 +243,7 @@ const ProjectList = () => {
   const { user } = useAuth();
   const can = usePermissions();
   const { activeOffice } = useActiveOffice();
+  const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { items, total, loading, error } = useAppSelector((state) => state.projects);
   const productsState = useAppSelector((state) => state.products);
@@ -275,6 +281,7 @@ const ProjectList = () => {
     key: ""
   });
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<Project | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [purgeTarget, setPurgeTarget] = useState<Project | null>(null);
   const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
@@ -441,7 +448,7 @@ const ProjectList = () => {
       .filter((col): col is NonNullable<typeof col> => col !== null);
   }, [projectsTableConfig.config.order, projectsTableConfig.config.hidden, projectDynamicColumns, projectsDynamic.valuesByEntity]);
 
-  const handleAction = (project: Project, label: string) => {
+  const handleAction = async (project: Project, label: string) => {
     if (!project.id) {
       return;
     }
@@ -465,11 +472,30 @@ const ProjectList = () => {
     }
 
     if (label === "Start Work") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } }));
+      const updated = await dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } })).unwrap();
+      navigate(
+        `/installations/assets?product=${encodeURIComponent(updated.productIds?.[0] ?? project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`
+      );
     }
 
     if (label === "Mark Completed") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Completed" } }));
+      try {
+        const completion = await getProjectCompletionSummary(project.id);
+        if (completion.percentComplete < 100) {
+          window.alert(
+            `This project is only ${completion.percentComplete}% complete (${completion.completedAssets}/${completion.totalAssets} assets completed). Complete all project assets before marking the project completed.`
+          );
+          return;
+        }
+
+        await notifyProjectReadyForCompletion(project, {
+          id: user?.id ?? null,
+          fullName: user?.fullName ?? null,
+        });
+        window.alert("Project assets are 100% complete. The Project Manager has been notified to change the project status to Completed.");
+      } catch {
+        window.alert("Unable to verify project completion right now. Check asset progress and API availability.");
+      }
     }
   };
 
@@ -661,7 +687,7 @@ const ProjectList = () => {
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
                         {!project.isDeleted && renderActions(project)}
                         {canEditProject(project) && !project.isDeleted && (
-                          <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
+                          <IconButton size="small" onClick={() => setEditTarget(project)}>
                             <EditOutlined fontSize="small" />
                           </IconButton>
                         )}
@@ -969,6 +995,44 @@ const ProjectList = () => {
           await projectsDynamic.reload();
         }}
       />
+
+      <Dialog
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{
+          className: "glass-card",
+          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)", minHeight: "80vh" }
+        }}
+      >
+        <DialogTitle>Edit project</DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {editTarget && (
+            <Box sx={{ p: 3 }}>
+              <ProjectForm
+                embedded
+                projectId={editTarget.id}
+                onClose={() => setEditTarget(null)}
+                onSaved={async () => {
+                  setEditTarget(null);
+                  await dispatch(
+                    fetchProjects({
+                      country: activeOffice !== "All" ? activeOffice : undefined,
+                      scope: "browse",
+                      ownershipScope: isPmUser ? projectViewFilter : "all",
+                      projectNumber: projectNumberFilter.trim() || undefined,
+                      page: page + 1,
+                      pageSize: rowsPerPage,
+                      includeDeleted: showArchived
+                    })
+                  );
+                }}
+              />
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
     </Stack>
   );
 };

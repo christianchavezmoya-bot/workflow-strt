@@ -1241,7 +1241,7 @@ const AssetInstallationPage = () => {
     }
     if (asset.assignedUserId !== currentUser.id) {
       // Assigned to someone else â€” warn before taking over
-      const otherName = users.find((u) => u.id === asset.assignedUserId)?.fullName ?? "another technician";
+      const otherName = users.find((u) => u.id === asset.assignedUserId)?.fullName ?? "another user";
       setAutoAssignConfirm({ asset, assignment, reason: "other", otherName });
       return;
     }
@@ -2602,7 +2602,7 @@ const AssetInstallationPage = () => {
             Assign workflow
           </Button>
 
-          {/* Assign technician */}
+          {/* Assign user */}
           <Button
             size="small"
             variant="outlined"
@@ -2611,9 +2611,9 @@ const AssetInstallationPage = () => {
               const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
               const withTech = sel.filter((a) => !!a.assignedUserId);
               if (withTech.length === 0) { setBulkTechOpen(true); return; }
-              setBulkWarnTitle("Some assets already have a technician assigned");
+              setBulkWarnTitle("Some assets already have a user assigned");
               setBulkWarnBody(
-                "These assets already have a technician assigned. Proceeding will replace their current assignment."
+                "These assets already have a user assigned. Proceeding will replace their current assignment."
               );
               setBulkWarnRows(withTech.map((a) => ({
                 assetTag: a.assetTag,
@@ -2623,7 +2623,7 @@ const AssetInstallationPage = () => {
               setBulkWarnOpen(true);
             }}
           >
-            Assign technician
+            Assign user
           </Button>
 
           {/* Upload documents */}
@@ -3076,8 +3076,8 @@ const AssetInstallationPage = () => {
               }
             />
             <FormControl size="small" fullWidth>
-              <InputLabel shrink>Assigned Technician</InputLabel>
-              <Select label="Assigned Technician" value={addForm.assignedUserId}
+              <InputLabel shrink>Assigned User</InputLabel>
+              <Select label="Assigned User" value={addForm.assignedUserId}
                 onChange={(e) => setAddForm((p) => ({ ...p, assignedUserId: e.target.value }))}>
                 <MenuItem value="">(Unassigned)</MenuItem>
                 {users.filter((u) => u.isActive).map((u) => (
@@ -3169,8 +3169,8 @@ const AssetInstallationPage = () => {
               placeholder="i.e LV workshop, U/G"
               InputLabelProps={{ shrink: true }} />
             <FormControl size="small" fullWidth>
-              <InputLabel shrink>Assigned Technician</InputLabel>
-              <Select label="Assigned Technician" value={editForm.assignedUserId}
+              <InputLabel shrink>Assigned User</InputLabel>
+              <Select label="Assigned User" value={editForm.assignedUserId}
                 onChange={(e) => setEditForm((p) => ({ ...p, assignedUserId: e.target.value }))}>
                 <MenuItem value="">(Unassigned)</MenuItem>
                 {users.filter((u) => u.isActive).map((u) => (
@@ -3799,13 +3799,13 @@ const AssetInstallationPage = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Bulk: Assign technician dialog */}
+      {/* Bulk: Assign user dialog */}
       <Dialog open={bulkTechOpen} onClose={() => setBulkTechOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Assign technician to {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""}</DialogTitle>
+        <DialogTitle>Assign user to {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""}</DialogTitle>
         <DialogContent>
           <FormControl fullWidth sx={{ mt: 1 }}>
-            <InputLabel shrink>Technician</InputLabel>
-            <Select label="Technician" value={bulkTechId} onChange={(e) => setBulkTechId(e.target.value)}>
+            <InputLabel shrink>User</InputLabel>
+            <Select label="User" value={bulkTechId} onChange={(e) => setBulkTechId(e.target.value)}>
               <MenuItem value="">(Unassign)</MenuItem>
               {users.filter((u) => u.isActive).map((u) => (
                 <MenuItem key={u.id} value={u.id}>{u.fullName}</MenuItem>
@@ -3930,9 +3930,9 @@ const AssetInstallationPage = () => {
                 <Stack spacing={2}>
                   <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                     <FormControl size="small" sx={{ minWidth: 200 }}>
-                      <InputLabel shrink>Technician</InputLabel>
-                      <Select label="Technician" value={printTechId} onChange={(e) => setPrintTechId(e.target.value)}>
-                        <MenuItem value="">(All technicians)</MenuItem>
+                      <InputLabel shrink>User</InputLabel>
+                      <Select label="User" value={printTechId} onChange={(e) => setPrintTechId(e.target.value)}>
+                        <MenuItem value="">(All users)</MenuItem>
                         {users.filter((u) => u.isActive).map((u) => (
                           <MenuItem key={u.id} value={u.id}>{u.fullName}</MenuItem>
                         ))}

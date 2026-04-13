@@ -1,27 +1,28 @@
-import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, Dialog, DialogContent, DialogTitle, Stack, Typography } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import StatusStepper from "../../components/ui/StatusStepper";
 import { demoProducts } from "../../data/demo";
 import { useAuth } from "../../hooks/useAuth";
-import { usePermissions } from "../../hooks/usePermissions";
 import { projectService } from "../../services/projectService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
-import { updateProjectStatus } from "../../store/projectSlice";
+import { fetchProjects, updateProjectStatus } from "../../store/projectSlice";
 import { fetchProducts } from "../../store/productsSlice";
 import { Project } from "../../types/project";
+import ProjectForm from "./ProjectForm";
+import { getProjectCompletionSummary, notifyProjectReadyForCompletion } from "./projectActionUtils";
 
 const ProjectDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const can = usePermissions();
   const dispatch = useAppDispatch();
   const { items } = useAppSelector((state) => state.projects);
   const productsState = useAppSelector((state) => state.products);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
 
   const localProject = useMemo(() => items.find((item) => item.id === id), [id, items]);
   const products = productsState.items.length ? productsState.items : demoProducts;
@@ -67,7 +68,7 @@ const ProjectDetail = () => {
     return list;
   }, [canEditProject, project, user]);
 
-  const handleAction = (label: string) => {
+  const handleAction = async (label: string) => {
     if (!project || !project.id) return;
 
     if (label === "Approve") {
@@ -91,13 +92,31 @@ const ProjectDetail = () => {
     }
 
     if (label === "Start Work") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } }));
-      setProject({ ...project, status: "In Progress" });
+      const updated = await dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } })).unwrap();
+      setProject(updated);
+      navigate(
+        `/installations/assets?product=${encodeURIComponent(updated.productIds?.[0] ?? project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`
+      );
     }
 
     if (label === "Mark Completed") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Completed" } }));
-      setProject({ ...project, status: "Completed" });
+      try {
+        const completion = await getProjectCompletionSummary(project.id);
+        if (completion.percentComplete < 100) {
+          window.alert(
+            `This project is only ${completion.percentComplete}% complete (${completion.completedAssets}/${completion.totalAssets} assets completed). Complete all project assets before marking the project completed.`
+          );
+          return;
+        }
+
+        await notifyProjectReadyForCompletion(project, {
+          id: user?.id ?? null,
+          fullName: user?.fullName ?? null,
+        });
+        window.alert("Project assets are 100% complete. The Project Manager has been notified to change the project status to Completed.");
+      } catch {
+        window.alert("Unable to verify project completion right now. Check asset progress and API availability.");
+      }
     }
   };
 
@@ -143,7 +162,7 @@ const ProjectDetail = () => {
           </Typography>
         </Box>
         {canEditProject && (
-          <Button variant="outlined" component={Link} to={`/projects/${project.id}/edit`}>
+          <Button variant="outlined" onClick={() => setEditOpen(true)}>
             Edit project
           </Button>
         )}
@@ -189,6 +208,35 @@ const ProjectDetail = () => {
           </Typography>
         </Stack>
       </Box>
+
+      <Dialog
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{
+          className: "glass-card",
+          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)", minHeight: "80vh" }
+        }}
+      >
+        <DialogTitle>Edit project</DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {project && (
+            <Box sx={{ p: 3 }}>
+              <ProjectForm
+                embedded
+                projectId={project.id}
+                onClose={() => setEditOpen(false)}
+                onSaved={async (saved) => {
+                  setProject(saved);
+                  setEditOpen(false);
+                  await dispatch(fetchProjects({}));
+                }}
+              />
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
     </Stack>
   );
 };

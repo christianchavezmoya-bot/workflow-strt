@@ -97,8 +97,16 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 
-const ProjectForm = () => {
-  const { id } = useParams();
+type ProjectFormProps = {
+  projectId?: string;
+  embedded?: boolean;
+  onClose?: () => void;
+  onSaved?: (project: Project) => void;
+};
+
+const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectFormProps) => {
+  const { id: routeId } = useParams();
+  const id = projectId ?? routeId;
   const navigate = useNavigate();
   const { user } = useAuth();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
@@ -188,6 +196,14 @@ const ProjectForm = () => {
     }
   });
 
+  const handleClose = () => {
+    if (embedded) {
+      onClose?.();
+      return;
+    }
+    navigate("/projects");
+  };
+
   useEffect(() => {
     dispatch(fetchCustomers());
     dispatch(fetchProducts());
@@ -268,10 +284,10 @@ const ProjectForm = () => {
   }, [id, items, reset, globalOffices]);
 
   useEffect(() => {
-    if (id && editingProject && !canEditExistingProject) {
+    if (!embedded && id && editingProject && !canEditExistingProject) {
       navigate(`/projects/${id}`);
     }
-  }, [canEditExistingProject, editingProject, id, navigate]);
+  }, [canEditExistingProject, editingProject, embedded, id, navigate]);
 
   useEffect(() => {
     if (projectsDynamic.definitions.length === 0) return;
@@ -608,12 +624,14 @@ const ProjectForm = () => {
     };
 
     try {
+      let savedProject: Project | null = null;
       if (id && !canEditExistingProject) {
         setSubmitError("You don't have permission to edit this project.");
         return;
       }
       if (id) {
         const result = await dispatch(updateProject({ id, payload })).unwrap();
+        savedProject = result;
         await projectsDynamic.upsertForEntity(
           result.id,
           dynamicValuesToSave,
@@ -621,6 +639,7 @@ const ProjectForm = () => {
         );
       } else {
         const result = await dispatch(createProject(payload)).unwrap();
+        savedProject = result;
         await projectsDynamic.upsertForEntity(
           result.id,
           dynamicValuesToSave,
@@ -639,7 +658,8 @@ const ProjectForm = () => {
           }
         }
       }
-      navigate("/projects");
+      if (savedProject) onSaved?.(savedProject);
+      handleClose();
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 403 || status === 401) {
@@ -1538,7 +1558,7 @@ const ProjectForm = () => {
             </Box>
           )}
           <Stack direction="row" spacing={2} sx={{ marginTop: 3 }}>
-            <Button variant="outlined" onClick={() => navigate("/projects")}>
+            <Button variant="outlined" onClick={handleClose}>
               Cancel
             </Button>
             <Button
