@@ -214,6 +214,7 @@ public class ProjectsController : ControllerBase
     public async Task<ActionResult<ProjectDto>> Create([FromBody] ProjectDto request)
     {
         var currentUser = await GetCurrentUserAsync();
+        var workflowMode = NormalizeWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
         var assignedPmUserId = await ResolveAssignedPmUserIdAsync(request.ProjectManager, request.AssignedPmUserId);
         if (!_userContext.IsAdmin)
         {
@@ -242,7 +243,8 @@ public class ProjectsController : ControllerBase
             ProjectType = request.ProjectType,
             Status = request.Status,
             ApprovalDecision = request.ApprovalDecision,
-            IsInstallationProject = request.IsInstallationProject,
+            WorkflowMode = workflowMode,
+            IsInstallationProject = UsesInstallationWorkflow(workflowMode),
             InstallationMode = request.InstallationMode,
             ProjectManager = projectManagerName,
             AssignedPmUserId = assignedPmUserId,
@@ -281,6 +283,7 @@ public class ProjectsController : ControllerBase
         }
 
         var currentUser = await GetCurrentUserAsync();
+        var workflowMode = NormalizeWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
         var assignedPmUserId = _userContext.IsAdmin
             ? await ResolveAssignedPmUserIdAsync(request.ProjectManager, request.AssignedPmUserId)
             : project.AssignedPmUserId ?? _userContext.UserId;
@@ -304,7 +307,8 @@ public class ProjectsController : ControllerBase
         project.ProjectType = request.ProjectType;
         project.Status = request.Status;
         project.ApprovalDecision = request.ApprovalDecision;
-        project.IsInstallationProject = request.IsInstallationProject;
+        project.WorkflowMode = workflowMode;
+        project.IsInstallationProject = UsesInstallationWorkflow(workflowMode);
         project.InstallationMode = request.InstallationMode;
         project.ProjectManager = projectManagerName;
         project.AssignedPmUserId = assignedPmUserId;
@@ -611,6 +615,7 @@ public class ProjectsController : ControllerBase
             project.ProjectType,
             project.Status,
             project.ApprovalDecision,
+            NormalizeWorkflowMode(project.WorkflowMode, project.IsInstallationProject),
             project.IsInstallationProject,
             project.InstallationMode,
             project.ProjectManager,
@@ -624,6 +629,24 @@ public class ProjectsController : ControllerBase
             project.OfficeId,
             assetCount
         );
+
+    private static string NormalizeWorkflowMode(string? workflowMode, bool isInstallationProject)
+    {
+        var normalized = (workflowMode ?? string.Empty).Trim().ToUpperInvariant();
+        return normalized switch
+        {
+            ProjectEntity.WorkflowModeInstallationOnly => ProjectEntity.WorkflowModeInstallationOnly,
+            ProjectEntity.WorkflowModeInspectionOnly => ProjectEntity.WorkflowModeInspectionOnly,
+            ProjectEntity.WorkflowModeMixed => ProjectEntity.WorkflowModeMixed,
+            _ => isInstallationProject
+                ? ProjectEntity.WorkflowModeInstallationOnly
+                : ProjectEntity.WorkflowModeInspectionOnly
+        };
+    }
+
+    private static bool UsesInstallationWorkflow(string workflowMode) =>
+        string.Equals(workflowMode, ProjectEntity.WorkflowModeInstallationOnly, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(workflowMode, ProjectEntity.WorkflowModeMixed, StringComparison.OrdinalIgnoreCase);
 
     private async Task<UserEntity?> GetCurrentUserAsync()
     {

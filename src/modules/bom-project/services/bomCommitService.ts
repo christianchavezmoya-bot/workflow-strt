@@ -111,6 +111,7 @@ export async function commitDraft(
     office: publishDetails?.office || "",
     projectType: "Internal",
     status: "Draft",
+    workflowMode: "INSTALLATION_ONLY",
     isInstallationProject: true,
     installationMode: "Multiple Installations",
     projectManager: currentUser?.fullName,

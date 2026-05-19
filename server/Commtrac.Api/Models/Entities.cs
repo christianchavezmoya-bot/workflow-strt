@@ -201,6 +201,10 @@ public class AssetEntity
 
 public class ProjectEntity
 {
+    public const string WorkflowModeInstallationOnly = "INSTALLATION_ONLY";
+    public const string WorkflowModeInspectionOnly = "INSPECTION_ONLY";
+    public const string WorkflowModeMixed = "MIXED";
+
     [Key]
     public string Id { get; set; } = Guid.NewGuid().ToString();
     [MaxLength(200)]
@@ -231,6 +235,8 @@ public class ProjectEntity
     public string Status { get; set; } = "Draft";
     [MaxLength(80)]
     public string? ApprovalDecision { get; set; }
+    [MaxLength(40)]
+    public string WorkflowMode { get; set; } = WorkflowModeInstallationOnly;
     public bool IsInstallationProject { get; set; }
     [MaxLength(80)]
     public string? InstallationMode { get; set; }
@@ -850,6 +856,33 @@ public class WorkflowTypeEntity
     public string? Icon { get; set; }
     public int SortOrder { get; set; } = 0;
     public bool IsActive { get; set; } = true;
+}
+
+public class InspectionImportEntity
+{
+    public const string StatusReceived = "RECEIVED";
+    public const string StatusNeedsAssignment = "NEEDS_ASSIGNMENT";
+    public const string StatusMapped = "MAPPED";
+    public const string StatusFailed = "FAILED";
+
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string Source { get; set; } = "manual";
+    public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;
+    public string RawJson { get; set; } = "{}";
+    [MaxLength(256)]
+    public string Hash { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string? ProjectId { get; set; }
+    [MaxLength(100)]
+    public string? ProjectAssetId { get; set; }
+    [MaxLength(40)]
+    public string Status { get; set; } = StatusNeedsAssignment;
+    [MaxLength(1000)]
+    public string? Error { get; set; }
+    [MaxLength(100)]
+    public string? MappedRunId { get; set; }
 }
 
 /// <summary>

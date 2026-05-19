@@ -417,6 +417,7 @@ public record ProjectDto(
     string ProjectType,
     string Status,
     string? ApprovalDecision,
+    string WorkflowMode,
     bool IsInstallationProject,
     string? InstallationMode,
     string? ProjectManager,
@@ -936,6 +937,36 @@ public record AssetWorkflowRunDto(
 
 public record StartRunRequest(
     string AssetId,
+    string WorkflowConfigId,
+    string? TechnicianUserId
+);
+
+public record InspectionImportDto(
+    string Id,
+    string Source,
+    DateTime ReceivedAt,
+    string RawJson,
+    string Hash,
+    string? ProjectId,
+    string? ProjectAssetId,
+    string Status,
+    string? Error,
+    string? MappedRunId
+);
+
+public record CreateInspectionImportRequest(
+    string? Source,
+    string RawJson,
+    string? ProjectId,
+    string? ProjectAssetId
+);
+
+public record AssignInspectionImportRequest(
+    string ProjectId,
+    string ProjectAssetId
+);
+
+public record CreateInspectionRunRequest(
     string WorkflowConfigId,
     string? TechnicianUserId
 );

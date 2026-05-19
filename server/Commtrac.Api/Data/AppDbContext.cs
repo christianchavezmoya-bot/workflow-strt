@@ -54,6 +54,7 @@ public class AppDbContext : DbContext
     public DbSet<WorkflowTypeEntity> WorkflowTypes => Set<WorkflowTypeEntity>();
     public DbSet<AssetWorkflowAssignmentEntity> AssetWorkflowAssignments => Set<AssetWorkflowAssignmentEntity>();
     public DbSet<AssetWorkflowRunEntity> AssetWorkflowRuns => Set<AssetWorkflowRunEntity>();
+    public DbSet<InspectionImportEntity> InspectionImports => Set<InspectionImportEntity>();
     public DbSet<BrandSettingEntity> BrandSettings => Set<BrandSettingEntity>();
     // ─── Asset Documents ──────────────────────────────────────────────────────
     public DbSet<AssetDocumentEntity> AssetDocuments => Set<AssetDocumentEntity>();
@@ -138,6 +139,10 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<ProjectEntity>()
             .Property(p => p.ProductFeatureValuesJson)
             .HasDefaultValue("{}");
+
+        modelBuilder.Entity<ProjectEntity>()
+            .Property(p => p.WorkflowMode)
+            .HasDefaultValue(ProjectEntity.WorkflowModeInstallationOnly);
 
         modelBuilder.Entity<InstallationEntity>()
             .Property(i => i.AssignedUsers)
@@ -404,6 +409,18 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<AssetWorkflowRunEntity>()
             .Property(r => r.TimeTrackingJson).HasDefaultValue("[]");
+
+        modelBuilder.Entity<InspectionImportEntity>()
+            .HasIndex(i => i.ProjectId);
+
+        modelBuilder.Entity<InspectionImportEntity>()
+            .HasIndex(i => i.ProjectAssetId);
+
+        modelBuilder.Entity<InspectionImportEntity>()
+            .HasIndex(i => i.Status);
+
+        modelBuilder.Entity<InspectionImportEntity>()
+            .HasIndex(i => i.Hash);
 
         // ─── Asset Document indexes ───────────────────────────────────────────
         modelBuilder.Entity<AssetDocumentEntity>()

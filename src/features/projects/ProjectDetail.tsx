@@ -1,25 +1,39 @@
-import { Alert, Box, Button, Chip, Dialog, DialogContent, DialogTitle, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, Dialog, DialogContent, DialogTitle, Stack, Tab, Tabs, Typography } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import StatusStepper from "../../components/ui/StatusStepper";
 import { demoProducts } from "../../data/demo";
 import { useAuth } from "../../hooks/useAuth";
+import { projectAssetService } from "../../services/projectAssetService";
 import { projectService } from "../../services/projectService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProjects, updateProjectStatus } from "../../store/projectSlice";
 import { fetchProducts } from "../../store/productsSlice";
-import { Project } from "../../types/project";
+import type { Project, WorkflowMode } from "../../types/project";
+import type { ProjectAsset } from "../../types/projectAsset";
 import ProjectForm from "./ProjectForm";
+import ProjectInspectionInboxPage from "./ProjectInspectionInboxPage";
+import ProjectInspectionsPage from "./ProjectInspectionsPage";
 import { getProjectCompletionSummary, notifyProjectReadyForCompletion } from "./projectActionUtils";
+
+type DetailTab = "overview" | "inspections" | "inbox";
+
+const installationEnabled = (workflowMode?: WorkflowMode) =>
+  workflowMode === "INSTALLATION_ONLY" || workflowMode === "MIXED" || !workflowMode;
+
+const inspectionEnabled = (workflowMode?: WorkflowMode) =>
+  workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED";
 
 const ProjectDetail = () => {
   const { id } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
   const dispatch = useAppDispatch();
   const { items } = useAppSelector((state) => state.projects);
   const productsState = useAppSelector((state) => state.products);
   const [project, setProject] = useState<Project | null>(null);
+  const [projectAssets, setProjectAssets] = useState<ProjectAsset[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -52,6 +66,41 @@ const ProjectDetail = () => {
     dispatch(fetchProducts());
   }, [dispatch]);
 
+  useEffect(() => {
+    if (!project?.id || !inspectionEnabled(project.workflowMode)) {
+      setProjectAssets([]);
+      return;
+    }
+
+    projectAssetService
+      .listByProject(project.id)
+      .then(setProjectAssets)
+      .catch(() => setProjectAssets([]));
+  }, [project?.id, project?.workflowMode]);
+
+  const currentTab = useMemo<DetailTab>(() => {
+    if (location.pathname.endsWith("/inspections/inbox")) return "inbox";
+    if (location.pathname.endsWith("/inspections")) return "inspections";
+    return "overview";
+  }, [location.pathname]);
+
+  const availableTabs = useMemo(() => {
+    if (!project) return [] as DetailTab[];
+    const tabs: DetailTab[] = [];
+    if (installationEnabled(project.workflowMode)) tabs.push("overview");
+    if (inspectionEnabled(project.workflowMode)) tabs.push("inspections", "inbox");
+    return tabs;
+  }, [project]);
+
+  useEffect(() => {
+    if (!project || availableTabs.length === 0) return;
+    if (!availableTabs.includes(currentTab)) {
+      navigate(inspectionEnabled(project.workflowMode) ? `/projects/${project.id}/inspections` : `/projects/${project.id}`, {
+        replace: true,
+      });
+    }
+  }, [availableTabs, currentTab, navigate, project]);
+
   const actions = useMemo(() => {
     if (!project) return [];
 
@@ -59,36 +108,47 @@ const ProjectDetail = () => {
     if (project.status === "Pending Approval" && user?.role === "Admin") {
       list.push("Approve", "Reject");
     }
-    if (project.status === "Approved" && canEditProject) {
+    if (project.status === "Approved" && canEditProject && installationEnabled(project.workflowMode)) {
       list.push("Start Work");
     }
-    if (project.status === "In Progress" && canEditProject) {
+    if (project.status === "In Progress" && canEditProject && installationEnabled(project.workflowMode)) {
       list.push("Mark Completed");
     }
     return list;
   }, [canEditProject, project, user]);
 
+  const handleTabChange = (_: React.SyntheticEvent, value: DetailTab) => {
+    if (!project) return;
+    const route =
+      value === "overview"
+        ? `/projects/${project.id}`
+        : value === "inspections"
+          ? `/projects/${project.id}/inspections`
+          : `/projects/${project.id}/inspections/inbox`;
+    navigate(route);
+  };
+
   const handleAction = async (label: string) => {
-    if (!project || !project.id) return;
+    if (!project?.id) return;
 
     if (label === "Approve") {
-      dispatch(
+      const updated = await dispatch(
         updateProjectStatus({
           id: project.id,
-          payload: { status: "Approved", approvalDecision: "Approved" }
+          payload: { status: "Approved", approvalDecision: "Approved" },
         })
-      );
-      setProject({ ...project, status: "Approved", approvalDecision: "Approved" });
+      ).unwrap();
+      setProject(updated);
     }
 
     if (label === "Reject") {
-      dispatch(
+      const updated = await dispatch(
         updateProjectStatus({
           id: project.id,
-          payload: { status: "Cancelled", approvalDecision: "Rejected" }
+          payload: { status: "Cancelled", approvalDecision: "Rejected" },
         })
-      );
-      setProject({ ...project, status: "Cancelled", approvalDecision: "Rejected" });
+      ).unwrap();
+      setProject(updated);
     }
 
     if (label === "Start Work") {
@@ -138,27 +198,40 @@ const ProjectDetail = () => {
         <Box>
           <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
             <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-              Project detail —
+              Project detail -
             </Typography>
-            <Chip
-              label={project.jobNumber}
-              size="small"
-              clickable
-              onClick={() =>
-                navigate(
-                  `/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`
-                )
-              }
-              sx={{
-                background: "linear-gradient(135deg, rgba(45,212,191,0.2), rgba(45,212,191,0.1))",
-                border: "1px solid rgba(45,212,191,0.3)",
-                fontWeight: 600,
-                fontSize: "0.875rem",
-              }}
-            />
+            {installationEnabled(project.workflowMode) ? (
+              <Chip
+                label={project.jobNumber}
+                size="small"
+                clickable
+                onClick={() =>
+                  navigate(
+                    `/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`
+                  )
+                }
+                sx={{
+                  background: "linear-gradient(135deg, rgba(45,212,191,0.2), rgba(45,212,191,0.1))",
+                  border: "1px solid rgba(45,212,191,0.3)",
+                  fontWeight: 600,
+                  fontSize: "0.875rem",
+                }}
+              />
+            ) : (
+              <Chip
+                label={project.jobNumber}
+                size="small"
+                sx={{
+                  background: "linear-gradient(135deg, rgba(45,212,191,0.2), rgba(45,212,191,0.1))",
+                  border: "1px solid rgba(45,212,191,0.3)",
+                  fontWeight: 600,
+                  fontSize: "0.875rem",
+                }}
+              />
+            )}
           </Stack>
           <Typography variant="body2" color="text.secondary">
-            {project.customerName} � {project.office}
+            {[project.customerName, project.office].filter(Boolean).join(" • ")}
           </Typography>
         </Box>
         {canEditProject && (
@@ -170,44 +243,72 @@ const ProjectDetail = () => {
 
       <StatusStepper type={project.projectType} status={project.status} />
 
-      <Box className="glass-card" sx={{ padding: 3 }}>
-        <Stack spacing={1}>
-          <Typography variant="subtitle1">Workflow actions</Typography>
-          {actions.length ? (
-            <Stack direction="row" spacing={1} flexWrap="wrap">
-              {actions.map((label) => (
-                <Button key={label} variant="outlined" onClick={() => handleAction(label)}>
-                  {label}
-                </Button>
-              ))}
-            </Stack>
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              No actions available for your role.
-            </Typography>
-          )}
-        </Stack>
-      </Box>
+      {availableTabs.length > 1 && (
+        <Box className="glass-card" sx={{ p: 1.5 }}>
+          <Tabs value={currentTab} onChange={handleTabChange}>
+            {installationEnabled(project.workflowMode) && <Tab value="overview" label="Installation" />}
+            {inspectionEnabled(project.workflowMode) && <Tab value="inspections" label="Inspections" />}
+            {inspectionEnabled(project.workflowMode) && <Tab value="inbox" label="Inspection Inbox" />}
+          </Tabs>
+        </Box>
+      )}
 
-      <Box className="glass-card" sx={{ padding: 3 }}>
-        <Stack spacing={1}>
-          <Typography variant="subtitle1">Project snapshot</Typography>
-          <Typography variant="body2">Status: {project.status}</Typography>
-          {project.approvalDecision && (
-            <Typography variant="body2">Approval: {project.approvalDecision}</Typography>
-          )}
-          <Typography variant="body2">Type: {project.projectType}</Typography>
-          <Typography variant="body2">Installation: {project.isInstallationProject ? "Yes" : "No"}</Typography>
-          <Typography variant="body2">
-            Products:{" "}
-            {project.productIds?.length
-              ? project.productIds
-                  .map((productId) => products.find((product) => product.id === productId)?.name || productId)
-                  .join(", ")
-              : "None"}
-          </Typography>
-        </Stack>
-      </Box>
+      {currentTab === "overview" && installationEnabled(project.workflowMode) && (
+        <>
+          <Box className="glass-card" sx={{ padding: 3 }}>
+            <Stack spacing={1}>
+              <Typography variant="subtitle1">Workflow actions</Typography>
+              {actions.length ? (
+                <Stack direction="row" spacing={1} flexWrap="wrap">
+                  {actions.map((label) => (
+                    <Button key={label} variant="outlined" onClick={() => void handleAction(label)}>
+                      {label}
+                    </Button>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No actions available for your role.
+                </Typography>
+              )}
+            </Stack>
+          </Box>
+
+          <Box className="glass-card" sx={{ padding: 3 }}>
+            <Stack spacing={1}>
+              <Typography variant="subtitle1">Project snapshot</Typography>
+              <Typography variant="body2">Status: {project.status}</Typography>
+              {project.approvalDecision && <Typography variant="body2">Approval: {project.approvalDecision}</Typography>}
+              <Typography variant="body2">Type: {project.projectType}</Typography>
+              <Typography variant="body2">
+                Workflow mode: {project.workflowMode || (project.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY")}
+              </Typography>
+              <Typography variant="body2">
+                Products:{" "}
+                {project.productIds?.length
+                  ? project.productIds
+                      .map((productId) => products.find((product) => product.id === productId)?.name || productId)
+                      .join(", ")
+                  : "None"}
+              </Typography>
+              <Button
+                component={Link}
+                to={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`}
+                variant="contained"
+                sx={{ alignSelf: "flex-start", mt: 1 }}
+              >
+                Open installation assets
+              </Button>
+            </Stack>
+          </Box>
+        </>
+      )}
+
+      {currentTab === "inspections" && inspectionEnabled(project.workflowMode) && <ProjectInspectionsPage project={project} />}
+
+      {currentTab === "inbox" && inspectionEnabled(project.workflowMode) && (
+        <ProjectInspectionInboxPage projectId={project.id} assets={projectAssets} />
+      )}
 
       <Dialog
         open={editOpen}
@@ -216,7 +317,7 @@ const ProjectDetail = () => {
         fullWidth
         PaperProps={{
           className: "glass-card",
-          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)", minHeight: "80vh" }
+          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)", minHeight: "80vh" },
         }}
       >
         <DialogTitle>Edit project</DialogTitle>
@@ -242,5 +343,3 @@ const ProjectDetail = () => {
 };
 
 export default ProjectDetail;
-
-

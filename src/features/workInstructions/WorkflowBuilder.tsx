@@ -62,6 +62,8 @@ import { featureDependencyService } from "../../services/featureDependencyServic
 import type { FeatureDependency } from "../../types/featureDependency";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
+import { workflowTypeService } from "../../services/workflowTypeService";
+import type { WorkflowType } from "../../types/workflowType";
 import WorkOrderRunner from "./WorkOrderRunner";
 
 // ------------------------------------------------------------------
@@ -227,6 +229,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   const [currentConfig, setCurrentConfig] = useState<WorkflowConfig | null>(null);
   const [draftName, setDraftName] = useState(configName ?? `${productName} Workflow`);
   const [draftConfigType, setDraftConfigType] = useState("");
+  const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const justLoadedRef = useRef(true); // prevents save from firing on load-triggered state changes
@@ -242,6 +245,10 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     if (!productId) return;
     featureService.getByProduct(productId).then(setLibFeatures).catch(() => {});
   }, [productId]);
+
+  useEffect(() => {
+    workflowTypeService.listAll().then(setWorkflowTypes).catch(() => setWorkflowTypes([]));
+  }, []);
 
   // Feature selections — managed in the builder (not just the publish dialog)
   const [featureSelections, setFeatureSelections] = useState<FeatureSelection[]>(() =>
@@ -951,14 +958,24 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             sx={{ minWidth: 280 }}
             disabled={isReadOnly}
           />
-          <TextField
-            size="small"
-            label="Config type"
-            value={draftConfigType}
-            onChange={(e) => setDraftConfigType(e.target.value)}
-            sx={{ minWidth: 220 }}
-            disabled={isReadOnly}
-          />
+          <FormControl size="small" sx={{ minWidth: 220 }} disabled={isReadOnly}>
+            <InputLabel id="workflow-builder-type-label">Workflow Type</InputLabel>
+            <Select
+              labelId="workflow-builder-type-label"
+              value={draftConfigType}
+              label="Workflow Type"
+              onChange={(e) => setDraftConfigType(e.target.value)}
+            >
+              <MenuItem value="">
+                <em>Not set</em>
+              </MenuItem>
+              {workflowTypes.map((workflowType) => (
+                <MenuItem key={workflowType.id} value={workflowType.name}>
+                  {workflowType.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
           <Stack direction="row" alignItems="center" spacing={0.75}>
             {saveStatus === "saving" && <CircularProgress size={11} />}
             {saveStatus === "saved" && <CheckCircleOutlined sx={{ fontSize: 13, color: "success.main" }} />}
@@ -1256,15 +1273,24 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               required
               autoFocus
             />
-            <TextField
-              label="Configuration Type"
-              value={publishForm.configType}
-              onChange={(e) => setPublishForm((p) => ({ ...p, configType: e.target.value }))}
-              fullWidth
-              placeholder="e.g. Installation, Maintenance, Inspection"
-              helperText="Used to identify this instruction type when assigning to an asset"
-              InputLabelProps={{ shrink: true }}
-            />
+            <FormControl fullWidth>
+              <InputLabel id="publish-workflow-type-label">Workflow Type</InputLabel>
+              <Select
+                labelId="publish-workflow-type-label"
+                value={publishForm.configType}
+                label="Workflow Type"
+                onChange={(e) => setPublishForm((p) => ({ ...p, configType: e.target.value }))}
+              >
+                <MenuItem value="">
+                  <em>Not set</em>
+                </MenuItem>
+                {workflowTypes.map((workflowType) => (
+                  <MenuItem key={workflowType.id} value={workflowType.name}>
+                    {workflowType.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <Box>
               <Typography variant="body2" color="text.secondary">
                 Product: <strong>{productName}</strong>

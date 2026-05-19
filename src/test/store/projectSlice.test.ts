@@ -22,6 +22,7 @@ const makeProject = (overrides: Partial<Project> = {}): Project => ({
   office: "Atlanta, United States",
   projectType: "External",
   status: "Active" as Project["status"],
+  workflowMode: "INSPECTION_ONLY",
   isInstallationProject: false,
   ...overrides,
 });

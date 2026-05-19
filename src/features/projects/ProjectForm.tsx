@@ -49,7 +49,7 @@ import { fetchCustomers } from "../../store/customersSlice";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { createProject, updateProject } from "../../store/projectSlice";
-import { ApprovalDecision, Office, Project, ProjectStatus } from "../../types/project";
+import { ApprovalDecision, Office, Project, ProjectStatus, WorkflowMode } from "../../types/project";
 import { useAuth } from "../../hooks/useAuth";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
@@ -58,6 +58,7 @@ import type { Site } from "../../types/site";
 import type { FieldDefinition } from "../../services/fieldService";
 
 const getLocalDateString = (offsetDays = 0) => dayjs().add(offsetDays, "day").format("YYYY-MM-DD");
+const INSTALLATION_ENABLED_MODES: WorkflowMode[] = ["INSTALLATION_ONLY", "MIXED"];
 
 const schema = z
   .object({
@@ -91,6 +92,7 @@ const schema = z
         z.literal("")
       ])
       .optional(),
+    workflowMode: z.enum(["INSTALLATION_ONLY", "INSPECTION_ONLY", "MIXED"]).default("INSTALLATION_ONLY"),
     isInstallationProject: z.boolean(),
     productIds: z.array(z.string()).optional()
   });
@@ -191,6 +193,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       projectType: "Internal",
       status: "Draft",
       approvalDecision: "",
+      workflowMode: "INSTALLATION_ONLY",
       isInstallationProject: false,
       productIds: []
     }
@@ -231,6 +234,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         projectType: "Internal",
         status: "Draft",
         approvalDecision: "",
+        workflowMode: "INSTALLATION_ONLY",
         isInstallationProject: false,
         productIds: []
       });
@@ -254,6 +258,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         projectType: localProject.projectType,
         status: localProject.status,
         approvalDecision: localProject.approvalDecision || "",
+        workflowMode: localProject.workflowMode || (localProject.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
         isInstallationProject: localProject.isInstallationProject,
         productIds: localProject.productIds ?? []
       });
@@ -276,6 +281,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         projectType: project.projectType,
         status: project.status,
         approvalDecision: project.approvalDecision || "",
+        workflowMode: project.workflowMode || (project.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
         isInstallationProject: project.isInstallationProject,
         productIds: project.productIds ?? []
       });
@@ -312,6 +318,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
 
 
   const projectType = watch("projectType");
+  const workflowMode = watch("workflowMode");
   const isInstallationProject = watch("isInstallationProject");
   const customerId = watch("customerId");
   const siteId = watch("siteId");
@@ -324,6 +331,13 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
   const [globalOfficePrompt, setGlobalOfficePrompt] = useState<{ country: string; managerName: string } | null>(null);
   const [productFeatureValues, setProductFeatureValues] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const nextIsInstallationProject = INSTALLATION_ENABLED_MODES.includes((workflowMode || "INSTALLATION_ONLY") as WorkflowMode);
+    if (isInstallationProject !== nextIsInstallationProject) {
+      setValue("isInstallationProject", nextIsInstallationProject, { shouldValidate: false, shouldDirty: true });
+    }
+  }, [isInstallationProject, setValue, workflowMode]);
 
   useEffect(() => {
     setSitesLoading(true);
@@ -617,7 +631,8 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       projectType: (data.projectType as any) || "Internal",
       status: derivedStatus,
       approvalDecision: requestedDecision,
-      isInstallationProject: data.isInstallationProject,
+      workflowMode: data.workflowMode,
+      isInstallationProject: INSTALLATION_ENABLED_MODES.includes(data.workflowMode as WorkflowMode),
       projectManager: data.projectManager,
       productIds: data.productIds ?? [],
       productFeatureValues
@@ -687,6 +702,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       projectManager: labelProjectManager,
       projectType: labelProjectType,
       status: labelStatus,
+      workflowMode: "Workflow mode",
       productIds: labelProducts,
       approvalDecision: "Approval Decision",
       isInstallationProject: "Installation project"
@@ -1470,31 +1486,44 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
             {visibleIdSet.has("projectType") && renderFormField("projectType")}
             <Grid item xs={12} md={6} />
 
-            {extraDynamicIds.map((fieldId) => renderFormField(fieldId))}
             <Grid item xs={12} md={6}>
-              <FormControl>
-                <FormControlLabel
-                  control={
-                  <Controller
-                    name="isInstallationProject"
-                    control={control}
-                    render={({ field }) => (
-                      <Switch
-                        checked={!!field.value}
-                        onChange={(_, checked) => field.onChange(checked)}
-                      />
-                    )}
-                  />
-                }
-                label="Installation project"
-              />
-                <FormHelperText>Enable if this project will have installation records and field work tracking.</FormHelperText>
+              <FormControl fullWidth>
+                <InputLabel id="workflow-mode-label">Workflow Mode</InputLabel>
+                <Controller
+                  name="workflowMode"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      {...field}
+                      labelId="workflow-mode-label"
+                      label="Workflow Mode"
+                    >
+                      <MenuItem value="INSTALLATION_ONLY">Installation-only</MenuItem>
+                      <MenuItem value="INSPECTION_ONLY">Inspection-only</MenuItem>
+                      <MenuItem value="MIXED">Mixed</MenuItem>
+                    </Select>
+                  )}
+                />
+                <FormHelperText>
+                  Determines whether this project exposes installations, inspections, or both.
+                </FormHelperText>
               </FormControl>
             </Grid>
+            <Grid item xs={12} md={6} />
+
+            {extraDynamicIds.map((fieldId) => renderFormField(fieldId))}
             {projectType === "External" && (
               <Grid item xs={12}>
                 <Alert severity="info">
                   External projects include the Pending Approval workflow state before execution can begin.
+                </Alert>
+              </Grid>
+            )}
+
+            {workflowMode === "INSPECTION_ONLY" && (
+              <Grid item xs={12}>
+                <Alert severity="info">
+                  Inspection-only projects use project assets and inspection runs without exposing installation workspace sections.
                 </Alert>
               </Grid>
             )}

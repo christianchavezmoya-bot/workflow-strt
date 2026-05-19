@@ -7,6 +7,7 @@ export type ProjectType = "Internal" | "External";
 export type InstallationMode = "Single Installation" | "Multiple Installations";
 
 export type ApprovalDecision = "Approved" | "Rejected" | "More Info Required";
+export type WorkflowMode = "INSTALLATION_ONLY" | "INSPECTION_ONLY" | "MIXED";
 
 export type ProjectStatus =
   | "Draft"
@@ -35,6 +36,7 @@ export interface Project {
   projectType: ProjectType;
   status: ProjectStatus;
   approvalDecision?: ApprovalDecision;
+  workflowMode?: WorkflowMode;
   isInstallationProject: boolean;
   installationMode?: InstallationMode;
   projectManager?: string;

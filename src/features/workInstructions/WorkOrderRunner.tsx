@@ -54,6 +54,8 @@ import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { notificationService } from "../../services/notificationService";
+import { projectAssetService } from "../../services/projectAssetService";
+import { projectService } from "../../services/projectService";
 import { signatureService } from "../../services/signatureService";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
@@ -786,6 +788,24 @@ export default function WorkOrderRunner({
         const totalCaptured = capturedCounts.filter(c => c > 0).length;
 
         if (totalExpected > 0 && totalCaptured < totalExpected) {
+          const resolvedAssetId = projectAssetId ?? lockedRun.assetId ?? "";
+          let resolvedProjectId: string | null = null;
+          let resolvedJobNumber = jobNumber?.trim() ?? "";
+
+          if (resolvedAssetId) {
+            const linkedAsset = await projectAssetService.getById(resolvedAssetId);
+            resolvedProjectId = linkedAsset?.projectId ?? null;
+
+            if (resolvedProjectId && !resolvedJobNumber) {
+              try {
+                const linkedProject = await projectService.getProject(resolvedProjectId);
+                resolvedJobNumber = linkedProject.jobNumber?.trim() ?? "";
+              } catch {
+                resolvedJobNumber = "";
+              }
+            }
+          }
+
           const missingSteps = allMediaInputs
             .map((inp, i) => ({ ...inp, captured: capturedCounts[i] }))
             .filter(inp => inp.captured === 0)
@@ -794,9 +814,9 @@ export default function WorkOrderRunner({
           const flag = {
             id: crypto.randomUUID(),
             runId: activeRunId,
-            assetId: projectAssetId ?? "",
+            assetId: resolvedAssetId,
             assetTag: assetTag ?? "",
-            jobNumber: jobNumber ?? "",
+            jobNumber: resolvedJobNumber,
             workflowName: workflow.name,
             technicianUserId: currentUserId ?? "",
             technicianName: currentUserName ?? "",
@@ -809,10 +829,11 @@ export default function WorkOrderRunner({
             eventType: "workflow-missing-media",
             severity: "warning",
             title: `Missing media: ${assetTag ?? "Asset"}`,
-            message: `${workflow.name} | ${jobNumber || "Unknown job"} | ${totalCaptured}/${totalExpected} media steps captured`,
+            message: `${workflow.name} | ${resolvedJobNumber || "Unknown job"} | ${totalCaptured}/${totalExpected} media steps captured`,
             recipientUserIds: currentUserId ? [currentUserId] : [],
             recipientRoles: ["Admin", "Project Manager"],
-            assetId: projectAssetId ?? null,
+            projectId: resolvedProjectId,
+            assetId: resolvedAssetId || null,
             runId: activeRunId,
             entityType: "asset-workflow-run",
             entityId: activeRunId,

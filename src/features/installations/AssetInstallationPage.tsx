@@ -168,6 +168,10 @@ const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   Issue: "Issue",
 };
 
+function projectHasInspection(workflowMode?: string | null) {
+  return workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED";
+}
+
 // ------------------------------------------------------------------
 // Health tracking
 // ------------------------------------------------------------------
@@ -491,6 +495,7 @@ const AssetInstallationPage = () => {
     }
     return undefined;
   }, [products, searchParams, selectedProject]);
+  const selectedProjectHasInspection = projectHasInspection(selectedProject?.workflowMode);
   const canCreateWorkflow = can.modifyData && !!activeProduct?.id;
 
   const openWorkflowBuilderForProduct = useCallback(async () => {
@@ -572,16 +577,15 @@ const AssetInstallationPage = () => {
     });
   }, [activeProduct?.id, archiveMode, products, selectedProjectId]);
 
-  const refreshAssets = () => {
+  const refreshAssets = async () => {
     const refreshPromise = selectedProjectId
       ? projectAssetService.listByProject(selectedProjectId, archiveMode)
       : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode))).then((groups) => groups.flat());
-    refreshPromise.then((a) => {
-      setAssets(a);
-      if (activeProduct?.id) {
-        setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
-      }
-    });
+    const a = await refreshPromise;
+    setAssets(a);
+    if (activeProduct?.id) {
+      setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+    }
   };
 
   const selectedAddConfig = useMemo(
@@ -1570,7 +1574,7 @@ const AssetInstallationPage = () => {
       const idx = issues.findIndex(i => i.id === updatedIssue.id);
       if (idx >= 0) issues[idx] = updatedIssue;
       await projectAssetService.patchIssues(asset.id, JSON.stringify(issues)).catch(console.warn);
-      refreshAssets();
+      await refreshAssets();
     } finally { setInlineSaving(false); }
   }
 
@@ -1587,7 +1591,10 @@ const AssetInstallationPage = () => {
       await assetWorkflowRunService.patchIssues(runId, JSON.stringify(issues)).catch(console.warn);
       // Auto-lock run if this was the last blocking issue and run is still in-progress
       await assetWorkflowRunService.tryAutoComplete(runId).catch(() => {});
-      await loadAssignmentsForAsset(assetId);
+      await Promise.all([
+        loadAssignmentsForAsset(assetId),
+        refreshAssets(),
+      ]);
     } finally { setInlineSaving(false); }
   }
 
@@ -1807,11 +1814,12 @@ const AssetInstallationPage = () => {
     );
   }
 
-  function actionButton(asset: ProjectAsset) {
+  function actionButton(asset: ProjectAsset, projectWorkflowMode?: string | null) {
     const loading = runnerLoading === asset.id;
     const assignments = assignmentsMap[asset.id];
     const latestRun = [...(runsMap[asset.id] ?? [])]
       .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+    const inspectionEnabled = projectHasInspection(projectWorkflowMode);
     // If assignments have been loaded and are empty, no workflow is assigned
     const hasAssignments = assignments !== undefined
       ? (assignments.length > 0 || !!asset.productConfigId || !!asset.workflowTemplateId || !!latestRun || !!asset.workflowSummary?.hasWorkflow)
@@ -1819,6 +1827,21 @@ const AssetInstallationPage = () => {
     const canViewCompletedRun = asset.status === "Complete"
       || (asset.workflowSummary?.latestRunStatus === "Complete" && !asset.workflowSummary?.hasOpenIssues);
     if (!hasAssignments) {
+      if (inspectionEnabled) {
+        return (
+          <Tooltip title="or use edit button to add a workflow ">
+            <Button
+              size="small"
+              variant="outlined"
+              color="info"
+              startIcon={<FileUploadOutlined />}
+              onClick={() => navigate(`/projects/${asset.projectId}/assets/${asset.id}/inspections`)}
+            >
+              Upload External JSON
+            </Button>
+          </Tooltip>
+        );
+      }
       return <Typography variant="caption" color="text.secondary">No workflow</Typography>;
     }
     const progress = pausedProgress[asset.id];
@@ -2439,16 +2462,27 @@ const AssetInstallationPage = () => {
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
         <Box>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Installation Assets</Typography>
+            <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Project Assets</Typography>
             {activeProduct?.name && <Chip size="small" color="primary" variant="outlined" label={activeProduct.name} />}
           </Stack>
           <Typography variant="body2" color="text.secondary">
             {selectedProject
-              ? `Track assets for ${selectedProject.jobNumber} - start work orders, record status, and monitor progress.`
+              ? selectedProjectHasInspection
+                ? `Track project assets for ${selectedProject.jobNumber} - manage installation and inspection workflows from one workspace.`
+                : `Track assets for ${selectedProject.jobNumber} - start work orders, record status, and monitor progress.`
               : "Track assets across all projects - start work orders, record status, and monitor progress."}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
+          {selectedProjectHasInspection && selectedProject && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => navigate(`/projects/${selectedProject.id}/inspections`)}
+            >
+              Inspection Assets
+            </Button>
+          )}
           {can.modifyData && (
             <Tooltip title={activeProduct?.id ? `Open the workflow builder for ${activeProduct.name}` : "Select a project with a product to create a workflow"}>
               <span>
@@ -2725,13 +2759,25 @@ const AssetInstallationPage = () => {
             </Button>
           </Tooltip>
         </Stack>
-        {!archiveMode && can.editFields && (
-          <Tooltip title="Column settings">
-            <IconButton size="small" onClick={openColumnSettings} sx={{ opacity: 0.7, "&:hover": { opacity: 1 } }}>
-              <ViewColumnOutlined fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        )}
+        <Stack direction="row" spacing={1} alignItems="center">
+          {selectedProjectHasInspection && selectedProject && !archiveMode && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => navigate(`/projects/${selectedProject.id}/inspections/inbox`)}
+              sx={{ fontSize: 12 }}
+            >
+              Inspection Inbox
+            </Button>
+          )}
+          {!archiveMode && can.editFields && (
+            <Tooltip title="Column settings">
+              <IconButton size="small" onClick={openColumnSettings} sx={{ opacity: 0.7, "&:hover": { opacity: 1 } }}>
+                <ViewColumnOutlined fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Stack>
         {archiveMode && (
           <Typography variant="caption" color="text.secondary">
             Showing archived assets from the server
@@ -2853,7 +2899,7 @@ const AssetInstallationPage = () => {
                     ))}
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-                        {(can.modifyData || asset.status === "Complete") && actionButton(asset)}
+                        {(can.modifyData || asset.status === "Complete") && actionButton(asset, proj?.workflowMode)}
                         {!can.viewOnly && (
                           <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
                             <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>

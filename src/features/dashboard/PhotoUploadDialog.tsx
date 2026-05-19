@@ -108,6 +108,32 @@ function parseCaptures(raw: string | undefined): string[] {
   } catch { return []; }
 }
 
+function parseWorkflowStepsFromSnapshot(snapshotJson: string) {
+  try {
+    const snapshot = JSON.parse(snapshotJson ?? "{}");
+    const stepsRaw = typeof snapshot.stepsJson === "string" ? snapshot.stepsJson : "[]";
+    const parsed = JSON.parse(stepsRaw);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && Array.isArray(parsed.steps)) return parsed.steps;
+  } catch {}
+  return [] as Array<{
+    id: string;
+    order?: number;
+    title?: string;
+    description?: string;
+    inputs?: Array<{ id: string; label?: string; type?: string }>;
+  }>;
+}
+
+function parseStepResults(stepResultsJson: string) {
+  try {
+    const parsed = JSON.parse(stepResultsJson ?? "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [] as Array<{ stepId: string; values?: Record<string, string>; iterationIndex?: number }>;
+  }
+}
+
 // Derive all photo/video steps from the workflow snapshot + current step results.
 // Returns { allSteps, missingSteps } so the caller can show full picture.
 function derivePhotoSteps(
@@ -115,12 +141,8 @@ function derivePhotoSteps(
   stepResultsJson: string
 ): { allSteps: MissingStep[]; missingSteps: MissingStep[] } {
   try {
-    const snapshot = JSON.parse(workflowSnapshotJson ?? "{}");
-    const steps: {
-      id: string; order?: number; title?: string; description?: string;
-      inputs?: { id: string; label?: string; type?: string }[];
-    }[] = snapshot.steps ?? [];
-    const values: Record<string, Record<string, string>> = JSON.parse(stepResultsJson ?? "{}");
+    const steps = parseWorkflowStepsFromSnapshot(workflowSnapshotJson);
+    const stepResults = parseStepResults(stepResultsJson);
 
     const allSteps: MissingStep[] = [];
     let stepIndex = 0;
@@ -128,7 +150,12 @@ function derivePhotoSteps(
       stepIndex++;
       for (const inp of step.inputs ?? []) {
         if (inp.type === "photo" || inp.type === "video") {
-          const captured = parseCaptures(values[step.id]?.[inp.id]).length;
+          const captured = Math.max(
+            0,
+            ...stepResults
+              .filter((entry) => entry.stepId === step.id)
+              .map((entry) => parseCaptures(entry.values?.[inp.id]).length)
+          );
           allSteps.push({
             stepId: step.id,
             stepOrder: step.order ?? stepIndex,
@@ -193,9 +220,10 @@ export default function PhotoUploadDialog({
         run.workflowSnapshotJson ?? "{}",
         run.stepResultsJson ?? "[]"
       );
-      const values: Record<string, Record<string, string>> = (() => {
-        try { return JSON.parse(run.stepResultsJson ?? "{}"); } catch { return {}; }
-      })();
+      const values: Record<string, Record<string, string>> = {};
+      for (const entry of parseStepResults(run.stepResultsJson ?? "[]")) {
+        if (entry?.stepId) values[entry.stepId] = { ...(entry.values ?? {}) };
+      }
       setRunValues(values);
       setAllPhotoSteps(allSteps);
       setEffectiveMissingSteps(missingSteps);

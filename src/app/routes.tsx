@@ -5,6 +5,7 @@ import Dashboard from "../features/dashboard/Dashboard";
 import ProjectsPage from "../features/projects/ProjectsPage";
 import ProjectForm from "../features/projects/ProjectForm";
 import ProjectDetail from "../features/projects/ProjectDetail";
+import ProjectAssetInspectionPage from "../features/projects/ProjectAssetInspectionPage";
 import AssetInstallationPage from "../features/installations/AssetInstallationPage";
 import WorkInstructions from "../features/workInstructions/WorkInstructions";
 import UserManagement from "../features/admin/UserManagement";
@@ -48,6 +49,9 @@ const AppRoutes = () => {
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/new" element={<ProjectForm />} />
         <Route path="/projects/:id" element={<ProjectDetail />} />
+        <Route path="/projects/:id/inspections" element={<ProjectDetail />} />
+        <Route path="/projects/:id/inspections/inbox" element={<ProjectDetail />} />
+        <Route path="/projects/:id/assets/:assetId/inspections" element={<ProjectAssetInspectionPage />} />
         <Route path="/installations/assets" element={<AssetInstallationPage />} />
         <Route path="/work-instructions" element={<WorkInstructions />} />
         <Route path="/documents" element={<DocumentsPage />} />

@@ -13,7 +13,6 @@ import {
 } from "@mui/icons-material";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import StatusStepper from "../../components/ui/StatusStepper";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
 import { useNotificationInbox } from "../../contexts/NotificationInboxContext";
@@ -30,13 +29,17 @@ import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { notificationService } from "../../services/notificationService";
+import { inspectionImportService } from "../../services/inspectionImportService";
 import { signatureService } from "../../services/signatureService";
 import { projectContactService } from "../../services/projectContactService";
 import type { ProjectContact } from "../../types/projectContact";
 import type { AppNotification } from "../../types/notification";
-import type { ProjectStatus } from "../../types/project";
+import type { Project } from "../../types/project";
+import type { ProjectAsset } from "../../types/projectAsset";
+import type { InspectionImport } from "../../types/inspectionImport";
 import type { User } from "../../types/user";
 import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag } from "./PhotoUploadDialog";
+import WorkflowRunHistoryDialog from "../installations/WorkflowRunHistoryDialog";
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -98,6 +101,36 @@ function parseMissingMediaNotification(notification: AppNotification) {
   return { assetTag, workflowName, jobNumber, captureText };
 }
 
+function parseCaptureSummary(captureText: string) {
+  const match = captureText.match(/(\d+)\s*\/\s*(\d+)/);
+  const captured = match ? Number(match[1]) : 0;
+  const total = match ? Number(match[2]) : 0;
+  return {
+    captured,
+    total,
+    missing: Math.max(0, total - captured),
+  };
+}
+
+function normalizeJobNumber(jobNumber: string | null | undefined) {
+  const value = (jobNumber ?? "").trim();
+  return value.toLowerCase() === "unknown job" ? "" : value;
+}
+
+type GroupedMissingMediaNotification = {
+  key: string;
+  assetId: string | null;
+  assetTag: string;
+  jobNumber: string;
+  workflowName: string;
+  latestNotification: AppNotification;
+  notificationIds: string[];
+  uniqueRuns: AppNotification[];
+  totalCaptured: number;
+  totalExpected: number;
+  totalMissing: number;
+};
+
 function parseWorkflowStepsFromSnapshot(snapshotJson: string) {
   try {
     const snapshot = JSON.parse(snapshotJson ?? "{}");
@@ -142,35 +175,12 @@ function normalizeName(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
 }
 
-function normalizeProjectStatus(status: string | undefined) {
-  return (status ?? "").trim().toLowerCase();
-}
-
-function deriveLifecycleStatus(projects: Array<{ status: string }>): ProjectStatus {
-  if (projects.length === 0) return "Draft";
-
-  const priority = [
-    "In Progress",
-    "Pending Approval",
-    "Approved",
-    "In Planning",
-    "Draft",
-    "On Hold",
-    "Completed",
-    "Cancelled",
-  ];
-
-  for (const candidate of priority) {
-    if (projects.some((project) => normalizeProjectStatus(project.status) === normalizeProjectStatus(candidate))) {
-      return candidate as ProjectStatus;
-    }
-  }
-
-  return (projects[0]?.status as ProjectStatus) ?? "Draft";
+function inspectionEnabled(workflowMode?: string | null) {
+  return workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED";
 }
 
 const ALL_DASHBOARDS_VALUE = "__all__";
-type PmDashboardTab = "pm-projects" | "my-installs";
+type PmDashboardTab = "pm-projects" | "my-inspections" | "my-installs";
 
 // ── Send-to-Customer widget ───────────────────────────────────────────────────
 // Self-contained per pending-signature row.
@@ -403,6 +413,9 @@ const Dashboard = () => {
   const [pendingSigs,        setPendingSigs]        = useState<PendingSignatureRecord[]>([]);
   const [attentionLoading,   setAttentionLoading]   = useState(false);
   const [openAssets,         setOpenAssets]         = useState<OpenAssetItem[]>([]);
+  const [inspectionAssets,   setInspectionAssets]   = useState<ProjectAsset[]>([]);
+  const [inspectionImports,  setInspectionImports]  = useState<InspectionImport[]>([]);
+  const [inspectionLoading,  setInspectionLoading]  = useState(false);
   const [workload,           setWorkload]           = useState<WorkloadSummaryItem[]>([]);
   const [workloadLoading,    setWorkloadLoading]    = useState(false);
   const [reportingTechId,    setReportingTechId]    = useState<string | null>(null);
@@ -459,6 +472,12 @@ const Dashboard = () => {
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
   const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
+  const [pmRunHistoryAsset, setPmRunHistoryAsset] = useState<ProjectAsset | null>(null);
+  const [pmRunHistoryProject, setPmRunHistoryProject] = useState<Project | null>(null);
+  const [pmRunHistoryConfigId, setPmRunHistoryConfigId] = useState("");
+  const [pmRunHistoryConfigName, setPmRunHistoryConfigName] = useState("Run History");
+  const [pmRunHistoryOpen, setPmRunHistoryOpen] = useState(false);
+  const [pmRunHistoryExpandedRunId, setPmRunHistoryExpandedRunId] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedDashboardId(defaultDashboardUserId);
@@ -570,6 +589,44 @@ const Dashboard = () => {
   const projectCount    = filteredProjects.length;
   const blockingIssues  = openIssues.filter((i) => i.isBlocking);
   const highIssues      = openIssues.filter((i) => !i.isBlocking && i.severity === "high");
+  const inspectionProjects = useMemo(
+    () => filteredProjects.filter((project) => inspectionEnabled(project.workflowMode)),
+    [filteredProjects]
+  );
+  const inspectionProjectIds = useMemo(
+    () => new Set(inspectionProjects.map((project) => project.id)),
+    [inspectionProjects]
+  );
+
+  useEffect(() => {
+    if (inspectionProjects.length === 0) {
+      setInspectionAssets([]);
+      setInspectionImports([]);
+      setInspectionLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setInspectionLoading(true);
+
+    Promise.all([
+      Promise.all(inspectionProjects.map((project) => projectAssetService.listByProject(project.id).catch(() => []))),
+      Promise.all(inspectionProjects.map((project) => inspectionImportService.listByProject(project.id).catch(() => []))),
+    ])
+      .then(([assetGroups, importGroups]) => {
+        if (cancelled) return;
+        setInspectionAssets(assetGroups.flat());
+        setInspectionImports(importGroups.flat());
+      })
+      .finally(() => {
+        if (!cancelled) setInspectionLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [inspectionProjects]);
+
   const overdueProjects = filteredProjects.filter((p) => {
     if (!p.finishDate || p.status === "Completed" || p.status === "Cancelled") return false;
     return new Date(p.finishDate) < new Date();
@@ -585,6 +642,45 @@ const Dashboard = () => {
   const myActive   = useMemo(() => myAssets.filter((a) => isInProgressAsset(a.runStatus) || isInProgressAsset(a.status)), [myAssets]);
   const myPaused   = useMemo(() => myAssets.filter((a) => isPausedAsset(a.runStatus)), [myAssets]);
   const myQueued   = useMemo(() => myAssets.filter((a) => isNotStartedAsset(a.status)), [myAssets]);
+  const myInspectionAssets = useMemo(() => {
+    const inspectionScopedAssets = inspectionAssets.filter((asset) => inspectionProjectIds.has(asset.projectId));
+    if (!viewedDashboardUserId) return inspectionScopedAssets;
+    return inspectionScopedAssets.filter((asset) => asset.assignedUserId === viewedDashboardUserId);
+  }, [inspectionAssets, inspectionProjectIds, viewedDashboardUserId]);
+  const myInspectionImports = useMemo(() => {
+    if (!viewedDashboardUserId) return inspectionImports;
+    const assignedAssetIds = new Set(myInspectionAssets.map((asset) => asset.id));
+    return inspectionImports.filter((item) => !item.projectAssetId || assignedAssetIds.has(item.projectAssetId));
+  }, [inspectionImports, myInspectionAssets, viewedDashboardUserId]);
+  const inspectionInProgress = useMemo(
+    () =>
+      inspectionAssets.filter((asset) => {
+        const latestStatus = asset.workflowSummary?.latestRunStatus ?? asset.status;
+        return latestStatus === "InProgress" || latestStatus === "Paused" || latestStatus === "Running";
+      }),
+    [inspectionAssets]
+  );
+  const inspectionDueAssets = useMemo(
+    () =>
+      inspectionAssets.filter((asset) => {
+        const project = inspectionProjects.find((candidate) => candidate.id === asset.projectId);
+        if (!project || project.status === "Completed" || project.status === "Cancelled") return false;
+        const latestStatus = asset.workflowSummary?.latestRunStatus ?? asset.status;
+        if (latestStatus === "Complete" || latestStatus === "Completed") return false;
+        const finishTime = project.finishDate ? new Date(project.finishDate).getTime() : Number.NaN;
+        const now = Date.now();
+        return Number.isFinite(finishTime) && finishTime <= now + 7 * 24 * 60 * 60 * 1000;
+      }),
+    [inspectionAssets, inspectionProjects]
+  );
+  const inspectionNeedsAssignment = useMemo(
+    () => inspectionImports.filter((item) => item.status === "NEEDS_ASSIGNMENT"),
+    [inspectionImports]
+  );
+  const failedInspectionImports = useMemo(
+    () => inspectionImports.filter((item) => item.status === "FAILED"),
+    [inspectionImports]
+  );
 
   // Supervisor: unassigned open assets
   const unassignedAssets = useMemo(() =>
@@ -711,6 +807,56 @@ const Dashboard = () => {
     () => unreadNotifications.filter((n) => n.eventType === "workflow-missing-media"),
     [unreadNotifications]
   );
+  const groupedMissingMediaNotifications = useMemo<GroupedMissingMediaNotification[]>(() => {
+    const groups = new Map<string, GroupedMissingMediaNotification>();
+
+    for (const notification of missingMediaNotifications) {
+      const parsed = parseMissingMediaNotification(notification);
+      const key = notification.assetId || parsed.assetTag || notification.runId || notification.id;
+      const capture = parseCaptureSummary(parsed.captureText);
+      const existing = groups.get(key);
+
+      if (!existing) {
+        groups.set(key, {
+          key,
+          assetId: notification.assetId,
+          assetTag: parsed.assetTag,
+          jobNumber: normalizeJobNumber(parsed.jobNumber),
+          workflowName: parsed.workflowName,
+          latestNotification: notification,
+          notificationIds: [notification.id],
+          uniqueRuns: [notification],
+          totalCaptured: capture.captured,
+          totalExpected: capture.total,
+          totalMissing: capture.missing,
+        });
+        continue;
+      }
+
+      existing.notificationIds.push(notification.id);
+
+      if (new Date(notification.createdAtUtc).getTime() > new Date(existing.latestNotification.createdAtUtc).getTime()) {
+        existing.latestNotification = notification;
+        existing.workflowName = parsed.workflowName;
+      }
+
+      if (!existing.jobNumber && normalizeJobNumber(parsed.jobNumber)) existing.jobNumber = normalizeJobNumber(parsed.jobNumber);
+      if (!existing.assetTag && parsed.assetTag) existing.assetTag = parsed.assetTag;
+      if (!existing.assetId && notification.assetId) existing.assetId = notification.assetId;
+
+      const alreadyTrackedRun = existing.uniqueRuns.some((candidate) => candidate.runId && candidate.runId === notification.runId);
+      if (!alreadyTrackedRun) {
+        existing.uniqueRuns.push(notification);
+        existing.totalCaptured += capture.captured;
+        existing.totalExpected += capture.total;
+        existing.totalMissing += capture.missing;
+      }
+    }
+
+    return Array.from(groups.values()).sort(
+      (a, b) => new Date(b.latestNotification.createdAtUtc).getTime() - new Date(a.latestNotification.createdAtUtc).getTime()
+    );
+  }, [missingMediaNotifications]);
   const scopedInstallerMissingMediaNotifications = useMemo(() => {
     if (!viewedDashboardUserId) return missingMediaNotifications;
     return missingMediaNotifications.filter((n) => n.triggeredByUserId === viewedDashboardUserId || !n.triggeredByUserId);
@@ -776,18 +922,37 @@ const Dashboard = () => {
     });
   }, []);
 
+  const openPmRunHistoryFromNotification = useCallback(async (notification: AppNotification) => {
+    if (!notification.runId || !notification.assetId) return;
+
+    const [asset, run] = await Promise.all([
+      projectAssetService.getById(notification.assetId),
+      assetWorkflowRunService.getById(notification.runId),
+    ]);
+
+    if (!asset || !run) return;
+
+    const project = projects.find((candidate) => candidate.id === asset.projectId) ?? null;
+    let configName = "Run History";
+    if (run.workflowConfigId) {
+      const config = await workflowConfigService.getById(run.workflowConfigId);
+      configName = config?.displayName ?? config?.name ?? configName;
+    }
+
+    setPmRunHistoryAsset(asset);
+    setPmRunHistoryProject(project);
+    setPmRunHistoryConfigId("");
+    setPmRunHistoryConfigName(configName);
+    setPmRunHistoryExpandedRunId(notification.runId);
+    setPmRunHistoryOpen(true);
+  }, [projects]);
+
   // Project status chart
   const statusGroups = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const p of filteredProjects) counts[p.status] = (counts[p.status] ?? 0) + 1;
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }, [filteredProjects]);
-
-  const lifecycleStatus = useMemo(() => deriveLifecycleStatus(filteredProjects), [filteredProjects]);
-  const lifecycleCount = useMemo(
-    () => filteredProjects.filter((project) => normalizeProjectStatus(project.status) === normalizeProjectStatus(lifecycleStatus)).length,
-    [filteredProjects, lifecycleStatus]
-  );
 
   const statusColor: Record<string, string> = {
     "In Progress": "primary", "Completed": "success", "Pending Approval": "warning",
@@ -814,6 +979,194 @@ const Dashboard = () => {
         * {label}
       </Typography>
       {sub && <Typography variant="caption" color="text.disabled" noWrap display="block" sx={{ pl: 1.5, fontSize: "0.65rem" }}>{sub}</Typography>}
+    </Box>
+  );
+
+  const InspectionSignalGrid = (
+    <Grid container spacing={2}>
+      <Grid item xs={12} md={4}>
+        <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+            <AssessmentOutlined sx={{ fontSize: 18, color: inspectionInProgress.length > 0 ? "info.main" : "text.disabled" }} />
+            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+              Inspections In Progress / Due
+            </Typography>
+            <Chip
+              label={`${inspectionInProgress.length}/${inspectionDueAssets.length}`}
+              size="small"
+              color={inspectionInProgress.length > 0 || inspectionDueAssets.length > 0 ? "info" : "default"}
+              variant="outlined"
+              sx={{ height: 20, fontSize: "0.7rem" }}
+            />
+          </Stack>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+            {inspectionLoading ? "Refreshing inspection asset signals..." : "Open and near-due inspection assets across inspection-enabled projects"}
+          </Typography>
+          {inspectionInProgress.length === 0 && inspectionDueAssets.length === 0 ? (
+            <Typography variant="caption" color="text.secondary">No active inspection pressure.</Typography>
+          ) : (
+            <Stack spacing={0.25}>
+              {inspectionInProgress.slice(0, 3).map((asset) => {
+                const project = inspectionProjects.find((candidate) => candidate.id === asset.projectId);
+                return (
+                  <ItemRow
+                    key={asset.id}
+                    label={`${project?.jobNumber ?? asset.projectId}: ${asset.assetTag || asset.assetName || asset.id}`}
+                    sub={asset.workflowSummary?.latestRunStatus ?? asset.status}
+                    onClick={() => navigate(`/projects/${asset.projectId}/assets/${asset.id}/inspections`)}
+                  />
+                );
+              })}
+              {inspectionDueAssets.slice(0, 2).map((asset) => {
+                const project = inspectionProjects.find((candidate) => candidate.id === asset.projectId);
+                return (
+                  <ItemRow
+                    key={`due-${asset.id}`}
+                    label={`Due soon: ${project?.jobNumber ?? asset.projectId} - ${asset.assetTag || asset.assetName || asset.id}`}
+                    sub={project?.finishDate ? `Project due ${fmtDate(project.finishDate)}` : "Due date pending"}
+                    onClick={() => navigate(`/projects/${asset.projectId}/assets/${asset.id}/inspections`)}
+                  />
+                );
+              })}
+            </Stack>
+          )}
+        </Box>
+      </Grid>
+      <Grid item xs={12} md={4}>
+        <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+            <AssignmentLateOutlined sx={{ fontSize: 18, color: inspectionNeedsAssignment.length > 0 ? "warning.main" : "text.disabled" }} />
+            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+              Inspection Imports Awaiting Assignment
+            </Typography>
+            <Chip
+              label={inspectionNeedsAssignment.length}
+              size="small"
+              color={inspectionNeedsAssignment.length > 0 ? "warning" : "default"}
+              variant="outlined"
+              sx={{ height: 20, fontSize: "0.7rem" }}
+            />
+          </Stack>
+          {inspectionNeedsAssignment.length === 0 ? (
+            <Typography variant="caption" color="text.secondary">No unassigned inspection imports.</Typography>
+          ) : (
+            <Stack spacing={0.25}>
+              {inspectionNeedsAssignment.slice(0, 5).map((item) => {
+                const project = inspectionProjects.find((candidate) => candidate.id === item.projectId);
+                return (
+                  <ItemRow
+                    key={item.id}
+                    label={project?.jobNumber ? `${project.jobNumber} import` : "Inspection import"}
+                    sub={`${item.source} • received ${fmtDate(item.receivedAt)}`}
+                    onClick={() => navigate(item.projectId ? `/projects/${item.projectId}/inspections/inbox` : "/projects")}
+                  />
+                );
+              })}
+            </Stack>
+          )}
+        </Box>
+      </Grid>
+      <Grid item xs={12} md={4}>
+        <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+            <ReportOutlined sx={{ fontSize: 18, color: failedInspectionImports.length > 0 ? "error.main" : "text.disabled" }} />
+            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+              Failed Inspection Imports
+            </Typography>
+            <Chip
+              label={failedInspectionImports.length}
+              size="small"
+              color={failedInspectionImports.length > 0 ? "error" : "default"}
+              variant="outlined"
+              sx={{ height: 20, fontSize: "0.7rem" }}
+            />
+          </Stack>
+          {failedInspectionImports.length === 0 ? (
+            <Typography variant="caption" color="text.secondary">No failed inspection imports.</Typography>
+          ) : (
+            <Stack spacing={0.25}>
+              {failedInspectionImports.slice(0, 5).map((item) => {
+                const project = inspectionProjects.find((candidate) => candidate.id === item.projectId);
+                return (
+                  <ItemRow
+                    key={item.id}
+                    label={project?.jobNumber ? `${project.jobNumber} import failed` : "Inspection import failed"}
+                    sub={item.error || `${item.source} • received ${fmtDate(item.receivedAt)}`}
+                    onClick={() => navigate(item.projectId ? `/projects/${item.projectId}/inspections/inbox` : "/projects")}
+                  />
+                );
+              })}
+            </Stack>
+          )}
+        </Box>
+      </Grid>
+    </Grid>
+  );
+
+  const MyInspectionWorkspace = (
+    <Box className="glass-card" sx={{ p: 2.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+        <AssessmentOutlined sx={{ color: "primary.main", fontSize: 20 }} />
+        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>
+          {viewingOwnDashboard ? "My Inspections" : `${viewedDashboardName}'s Inspections`}
+        </Typography>
+      </Stack>
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+        Assigned inspection assets in inspection-only and mixed projects.
+      </Typography>
+      {myInspectionAssets.length === 0 ? (
+        <Typography variant="caption" color="text.disabled">
+          {viewingOwnDashboard ? "No inspection assets assigned to you." : `No inspection assets assigned to ${viewedDashboardName}.`}
+        </Typography>
+      ) : (
+        <Grid container spacing={1.5}>
+          {myInspectionAssets.slice(0, 6).map((asset) => {
+            const project = inspectionProjects.find((candidate) => candidate.id === asset.projectId);
+            const latestStatus = asset.workflowSummary?.latestRunStatus ?? asset.status;
+            return (
+              <Grid item xs={12} sm={6} md={4} key={asset.id}>
+                <Paper
+                  elevation={0}
+                  onClick={() => navigate(`/projects/${asset.projectId}/assets/${asset.id}/inspections`)}
+                  sx={{
+                    p: 1.5,
+                    border: "1px solid var(--stroke)",
+                    borderRadius: 1.5,
+                    cursor: "pointer",
+                    transition: "all 0.15s",
+                    "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
+                  }}
+                >
+                  <Stack spacing={0.75}>
+                    <Typography variant="caption" fontWeight={600} noWrap display="block">
+                      {asset.assetTag || asset.assetName || asset.id}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
+                      {project?.jobNumber ?? asset.projectId}
+                    </Typography>
+                    <Typography variant="caption" color="text.disabled" noWrap display="block" sx={{ fontSize: "0.62rem" }}>
+                      {latestStatus}
+                      {asset.workflowSummary?.missingItems ? ` • ${asset.workflowSummary.missingItems} missing` : ""}
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      sx={{ alignSelf: "flex-start", height: 22, fontSize: "0.68rem", py: 0 }}
+                    >
+                      Open
+                    </Button>
+                  </Stack>
+                </Paper>
+              </Grid>
+            );
+          })}
+        </Grid>
+      )}
+      {myInspectionImports.length > 0 && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
+          {myInspectionImports.length} inspection inbox item{myInspectionImports.length === 1 ? "" : "s"} linked to this workspace.
+        </Typography>
+      )}
     </Box>
   );
 
@@ -1029,7 +1382,7 @@ const Dashboard = () => {
 
   const ProjectStatusGrid = (
     <Grid container spacing={2}>
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12}>
         <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
             <TrendingUpOutlined sx={{ fontSize: 18, color: "primary.main" }} />
@@ -1046,7 +1399,7 @@ const Dashboard = () => {
               const pct        = total > 0 ? Math.round((completed / total) * 100) : 0;
               return (
                 <Box key={project.id}
-                  onClick={() => navigate(`/projects/${project.id}`)}
+                  onClick={() => navigate(`/installations/assets?project=${encodeURIComponent(project.id)}`)}
                   sx={{ cursor: "pointer", "&:hover": { "& .proj-row": { background: "rgba(255,255,255,0.04)" } } }}>
                   <Stack className="proj-row" direction="row" alignItems="center" spacing={1}
                     sx={{ px: 1, py: 0.5, borderRadius: 1, transition: "background 0.15s" }}>
@@ -1117,15 +1470,6 @@ const Dashboard = () => {
               </Typography>
             </Box>
           )}
-        </Box>
-      </Grid>
-      <Grid item xs={12} md={8}>
-        <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
-          <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem", mb: 2 }}>Project Lifecycle</Typography>
-          <StatusStepper type="External" status={lifecycleStatus} />
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
-            {lifecycleCount} of {projectCount} visible projects currently in {lifecycleStatus}.
-          </Typography>
         </Box>
       </Grid>
     </Grid>
@@ -1490,12 +1834,15 @@ const Dashboard = () => {
               sx={{ minHeight: 36, "& .MuiTab-root": { minHeight: 36, textTransform: "none", fontSize: "0.85rem" } }}
             >
               <Tab value="pm-projects" label="My PM Projects" />
+              <Tab value="my-inspections" label="My Inspections" />
               <Tab value="my-installs" label="My Installs" />
             </Tabs>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
               {pmDashboardTab === "pm-projects"
                 ? "Management metrics for projects where you are the assigned PM."
-                : "Your assigned asset work across projects where you participate."}
+                : pmDashboardTab === "my-inspections"
+                  ? "Your assigned inspection assets and import inbox activity."
+                  : "Your assigned asset work across projects where you participate."}
             </Typography>
           </Box>
         )}
@@ -1627,6 +1974,8 @@ const Dashboard = () => {
               </>
             )}
           </Box>
+
+          {myInspectionAssets.length > 0 && MyInspectionWorkspace}
 
           {/* Photo reminders from PM */}
           {canShowOwnNotifications && photoReminderNotifications.length > 0 && (
@@ -1919,6 +2268,10 @@ const Dashboard = () => {
       {/* â•â• PROJECT MANAGER / ADMIN VIEW â•â• */}
       {isManager && (
         <>
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && ProjectStatusGrid}
+          {(!showPmTabs || pmDashboardTab === "pm-projects" || pmDashboardTab === "my-inspections") && InspectionSignalGrid}
+          {showPmTabs && pmDashboardTab === "my-inspections" && MyInspectionWorkspace}
+
           {/* Needs Attention â€” company-wide */}
           {NeedsAttentionSection}
 
@@ -2026,7 +2379,7 @@ const Dashboard = () => {
           )}
 
           {/* Missing media flags â€” PM sees all runs without required media */}
-          {missingMediaNotifications.length > 0 && (
+          {groupedMissingMediaNotifications.length > 0 && (
             <Grid item xs={12} md={6}>
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)", height: "100%" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -2034,7 +2387,7 @@ const Dashboard = () => {
                 <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                   Runs Missing Media
                 </Typography>
-                <Chip label={missingMediaNotifications.length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                <Chip label={groupedMissingMediaNotifications.length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
                 <Button size="small" variant="text" color="warning" sx={{ fontSize: "0.72rem" }}
                   onClick={() => { void acknowledge(missingMediaNotifications.map((n) => n.id)); }}>
                   Dismiss all
@@ -2044,19 +2397,29 @@ const Dashboard = () => {
                 Workflow runs completed without all required photos or videos captured
               </Typography>
               <Stack spacing={0.75}>
-                {missingMediaNotifications.map((f) => {
-                  const parsed = parseMissingMediaNotification(f);
+                {groupedMissingMediaNotifications.map((group) => {
+                  const { latestNotification } = group;
+                  const installerName = latestNotification.triggeredByName ?? "Installer";
+                  const projectJob = projects.find((candidate) => candidate.id === latestNotification.projectId)?.jobNumber ?? "";
+                  const displayJob = projectJob || normalizeJobNumber(group.jobNumber);
+                  const captureSummary = group.totalExpected > 0
+                    ? `${group.totalCaptured}/${group.totalExpected} media steps captured`
+                    : "0/0 media steps captured";
+                  const runSummary = group.uniqueRuns.length > 1
+                    ? `${group.uniqueRuns.length} runs`
+                    : group.workflowName;
                   return (
-                  <Stack key={f.id} direction="row" alignItems="flex-start" spacing={1}>
+                  <Stack key={group.key} direction="row" alignItems="flex-start" spacing={1}>
                     <Box sx={{ flex: 1 }}>
                       <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.3 }}>
-                        {parsed.jobNumber ? `${parsed.jobNumber}: ` : ""}{parsed.assetTag}
+                        {displayJob ? `${displayJob}: ` : ""}{group.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {parsed.workflowName} | {f.triggeredByName ?? "Installer"} | {fmtDate(f.createdAtUtc)}
+                        {runSummary} | {installerName} | {fmtDate(latestNotification.createdAtUtc)}
                       </Typography>
                       <Typography variant="caption" color="warning.main" display="block">
-                        {parsed.captureText}
+                        {captureSummary}
+                        {group.totalMissing > 0 ? ` • ${group.totalMissing} missing media item${group.totalMissing === 1 ? "" : "s"}` : ""}
                       </Typography>
                     </Box>
                     <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
@@ -2065,7 +2428,7 @@ const Dashboard = () => {
                         variant="outlined"
                         color="info"
                         sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
-                        onClick={() => { void openPhotoUploadFromNotification(f, "pm"); }}
+                        onClick={() => { void openPmRunHistoryFromNotification(latestNotification); }}
                       >
                         Preview
                       </Button>
@@ -2074,31 +2437,32 @@ const Dashboard = () => {
                         variant="text"
                         color="warning"
                         sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
-                        disabled={reminderSentId === f.id}
+                        disabled={reminderSentId === latestNotification.id}
                         onClick={() => {
                           void notificationService.create({
                             eventType: "missing-media-reminder",
                             severity: "warning",
-                            title: `Reminder: upload media for ${parsed.assetTag}`,
-                            message: `${parsed.workflowName} | ${parsed.jobNumber} | requested by ${user.fullName ?? "PM"}`,
-                            recipientUserIds: f.triggeredByUserId ? [f.triggeredByUserId] : [],
-                            assetId: f.assetId,
-                            runId: f.runId,
+                            title: `Reminder: upload media for ${group.assetTag}`,
+                            message: `${runSummary} | ${displayJob} | requested by ${user.fullName ?? "PM"}`,
+                            recipientUserIds: latestNotification.triggeredByUserId ? [latestNotification.triggeredByUserId] : [],
+                            projectId: latestNotification.projectId,
+                            assetId: latestNotification.assetId,
+                            runId: latestNotification.runId,
                             entityType: "asset-workflow-run",
-                            entityId: f.runId,
+                            entityId: latestNotification.runId,
                             triggeredByUserId: user.id,
                             triggeredByName: user.fullName ?? "PM",
                           }).then(async () => {
-                            setReminderSentId(f.id);
+                            setReminderSentId(latestNotification.id);
                             await refreshNotifications();
                             window.setTimeout(() => setReminderSentId(null), 2000);
                           });
                         }}
                       >
-                        {reminderSentId === f.id ? "Sent" : "Remind Installer"}
+                        {reminderSentId === latestNotification.id ? "Sent" : "Remind Installer"}
                       </Button>
                       <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                        onClick={() => { void acknowledge([f.id]); }}>
+                        onClick={() => { void acknowledge(group.notificationIds); }}>
                         Dismiss
                       </Button>
                     </Stack>
@@ -2113,9 +2477,6 @@ const Dashboard = () => {
 
           {/* Regional Snapshot */}
           {(!showPmTabs || pmDashboardTab === "pm-projects") && RegionalSnapshotSection}
-
-          {/* Project Status + Lifecycle */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects") && ProjectStatusGrid}
 
           {/* Evidence + Health */}
           {(!showPmTabs || pmDashboardTab === "pm-projects") && EvidenceHealthGrid}
@@ -2188,6 +2549,33 @@ const Dashboard = () => {
             setPhotoUploadTarget(null);
             await refreshNotifications();
           }}
+        />
+      )}
+
+      {pmRunHistoryAsset && (
+        <WorkflowRunHistoryDialog
+          open={pmRunHistoryOpen}
+          onClose={() => {
+            setPmRunHistoryOpen(false);
+            setPmRunHistoryAsset(null);
+            setPmRunHistoryProject(null);
+            setPmRunHistoryConfigId("");
+            setPmRunHistoryConfigName("Run History");
+            setPmRunHistoryExpandedRunId(null);
+          }}
+          asset={pmRunHistoryAsset}
+          workflowConfigId={pmRunHistoryConfigId}
+          workflowConfigName={pmRunHistoryConfigName}
+          currentUserName={user.fullName ?? ""}
+          onRerun={() => {}}
+          project={pmRunHistoryProject ? {
+            customerName: pmRunHistoryProject.customerName,
+            jobNumber: pmRunHistoryProject.jobNumber,
+            siteName: pmRunHistoryProject.siteName,
+          } : undefined}
+          initialExpandedRunId={pmRunHistoryExpandedRunId}
+          allowRerun={false}
+          allowContinue={false}
         />
       )}
 
