@@ -74,6 +74,8 @@ public class AppDbContext : DbContext
     public DbSet<BomImportRunEntity> BomImportRuns => Set<BomImportRunEntity>();
     public DbSet<BomMappingProfileEntity> BomMappingProfiles => Set<BomMappingProfileEntity>();
     public DbSet<BomRuleProfileEntity> BomRuleProfiles => Set<BomRuleProfileEntity>();
+    // ─── Inspection Imports ───────────────────────────────────────────────────
+    public DbSet<InspectionImportEntity> InspectionImports => Set<InspectionImportEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -363,6 +365,18 @@ public class AppDbContext : DbContext
                 new FieldDefinitionEntity { Id = "field-customer-key", Name = "Customer Key", FieldType = "primary key", TablesJson = JsonSerializer.Serialize(new[] { "customers" }, JsonOptions), SortOrder = 46, IsActive = true },
                 new FieldDefinitionEntity { Id = "field-site-key", Name = "Site Key", FieldType = "primary key", TablesJson = JsonSerializer.Serialize(new[] { "sites" }, JsonOptions), SortOrder = 47, IsActive = true }
             });
+
+        modelBuilder.Entity<InspectionImportEntity>()
+            .HasIndex(i => i.ProjectId);
+
+        modelBuilder.Entity<InspectionImportEntity>()
+            .HasIndex(i => i.AssetId);
+
+        modelBuilder.Entity<InspectionImportEntity>()
+            .HasIndex(i => i.ContentHash);
+
+        modelBuilder.Entity<InspectionImportEntity>()
+            .HasIndex(i => i.Status);
     }
 }
 

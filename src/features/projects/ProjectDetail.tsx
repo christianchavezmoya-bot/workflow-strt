@@ -1,4 +1,4 @@
-import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, Stack, Tab, Tabs, Typography } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import StatusStepper from "../../components/ui/StatusStepper";
@@ -9,7 +9,15 @@ import { projectService } from "../../services/projectService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { updateProjectStatus } from "../../store/projectSlice";
 import { fetchProducts } from "../../store/productsSlice";
-import { Project } from "../../types/project";
+import type { Project, ProjectStatus, WorkflowMode } from "../../types/project";
+import InspectionsTab from "./InspectionsTab";
+import InspectionInboxTab from "./InspectionInboxTab";
+
+/** Derive effective workflow mode, providing safe backward-compat default. */
+function effectiveMode(project: Project): WorkflowMode {
+  if (project.workflowMode) return project.workflowMode as WorkflowMode;
+  return project.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY";
+}
 
 const ProjectDetail = () => {
   const { id } = useParams();
@@ -22,6 +30,7 @@ const ProjectDetail = () => {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState(0);
 
   const localProject = useMemo(() => items.find((item) => item.id === id), [id, items]);
   const products = productsState.items.length ? productsState.items : demoProducts;
@@ -46,9 +55,24 @@ const ProjectDetail = () => {
     dispatch(fetchProducts());
   }, [dispatch]);
 
+  const mode = project ? effectiveMode(project) : "INSTALLATION_ONLY";
+  const showInstallations = mode === "INSTALLATION_ONLY" || mode === "MIXED";
+  const showInspections = mode === "INSPECTION_ONLY" || mode === "MIXED";
+
+  const tabs = useMemo(() => {
+    const list: string[] = ["Overview"];
+    if (showInstallations) list.push("Installations");
+    if (showInspections) list.push("Inspections", "Inspection Inbox");
+    return list;
+  }, [showInstallations, showInspections]);
+
+  // Keep tab index in bounds when project loads and tabs change
+  useEffect(() => {
+    setTab((prev) => Math.min(prev, tabs.length - 1));
+  }, [tabs.length]);
+
   const actions = useMemo(() => {
     if (!project) return [];
-
     const list: string[] = [];
     if (project.status === "Draft" && user?.role === "Project Manager") {
       list.push("Submit for Approval");
@@ -63,54 +87,38 @@ const ProjectDetail = () => {
       list.push("Mark Completed");
     }
     return list;
-  }, [project, user]);
+  }, [project, user, can]);
 
   const handleAction = (label: string) => {
     if (!project || !project.id) return;
 
-    if (label === "Submit for Approval") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Pending Approval" } }));
-      setProject({ ...project, status: "Pending Approval" });
-    }
+    const dispatchAndSet = (status: ProjectStatus, extra: Partial<Project> = {}) => {
+      dispatch(updateProjectStatus({ id: project.id, payload: { status } }));
+      setProject({ ...project, status, ...extra });
+    };
 
-    if (label === "Approve") {
-      dispatch(
-        updateProjectStatus({
-          id: project.id,
-          payload: { status: "Approved", approvalDecision: "Approved" }
-        })
-      );
-      setProject({ ...project, status: "Approved", approvalDecision: "Approved" });
-    }
-
-    if (label === "Request Info") {
-      dispatch(
-        updateProjectStatus({
-          id: project.id,
-          payload: { status: "Pending Approval", approvalDecision: "More Info Required" }
-        })
-      );
-      setProject({ ...project, approvalDecision: "More Info Required" });
-    }
-
-    if (label === "Reject") {
-      dispatch(
-        updateProjectStatus({
-          id: project.id,
-          payload: { status: "Cancelled", approvalDecision: "Rejected" }
-        })
-      );
-      setProject({ ...project, status: "Cancelled", approvalDecision: "Rejected" });
-    }
-
-    if (label === "Start Work") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } }));
-      setProject({ ...project, status: "In Progress" });
-    }
-
-    if (label === "Mark Completed") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Completed" } }));
-      setProject({ ...project, status: "Completed" });
+    switch (label) {
+      case "Submit for Approval":
+        dispatchAndSet("Pending Approval");
+        break;
+      case "Approve":
+        dispatch(updateProjectStatus({ id: project.id, payload: { status: "Approved", approvalDecision: "Approved" } }));
+        setProject({ ...project, status: "Approved", approvalDecision: "Approved" });
+        break;
+      case "Request Info":
+        dispatch(updateProjectStatus({ id: project.id, payload: { status: "Pending Approval", approvalDecision: "More Info Required" } }));
+        setProject({ ...project, approvalDecision: "More Info Required" });
+        break;
+      case "Reject":
+        dispatch(updateProjectStatus({ id: project.id, payload: { status: "Cancelled", approvalDecision: "Rejected" } }));
+        setProject({ ...project, status: "Cancelled", approvalDecision: "Rejected" });
+        break;
+      case "Start Work":
+        dispatchAndSet("In Progress");
+        break;
+      case "Mark Completed":
+        dispatchAndSet("Completed");
+        break;
     }
   };
 
@@ -128,6 +136,7 @@ const ProjectDetail = () => {
 
   return (
     <Stack spacing={3}>
+      {/* ── Header ── */}
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center">
         <Box>
           <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
@@ -150,9 +159,15 @@ const ProjectDetail = () => {
                 fontSize: "0.875rem",
               }}
             />
+            <Chip
+              label={mode.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase())}
+              size="small"
+              variant="outlined"
+              sx={{ fontSize: "0.75rem" }}
+            />
           </Stack>
           <Typography variant="body2" color="text.secondary">
-            {project.customerName} � {project.office}
+            {project.customerName} · {project.office}
           </Typography>
         </Box>
         <Button variant="outlined" component={Link} to={`/projects/${project.id}/edit`}>
@@ -162,48 +177,89 @@ const ProjectDetail = () => {
 
       <StatusStepper type={project.projectType} status={project.status} />
 
-      <Box className="glass-card" sx={{ padding: 3 }}>
-        <Stack spacing={1}>
-          <Typography variant="subtitle1">Workflow actions</Typography>
-          {actions.length ? (
-            <Stack direction="row" spacing={1} flexWrap="wrap">
-              {actions.map((label) => (
-                <Button key={label} variant="outlined" onClick={() => handleAction(label)}>
-                  {label}
-                </Button>
-              ))}
-            </Stack>
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              No actions available for your role.
-            </Typography>
-          )}
-        </Stack>
+      {/* ── Tabs ── */}
+      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto">
+          {tabs.map((label) => (
+            <Tab key={label} label={label} />
+          ))}
+        </Tabs>
       </Box>
 
-      <Box className="glass-card" sx={{ padding: 3 }}>
-        <Stack spacing={1}>
-          <Typography variant="subtitle1">Project snapshot</Typography>
-          <Typography variant="body2">Status: {project.status}</Typography>
-          {project.approvalDecision && (
-            <Typography variant="body2">Approval: {project.approvalDecision}</Typography>
-          )}
-          <Typography variant="body2">Type: {project.projectType}</Typography>
-          <Typography variant="body2">Installation: {project.isInstallationProject ? "Yes" : "No"}</Typography>
-          <Typography variant="body2">
-            Products:{" "}
-            {project.productIds?.length
-              ? project.productIds
-                  .map((productId) => products.find((product) => product.id === productId)?.name || productId)
-                  .join(", ")
-              : "None"}
-          </Typography>
+      {/* ── Tab: Overview ── */}
+      {tabs[tab] === "Overview" && (
+        <Stack spacing={2}>
+          <Box className="glass-card" sx={{ padding: 3 }}>
+            <Stack spacing={1}>
+              <Typography variant="subtitle1">Workflow actions</Typography>
+              {actions.length ? (
+                <Stack direction="row" spacing={1} flexWrap="wrap">
+                  {actions.map((label) => (
+                    <Button key={label} variant="outlined" onClick={() => handleAction(label)}>
+                      {label}
+                    </Button>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No actions available for your role.
+                </Typography>
+              )}
+            </Stack>
+          </Box>
+
+          <Box className="glass-card" sx={{ padding: 3 }}>
+            <Stack spacing={1}>
+              <Typography variant="subtitle1">Project snapshot</Typography>
+              <Typography variant="body2">Status: {project.status}</Typography>
+              {project.approvalDecision && (
+                <Typography variant="body2">Approval: {project.approvalDecision}</Typography>
+              )}
+              <Typography variant="body2">Type: {project.projectType}</Typography>
+              <Typography variant="body2">
+                Workflow mode: {mode.replace(/_/g, " ")}
+              </Typography>
+              <Typography variant="body2">
+                Products:{" "}
+                {project.productIds?.length
+                  ? project.productIds
+                      .map((pid) => products.find((p) => p.id === pid)?.name || pid)
+                      .join(", ")
+                  : "None"}
+              </Typography>
+            </Stack>
+          </Box>
         </Stack>
-      </Box>
+      )}
+
+      {/* ── Tab: Installations ── */}
+      {tabs[tab] === "Installations" && (
+        <Box>
+          <Stack spacing={2}>
+            <Typography variant="body2" color="text.secondary">
+              View and manage installation assets for this project.
+            </Typography>
+            <Button
+              variant="contained"
+              onClick={() =>
+                navigate(
+                  `/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`
+                )
+              }
+            >
+              Open installations
+            </Button>
+          </Stack>
+        </Box>
+      )}
+
+      {/* ── Tab: Inspections ── */}
+      {tabs[tab] === "Inspections" && <InspectionsTab projectId={project.id} />}
+
+      {/* ── Tab: Inspection Inbox ── */}
+      {tabs[tab] === "Inspection Inbox" && <InspectionInboxTab projectId={project.id} />}
     </Stack>
   );
 };
 
 export default ProjectDetail;
-
-

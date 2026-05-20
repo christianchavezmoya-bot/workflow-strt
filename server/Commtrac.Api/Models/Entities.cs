@@ -234,6 +234,12 @@ public class ProjectEntity
     public bool IsInstallationProject { get; set; }
     [MaxLength(80)]
     public string? InstallationMode { get; set; }
+    /// <summary>
+    /// INSTALLATION_ONLY | INSPECTION_ONLY | MIXED.
+    /// Null means legacy row — treated as INSTALLATION_ONLY when IsInstallationProject=true, else INSPECTION_ONLY.
+    /// </summary>
+    [MaxLength(40)]
+    public string? WorkflowMode { get; set; }
     [MaxLength(200)]
     public string? ProjectManager { get; set; }
     public decimal? ContractValue { get; set; }
@@ -1201,4 +1207,59 @@ public class BomRuleProfileEntity
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     [MaxLength(200)]
     public string? CreatedBy { get; set; }
+}
+
+// ─── Inspection Imports (third-party JSON inbox) ──────────────────────────────
+
+/// <summary>
+/// Stores raw inspection JSON payloads received from external sources
+/// (OneDrive, local upload, email). An import stays raw until a user
+/// assigns it to a project + asset, at which point status moves to MAPPED.
+/// </summary>
+public class InspectionImportEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    /// <summary>ONEDRIVE | LOCAL | EMAIL | API</summary>
+    [MaxLength(40)]
+    public string Source { get; set; } = "LOCAL";
+
+    public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;
+
+    [MaxLength(500)]
+    public string? FileName { get; set; }
+
+    /// <summary>SHA-256 of raw content for deduplication.</summary>
+    [MaxLength(64)]
+    public string? ContentHash { get; set; }
+
+    /// <summary>Raw JSON body (stored inline for MVP; large files should use RawPath).</summary>
+    public string? RawJson { get; set; }
+
+    /// <summary>Optional path to file on disk for payloads too large for inline storage.</summary>
+    [MaxLength(1000)]
+    public string? RawPath { get; set; }
+
+    /// <summary>Nullable until assigned by a user.</summary>
+    [MaxLength(100)]
+    public string? ProjectId { get; set; }
+
+    /// <summary>Nullable until assigned by a user.</summary>
+    [MaxLength(100)]
+    public string? AssetId { get; set; }
+
+    /// <summary>RECEIVED | NEEDS_ASSIGNMENT | MAPPED | FAILED</summary>
+    [MaxLength(40)]
+    public string Status { get; set; } = "RECEIVED";
+
+    [MaxLength(2000)]
+    public string? ErrorText { get; set; }
+
+    /// <summary>Set once the import is mapped to an AssetWorkflowRun.</summary>
+    [MaxLength(100)]
+    public string? MappedRunId { get; set; }
+
+    [MaxLength(200)]
+    public string? UploadedBy { get; set; }
 }

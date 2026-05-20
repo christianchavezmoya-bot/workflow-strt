@@ -18,6 +18,8 @@ export type ProjectStatus =
   | "Completed"
   | "Cancelled";
 
+export type WorkflowMode = "INSTALLATION_ONLY" | "INSPECTION_ONLY" | "MIXED";
+
 export interface Project {
   id: string;
   customerName: string;
@@ -37,10 +39,32 @@ export interface Project {
   approvalDecision?: ApprovalDecision;
   isInstallationProject: boolean;
   installationMode?: InstallationMode;
+  /** INSTALLATION_ONLY | INSPECTION_ONLY | MIXED. Derived server-side for legacy rows. */
+  workflowMode?: WorkflowMode;
   projectManager?: string;
   contractValue?: number;
   probabilityStage?: string;
   productIds?: string[];
   productFeatureValues?: Record<string, string>;
   assetCount?: number;
+}
+
+// ── Inspection Imports ────────────────────────────────────────────────────────
+
+export type InspectionImportStatus = "RECEIVED" | "NEEDS_ASSIGNMENT" | "MAPPED" | "FAILED";
+export type InspectionImportSource = "ONEDRIVE" | "LOCAL" | "EMAIL" | "API";
+
+export interface InspectionImport {
+  id: string;
+  source: InspectionImportSource;
+  receivedAt: string;
+  fileName?: string;
+  contentHash?: string;
+  rawJson?: string;
+  projectId?: string;
+  assetId?: string;
+  status: InspectionImportStatus;
+  errorText?: string;
+  mappedRunId?: string;
+  uploadedBy?: string;
 }

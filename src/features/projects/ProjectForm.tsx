@@ -20,7 +20,6 @@ import {
   Rating,
   Select,
   Stack,
-  Switch,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -49,7 +48,7 @@ import { fetchCustomers } from "../../store/customersSlice";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { createProject, updateProject } from "../../store/projectSlice";
-import { ApprovalDecision, Office, Project, ProjectStatus } from "../../types/project";
+import { ApprovalDecision, Office, Project, ProjectStatus, WorkflowMode } from "../../types/project";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
@@ -88,7 +87,7 @@ const schema = z
         z.literal("")
       ])
       .optional(),
-    isInstallationProject: z.boolean(),
+    workflowMode: z.enum(["INSTALLATION_ONLY", "INSPECTION_ONLY", "MIXED"] as [WorkflowMode, ...WorkflowMode[]]).optional(),
     productIds: z.array(z.string()).optional()
   });
 
@@ -169,7 +168,7 @@ const ProjectForm = () => {
       projectType: "Internal",
       status: "Draft",
       approvalDecision: "",
-      isInstallationProject: false,
+      workflowMode: "INSTALLATION_ONLY" as WorkflowMode,
       productIds: []
     }
   });
@@ -204,7 +203,7 @@ const ProjectForm = () => {
         projectType: localProject.projectType,
         status: localProject.status,
         approvalDecision: localProject.approvalDecision || "",
-        isInstallationProject: localProject.isInstallationProject,
+        workflowMode: (localProject.workflowMode as WorkflowMode) ?? (localProject.isInstallationProject ? "INSTALLATION_ONLY" : "INSTALLATION_ONLY"),
         productIds: localProject.productIds ?? []
       });
       setProductFeatureValues(localProject.productFeatureValues || {});
@@ -227,7 +226,7 @@ const ProjectForm = () => {
         projectType: project.projectType,
         status: project.status,
         approvalDecision: project.approvalDecision || "",
-        isInstallationProject: project.isInstallationProject,
+        workflowMode: (project.workflowMode as WorkflowMode) ?? (project.isInstallationProject ? "INSTALLATION_ONLY" : "INSTALLATION_ONLY"),
         productIds: project.productIds ?? []
       });
       setProductFeatureValues(project.productFeatureValues || {});
@@ -257,7 +256,8 @@ const ProjectForm = () => {
 
 
   const projectType = watch("projectType");
-  const isInstallationProject = watch("isInstallationProject");
+  const workflowMode = watch("workflowMode");
+  const isInstallationProject = workflowMode === "INSTALLATION_ONLY" || workflowMode === "MIXED";
   const status = watch("status");
   const customerId = watch("customerId");
   const siteId = watch("siteId");
@@ -551,7 +551,8 @@ const ProjectForm = () => {
       projectType: (data.projectType as any) || "Internal",
       status: (data.status as any) || "Draft",
       approvalDecision: data.approvalDecision || undefined,
-      isInstallationProject: data.isInstallationProject,
+      workflowMode: data.workflowMode ?? "INSTALLATION_ONLY",
+      isInstallationProject: data.workflowMode === "INSTALLATION_ONLY" || data.workflowMode === "MIXED",
       projectManager: data.projectManager,
       productIds: data.productIds ?? [],
       productFeatureValues
@@ -615,7 +616,7 @@ const ProjectForm = () => {
       status: labelStatus,
       productIds: labelProducts,
       approvalDecision: "Approval Decision",
-      isInstallationProject: "Installation project"
+      workflowMode: "Workflow mode"
     };
     const missingLabels = keys.map((key) => labelByName[key] || key);
     setSubmitError(
@@ -1416,23 +1417,26 @@ const ProjectForm = () => {
 
             {extraDynamicIds.map((fieldId) => renderFormField(fieldId))}
             <Grid item xs={12} md={6}>
-              <FormControl>
-                <FormControlLabel
-                  control={
-                  <Controller
-                    name="isInstallationProject"
-                    control={control}
-                    render={({ field }) => (
-                      <Switch
-                        checked={!!field.value}
-                        onChange={(_, checked) => field.onChange(checked)}
-                      />
-                    )}
-                  />
-                }
-                label="Installation project"
-              />
-                <FormHelperText>Enable if this project will have installation records and field work tracking.</FormHelperText>
+              <FormControl component="fieldset">
+                <FormLabel component="legend">Workflow Mode</FormLabel>
+                <Controller
+                  name="workflowMode"
+                  control={control}
+                  render={({ field }) => (
+                    <RadioGroup
+                      row
+                      value={field.value ?? "INSTALLATION_ONLY"}
+                      onChange={(_, val) => field.onChange(val as WorkflowMode)}
+                    >
+                      <FormControlLabel value="INSTALLATION_ONLY" control={<Radio />} label="Installation only" />
+                      <FormControlLabel value="INSPECTION_ONLY"  control={<Radio />} label="Inspection only"  />
+                      <FormControlLabel value="MIXED"            control={<Radio />} label="Both (mixed)"     />
+                    </RadioGroup>
+                  )}
+                />
+                <FormHelperText>
+                  Controls which modules are visible on the project detail page.
+                </FormHelperText>
               </FormControl>
             </Grid>
             {projectType === "External" && (

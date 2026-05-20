@@ -185,6 +185,24 @@ const Dashboard = () => {
     }
   }, [dispatch, loadAttention, isEngineer]);
 
+  // Load inspection signals for PM/Admin
+  useEffect(() => {
+    if (!isManager) return;
+    import("../../services/inspectionImportService").then(({ inspectionImportService }) => {
+      inspectionImportService.list({ status: "NEEDS_ASSIGNMENT" })
+        .then((items) => setInspectionImportsWaiting(items.length))
+        .catch(() => {});
+      inspectionImportService.list({ status: "FAILED" })
+        .then((items) => setInspectionImportsFailed(items.length))
+        .catch(() => {});
+    });
+    import("../../services/api").then(({ default: api }) => {
+      api.get("/asset-workflow-runs", { params: { workflowType: "Inspection", status: "in-progress" } })
+        .then((r: { data: unknown[] }) => setInspectionRunsDue(r.data.length))
+        .catch(() => {});
+    });
+  }, [isManager]);
+
   // PM: listen for new auto-assign flags written by AssetInstallationPage
   useEffect(() => {
     if (!isManager) return;
@@ -277,6 +295,11 @@ const Dashboard = () => {
   const pendingApprovals = useMemo(() =>
     filteredProjects.filter(p => p.status === "Pending Approval"),
     [filteredProjects]);
+
+  // Inspection signals (PM/Manager only)
+  const [inspectionRunsDue,       setInspectionRunsDue]       = useState(0);
+  const [inspectionImportsWaiting, setInspectionImportsWaiting] = useState(0);
+  const [inspectionImportsFailed,  setInspectionImportsFailed]  = useState(0);
 
   // Installer: my pending sigs
   const myPendingSigs = useMemo(() =>
@@ -1264,6 +1287,46 @@ const Dashboard = () => {
                     color="warning" variant="outlined"
                     sx={{ flexShrink: 0, cursor: "pointer" }} />
                 ))}
+              </Stack>
+            </Box>
+          )}
+
+          {/* Inspection signals */}
+          {(inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || inspectionImportsFailed > 0) && (
+            <Box className="glass-card" sx={{ p: 2 }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                <AssignmentLateOutlined sx={{ fontSize: 18, color: "info.main" }} />
+                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                  Inspections
+                </Typography>
+              </Stack>
+              <Stack direction="row" spacing={2} flexWrap="wrap">
+                {inspectionRunsDue > 0 && (
+                  <Chip
+                    label={inspectionRunsDue + (inspectionRunsDue === 1 ? " run" : " runs") + " in progress"}
+                    size="small"
+                    color="info"
+                    variant="outlined"
+                    onClick={() => navigate("/installations/assets?workflowType=Inspection")}
+                    sx={{ cursor: "pointer" }}
+                  />
+                )}
+                {inspectionImportsWaiting > 0 && (
+                  <Chip
+                    label={inspectionImportsWaiting + (inspectionImportsWaiting === 1 ? " import" : " imports") + " need assignment"}
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                  />
+                )}
+                {inspectionImportsFailed > 0 && (
+                  <Chip
+                    label={inspectionImportsFailed + (inspectionImportsFailed === 1 ? " import" : " imports") + " failed"}
+                    size="small"
+                    color="error"
+                    variant="outlined"
+                  />
+                )}
               </Stack>
             </Box>
           )}

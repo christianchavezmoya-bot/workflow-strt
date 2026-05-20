@@ -168,6 +168,7 @@ public class ProjectsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<ProjectDto>> Create([FromBody] ProjectDto request)
     {
+        var resolvedMode = ResolveWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
         var project = new ProjectEntity
         {
             Id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString() : request.Id,
@@ -185,8 +186,9 @@ public class ProjectsController : ControllerBase
             ProjectType = request.ProjectType,
             Status = request.Status,
             ApprovalDecision = request.ApprovalDecision,
-            IsInstallationProject = request.IsInstallationProject,
+            IsInstallationProject = resolvedMode is "INSTALLATION_ONLY" or "MIXED",
             InstallationMode = request.InstallationMode,
+            WorkflowMode = resolvedMode,
             ProjectManager = request.ProjectManager,
             ContractValue = request.ContractValue,
             ProbabilityStage = request.ProbabilityStage,
@@ -218,6 +220,7 @@ public class ProjectsController : ControllerBase
             return NotFound();
         }
 
+        var resolvedMode = ResolveWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
         project.CustomerName = request.CustomerName;
         project.CustomerId = request.CustomerId;
         project.SiteId = request.SiteId;
@@ -232,8 +235,9 @@ public class ProjectsController : ControllerBase
         project.ProjectType = request.ProjectType;
         project.Status = request.Status;
         project.ApprovalDecision = request.ApprovalDecision;
-        project.IsInstallationProject = request.IsInstallationProject;
+        project.IsInstallationProject = resolvedMode is "INSTALLATION_ONLY" or "MIXED";
         project.InstallationMode = request.InstallationMode;
+        project.WorkflowMode = resolvedMode;
         project.ProjectManager = request.ProjectManager;
         project.ContractValue = request.ContractValue;
         project.ProbabilityStage = request.ProbabilityStage;
@@ -361,7 +365,9 @@ public class ProjectsController : ControllerBase
     }
 
     private static ProjectDto ToDto(ProjectEntity project, string? siteName, int assetCount = 0)
-        => new(
+    {
+        var effectiveMode = project.WorkflowMode ?? (project.IsInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY");
+        return new(
             project.Id,
             project.CustomerName,
             project.CustomerId,
@@ -387,8 +393,24 @@ public class ProjectsController : ControllerBase
                 ? new Dictionary<string, string>()
                 : JsonSerializer.Deserialize<Dictionary<string, string>>(project.ProductFeatureValuesJson, JsonOptions) ?? new Dictionary<string, string>(),
             project.OfficeId,
-            assetCount
+            assetCount,
+            effectiveMode
         );
+    }
+
+    /// <summary>
+    /// If the client sends an explicit WorkflowMode use it;
+    /// otherwise derive from the legacy IsInstallationProject flag.
+    /// </summary>
+    private static string ResolveWorkflowMode(string? requested, bool legacyFlag)
+    {
+        if (!string.IsNullOrWhiteSpace(requested) &&
+            requested is "INSTALLATION_ONLY" or "INSPECTION_ONLY" or "MIXED")
+        {
+            return requested;
+        }
+        return legacyFlag ? "INSTALLATION_ONLY" : "INSPECTION_ONLY";
+    }
 }
 
 public record ProjectListResponse(List<ProjectDto> Items, int Total);

@@ -49,6 +49,12 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use Face ID to unlock your secure session when offline.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera access is required to photograph inspection evidence and assets.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo library access is required to attach existing photos to inspection runs.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Permission is needed to save inspection photos to your photo library.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

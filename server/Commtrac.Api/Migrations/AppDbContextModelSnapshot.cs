@@ -1692,6 +1692,10 @@ namespace Commtrac.Api.Migrations
                     b.Property<bool>("IsInstallationProject")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("WorkflowMode")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("JobNumber")
                         .IsRequired()
                         .HasMaxLength(80)
@@ -2331,6 +2335,71 @@ namespace Commtrac.Api.Migrations
                             Name = "Repair",
                             SortOrder = 4
                         });
+                });
+
+            modelBuilder.Entity("Commtrac.Api.Models.InspectionImportEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("LOCAL");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RawJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RawPath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AssetId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("RECEIVED");
+
+                    b.Property<string>("ErrorText")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MappedRunId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UploadedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+                    b.HasIndex("AssetId");
+                    b.HasIndex("ContentHash");
+                    b.HasIndex("Status");
+
+                    b.ToTable("InspectionImports");
                 });
 #pragma warning restore 612, 618
         }

@@ -389,7 +389,9 @@ public record ProjectDto(
     List<string>? ProductIds,
     Dictionary<string, string>? ProductFeatureValues,
     string? OfficeId = null,
-    int AssetCount = 0
+    int AssetCount = 0,
+    /// <summary>INSTALLATION_ONLY | INSPECTION_ONLY | MIXED. Null on legacy rows.</summary>
+    string? WorkflowMode = null
 );
 
 public record UpdateProjectStatusRequest(
@@ -1305,4 +1307,35 @@ public record BulkImportUsersResult(
     int Skipped,
     List<string> SkippedEmails,
     List<string> Errors
+);
+
+// ─── Inspection Imports ───────────────────────────────────────────────────────
+
+public record InspectionImportDto(
+    string Id,
+    string Source,
+    DateTime ReceivedAt,
+    string? FileName,
+    string? ContentHash,
+    string? RawJson,
+    string? ProjectId,
+    string? AssetId,
+    string Status,
+    string? ErrorText,
+    string? MappedRunId,
+    string? UploadedBy
+);
+
+public record CreateInspectionImportRequest(
+    string Source,
+    string? FileName,
+    string? RawJson,
+    string? ProjectId,
+    string? AssetId,
+    string? UploadedBy
+);
+
+public record AssignInspectionImportRequest(
+    string ProjectId,
+    string? AssetId
 );
