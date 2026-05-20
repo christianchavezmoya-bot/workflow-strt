@@ -14,10 +14,12 @@ namespace Commtrac.Api.Controllers;
 public class InspectionImportsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IWebHostEnvironment _env;
 
-    public InspectionImportsController(AppDbContext db)
+    public InspectionImportsController(AppDbContext db, IWebHostEnvironment env)
     {
         _db = db;
+        _env = env;
     }
 
     // GET /api/inspection-imports?projectId=&assetId=&status=
@@ -54,7 +56,7 @@ public class InspectionImportsController : ControllerBase
         return Ok(ToDto(item));
     }
 
-    // POST /api/inspection-imports
+    // POST /api/inspection-imports  (JSON body — small payloads, browser/web)
     [HttpPost]
     public async Task<ActionResult<InspectionImportDto>> Create([FromBody] CreateInspectionImportRequest request)
     {
@@ -64,12 +66,9 @@ public class InspectionImportsController : ControllerBase
             var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(request.RawJson));
             hash = Convert.ToHexString(bytes).ToLowerInvariant();
 
-            // Deduplicate by hash within the same project
             if (await _db.InspectionImports.AnyAsync(x => x.ContentHash == hash && x.ProjectId == request.ProjectId))
                 return Conflict(new { error = "Duplicate import: identical content already received for this project." });
         }
-
-        var status = (string.IsNullOrWhiteSpace(request.ProjectId)) ? "RECEIVED" : "NEEDS_ASSIGNMENT";
 
         var entity = new InspectionImportEntity
         {
@@ -79,7 +78,7 @@ public class InspectionImportsController : ControllerBase
             RawJson = request.RawJson,
             ProjectId = request.ProjectId,
             AssetId = request.AssetId,
-            Status = status,
+            Status = string.IsNullOrWhiteSpace(request.ProjectId) ? "RECEIVED" : "NEEDS_ASSIGNMENT",
             UploadedBy = request.UploadedBy
         };
 
@@ -87,6 +86,101 @@ public class InspectionImportsController : ControllerBase
         await _db.SaveChangesAsync();
 
         return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity));
+    }
+
+    // POST /api/inspection-imports/upload  (multipart — large files, mobile/native)
+    [HttpPost("upload")]
+    [RequestSizeLimit(20 * 1024 * 1024)] // 20 MB
+    public async Task<ActionResult<InspectionImportDto>> Upload(
+        [FromForm] IFormFile file,
+        [FromForm] string? projectId,
+        [FromForm] string? assetId,
+        [FromForm] string? source,
+        [FromForm] string? uploadedBy)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { error = "No file received." });
+
+        if (!file.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
+            file.ContentType != "application/json" &&
+            file.ContentType != "text/plain")
+        {
+            return BadRequest(new { error = "Only JSON files are accepted." });
+        }
+
+        // Compute hash to deduplicate
+        string hash;
+        string rawJson;
+        using (var ms = new MemoryStream())
+        {
+            await file.CopyToAsync(ms);
+            var rawBytes = ms.ToArray();
+            hash = Convert.ToHexString(SHA256.HashData(rawBytes)).ToLowerInvariant();
+            rawJson = Encoding.UTF8.GetString(rawBytes);
+        }
+
+        if (await _db.InspectionImports.AnyAsync(x => x.ContentHash == hash && x.ProjectId == projectId))
+            return Conflict(new { error = "Duplicate import: identical content already received for this project." });
+
+        // Save to disk when file is > 128 KB; store inline for smaller payloads
+        string? rawPath = null;
+        string? inlineJson = null;
+        const int inlineThreshold = 128 * 1024;
+
+        if (rawJson.Length > inlineThreshold)
+        {
+            var storageDir = Path.Combine(_env.ContentRootPath, "Storage", "InspectionImports");
+            Directory.CreateDirectory(storageDir);
+            var storedName = $"{Guid.NewGuid()}.json";
+            rawPath = Path.Combine("Storage", "InspectionImports", storedName);
+            var fullPath = Path.Combine(_env.ContentRootPath, rawPath);
+            await System.IO.File.WriteAllTextAsync(fullPath, rawJson);
+        }
+        else
+        {
+            inlineJson = rawJson;
+        }
+
+        var entity = new InspectionImportEntity
+        {
+            Source = source ?? "LOCAL",
+            FileName = file.FileName,
+            ContentHash = hash,
+            RawJson = inlineJson,
+            RawPath = rawPath,
+            ProjectId = projectId,
+            AssetId = assetId,
+            Status = string.IsNullOrWhiteSpace(projectId) ? "RECEIVED" : "NEEDS_ASSIGNMENT",
+            UploadedBy = uploadedBy
+        };
+
+        _db.InspectionImports.Add(entity);
+        await _db.SaveChangesAsync();
+
+        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity));
+    }
+
+    // GET /api/inspection-imports/{id}/raw  — stream the raw JSON file from disk
+    [HttpGet("{id}/raw")]
+    public async Task<IActionResult> GetRaw(string id)
+    {
+        var item = await _db.InspectionImports.FirstOrDefaultAsync(x => x.Id == id);
+        if (item is null) return NotFound();
+
+        if (!string.IsNullOrWhiteSpace(item.RawJson))
+            return Content(item.RawJson, "application/json");
+
+        if (!string.IsNullOrWhiteSpace(item.RawPath))
+        {
+            var fullPath = Path.Combine(_env.ContentRootPath, item.RawPath);
+            if (!System.IO.File.Exists(fullPath))
+                return NotFound(new { error = "Stored file not found on disk." });
+
+            var content = await System.IO.File.ReadAllTextAsync(fullPath);
+            return Content(content, "application/json");
+        }
+
+        return NotFound(new { error = "No raw content stored." });
     }
 
     // POST /api/inspection-imports/{id}/assign
@@ -130,6 +224,15 @@ public class InspectionImportsController : ControllerBase
     {
         var item = await _db.InspectionImports.FirstOrDefaultAsync(x => x.Id == id);
         if (item is null) return NotFound();
+
+        // Remove stored file from disk if present
+        if (!string.IsNullOrWhiteSpace(item.RawPath))
+        {
+            var fullPath = Path.Combine(_env.ContentRootPath, item.RawPath);
+            if (System.IO.File.Exists(fullPath))
+                System.IO.File.Delete(fullPath);
+        }
+
         _db.InspectionImports.Remove(item);
         await _db.SaveChangesAsync();
         return NoContent();
@@ -141,7 +244,8 @@ public class InspectionImportsController : ControllerBase
         e.ReceivedAt,
         e.FileName,
         e.ContentHash,
-        e.RawJson,
+        // Return inline JSON only; large files should be fetched via GET /{id}/raw
+        e.RawPath == null ? e.RawJson : null,
         e.ProjectId,
         e.AssetId,
         e.Status,

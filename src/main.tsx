@@ -9,6 +9,10 @@ import theme from "./theme/theme";
 import { FieldNotificationProvider } from "./contexts/FieldNotificationContext";
 import { ViewModeProvider } from "./contexts/ViewModeContext";
 import "./index.css";
+import { defineCustomElements } from "@ionic/pwa-elements/loader";
+
+// Bootstrap Ionic PWA elements for Camera/FilePicker web fallbacks
+defineCustomElements(window);
 
 // Render immediately — Capacitor native bridge is not ready before mount.
 // initSecureStorage() is called inside App.tsx via useEffect after mount.

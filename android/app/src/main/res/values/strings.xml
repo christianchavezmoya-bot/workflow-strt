@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Kinet</string>
+    <string name="title_activity_main">Kinet</string>
+    <string name="package_name">com.christianchavez.kinet</string>
+    <string name="custom_url_scheme">com.christianchavez.kinet</string>
+</resources>

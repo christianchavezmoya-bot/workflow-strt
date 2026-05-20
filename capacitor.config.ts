@@ -9,7 +9,10 @@ const config: CapacitorConfig = {
       overlaysWebView: false,
       style: 'DARK',
       backgroundColor: '#0b1d24'
-    }
+    },
+    Camera: {
+      // Present the native camera sheet instead of the web fallback on device
+    },
   }
 };
 
