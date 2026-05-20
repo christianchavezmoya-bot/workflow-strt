@@ -176,7 +176,12 @@ export default function ProjectAssetInspectionPage() {
         )}
       </Box>
 
-      <ProjectInspectionInboxPage projectId={project.id} assetId={asset.id} assets={[asset]} />
+      <ProjectInspectionInboxPage
+        projectId={project.id}
+        assetId={asset.id}
+        assets={[asset]}
+        onChanged={() => load()}
+      />
 
       {runnerConfig && workflow && (
         <Dialog open={runnerOpen} onClose={() => setRunnerOpen(false)} maxWidth="lg" fullWidth>
@@ -214,6 +219,7 @@ export default function ProjectAssetInspectionPage() {
         allowContinue={false}
         initialExpandedRunId={activeRunId}
         project={{ customerName: project.customerName, jobNumber: project.jobNumber, siteName: project.siteName }}
+        documentType="inspection"
       />
     </Stack>
   );

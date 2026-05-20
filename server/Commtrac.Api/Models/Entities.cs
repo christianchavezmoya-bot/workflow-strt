@@ -883,6 +883,16 @@ public class InspectionImportEntity
     public string? Error { get; set; }
     [MaxLength(100)]
     public string? MappedRunId { get; set; }
+    /// <summary>True when this import has been superseded by a newer upload and archived.</summary>
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
+    [MaxLength(200)]
+    public string? ArchivedBy { get; set; }
+    [MaxLength(500)]
+    public string? ArchiveReason { get; set; }
+    /// <summary>Human-readable reference: "JO003424 / RC-0022 / 2026-05-20"</summary>
+    [MaxLength(300)]
+    public string? ArchiveRef { get; set; }
 }
 
 /// <summary>

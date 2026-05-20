@@ -45,7 +45,7 @@ public class ProjectInspectionRunsController : ControllerBase
         }
 
         var inspectionConfigIds = await _db.WorkflowConfigs
-            .Where(c => IsInspectionConfig(c.ConfigType))
+            .Where(c => c.ConfigType != null && (c.ConfigType.ToLower() == "inspection" || c.ConfigType.ToLower() == "wftype-inspection"))
             .Select(c => c.Id)
             .ToListAsync();
 

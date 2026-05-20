@@ -171,6 +171,8 @@ export interface GenerateReportParams {
   includeAllSteps?: boolean;
   /** Installer and/or customer signature events â€” used to render the sign-off block. */
   signatureEvents?: SignatureEvent[];
+  /** Controls the document title and filename prefix. Defaults to "installation". */
+  documentType?: "installation" | "inspection";
 }
 
 export async function generateWorkflowReport(params: GenerateReportParams): Promise<void> {
@@ -180,6 +182,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     customerName, jobNumber, siteName, siteLocation, assignedTechnician,
     includeAllSteps = false,
     signatureEvents = [],
+    documentType = "installation",
   } = params;
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -261,7 +264,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   doc.setTextColor(...WHITE);
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
-  doc.text("INSTALLATION RECORD", PAGE_W / 2, HEADER_H / 2 - 1, { align: "center" });
+  doc.text(documentType === "inspection" ? "INSPECTION RECORD" : "INSTALLATION RECORD", PAGE_W / 2, HEADER_H / 2 - 1, { align: "center" });
   doc.setFontSize(8.5);
   doc.setFont("helvetica", "normal");
   doc.text(asset.assetTag ?? "", PAGE_W / 2, HEADER_H / 2 + 4.5, { align: "center" });
@@ -892,5 +895,5 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   // â”€â”€ Save â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const safeName = (asset.assetTag ?? "asset").replace(/[^a-zA-Z0-9-_]/g, "_");
   const runNum   = run.runNumber ?? 1;
-  doc.save(`installation-record_${safeName}_run${runNum}.pdf`);
+  doc.save(`${documentType === "inspection" ? "inspection-record" : "installation-record"}_${safeName}_run${runNum}.pdf`);
 }

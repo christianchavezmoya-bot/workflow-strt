@@ -36,6 +36,8 @@ builder.Services.AddScoped<IDocumentAuthorizationService, DocumentAuthorizationS
 builder.Services.AddScoped<ViewOnlyEnforcementFilter>();
 builder.Services.AddScoped<AuditLogService>();
 builder.Services.AddSingleton<SqliteBackupService>();
+builder.Services.AddSingleton<IInspectionImportValidatorService, InspectionImportValidatorService>();
+builder.Services.AddSingleton<IInspectionImportAdapterService, InspectionImportAdapterService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.AddScoped<IEmailSender, EmailSender>();

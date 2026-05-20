@@ -11,6 +11,11 @@ export interface InspectionImport {
   status: InspectionImportStatus;
   error?: string | null;
   mappedRunId?: string | null;
+  isArchived: boolean;
+  archivedAt?: string | null;
+  archivedBy?: string | null;
+  archiveReason?: string | null;
+  archiveRef?: string | null;
 }
 
 export interface CreateInspectionImportInput {

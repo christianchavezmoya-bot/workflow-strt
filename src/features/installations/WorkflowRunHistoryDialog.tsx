@@ -77,6 +77,7 @@ interface Props {
   project?: { customerName: string; jobNumber: string; siteName?: string };
   customerLogoBase64?: string | null;
   assignedTechnician?: string;
+  documentType?: "installation" | "inspection";
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -192,6 +193,7 @@ export default function WorkflowRunHistoryDialog({
   project,
   customerLogoBase64,
   assignedTechnician,
+  documentType = "installation",
 }: Props) {
   const [runs, setRuns] = useState<AssetWorkflowRun[]>([]);
   const [loading, setLoading] = useState(false);
@@ -358,6 +360,7 @@ export default function WorkflowRunHistoryDialog({
         assignedTechnician,
         includeAllSteps,
         signatureEvents,
+        documentType,
       });
     } catch (err) {
       console.error("[WorkflowRunHistoryDialog] Report generation failed", err);

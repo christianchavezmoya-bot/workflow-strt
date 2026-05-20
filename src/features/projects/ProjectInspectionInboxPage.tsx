@@ -8,9 +8,10 @@ type Props = {
   projectId: string;
   assets: ProjectAsset[];
   assetId?: string;
+  onChanged?: () => void | Promise<void>;
 };
 
-export default function ProjectInspectionInboxPage({ projectId, assets, assetId }: Props) {
+export default function ProjectInspectionInboxPage({ projectId, assets, assetId, onChanged }: Props) {
   const [items, setItems] = useState<InspectionImport[]>([]);
   const [rawJson, setRawJson] = useState("");
   const [source, setSource] = useState("manual");
@@ -18,6 +19,11 @@ export default function ProjectInspectionInboxPage({ projectId, assets, assetId 
   const [error, setError] = useState<string | null>(null);
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [pendingAssignments, setPendingAssignments] = useState<Record<string, string>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState("manual");
+  const [editingRawJson, setEditingRawJson] = useState("");
+  const [savingEditId, setSavingEditId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const visibleAssets = useMemo(
     () => assets.filter((asset) => !assetId || asset.id === assetId),
@@ -54,6 +60,7 @@ export default function ProjectInspectionInboxPage({ projectId, assets, assetId 
       });
       setRawJson("");
       await load();
+      await onChanged?.();
     } catch {
       setError("Unable to upload inspection import.");
     } finally {
@@ -68,10 +75,59 @@ export default function ProjectInspectionInboxPage({ projectId, assets, assetId 
     try {
       await inspectionImportService.assign(item.id, { projectId, projectAssetId: nextAssetId });
       await load();
+      await onChanged?.();
     } catch {
       setError("Unable to assign inspection import.");
     } finally {
       setAssigningId(null);
+    }
+  }
+
+  function startEditing(item: InspectionImport) {
+    setEditingId(item.id);
+    setEditingSource(item.source);
+    setEditingRawJson(item.rawJson);
+  }
+
+  function cancelEditing() {
+    setEditingId(null);
+    setEditingSource("manual");
+    setEditingRawJson("");
+  }
+
+  async function handleSaveEdit(item: InspectionImport) {
+    if (!editingRawJson.trim()) return;
+    setSavingEditId(item.id);
+    setError(null);
+    try {
+      await inspectionImportService.update(item.id, {
+        source: editingSource,
+        rawJson: editingRawJson,
+      });
+      cancelEditing();
+      await load();
+      await onChanged?.();
+    } catch {
+      setError("Unable to update inspection import.");
+    } finally {
+      setSavingEditId(null);
+    }
+  }
+
+  async function handleDelete(item: InspectionImport) {
+    setDeletingId(item.id);
+    setError(null);
+    try {
+      await inspectionImportService.remove(item.id);
+      if (editingId === item.id) {
+        cancelEditing();
+      }
+      await load();
+      await onChanged?.();
+    } catch {
+      setError("Unable to delete inspection import.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -93,6 +149,7 @@ export default function ProjectInspectionInboxPage({ projectId, assets, assetId 
                 <MenuItem value="disk">Disk</MenuItem>
                 <MenuItem value="onedrive">OneDrive</MenuItem>
                 <MenuItem value="email">Email</MenuItem>
+                <MenuItem value="generic-kv">Generic Key-Value</MenuItem>
               </Select>
             </FormControl>
             <Button variant="contained" onClick={handleUpload} disabled={!rawJson.trim() || loading}>
@@ -134,14 +191,53 @@ export default function ProjectInspectionInboxPage({ projectId, assets, assetId 
                         {item.error}
                       </Typography>
                     )}
-                    <TextField
-                      value={item.rawJson}
-                      multiline
-                      minRows={4}
-                      fullWidth
-                      InputProps={{ readOnly: true }}
-                      sx={{ mt: 1 }}
-                    />
+                    {editingId === item.id ? (
+                      <Stack spacing={1} sx={{ mt: 1 }}>
+                        <FormControl size="small" sx={{ maxWidth: 220 }}>
+                          <InputLabel id={`edit-source-${item.id}`}>Source</InputLabel>
+                          <Select
+                            labelId={`edit-source-${item.id}`}
+                            value={editingSource}
+                            label="Source"
+                            onChange={(e) => setEditingSource(e.target.value)}
+                          >
+                            <MenuItem value="manual">Manual</MenuItem>
+                            <MenuItem value="disk">Disk</MenuItem>
+                            <MenuItem value="onedrive">OneDrive</MenuItem>
+                            <MenuItem value="email">Email</MenuItem>
+                            <MenuItem value="generic-kv">Generic Key-Value</MenuItem>
+                          </Select>
+                        </FormControl>
+                        <TextField
+                          value={editingRawJson}
+                          multiline
+                          minRows={6}
+                          fullWidth
+                          onChange={(e) => setEditingRawJson(e.target.value)}
+                        />
+                        <Stack direction="row" spacing={1}>
+                          <Button
+                            variant="contained"
+                            onClick={() => void handleSaveEdit(item)}
+                            disabled={!editingRawJson.trim() || savingEditId === item.id}
+                          >
+                            {savingEditId === item.id ? "Saving..." : "Save JSON"}
+                          </Button>
+                          <Button variant="text" onClick={cancelEditing} disabled={savingEditId === item.id}>
+                            Cancel
+                          </Button>
+                        </Stack>
+                      </Stack>
+                    ) : (
+                      <TextField
+                        value={item.rawJson}
+                        multiline
+                        minRows={4}
+                        fullWidth
+                        InputProps={{ readOnly: true }}
+                        sx={{ mt: 1 }}
+                      />
+                    )}
                   </Box>
                   <Stack spacing={1} sx={{ minWidth: { md: 240 } }}>
                     <FormControl fullWidth size="small">
@@ -166,6 +262,21 @@ export default function ProjectInspectionInboxPage({ projectId, assets, assetId 
                     >
                       {assigningId === item.id ? "Assigning..." : "Assign"}
                     </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={() => startEditing(item)}
+                      disabled={editingId === item.id || deletingId === item.id}
+                    >
+                      Edit JSON
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      onClick={() => void handleDelete(item)}
+                      disabled={deletingId === item.id || savingEditId === item.id}
+                    >
+                      {deletingId === item.id ? "Deleting..." : "Delete JSON"}
+                    </Button>
                   </Stack>
                 </Stack>
               </Box>
@@ -176,4 +287,3 @@ export default function ProjectInspectionInboxPage({ projectId, assets, assetId 
     </Stack>
   );
 }
-

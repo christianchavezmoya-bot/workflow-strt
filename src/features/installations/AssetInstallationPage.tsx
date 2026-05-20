@@ -114,6 +114,7 @@ import AssetDocumentsDialog from "./AssetDocumentsDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
+import InspectionImportDialog from "../projects/InspectionImportDialog";
 
 // ------------------------------------------------------------------
 // Column configuration
@@ -170,6 +171,25 @@ const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
 
 function projectHasInspection(workflowMode?: string | null) {
   return workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED";
+}
+
+function isInspectionConfigType(configType?: string | null): boolean {
+  const n = (configType ?? "").trim().toLowerCase();
+  return n === "inspection" || n === "wftype-inspection";
+}
+
+function isInspectionWorkflowType(typeName?: string | null): boolean {
+  return (typeName ?? "").trim().toLowerCase().includes("inspection");
+}
+
+function workflowTypeMismatchMessage(typeName: string | undefined, configType: string | null | undefined): string | null {
+  const typeIsInspection = isInspectionWorkflowType(typeName);
+  const configIsInspection = isInspectionConfigType(configType);
+  if (typeIsInspection && !configIsInspection)
+    return `The selected workflow config is an installation/generic type but the workflow type is "${typeName}". Using an inspection workflow type with a non-inspection config may produce unexpected results.`;
+  if (!typeIsInspection && configIsInspection)
+    return `The selected workflow config is an inspection type but the workflow type is "${typeName}". Inspection configs should only be used with an Inspection workflow type.`;
+  return null;
 }
 
 // ------------------------------------------------------------------
@@ -251,7 +271,7 @@ const emptyForm = (): AssetForm => ({
 });
 
 // ------------------------------------------------------------------
-// Report generator (type only â€” the async function lives inside the component)
+// Report generator (type only â€" the async function lives inside the component)
 // ------------------------------------------------------------------
 
 type FeatureDef = {
@@ -379,7 +399,7 @@ const AssetInstallationPage = () => {
   const [issueDetailAsset, setIssueDetailAsset] = useState<ProjectAsset | null>(null);
   const [issueDetailIssueId, setIssueDetailIssueId] = useState<string | null>(null);
 
-  // Inline issue fields in chevron panel â€” keyed by issueId
+  // Inline issue fields in chevron panel â€" keyed by issueId
   const [inlineCommentTexts, setInlineCommentTexts] = useState<Record<string, string>>({});
   const [inlineCorrectiveTexts, setInlineCorrectiveTexts] = useState<Record<string, string>>({});
   const [inlineSaving, setInlineSaving] = useState(false);
@@ -402,6 +422,14 @@ const AssetInstallationPage = () => {
   const [runHistoryOpen, setRunHistoryOpen] = useState(false);
   const [runHistoryConfigId, setRunHistoryConfigId] = useState("");
   const [runHistoryConfigName, setRunHistoryConfigName] = useState("");
+  // False when the run was created synthetically from a JSON import (no point re-running)
+  const [runHistoryAllowRerun, setRunHistoryAllowRerun] = useState(true);
+  // Workflow type mismatch confirmation
+  const [wfMismatchConfirm, setWfMismatchConfirm] = useState<{
+    asset: ProjectAsset;
+    assignment: WorkflowAssignment;
+    message: string;
+  } | null>(null);
   const [runnerPrefillValues, setRunnerPrefillValues] = useState<Record<string, Record<string, string>> | undefined>(undefined);
 
   // Column filters
@@ -442,7 +470,7 @@ const AssetInstallationPage = () => {
   const [printGroupBy, setPrintGroupBy]   = useState<GroupByKey>("none");
   const [printGenerating, setPrintGenerating] = useState(false);
 
-  // Override warning â€” fires before any bulk action when existing data would be affected
+  // Override warning â€" fires before any bulk action when existing data would be affected
   const [bulkWarnOpen, setBulkWarnOpen] = useState(false);
   const [bulkWarnTitle, setBulkWarnTitle] = useState("");
   const [bulkWarnBody, setBulkWarnBody] = useState("");
@@ -454,6 +482,9 @@ const AssetInstallationPage = () => {
   // Extra context passed into WorkflowRunHistoryDialog for the PDF download
   const [runHistoryProject, setRunHistoryProject] = useState<{ customerName: string; jobNumber: string; siteName?: string } | null>(null);
   const [runHistoryCustomerLogo, setRunHistoryCustomerLogo] = useState<string | null>(null);
+  // Inspection import dialog (per-asset popup)
+  const [importDialogAsset, setImportDialogAsset] = useState<ProjectAsset | null>(null);
+
   // Asset documents
   const [docsOpen, setDocsOpen] = useState(false);
   const [docsAsset, setDocsAsset] = useState<ProjectAsset | null>(null);
@@ -536,14 +567,14 @@ const AssetInstallationPage = () => {
     const configPromise = activeProduct?.id ? productConfigService.listByProduct(activeProduct.id) : Promise.resolve([]);
     const workflowPromise = activeProduct?.id ? workflowConfigService.listByProduct(activeProduct.id, "Published") : Promise.resolve([]);
     Promise.all([assetPromise, configPromise, workflowPromise]).then(([a, c, wc]) => {
-      if (loadId !== assetLoadIdRef.current) return; // Stale â€” a newer load is in flight
+      if (loadId !== assetLoadIdRef.current) return; // Stale â€" a newer load is in flight
       setAssets(a);
       setConfigs(c);
       setPublishedWfConfigs(wc);
       if (activeProduct?.id) {
         setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
       }
-      // Pre-load latest run per asset (for signature status in status chip) â€” fire-and-forget
+      // Pre-load latest run per asset (for signature status in status chip) â€" fire-and-forget
       const uniqueProjectIds = [...new Set(a.map(asset => asset.projectId).filter(Boolean))];
       Promise.all(uniqueProjectIds.map(pid => assetWorkflowRunService.listLatestByProject(pid)))
         .then(results => {
@@ -650,7 +681,7 @@ const AssetInstallationPage = () => {
   }, [publishedWfConfigs]);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
-  // â”€â”€ Print scope computation (needs userMap / projectMap / configMap / runsMap) â”€â”€
+  // â"€â"€ Print scope computation (needs userMap / projectMap / configMap / runsMap) â"€â"€
   const printRows = useMemo((): PrintRow[] => {
     let pool = assets;
     if (printScope === "selection") {
@@ -980,7 +1011,7 @@ const AssetInstallationPage = () => {
   async function handleStartWorkOrder(asset: ProjectAsset) {
     setRunnerLoading(asset.id);
     try {
-      // New path: productConfigId â†’ WorkflowConfig (published work instruction)
+      // New path: productConfigId â†' WorkflowConfig (published work instruction)
       if (asset.productConfigId) {
         const wfConfig = await workflowConfigService.getById(asset.productConfigId);
         if (!wfConfig) { alert("Work instruction config not found."); return; }
@@ -1056,7 +1087,7 @@ const AssetInstallationPage = () => {
   }
 
   async function handleWorkOrderComplete(capturedValues: Record<string, string>) {
-    // Sync captured feature values back to the asset record â€” await so refreshAssets sees the new values
+    // Sync captured feature values back to the asset record â€" await so refreshAssets sees the new values
     if (runnerAsset && Object.keys(capturedValues).length > 0) {
       let existing: Record<string, string> = {};
       try { existing = JSON.parse(runnerAsset.featureValuesJson || "{}"); } catch {}
@@ -1199,7 +1230,7 @@ const AssetInstallationPage = () => {
     } catch { console.warn("[AssetInstallationPage] removeAssignment failed"); }
   }
 
-  async function handleStartAssignmentRun(asset: ProjectAsset, assignment: WorkflowAssignment) {
+  async function _doStartAssignmentRun(asset: ProjectAsset, assignment: WorkflowAssignment) {
     setRunnerLoading(asset.id);
     try {
       // Load the workflow config to get steps
@@ -1233,23 +1264,35 @@ const AssetInstallationPage = () => {
     }
   }
 
+  async function handleStartAssignmentRun(asset: ProjectAsset, assignment: WorkflowAssignment) {
+    // Workflow type / config type mismatch guard — warn before proceeding
+    const matchedType = workflowTypes.find((t) => t.id === assignment.workflowTypeId);
+    const matchedCfg = wfConfigMap.get(assignment.workflowConfigId) ?? workflowConfigs.find((c) => c.id === assignment.workflowConfigId);
+    const mismatchMsg = workflowTypeMismatchMessage(matchedType?.name, matchedCfg?.configType);
+    if (mismatchMsg) {
+      setWfMismatchConfirm({ asset, assignment, message: mismatchMsg });
+      return;
+    }
+    await _doStartAssignmentRun(asset, assignment);
+  }
+
   // ------------------------------------------------------------------
-  // Auto-assign check â€” intercepts start/continue before opening runner
+  // Auto-assign check â€" intercepts start/continue before opening runner
   // ------------------------------------------------------------------
 
   function checkAssignmentThenStart(asset: ProjectAsset, assignment?: WorkflowAssignment) {
     if (!asset.assignedUserId) {
-      // Unassigned â€” warn and auto-assign
+      // Unassigned â€" warn and auto-assign
       setAutoAssignConfirm({ asset, assignment, reason: "unassigned" });
       return;
     }
     if (asset.assignedUserId !== currentUser.id) {
-      // Assigned to someone else â€” warn before taking over
+      // Assigned to someone else â€" warn before taking over
       const otherName = users.find((u) => u.id === asset.assignedUserId)?.fullName ?? "another user";
       setAutoAssignConfirm({ asset, assignment, reason: "other", otherName });
       return;
     }
-    // Assigned to me â€” start directly
+    // Assigned to me â€" start directly
     assignment ? handleStartAssignmentRun(asset, assignment) : handleStartWorkOrder(asset);
   }
 
@@ -1262,7 +1305,7 @@ const AssetInstallationPage = () => {
       await projectAssetService.update(asset.id, { assignedUserId: currentUser.id });
       setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, assignedUserId: currentUser.id } : a));
     } catch {
-      // Non-fatal â€” continue with start even if update fails
+      // Non-fatal â€" continue with start even if update fails
     }
     const updated = { ...asset, assignedUserId: currentUser.id };
     assignment ? handleStartAssignmentRun(updated, assignment) : handleStartWorkOrder(updated);
@@ -1280,12 +1323,13 @@ const AssetInstallationPage = () => {
       setRunHistoryAsset(asset);
       setRunHistoryConfigId(wfConfigId);
       setRunHistoryConfigName(cfgName);
+      setRunHistoryAllowRerun(true);
       _openRunHistoryProjectContext(asset);
       setRunHistoryOpen(true);
       return;
     }
 
-    // No config specified â€” fetch runs from API to find the correct configId
+    // No config specified — fetch runs from API to find the correct configId
     let assetRuns = runsMap[asset.id];
     if (!assetRuns) {
       try {
@@ -1302,9 +1346,21 @@ const AssetInstallationPage = () => {
     const configId = latestRun?.workflowConfigId ?? asset.productConfigId ?? "";
     const cached = configId ? wfConfigMap.get(configId) : undefined;
     const cfgName = cached?.displayName ?? cached?.name ?? "Run History";
+
+    // Disable Re-run for inspection-only assets where the run was auto-created from a JSON import:
+    // detection = assignments were actually loaded AND are empty (undefined = not yet loaded → assume
+    // there may be assignments, so err on the side of allowing Re-run).
+    const explicitAssignments = assignmentsMap[asset.id]; // undefined = not loaded yet
+    const assignmentsLoaded = explicitAssignments !== undefined;
+    const hasExplicitAssignment = assignmentsLoaded && explicitAssignments.length > 0;
+    const proj = projects.find((p) => p.id === asset.projectId);
+    const isInspectionOnly = proj?.workflowMode === "INSPECTION_ONLY";
+    const isSyntheticRun = isInspectionOnly && assignmentsLoaded && !hasExplicitAssignment && !!latestRun;
+
     setRunHistoryAsset(asset);
     setRunHistoryConfigId(configId);
     setRunHistoryConfigName(cfgName);
+    setRunHistoryAllowRerun(!isSyntheticRun);
     _openRunHistoryProjectContext(asset);
     setRunHistoryOpen(true);
   }
@@ -1327,7 +1383,7 @@ const AssetInstallationPage = () => {
   async function handleGeneratePdfReport(asset: ProjectAsset) {
     setReportGenerating(asset.id);
     try {
-      // Runs â€” use cached value or fetch
+      // Runs â€" use cached value or fetch
       let runs = runsMap[asset.id];
       if (!runs) {
         try { runs = await assetWorkflowRunService.listByAsset(asset.id); } catch { runs = []; }
@@ -1353,6 +1409,8 @@ const AssetInstallationPage = () => {
       const configId = effectiveRun.workflowConfigId || asset.productConfigId;
       const wfCfg = configId ? wfConfigMap.get(configId) : null;
       const configName = wfCfg?.displayName ?? wfCfg?.name ?? "Installation Record";
+      const cfgType = (wfCfg?.configType ?? "").trim().toLowerCase();
+      const docType = cfgType === "inspection" || cfgType === "wftype-inspection" ? "inspection" as const : "installation" as const;
 
       // Assigned technician
       const tech = users.find((u) => u.id === asset.assignedUserId);
@@ -1367,7 +1425,7 @@ const AssetInstallationPage = () => {
         } catch { /* ignore */ }
       }
 
-      // Business logo + customer logo â€” resolve data URL regardless of source format
+      // Business logo + customer logo â€" resolve data URL regardless of source format
       const brandSettings = await brandSettingsService.get();
       const [bizLogoResolved, custLogoResolved] = await Promise.all([
         brandSettings.logoBase64 ? resolveImageToDataUrl(brandSettings.logoBase64) : Promise.resolve(null),
@@ -1385,6 +1443,7 @@ const AssetInstallationPage = () => {
         siteName: proj?.siteName,
         siteLocation: asset.location ?? undefined,
         assignedTechnician: tech?.fullName,
+        documentType: docType,
       });
     } catch (err) {
       console.error("[AssetInstallationPage] Report generation failed", err);
@@ -1455,7 +1514,7 @@ const AssetInstallationPage = () => {
     }
   }
 
-  // useCallback with [] deps â€” setDocsCountMap (setState setter) is always stable,
+  // useCallback with [] deps â€" setDocsCountMap (setState setter) is always stable,
   // so this callback never changes identity and won't destabilize the dialog's
   // reload useCallback, preventing an infinite re-render loop.
   const handleDocsChanged = useCallback((assetId: string, count: number) => {
@@ -1555,7 +1614,7 @@ const AssetInstallationPage = () => {
     if (openIssues.some(i => i.severity === "high" || (i.isBlocking && i.severity !== "medium" && i.severity !== "low"))) return "red";
     if (openIssues.some(i => i.severity === "medium")) return "amber";
     if (openIssues.length === 0 && asset.status === "Complete") return "green";
-    return null; // no open issues â†’ use default status color
+    return null; // no open issues â†' use default status color
   }
 
   function formatRunDur(totalSeconds: number): string {
@@ -1629,7 +1688,7 @@ const AssetInstallationPage = () => {
       return (
         <Paper key={issue.id} variant="outlined" sx={{ p: 1.5, bgcolor: issue.resolved ? "rgba(255,255,255,0.02)" : "rgba(244,67,54,0.03)", borderColor: issue.resolved ? "divider" : "error.dark", opacity: issue.resolved ? 0.65 : 1 }}>
           <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="flex-start">
-            {/* Col 1 â€” Issue Description */}
+            {/* Col 1 â€" Issue Description */}
             <Box sx={{ flex: "0 0 28%", minWidth: 0 }}>
               <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }} display="block" mb={0.5}>
                 Issue Description
@@ -1670,7 +1729,7 @@ const AssetInstallationPage = () => {
               )}
             </Box>
 
-            {/* Col 2 â€” Comments */}
+            {/* Col 2 â€" Comments */}
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }} display="block" mb={0.5}>
                 Comments
@@ -1721,7 +1780,7 @@ const AssetInstallationPage = () => {
               )}
             </Box>
 
-            {/* Col 3 â€” Corrective Action */}
+            {/* Col 3 â€" Corrective Action */}
             <Box sx={{ flex: "0 0 28%", minWidth: 0 }}>
               <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }} display="block" mb={0.5}>
                 Corrective Action
@@ -1826,18 +1885,29 @@ const AssetInstallationPage = () => {
       : (asset.workflowSummary?.hasWorkflow ?? (!!asset.productConfigId || !!asset.workflowTemplateId));
     const canViewCompletedRun = asset.status === "Complete"
       || (asset.workflowSummary?.latestRunStatus === "Complete" && !asset.workflowSummary?.hasOpenIssues);
+    const openImportDialog = () => setImportDialogAsset(asset);
+    if (inspectionEnabled && asset.status === "Complete" && !latestRun && !hasAssignments) {
+      return (
+        <Tooltip title="View or edit linked external inspection JSON">
+          <Button size="small" variant="text" color="inherit" startIcon={<HistoryOutlined />}
+            onClick={openImportDialog}>
+            View/Edit
+          </Button>
+        </Tooltip>
+      );
+    }
     if (!hasAssignments) {
       if (inspectionEnabled) {
         return (
-          <Tooltip title="or use edit button to add a workflow ">
+          <Tooltip title="Upload external inspection JSON for this asset">
             <Button
               size="small"
               variant="outlined"
               color="info"
               startIcon={<FileUploadOutlined />}
-              onClick={() => navigate(`/projects/${asset.projectId}/assets/${asset.id}/inspections`)}
+              onClick={openImportDialog}
             >
-              Upload External JSON
+              Upload JSON
             </Button>
           </Tooltip>
         );
@@ -2601,7 +2671,7 @@ const AssetInstallationPage = () => {
           value={search} onChange={(e) => setSearch(e.target.value)} sx={{ minWidth: 260 }} />
       </Stack>
 
-      {/* Bulk actions toolbar â€” visible when â‰¥1 asset is selected */}
+      {/* Bulk actions toolbar â€" visible when â‰¥1 asset is selected */}
       {selectedAssetIds.size > 0 && (
         <Paper className="glass-card" sx={{ px: 2, py: 1, display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
           <Typography variant="body2" fontWeight={600}>
@@ -3457,6 +3527,16 @@ const AssetInstallationPage = () => {
                 ))}
               </Select>
             </FormControl>
+            {(() => {
+              const selType = workflowTypes.find((t) => t.id === assignForm.workflowTypeId);
+              const selCfg  = workflowConfigs.find((c) => c.id === assignForm.workflowConfigId);
+              const msg = assignForm.workflowTypeId && assignForm.workflowConfigId
+                ? workflowTypeMismatchMessage(selType?.name, selCfg?.configType)
+                : null;
+              return msg ? (
+                <Alert severity="warning" sx={{ fontSize: "0.8rem" }}>{msg}</Alert>
+              ) : null;
+            })()}
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -3593,6 +3673,17 @@ const AssetInstallationPage = () => {
         </DialogActions>
       </Dialog>
 
+      {/* Inspection Import Dialog — per-asset popup */}
+      {importDialogAsset && selectedProject && (
+        <InspectionImportDialog
+          open={Boolean(importDialogAsset)}
+          onClose={() => setImportDialogAsset(null)}
+          projectId={selectedProject.id}
+          asset={importDialogAsset}
+          onChanged={refreshAssets}
+        />
+      )}
+
       {/* Legacy run history dialog (assignment panel history icon) */}
       {runHistoryAsset && runHistoryAssignment && (
         <AssetWorkflowRunHistoryDialog
@@ -3603,7 +3694,7 @@ const AssetInstallationPage = () => {
         />
       )}
 
-      {/* New run history dialog â€” View/Edit button â†’ history, re-run, PDF report */}
+      {/* New run history dialog â€" View/Edit button â†' history, re-run, PDF report */}
       {docsOpen && docsAsset && (
         <AssetDocumentsDialog
           open={docsOpen}
@@ -3625,13 +3716,15 @@ const AssetInstallationPage = () => {
           currentUserName={currentUser?.fullName ?? ""}
           onRerun={handleRerun}
           onContinue={handleContinueRun}
+          allowRerun={runHistoryAllowRerun}
+          allowContinue={runHistoryAllowRerun}
           project={runHistoryProject ?? undefined}
           customerLogoBase64={runHistoryCustomerLogo}
           assignedTechnician={users.find((u) => u.id === runHistoryAsset?.assignedUserId)?.fullName}
         />
       )}
 
-      {/* Paused progress popover â€” click badge to see completed steps */}
+      {/* Paused progress popover â€" click badge to see completed steps */}
       <Popover
         open={Boolean(progressPopoverAnchor)}
         anchorEl={progressPopoverAnchor}
@@ -3700,8 +3793,33 @@ const AssetInstallationPage = () => {
         </MenuItem>
       </Menu>
 
+      {/* Workflow type / config mismatch warning */}
+      <Dialog open={!!wfMismatchConfirm} onClose={() => setWfMismatchConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Workflow type mismatch</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 1.5 }}>{wfMismatchConfirm?.message}</Alert>
+          <Typography variant="body2">
+            You can still start the workflow, but check that this is intentional.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setWfMismatchConfirm(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={() => {
+              const confirm = wfMismatchConfirm;
+              setWfMismatchConfirm(null);
+              if (confirm) void _doStartAssignmentRun(confirm.asset, confirm.assignment);
+            }}
+          >
+            Start anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Work order runner */}
-      {/* â”€â”€ Auto-assign warning dialog â”€â”€ */}
+      {/* â"€â"€ Auto-assign warning dialog â"€â"€ */}
       <Dialog open={!!autoAssignConfirm} onClose={() => setAutoAssignConfirm(null)} maxWidth="xs" fullWidth>
         <DialogTitle>
           {autoAssignConfirm?.reason === "unassigned" ? "Unassigned asset" : "Asset assigned to someone else"}
@@ -3787,7 +3905,7 @@ const AssetInstallationPage = () => {
           />
         ) : null;
       })()}
-      {/* Override warning dialog â€” appears before any destructive bulk action */}
+      {/* Override warning dialog â€" appears before any destructive bulk action */}
       <Dialog
         open={bulkWarnOpen}
         onClose={() => setBulkWarnOpen(false)}
@@ -3905,10 +4023,23 @@ const AssetInstallationPage = () => {
               <InputLabel shrink>Workflow config</InputLabel>
               <Select label="Workflow config" value={bulkWfConfigId} onChange={(e) => setBulkWfConfigId(e.target.value)}>
                 {latestPublishedWfConfigs.map((wc) => (
-                  <MenuItem key={wc.id} value={wc.id}>{wc.name}</MenuItem>
+                  <MenuItem key={wc.id} value={wc.id}>
+                    {wc.name}
+                    {wc.configType ? ` (${wc.configType})` : ""}
+                  </MenuItem>
                 ))}
               </Select>
             </FormControl>
+            {(() => {
+              const selType = workflowTypes.find((t) => t.id === bulkWfTypeId);
+              const selCfg  = latestPublishedWfConfigs.find((c) => c.id === bulkWfConfigId);
+              const msg = bulkWfTypeId && bulkWfConfigId
+                ? workflowTypeMismatchMessage(selType?.name, selCfg?.configType)
+                : null;
+              return msg ? (
+                <Alert severity="warning" sx={{ fontSize: "0.8rem" }}>{msg}</Alert>
+              ) : null;
+            })()}
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -3935,7 +4066,7 @@ const AssetInstallationPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
-      {/* â”€â”€ Print / PDF dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* â"€â"€ Print / PDF dialog â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       <Dialog
         open={printOpen}
         onClose={() => setPrintOpen(false)}
@@ -3950,7 +4081,7 @@ const AssetInstallationPage = () => {
         <DialogContent>
           <Stack spacing={3} sx={{ pt: 1 }}>
 
-            {/* â”€â”€ Scope â”€â”€ */}
+            {/* â"€â"€ Scope â"€â"€ */}
             <Box>
               <FormLabel component="legend" sx={{ fontWeight: 700, mb: 1, fontSize: 13 }}>Scope</FormLabel>
               <RadioGroup
@@ -3969,7 +4100,7 @@ const AssetInstallationPage = () => {
               </RadioGroup>
             </Box>
 
-            {/* â”€â”€ Custom filters â”€â”€ */}
+            {/* â"€â"€ Custom filters â"€â"€ */}
             {printScope === "custom" && (
               <Box sx={{ pl: 2, borderLeft: "3px solid var(--stroke)" }}>
                 <Typography variant="subtitle2" sx={{ mb: 1.5 }}>Custom filters</Typography>
@@ -4036,7 +4167,7 @@ const AssetInstallationPage = () => {
               </Box>
             )}
 
-            {/* â”€â”€ Column picker â”€â”€ */}
+            {/* â"€â"€ Column picker â"€â"€ */}
             <Box>
               <FormLabel component="legend" sx={{ fontWeight: 700, mb: 1, fontSize: 13 }}>Columns to include</FormLabel>
               <FormGroup row>
@@ -4066,7 +4197,7 @@ const AssetInstallationPage = () => {
               </FormGroup>
             </Box>
 
-            {/* â”€â”€ Group by â”€â”€ */}
+            {/* â"€â"€ Group by â"€â"€ */}
             <Box>
               <FormLabel component="legend" sx={{ fontWeight: 700, mb: 1, fontSize: 13 }}>Group by</FormLabel>
               <ToggleButtonGroup
@@ -4082,7 +4213,7 @@ const AssetInstallationPage = () => {
               </ToggleButtonGroup>
             </Box>
 
-            {/* â”€â”€ Preview count â”€â”€ */}
+            {/* â"€â"€ Preview count â"€â"€ */}
             <Alert
               severity={printRows.length === 0 ? "warning" : "info"}
               sx={{ py: 0.5 }}

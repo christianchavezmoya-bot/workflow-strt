@@ -31,6 +31,7 @@ public static class DbInitializer
         EnsureFeatureProcurementColumns(db);
         EnsureRecoverableDeleteColumns(db);
         EnsureAssignedPmUserIdColumn(db);
+        EnsureInspectionImportArchiveColumns(db);
         BackfillDocumentOwnership(db);
         EnsureLinkableKeyFieldDefinitions(db);
 
@@ -1107,6 +1108,36 @@ public static class DbInitializer
                 cmd.CommandText = "ALTER TABLE Projects ADD COLUMN AssignedPmUserId TEXT NULL";
                 cmd.ExecuteNonQuery();
             }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureInspectionImportArchiveColumns(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            void AddIfMissing(string column, string columnDef)
+            {
+                cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('InspectionImports') WHERE name='{column}'";
+                if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+                {
+                    cmd.CommandText = $"ALTER TABLE InspectionImports ADD COLUMN {column} {columnDef}";
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            AddIfMissing("IsArchived",    "INTEGER NOT NULL DEFAULT 0");
+            AddIfMissing("ArchivedAt",    "TEXT NULL");
+            AddIfMissing("ArchivedBy",    "TEXT NULL");
+            AddIfMissing("ArchiveReason", "TEXT NULL");
+            AddIfMissing("ArchiveRef",    "TEXT NULL");
         }
         finally
         {

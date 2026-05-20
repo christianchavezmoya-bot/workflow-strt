@@ -951,7 +951,12 @@ public record InspectionImportDto(
     string? ProjectAssetId,
     string Status,
     string? Error,
-    string? MappedRunId
+    string? MappedRunId,
+    bool IsArchived,
+    DateTime? ArchivedAt,
+    string? ArchivedBy,
+    string? ArchiveReason,
+    string? ArchiveRef
 );
 
 public record CreateInspectionImportRequest(
@@ -964,6 +969,16 @@ public record CreateInspectionImportRequest(
 public record AssignInspectionImportRequest(
     string ProjectId,
     string ProjectAssetId
+);
+
+public record UpdateInspectionImportRequest(
+    string? Source,
+    string RawJson
+);
+
+public record ArchiveInspectionImportRequest(
+    string? Reason,
+    string? ArchiveRef
 );
 
 public record CreateInspectionRunRequest(
