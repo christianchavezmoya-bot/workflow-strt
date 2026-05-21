@@ -879,7 +879,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
       const selectedWorkflowType = workflowTypes.find((type) => type.id === publishForm.workflowTypeId);
       await workflowConfigService.update(cfgId, {
         name: publishForm.name.trim() || undefined,
-        configType: selectedWorkflowType?.name ?? publishForm.configType.trim() || undefined,
+        configType: (selectedWorkflowType?.name ?? publishForm.configType.trim()) || undefined,
         workflowTypeId: publishForm.workflowTypeId || undefined,
         notes: publishForm.notes.trim() || undefined,
         featureSelectionsJson: JSON.stringify(publishForm.featureSelections),
