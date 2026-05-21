@@ -6,6 +6,7 @@ export interface WorkflowConfig {
   name: string;
   displayName?: string;
   configType?: string;
+  workflowTypeId?: string;
   status: WorkflowConfigStatus;
   version: number;
   templateSourceId?: string;
@@ -23,6 +24,7 @@ export interface UpsertWorkflowConfigInput {
   productId: string;
   displayName?: string;
   configType?: string;
+  workflowTypeId?: string;
   notes?: string;
   stepsJson?: string;
   mediaJson?: string;

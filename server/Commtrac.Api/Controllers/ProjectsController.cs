@@ -3,6 +3,7 @@ using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
@@ -34,6 +35,15 @@ public class ProjectsController : ControllerBase
     )
     {
         var query = _db.Projects.AsQueryable();
+        var allowedProjectIds = await GetRoleScopedProjectIdsAsync();
+        if (allowedProjectIds is { Count: > 0 })
+        {
+            query = query.Where(p => allowedProjectIds.Contains(p.Id));
+        }
+        else if (allowedProjectIds is { Count: 0 })
+        {
+            return Ok(new ProjectListResponse(new List<ProjectDto>(), 0));
+        }
 
         if (!string.IsNullOrWhiteSpace(country) && country != "All")
         {
@@ -146,6 +156,12 @@ public class ProjectsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<ProjectDto>> GetById(string id)
     {
+        var allowedProjectIds = await GetRoleScopedProjectIdsAsync();
+        if (allowedProjectIds is not null && !allowedProjectIds.Contains(id))
+        {
+            return NotFound();
+        }
+
         var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id);
         if (project is null)
         {
@@ -410,6 +426,41 @@ public class ProjectsController : ControllerBase
             return requested;
         }
         return legacyFlag ? "INSTALLATION_ONLY" : "INSPECTION_ONLY";
+    }
+
+    private async Task<HashSet<string>?> GetRoleScopedProjectIdsAsync()
+    {
+        var role = User.FindFirstValue(ClaimTypes.Role);
+        if (string.IsNullOrWhiteSpace(role)) return null;
+
+        if (role is "Installer" or "Technician")
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrWhiteSpace(userId)) return new HashSet<string>();
+
+            var assignedProjectIds = await _db.ProjectAssets
+                .Where(a => a.AssignedUserId == userId)
+                .Select(a => a.ProjectId)
+                .Distinct()
+                .ToListAsync();
+            return assignedProjectIds.ToHashSet();
+        }
+
+        if (role == "Project Manager")
+        {
+            var fullName = User.FindFirstValue(ClaimTypes.Name);
+            var email = User.FindFirstValue(ClaimTypes.Email);
+
+            var managedProjectIds = await _db.Projects
+                .Where(p =>
+                    (!string.IsNullOrWhiteSpace(fullName) && p.ProjectManager == fullName) ||
+                    (!string.IsNullOrWhiteSpace(email) && p.ProjectManager == email))
+                .Select(p => p.Id)
+                .ToListAsync();
+            return managedProjectIds.ToHashSet();
+        }
+
+        return null;
     }
 }
 

@@ -196,7 +196,7 @@ public class InspectionImportsController : ControllerBase
 
         item.ProjectId = request.ProjectId;
         item.AssetId = request.AssetId;
-        item.Status = "MAPPED";
+        item.Status = string.IsNullOrWhiteSpace(request.AssetId) ? "NEEDS_ASSIGNMENT" : "MAPPED";
         await _db.SaveChangesAsync();
 
         return Ok(ToDto(item));

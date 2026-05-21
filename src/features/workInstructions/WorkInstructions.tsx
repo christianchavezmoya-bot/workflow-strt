@@ -54,11 +54,13 @@ import { demoProducts } from "../../data/demo";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { featureService } from "../../services/featureService";
+import { workflowTypeService } from "../../services/workflowTypeService";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import type { Workflow } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
+import type { WorkflowType } from "../../types/workflowType";
 import WorkflowBuilder from "./WorkflowBuilder";
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -452,6 +454,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
 interface ConfigFormState {
   name: string;
   configType: string;
+  workflowTypeId: string;
   notes: string;
   featureSelections: FeatureSelection[];
 }
@@ -461,6 +464,7 @@ type WorkInstructionSortKey = "name" | "configType" | "createdBy" | "dateCreated
 const emptyConfigForm = (): ConfigFormState => ({
   name: "",
   configType: "",
+  workflowTypeId: "",
   notes: "",
   featureSelections: [],
 });
@@ -478,6 +482,7 @@ const WorkInstructions = () => {
 
   const [configs, setConfigs] = useState<WorkflowConfig[]>([]);
   const [configsLoading, setConfigsLoading] = useState(false);
+  const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
   const [configSearch, setConfigSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkInstructionSortKey>("dateCreated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -500,7 +505,10 @@ const WorkInstructions = () => {
   const [settingsMenu, setSettingsMenu] = useState<HTMLElement | null>(null);
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
 
-  useEffect(() => { dispatch(fetchProducts()); }, [dispatch]);
+  useEffect(() => {
+    dispatch(fetchProducts());
+    workflowTypeService.listAll().then(setWorkflowTypes).catch(() => {});
+  }, [dispatch]);
 
   const products = useMemo(
     () => (productsState.items.length ? productsState.items : demoProducts),
@@ -638,6 +646,10 @@ const WorkInstructions = () => {
     setConfigForm({
       name: cfg.name,
       configType: cfg.configType ?? "",
+      workflowTypeId:
+        cfg.workflowTypeId ??
+        workflowTypes.find((type) => type.name === cfg.configType)?.id ??
+        "",
       notes: cfg.notes ?? "",
       featureSelections: inventoryFeatures.map(
         (f) => selMap.get(f.id) ?? { featureId: f.id, included: false, activeCount: 0 },
@@ -659,11 +671,13 @@ const WorkInstructions = () => {
     if (!name) { setConfigError("Name is required."); return; }
     setConfigSaving(true);
     try {
+      const selectedWorkflowType = workflowTypes.find((type) => type.id === configForm.workflowTypeId);
       const payload = {
         name,
         productId: activeProduct.id,
         notes: configForm.notes.trim() || undefined,
-        configType: configForm.configType.trim() || undefined,
+        configType: selectedWorkflowType?.name ?? configForm.configType.trim() || undefined,
+        workflowTypeId: configForm.workflowTypeId || undefined,
         featureSelectionsJson: JSON.stringify(configForm.featureSelections),
       };
       if (editingConfig) {
@@ -1087,15 +1101,27 @@ const WorkInstructions = () => {
               placeholder="e.g. AIM-100 Front Camera Install"
               InputLabelProps={{ shrink: true }}
             />
-            <TextField
-              label="Configuration Type"
-              value={configForm.configType}
-              onChange={(e) => setConfigForm((p) => ({ ...p, configType: e.target.value }))}
-              fullWidth
-              placeholder="e.g. Installation, Maintenance, Inspection"
-              helperText="Used to identify this instruction type when assigning to an asset"
-              InputLabelProps={{ shrink: true }}
-            />
+            <FormControl fullWidth>
+              <InputLabel shrink>Workflow Type</InputLabel>
+              <Select
+                label="Workflow Type"
+                value={configForm.workflowTypeId}
+                onChange={(e) => {
+                  const workflowTypeId = e.target.value;
+                  const selected = workflowTypes.find((type) => type.id === workflowTypeId);
+                  setConfigForm((p) => ({
+                    ...p,
+                    workflowTypeId,
+                    configType: selected?.name ?? p.configType,
+                  }));
+                }}
+              >
+                <MenuItem value="">Unspecified</MenuItem>
+                {workflowTypes.map((type) => (
+                  <MenuItem key={type.id} value={type.id}>{type.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <TextField
               label="Description"
               value={configForm.notes}
@@ -1184,4 +1210,3 @@ const WorkInstructions = () => {
 };
 
 export default WorkInstructions;
-
