@@ -12,11 +12,147 @@ import RestoreOutlinedIcon from "@mui/icons-material/RestoreOutlined";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import UploadFileOutlinedIcon from "@mui/icons-material/UploadFileOutlined";
+import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import { useNavigate } from "react-router-dom";
 import { useBomProject } from "../store/BomProjectContext";
-import { bomApiService } from "../services/bomApiService";
+import { bomApiService, type BomImportRunData } from "../services/bomApiService";
 import ImportRunStatusBadge from "../components/ImportRunStatusBadge";
 import { downloadBomTemplate } from "../services/bomTemplateGenerator";
+import type { BomImportRun } from "../types/importRun";
+import type { DraftProject } from "../types/projectDraft";
+import type { RawWorkbookRow } from "../types/sourceWorkbook";
+import type { CanonicalBomRow } from "../types/canonicalBom";
+
+function escapeCsv(value: string | number | null | undefined): string {
+  const text = value == null ? "" : String(value);
+  if (text.includes(",") || text.includes("\"") || text.includes("\n")) {
+    return `"${text.replace(/"/g, "\"\"")}"`;
+  }
+  return text;
+}
+
+function downloadDraftBomCsv(run: BomImportRun, draft: DraftProject) {
+  const header = [
+    "Asset Name",
+    "Asset Type",
+    "Config Type",
+    "Location",
+    "Part Number",
+    "Component Description",
+    "Item Type",
+    "Qty Required",
+    "Inventory Tracked",
+    "Serial Required",
+    "Stock Qty",
+    "Difference Qty",
+  ];
+
+  const rows = draft.assets.flatMap((asset) => {
+    if (asset.components.length === 0) {
+      return [[
+        asset.assetName,
+        asset.assetType ?? "",
+        asset.configType ?? "",
+        asset.location ?? "",
+        asset.partNumber ?? "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ]];
+    }
+
+    return asset.components.map((component) => ([
+      asset.assetName,
+      asset.assetType ?? "",
+      asset.configType ?? "",
+      asset.location ?? "",
+      component.partNumber ?? "",
+      component.description,
+      component.itemType,
+      component.qtyRequired,
+      component.inventoryTracked ? "Yes" : "No",
+      component.serialRequired ? "Yes" : "No",
+      component.stockQty ?? "",
+      component.differenceQty ?? "",
+    ]));
+  });
+
+  const csv = [header, ...rows]
+    .map((row) => row.map((cell) => escapeCsv(cell)).join(","))
+    .join("\r\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${run.fileName.replace(/\.[^.]+$/, "") || "bom-import"}-draft-bom.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadRawRowsCsv(run: BomImportRun, rawRows: RawWorkbookRow[]) {
+  const headers = Array.from(new Set(rawRows.flatMap((row) => Object.keys(row.cells ?? {}))));
+  const csv = [
+    ["Sheet", "Row", ...headers],
+    ...rawRows.map((row) => [
+      row.sheetName,
+      row.rowIndex,
+      ...headers.map((header) => row.cells?.[header] ?? ""),
+    ]),
+  ]
+    .map((row) => row.map((cell) => escapeCsv(cell as string | number | null | undefined)).join(","))
+    .join("\r\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${run.fileName.replace(/\.[^.]+$/, "") || "bom-import"}-uploaded-rows.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadNormalizedRowsCsv(run: BomImportRun, rows: CanonicalBomRow[]) {
+  const headers: Array<keyof CanonicalBomRow> = [
+    "sheetName",
+    "rowIndex",
+    "partNumber",
+    "description",
+    "supplier",
+    "qty",
+    "unit",
+    "costUnit",
+    "costExtended",
+    "stockQty",
+    "requiredQty",
+    "differenceQty",
+    "vehicleType",
+    "assetNameCandidate",
+    "groupName",
+    "itemScope",
+    "notes",
+    "itemTypeHint",
+  ];
+
+  const csv = [
+    headers,
+    ...rows.map((row) => headers.map((header) => row[header] ?? "")),
+  ]
+    .map((row) => row.map((cell) => escapeCsv(cell as string | number | null | undefined)).join(","))
+    .join("\r\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${run.fileName.replace(/\.[^.]+$/, "") || "bom-import"}-normalized-bom.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function BomDashboard() {
   const { state, dispatch } = useBomProject();
@@ -25,25 +161,29 @@ export default function BomDashboard() {
   const [archiving, setArchiving] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; fileName: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [bomViewerRun, setBomViewerRun] = useState<BomImportRun | null>(null);
+  const [bomViewerData, setBomViewerData] = useState<BomImportRunData | null>(null);
+  const [bomViewerLoading, setBomViewerLoading] = useState(false);
+  const [bomViewerError, setBomViewerError] = useState<string | null>(null);
 
   useEffect(() => {
     dispatch({ type: "SET_RUNS_LOADING", payload: true });
     bomApiService
-      .listRuns()
+      .listRuns(showArchived)
       .then((runs) => dispatch({ type: "SET_RUNS", payload: runs }))
       .catch((err) => dispatch({ type: "SET_ERROR", payload: String(err) }))
       .finally(() => dispatch({ type: "SET_RUNS_LOADING", payload: false }));
-  }, [dispatch]);
+  }, [dispatch, showArchived]);
 
   const handleArchive = async (id: string, restore: boolean) => {
     setArchiving(id);
     try {
       if (restore) {
-        await bomApiService.updateRun(id, { status: "ready" } as never);
+        await bomApiService.restoreRun(id);
       } else {
         await bomApiService.deleteRun(id);
       }
-      const runs = await bomApiService.listRuns();
+      const runs = await bomApiService.listRuns(showArchived);
       dispatch({ type: "SET_RUNS", payload: runs });
     } catch { /* ignore */ }
     finally { setArchiving(null); }
@@ -54,7 +194,7 @@ export default function BomDashboard() {
     setDeleting(true);
     try {
       await bomApiService.purgeRun(deleteTarget.id);
-      const runs = await bomApiService.listRuns();
+      const runs = await bomApiService.listRuns(showArchived);
       dispatch({ type: "SET_RUNS", payload: runs });
     } catch { /* ignore */ }
     finally { setDeleting(false); setDeleteTarget(null); }
@@ -69,6 +209,32 @@ export default function BomDashboard() {
     published: state.runs.filter((r) => r.status === "published").length,
     ready: state.runs.filter((r) => r.status === "ready").length,
     failed: state.runs.filter((r) => r.status === "failed").length,
+  };
+
+  const openBomViewer = async (run: BomImportRun) => {
+    setBomViewerRun(run);
+    setBomViewerData(null);
+    setBomViewerError(null);
+    setBomViewerLoading(true);
+    try {
+      const data = await bomApiService.getRunData(run.id);
+      if (!data.rawRows?.length && !data.normalizedRows?.length && !data.draftProject) {
+        setBomViewerError("No saved BOM data is available for this import run yet.");
+        return;
+      }
+      setBomViewerData(data);
+    } catch {
+      setBomViewerError("Unable to load BOM data for this import run.");
+    } finally {
+      setBomViewerLoading(false);
+    }
+  };
+
+  const closeBomViewer = () => {
+    setBomViewerRun(null);
+    setBomViewerData(null);
+    setBomViewerError(null);
+    setBomViewerLoading(false);
   };
 
   return (
@@ -172,10 +338,14 @@ export default function BomDashboard() {
         ) : visibleRuns.length === 0 ? (
           <Box p={6} textAlign="center">
             <FolderOpenOutlinedIcon sx={{ fontSize: 48, color: "text.disabled", mb: 1 }} />
-            <Typography color="text.secondary">No imports yet. Start by uploading a BOM file.</Typography>
-            <Button variant="outlined" sx={{ mt: 2 }} onClick={() => navigate("/admin/bom-project/upload")}>
-              Upload BOM
-            </Button>
+            <Typography color="text.secondary">
+              {showArchived ? "No archived imports found." : "No imports yet. Start by uploading a BOM file."}
+            </Typography>
+            {!showArchived && (
+              <Button variant="outlined" sx={{ mt: 2 }} onClick={() => navigate("/admin/bom-project/upload")}>
+                Upload BOM
+              </Button>
+            )}
           </Box>
         ) : (
           <Table size="small">
@@ -227,6 +397,16 @@ export default function BomDashboard() {
                     <TableCell><ImportRunStatusBadge status={run.status} /></TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={0.5} alignItems="center">
+                        {!isArchived && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<VisibilityOutlinedIcon />}
+                            onClick={() => void openBomViewer(run)}
+                          >
+                            View BOM
+                          </Button>
+                        )}
                         {!isArchived && run.status === "published" && run.publishedProjectId && (
                           <Button size="small" variant="outlined" color="primary"
                             onClick={() => navigate(`/projects/${run.publishedProjectId}`)}>
@@ -290,6 +470,200 @@ export default function BomDashboard() {
             startIcon={deleting ? <CircularProgress size={14} /> : <DeleteOutlinedIcon />}
           >
             {deleting ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!bomViewerRun} onClose={closeBomViewer} maxWidth="lg" fullWidth>
+        <DialogTitle>
+          <Stack spacing={0.5}>
+            <Typography variant="h6">Imported BOM</Typography>
+            {bomViewerRun && (
+              <Typography variant="caption" color="text.secondary">
+                {bomViewerRun.fileName} | {new Date(bomViewerRun.uploadedAt).toLocaleString()}
+              </Typography>
+            )}
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          {bomViewerLoading ? (
+            <Box py={6} textAlign="center">
+              <CircularProgress size={28} />
+            </Box>
+          ) : bomViewerError ? (
+            <Alert severity="warning">{bomViewerError}</Alert>
+          ) : bomViewerData ? (
+            <Stack spacing={2}>
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Project</Typography>
+                    <Typography variant="body2" fontWeight={600}>{bomViewerData.draftProject?.projectName ?? bomViewerRun?.fileName ?? "-"}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Uploaded Rows</Typography>
+                    <Typography variant="body2" fontWeight={600}>{bomViewerData.rawRows?.length ?? bomViewerRun?.totalRawRows ?? 0}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Normalized Rows</Typography>
+                    <Typography variant="body2" fontWeight={600}>
+                      {bomViewerData.normalizedRows?.length ?? bomViewerRun?.normalizedRows ?? 0}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Sheets</Typography>
+                    <Typography variant="body2" fontWeight={600}>
+                      {bomViewerRun?.selectedSheets.join(", ") || "-"}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Paper>
+
+              {bomViewerData.rawRows?.length ? (
+                <Paper variant="outlined" sx={{ overflow: "auto", maxHeight: 520 }}>
+                  <Table size="small" stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Sheet</TableCell>
+                        <TableCell align="right">Row</TableCell>
+                        {Array.from(new Set(bomViewerData.rawRows.flatMap((row) => Object.keys(row.cells ?? {})))).map((header) => (
+                          <TableCell key={header}>{header}</TableCell>
+                        ))}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {bomViewerData.rawRows.map((row) => {
+                        const headers = Array.from(new Set(bomViewerData.rawRows?.flatMap((r) => Object.keys(r.cells ?? {})) ?? []));
+                        return (
+                          <TableRow key={row.id}>
+                            <TableCell>{row.sheetName}</TableCell>
+                            <TableCell align="right">{row.rowIndex}</TableCell>
+                            {headers.map((header) => (
+                              <TableCell key={`${row.id}-${header}`}>
+                                {row.cells?.[header] == null || row.cells?.[header] === "" ? "-" : String(row.cells[header])}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </Paper>
+              ) : bomViewerData.normalizedRows?.length ? (
+                <Paper variant="outlined" sx={{ overflow: "auto", maxHeight: 520 }}>
+                  <Table size="small" stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Sheet</TableCell>
+                        <TableCell align="right">Row</TableCell>
+                        <TableCell>Part No.</TableCell>
+                        <TableCell>Description</TableCell>
+                        <TableCell align="right">Qty</TableCell>
+                        <TableCell>Supplier</TableCell>
+                        <TableCell>Asset Candidate</TableCell>
+                        <TableCell>Group</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {bomViewerData.normalizedRows.map((row) => (
+                        <TableRow key={row.sourceRowId}>
+                          <TableCell>{row.sheetName}</TableCell>
+                          <TableCell align="right">{row.rowIndex}</TableCell>
+                          <TableCell>{row.partNumber || "-"}</TableCell>
+                          <TableCell>{row.description}</TableCell>
+                          <TableCell align="right">{row.qty ?? "-"}</TableCell>
+                          <TableCell>{row.supplier || "-"}</TableCell>
+                          <TableCell>{row.assetNameCandidate || "-"}</TableCell>
+                          <TableCell>{row.groupName || "-"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Paper>
+              ) : bomViewerData.draftProject ? (
+                <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Asset</TableCell>
+                        <TableCell>Component</TableCell>
+                        <TableCell>Part No.</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell align="right">Qty</TableCell>
+                        <TableCell>Location</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {bomViewerData.draftProject.assets.flatMap((asset) => {
+                        if (asset.components.length === 0) {
+                          return [
+                            <TableRow key={`${asset.draftAssetId}-empty`}>
+                              <TableCell>
+                                <Typography variant="body2" fontWeight={600}>{asset.assetName}</Typography>
+                              </TableCell>
+                              <TableCell colSpan={5}>
+                                <Typography variant="caption" color="text.secondary">No components generated.</Typography>
+                              </TableCell>
+                            </TableRow>,
+                          ];
+                        }
+
+                        return asset.components.map((component, index) => (
+                          <TableRow key={component.draftComponentId}>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight={index === 0 ? 600 : 400}>
+                                {index === 0 ? asset.assetName : ""}
+                              </Typography>
+                              {index === 0 && asset.configType && (
+                                <Typography variant="caption" color="text.secondary">{asset.configType}</Typography>
+                              )}
+                            </TableCell>
+                            <TableCell>{component.description}</TableCell>
+                            <TableCell>{component.partNumber || "-"}</TableCell>
+                            <TableCell>
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                label={component.itemType}
+                                color={component.itemType === "component" ? "primary" : "warning"}
+                              />
+                            </TableCell>
+                            <TableCell align="right">{component.qtyRequired}</TableCell>
+                            <TableCell>{asset.location || "-"}</TableCell>
+                          </TableRow>
+                        ));
+                      })}
+                    </TableBody>
+                  </Table>
+                </Paper>
+              ) : null}
+            </Stack>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadOutlinedIcon />}
+            disabled={!bomViewerRun || !bomViewerData}
+            onClick={() => {
+              if (!bomViewerRun || !bomViewerData) return;
+              if (bomViewerData.rawRows?.length) {
+                downloadRawRowsCsv(bomViewerRun, bomViewerData.rawRows);
+                return;
+              }
+              if (bomViewerData.normalizedRows?.length) {
+                downloadNormalizedRowsCsv(bomViewerRun, bomViewerData.normalizedRows);
+                return;
+              }
+              if (bomViewerData.draftProject) {
+                downloadDraftBomCsv(bomViewerRun, bomViewerData.draftProject);
+              }
+            }}
+          >
+            Download
+          </Button>
+          <Button variant="contained" onClick={closeBomViewer}>
+            Close
           </Button>
         </DialogActions>
       </Dialog>

@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,15 +15,31 @@ namespace Commtrac.Api.Controllers;
 public class ProjectsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly AuditLogService _audit;
+    private readonly IAccessScopeService _accessScope;
+    private readonly IProjectAuthorizationService _projectAuthorization;
+    private readonly IUserContextService _userContext;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public ProjectsController(AppDbContext db)
+    public ProjectsController(
+        AppDbContext db,
+        AuditLogService audit,
+        IAccessScopeService accessScope,
+        IProjectAuthorizationService projectAuthorization,
+        IUserContextService userContext)
     {
         _db = db;
+        _audit = audit;
+        _accessScope = accessScope;
+        _projectAuthorization = projectAuthorization;
+        _userContext = userContext;
     }
 
     [HttpGet]
     public async Task<ActionResult<ProjectListResponse>> GetAll(
+        [FromQuery] string? scope,
+        [FromQuery] string? ownershipScope,
+        [FromQuery] string? projectNumber,
         [FromQuery] string? country,
         [FromQuery] string? office,
         [FromQuery] string? status,
@@ -31,18 +48,30 @@ public class ProjectsController : ControllerBase
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int? page,
-        [FromQuery] int? pageSize
+        [FromQuery] int? pageSize,
+        [FromQuery] bool includeDeleted = false
     )
     {
-        var query = _db.Projects.AsQueryable();
-        var allowedProjectIds = await GetRoleScopedProjectIdsAsync();
-        if (allowedProjectIds is { Count: > 0 })
+        var query = includeDeleted
+            ? _db.Projects.IgnoreQueryFilters().AsQueryable()
+            : _db.Projects.AsQueryable();
+        var normalizedScope = (scope ?? string.Empty).Trim().ToLowerInvariant();
+        var browseScope = normalizedScope == "browse";
+        if (!browseScope)
         {
-            query = query.Where(p => allowedProjectIds.Contains(p.Id));
+            var scopedProjectIds = await _accessScope.GetScopedProjectIdsAsync(User, normalizedScope, includeDeleted);
+            query = query.Where(p => scopedProjectIds.Contains(p.Id));
         }
-        else if (allowedProjectIds is { Count: 0 })
+
+        var mineOnly = string.Equals(ownershipScope, "mine", StringComparison.OrdinalIgnoreCase);
+        if (mineOnly && string.Equals(_userContext.Role, "Project Manager", StringComparison.OrdinalIgnoreCase))
         {
-            return Ok(new ProjectListResponse(new List<ProjectDto>(), 0));
+            query = query.Where(p => p.AssignedPmUserId == _userContext.UserId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectNumber))
+        {
+            query = query.Where(p => p.JobNumber.Contains(projectNumber));
         }
 
         if (!string.IsNullOrWhiteSpace(country) && country != "All")
@@ -154,15 +183,16 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    public async Task<ActionResult<ProjectDto>> GetById(string id)
+    public async Task<ActionResult<ProjectDto>> GetById(string id, [FromQuery] bool includeDeleted = false, [FromQuery] string? scope = null)
     {
-        var allowedProjectIds = await GetRoleScopedProjectIdsAsync();
-        if (allowedProjectIds is not null && !allowedProjectIds.Contains(id))
+        var browseScope = string.Equals(scope, "browse", StringComparison.OrdinalIgnoreCase);
+        if (!browseScope && !await _accessScope.CanViewProjectAsync(User, id, includeDeleted))
         {
             return NotFound();
         }
 
-        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id);
+        var projects = includeDeleted ? _db.Projects.IgnoreQueryFilters() : _db.Projects;
+        var project = await projects.FirstOrDefaultAsync(p => p.Id == id);
         if (project is null)
         {
             return NotFound();
@@ -184,7 +214,19 @@ public class ProjectsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<ProjectDto>> Create([FromBody] ProjectDto request)
     {
-        var resolvedMode = ResolveWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
+        var currentUser = await GetCurrentUserAsync();
+        var workflowMode = NormalizeWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
+        var assignedPmUserId = await ResolveAssignedPmUserIdAsync(request.ProjectManager, request.AssignedPmUserId);
+        if (!_userContext.IsAdmin)
+        {
+            assignedPmUserId = _userContext.UserId ?? currentUser?.Id;
+        }
+        else if (string.IsNullOrWhiteSpace(assignedPmUserId) && currentUser is not null && string.Equals(currentUser.Role, "Project Manager", StringComparison.OrdinalIgnoreCase))
+        {
+            assignedPmUserId = currentUser.Id;
+        }
+
+        var projectManagerName = await ResolveProjectManagerNameAsync(request.ProjectManager, assignedPmUserId, currentUser);
         var project = new ProjectEntity
         {
             Id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString() : request.Id,
@@ -202,10 +244,11 @@ public class ProjectsController : ControllerBase
             ProjectType = request.ProjectType,
             Status = request.Status,
             ApprovalDecision = request.ApprovalDecision,
-            IsInstallationProject = resolvedMode is "INSTALLATION_ONLY" or "MIXED",
+            WorkflowMode = workflowMode,
+            IsInstallationProject = UsesInstallationWorkflow(workflowMode),
             InstallationMode = request.InstallationMode,
-            WorkflowMode = resolvedMode,
-            ProjectManager = request.ProjectManager,
+            ProjectManager = projectManagerName,
+            AssignedPmUserId = assignedPmUserId,
             ContractValue = request.ContractValue,
             ProbabilityStage = request.ProbabilityStage,
             ProductIds = request.ProductIds ?? new List<string>(),
@@ -235,8 +278,22 @@ public class ProjectsController : ControllerBase
         {
             return NotFound();
         }
+        if (!await _projectAuthorization.CanEditProjectAsync(User, project))
+        {
+            return Forbid();
+        }
 
-        var resolvedMode = ResolveWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
+        var currentUser = await GetCurrentUserAsync();
+        var workflowMode = NormalizeWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
+        var assignedPmUserId = _userContext.IsAdmin
+            ? await ResolveAssignedPmUserIdAsync(request.ProjectManager, request.AssignedPmUserId)
+            : project.AssignedPmUserId ?? _userContext.UserId;
+        if (!_userContext.IsAdmin)
+        {
+            assignedPmUserId = _userContext.UserId;
+        }
+        var projectManagerName = await ResolveProjectManagerNameAsync(request.ProjectManager, assignedPmUserId, currentUser);
+
         project.CustomerName = request.CustomerName;
         project.CustomerId = request.CustomerId;
         project.SiteId = request.SiteId;
@@ -251,10 +308,11 @@ public class ProjectsController : ControllerBase
         project.ProjectType = request.ProjectType;
         project.Status = request.Status;
         project.ApprovalDecision = request.ApprovalDecision;
-        project.IsInstallationProject = resolvedMode is "INSTALLATION_ONLY" or "MIXED";
+        project.WorkflowMode = workflowMode;
+        project.IsInstallationProject = UsesInstallationWorkflow(workflowMode);
         project.InstallationMode = request.InstallationMode;
-        project.WorkflowMode = resolvedMode;
-        project.ProjectManager = request.ProjectManager;
+        project.ProjectManager = projectManagerName;
+        project.AssignedPmUserId = assignedPmUserId;
         project.ContractValue = request.ContractValue;
         project.ProbabilityStage = request.ProbabilityStage;
         project.ProductIds = request.ProductIds ?? new List<string>();
@@ -282,6 +340,10 @@ public class ProjectsController : ControllerBase
         {
             return NotFound();
         }
+        if (!await _projectAuthorization.CanEditProjectAsync(User, project))
+        {
+            return Forbid();
+        }
 
         project.Status = request.Status;
         project.ApprovalDecision = request.ApprovalDecision;
@@ -303,14 +365,168 @@ public class ProjectsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
-        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id);
+        var project = await _db.Projects
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == id);
+        if (project is null)
+        {
+            return NotFound();
+        }
+        if (!await _projectAuthorization.CanEditProjectAsync(User, project))
+        {
+            return Forbid();
+        }
+        if (project.IsDeleted)
+        {
+            return NoContent();
+        }
+
+        var deletedByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        var deletedAt = DateTime.UtcNow;
+
+        project.IsDeleted = true;
+        project.DeletedAtUtc = deletedAt;
+        project.DeletedByUserId = deletedByUserId;
+
+        var installations = await _db.Installations
+            .IgnoreQueryFilters()
+            .Where(i => i.ProjectId == id && !i.IsDeleted)
+            .ToListAsync();
+        foreach (var installation in installations)
+        {
+            installation.IsDeleted = true;
+            installation.DeletedAtUtc = deletedAt;
+            installation.DeletedByUserId = deletedByUserId;
+        }
+
+        var assets = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .Where(a => a.ProjectId == id && !a.IsDeleted)
+            .ToListAsync();
+        foreach (var asset in assets)
+        {
+            asset.IsDeleted = true;
+            asset.DeletedAtUtc = deletedAt;
+            asset.DeletedByUserId = deletedByUserId;
+        }
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "project_archived", $"{project.JobNumber} ({project.Id})");
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        var project = await _db.Projects
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == id);
+        if (project is null)
+        {
+            return NotFound();
+        }
+        if (!await _projectAuthorization.CanEditProjectAsync(User, project))
+        {
+            return Forbid();
+        }
+
+        project.IsDeleted = false;
+        project.DeletedAtUtc = null;
+        project.DeletedByUserId = null;
+        project.DeleteReason = null;
+
+        var installations = await _db.Installations
+            .IgnoreQueryFilters()
+            .Where(i => i.ProjectId == id && i.IsDeleted)
+            .ToListAsync();
+        foreach (var installation in installations)
+        {
+            installation.IsDeleted = false;
+            installation.DeletedAtUtc = null;
+            installation.DeletedByUserId = null;
+            installation.DeleteReason = null;
+        }
+
+        var assets = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .Where(a => a.ProjectId == id && a.IsDeleted)
+            .ToListAsync();
+        foreach (var asset in assets)
+        {
+            asset.IsDeleted = false;
+            asset.DeletedAtUtc = null;
+            asset.DeletedByUserId = null;
+            asset.DeleteReason = null;
+        }
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "project_restored", $"{project.JobNumber} ({project.Id})");
+        return NoContent();
+    }
+
+    [HttpDelete("{id}/purge")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Purge(string id)
+    {
+        var project = await _db.Projects
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == id);
         if (project is null)
         {
             return NotFound();
         }
 
+        var installations = await _db.Installations
+            .IgnoreQueryFilters()
+            .Where(i => i.ProjectId == id)
+            .ToListAsync();
+        var installationIds = installations.Select(i => i.Id).ToList();
+        if (installationIds.Count > 0)
+        {
+            _db.Issues.RemoveRange(_db.Issues.Where(i => installationIds.Contains(i.InstallationId)));
+            var inspectionIds = await _db.Inspections
+                .Where(i => installationIds.Contains(i.InstallationId))
+                .Select(i => i.Id)
+                .ToListAsync();
+            if (inspectionIds.Count > 0)
+            {
+                _db.InspectionPhotos.RemoveRange(_db.InspectionPhotos.Where(p => inspectionIds.Contains(p.InspectionId)));
+            }
+            _db.Inspections.RemoveRange(_db.Inspections.Where(i => installationIds.Contains(i.InstallationId)));
+        }
+        _db.Installations.RemoveRange(installations);
+
+        var assetIds = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .Where(a => a.ProjectId == id)
+            .Select(a => a.Id)
+            .ToListAsync();
+        if (assetIds.Count > 0)
+        {
+            _db.AssetWorkflowAssignments.RemoveRange(_db.AssetWorkflowAssignments.Where(a => assetIds.Contains(a.AssetId)));
+            _db.AssetWorkflowRuns.RemoveRange(_db.AssetWorkflowRuns.Where(r => assetIds.Contains(r.AssetId)));
+            _db.AssetDocumentLinks.RemoveRange(_db.AssetDocumentLinks.Where(l => assetIds.Contains(l.AssetId)));
+            var docIds = await _db.AssetDocuments
+                .Where(d => assetIds.Contains(d.AssetId))
+                .Select(d => d.Id)
+                .ToListAsync();
+            if (docIds.Count > 0)
+            {
+                _db.AssetDocumentRevisions.RemoveRange(_db.AssetDocumentRevisions.Where(r => docIds.Contains(r.DocumentId)));
+            }
+            _db.AssetDocuments.RemoveRange(_db.AssetDocuments.Where(d => assetIds.Contains(d.AssetId)));
+            var assets = await _db.ProjectAssets.IgnoreQueryFilters().Where(a => a.ProjectId == id).ToListAsync();
+            _db.ProjectAssets.RemoveRange(assets);
+        }
+
+        _db.ProjectContacts.RemoveRange(_db.ProjectContacts.Where(c => c.ProjectId == id));
+        _db.ProjectDeliveryProfiles.RemoveRange(_db.ProjectDeliveryProfiles.Where(d => d.ProjectId == id));
+        _db.ProjectInboundItems.RemoveRange(_db.ProjectInboundItems.Where(i => i.ProjectId == id));
+
         _db.Projects.Remove(project);
         await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "project_purged", $"{project.JobNumber} ({project.Id})");
         return NoContent();
     }
 
@@ -322,9 +538,12 @@ public class ProjectsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<CloneAssetsResult>> CloneAssetsFrom(string targetId, string sourceId)
     {
-        if (!await _db.Projects.AnyAsync(p => p.Id == targetId))
+        var targetProject = await _db.Projects.FirstOrDefaultAsync(p => p.Id == targetId);
+        if (targetProject is null)
             return NotFound("Target project not found.");
-        if (!await _db.Projects.AnyAsync(p => p.Id == sourceId))
+        if (!await _projectAuthorization.CanEditProjectAsync(User, targetProject))
+            return Forbid();
+        if (!await _accessScope.CanViewProjectAsync(User, sourceId))
             return NotFound("Source project not found.");
 
         var sourceAssets = await _db.ProjectAssets
@@ -399,9 +618,11 @@ public class ProjectsController : ControllerBase
             project.ProjectType,
             project.Status,
             project.ApprovalDecision,
+            NormalizeWorkflowMode(project.WorkflowMode, project.IsInstallationProject),
             project.IsInstallationProject,
             project.InstallationMode,
             project.ProjectManager,
+            project.AssignedPmUserId,
             project.ContractValue,
             project.ProbabilityStage,
             project.ProductIds,
@@ -414,54 +635,123 @@ public class ProjectsController : ControllerBase
         );
     }
 
-    /// <summary>
-    /// If the client sends an explicit WorkflowMode use it;
-    /// otherwise derive from the legacy IsInstallationProject flag.
-    /// </summary>
-    private static string ResolveWorkflowMode(string? requested, bool legacyFlag)
+    private static string NormalizeWorkflowMode(string? workflowMode, bool isInstallationProject)
     {
-        if (!string.IsNullOrWhiteSpace(requested) &&
-            requested is "INSTALLATION_ONLY" or "INSPECTION_ONLY" or "MIXED")
+        var normalized = (workflowMode ?? string.Empty).Trim().ToUpperInvariant();
+        return normalized switch
         {
-            return requested;
-        }
-        return legacyFlag ? "INSTALLATION_ONLY" : "INSPECTION_ONLY";
+            ProjectEntity.WorkflowModeInstallationOnly => ProjectEntity.WorkflowModeInstallationOnly,
+            ProjectEntity.WorkflowModeInspectionOnly => ProjectEntity.WorkflowModeInspectionOnly,
+            ProjectEntity.WorkflowModeMixed => ProjectEntity.WorkflowModeMixed,
+            _ => isInstallationProject
+                ? ProjectEntity.WorkflowModeInstallationOnly
+                : ProjectEntity.WorkflowModeInspectionOnly
+        };
     }
 
-    private async Task<HashSet<string>?> GetRoleScopedProjectIdsAsync()
+    private static bool UsesInstallationWorkflow(string workflowMode) =>
+        string.Equals(workflowMode, ProjectEntity.WorkflowModeInstallationOnly, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(workflowMode, ProjectEntity.WorkflowModeMixed, StringComparison.OrdinalIgnoreCase);
+
+    private async Task<UserEntity?> GetCurrentUserAsync()
     {
-        var role = User.FindFirstValue(ClaimTypes.Role);
-        if (string.IsNullOrWhiteSpace(role)) return null;
-
-        if (role is "Installer" or "Technician")
+        var userId = _userContext.UserId
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value;
+        if (!string.IsNullOrWhiteSpace(userId))
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (string.IsNullOrWhiteSpace(userId)) return new HashSet<string>();
-
-            var assignedProjectIds = await _db.ProjectAssets
-                .Where(a => a.AssignedUserId == userId)
-                .Select(a => a.ProjectId)
-                .Distinct()
-                .ToListAsync();
-            return assignedProjectIds.ToHashSet();
+            var byId = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            if (byId is not null)
+            {
+                return byId;
+            }
         }
 
-        if (role == "Project Manager")
+        var email = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+        if (!string.IsNullOrWhiteSpace(email))
         {
-            var fullName = User.FindFirstValue(ClaimTypes.Name);
-            var email = User.FindFirstValue(ClaimTypes.Email);
+            var normalizedEmail = email.Trim().ToLowerInvariant();
+            var byEmail = await _db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail);
+            if (byEmail is not null)
+            {
+                return byEmail;
+            }
+        }
 
-            var managedProjectIds = await _db.Projects
-                .Where(p =>
-                    (!string.IsNullOrWhiteSpace(fullName) && p.ProjectManager == fullName) ||
-                    (!string.IsNullOrWhiteSpace(email) && p.ProjectManager == email))
-                .Select(p => p.Id)
-                .ToListAsync();
-            return managedProjectIds.ToHashSet();
+        var fullName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+        if (!string.IsNullOrWhiteSpace(fullName))
+        {
+            var normalizedName = fullName.Trim().ToLowerInvariant();
+            return await _db.Users.FirstOrDefaultAsync(u => u.FullName.ToLower() == normalizedName);
         }
 
         return null;
     }
+
+    private async Task<string?> ResolveAssignedPmUserIdAsync(string? projectManager, string? requestedAssignedPmUserId)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedAssignedPmUserId))
+        {
+            var exists = await _db.Users.AnyAsync(u => u.Id == requestedAssignedPmUserId);
+            if (exists)
+            {
+                return requestedAssignedPmUserId;
+            }
+        }
+
+        var normalizedManager = NormalizeIdentity(projectManager);
+        if (string.IsNullOrWhiteSpace(normalizedManager))
+        {
+            return null;
+        }
+
+        var pmMatches = await _db.Users
+            .Where(u => u.Role == "Project Manager")
+            .Where(u => u.FullName.ToLower() == normalizedManager || u.Email.ToLower() == normalizedManager)
+            .Select(u => u.Id)
+            .ToListAsync();
+        if (pmMatches.Count == 1)
+        {
+            return pmMatches[0];
+        }
+
+        var anyMatches = await _db.Users
+            .Where(u => u.FullName.ToLower() == normalizedManager || u.Email.ToLower() == normalizedManager)
+            .Select(u => u.Id)
+            .ToListAsync();
+        return anyMatches.Count == 1 ? anyMatches[0] : null;
+    }
+
+    private async Task<string?> ResolveProjectManagerNameAsync(string? requestedName, string? assignedPmUserId, UserEntity? currentUser)
+    {
+        if (!string.IsNullOrWhiteSpace(assignedPmUserId))
+        {
+            var ownerName = await _db.Users
+                .Where(u => u.Id == assignedPmUserId)
+                .Select(u => u.FullName)
+                .FirstOrDefaultAsync();
+            if (!string.IsNullOrWhiteSpace(ownerName))
+            {
+                return ownerName;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedName))
+        {
+            return requestedName.Trim();
+        }
+
+        if (!_userContext.IsAdmin && currentUser is not null)
+        {
+            return currentUser.FullName;
+        }
+
+        return null;
+    }
+
+    private static string NormalizeIdentity(string? value) =>
+        (value ?? string.Empty).Trim().ToLowerInvariant();
 }
 
 public record ProjectListResponse(List<ProjectDto> Items, int Total);

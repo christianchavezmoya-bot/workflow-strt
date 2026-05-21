@@ -2,7 +2,9 @@ using System.Net;
 using System.Text;
 using Commtrac.Api.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Commtrac.Api.Services;
@@ -10,18 +12,39 @@ using Commtrac.Api.Swagger;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<ViewOnlyEnforcementFilter>();
+});
 builder.Services.AddHttpClient();
+builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"))
+           .AddInterceptors(new SqliteForeignKeyPragmaInterceptor()));
 
 builder.Services.AddScoped<NotificationSettingsService>();
+builder.Services.AddScoped<NotificationFeedService>();
+builder.Services.AddScoped<OfficeNormalizationService>();
+builder.Services.AddScoped<IUserContextService, UserContextService>();
+builder.Services.AddScoped<IViewOnlyContextService, ViewOnlyContextService>();
+builder.Services.AddScoped<IAccessScopeService, AccessScopeService>();
+builder.Services.AddScoped<IProjectAuthorizationService, ProjectAuthorizationService>();
+builder.Services.AddScoped<IInstallationAuthorizationService, InstallationAuthorizationService>();
+builder.Services.AddScoped<IWorkflowRunAuthorizationService, WorkflowRunAuthorizationService>();
+builder.Services.AddScoped<IDocumentAuthorizationService, DocumentAuthorizationService>();
+builder.Services.AddScoped<ViewOnlyEnforcementFilter>();
+builder.Services.AddScoped<AuditLogService>();
+builder.Services.AddSingleton<SqliteBackupService>();
+builder.Services.AddSingleton<IInspectionImportValidatorService, InspectionImportValidatorService>();
+builder.Services.AddSingleton<IInspectionImportAdapterService, InspectionImportAdapterService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.AddScoped<IEmailSender, EmailSender>();
 builder.Services.Configure<SmsSettings>(builder.Configuration.GetSection("Sms"));
 builder.Services.AddScoped<ISmsSender, SmsSender>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<RecoveryService>();
 builder.Services.AddScoped<IDocumentContentSearchService, DocumentContentSearchService>();
 builder.Services.AddSingleton<DocumentSearchIndexStatusStore>();
 builder.Services.AddSingleton<IDocumentSearchIndexMonitor>(sp => sp.GetRequiredService<DocumentSearchIndexStatusStore>());

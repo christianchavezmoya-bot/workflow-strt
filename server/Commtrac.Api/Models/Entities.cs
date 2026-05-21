@@ -201,6 +201,10 @@ public class AssetEntity
 
 public class ProjectEntity
 {
+    public const string WorkflowModeInstallationOnly = "INSTALLATION_ONLY";
+    public const string WorkflowModeInspectionOnly = "INSPECTION_ONLY";
+    public const string WorkflowModeMixed = "MIXED";
+
     [Key]
     public string Id { get; set; } = Guid.NewGuid().ToString();
     [MaxLength(200)]
@@ -231,22 +235,26 @@ public class ProjectEntity
     public string Status { get; set; } = "Draft";
     [MaxLength(80)]
     public string? ApprovalDecision { get; set; }
+    [MaxLength(40)]
+    public string WorkflowMode { get; set; } = WorkflowModeInstallationOnly;
     public bool IsInstallationProject { get; set; }
     [MaxLength(80)]
     public string? InstallationMode { get; set; }
-    /// <summary>
-    /// INSTALLATION_ONLY | INSPECTION_ONLY | MIXED.
-    /// Null means legacy row — treated as INSTALLATION_ONLY when IsInstallationProject=true, else INSPECTION_ONLY.
-    /// </summary>
-    [MaxLength(40)]
-    public string? WorkflowMode { get; set; }
     [MaxLength(200)]
     public string? ProjectManager { get; set; }
+    [MaxLength(80)]
+    public string? AssignedPmUserId { get; set; }
     public decimal? ContractValue { get; set; }
     [MaxLength(120)]
     public string? ProbabilityStage { get; set; }
     public List<string> ProductIds { get; set; } = new();
     public string ProductFeatureValuesJson { get; set; } = "{}";
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(400)]
+    public string? DeleteReason { get; set; }
 }
 
 public class InstallationEntity
@@ -301,6 +309,12 @@ public class InstallationEntity
     [MaxLength(200)]
     public string? Pm4Serial { get; set; }
     public string CustomFieldsJson { get; set; } = "{}";
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(400)]
+    public string? DeleteReason { get; set; }
 }
 
 public class CustomFieldDefinitionEntity
@@ -359,6 +373,12 @@ public class DocumentEntity
 {
     [Key]
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(20)]
+    public string VisibilityScope { get; set; } = "Global";
+    [MaxLength(80)]
+    public string? ProjectId { get; set; }
+    [MaxLength(80)]
+    public string? AssetId { get; set; }
     [MaxLength(200)]
     public string Name { get; set; } = string.Empty;
     [MaxLength(80)]
@@ -374,11 +394,20 @@ public class DocumentEntity
     public long? FileSize { get; set; }
     [MaxLength(200)]
     public string? CreatedBy { get; set; }
+    [MaxLength(80)]
+    public string? CreatedByUserId { get; set; }
     [MaxLength(2000)]
     public string? Notes { get; set; }
     public string? CustomValuesJson { get; set; }
     [MaxLength(2000)]
     public string? DownloadUrl { get; set; }
+    public bool IsLegacyUnclassified { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(400)]
+    public string? DeleteReason { get; set; }
 }
 
 public class DocumentConfigEntity
@@ -540,6 +569,42 @@ public class NotificationSettingsEntity
     public string SmsApiKey { get; set; } = "";
     [MaxLength(80)]
     public string SmsSender { get; set; } = "";
+}
+
+public class NotificationInboxEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string? RecipientUserId { get; set; }
+    [MaxLength(80)]
+    public string? RecipientRole { get; set; }
+    [MaxLength(80)]
+    public string EventType { get; set; } = string.Empty;
+    [MaxLength(20)]
+    public string Severity { get; set; } = "info";
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+    [MaxLength(2000)]
+    public string Message { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string? ProjectId { get; set; }
+    [MaxLength(80)]
+    public string? AssetId { get; set; }
+    [MaxLength(100)]
+    public string? RunId { get; set; }
+    [MaxLength(120)]
+    public string? EntityType { get; set; }
+    [MaxLength(120)]
+    public string? EntityId { get; set; }
+    [MaxLength(80)]
+    public string? TriggeredByUserId { get; set; }
+    [MaxLength(200)]
+    public string? TriggeredByName { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? ReadAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? ReadByUserId { get; set; }
 }
 
 public class OfficeEntity
@@ -716,6 +781,12 @@ public class ProjectAssetEntity
     public string AsBuiltJson { get; set; } = "{}";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(400)]
+    public string? DeleteReason { get; set; }
 }
 
 // ─── Workflow Config Unification (v2 architecture) ────────────────────────────
@@ -789,6 +860,43 @@ public class WorkflowTypeEntity
     public string? Icon { get; set; }
     public int SortOrder { get; set; } = 0;
     public bool IsActive { get; set; } = true;
+}
+
+public class InspectionImportEntity
+{
+    public const string StatusReceived = "RECEIVED";
+    public const string StatusNeedsAssignment = "NEEDS_ASSIGNMENT";
+    public const string StatusMapped = "MAPPED";
+    public const string StatusFailed = "FAILED";
+
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string Source { get; set; } = "manual";
+    public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;
+    public string RawJson { get; set; } = "{}";
+    [MaxLength(256)]
+    public string Hash { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string? ProjectId { get; set; }
+    [MaxLength(100)]
+    public string? ProjectAssetId { get; set; }
+    [MaxLength(40)]
+    public string Status { get; set; } = StatusNeedsAssignment;
+    [MaxLength(1000)]
+    public string? Error { get; set; }
+    [MaxLength(100)]
+    public string? MappedRunId { get; set; }
+    /// <summary>True when this import has been superseded by a newer upload and archived.</summary>
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
+    [MaxLength(200)]
+    public string? ArchivedBy { get; set; }
+    [MaxLength(500)]
+    public string? ArchiveReason { get; set; }
+    /// <summary>Human-readable reference: "JO003424 / RC-0022 / 2026-05-20"</summary>
+    [MaxLength(300)]
+    public string? ArchiveRef { get; set; }
 }
 
 /// <summary>
@@ -1185,6 +1293,12 @@ public class BomImportRunEntity
     public string? DraftProjectJson { get; set; }
     public string? ValidationResultJson { get; set; }
     public string? CommitLogsJson { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(400)]
+    public string? DeleteReason { get; set; }
 }
 
 public class BomMappingProfileEntity
@@ -1213,57 +1327,21 @@ public class BomRuleProfileEntity
     public string? CreatedBy { get; set; }
 }
 
-// ─── Inspection Imports (third-party JSON inbox) ──────────────────────────────
-
-/// <summary>
-/// Stores raw inspection JSON payloads received from external sources
-/// (OneDrive, local upload, email). An import stays raw until a user
-/// assigns it to a project + asset, at which point status moves to MAPPED.
-/// </summary>
-public class InspectionImportEntity
+// ─── Analytics ────────────────────────────────────────────────────────────────
+public class AnalyticsEventEntity
 {
     [Key]
     public string Id { get; set; } = Guid.NewGuid().ToString();
-
-    /// <summary>ONEDRIVE | LOCAL | EMAIL | API</summary>
-    [MaxLength(40)]
-    public string Source { get; set; } = "LOCAL";
-
-    public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;
-
-    [MaxLength(500)]
-    public string? FileName { get; set; }
-
-    /// <summary>SHA-256 of raw content for deduplication.</summary>
-    [MaxLength(64)]
-    public string? ContentHash { get; set; }
-
-    /// <summary>Raw JSON body (stored inline for MVP; large files should use RawPath).</summary>
-    public string? RawJson { get; set; }
-
-    /// <summary>Optional path to file on disk for payloads too large for inline storage.</summary>
-    [MaxLength(1000)]
-    public string? RawPath { get; set; }
-
-    /// <summary>Nullable until assigned by a user.</summary>
-    [MaxLength(100)]
-    public string? ProjectId { get; set; }
-
-    /// <summary>Nullable until assigned by a user.</summary>
-    [MaxLength(100)]
-    public string? AssetId { get; set; }
-
-    /// <summary>RECEIVED | NEEDS_ASSIGNMENT | MAPPED | FAILED</summary>
-    [MaxLength(40)]
-    public string Status { get; set; } = "RECEIVED";
-
-    [MaxLength(2000)]
-    public string? ErrorText { get; set; }
-
-    /// <summary>Set once the import is mapped to an AssetWorkflowRun.</summary>
-    [MaxLength(100)]
-    public string? MappedRunId { get; set; }
-
-    [MaxLength(200)]
-    public string? UploadedBy { get; set; }
+    /// <summary>e.g. "onboarding_started", "tour_step_viewed"</summary>
+    [MaxLength(80)]
+    public string EventName { get; set; } = string.Empty;
+    /// <summary>null when anonymous / pre-auth</summary>
+    [MaxLength(80)]
+    public string? UserId { get; set; }
+    [MaxLength(80)]
+    public string? Role { get; set; }
+    /// <summary>JSON blob of all extra payload fields</summary>
+    public string PayloadJson { get; set; } = "{}";
+    public DateTime OccurredAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime ReceivedAtUtc { get; set; } = DateTime.UtcNow;
 }

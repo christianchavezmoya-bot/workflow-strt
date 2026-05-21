@@ -12,13 +12,18 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
+  FormControlLabel,
   IconButton,
+  InputLabel,
   ListItemText,
   Menu,
   MenuItem,
-  Paper,
+  Select,
   Stack,
+  Switch,
   Table,
+  TextField,
   TableBody,
   TableCell,
   TableHead,
@@ -28,9 +33,9 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { ArrowDropDown, CalendarTodayOutlined, DeleteOutline, EditOutlined, ExpandLess, ExpandMore, PersonOutlined } from "@mui/icons-material";
+import { ArrowDropDown, CalendarTodayOutlined, DeleteForeverOutlined, DeleteOutline, EditOutlined, ExpandLess, ExpandMore, PersonOutlined, RestoreOutlined } from "@mui/icons-material";
 import ProjectChevronPanel from "./ProjectChevronPanel";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import TableConfigDialog from "../../components/TableConfigDialog";
@@ -50,7 +55,10 @@ import { createCountryResolver } from "../../utils/officeCountry";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { deleteProject, fetchProjects, updateProjectStatus } from "../../store/projectSlice";
+import { projectService } from "../../services/projectService";
 import { Project } from "../../types/project";
+import ProjectForm from "./ProjectForm";
+import { getProjectCompletionSummary, notifyProjectReadyForCompletion } from "./projectActionUtils";
 
 // Style for field definition labels (yellow bold)
 const fieldLabelStyle = {
@@ -247,6 +255,7 @@ const ProjectList = () => {
   const can = usePermissions();
   const { activeOffice } = useActiveOffice();
   const { isMyWork, canUseOfficeView } = useWorkScope();
+  const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { items, total, loading, error } = useAppSelector((state) => state.projects);
   const productsState = useAppSelector((state) => state.products);
@@ -295,11 +304,25 @@ const ProjectList = () => {
     key: ""
   });
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<Project | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [purgeTarget, setPurgeTarget] = useState<Project | null>(null);
   const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const canDeleteProjects = can.modifyData;
+  const [projectViewFilter, setProjectViewFilter] = useState<"all" | "mine">("all");
+  const [projectNumberFilter, setProjectNumberFilter] = useState("");
+  const isAdminUser = user?.role === "Admin";
+  const isPmUser = user?.role === "Project Manager";
+  const canCreateProjects = isAdminUser || isPmUser;
+  const canManageProjectTable = isAdminUser || isPmUser;
+
+  const canEditProject = useMemo(() => (project: Project) => {
+    if (isAdminUser) return true;
+    if (!isPmUser) return false;
+    return project.assignedPmUserId === user?.id;
+  }, [isAdminUser, isPmUser, user?.id]);
 
   // Block-complete dialog — shown when assets are not all done
   const [blockComplete, setBlockComplete] = useState<{ open: boolean; incomplete: number; total: number }>({ open: false, incomplete: 0, total: 0 });
@@ -316,11 +339,19 @@ const ProjectList = () => {
       fetchProjects({
         // Filter by country on the server so pagination doesn't hide matching projects.
         country: activeOffice !== "All" ? activeOffice : undefined,
+        scope: "browse",
+        ownershipScope: isPmUser ? projectViewFilter : "all",
+        projectNumber: projectNumberFilter.trim() || undefined,
         page: page + 1,
-        pageSize: rowsPerPage
+        pageSize: rowsPerPage,
+        includeDeleted: showArchived
       })
     );
-  }, [dispatch, activeOffice, page, rowsPerPage]);
+  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, isPmUser, projectViewFilter, projectNumberFilter]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [showArchived, projectViewFilter, projectNumberFilter]);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -464,10 +495,8 @@ const ProjectList = () => {
   }, [projectsTableConfig.config.order, projectsTableConfig.config.hidden, projectDynamicColumns, projectsDynamic.valuesByEntity]);
 
   const handleAction = async (project: Project, label: string) => {
-    if (!project.id) return;
-
-    if (label === "Submit for Approval") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Pending Approval" } }));
+    if (!project.id) {
+      return;
     }
 
     if (label === "Approve") {
@@ -483,7 +512,10 @@ const ProjectList = () => {
     }
 
     if (label === "Start Work") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } }));
+      const updated = await dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } })).unwrap();
+      navigate(
+        `/installations/assets?product=${encodeURIComponent(updated.productIds?.[0] ?? project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`
+      );
     }
 
     if (label === "Mark Completed") {
@@ -511,19 +543,15 @@ const ProjectList = () => {
   const renderActions = (project: Project) => {
     const actions: string[] = [];
 
-    if (project.status === "Draft" && user?.role === "Project Manager") {
-      actions.push("Submit for Approval");
+    if (project.status === "Pending Approval" && isAdminUser) {
+      actions.push("Approve", "Reject");
     }
 
-    if (project.status === "Pending Approval" && user?.role === "Admin") {
-      actions.push("Approve", "Request Info", "Reject");
-    }
-
-    if (project.status === "Approved" && can.modifyData) {
+    if (project.status === "Approved" && canEditProject(project)) {
       actions.push("Start Work");
     }
 
-    if (project.status === "In Progress" && can.modifyData) {
+    if (project.status === "In Progress" && canEditProject(project)) {
       actions.push("Mark Completed");
     }
 
@@ -564,16 +592,20 @@ const ProjectList = () => {
             )}
           </Stack>
           <Typography variant="body2" color="text.secondary">
-            Showing {activeOffice === "All" ? "all offices" : activeOffice} projects.
+            Showing {activeOffice === "All" ? "all offices" : activeOffice} {showArchived ? "projects including archived records." : "projects."}
           </Typography>
         </Box>
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-          {can.modifyData && (
+          <FormControlLabel
+            control={<Switch size="small" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />}
+            label="Show archived"
+          />
+          {canCreateProjects && (
             <Button variant="contained" component={Link} to="/projects/new">
               Create project
             </Button>
           )}
-          {can.editFields && !isMobile && (
+          {canManageProjectTable && (
             <Button variant="outlined" onClick={() => setTableConfigOpen(true)}>
               Table configuration
             </Button>
@@ -581,9 +613,46 @@ const ProjectList = () => {
         </Stack>
       </Stack>
 
+      <Box className="glass-card" sx={{ p: 2 }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
+          {isPmUser && (
+            <FormControl size="small" sx={{ minWidth: 220 }}>
+              <InputLabel id="project-view-filter-label">Project View</InputLabel>
+              <Select
+                labelId="project-view-filter-label"
+                label="Project View"
+                value={projectViewFilter}
+                onChange={(event) => setProjectViewFilter(event.target.value as "all" | "mine")}
+              >
+                <MenuItem value="all">All projects</MenuItem>
+                <MenuItem value="mine">My PM projects</MenuItem>
+              </Select>
+            </FormControl>
+          )}
+          <TextField
+            size="small"
+            label="Project number"
+            placeholder="Search job / project number"
+            value={projectNumberFilter}
+            onChange={(event) => setProjectNumberFilter(event.target.value)}
+            sx={{ minWidth: { xs: "100%", md: 280 } }}
+          />
+          <Button
+            variant="outlined"
+            onClick={() => {
+              setProjectViewFilter("all");
+              setProjectNumberFilter("");
+              setAutoFilters({});
+            }}
+          >
+            Clear filters
+          </Button>
+        </Stack>
+      </Box>
+
       {error && (
         <Typography variant="body2" color="warning.main">
-          API unavailable. Showing demo data for local testing.
+          Unable to load the latest server project data.
         </Typography>
       )}
 
@@ -612,7 +681,7 @@ const ProjectList = () => {
             })();
 
             return (
-              <Paper key={project.id} className="glass-card" sx={{
+              <Box key={project.id} className="glass-card" sx={{
                 overflow: "hidden",
                 transition: "all 0.2s ease",
                 "&:hover": {
@@ -703,7 +772,7 @@ const ProjectList = () => {
                           <EditOutlined fontSize="small" />
                         </IconButton>
                       )}
-                      {canDeleteProjects && (
+                      {canEditProject(project) && (
                         <IconButton size="small" color="error" disabled={deleteSavingId === project.id}
                           onClick={() => setDeleteTarget(project)}>
                           <DeleteOutline fontSize="small" />
@@ -727,7 +796,7 @@ const ProjectList = () => {
                     />
                   </Box>
                 </Collapse>
-              </Paper>
+              </Box>
             );
           })}
 
@@ -824,13 +893,13 @@ const ProjectList = () => {
                     ))}
                     <TableCell sx={{ padding: '8px 12px' }}>
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
-                        {renderActions(project)}
-                        {can.modifyData && (
-                          <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
+                        {!project.isDeleted && renderActions(project)}
+                        {canEditProject(project) && !project.isDeleted && (
+                          <IconButton size="small" onClick={() => setEditTarget(project)}>
                             <EditOutlined fontSize="small" />
                           </IconButton>
                         )}
-                        {canDeleteProjects && (
+                        {canEditProject(project) && !project.isDeleted && (
                           <IconButton
                             size="small"
                             disabled={deleteSavingId === project.id}
@@ -838,6 +907,42 @@ const ProjectList = () => {
                           >
                             <DeleteOutline fontSize="small" />
                           </IconButton>
+                        )}
+                        {canEditProject(project) && project.isDeleted && (
+                          <>
+                            <IconButton
+                              size="small"
+                              disabled={deleteSavingId === project.id}
+                              onClick={async () => {
+                                try {
+                                  setDeleteSavingId(project.id);
+                                  await projectService.restoreProject(project.id);
+                                  await dispatch(
+                                    fetchProjects({
+                                      country: activeOffice !== "All" ? activeOffice : undefined,
+                                      scope: "browse",
+                                      ownershipScope: isPmUser ? projectViewFilter : "all",
+                                      projectNumber: projectNumberFilter.trim() || undefined,
+                                      page: page + 1,
+                                      pageSize: rowsPerPage,
+                                      includeDeleted: showArchived
+                                    })
+                                  );
+                                } finally {
+                                  setDeleteSavingId(null);
+                                }
+                              }}
+                            >
+                              <RestoreOutlined fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              disabled={deleteSavingId === project.id}
+                              onClick={() => setPurgeTarget(project)}
+                            >
+                              <DeleteForeverOutlined fontSize="small" />
+                            </IconButton>
+                          </>
                         )}
                       </Stack>
                     </TableCell>
@@ -957,6 +1062,9 @@ const ProjectList = () => {
         open={!!deleteTarget}
         entityType="project"
         entityLabel={deleteTarget?.jobNumber || deleteTarget?.id}
+        title="Archive Project"
+        message={`Archive project ${(deleteTarget?.jobNumber || deleteTarget?.id) ? `(${deleteTarget?.jobNumber || deleteTarget?.id})` : ""}? It will be removed from active lists for all users and can be restored later.`}
+        confirmLabel="Archive"
         loading={!!deleteTarget && deleteSavingId === deleteTarget.id}
         onClose={() => {
           if (deleteSavingId) return;
@@ -969,8 +1077,46 @@ const ProjectList = () => {
             await dispatch(deleteProject(deleteTarget.id)).unwrap();
             setDeleteTarget(null);
           } catch (e) {
-            console.error("Delete project failed:", e);
-            alert("Unable to delete project. Check your permissions and API availability.");
+            console.error("Archive project failed:", e);
+            alert("Unable to archive project. Check your permissions and API availability.");
+          } finally {
+            setDeleteSavingId(null);
+          }
+        }}
+      />
+
+      <DeleteConfirmDialog
+        open={!!purgeTarget}
+        entityType="project"
+        entityLabel={purgeTarget?.jobNumber || purgeTarget?.id}
+        title="Delete Project Permanently"
+        message={`Permanently delete project ${(purgeTarget?.jobNumber || purgeTarget?.id) ? `(${purgeTarget?.jobNumber || purgeTarget?.id})` : ""}? This cannot be undone.`}
+        confirmLabel="Delete permanently"
+        loading={!!purgeTarget && deleteSavingId === purgeTarget.id}
+        onClose={() => {
+          if (deleteSavingId) return;
+          setPurgeTarget(null);
+        }}
+        onConfirm={async () => {
+          if (!purgeTarget) return;
+          try {
+            setDeleteSavingId(purgeTarget.id);
+            await projectService.purgeProject(purgeTarget.id);
+            setPurgeTarget(null);
+            await dispatch(
+              fetchProjects({
+                country: activeOffice !== "All" ? activeOffice : undefined,
+                scope: "browse",
+                ownershipScope: isPmUser ? projectViewFilter : "all",
+                projectNumber: projectNumberFilter.trim() || undefined,
+                page: page + 1,
+                pageSize: rowsPerPage,
+                includeDeleted: showArchived
+              })
+            );
+          } catch (e) {
+            console.error("Purge project failed:", e);
+            alert("Unable to permanently delete project. Check your permissions and API availability.");
           } finally {
             setDeleteSavingId(null);
           }
@@ -1077,10 +1223,46 @@ const ProjectList = () => {
           await projectsDynamic.reload();
         }}
       />
+
+      <Dialog
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{
+          className: "glass-card",
+          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)", minHeight: "80vh" }
+        }}
+      >
+        <DialogTitle>Edit project</DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {editTarget && (
+            <Box sx={{ p: 3 }}>
+              <ProjectForm
+                embedded
+                projectId={editTarget.id}
+                onClose={() => setEditTarget(null)}
+                onSaved={async () => {
+                  setEditTarget(null);
+                  await dispatch(
+                    fetchProjects({
+                      country: activeOffice !== "All" ? activeOffice : undefined,
+                      scope: "browse",
+                      ownershipScope: isPmUser ? projectViewFilter : "all",
+                      projectNumber: projectNumberFilter.trim() || undefined,
+                      page: page + 1,
+                      pageSize: rowsPerPage,
+                      includeDeleted: showArchived
+                    })
+                  );
+                }}
+              />
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
     </Stack>
   );
 };
 
 export default ProjectList;
-
-

@@ -5529,6 +5529,29 @@ export const UserManagement: React.FC = () => {
         <DialogTitle>Edit user</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ marginTop: 1 }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Chip
+                label={editUserForm.isActive ? "Active" : "Inactive"}
+                color={editUserForm.isActive ? "success" : "default"}
+                size="small"
+              />
+              <Button
+                variant={editUserForm.isActive ? "contained" : "outlined"}
+                color="success"
+                onClick={() => setEditUserForm((prev) => ({ ...prev, isActive: true }))}
+                disabled={editUserForm.isActive}
+              >
+                Activate
+              </Button>
+              <Button
+                variant={!editUserForm.isActive ? "contained" : "outlined"}
+                color="inherit"
+                onClick={() => setEditUserForm((prev) => ({ ...prev, isActive: false }))}
+                disabled={!editUserForm.isActive}
+              >
+                Deactivate
+              </Button>
+            </Stack>
             <TextField
               label="Full name"
               value={editUserForm.fullName}

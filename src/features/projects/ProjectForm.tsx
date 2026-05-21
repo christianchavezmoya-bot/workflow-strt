@@ -28,7 +28,7 @@ import {
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs from "dayjs";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -49,11 +49,15 @@ import { fetchProducts } from "../../store/productsSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { createProject, updateProject } from "../../store/projectSlice";
 import { ApprovalDecision, Office, Project, ProjectStatus, WorkflowMode } from "../../types/project";
+import { useAuth } from "../../hooks/useAuth";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import type { Site } from "../../types/site";
 import type { FieldDefinition } from "../../services/fieldService";
+
+const getLocalDateString = (offsetDays = 0) => dayjs().add(offsetDays, "day").format("YYYY-MM-DD");
+const INSTALLATION_ENABLED_MODES: WorkflowMode[] = ["INSTALLATION_ONLY", "MIXED"];
 
 const schema = z
   .object({
@@ -83,19 +87,29 @@ const schema = z
       .optional(),
     approvalDecision: z
       .union([
-        z.enum(["Approved", "Rejected", "More Info Required"] as [ApprovalDecision, ...ApprovalDecision[]]),
+        z.enum(["Approved", "Rejected"] as [ApprovalDecision, ...ApprovalDecision[]]),
         z.literal("")
       ])
       .optional(),
-    workflowMode: z.enum(["INSTALLATION_ONLY", "INSPECTION_ONLY", "MIXED"] as [WorkflowMode, ...WorkflowMode[]]).optional(),
+    workflowMode: z.enum(["INSTALLATION_ONLY", "INSPECTION_ONLY", "MIXED"]).default("INSTALLATION_ONLY"),
+    isInstallationProject: z.boolean(),
     productIds: z.array(z.string()).optional()
   });
 
 type FormValues = z.infer<typeof schema>;
 
-const ProjectForm = () => {
-  const { id } = useParams();
+type ProjectFormProps = {
+  projectId?: string;
+  embedded?: boolean;
+  onClose?: () => void;
+  onSaved?: (project: Project) => void;
+};
+
+const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectFormProps) => {
+  const { id: routeId } = useParams();
+  const id = projectId ?? routeId;
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const { items } = useAppSelector((state) => state.projects);
@@ -119,6 +133,7 @@ const ProjectForm = () => {
     [allFieldDefinitions.definitions]
   );
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
+  const saveModeRef = useRef<"draft" | "final">("final");
   const builtInLabel = useMemo(() => {
     const overrides = projectsTableConfig.config.baseFieldNames || {};
     return (id: string, fallback: string) => {
@@ -142,6 +157,13 @@ const ProjectForm = () => {
     return customers;
   }, [customers]);
   const products = productsState.items.length ? productsState.items : demoProducts;
+  const editingProject = useMemo(() => items.find((item) => item.id === id) ?? null, [id, items]);
+  const canEditExistingProject = useMemo(() => {
+    if (!id) return true;
+    if (!editingProject || !user) return false;
+    if (user.role === "Admin") return true;
+    return user.role === "Project Manager" && editingProject.assignedPmUserId === user.id;
+  }, [editingProject, id, user]);
   const {
     control,
     handleSubmit,
@@ -150,7 +172,9 @@ const ProjectForm = () => {
     reset,
     setError,
     setValue,
-    setFocus
+    setFocus,
+    getValues,
+    clearErrors
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -160,7 +184,7 @@ const ProjectForm = () => {
       jobNumber: "",
       purchaseOrderNumber: "",
       description: "",
-      startDate: "",
+      startDate: getLocalDateString(),
       finishDate: "",
       office: "",
       region: "",
@@ -168,10 +192,19 @@ const ProjectForm = () => {
       projectType: "Internal",
       status: "Draft",
       approvalDecision: "",
-      workflowMode: "INSTALLATION_ONLY" as WorkflowMode,
+      workflowMode: "INSTALLATION_ONLY",
+      isInstallationProject: false,
       productIds: []
     }
   });
+
+  const handleClose = () => {
+    if (embedded) {
+      onClose?.();
+      return;
+    }
+    navigate("/projects");
+  };
 
   useEffect(() => {
     dispatch(fetchCustomers());
@@ -184,7 +217,28 @@ const ProjectForm = () => {
   }, []);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id) {
+      reset({
+        customerName: "",
+        customerId: "",
+        siteId: "",
+        jobNumber: "",
+        purchaseOrderNumber: "",
+        description: "",
+        startDate: getLocalDateString(),
+        finishDate: "",
+        office: "",
+        region: "",
+        projectManager: "",
+        projectType: "Internal",
+        status: "Draft",
+        approvalDecision: "",
+        workflowMode: "INSTALLATION_ONLY",
+        isInstallationProject: false,
+        productIds: []
+      });
+      return;
+    }
 
     const localProject = items.find((item) => item.id === id);
     if (localProject) {
@@ -203,11 +257,11 @@ const ProjectForm = () => {
         projectType: localProject.projectType,
         status: localProject.status,
         approvalDecision: localProject.approvalDecision || "",
-        workflowMode: (localProject.workflowMode as WorkflowMode) ?? (localProject.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
+        workflowMode: localProject.workflowMode || (localProject.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
+        isInstallationProject: localProject.isInstallationProject,
         productIds: localProject.productIds ?? []
       });
       setProductFeatureValues(localProject.productFeatureValues || {});
-      return;
     }
 
     projectService.getProject(id).then((project) => {
@@ -218,7 +272,7 @@ const ProjectForm = () => {
         jobNumber: project.jobNumber,
         purchaseOrderNumber: project.purchaseOrderNumber || "",
         description: project.description,
-        startDate: project.startDate,
+        startDate: project.startDate || getLocalDateString(),
         finishDate: project.finishDate,
         office: project.officeId || globalOffices.find((o) => o.city === project.office)?.id || "",
         region: project.region,
@@ -226,12 +280,19 @@ const ProjectForm = () => {
         projectType: project.projectType,
         status: project.status,
         approvalDecision: project.approvalDecision || "",
-        workflowMode: (project.workflowMode as WorkflowMode) ?? (project.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
+        workflowMode: project.workflowMode || (project.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
+        isInstallationProject: project.isInstallationProject,
         productIds: project.productIds ?? []
       });
       setProductFeatureValues(project.productFeatureValues || {});
     });
-  }, [id, items, reset]);
+  }, [id, items, reset, globalOffices]);
+
+  useEffect(() => {
+    if (!embedded && id && editingProject && !canEditExistingProject) {
+      navigate(`/projects/${id}`);
+    }
+  }, [canEditExistingProject, editingProject, embedded, id, navigate]);
 
   useEffect(() => {
     if (projectsDynamic.definitions.length === 0) return;
@@ -257,8 +318,7 @@ const ProjectForm = () => {
 
   const projectType = watch("projectType");
   const workflowMode = watch("workflowMode");
-  const isInstallationProject = workflowMode === "INSTALLATION_ONLY" || workflowMode === "MIXED";
-  const status = watch("status");
+  const isInstallationProject = watch("isInstallationProject");
   const customerId = watch("customerId");
   const siteId = watch("siteId");
   const office = watch("office");
@@ -270,6 +330,13 @@ const ProjectForm = () => {
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
   const [globalOfficePrompt, setGlobalOfficePrompt] = useState<{ country: string; managerName: string } | null>(null);
   const [productFeatureValues, setProductFeatureValues] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const nextIsInstallationProject = INSTALLATION_ENABLED_MODES.includes((workflowMode || "INSTALLATION_ONLY") as WorkflowMode);
+    if (isInstallationProject !== nextIsInstallationProject) {
+      setValue("isInstallationProject", nextIsInstallationProject, { shouldValidate: false, shouldDirty: true });
+    }
+  }, [isInstallationProject, setValue, workflowMode]);
 
   useEffect(() => {
     setSitesLoading(true);
@@ -406,7 +473,9 @@ const ProjectForm = () => {
       anyWindow.__apiDebugLogs = [];
     }
     anyWindow.__apiDebugLogs.push({
-      id: crypto.randomUUID(),
+      id: typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : Math.random().toString(36).slice(2),
       time: new Date().toLocaleTimeString(),
       method: "UI",
       url: message,
@@ -418,6 +487,7 @@ const ProjectForm = () => {
 
   const onSubmit = async (data: FormValues) => {
     setDynamicFieldErrors({});
+    setSubmitError(null);
     // Validate required fields based on table configuration (admin-controlled).
     const hiddenSet = new Set(projectsTableConfig.config.hidden || []);
     const meta = projectsTableConfig.config.baseFieldMeta || {};
@@ -425,57 +495,64 @@ const ProjectForm = () => {
 
     const isRequired = (fieldId: string) => !!meta[fieldId]?.required && !hiddenSet.has(fieldId);
     const isBlank = (value: unknown) => String(value ?? "").trim() === "";
+    const requestedDecision = data.approvalDecision || undefined;
+    const currentSaveMode = saveModeRef.current;
+    const derivedStatus: ProjectStatus =
+      currentSaveMode === "draft"
+        ? "Draft"
+        : requestedDecision === "Approved"
+        ? "Approved"
+        : requestedDecision === "Rejected"
+        ? "Cancelled"
+        : ((data.status as ProjectStatus | undefined) || "Draft");
+    const shouldEnforceRequiredFields = derivedStatus !== "Draft";
 
-    if (isRequired("customerName") && !selectedCustomerId) {
+    if (shouldEnforceRequiredFields && isRequired("customerName") && !selectedCustomerId) {
       // customerName is driven by the separate Select (selectedCustomerId), so set an explicit form error.
       setError("customerName", { type: "required", message: `${labelCustomer} is required` });
       missing.push(labelCustomer);
     }
-    if (isRequired("customerId") && isBlank(data.customerId)) {
+    if (shouldEnforceRequiredFields && isRequired("customerId") && isBlank(data.customerId)) {
       setError("customerId", { type: "required", message: `${labelCustomerId} is required` });
       missing.push(labelCustomerId);
     }
-    if (isRequired("siteName") && isBlank(data.siteId)) {
+    if (shouldEnforceRequiredFields && isRequired("siteName") && isBlank(data.siteId)) {
       setError("siteId", { type: "required", message: `${labelSite} is required` });
       missing.push(labelSite);
     }
-    if (isRequired("jobNumber") && isBlank(data.jobNumber)) {
+    if (shouldEnforceRequiredFields && isRequired("jobNumber") && isBlank(data.jobNumber)) {
       setError("jobNumber", { type: "required", message: `${labelJobNumber} is required` });
       missing.push(labelJobNumber);
     }
-    if (isRequired("description") && isBlank(data.description)) {
+    if (shouldEnforceRequiredFields && isRequired("description") && isBlank(data.description)) {
       setError("description", { type: "required", message: `${labelDescription} is required` });
       missing.push(labelDescription);
     }
-    if (isRequired("startDate") && isBlank(data.startDate)) {
+    if (shouldEnforceRequiredFields && isRequired("startDate") && isBlank(data.startDate)) {
       setError("startDate", { type: "required", message: `${labelStartDate} is required` });
       missing.push(labelStartDate);
     }
-    if (isRequired("finishDate") && isBlank(data.finishDate)) {
+    if (shouldEnforceRequiredFields && isRequired("finishDate") && isBlank(data.finishDate)) {
       setError("finishDate", { type: "required", message: `${labelFinishDate} is required` });
       missing.push(labelFinishDate);
     }
-    if (isRequired("office") && isBlank(data.office)) {
+    if (shouldEnforceRequiredFields && isRequired("office") && isBlank(data.office)) {
       setError("office", { type: "required", message: `${labelOffice} is required` });
       missing.push(labelOffice);
     }
-    if (isRequired("region") && isBlank(data.region)) {
+    if (shouldEnforceRequiredFields && isRequired("region") && isBlank(data.region)) {
       setError("region", { type: "required", message: `${labelRegion} is required` });
       missing.push(labelRegion);
     }
-    if (isRequired("projectManager") && isBlank(data.projectManager)) {
+    if (shouldEnforceRequiredFields && isRequired("projectManager") && isBlank(data.projectManager)) {
       setError("projectManager", { type: "required", message: `${labelProjectManager} is required` });
       missing.push(labelProjectManager);
     }
-    if (isRequired("status") && isBlank(data.status)) {
-      setError("status", { type: "required", message: `${labelStatus} is required` });
-      missing.push(labelStatus);
-    }
-    if (isRequired("projectType") && isBlank(data.projectType)) {
+    if (shouldEnforceRequiredFields && isRequired("projectType") && isBlank(data.projectType)) {
       setError("projectType", { type: "required", message: `${labelProjectType} is required` });
       missing.push(labelProjectType);
     }
-    if (isRequired("products") && (!data.productIds || data.productIds.length === 0)) {
+    if (shouldEnforceRequiredFields && isRequired("products") && (!data.productIds || data.productIds.length === 0)) {
       setError("productIds", { type: "required", message: `${labelProducts} is required` });
       missing.push(labelProducts);
     }
@@ -494,17 +571,19 @@ const ProjectForm = () => {
     };
 
     // Dynamic fields required flags are stored in baseFieldMeta by field id.
-    const missingDynamicDefs = projectsDynamic.definitions
-      .filter((def) => !!meta[def.id]?.required && !hiddenSet.has(def.id))
-      .filter((def) => isBlank(dynamicValueForValidation(def)))
-      .map((def) => ({ id: def.id, name: def.name }));
-    if (missingDynamicDefs.length) {
-      const nextErrors: Record<string, string> = {};
-      missingDynamicDefs.forEach((def) => {
-        nextErrors[def.id] = `${def.name} is required`;
-      });
-      setDynamicFieldErrors(nextErrors);
-      missing.push(...missingDynamicDefs.map((d) => d.name));
+    if (shouldEnforceRequiredFields) {
+      const missingDynamicDefs = projectsDynamic.definitions
+        .filter((def) => !!meta[def.id]?.required && !hiddenSet.has(def.id))
+        .filter((def) => isBlank(dynamicValueForValidation(def)))
+        .map((def) => ({ id: def.id, name: def.name }));
+      if (missingDynamicDefs.length) {
+        const nextErrors: Record<string, string> = {};
+        missingDynamicDefs.forEach((def) => {
+          nextErrors[def.id] = `${def.name} is required`;
+        });
+        setDynamicFieldErrors(nextErrors);
+        missing.push(...missingDynamicDefs.map((d) => d.name));
+      }
     }
 
     if (missing.length) {
@@ -514,7 +593,7 @@ const ProjectForm = () => {
     }
 
     const selected = filteredCustomers.find((customer) => customer.id === selectedCustomerId);
-    if (!selected) {
+    if (shouldEnforceRequiredFields && !selected) {
       // Customer selection can be hidden/optional; only block if a dependent field is required.
       if (isRequired("customerName") || isRequired("customerId") || isRequired("siteName")) {
         setSubmitError(`Select a ${labelCustomer.toLowerCase()} before submitting.`);
@@ -543,24 +622,30 @@ const ProjectForm = () => {
       jobNumber: data.jobNumber || "",
       purchaseOrderNumber: data.purchaseOrderNumber || "",
       description: data.description || "",
-      startDate: data.startDate || "",
+      startDate: data.startDate || getLocalDateString(),
       finishDate: data.finishDate || "",
       officeId: data.office || undefined,
       office: globalOffices.find((o) => o.id === data.office)?.city || data.office || "",
       region: data.region,
       projectType: (data.projectType as any) || "Internal",
-      status: (data.status as any) || "Draft",
-      approvalDecision: data.approvalDecision || undefined,
-      workflowMode: data.workflowMode ?? "INSTALLATION_ONLY",
-      isInstallationProject: data.workflowMode === "INSTALLATION_ONLY" || data.workflowMode === "MIXED",
+      status: derivedStatus,
+      approvalDecision: requestedDecision,
+      workflowMode: data.workflowMode,
+      isInstallationProject: INSTALLATION_ENABLED_MODES.includes(data.workflowMode as WorkflowMode),
       projectManager: data.projectManager,
       productIds: data.productIds ?? [],
       productFeatureValues
     };
 
     try {
+      let savedProject: Project | null = null;
+      if (id && !canEditExistingProject) {
+        setSubmitError("You don't have permission to edit this project.");
+        return;
+      }
       if (id) {
         const result = await dispatch(updateProject({ id, payload })).unwrap();
+        savedProject = result;
         await projectsDynamic.upsertForEntity(
           result.id,
           dynamicValuesToSave,
@@ -568,6 +653,7 @@ const ProjectForm = () => {
         );
       } else {
         const result = await dispatch(createProject(payload)).unwrap();
+        savedProject = result;
         await projectsDynamic.upsertForEntity(
           result.id,
           dynamicValuesToSave,
@@ -586,7 +672,8 @@ const ProjectForm = () => {
           }
         }
       }
-      navigate("/projects");
+      if (savedProject) onSaved?.(savedProject);
+      handleClose();
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 403 || status === 401) {
@@ -614,9 +701,9 @@ const ProjectForm = () => {
       projectManager: labelProjectManager,
       projectType: labelProjectType,
       status: labelStatus,
+      workflowMode: "Workflow mode",
       productIds: labelProducts,
-      approvalDecision: "Approval Decision",
-      workflowMode: "Workflow mode"
+      approvalDecision: "Approval Decision"
     };
     const missingLabels = keys.map((key) => labelByName[key] || key);
     setSubmitError(
@@ -640,6 +727,24 @@ const ProjectForm = () => {
         // ignore
       }
     }
+  };
+
+  const runSave = (mode: "draft" | "final") => {
+    saveModeRef.current = mode;
+    if (mode === "draft") {
+      clearErrors();
+      setDynamicFieldErrors({});
+      setSubmitError(null);
+      setValue("approvalDecision", "", { shouldValidate: false });
+      setValue("status", "Draft", { shouldValidate: false });
+      void onSubmit({
+        ...getValues(),
+        approvalDecision: "",
+        status: "Draft"
+      });
+      return;
+    }
+    void handleSubmit(onSubmit, onInvalid)();
   };
 
   const handleCustomerSelect = (value: string) => {
@@ -1191,42 +1296,6 @@ const ProjectForm = () => {
             />
           </Grid>
         );
-      case "status":
-        return (
-          <Grid item xs={12} md={6} key={fieldId}>
-            <Controller
-              name="status"
-              control={control}
-              render={({ field }) => (
-                <TextField
-                  {...field}
-                  label={labelWithRequired("status", labelStatus)}
-                  fullWidth
-                  select
-                  SelectProps={{ native: true }}
-                  InputLabelProps={{ shrink: true }}
-                  error={!!errors.status}
-                  helperText={errors.status?.message || "Current workflow status for this project."}
-                >
-                  {([
-                    "Draft",
-                    "In Planning",
-                    "Pending Approval",
-                    "Approved",
-                    "In Progress",
-                    "On Hold",
-                    "Completed",
-                    "Cancelled"
-                  ] as ProjectStatus[]).map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </TextField>
-              )}
-            />
-          </Grid>
-        );
       case "projectType":
         return (
           <Grid item xs={12} md={6} key={fieldId}>
@@ -1413,9 +1482,8 @@ const ProjectForm = () => {
             <Grid item xs={12} md={6} />
 
             {visibleIdSet.has("projectType") && renderFormField("projectType")}
-            {visibleIdSet.has("status") ? renderFormField("status") : <Grid item xs={12} md={6} />}
+            <Grid item xs={12} md={6} />
 
-            {extraDynamicIds.map((fieldId) => renderFormField(fieldId))}
             <Grid item xs={12} md={6}>
               <FormControl component="fieldset">
                 <FormLabel component="legend">Workflow Mode</FormLabel>
@@ -1439,6 +1507,9 @@ const ProjectForm = () => {
                 </FormHelperText>
               </FormControl>
             </Grid>
+            <Grid item xs={12} md={6} />
+
+            {extraDynamicIds.map((fieldId) => renderFormField(fieldId))}
             {projectType === "External" && (
               <Grid item xs={12}>
                 <Alert severity="info">
@@ -1447,7 +1518,15 @@ const ProjectForm = () => {
               </Grid>
             )}
 
-            {projectType === "External" && status !== "Draft" && (
+            {workflowMode === "INSPECTION_ONLY" && (
+              <Grid item xs={12}>
+                <Alert severity="info">
+                  Inspection-only projects use project assets and inspection runs without exposing installation workspace sections.
+                </Alert>
+              </Grid>
+            )}
+
+            {projectType === "External" && (
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth>
                   <FormLabel>Approval Decision</FormLabel>
@@ -1456,13 +1535,13 @@ const ProjectForm = () => {
                     control={control}
                     render={({ field }) => (
                       <RadioGroup row {...field}>
-                        {"Approved,Rejected,More Info Required".split(",").map((value) => (
+                        {"Approved,Rejected".split(",").map((value) => (
                           <FormControlLabel key={value} value={value} control={<Radio />} label={value} />
                         ))}
                       </RadioGroup>
                     )}
                   />
-                  <FormHelperText>Record the current approval outcome for External projects.</FormHelperText>
+                  <FormHelperText>Approval updates the project status automatically when you save.</FormHelperText>
                 </FormControl>
               </Grid>
             )}
@@ -1506,11 +1585,23 @@ const ProjectForm = () => {
             </Box>
           )}
           <Stack direction="row" spacing={2} sx={{ marginTop: 3 }}>
-            <Button variant="outlined" onClick={() => navigate("/projects")}>
+            <Button variant="outlined" onClick={handleClose}>
               Cancel
             </Button>
-            <Button variant="outlined">Save draft</Button>
-            <Button variant="contained" type="submit" disabled={cloning}>
+            <Button
+              variant="outlined"
+              type="button"
+              disabled={!!id && !canEditExistingProject}
+              onClick={() => runSave("draft")}
+            >
+              Save draft
+            </Button>
+            <Button
+              variant="contained"
+              type="button"
+              disabled={cloning || (!!id && !canEditExistingProject)}
+              onClick={() => runSave("final")}
+            >
               {cloning ? "Copying assets…" : id ? "Save changes" : "Submit project"}
             </Button>
           </Stack>

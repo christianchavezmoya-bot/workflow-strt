@@ -13,7 +13,7 @@ import {
   Typography,
 } from "@mui/material";
 import type { ProjectAsset } from "../../types/projectAsset";
-import type { InspectionImport } from "../../types/project";
+import type { InspectionImport } from "../../types/inspectionImport";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import api from "../../services/api";
 
@@ -55,7 +55,9 @@ const AssetInspectionDialog = ({ asset, open, onClose }: Props) => {
       api.get<AssetInspectionRun[]>("/asset-workflow-runs", {
         params: { assetId: asset.id, workflowType: "Inspection" },
       }),
-      inspectionImportService.list({ assetId: asset.id }),
+      asset.projectId
+        ? inspectionImportService.listByProjectIncludeArchived(asset.projectId, asset.id)
+        : Promise.resolve([]),
     ])
       .then(([runResponse, importItems]) => {
         setRuns(runResponse.data);
@@ -109,7 +111,7 @@ const AssetInspectionDialog = ({ asset, open, onClose }: Props) => {
                 <Box key={item.id} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1.5 }}>
                   <Stack direction="row" justifyContent="space-between" alignItems="center">
                     <Box>
-                      <Typography variant="body2" fontWeight={600}>{item.fileName || item.id}</Typography>
+                      <Typography variant="body2" fontWeight={600}>{item.id}</Typography>
                       <Typography variant="caption" color="text.secondary">
                         {item.source} · {new Date(item.receivedAt).toLocaleString()}
                         {item.mappedRunId ? ` · Run ${item.mappedRunId}` : ""}

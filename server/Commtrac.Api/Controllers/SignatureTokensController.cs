@@ -16,12 +16,21 @@ public class SignatureTokensController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IEmailSender _email;
     private readonly IConfiguration _config;
+    private readonly IAccessScopeService _accessScope;
+    private readonly IWorkflowRunAuthorizationService _workflowAuthorization;
 
-    public SignatureTokensController(AppDbContext db, IEmailSender email, IConfiguration config)
+    public SignatureTokensController(
+        AppDbContext db,
+        IEmailSender email,
+        IConfiguration config,
+        IAccessScopeService accessScope,
+        IWorkflowRunAuthorizationService workflowAuthorization)
     {
         _db = db;
         _email = email;
         _config = config;
+        _accessScope = accessScope;
+        _workflowAuthorization = workflowAuthorization;
     }
 
     // GET /api/signature-tokens?runId=xxx
@@ -29,6 +38,13 @@ public class SignatureTokensController : ControllerBase
     public async Task<ActionResult<List<SignatureTokenDto>>> List([FromQuery] string runId)
     {
         if (string.IsNullOrWhiteSpace(runId)) return BadRequest("runId required");
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == runId);
+        if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null || !await _accessScope.CanViewProjectAsync(User, asset.ProjectId))
+        {
+            return NotFound();
+        }
         var tokens = await _db.SignatureTokens
             .Where(t => t.RunId == runId)
             .OrderByDescending(t => t.CreatedAtUtc)
@@ -43,6 +59,12 @@ public class SignatureTokensController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == req.RunId);
         if (run is null) return NotFound(new { message = "Run not found." });
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return NotFound(new { message = "Asset not found." });
+        if (!await _workflowAuthorization.CanAdministerWorkflowRunAsync(User, asset))
+        {
+            return Forbid();
+        }
         if (!run.IsLocked) return BadRequest(new { message = "Run must be completed before requesting customer signature." });
 
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown";
@@ -73,9 +95,8 @@ public class SignatureTokensController : ControllerBase
             var baseUrl = _config["Email:FrontendBaseUrl"]?.TrimEnd('/') ?? "http://localhost:5173";
             var signLink = $"{baseUrl}/sign/{token.Id}";
 
-            // Resolve the asset name from the run's asset
-            var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
-            var assetName = asset?.AssetName ?? asset?.AssetTag ?? asset?.SerialNumber ?? "Asset";
+            // Use the already-loaded asset to label the signing email consistently.
+            var assetName = asset.AssetName ?? asset.AssetTag ?? asset.SerialNumber ?? "Asset";
 
             _ = _email.SendSignatureLinkAsync(
                 token.RecipientEmail,
@@ -96,6 +117,13 @@ public class SignatureTokensController : ControllerBase
     {
         var token = await _db.SignatureTokens.FirstOrDefaultAsync(t => t.Id == id);
         if (token is null) return NotFound();
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == token.RunId);
+        if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null || !await _workflowAuthorization.CanAdministerWorkflowRunAsync(User, asset))
+        {
+            return Forbid();
+        }
         token.IsRevoked = true;
         await _db.SaveChangesAsync();
         return NoContent();

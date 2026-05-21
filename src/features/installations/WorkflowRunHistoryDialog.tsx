@@ -70,10 +70,14 @@ interface Props {
     latestRun: AssetWorkflowRun
   ) => void;
   onContinue?: (run: AssetWorkflowRun) => void;
+  initialExpandedRunId?: string | null;
+  allowRerun?: boolean;
+  allowContinue?: boolean;
   /** Customer / project context forwarded from the parent page for the PDF report. */
   project?: { customerName: string; jobNumber: string; siteName?: string };
   customerLogoBase64?: string | null;
   assignedTechnician?: string;
+  documentType?: "installation" | "inspection";
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -183,9 +187,13 @@ export default function WorkflowRunHistoryDialog({
   workflowConfigName,
   onRerun,
   onContinue,
+  initialExpandedRunId,
+  allowRerun = true,
+  allowContinue = true,
   project,
   customerLogoBase64,
   assignedTechnician,
+  documentType = "installation",
 }: Props) {
   const [runs, setRuns] = useState<AssetWorkflowRun[]>([]);
   const [loading, setLoading] = useState(false);
@@ -315,10 +323,15 @@ export default function WorkflowRunHistoryDialog({
               new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
           );
         setRuns(filtered);
-        if (filtered.length > 0) setExpandedRunId(filtered[0].id);
+        if (filtered.length > 0) {
+          const preferredRunId = initialExpandedRunId && filtered.some((run) => run.id === initialExpandedRunId)
+            ? initialExpandedRunId
+            : filtered[0].id;
+          setExpandedRunId(preferredRunId);
+        }
       })
       .finally(() => setLoading(false));
-  }, [open, asset.id, workflowConfigId]);
+  }, [open, asset.id, workflowConfigId, initialExpandedRunId]);
 
   const latestLockedRun = runs.find((r) => r.isLocked) ?? null;
   const latestInProgressRun = runs.find((r) => !r.isLocked && r.status === "InProgress") ?? null;
@@ -347,6 +360,7 @@ export default function WorkflowRunHistoryDialog({
         assignedTechnician,
         includeAllSteps,
         signatureEvents,
+        documentType,
       });
     } catch (err) {
       console.error("[WorkflowRunHistoryDialog] Report generation failed", err);
@@ -385,7 +399,7 @@ export default function WorkflowRunHistoryDialog({
                   variant="outlined"
                 />
               )}
-              {latestInProgressRun && onContinue && (
+              {allowContinue && latestInProgressRun && onContinue && (
                 <Tooltip title="Resume the in-progress run from where it was paused">
                   <Button
                     size="small"
@@ -398,25 +412,27 @@ export default function WorkflowRunHistoryDialog({
                   </Button>
                 </Tooltip>
               )}
-              <Tooltip
-                title={
-                  latestLockedRun
-                    ? "Create a new run pre-filled with the latest completed run's values"
-                    : "No completed runs to re-run from"
-                }
-              >
-                <span>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<ReplayOutlined />}
-                    disabled={!latestLockedRun}
-                    onClick={() => setRerunConfirmOpen(true)}
-                  >
-                    Re-run
-                  </Button>
-                </span>
-              </Tooltip>
+              {allowRerun && (
+                <Tooltip
+                  title={
+                    latestLockedRun
+                      ? "Create a new run pre-filled with the latest completed run's values"
+                      : "No completed runs to re-run from"
+                  }
+                >
+                  <span>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<ReplayOutlined />}
+                      disabled={!latestLockedRun}
+                      onClick={() => setRerunConfirmOpen(true)}
+                    >
+                      Re-run
+                    </Button>
+                  </span>
+                </Tooltip>
+              )}
             </Stack>
           </Stack>
         </DialogTitle>

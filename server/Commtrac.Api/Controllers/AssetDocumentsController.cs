@@ -15,11 +15,19 @@ public class AssetDocumentsController : ControllerBase
     private const int MaxDocsPerAsset = 3;
     private readonly AppDbContext _db;
     private readonly IDocumentSearchIndexQueue _searchIndexQueue;
+    private readonly IAccessScopeService _accessScope;
+    private readonly IProjectAuthorizationService _projectAuthorization;
 
-    public AssetDocumentsController(AppDbContext db, IDocumentSearchIndexQueue searchIndexQueue)
+    public AssetDocumentsController(
+        AppDbContext db,
+        IDocumentSearchIndexQueue searchIndexQueue,
+        IAccessScopeService accessScope,
+        IProjectAuthorizationService projectAuthorization)
     {
         _db = db;
         _searchIndexQueue = searchIndexQueue;
+        _accessScope = accessScope;
+        _projectAuthorization = projectAuthorization;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -54,6 +62,12 @@ public class AssetDocumentsController : ControllerBase
     [HttpGet("by-asset/{assetId}")]
     public async Task<IActionResult> ListByAsset(string assetId)
     {
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == assetId);
+        if (asset is null || !await _accessScope.CanViewProjectAsync(User, asset.ProjectId))
+        {
+            return NotFound();
+        }
+
         var docs = await _db.AssetDocuments
             .Where(d => d.AssetId == assetId)
             .OrderBy(d => d.CreatedAt)
@@ -75,6 +89,13 @@ public class AssetDocumentsController : ControllerBase
         [FromForm] string? uploadedBy,
         IFormFile file)
     {
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == assetId);
+        if (asset is null) return NotFound("Asset not found.");
+        if (!await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
+
         // Enforce cap
         var existing = await _db.AssetDocuments.CountAsync(d => d.AssetId == assetId);
         if (existing >= MaxDocsPerAsset)
@@ -108,6 +129,12 @@ public class AssetDocumentsController : ControllerBase
     {
         var doc = await _db.AssetDocuments.FindAsync(id);
         if (doc is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == doc.AssetId);
+        if (asset is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
 
         var nextRevNum = await _db.AssetDocumentRevisions
             .Where(r => r.DocumentId == id)
@@ -126,6 +153,14 @@ public class AssetDocumentsController : ControllerBase
     [HttpGet("{id}/download")]
     public async Task<IActionResult> Download(string id)
     {
+        var doc = await _db.AssetDocuments.FindAsync(id);
+        if (doc is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == doc.AssetId);
+        if (asset is null || !await _accessScope.CanViewProjectAsync(User, asset.ProjectId))
+        {
+            return NotFound();
+        }
+
         var rev = await _db.AssetDocumentRevisions
             .Where(r => r.DocumentId == id)
             .OrderByDescending(r => r.RevisionNumber)
@@ -139,6 +174,14 @@ public class AssetDocumentsController : ControllerBase
     [HttpGet("{id}/revisions/{revId}/download")]
     public async Task<IActionResult> DownloadRevision(string id, string revId)
     {
+        var doc = await _db.AssetDocuments.FindAsync(id);
+        if (doc is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == doc.AssetId);
+        if (asset is null || !await _accessScope.CanViewProjectAsync(User, asset.ProjectId))
+        {
+            return NotFound();
+        }
+
         var rev = await _db.AssetDocumentRevisions
             .FirstOrDefaultAsync(r => r.DocumentId == id && r.Id == revId);
 
@@ -152,6 +195,11 @@ public class AssetDocumentsController : ControllerBase
     {
         var doc = await _db.AssetDocuments.FindAsync(id);
         if (doc is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == doc.AssetId);
+        if (asset is null || !await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
 
         doc.Label = req.Label;
         await _db.SaveChangesAsync();
@@ -164,6 +212,11 @@ public class AssetDocumentsController : ControllerBase
     {
         var doc = await _db.AssetDocuments.FindAsync(id);
         if (doc is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == doc.AssetId);
+        if (asset is null || !await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
 
         var revisions = await _db.AssetDocumentRevisions
             .Where(r => r.DocumentId == id)

@@ -1,7 +1,6 @@
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
-import { pendingGetAll } from "./localDB";
-import { AssetRepository } from "../repositories/AssetRepository";
+import type { DashboardScope } from "./dashboardService";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -15,21 +14,27 @@ function fromDto(dto: ProjectAsset): ProjectAsset {
   return { ...dto, status: normalizeStatus(dto.status) };
 }
 
-/** Return all asset IDs that have a pending action queued. */
-export async function pendingAssetIds(): Promise<Set<string>> {
-  const all = await pendingGetAll();
-  return new Set(all.filter((a) => a.entityType === "asset").map((a) => a.entityId));
-}
-
 export const projectAssetService = {
-  async listByProject(projectId: string): Promise<ProjectAsset[]> {
-    try { return await AssetRepository.getByProject(projectId); }
-    catch { return []; }
+  async myProjectIds(): Promise<string[]> {
+    try {
+      const res = await api.get<string[]>("/project-assets/my-project-ids");
+      return res.data;
+    } catch {
+      return [];
+    }
+  },
+  async listByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, {
+      params: includeDeleted ? { includeDeleted: true } : undefined,
+    });
+    return res.data.map(fromDto);
   },
 
-  async listByProduct(productId: string): Promise<ProjectAsset[]> {
-    try { return await AssetRepository.getByProduct(productId); }
-    catch { return []; }
+  async listByProduct(productId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    const res = await api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`, {
+      params: includeDeleted ? { includeDeleted: true } : undefined,
+    });
+    return res.data.map(fromDto);
   },
 
   async create(input: CreateProjectAssetInput): Promise<ProjectAsset> {
@@ -46,9 +51,11 @@ export const projectAssetService = {
     return res.data.map(fromDto);
   },
 
-  async getById(id: string): Promise<ProjectAsset | null> {
+  async getById(id: string, includeDeleted = false): Promise<ProjectAsset | null> {
     try {
-      const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
+      const res = await api.get<ProjectAsset>(`/project-assets/${id}`, {
+        params: includeDeleted ? { includeDeleted: true } : undefined,
+      });
       return fromDto(res.data);
     } catch {
       return null;
@@ -56,9 +63,8 @@ export const projectAssetService = {
   },
 
   async update(id: string, patch: Partial<CreateProjectAssetInput> & { status?: string; workOrderId?: string }): Promise<ProjectAsset> {
-    const result = await AssetRepository.update(id, patch as Partial<ProjectAsset> & Record<string, unknown>);
-    if (result === null) throw new Error("Offline — change queued");
-    return result;
+    const res = await api.patch<ProjectAsset>(`/project-assets/${id}`, patch);
+    return fromDto(res.data);
   },
 
   async patchIssues(id: string, issuesJson: string): Promise<ProjectAsset> {
@@ -70,36 +76,31 @@ export const projectAssetService = {
     await api.delete(`/project-assets/${id}`);
   },
 
-  async workloadSummary(): Promise<WorkloadSummaryItem[]> {
+  async restore(id: string): Promise<ProjectAsset> {
+    const res = await api.post<ProjectAsset>(`/project-assets/${id}/restore`);
+    return fromDto(res.data);
+  },
+
+  async purge(id: string): Promise<void> {
+    await api.delete(`/project-assets/${id}/purge`);
+  },
+
+  async workloadSummary(scope: DashboardScope = "default"): Promise<WorkloadSummaryItem[]> {
     try {
-      const res = await api.get<WorkloadSummaryItem[]>("/project-assets/workload-summary");
+      const res = await api.get<WorkloadSummaryItem[]>("/project-assets/workload-summary", {
+        params: { scope }
+      });
       return res.data;
     } catch {
       return [];
     }
   },
 
-  async activeSummary(): Promise<ProjectAssetSummaryItem[]> {
+  async listOpen(scope: DashboardScope = "default"): Promise<OpenAssetItem[]> {
     try {
-      const res = await api.get<ProjectAssetSummaryItem[]>("/project-assets/active-summary");
-      return res.data;
-    } catch {
-      return [];
-    }
-  },
-
-  async myProjectIds(): Promise<string[]> {
-    try {
-      const res = await api.get<string[]>("/project-assets/my-project-ids");
-      return res.data;
-    } catch {
-      return [];
-    }
-  },
-
-  async listOpen(): Promise<OpenAssetItem[]> {
-    try {
-      const res = await api.get<OpenAssetItem[]>("/project-assets/open");
+      const res = await api.get<OpenAssetItem[]>("/project-assets/open", {
+        params: { scope }
+      });
       return res.data;
     } catch {
       return [];

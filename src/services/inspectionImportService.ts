@@ -1,70 +1,45 @@
 import api from "./api";
-import type { InspectionImport, InspectionImportStatus, InspectionImportSource } from "../types/project";
-
-export interface CreateInspectionImportPayload {
-  source: InspectionImportSource;
-  fileName?: string;
-  rawJson?: string;
-  projectId?: string;
-  assetId?: string;
-  uploadedBy?: string;
-}
-
-export interface AssignImportPayload {
-  projectId: string;
-  assetId?: string;
-}
+import type { InspectionImport, CreateInspectionImportInput, InspectionImportStatus } from "../types/inspectionImport";
 
 export const inspectionImportService = {
-  async list(params: { projectId?: string; assetId?: string; status?: InspectionImportStatus }) {
-    const response = await api.get<InspectionImport[]>("/inspection-imports", { params });
-    return response.data;
+  async create(input: CreateInspectionImportInput): Promise<InspectionImport> {
+    const res = await api.post<InspectionImport>("/inspection-imports", input);
+    return res.data;
   },
 
-  async getById(id: string) {
-    const response = await api.get<InspectionImport>(`/inspection-imports/${id}`);
-    return response.data;
+  async listByProject(projectId: string, params?: { status?: InspectionImportStatus; assetId?: string }): Promise<InspectionImport[]> {
+    const res = await api.get<InspectionImport[]>(`/projects/${projectId}/inspection-imports`, {
+      params: {
+        status: params?.status,
+        assetId: params?.assetId,
+      },
+    });
+    return res.data;
   },
 
-  async create(payload: CreateInspectionImportPayload) {
-    const response = await api.post<InspectionImport>("/inspection-imports", payload);
-    return response.data;
+  async assign(id: string, payload: { projectId: string; projectAssetId: string }): Promise<InspectionImport> {
+    const res = await api.post<InspectionImport>(`/inspection-imports/${id}/assign`, payload);
+    return res.data;
   },
 
-  async assign(id: string, payload: AssignImportPayload) {
-    const response = await api.post<InspectionImport>(`/inspection-imports/${id}/assign`, payload);
-    return response.data;
+  async update(id: string, payload: { source?: string; rawJson: string }): Promise<InspectionImport> {
+    const res = await api.put<InspectionImport>(`/inspection-imports/${id}`, payload);
+    return res.data;
   },
 
-  async markFailed(id: string, errorText?: string) {
-    const response = await api.patch<InspectionImport>(`/inspection-imports/${id}/fail`, { errorText });
-    return response.data;
-  },
-
-  async remove(id: string) {
+  async remove(id: string): Promise<void> {
     await api.delete(`/inspection-imports/${id}`);
   },
 
-  async uploadFile(file: File, projectId?: string, uploadedBy?: string) {
-    return new Promise<InspectionImport>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const rawJson = reader.result as string;
-          const result = await inspectionImportService.create({
-            source: "LOCAL",
-            fileName: file.name,
-            rawJson,
-            projectId,
-            uploadedBy,
-          });
-          resolve(result);
-        } catch (err) {
-          reject(err);
-        }
-      };
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsText(file);
+  async archive(id: string, payload: { reason?: string; archiveRef?: string }): Promise<InspectionImport> {
+    const res = await api.post<InspectionImport>(`/inspection-imports/${id}/archive`, payload);
+    return res.data;
+  },
+
+  async listByProjectIncludeArchived(projectId: string, assetId?: string): Promise<InspectionImport[]> {
+    const res = await api.get<InspectionImport[]>(`/projects/${projectId}/inspection-imports`, {
+      params: { assetId, includeArchived: true },
     });
+    return res.data;
   },
 };

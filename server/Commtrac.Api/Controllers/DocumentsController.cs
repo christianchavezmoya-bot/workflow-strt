@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
@@ -18,28 +19,55 @@ public class DocumentsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
     private readonly IDocumentSearchIndexQueue _searchIndexQueue;
+    private readonly AuditLogService _audit;
+    private readonly IDocumentAuthorizationService _documentAuthorization;
 
-    public DocumentsController(AppDbContext db, IWebHostEnvironment env, IDocumentSearchIndexQueue searchIndexQueue)
+    public DocumentsController(
+        AppDbContext db,
+        IWebHostEnvironment env,
+        IDocumentSearchIndexQueue searchIndexQueue,
+        AuditLogService audit,
+        IDocumentAuthorizationService documentAuthorization)
     {
         _db = db;
         _env = env;
         _searchIndexQueue = searchIndexQueue;
+        _audit = audit;
+        _documentAuthorization = documentAuthorization;
     }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<DocumentDto>>> GetAll()
     {
         var docs = await _db.Documents.OrderByDescending(d => d.UploadedAt).ToListAsync();
-        return Ok(docs.Select(doc => ToDto(doc, Request)));
+        var visible = new List<DocumentDto>(docs.Count);
+        foreach (var doc in docs)
+        {
+            if (await _documentAuthorization.CanViewDocumentAsync(User, doc))
+            {
+                visible.Add(ToDto(doc, Request));
+            }
+        }
+
+        return Ok(visible);
     }
 
     [HttpPost]
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<DocumentDto>> Create([FromBody] DocumentDto request)
     {
+        var ownership = await _documentAuthorization.ResolveOwnershipAsync(request.ProjectId, request.AssetId, request.LinkedTo);
+        if (!await CanCreateOrUpdateForOwnershipAsync(request.VisibilityScope, ownership.ProjectId, ownership.AssetId))
+        {
+            return Forbid();
+        }
+
         var doc = new DocumentEntity
         {
             Id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString() : request.Id,
+            VisibilityScope = ResolveVisibilityScope(request.VisibilityScope, ownership.ProjectId, ownership.AssetId, false),
+            ProjectId = ownership.ProjectId,
+            AssetId = ownership.AssetId,
             Name = request.Name,
             Type = request.Type,
             LinkedTo = request.LinkedTo,
@@ -48,8 +76,10 @@ public class DocumentsController : ControllerBase
             FileSize = request.FileSize,
             DownloadUrl = request.DownloadUrl,
             CreatedBy = User.Identity?.Name ?? request.CreatedBy,
+            CreatedByUserId = GetCurrentUserId(),
             Notes = request.Notes,
-            CustomValuesJson = request.CustomValuesJson
+            CustomValuesJson = request.CustomValuesJson,
+            IsLegacyUnclassified = false
         };
 
         _db.Documents.Add(doc);
@@ -68,6 +98,12 @@ public class DocumentsController : ControllerBase
             return BadRequest("File is required.");
         }
 
+        var ownership = await _documentAuthorization.ResolveOwnershipAsync(request.ProjectId, request.AssetId, request.LinkedTo);
+        if (!await CanCreateOrUpdateForOwnershipAsync(request.VisibilityScope, ownership.ProjectId, ownership.AssetId))
+        {
+            return Forbid();
+        }
+
         var storageRoot = Path.Combine(_env.ContentRootPath, "Storage", "Documents");
         Directory.CreateDirectory(storageRoot);
 
@@ -82,6 +118,9 @@ public class DocumentsController : ControllerBase
 
         var doc = new DocumentEntity
         {
+            VisibilityScope = ResolveVisibilityScope(request.VisibilityScope, ownership.ProjectId, ownership.AssetId, false),
+            ProjectId = ownership.ProjectId,
+            AssetId = ownership.AssetId,
             Name = request.File.FileName,
             Type = request.Type ?? string.Empty,
             LinkedTo = request.LinkedTo ?? string.Empty,
@@ -90,8 +129,10 @@ public class DocumentsController : ControllerBase
             ContentType = request.File.ContentType,
             FileSize = request.File.Length,
             CreatedBy = User.Identity?.Name ?? request.CreatedBy,
+            CreatedByUserId = GetCurrentUserId(),
             Notes = request.Notes,
-            CustomValuesJson = request.CustomValuesJson
+            CustomValuesJson = request.CustomValuesJson,
+            IsLegacyUnclassified = false
         };
 
         _db.Documents.Add(doc);
@@ -100,11 +141,10 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpGet("{id}/download")]
-    [AllowAnonymous]
     public async Task<IActionResult> Download(string id)
     {
         var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
-        if (doc is null || string.IsNullOrWhiteSpace(doc.FilePath))
+        if (doc is null || string.IsNullOrWhiteSpace(doc.FilePath) || !await _documentAuthorization.CanViewDocumentAsync(User, doc))
         {
             return NotFound();
         }
@@ -116,7 +156,6 @@ public class DocumentsController : ControllerBase
         }
 
         var contentType = string.IsNullOrWhiteSpace(doc.ContentType) ? "application/octet-stream" : doc.ContentType;
-        // inline disposition: browser opens PDF/images in-tab; filename still available for "Save As"
         var safeName = Uri.EscapeDataString(doc.Name ?? "document");
         Response.Headers["Content-Disposition"] = $"inline; filename*=UTF-8''{safeName}";
         return PhysicalFile(fullPath, contentType, enableRangeProcessing: true);
@@ -126,20 +165,67 @@ public class DocumentsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
-        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+        if (doc.IsDeleted) return NoContent();
+        if (!await _documentAuthorization.CanEditDocumentAsync(User, doc)) return Forbid();
+
+        doc.IsDeleted = true;
+        doc.DeletedAtUtc = DateTime.UtcNow;
+        doc.DeletedByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        await _db.SaveChangesAsync();
+        _searchIndexQueue.RemoveLibraryDocument(id);
+        await _audit.LogAsync(User, HttpContext, "document_archived", $"{doc.Name} ({doc.Id})");
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+        if (!await _documentAuthorization.CanEditDocumentAsync(User, doc)) return Forbid();
+
+        if (!string.IsNullOrWhiteSpace(doc.FilePath))
+        {
+            var fullPath = Path.Combine(_env.ContentRootPath, doc.FilePath);
+            if (!System.IO.File.Exists(fullPath))
+            {
+                return Conflict("Physical file is missing from storage.");
+            }
+        }
+
+        doc.IsDeleted = false;
+        doc.DeletedAtUtc = null;
+        doc.DeletedByUserId = null;
+        doc.DeleteReason = null;
+        await _db.SaveChangesAsync();
+        _searchIndexQueue.EnqueueLibraryDocument(id);
+        await _audit.LogAsync(User, HttpContext, "document_restored", $"{doc.Name} ({doc.Id})");
+        return NoContent();
+    }
+
+    [HttpDelete("{id}/purge")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Purge(string id)
+    {
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
         if (doc is null) return NotFound();
 
-        // Delete the physical file if one exists
         if (!string.IsNullOrWhiteSpace(doc.FilePath))
         {
             var fullPath = Path.Combine(_env.ContentRootPath, doc.FilePath);
             if (System.IO.File.Exists(fullPath))
+            {
                 System.IO.File.Delete(fullPath);
+            }
         }
 
         _db.Documents.Remove(doc);
         await _db.SaveChangesAsync();
         _searchIndexQueue.RemoveLibraryDocument(id);
+        await _audit.LogAsync(User, HttpContext, "document_purged", $"{doc.Name} ({doc.Id})");
         return NoContent();
     }
 
@@ -153,26 +239,40 @@ public class DocumentsController : ControllerBase
             return NotFound();
         }
 
+        if (!await _documentAuthorization.CanEditDocumentAsync(User, doc))
+        {
+            return Forbid();
+        }
+
+        var ownership = await _documentAuthorization.ResolveOwnershipAsync(request.ProjectId ?? doc.ProjectId, request.AssetId ?? doc.AssetId, request.LinkedTo);
+        var visibilityScope = ResolveVisibilityScope(request.VisibilityScope, ownership.ProjectId, ownership.AssetId, false);
+        if (!await CanCreateOrUpdateForOwnershipAsync(visibilityScope, ownership.ProjectId, ownership.AssetId))
+        {
+            return Forbid();
+        }
+
+        doc.VisibilityScope = visibilityScope;
+        doc.ProjectId = ownership.ProjectId;
+        doc.AssetId = ownership.AssetId;
         doc.Name = request.Name;
         doc.Type = request.Type;
         doc.LinkedTo = request.LinkedTo;
         doc.UploadedAt = request.UploadedAt;
         doc.ContentType = request.ContentType;
         doc.FileSize = request.FileSize;
-        // Preserve original creator — only set if not already recorded
         if (string.IsNullOrWhiteSpace(doc.CreatedBy))
             doc.CreatedBy = User.Identity?.Name ?? request.CreatedBy;
+        if (string.IsNullOrWhiteSpace(doc.CreatedByUserId))
+            doc.CreatedByUserId = GetCurrentUserId();
         doc.Notes = request.Notes;
         doc.CustomValuesJson = request.CustomValuesJson;
-        // Only update DownloadUrl for URL-linked docs (uploaded docs use FilePath, not DownloadUrl)
+        doc.IsLegacyUnclassified = false;
         if (string.IsNullOrWhiteSpace(doc.FilePath))
             doc.DownloadUrl = request.DownloadUrl;
 
         await _db.SaveChangesAsync();
         return Ok(ToDto(doc, Request));
     }
-
-    // ── Document UI Config (tabs + custom fields) ────────────────────────────
 
     [HttpGet("config")]
     public async Task<ActionResult<DocumentConfigDto>> GetConfig()
@@ -203,6 +303,37 @@ public class DocumentsController : ControllerBase
         return Ok(new DocumentConfigDto(config.TabsJson, config.FieldsJson));
     }
 
+    private async Task<bool> CanCreateOrUpdateForOwnershipAsync(string? visibilityScope, string? projectId, string? assetId)
+    {
+        if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            return await _documentAuthorization.CanEditDocumentAsync(User, new DocumentEntity
+            {
+                VisibilityScope = ResolveVisibilityScope(visibilityScope, projectId, assetId, false),
+                ProjectId = projectId,
+                AssetId = assetId,
+                CreatedByUserId = GetCurrentUserId(),
+                IsLegacyUnclassified = false
+            });
+        }
+
+        var role = User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirst("role")?.Value;
+        if (string.Equals(ResolveVisibilityScope(visibilityScope, projectId, assetId, false), "Global", StringComparison.OrdinalIgnoreCase))
+        {
+            return User.IsInRole("Admin")
+                || string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Project Manager", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return User.IsInRole("Admin")
+            || string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string? GetCurrentUserId() =>
+        User.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? User.FindFirst("sub")?.Value
+        ?? User.FindFirst("nameid")?.Value;
+
     private static DocumentDto ToDto(DocumentEntity doc, HttpRequest request)
         => new(
             doc.Id,
@@ -213,12 +344,39 @@ public class DocumentsController : ControllerBase
             doc.ContentType,
             doc.FileSize,
             string.IsNullOrWhiteSpace(doc.FilePath)
-                ? doc.DownloadUrl   // URL-linked document — use stored URL
+                ? doc.DownloadUrl
                 : $"{request.Scheme}://{request.Host}/api/documents/{doc.Id}/download",
             doc.CreatedBy,
             doc.Notes,
-            doc.CustomValuesJson
+            doc.CustomValuesJson,
+            doc.VisibilityScope,
+            doc.ProjectId,
+            doc.AssetId,
+            doc.CreatedByUserId,
+            doc.IsLegacyUnclassified
         );
+
+    private static string ResolveVisibilityScope(string? requestedScope, string? projectId, string? assetId, bool isLegacyUnclassified)
+    {
+        if (isLegacyUnclassified)
+        {
+            return "Legacy";
+        }
+
+        if (!string.IsNullOrWhiteSpace(assetId))
+        {
+            return "Asset";
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            return "Project";
+        }
+
+        return string.Equals(requestedScope, "Global", StringComparison.OrdinalIgnoreCase)
+            ? "Global"
+            : "Global";
+    }
 }
 
 public class UploadDocumentRequest
@@ -227,6 +385,12 @@ public class UploadDocumentRequest
     public IFormFile? File { get; set; }
     [FromForm(Name = "type")]
     public string? Type { get; set; }
+    [FromForm(Name = "visibilityScope")]
+    public string? VisibilityScope { get; set; }
+    [FromForm(Name = "projectId")]
+    public string? ProjectId { get; set; }
+    [FromForm(Name = "assetId")]
+    public string? AssetId { get; set; }
     [FromForm(Name = "linkedTo")]
     public string? LinkedTo { get; set; }
     [FromForm(Name = "createdBy")]

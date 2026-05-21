@@ -16,6 +16,7 @@ export const demoProjects: Project[] = [
     office: "USA",
     projectType: "External",
     status: "Pending Approval",
+    workflowMode: "INSTALLATION_ONLY",
     isInstallationProject: true,
     installationMode: "Multiple Installations",
     projectManager: "Jordan Ames",
@@ -32,6 +33,7 @@ export const demoProjects: Project[] = [
     office: "Australia",
     projectType: "Internal",
     status: "Draft",
+    workflowMode: "INSPECTION_ONLY",
     isInstallationProject: false,
     projectManager: "Priya Nair",
     productIds: ["prod-3"]

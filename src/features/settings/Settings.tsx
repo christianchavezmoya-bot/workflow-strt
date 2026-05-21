@@ -58,7 +58,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import * as XLSX from "xlsx";
 import PasswordField from "../../components/ui/PasswordField";
-import { secureGet, secureRemove } from "../../services/secureStorage";
+import RecoveryCenter from "./RecoveryCenter";
 
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
 function BusinessLogoTab() {
@@ -298,7 +298,7 @@ const Settings = () => {
   const { addNotification } = useFieldNotifications();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isAdmin = user?.role === "Admin" || secureGet("local_auth_user")?.includes('"Admin"');
+  const isAdmin = user?.role === "Admin";
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [tab, setTab] = useState(() => {
@@ -1010,16 +1010,6 @@ const Settings = () => {
       setWfTypes((prev) => prev.filter((t) => t.id !== id));
     } catch { alert("Failed to delete workflow type."); }
   }
-  const localUser = useMemo(() => {
-    const raw = secureGet("local_auth_user");
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as { email: string; fullName: string; role: string; office: string };
-    } catch {
-      return null;
-    }
-  }, []);
-
   const projectsMap = useMemo(() => parseJsonMap(settings.projectsFieldMap), [settings.projectsFieldMap]);
   const installationsMap = useMemo(
     () => parseJsonMap(settings.installationsFieldMap),
@@ -1169,11 +1159,6 @@ const Settings = () => {
     } finally {
       setNotifySending(false);
     }
-  };
-
-  const handleClearLocalAuth = () => {
-    secureRemove("local_auth_user");
-    secureRemove("auth_token");
   };
 
   const fieldTypes = [
@@ -2631,28 +2616,29 @@ const Settings = () => {
 
         {tab === 8 && isAdmin && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
-            <Typography variant="h6">2FA Audit Log</Typography>
+            <Typography variant="h6">System Audit Log</Typography>
             <Typography variant="body2" color="text.secondary">
-              Security events related to two-factor authentication.
+              Security, archive, restore, purge, and backup events recorded on the server.
             </Typography>
             <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
-            <Button
-              variant="outlined"
-              disabled={auditLoading}
-              onClick={async () => {
-                setAuditLoading(true);
-                try {
-                  const response = await api.get<AuditLogEntry[]>("/auth/audit-log?limit=200");
-                  setAuditLogs(response.data);
-                } catch {
-                  setAuditLogs([]);
-                }
-                setAuditLoading(false);
-              }}
-              sx={{ alignSelf: "flex-start" }}
-            >
-              {auditLoading ? "Loading..." : "Load audit log"}
-            </Button>
+            <Stack direction="row" spacing={1} flexWrap="wrap">
+              <Button
+                variant="outlined"
+                disabled={auditLoading}
+                onClick={async () => {
+                  setAuditLoading(true);
+                  try {
+                    const response = await api.get<AuditLogEntry[]>("/auth/audit-log?limit=200");
+                    setAuditLogs(response.data);
+                  } catch {
+                    setAuditLogs([]);
+                  }
+                  setAuditLoading(false);
+                }}
+              >
+                {auditLoading ? "Loading..." : "Load audit log"}
+              </Button>
+            </Stack>
             {auditLogs.length > 0 && (
               <TableContainer sx={{ overflowX: "auto" }}>
               <Table size="small" sx={{ minWidth: 650 }}>
@@ -2679,7 +2665,7 @@ const Settings = () => {
                             fontFamily: "monospace",
                             fontSize: "0.8rem",
                             color: log.action.includes("failed") ? "error.main" :
-                                   log.action.includes("disabled") || log.action.includes("reset") ? "warning.main" :
+                                   log.action.includes("disabled") || log.action.includes("reset") || log.action.includes("archived") || log.action.includes("purged") ? "warning.main" :
                                    "success.main"
                           }}
                         >
@@ -2696,9 +2682,11 @@ const Settings = () => {
             )}
             {auditLogs.length === 0 && !auditLoading && (
               <Typography variant="body2" color="text.secondary">
-                Click "Load audit log" to view recent 2FA security events.
+                Click "Load audit log" to view recent server-side events.
               </Typography>
             )}
+            <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            <RecoveryCenter />
           </Stack>
         )}
 
@@ -4257,17 +4245,6 @@ const Settings = () => {
         </DialogActions>
       </Dialog>
 
-      <Box className="glass-card" sx={{ padding: 3 }}>
-        <Stack spacing={1.5}>
-          <Typography variant="h6">Local auth testing</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Current local user: {localUser ? `${localUser.fullName} (${localUser.role})` : "None"}
-          </Typography>
-          <Button variant="outlined" onClick={handleClearLocalAuth}>
-            Clear local auth
-          </Button>
-        </Stack>
-      </Box>
     </Stack>
   );
 };

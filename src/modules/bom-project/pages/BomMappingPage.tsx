@@ -7,6 +7,7 @@ import BomStepHeader from "../components/BomStepHeader";
 import ColumnMapper from "../components/ColumnMapper";
 import { useBomProject } from "../store/BomProjectContext";
 import { normalizeAllRows } from "../services/bomNormalizer";
+import { bomApiService } from "../services/bomApiService";
 
 export default function BomMappingPage() {
   const { id } = useParams<{ id: string }>();
@@ -40,6 +41,15 @@ export default function BomMappingPage() {
     setError(null);
     try {
       const normalized = normalizeAllRows(state.rawRows, state.activeMappings);
+      if (id) {
+        await bomApiService.saveRunData(id, {
+          totalRawRows: state.rawRows.length,
+          normalizedRows: normalized.length,
+          rawRows: state.rawRows,
+          normalizedRowsData: normalized,
+          mappings: state.activeMappings,
+        });
+      }
       dispatch({ type: "SET_NORMALIZED_ROWS", payload: normalized });
       navigate(`/admin/bom-project/imports/${id}/classification`);
     } catch (e) {

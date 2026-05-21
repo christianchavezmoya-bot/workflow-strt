@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Commtrac.Api.Data;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,6 +15,9 @@ public class MobileUploadController : ControllerBase
         string Token,
         string Type,
         string LinkedTo,
+        string? ProjectId,
+        string? AssetId,
+        string? CreatedByUserId,
         string? CustomValuesJson,
         DateTime ExpiresAt,
         string Status,          // "pending" | "complete" | "expired"
@@ -24,28 +28,41 @@ public class MobileUploadController : ControllerBase
 
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
+    private readonly NotificationSettingsService _notificationSettings;
+    private readonly IDocumentAuthorizationService _documentAuthorization;
 
-    public MobileUploadController(AppDbContext db, IWebHostEnvironment env)
+    public MobileUploadController(
+        AppDbContext db,
+        IWebHostEnvironment env,
+        NotificationSettingsService notificationSettings,
+        IDocumentAuthorizationService documentAuthorization)
     {
         _db = db;
         _env = env;
+        _notificationSettings = notificationSettings;
+        _documentAuthorization = documentAuthorization;
     }
 
     // ── POST /api/mobile-upload/token ────────────────────────────────────────
     // Called by desktop to create a token. Requires auth.
     [HttpPost("token")]
     [Authorize]
-    public IActionResult CreateToken([FromBody] CreateTokenRequest request)
+    public async Task<IActionResult> CreateToken([FromBody] CreateTokenRequest request)
     {
         // Purge expired tokens
         var expired = Tokens.Where(kvp => kvp.Value.ExpiresAt < DateTime.UtcNow).Select(kvp => kvp.Key).ToList();
         foreach (var k in expired) Tokens.TryRemove(k, out _);
 
+        var ownership = await _documentAuthorization.ResolveOwnershipAsync(null, null, request.LinkedTo);
+        var createdByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
         var token = Guid.NewGuid().ToString("N")[..16]; // 16-char token
         var entry = new UploadToken(
             Token: token,
             Type: request.Type ?? "tips",
             LinkedTo: request.LinkedTo ?? "",
+            ProjectId: ownership.ProjectId,
+            AssetId: ownership.AssetId,
+            CreatedByUserId: createdByUserId,
             CustomValuesJson: request.CustomValuesJson,
             ExpiresAt: DateTime.UtcNow.AddMinutes(10),
             Status: "pending",
@@ -53,7 +70,8 @@ public class MobileUploadController : ControllerBase
         );
         Tokens[token] = entry;
 
-        return Ok(new { token, expiresAt = entry.ExpiresAt });
+        var frontendBaseUrl = await ResolveFrontendBaseUrlAsync();
+        return Ok(new { token, expiresAt = entry.ExpiresAt, frontendBaseUrl });
     }
 
     // ── GET /api/mobile-upload/token/{token} ─────────────────────────────────
@@ -111,6 +129,8 @@ public class MobileUploadController : ControllerBase
 
         var doc = new Commtrac.Api.Models.DocumentEntity
         {
+            ProjectId = entry.ProjectId,
+            AssetId = entry.AssetId,
             Name = file.FileName,
             Type = entry.Type,
             LinkedTo = entry.LinkedTo,
@@ -119,8 +139,10 @@ public class MobileUploadController : ControllerBase
             ContentType = file.ContentType,
             FileSize = file.Length,
             CreatedBy = "mobile-upload",
+            CreatedByUserId = entry.CreatedByUserId,
             Notes = null,
-            CustomValuesJson = entry.CustomValuesJson
+            CustomValuesJson = entry.CustomValuesJson,
+            IsLegacyUnclassified = false
         };
 
         _db.Documents.Add(doc);
@@ -143,6 +165,35 @@ public class MobileUploadController : ControllerBase
         if (entry.ExpiresAt < DateTime.UtcNow)
             return Ok(new { error = "expired" });
         return Ok(new { type = entry.Type, linkedTo = entry.LinkedTo, expiresAt = entry.ExpiresAt });
+    }
+
+    private async Task<string> ResolveFrontendBaseUrlAsync()
+    {
+        var settings = await _notificationSettings.GetAsync();
+        var configured = (settings.FrontendBaseUrl ?? string.Empty).Trim().TrimEnd('/');
+        if (!string.IsNullOrWhiteSpace(configured) && !IsLocalhostUrl(configured))
+        {
+            return configured;
+        }
+
+        var origin = Request.Headers.Origin.ToString().Trim().TrimEnd('/');
+        if (Uri.TryCreate(origin, UriKind.Absolute, out var originUri) && !IsLocalhostUrl(origin))
+        {
+            return $"{originUri.Scheme}://{originUri.Authority}";
+        }
+
+        return $"{Request.Scheme}://{Request.Host.Value}";
+    }
+
+    private static bool IsLocalhostUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var host = uri.Host.ToLowerInvariant();
+        return host == "localhost" || host == "127.0.0.1" || host == "::1";
     }
 }
 

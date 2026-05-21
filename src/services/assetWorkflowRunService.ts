@@ -1,6 +1,7 @@
 import api, { cachedGet } from "./api";
 import { IssueRepository } from "../repositories/IssueRepository";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
+import type { DashboardScope } from "./dashboardService";
 
 export interface PendingSignatureRecord {
   runId:        string;
@@ -147,17 +148,25 @@ export const assetWorkflowRunService = {
     return res.data;
   },
 
-  async listPendingSignatures(): Promise<PendingSignatureRecord[]> {
+  async listPendingSignatures(scope: DashboardScope = "default"): Promise<PendingSignatureRecord[]> {
     try {
-      const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures");
+      const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures", {
+        params: { scope }
+      });
       return res.data;
     } catch {
       return [];
     }
   },
 
-  async listOpenIssues(): Promise<OpenIssueRecord[]> {
-    try { return await IssueRepository.getAll(); }
-    catch { return []; }
+  async listOpenIssues(scope: DashboardScope = "default"): Promise<OpenIssueRecord[]> {
+    try {
+      const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", {
+        params: { scope }
+      });
+      return res.data;
+    } catch {
+      return [];
+    }
   },
 };

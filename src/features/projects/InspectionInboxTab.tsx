@@ -26,7 +26,7 @@ import DownloadIcon from "@mui/icons-material/Download";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { inspectionImportService } from "../../services/inspectionImportService";
-import type { InspectionImport } from "../../types/project";
+import type { InspectionImport } from "../../types/inspectionImport";
 import api from "../../services/api";
 import { projectAssetService } from "../../services/projectAssetService";
 import type { ProjectAsset } from "../../types/projectAsset";
@@ -61,7 +61,7 @@ const InspectionInboxTab = ({ projectId }: Props) => {
   const load = () => {
     setLoading(true);
     Promise.all([
-      inspectionImportService.list({ projectId }),
+      inspectionImportService.listByProject(projectId),
       projectAssetService.listByProject(projectId),
     ])
       .then(([items, assets]) => {
@@ -112,7 +112,7 @@ const InspectionInboxTab = ({ projectId }: Props) => {
       setAssigningId(item.id);
       await inspectionImportService.assign(item.id, {
         projectId,
-        assetId: selectedAssetId || undefined,
+        projectAssetId: selectedAssetId,
       });
       setAssigningId(null);
       setSelectedAssetId("");
@@ -159,7 +159,7 @@ const InspectionInboxTab = ({ projectId }: Props) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = viewItem.fileName || `${viewItem.id}.json`;
+    a.download = `${viewItem.id}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -226,11 +226,10 @@ const InspectionInboxTab = ({ projectId }: Props) => {
           <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="body2" fontWeight={600} noWrap>
-                {item.fileName || item.id}
+                {item.id}
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 {item.source} · {new Date(item.receivedAt).toLocaleString()}
-                {item.uploadedBy && " · " + item.uploadedBy}
               </Typography>
             </Box>
             <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 1, flexShrink: 0 }}>
@@ -259,26 +258,26 @@ const InspectionInboxTab = ({ projectId }: Props) => {
             </Stack>
           </Stack>
 
-          {item.errorText && (
+          {item.error && (
             <>
               <Divider sx={{ my: 1 }} />
               <Typography variant="caption" color="error.main">
-                {item.errorText}
+                {item.error}
               </Typography>
             </>
           )}
 
-          {item.assetId && (
+          {item.projectAssetId && (
             <>
               <Divider sx={{ my: 1 }} />
               <Typography variant="caption" color="text.secondary">
-                Asset: {projectAssets.find((asset) => asset.id === item.assetId)?.assetTag || item.assetId}
+                Asset: {projectAssets.find((asset) => asset.id === item.projectAssetId)?.assetTag || item.projectAssetId}
                 {item.mappedRunId && " · Run: " + item.mappedRunId}
               </Typography>
             </>
           )}
 
-          {!item.assetId && (item.status === "RECEIVED" || item.status === "NEEDS_ASSIGNMENT") && (
+          {!item.projectAssetId && (item.status === "RECEIVED" || item.status === "NEEDS_ASSIGNMENT") && (
             <>
               <Divider sx={{ my: 1 }} />
               <FormControl size="small" fullWidth>
@@ -308,7 +307,7 @@ const InspectionInboxTab = ({ projectId }: Props) => {
       {/* Raw JSON viewer dialog */}
       <Dialog open={!!viewItem} onClose={() => { setViewItem(null); setViewRaw(null); }} maxWidth="md" fullWidth>
         <DialogTitle>
-          Raw JSON — {viewItem?.fileName || viewItem?.id}
+          Raw JSON — {viewItem?.id}
         </DialogTitle>
         <DialogContent>
           {viewLoading ? (

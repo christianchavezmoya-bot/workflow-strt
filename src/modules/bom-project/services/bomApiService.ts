@@ -9,15 +9,28 @@ import type { MappingProfile } from "../types/sourceWorkbook";
 import type { RuleProfile } from "../types/classification";
 import type { DraftProject } from "../types/projectDraft";
 import type { ValidationResult } from "../types/validation";
+import type { RawWorkbookRow, ColumnMappingEntry } from "../types/sourceWorkbook";
+import type { CanonicalBomRow } from "../types/canonicalBom";
+import type { ClassificationResult } from "../types/classification";
 
 const BASE = "/bom-import-runs";
+
+export interface BomImportRunData {
+  rawRows: RawWorkbookRow[] | null;
+  normalizedRows: CanonicalBomRow[] | null;
+  classifications: ClassificationResult[] | null;
+  mappings: ColumnMappingEntry[] | null;
+  draftProject: DraftProject | null;
+}
 
 // ── Import Runs ──────────────────────────────────────────────────────────────
 
 export const bomApiService = {
   /** List all import runs */
-  async listRuns(): Promise<BomImportRun[]> {
-    const { data } = await api.get<BomImportRun[]>(BASE);
+  async listRuns(includeDeleted = false): Promise<BomImportRun[]> {
+    const { data } = await api.get<BomImportRun[]>(BASE, {
+      params: includeDeleted ? { includeDeleted: true } : undefined,
+    });
     return data;
   },
 
@@ -45,9 +58,43 @@ export const bomApiService = {
     return data;
   },
 
+  async saveRunData(
+    id: string,
+    payload: {
+      totalRawRows?: number;
+      normalizedRows?: number;
+      classifiedRows?: number;
+      rawRows?: RawWorkbookRow[];
+      normalizedRowsData?: CanonicalBomRow[];
+      classifications?: ClassificationResult[];
+      mappings?: ColumnMappingEntry[];
+    }
+  ): Promise<BomImportRun> {
+    const { data } = await api.put<BomImportRun>(`${BASE}/${id}`, {
+      totalRawRows: payload.totalRawRows,
+      normalizedRows: payload.normalizedRows,
+      classifiedRows: payload.classifiedRows,
+      rawRowsJson: payload.rawRows ? JSON.stringify(payload.rawRows) : undefined,
+      normalizedRowsJson: payload.normalizedRowsData ? JSON.stringify(payload.normalizedRowsData) : undefined,
+      classificationsJson: payload.classifications ? JSON.stringify(payload.classifications) : undefined,
+      mappingsJson: payload.mappings ? JSON.stringify(payload.mappings) : undefined,
+    });
+    return data;
+  },
+
+  async getRunData(id: string): Promise<BomImportRunData> {
+    const { data } = await api.get<BomImportRunData>(`${BASE}/${id}/data`);
+    return data;
+  },
+
   /** Delete (archive) an import run */
   async deleteRun(id: string): Promise<void> {
     await api.delete(`${BASE}/${id}`);
+  },
+
+  /** Restore an archived import run */
+  async restoreRun(id: string): Promise<void> {
+    await api.post(`${BASE}/${id}/restore`);
   },
 
   /** Permanently delete an import run (cannot be undone) */

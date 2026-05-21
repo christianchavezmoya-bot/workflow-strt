@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 
 namespace Commtrac.Api.Controllers;
 
@@ -13,11 +14,25 @@ namespace Commtrac.Api.Controllers;
 public class AssetWorkflowRunsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly NotificationFeedService _feed;
     private readonly ILogger<AssetWorkflowRunsController> _logger;
-    public AssetWorkflowRunsController(AppDbContext db, ILogger<AssetWorkflowRunsController> logger)
+    private readonly IAccessScopeService _accessScope;
+    private readonly IWorkflowRunAuthorizationService _workflowAuthorization;
+    private readonly IUserContextService _userContext;
+    public AssetWorkflowRunsController(
+        AppDbContext db,
+        NotificationFeedService feed,
+        ILogger<AssetWorkflowRunsController> logger,
+        IAccessScopeService accessScope,
+        IWorkflowRunAuthorizationService workflowAuthorization,
+        IUserContextService userContext)
     {
         _db = db;
+        _feed = feed;
         _logger = logger;
+        _accessScope = accessScope;
+        _workflowAuthorization = workflowAuthorization;
+        _userContext = userContext;
     }
 
     private sealed class RunTimeEntry
@@ -184,6 +199,11 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         try
         {
+            if (!await _accessScope.CanViewProjectAsync(User, projectId))
+            {
+                return Ok(Array.Empty<AssetWorkflowRunDto>());
+            }
+
             var assetIds = await _db.ProjectAssets
                 .Where(a => a.ProjectId == projectId)
                 .Select(a => a.Id)
@@ -211,16 +231,19 @@ public class AssetWorkflowRunsController : ControllerBase
 
     // GET api/asset-workflow-runs/open-issues — all unresolved issues across every run, with project context
     [HttpGet("open-issues")]
-    public async Task<IActionResult> GetOpenIssues()
+    public async Task<IActionResult> GetOpenIssues([FromQuery] string? scope = null)
     {
         try
         {
+            var visibleProjectIds = await _accessScope.GetScopedProjectIdsAsync(User, scope);
             var runs = await _db.AssetWorkflowRuns
                 .Where(r => r.IssuesJson != null && r.IssuesJson != "[]" && r.IssuesJson != "")
                 .ToListAsync();
 
             var assetIds = runs.Select(r => r.AssetId).Distinct().ToList();
-            var assets   = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
+            var assets   = await _db.ProjectAssets
+                .Where(a => assetIds.Contains(a.Id) && visibleProjectIds.Contains(a.ProjectId))
+                .ToListAsync();
 
             var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
             var projects   = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
@@ -270,6 +293,7 @@ public class AssetWorkflowRunsController : ControllerBase
 
             // ── 2. Manually-added asset-level issues ──────────────────────
             var assetsWithIssues = await _db.ProjectAssets
+                .Where(a => visibleProjectIds.Contains(a.ProjectId))
                 .Where(a => a.IssuesJson != null && a.IssuesJson != "[]" && a.IssuesJson != "")
                 .ToListAsync();
 
@@ -338,6 +362,12 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         try
         {
+            var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == assetId);
+            if (asset is null || !await _accessScope.CanViewProjectAsync(User, asset.ProjectId))
+            {
+                return Ok(Array.Empty<AssetWorkflowRunDto>());
+            }
+
             var runs = await _db.AssetWorkflowRuns
                 .Where(r => r.AssetId == assetId)
                 .OrderByDescending(r => r.StartedAt)
@@ -357,6 +387,11 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null || !await _accessScope.CanViewProjectAsync(User, asset.ProjectId))
+        {
+            return NotFound();
+        }
         return Ok(ToDto(run));
     }
 
@@ -364,6 +399,16 @@ public class AssetWorkflowRunsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> StartRun([FromBody] StartRunRequest req)
     {
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == req.AssetId);
+        if (asset is null)
+        {
+            return BadRequest(new { message = "Asset not found." });
+        }
+        if (!await _workflowAuthorization.CanStartWorkflowRunAsync(User, asset))
+        {
+            return Forbid();
+        }
+
         var config = await _db.WorkflowConfigs.FirstOrDefaultAsync(c => c.Id == req.WorkflowConfigId);
         if (config is null) return BadRequest(new { message = "WorkflowConfig not found." });
         if (config.Status != "Published")
@@ -402,7 +447,7 @@ public class AssetWorkflowRunsController : ControllerBase
             WorkflowSnapshotJson = snapshot,
             Status               = "InProgress",
             IsLocked             = false,
-            TechnicianUserId     = req.TechnicianUserId,
+            TechnicianUserId     = ResolveRunTechnicianUserId(asset, req.TechnicianUserId),
             StepResultsJson      = "[]",
             IssuesJson           = "[]",
             TimeTrackingJson     = "[]",
@@ -418,14 +463,17 @@ public class AssetWorkflowRunsController : ControllerBase
         _db.AssetWorkflowRuns.Add(run);
 
         // Update asset status to InProgress whenever a new run is created
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == req.AssetId);
-        if (asset is not null)
-        {
-            asset.Status    = "InProgress";
-            asset.UpdatedAt = now;
-        }
+        asset.Status    = "InProgress";
+        asset.UpdatedAt = now;
 
         await _db.SaveChangesAsync();
+        await NotifyRunEventAsync(
+            run,
+            "workflow-started",
+            "info",
+            "Workflow started",
+            $"{ResolveActorName()} started workflow for asset {{asset}} on job {{job}}.",
+            notifyInstaller: false);
         return CreatedAtAction(nameof(GetById), new { id = run.Id }, ToDto(run));
     }
 
@@ -435,8 +483,16 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return NotFound();
+        if (!await _workflowAuthorization.CanMutateWorkflowRunAsync(User, asset, run))
+        {
+            return Forbid();
+        }
         if (run.IsLocked)
             return BadRequest(new { message = "This run is locked (completed). Re-run to create a new run." });
+        var previousStatus = run.Status;
+        var previousIssuesJson = run.IssuesJson;
 
         run.StepResultsJson = req.StepResultsJson;
         if (req.IssuesJson is not null) run.IssuesJson = req.IssuesJson;
@@ -448,8 +504,7 @@ public class AssetWorkflowRunsController : ControllerBase
         // Update asset status based on current open issues in this run
         if (req.IssuesJson is not null)
         {
-            var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
-            if (asset is not null && asset.Status != "NotStarted")
+            if (asset.Status != "NotStarted")
             {
                 var issues = ParseIssues(req.IssuesJson);
                 var hasOpenIssues = issues.Any(i =>
@@ -460,6 +515,42 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        if (!string.Equals(previousStatus, run.Status, StringComparison.OrdinalIgnoreCase))
+        {
+            var eventType = run.Status switch
+            {
+                "Paused" => "workflow-paused",
+                "InProgress" => "workflow-resumed",
+                "Issue" => "workflow-issue",
+                _ => "workflow-updated"
+            };
+            var severity = run.Status == "Issue" ? "warning" : "info";
+            var title = run.Status switch
+            {
+                "Paused" => "Workflow paused",
+                "InProgress" => "Workflow resumed",
+                "Issue" => "Workflow issue raised",
+                _ => $"Workflow status changed to {run.Status}"
+            };
+            await NotifyRunEventAsync(
+                run,
+                eventType,
+                severity,
+                title,
+                $"{ResolveActorName()} changed workflow status to {run.Status} for asset {{asset}} on job {{job}}.",
+                notifyInstaller: string.Equals(run.Status, "Issue", StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (req.IssuesJson is not null && CountOpenIssues(req.IssuesJson) > CountOpenIssues(previousIssuesJson))
+        {
+            await NotifyRunEventAsync(
+                run,
+                "workflow-issue",
+                "warning",
+                "New workflow issue",
+                $"{ResolveActorName()} added or reopened issues for asset {{asset}} on job {{job}}.",
+                notifyInstaller: true);
+        }
         return Ok(ToDto(run));
     }
 
@@ -469,6 +560,12 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return NotFound();
+        if (!await _workflowAuthorization.CanMutateWorkflowRunAsync(User, asset, run))
+        {
+            return Forbid();
+        }
         if (run.IsLocked)
             return BadRequest(new { message = "This run is already locked." });
 
@@ -500,7 +597,6 @@ public class AssetWorkflowRunsController : ControllerBase
         RecomputeRunTimeMetrics(run, now);
 
         // Update asset status — Complete only if no open issues remain across all runs
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
         if (asset is not null)
         {
             // Check all runs for this asset for any open issues (blocking OR non-blocking)
@@ -529,6 +625,25 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        await NotifyRunEventAsync(
+            run,
+            "workflow-completed",
+            "success",
+            "Workflow completed",
+            $"{(req.CompletedByName ?? ResolveActorName())} completed workflow for asset {{asset}} on job {{job}}.",
+            notifyInstaller: false);
+
+        if (asset is not null && string.Equals(asset.Status, "Complete", StringComparison.OrdinalIgnoreCase))
+        {
+            await NotifyAssetEventAsync(
+                asset,
+                "asset-completed",
+                "success",
+                "Asset completed",
+                $"{asset.AssetTag} was fully completed on job {{job}} by {(req.CompletedByName ?? ResolveActorName())}.",
+                notifyInstaller: false,
+                runId: run.Id);
+        }
         return Ok(ToDto(run));
     }
 
@@ -538,18 +653,23 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return NotFound();
+        if (!await _workflowAuthorization.CanMutateWorkflowRunAsync(User, asset, run))
+        {
+            return Forbid();
+        }
 
-        run.IssuesJson = req.IssuesJson;
+        run.IssuesJson = req.IssuesJson ?? "[]";
         run.UpdatedAt  = DateTime.UtcNow;
 
         // Recalculate asset status now that issues may have changed
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
         if (asset is not null)
         {
             var allRuns = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
             // Any open issue (blocking OR non-blocking) keeps the asset in "Issue" state
             var anyOpenIssue = allRuns.Any(r => {
-                var json = r.Id == id ? req.IssuesJson : r.IssuesJson;
+                var json = r.Id == id ? (req.IssuesJson ?? "[]") : r.IssuesJson;
                 return ParseIssues(json).Any(i =>
                     i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean());
             });
@@ -562,6 +682,16 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        if (CountOpenIssues(req.IssuesJson) > 0)
+        {
+            await NotifyRunEventAsync(
+                run,
+                "workflow-issues-updated",
+                "warning",
+                "Workflow issues updated",
+                $"{ResolveActorName()} updated workflow issues for asset {{asset}} on job {{job}}.",
+                notifyInstaller: true);
+        }
         return Ok(ToDto(run));
     }
 
@@ -571,11 +701,24 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return NotFound();
+        if (!await _workflowAuthorization.CanMutateWorkflowRunAsync(User, asset, run))
+        {
+            return Forbid();
+        }
 
         run.StepResultsJson = req.StepResultsJson;
         run.UpdatedAt       = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+        await NotifyRunEventAsync(
+            run,
+            "workflow-media-updated",
+            "info",
+            "Workflow media updated",
+            $"{req.AmendedByName ?? ResolveActorName()} uploaded or amended workflow media for asset {{asset}} on job {{job}}.",
+            notifyInstaller: false);
         return Ok(ToDto(run));
     }
 
@@ -585,6 +728,12 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return NotFound();
+        if (!await _workflowAuthorization.CanMutateWorkflowRunAsync(User, asset, run))
+        {
+            return Forbid();
+        }
 
         run.TimeTrackingJson = req.TimeEntriesJson;
         run.UpdatedAt = DateTime.UtcNow;
@@ -601,6 +750,12 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var source = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (source is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == source.AssetId);
+        if (asset is null) return NotFound();
+        if (!await _workflowAuthorization.CanAdministerWorkflowRunAsync(User, asset))
+        {
+            return Forbid();
+        }
 
         var runCount = await _db.AssetWorkflowRuns
             .CountAsync(r => r.AssetId == source.AssetId && r.WorkflowConfigId == source.WorkflowConfigId);
@@ -629,7 +784,6 @@ public class AssetWorkflowRunsController : ControllerBase
         StartProductivePeriod(newRun, now, "Re-run started");
         _db.AssetWorkflowRuns.Add(newRun);
 
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == source.AssetId);
         if (asset is not null && asset.Status == "Complete")
         {
             asset.Status    = "InProgress";
@@ -637,6 +791,13 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        await NotifyRunEventAsync(
+            newRun,
+            "workflow-reopened",
+            "warning",
+            "Workflow reopened",
+            $"{ResolveActorName()} reopened workflow for asset {{asset}} on job {{job}}.",
+            notifyInstaller: false);
         return CreatedAtAction(nameof(GetById), new { id = newRun.Id }, ToDto(newRun));
     }
 
@@ -646,6 +807,12 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return NotFound();
+        if (!await _workflowAuthorization.CanMutateWorkflowRunAsync(User, asset, run))
+        {
+            return Forbid();
+        }
         if (run.IsLocked)
             return BadRequest(new { message = "This run is locked (completed)." });
 
@@ -683,6 +850,26 @@ public class AssetWorkflowRunsController : ControllerBase
         run.UpdatedAt = now;
         RecomputeRunTimeMetrics(run, now);
         await _db.SaveChangesAsync();
+        if (action is "pause" or "stopall")
+        {
+            await NotifyRunEventAsync(
+                run,
+                "workflow-paused",
+                "warning",
+                "Workflow paused",
+                $"{ResolveActorName()} paused workflow for asset {{asset}} on job {{job}}.",
+                notifyInstaller: false);
+        }
+        else if (action is "resumeproductive" or "startproductive")
+        {
+            await NotifyRunEventAsync(
+                run,
+                "workflow-resumed",
+                "info",
+                "Workflow resumed",
+                $"{ResolveActorName()} resumed workflow for asset {{asset}} on job {{job}}.",
+                notifyInstaller: false);
+        }
         return Ok(ToDto(run));
     }
 
@@ -691,6 +878,13 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         try { return JsonSerializer.Deserialize<List<JsonElement>>(json) ?? new(); }
         catch { return new(); }
+    }
+
+    private static int CountOpenIssues(string? json)
+    {
+        return ParseIssues(json ?? "[]").Count(i =>
+            !i.TryGetProperty("resolved", out var resolvedEl) ||
+            resolvedEl.ValueKind != JsonValueKind.True);
     }
 
     private static DateTime ParseUtcOr(string? value, DateTime fallbackUtc)
@@ -811,6 +1005,91 @@ public class AssetWorkflowRunsController : ControllerBase
     }
 
     // ── as-built builder ─────────────────────────────────────────────────────
+
+    private string ResolveActorName()
+    {
+        return User.Identity?.Name
+            ?? User.FindFirst("email")?.Value
+            ?? User.FindFirst("name")?.Value
+            ?? "System";
+    }
+
+    private string? ResolveRunTechnicianUserId(ProjectAssetEntity asset, string? requestedTechnicianUserId)
+    {
+        if (!string.IsNullOrWhiteSpace(_userContext.UserId)
+            && string.Equals(asset.AssignedUserId, _userContext.UserId, StringComparison.OrdinalIgnoreCase))
+        {
+            return _userContext.UserId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedTechnicianUserId))
+        {
+            return requestedTechnicianUserId;
+        }
+
+        return asset.AssignedUserId ?? _userContext.UserId;
+    }
+
+    private async Task NotifyRunEventAsync(
+        AssetWorkflowRunEntity run,
+        string eventType,
+        string severity,
+        string title,
+        string template,
+        bool notifyInstaller)
+    {
+        var asset = await _db.ProjectAssets.AsNoTracking().FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return;
+        await NotifyAssetEventAsync(asset, eventType, severity, title, template, notifyInstaller, run.Id);
+    }
+
+    private async Task NotifyAssetEventAsync(
+        ProjectAssetEntity asset,
+        string eventType,
+        string severity,
+        string title,
+        string template,
+        bool notifyInstaller,
+        string? runId)
+    {
+        var project = await _db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+        var message = template
+            .Replace("{asset}", asset.AssetTag, StringComparison.Ordinal)
+            .Replace("{job}", project?.JobNumber ?? "unknown", StringComparison.Ordinal);
+        var actorUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        var actorName = ResolveActorName();
+
+        await _feed.NotifyRolesAsync(
+            eventType,
+            severity,
+            title,
+            message,
+            ["Admin", "Project Manager"],
+            asset.ProjectId,
+            asset.Id,
+            runId,
+            "project-asset",
+            asset.Id,
+            actorUserId,
+            actorName);
+
+        if (notifyInstaller && !string.IsNullOrWhiteSpace(asset.AssignedUserId))
+        {
+            await _feed.NotifyUsersAsync(
+                eventType,
+                severity,
+                title,
+                message,
+                [asset.AssignedUserId],
+                asset.ProjectId,
+                asset.Id,
+                runId,
+                "project-asset",
+                asset.Id,
+                actorUserId,
+                actorName);
+        }
+    }
 
     private sealed class CaptureFieldDef
     {
@@ -947,17 +1226,20 @@ public class AssetWorkflowRunsController : ControllerBase
 
     // GET api/asset-workflow-runs/pending-signatures — locked runs awaiting customer sign-off, with project context
     [HttpGet("pending-signatures")]
-    public async Task<IActionResult> GetPendingSignatures()
+    public async Task<IActionResult> GetPendingSignatures([FromQuery] string? scope = null)
     {
         try
         {
+            var visibleProjectIds = await _accessScope.GetScopedProjectIdsAsync(User, scope);
             var runs = await _db.AssetWorkflowRuns
                 .Where(r => r.IsLocked && r.SignatureStatus == "PendingCustomer")
                 .OrderByDescending(r => r.CompletedAt)
                 .ToListAsync();
 
             var assetIds  = runs.Select(r => r.AssetId).Distinct().ToList();
-            var assets    = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
+            var assets    = await _db.ProjectAssets
+                .Where(a => assetIds.Contains(a.Id) && visibleProjectIds.Contains(a.ProjectId))
+                .ToListAsync();
             var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
             var projects  = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
 
@@ -993,6 +1275,12 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FindAsync(id);
         if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is null) return NotFound();
+        if (!await _workflowAuthorization.CanAdministerWorkflowRunAsync(User, asset))
+        {
+            return Forbid();
+        }
         if (!run.IsLocked) return BadRequest(new { message = "Run must be completed before waiving customer signature." });
         if (run.SignatureStatus != "PendingCustomer")
             return UnprocessableEntity(new { message = "Run is not currently awaiting customer signature." });

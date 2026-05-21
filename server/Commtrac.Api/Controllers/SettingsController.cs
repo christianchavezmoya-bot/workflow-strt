@@ -15,11 +15,17 @@ public class SettingsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly NotificationSettingsService _notificationSettings;
+    private readonly SqliteBackupService _backupService;
+    private readonly AuditLogService _audit;
+    private readonly RecoveryService _recovery;
 
-    public SettingsController(AppDbContext db, NotificationSettingsService notificationSettings)
+    public SettingsController(AppDbContext db, NotificationSettingsService notificationSettings, SqliteBackupService backupService, AuditLogService audit, RecoveryService recovery)
     {
         _db = db;
         _notificationSettings = notificationSettings;
+        _backupService = backupService;
+        _audit = audit;
+        _recovery = recovery;
     }
 
     [HttpGet("quickbase")]
@@ -73,5 +79,71 @@ public class SettingsController : ControllerBase
     public async Task<ActionResult<NotificationSettingsDto>> SaveNotifications([FromBody] NotificationSettingsDto request)
     {
         return Ok(await _notificationSettings.SaveAsync(request));
+    }
+
+    [HttpGet("backups")]
+    public async Task<ActionResult<IEnumerable<object>>> ListBackups()
+    {
+        var backups = await _backupService.ListBackupsAsync();
+        return Ok(backups.Select(b => new
+        {
+            b.FileName,
+            b.FullPath,
+            b.SizeBytes,
+            b.CreatedAtUtc
+        }));
+    }
+
+    [HttpPost("backups/create")]
+    public async Task<ActionResult<object>> CreateBackup()
+    {
+        var backup = await _backupService.CreateBackupAsync("manual");
+        await _audit.LogAsync(User, HttpContext, "database_backup_requested", backup.FileName);
+        return Ok(new
+        {
+            backup.FileName,
+            backup.FullPath,
+            backup.SizeBytes,
+            backup.CreatedAtUtc
+        });
+    }
+
+    [HttpPost("backups/restore")]
+    public async Task<ActionResult<RestoreBackupResponse>> RestoreBackup([FromBody] RestoreBackupRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _backupService.RestoreBackupAsync(request.FileName, cancellationToken);
+        await _audit.LogAsync(User, HttpContext, "database_restore_requested", request.FileName);
+        return Ok(new RestoreBackupResponse(
+            request.FileName,
+            result.SafeguardBackup.FileName,
+            result.RestoredAtUtc
+        ));
+    }
+
+    [HttpGet("backups/catalog")]
+    public async Task<ActionResult<IEnumerable<BackupCatalogItemDto>>> ListBackupCatalog(
+        [FromQuery] string fileName,
+        [FromQuery] string entityType,
+        [FromQuery] string? search,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await _recovery.ListBackupCatalogAsync(fileName, entityType, search, cancellationToken));
+    }
+
+    [HttpPost("backups/restore-item")]
+    public async Task<ActionResult<SelectiveRestoreResultDto>> RestoreItemFromBackup([FromBody] RestoreBackupItemRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _recovery.RestoreItemFromBackupAsync(request.FileName, request.EntityType, request.EntityId, cancellationToken);
+        await _audit.LogAsync(User, HttpContext, "database_selective_restore_requested", $"{request.EntityType}:{request.EntityId} from {request.FileName}");
+        return Ok(result);
+    }
+
+    [HttpGet("recycle-bin")]
+    public async Task<ActionResult<IEnumerable<RecycleBinItemDto>>> GetRecycleBin(
+        [FromQuery] string? entityType,
+        [FromQuery] string? search,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await _recovery.ListRecycleBinAsync(search, entityType, cancellationToken));
     }
 }

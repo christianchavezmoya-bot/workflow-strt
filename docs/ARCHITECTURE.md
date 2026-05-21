@@ -1,5 +1,5 @@
 # Commtrac Codex 915 — Application Architecture
-**Last updated: 2026-03-26**
+**Last updated: 2026-05-21**
 
 ---
 
@@ -14,6 +14,17 @@ Commtrac Codex 915 is a full-stack project & asset management platform delivered
 | **REST API** | ASP.NET Core 8 + EF Core 8 + SQLite | `http://<host>:4000/api` |
 
 The web and iOS apps share **100% of the same React source code**. iOS-specific behaviour is isolated to responsive layout breakpoints (`useMediaQuery`) and Capacitor plug-in calls (StatusBar colour, safe-area insets via CSS `env()`).
+
+### 1.1 Permanent Access-Control Rule
+
+User-scoped visibility and edit permissions are a permanent platform rule.
+
+- `Admin` can view and modify all records.
+- `Project Manager` can view records within their allowed scope, but PM-level edits are restricted to projects they own via `AssignedPmUserId`.
+- `Installer` / `Technician` visibility is based on assignment and participation scope.
+- `View-only` mode never expands visibility and blocks all state-changing API actions.
+
+This rule must be enforced backend-first. New features must not return unrestricted datasets and then rely on React-only filtering or hidden buttons for protection.
 
 ---
 
@@ -81,17 +92,14 @@ src/
 │   ├── tips/                   # Tips & Tricks
 │   └── workInstructions/       # Workflow builder + work order runner
 ├── hooks/
-│   ├── useAuth.ts              # Current user + JWT + dev-role override
+│   ├── useAuth.ts              # Current user + JWT-backed profile
 │   ├── usePermissions.ts       # Role-based permission flags
 │   ├── useActiveOffice.ts      # Regional office filter
-│   ├── useSyncEngine.ts        # Offline queue flush engine
-│   ├── useApiCacheUpdate.ts    # Stale-while-revalidate helper
 │   ├── useDynamicFields.ts
 │   ├── useFieldDefinitions.ts
 │   ├── useOfflineTimeQueue.ts
-│   ├── usePendingAssetIds.ts
 │   ├── useTableConfig.ts
-│   └── useWorkScope.ts         # RBAC work-scope filter for Engineers
+│   └── useAccessMode.ts        # View-only vs normal access mode
 ├── modules/
 │   └── bom-project/            # BOM-to-Project module (feature-flagged)
 │       ├── featureFlag.ts      # VITE_ENABLE_BOM_MODULE env var gate
@@ -104,8 +112,7 @@ src/
 │       ├── types/
 │       └── utils/
 ├── services/                   # API service layer (one file per domain)
-│   ├── api.ts                  # Axios instance (auto-detect base URL, JWT, offline cache)
-│   ├── localDB.ts              # IndexedDB (idb): cache / pending_actions / sync_meta
+│   ├── api.ts                  # Axios instance (auto-detect base URL, JWT, view-only header)
 │   └── [domain]Service.ts      # One per entity (see §3.3)
 ├── store/                      # Redux Toolkit slices
 │   ├── index.ts
@@ -150,7 +157,7 @@ Each `[domain]Service.ts` wraps Axios calls to the API. The `api.ts` instance:
 - Auto-detects `baseURL` from `VITE_API_BASE` env var, or derives `protocol://hostname:4000/api`
 - Attaches `Authorization: Bearer <token>` from `localStorage`
 - Performs silent JWT refresh 30 min before expiry
-- Stale-while-revalidate: every GET response is cached in IndexedDB; if the network fails the cached copy is served
+- Sends `X-View-Only: true` when the user switches into view-only access mode
 - Timeout: 5 s default; auth endpoints override to no timeout
 
 | Service file | Domain |
@@ -192,15 +199,12 @@ Each `[domain]Service.ts` wraps Axios calls to the API. The `api.ts` instance:
 | `globalSearchService.ts` | Global search |
 | `searchIndexService.ts` | Document index status |
 | `tableConfigService.ts` | Table column config |
-| `localDB.ts` | IndexedDB (offline cache + pending queue) |
-
 ### 3.4 State management
 
 | Layer | Tool | Used for |
 |---|---|---|
 | Server state | React `useState` + service calls | Per-page data fetching |
 | Global client state | Redux Toolkit | Projects, installations, customers, products, users |
-| Offline queue | IndexedDB via `idb` | Pending writes while offline |
 | Auth | `localStorage` + `useAuth` hook | JWT token, user object |
 | Role config | `localStorage` + API | RBAC permission flags |
 | BOM module | React Context (`BomProjectContext`) | Multi-step BOM wizard state |
@@ -254,9 +258,8 @@ There is **no `Capacitor.isNativePlatform()` guard** in the app source. Mobile v
 | Feature | File | Notes |
 |---|---|---|
 | QR code file upload | `MobileUploadPage`, `QRUploadButton` | Generates a token URL; phone browser opens upload page — no Capacitor required |
-| Offline sync | `useSyncEngine`, `localDB` | Works on both web and iOS; queues writes to IndexedDB, flushes on reconnect |
-| Stale-while-revalidate cache | `api.ts` | All GET responses cached in IndexedDB; shown instantly while fresh data loads |
-| Sync status badge | `Topbar` | Amber dot indicator visible on both platforms |
+| View-only access mode | `AccessModeContext`, `Topbar`, `api.ts` | Switches the UI into view-only and sends a backend-enforced mutation block header |
+| Search index status | `Topbar`, `searchIndexService` | Admin-only status/rebuild control for document indexing |
 
 ---
 
@@ -479,7 +482,9 @@ Permissions configurable per role via `RoleConfigs` table.
 
 ---
 
-## 8. Offline & Sync Architecture
+## 8. Request & Access Architecture
+
+The current app no longer uses the older IndexedDB/offline queue design. Runtime access now flows through `useAuth`, `AccessModeContext`, `api.ts`, `ViewOnlyEnforcementFilter`, and `AccessScopeServices`, with the backend enforcing scoped visibility and view-only mutation blocking.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -512,7 +517,6 @@ Permissions configurable per role via `RoleConfigs` table.
 |---|---|---|
 | `VITE_ENABLE_BOM_MODULE=true` | `.env` file | Shows BOM module routes and sidebar item |
 | `VITE_API_BASE=http://...` | `.env` file | Override API base URL (useful for iOS pointing at specific server) |
-| `dev_role_override` | `localStorage` | Dev-only: simulate a different role without re-logging in |
 
 ---
 

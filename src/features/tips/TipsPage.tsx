@@ -132,6 +132,31 @@ function formatDate(dateStr: string): string {
   }
 }
 
+const MIME_TO_EXT: Record<string, string> = {
+  "application/pdf": ".pdf",
+  "application/msword": ".doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  "application/vnd.ms-excel": ".xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+  "application/vnd.ms-powerpoint": ".ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "video/mp4": ".mp4",
+  "video/quicktime": ".mov",
+  "text/plain": ".txt",
+};
+
+function addExtIfMissing(name: string, contentType?: string | null): string {
+  const trimmed = name.trim();
+  if (!trimmed) return name;
+  if (/\.[a-z0-9]{2,5}$/i.test(trimmed)) return trimmed;
+  const ext = contentType ? MIME_TO_EXT[contentType.toLowerCase()] : "";
+  return ext ? `${trimmed}${ext}` : trimmed;
+}
+
 // ── Thumbnail helpers ─────────────────────────────────────────────────────────
 
 interface ThumbnailBoxProps {
@@ -191,7 +216,7 @@ const ThumbnailBox = ({ doc, size = 160 }: ThumbnailBoxProps) => {
   return (
     <Box sx={{ height: size, bgcolor: "action.hover", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
       {isImage && doc.downloadUrl ? (
-        <img src={doc.downloadUrl} alt={doc.name} style={{ objectFit: "cover", width: "100%", height: "100%" }} />
+        <img src={doc.downloadUrl} alt={addExtIfMissing(doc.name, doc.contentType)} style={{ objectFit: "cover", width: "100%", height: "100%" }} />
       ) : isVideo ? (
         <OndemandVideoOutlinedIcon color="primary" sx={{ fontSize: 64 }} />
       ) : (
@@ -224,7 +249,7 @@ const SmallThumbnail = ({ doc }: { doc: DocumentRecord }) => {
       {isImage && doc.downloadUrl ? (
         <img
           src={doc.downloadUrl}
-          alt={doc.name}
+          alt={addExtIfMissing(doc.name, doc.contentType)}
           style={{ objectFit: "cover", width: "100%", height: "100%" }}
         />
       ) : isVideo ? (
@@ -318,7 +343,7 @@ const TipsPage = () => {
 
     if (search) {
       const q = search.toLowerCase();
-      const matchTitle = doc.name.toLowerCase().includes(q);
+      const matchTitle = addExtIfMissing(doc.name, doc.contentType).toLowerCase().includes(q);
       const matchNotes = (doc.notes ?? "").toLowerCase().includes(q);
       const matchDivProd = `${division} ${product}`.toLowerCase().includes(q);
       if (!matchTitle && !matchNotes && !matchDivProd) return false;
@@ -490,7 +515,7 @@ const TipsPage = () => {
                     WebkitBoxOrient: "vertical",
                   }}
                 >
-                  {doc.name}
+                  {addExtIfMissing(doc.name, doc.contentType)}
                 </Typography>
                 {doc.createdBy && (
                   <Typography variant="caption" color="text.secondary" display="block" mt={0.5}>
@@ -559,7 +584,7 @@ const TipsPage = () => {
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" fontWeight={600}>
-                      {doc.name}
+                      {addExtIfMissing(doc.name, doc.contentType)}
                     </Typography>
                     {doc.notes && (
                       <Typography variant="caption" color="text.secondary">
@@ -620,7 +645,7 @@ const TipsPage = () => {
           <Stack direction="row" alignItems="center" spacing={1}>
             {contentType && renderContentTypeChip(contentType, "medium")}
             <Typography variant="h6" component="span">
-              {viewDoc.name}
+              {addExtIfMissing(viewDoc.name, viewDoc.contentType)}
             </Typography>
           </Stack>
         </DialogTitle>
@@ -631,7 +656,7 @@ const TipsPage = () => {
             </Box>
           )}
           {!viewLoading && viewBlobUrl && isImage && (
-            <Box component="img" src={viewBlobUrl} alt={viewDoc.name} sx={{ maxWidth: "100%", borderRadius: 1 }} />
+            <Box component="img" src={viewBlobUrl} alt={addExtIfMissing(viewDoc.name, viewDoc.contentType)} sx={{ maxWidth: "100%", borderRadius: 1 }} />
           )}
           {!viewLoading && viewBlobUrl && isVideo && (
             <Box component="video" controls src={viewBlobUrl} sx={{ width: "100%", borderRadius: 1 }} />
@@ -640,7 +665,7 @@ const TipsPage = () => {
             <Box
               component="iframe"
               src={viewBlobUrl}
-              title={viewDoc.name}
+              title={addExtIfMissing(viewDoc.name, viewDoc.contentType)}
               sx={{ width: "100%", height: 500, border: "none", borderRadius: 1 }}
             />
           )}

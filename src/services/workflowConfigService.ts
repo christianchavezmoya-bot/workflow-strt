@@ -1,66 +1,17 @@
 import api from "./api";
 import type { WorkflowConfig, UpsertWorkflowConfigInput, WorkflowConfigStatus } from "../types/workflowConfig";
 
-const LS_KEY = (productId: string) => `workflow_configs_v1_${productId}`;
-
-function lsRead(productId: string): WorkflowConfig[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY(productId));
-    if (raw) return JSON.parse(raw) as WorkflowConfig[];
-  } catch {}
-  return [];
-}
-
-function lsWrite(productId: string, configs: WorkflowConfig[]) {
-  try { localStorage.setItem(LS_KEY(productId), JSON.stringify(configs)); } catch {}
-}
-
-function lsReadAll(): WorkflowConfig[] {
-  try {
-    const prefix = "workflow_configs_v1_";
-    const all: WorkflowConfig[] = [];
-    const seen = new Set<string>();
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith(prefix)) {
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          const items = JSON.parse(raw) as WorkflowConfig[];
-          for (const item of items) {
-            if (!seen.has(item.id)) { seen.add(item.id); all.push(item); }
-          }
-        }
-      }
-    }
-    return all;
-  } catch { return []; }
-}
-
 export const workflowConfigService = {
   async getAll(status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
-    try {
-      const params = status ? `?status=${status}` : "";
-      const res = await api.get<WorkflowConfig[]>(`/workflow-configs${params}`);
-      return res.data;
-    } catch {
-      const cached = lsReadAll();
-      return status ? cached.filter((c) => c.status === status) : cached;
-    }
+    const params = status ? `?status=${status}` : "";
+    const res = await api.get<WorkflowConfig[]>(`/workflow-configs${params}`);
+    return res.data;
   },
 
   async listByProduct(productId: string, status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
-    try {
-      const params = status ? `?status=${status}` : "";
-      const res = await api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}${params}`);
-      // Only cache unfiltered results — a status-filtered response would corrupt the cache
-      // for callers that need all statuses (e.g. WorkInstructions table).
-      if (!status) lsWrite(productId, res.data);
-      return res.data;
-    } catch (err: unknown) {
-      console.warn("[workflowConfigService] API unavailable, falling back to localStorage", err);
-      const cached = lsRead(productId);
-      return status ? cached.filter((c) => c.status === status) : cached;
-    }
+    const params = status ? `?status=${status}` : "";
+    const res = await api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}${params}`);
+    return res.data;
   },
 
   async getById(id: string): Promise<WorkflowConfig | null> {
@@ -77,16 +28,11 @@ export const workflowConfigService = {
 
   async create(input: UpsertWorkflowConfigInput): Promise<WorkflowConfig> {
     const res = await api.post<WorkflowConfig>("/workflow-configs", input);
-    const configs = lsRead(input.productId);
-    configs.unshift(res.data);
-    lsWrite(input.productId, configs);
     return res.data;
   },
 
   async update(id: string, input: Partial<UpsertWorkflowConfigInput>): Promise<WorkflowConfig> {
     const res = await api.put<WorkflowConfig>(`/workflow-configs/${id}`, input);
-    const configs = lsRead(res.data.productId).map((c) => (c.id === id ? res.data : c));
-    lsWrite(res.data.productId, configs);
     return res.data;
   },
 
@@ -105,10 +51,8 @@ export const workflowConfigService = {
     return res.data;
   },
 
-  async remove(id: string, productId: string): Promise<void> {
+  async remove(id: string, _productId: string): Promise<void> {
     await api.delete(`/workflow-configs/${id}`);
-    const configs = lsRead(productId).filter((c) => c.id !== id);
-    lsWrite(productId, configs);
   },
 
   async uploadMedia(id: string, file: File): Promise<WorkflowConfig> {

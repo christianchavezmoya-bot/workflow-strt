@@ -10,6 +10,7 @@ import {
   Alert,
   Autocomplete,
   FormControl,
+  FormControlLabel,
   Grid,
   IconButton,
   ListItemText,
@@ -17,6 +18,7 @@ import {
   MenuItem,
   Select,
   Stack,
+  Switch,
   Tab,
   Tabs,
   Table,
@@ -28,7 +30,7 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { ArrowDropDown, DeleteOutline, EditOutlined, SettingsOutlined } from "@mui/icons-material";
+import { ArrowDropDown, DeleteForeverOutlined, DeleteOutline, EditOutlined, RestoreOutlined, SettingsOutlined } from "@mui/icons-material";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
@@ -44,6 +46,7 @@ import { officesService } from "../../services/officesService";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { installationTabsService, InstallationTab, InstallationTabRow } from "../../services/installationTabsService";
+import { installationService } from "../../services/installationService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createInstallation, deleteInstallation, fetchInstallations, updateInstallation } from "../../store/installationSlice";
 import { fetchProjects } from "../../store/projectSlice";
@@ -214,7 +217,9 @@ const InstallationList = () => {
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<Installation | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Installation | null>(null);
+  const [purgeTarget, setPurgeTarget] = useState<Installation | null>(null);
   const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [placeholderNoticeOpen, setPlaceholderNoticeOpen] = useState(false);
   const [inspections, setInspections] = useState<
     Array<Inspection & { installationLabel: string }>
@@ -447,8 +452,8 @@ const InstallationList = () => {
   };
 
   useEffect(() => {
-    dispatch(fetchInstallations());
-  }, [dispatch]);
+    dispatch(fetchInstallations({ includeDeleted: showArchived }));
+  }, [dispatch, showArchived]);
 
   useEffect(() => {
     dispatch(fetchUsers());
@@ -457,6 +462,10 @@ const InstallationList = () => {
   useEffect(() => {
     dispatch(fetchProducts());
   }, [dispatch]);
+
+  useEffect(() => {
+    setLocalInstallations(items);
+  }, [items]);
 
   useEffect(() => {
     dispatch(
@@ -497,17 +506,15 @@ const InstallationList = () => {
   }, [tab]);
 
   useEffect(() => {
-    const storedAssets = localStorage.getItem("admin_assets");
-    if (storedAssets) {
-      try {
-        const parsed = JSON.parse(storedAssets) as Array<{ machineType: string }>;
-        const types = Array.from(new Set(parsed.map((item) => item.machineType).filter(Boolean)));
-        setAssetTypes(types);
-      } catch {
-        setAssetTypes([]);
-      }
-    }
-  }, []);
+    const types = Array.from(
+      new Set(
+        [...items, ...localInstallations]
+          .map((item) => item.machineType)
+          .filter((value): value is string => !!value)
+      )
+    ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    setAssetTypes(types);
+  }, [items, localInstallations]);
 
   useEffect(() => {
     if (selectedJobNumber && !showAllInstallations) {
@@ -589,7 +596,7 @@ const InstallationList = () => {
     []
   );
 
-  const data = items.length ? items : localInstallations;
+  const data = items.length || localInstallations.length ? localInstallations : [];
   const dataWithSeq = useMemo(() => data.map((row, index) => ({ ...row, seq: index + 1 })), [data]);
 
   const projects = projectsState.items;
@@ -917,10 +924,14 @@ const InstallationList = () => {
             Installations{selectedProductNames ? ` — ${selectedProductNames}` : ""}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Showing {activeOffice === "All" ? "all offices" : activeOffice} installations.
+            Showing {activeOffice === "All" ? "all offices" : activeOffice} {showArchived ? "installations including archived records." : "installations."}
           </Typography>
         </Box>
         <Stack direction="row" spacing={2} alignItems="center">
+          <FormControlLabel
+            control={<Switch size="small" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />}
+            label="Show archived"
+          />
           <Button
             variant="outlined"
             onClick={showInstallationsPlaceholder}
@@ -1097,7 +1108,7 @@ const InstallationList = () => {
                     setCustomInstallMenu({ tabId: "", anchorEl: null, key: "" });
                   }}
                 >
-                  Sort A â†’ Z
+                        Sort A to Z
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
@@ -1110,7 +1121,7 @@ const InstallationList = () => {
                     setCustomInstallMenu({ tabId: "", anchorEl: null, key: "" });
                   }}
                 >
-                  Sort Z â†’ A
+                        Sort Z to A
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
@@ -1331,21 +1342,50 @@ const InstallationList = () => {
                       ))}
                       <TableCell>
                         <Stack direction="row" spacing={1}>
-                          <IconButton
-                            size="small"
-                            onClick={() => {
-                              setEditForm(row);
-                              setEditOpen(true);
-                            }}
-                          >
-                            <EditOutlined fontSize="small" />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            onClick={() => setDeleteTarget(row)}
-                          >
-                            <DeleteOutline fontSize="small" />
-                          </IconButton>
+                          {!row.isDeleted ? (
+                            <>
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  setEditForm(row);
+                                  setEditOpen(true);
+                                }}
+                              >
+                                <EditOutlined fontSize="small" />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                onClick={() => setDeleteTarget(row)}
+                              >
+                                <DeleteOutline fontSize="small" />
+                              </IconButton>
+                            </>
+                          ) : (
+                            <>
+                              <IconButton
+                                size="small"
+                                disabled={deleteSavingId === row.id}
+                                onClick={async () => {
+                                  try {
+                                    setDeleteSavingId(row.id);
+                                    await installationService.restoreInstallation(row.id);
+                                    await dispatch(fetchInstallations({ includeDeleted: showArchived }));
+                                  } finally {
+                                    setDeleteSavingId(null);
+                                  }
+                                }}
+                              >
+                                <RestoreOutlined fontSize="small" />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                disabled={deleteSavingId === row.id}
+                                onClick={() => setPurgeTarget(row)}
+                              >
+                                <DeleteForeverOutlined fontSize="small" />
+                              </IconButton>
+                            </>
+                          )}
                         </Stack>
                       </TableCell>
                     </TableRow>
@@ -1363,7 +1403,7 @@ const InstallationList = () => {
                   setInstallationMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort A â†’ Z
+                        Sort A to Z
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -1371,7 +1411,7 @@ const InstallationList = () => {
                   setInstallationMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort Z â†’ A
+                        Sort Z to A
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -1586,7 +1626,7 @@ const InstallationList = () => {
                         <Box sx={{ p: 2, borderRadius: 2, bgcolor: "rgba(255,255,255,0.04)" }}>
                           <Typography variant="body2">{component}</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            Serial Â· Firmware Â· Checks
+                            Serial | Firmware | Checks
                           </Typography>
                         </Box>
                       </Grid>
@@ -1632,7 +1672,7 @@ const InstallationList = () => {
                         }}
                       >
                         <Typography variant="body2">
-                          {field.name} Â· {field.fieldType}
+                          {field.name} | {field.fieldType}
                         </Typography>
                       </Box>
                     ))}
@@ -1920,7 +1960,7 @@ const InstallationList = () => {
                   setInspectionMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort A â†’ Z
+                        Sort A to Z
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -1928,7 +1968,7 @@ const InstallationList = () => {
                   setInspectionMenu({ anchorEl: null, key: "" });
                 }}
               >
-                Sort Z â†’ A
+                        Sort Z to A
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -2296,6 +2336,9 @@ const InstallationList = () => {
         open={!!deleteTarget}
         entityType="installation"
         entityLabel={deleteTarget?.installationId || deleteTarget?.installationNumber || deleteTarget?.id}
+        title="Archive Installation"
+        message={`Archive installation ${(deleteTarget?.installationId || deleteTarget?.installationNumber || deleteTarget?.id) ? `(${deleteTarget?.installationId || deleteTarget?.installationNumber || deleteTarget?.id})` : ""}? It will be removed from active lists for all users and can be restored later.`}
+        confirmLabel="Archive"
         loading={!!deleteTarget && deleteSavingId === deleteTarget.id}
         onClose={() => {
           if (deleteSavingId) return;
@@ -2306,8 +2349,33 @@ const InstallationList = () => {
           try {
             setDeleteSavingId(deleteTarget.id);
             await dispatch(deleteInstallation(deleteTarget.id)).unwrap();
-            setLocalInstallations((prev) => prev.filter((item) => item.id !== deleteTarget.id));
             setDeleteTarget(null);
+            await dispatch(fetchInstallations({ includeDeleted: showArchived }));
+          } finally {
+            setDeleteSavingId(null);
+          }
+        }}
+      />
+
+      <DeleteConfirmDialog
+        open={!!purgeTarget}
+        entityType="installation"
+        entityLabel={purgeTarget?.installationId || purgeTarget?.installationNumber || purgeTarget?.id}
+        title="Delete Installation Permanently"
+        message={`Permanently delete installation ${(purgeTarget?.installationId || purgeTarget?.installationNumber || purgeTarget?.id) ? `(${purgeTarget?.installationId || purgeTarget?.installationNumber || purgeTarget?.id})` : ""}? This cannot be undone.`}
+        confirmLabel="Delete permanently"
+        loading={!!purgeTarget && deleteSavingId === purgeTarget.id}
+        onClose={() => {
+          if (deleteSavingId) return;
+          setPurgeTarget(null);
+        }}
+        onConfirm={async () => {
+          if (!purgeTarget) return;
+          try {
+            setDeleteSavingId(purgeTarget.id);
+            await installationService.purgeInstallation(purgeTarget.id);
+            setPurgeTarget(null);
+            await dispatch(fetchInstallations({ includeDeleted: showArchived }));
           } finally {
             setDeleteSavingId(null);
           }

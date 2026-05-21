@@ -33,4 +33,8 @@ export interface Installation {
   pm2Serial?: string;
   pm3Serial?: string;
   pm4Serial?: string;
+  isDeleted?: boolean;
+  deletedAtUtc?: string;
+  deletedByUserId?: string;
+  deleteReason?: string;
 }

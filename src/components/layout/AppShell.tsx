@@ -5,7 +5,9 @@ import Topbar from "./Topbar";
 import DebugPanel from "./DebugPanel";
 import FieldNotificationBar from "../FieldNotificationBar";
 import BottomTabBar from "./BottomTabBar";
+import NotificationBanner from "./NotificationBanner";
 import { useViewMode } from "../../contexts/ViewModeContext";
+import { useAccessMode } from "../../contexts/AccessModeContext";
 import { FavoritesProvider } from "../../contexts/FavoritesContext";
 import OnboardingController from "../../onboarding/OnboardingController";
 import HelpCenterLauncher from "../../onboarding/components/HelpCenterLauncher";
@@ -45,6 +47,7 @@ function OnboardingLayer() {
 
 const AppShell = () => {
   const { viewMode } = useViewMode();
+  const { isViewOnly } = useAccessMode();
 
   return (
     <FavoritesProvider>
@@ -52,6 +55,22 @@ const AppShell = () => {
         {/* Sidebar: desktop only (hidden on mobile via CSS) */}
         {viewMode === "full" && <Sidebar />}
         <Box className={`app-main ${viewMode === "minimal" ? "minimal-view" : ""}`}>
+          <NotificationBanner />
+          {isViewOnly && (
+            <Box
+              sx={{
+                px: 2,
+                py: 1,
+                borderBottom: "1px solid rgba(245, 158, 11, 0.25)",
+                background: "rgba(245, 158, 11, 0.12)",
+                color: "warning.light",
+                fontSize: "0.85rem",
+                fontWeight: 700,
+              }}
+            >
+              View-only mode is active. Changes are disabled.
+            </Box>
+          )}
           <Topbar />
           <FieldNotificationBar />
           <Box component="main" className="app-content">

@@ -7,6 +7,7 @@ export type ProjectType = "Internal" | "External";
 export type InstallationMode = "Single Installation" | "Multiple Installations";
 
 export type ApprovalDecision = "Approved" | "Rejected" | "More Info Required";
+export type WorkflowMode = "INSTALLATION_ONLY" | "INSPECTION_ONLY" | "MIXED";
 
 export type ProjectStatus =
   | "Draft"
@@ -17,8 +18,6 @@ export type ProjectStatus =
   | "On Hold"
   | "Completed"
   | "Cancelled";
-
-export type WorkflowMode = "INSTALLATION_ONLY" | "INSPECTION_ONLY" | "MIXED";
 
 export interface Project {
   id: string;
@@ -37,16 +36,20 @@ export interface Project {
   projectType: ProjectType;
   status: ProjectStatus;
   approvalDecision?: ApprovalDecision;
+  workflowMode?: WorkflowMode;
   isInstallationProject: boolean;
   installationMode?: InstallationMode;
-  /** INSTALLATION_ONLY | INSPECTION_ONLY | MIXED. Derived server-side for legacy rows. */
-  workflowMode?: WorkflowMode;
   projectManager?: string;
+  assignedPmUserId?: string;
   contractValue?: number;
   probabilityStage?: string;
   productIds?: string[];
   productFeatureValues?: Record<string, string>;
   assetCount?: number;
+  isDeleted?: boolean;
+  deletedAtUtc?: string;
+  deletedByUserId?: string;
+  deleteReason?: string;
 }
 
 // ── Inspection Imports ────────────────────────────────────────────────────────

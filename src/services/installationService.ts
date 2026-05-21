@@ -2,9 +2,14 @@
 import { Installation } from "../types/installation";
 
 export const installationService = {
-  async getInstallations(projectId?: string) {
+  async getInstallations(projectId?: string, includeDeleted = false) {
     const response = await api.get<Installation[]>("/installations", {
-      params: projectId ? { projectId } : undefined
+      params: projectId || includeDeleted
+        ? {
+            ...(projectId ? { projectId } : {}),
+            ...(includeDeleted ? { includeDeleted: true } : {}),
+          }
+        : undefined
     });
     return response.data;
   },
@@ -18,6 +23,14 @@ export const installationService = {
   },
   async deleteInstallation(id: string) {
     await api.delete(`/installations/${id}`);
+    return id;
+  },
+  async restoreInstallation(id: string) {
+    const response = await api.post<Installation>(`/installations/${id}/restore`);
+    return response.data;
+  },
+  async purgeInstallation(id: string) {
+    await api.delete(`/installations/${id}/purge`);
     return id;
   }
 };

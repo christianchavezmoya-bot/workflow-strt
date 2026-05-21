@@ -38,13 +38,19 @@ export interface WorkflowTypeHealth {
   score: number;
 }
 
+export type DashboardScope = "default" | "pm-owned" | "participant";
+
 export const dashboardService = {
-  async evidenceCompleteness(windowDays: number): Promise<EvidenceCompleteness> {
-    const res = await api.get<EvidenceCompleteness>(`/dashboard/evidence-completeness?windowDays=${windowDays}`);
+  async evidenceCompleteness(windowDays: number, scope: DashboardScope = "default"): Promise<EvidenceCompleteness> {
+    const res = await api.get<EvidenceCompleteness>("/dashboard/evidence-completeness", {
+      params: { windowDays, scope }
+    });
     return res.data;
   },
-  async workflowHealth(windowDays: number): Promise<WorkflowHealth> {
-    const res = await api.get<WorkflowHealth>(`/dashboard/workflow-health?windowDays=${windowDays}`);
+  async workflowHealth(windowDays: number, scope: DashboardScope = "default"): Promise<WorkflowHealth> {
+    const res = await api.get<WorkflowHealth>("/dashboard/workflow-health", {
+      params: { windowDays, scope }
+    });
     return res.data;
   },
 };

@@ -7,6 +7,8 @@ import App from "./app/App";
 import { store } from "./store";
 import theme from "./theme/theme";
 import { FieldNotificationProvider } from "./contexts/FieldNotificationContext";
+import { NotificationInboxProvider } from "./contexts/NotificationInboxContext";
+import { AccessModeProvider } from "./contexts/AccessModeContext";
 import { ViewModeProvider } from "./contexts/ViewModeContext";
 import "./index.css";
 import { defineCustomElements } from "@ionic/pwa-elements/loader";
@@ -22,11 +24,15 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <BrowserRouter>
-          <ViewModeProvider>
-            <FieldNotificationProvider>
-              <App />
-            </FieldNotificationProvider>
-          </ViewModeProvider>
+          <AccessModeProvider>
+            <ViewModeProvider>
+              <NotificationInboxProvider>
+                <FieldNotificationProvider>
+                  <App />
+                </FieldNotificationProvider>
+              </NotificationInboxProvider>
+            </ViewModeProvider>
+          </AccessModeProvider>
         </BrowserRouter>
       </ThemeProvider>
     </Provider>

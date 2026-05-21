@@ -5,6 +5,15 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    host: '0.0.0.0' // Listen on all network interfaces
-  }
+    host: '0.0.0.0'
+  },
+  test: {
+    globals: true,
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html"],
+    },
+  },
 });

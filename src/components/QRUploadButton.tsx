@@ -32,6 +32,7 @@ interface QRUploadButtonProps {
 interface TokenResponse {
   token: string;
   expiresAt: string;
+  frontendBaseUrl?: string;
 }
 
 interface TokenStatus {
@@ -55,6 +56,7 @@ export default function QRUploadButton({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [frontendBaseUrl, setFrontendBaseUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = () => {
@@ -74,6 +76,7 @@ export default function QRUploadButton({
       });
       setToken(res.data.token);
       setExpiresAt(new Date(res.data.expiresAt));
+      setFrontendBaseUrl(res.data.frontendBaseUrl?.trim().replace(/\/+$/, "") || null);
     } catch {
       setError("Could not generate upload token. Is the server running?");
     } finally {
@@ -93,6 +96,7 @@ export default function QRUploadButton({
     setDone(false);
     setError(null);
     setProcessing(false);
+    setFrontendBaseUrl(null);
   };
 
   // Start/restart polling whenever token changes
@@ -153,7 +157,7 @@ export default function QRUploadButton({
 
   // Build the URL the phone will open
   const uploadUrl = token
-    ? `${window.location.origin}/mobile-upload?token=${token}`
+    ? `${(frontendBaseUrl || window.location.origin).replace(/\/+$/, "")}/mobile-upload?token=${token}`
     : "";
 
   const minutesLeft = Math.floor(secondsLeft / 60);

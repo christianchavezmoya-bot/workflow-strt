@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,23 +10,37 @@ namespace Commtrac.Api.Controllers;
 
 [ApiController]
 [Route("api/dashboard")]
-[Authorize(Roles = "Admin,Project Manager")]
+[Authorize]
 public class DashboardController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IAccessScopeService _accessScope;
     private static readonly JsonSerializerOptions _json = new() { PropertyNameCaseInsensitive = true };
 
-    public DashboardController(AppDbContext db) => _db = db;
+    public DashboardController(AppDbContext db, IAccessScopeService accessScope)
+    {
+        _db = db;
+        _accessScope = accessScope;
+    }
 
     // ── Evidence Completeness ────────────────────────────────────────────────
 
     [HttpGet("evidence-completeness")]
-    public async Task<ActionResult<EvidenceCompletenessDto>> EvidenceCompleteness([FromQuery] int windowDays = 90)
+    public async Task<ActionResult<EvidenceCompletenessDto>> EvidenceCompleteness([FromQuery] int windowDays = 90, [FromQuery] string? scope = null)
     {
         var cutoff = DateTime.UtcNow.AddDays(-windowDays);
+        var visibleProjectIds = await _accessScope.GetScopedProjectIdsAsync(User, scope);
+
+        if (visibleProjectIds.Count == 0)
+            return Ok(new EvidenceCompletenessDto(windowDays, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new()));
+
+        var visibleAssetIds = await _db.ProjectAssets
+            .Where(a => visibleProjectIds.Contains(a.ProjectId))
+            .Select(a => a.Id)
+            .ToListAsync();
 
         var runs = await _db.AssetWorkflowRuns
-            .Where(r => r.Status == "Complete" && r.CompletedAt >= cutoff)
+            .Where(r => visibleAssetIds.Contains(r.AssetId) && r.Status == "Complete" && r.CompletedAt >= cutoff)
             .ToListAsync();
 
         if (runs.Count == 0)
@@ -103,18 +118,29 @@ public class DashboardController : ControllerBase
     // ── Workflow Health Score ────────────────────────────────────────────────
 
     [HttpGet("workflow-health")]
-    public async Task<ActionResult<WorkflowHealthDto>> WorkflowHealth([FromQuery] int windowDays = 90)
+    public async Task<ActionResult<WorkflowHealthDto>> WorkflowHealth([FromQuery] int windowDays = 90, [FromQuery] string? scope = null)
     {
         var now      = DateTime.UtcNow;
         var cutoff   = now.AddDays(-windowDays);
         var prev     = now.AddDays(-windowDays * 2);
+        var visibleProjectIds = await _accessScope.GetScopedProjectIdsAsync(User, scope);
+
+        if (visibleProjectIds.Count == 0)
+        {
+            return Ok(new WorkflowHealthDto(windowDays, 0, 0, 0, 0, 0, 0, 0, 0, new()));
+        }
+
+        var visibleAssetIds = await _db.ProjectAssets
+            .Where(a => visibleProjectIds.Contains(a.ProjectId))
+            .Select(a => a.Id)
+            .ToListAsync();
 
         var currentRuns = await _db.AssetWorkflowRuns
-            .Where(r => r.StartedAt >= cutoff)
+            .Where(r => visibleAssetIds.Contains(r.AssetId) && r.StartedAt >= cutoff)
             .ToListAsync();
 
         var previousRuns = await _db.AssetWorkflowRuns
-            .Where(r => r.StartedAt >= prev && r.StartedAt < cutoff)
+            .Where(r => visibleAssetIds.Contains(r.AssetId) && r.StartedAt >= prev && r.StartedAt < cutoff)
             .ToListAsync();
 
         int currentScore  = currentRuns.Count  > 0 ? ComputeScore(ComputeMetrics(currentRuns))  : 0;

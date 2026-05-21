@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,11 +14,24 @@ namespace Commtrac.Api.Controllers;
 public class ProjectAssetsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly NotificationFeedService _feed;
+    private readonly AuditLogService _audit;
+    private readonly IAccessScopeService _accessScope;
+    private readonly IProjectAuthorizationService _projectAuthorization;
     private static readonly JsonSerializerOptions _json = new() { PropertyNameCaseInsensitive = true };
 
-    public ProjectAssetsController(AppDbContext db)
+    public ProjectAssetsController(
+        AppDbContext db,
+        NotificationFeedService feed,
+        AuditLogService audit,
+        IAccessScopeService accessScope,
+        IProjectAuthorizationService projectAuthorization)
     {
         _db = db;
+        _feed = feed;
+        _audit = audit;
+        _accessScope = accessScope;
+        _projectAuthorization = projectAuthorization;
     }
 
     // GET api/project-assets/my-project-ids
@@ -54,9 +68,11 @@ public class ProjectAssetsController : ControllerBase
 
     // GET api/project-assets/open  — all assets not yet Complete, joined with parent project info
     [HttpGet("open")]
-    public async Task<ActionResult<IEnumerable<OpenAssetDto>>> GetOpen()
+    public async Task<ActionResult<IEnumerable<OpenAssetDto>>> GetOpen([FromQuery] string? scope = null)
     {
+        var visibleProjectIds = await _accessScope.GetScopedProjectIdsAsync(User, scope);
         var assets = await _db.ProjectAssets
+            .Where(a => visibleProjectIds.Contains(a.ProjectId))
             .Where(a => a.Status == "NotStarted" || a.Status == "InProgress")
             .OrderBy(a => a.ProjectId).ThenBy(a => a.AssetTag)
             .ToListAsync();
@@ -106,9 +122,11 @@ public class ProjectAssetsController : ControllerBase
 
     // GET api/project-assets/workload-summary
     [HttpGet("workload-summary")]
-    public async Task<ActionResult<IEnumerable<WorkloadSummaryDto>>> WorkloadSummary()
+    public async Task<ActionResult<IEnumerable<WorkloadSummaryDto>>> WorkloadSummary([FromQuery] string? scope = null)
     {
+        var visibleProjectIds = await _accessScope.GetScopedProjectIdsAsync(User, scope);
         var assets = await _db.ProjectAssets
+            .Where(a => visibleProjectIds.Contains(a.ProjectId))
             .Where(a => a.AssignedUserId != null && a.AssignedUserId != ""
                      && (a.Status == "NotStarted" || a.Status == "InProgress"))
             .ToListAsync();
@@ -217,9 +235,15 @@ public class ProjectAssetsController : ControllerBase
 
     // GET api/project-assets/by-project/{projectId}
     [HttpGet("by-project/{projectId}")]
-    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProject(string projectId)
+    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProject(string projectId, [FromQuery] bool includeDeleted = false)
     {
-        var assets = await _db.ProjectAssets
+        if (!await _accessScope.CanViewProjectAsync(User, projectId, includeDeleted))
+        {
+            return NotFound();
+        }
+
+        var assetsQuery = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
+        var assets = await assetsQuery
             .Where(a => a.ProjectId == projectId)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
@@ -229,9 +253,12 @@ public class ProjectAssetsController : ControllerBase
 
     // GET api/project-assets/by-product/{productId}
     [HttpGet("by-product/{productId}")]
-    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProduct(string productId)
+    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProduct(string productId, [FromQuery] bool includeDeleted = false)
     {
-        var assets = await _db.ProjectAssets
+        var visibleProjectIds = await _accessScope.GetVisibleProjectIdsAsync(User, includeDeleted);
+        var assetsQuery = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
+        var assets = await assetsQuery
+            .Where(a => visibleProjectIds.Contains(a.ProjectId))
             .Where(a => a.ProductId == productId)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
@@ -241,10 +268,15 @@ public class ProjectAssetsController : ControllerBase
 
     // GET api/project-assets/{id}
     [HttpGet("{id}")]
-    public async Task<ActionResult<ProjectAssetDto>> GetById(string id)
+    public async Task<ActionResult<ProjectAssetDto>> GetById(string id, [FromQuery] bool includeDeleted = false)
     {
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
+        var assets = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
+        var asset = await assets.FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
+        if (!await _accessScope.CanViewProjectAsync(User, asset.ProjectId, includeDeleted))
+        {
+            return NotFound();
+        }
         return Ok(await ToDtoAsync(asset));
     }
 
@@ -253,6 +285,11 @@ public class ProjectAssetsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<ProjectAssetDto>> Create([FromBody] UpsertProjectAssetRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.ProjectId) || !await _projectAuthorization.CanEditProjectAsync(User, request.ProjectId))
+        {
+            return Forbid();
+        }
+
         var asset = new ProjectAssetEntity
         {
             ProjectId          = request.ProjectId ?? string.Empty,
@@ -273,6 +310,7 @@ public class ProjectAssetsController : ControllerBase
         };
         _db.ProjectAssets.Add(asset);
         await _db.SaveChangesAsync();
+        await NotifyAssetAssignmentChangeAsync(asset, null, asset.AssignedUserId, "asset-created");
         return CreatedAtAction(nameof(GetById), new { id = asset.Id }, await ToDtoAsync(asset));
     }
 
@@ -281,6 +319,11 @@ public class ProjectAssetsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> BulkCreate([FromBody] BulkCreateProjectAssetsRequest request)
     {
+        if (!await _projectAuthorization.CanEditProjectAsync(User, request.ProjectId))
+        {
+            return Forbid();
+        }
+
         var created = new List<ProjectAssetEntity>();
         foreach (var item in request.Assets)
         {
@@ -304,6 +347,10 @@ public class ProjectAssetsController : ControllerBase
             _db.ProjectAssets.Add(asset);
         }
         await _db.SaveChangesAsync();
+        foreach (var asset in created.Where(a => !string.IsNullOrWhiteSpace(a.AssignedUserId)))
+        {
+            await NotifyAssetAssignmentChangeAsync(asset, null, asset.AssignedUserId, "asset-created");
+        }
         return Ok(await MapAssetsToDtosAsync(created));
     }
 
@@ -314,6 +361,11 @@ public class ProjectAssetsController : ControllerBase
     {
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
+        var previousAssignedUserId = asset.AssignedUserId;
 
         if (!string.IsNullOrWhiteSpace(request.AssetTag))   asset.AssetTag        = request.AssetTag.Trim();
         if (request.AssetName is not null)                  asset.AssetName        = string.IsNullOrWhiteSpace(request.AssetName) ? null : request.AssetName.Trim();
@@ -322,7 +374,7 @@ public class ProjectAssetsController : ControllerBase
         if (request.Manufacturer is not null)               asset.Manufacturer     = string.IsNullOrWhiteSpace(request.Manufacturer) ? null : request.Manufacturer.Trim();
         if (request.Location is not null)                   asset.Location         = string.IsNullOrWhiteSpace(request.Location) ? null : request.Location.Trim();
         if (request.AssignedUserId is not null)             asset.AssignedUserId   = string.IsNullOrWhiteSpace(request.AssignedUserId) ? null : request.AssignedUserId;
-        if (!string.IsNullOrWhiteSpace(request.Status))    asset.Status            = request.Status;
+        if (!string.IsNullOrWhiteSpace(request.Status) && User.IsInRole("Admin")) asset.Status = request.Status;
         if (request.Notes is not null)                      asset.Notes            = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
         if (request.ProductConfigId is not null)            asset.ProductConfigId  = string.IsNullOrWhiteSpace(request.ProductConfigId) ? null : request.ProductConfigId;
         if (request.WorkflowTemplateId is not null)         asset.WorkflowTemplateId = string.IsNullOrWhiteSpace(request.WorkflowTemplateId) ? null : request.WorkflowTemplateId;
@@ -333,6 +385,10 @@ public class ProjectAssetsController : ControllerBase
         asset.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+        if (!string.Equals(previousAssignedUserId, asset.AssignedUserId, StringComparison.OrdinalIgnoreCase))
+        {
+            await NotifyAssetAssignmentChangeAsync(asset, previousAssignedUserId, asset.AssignedUserId, "asset-assignment-updated");
+        }
         return Ok(await ToDtoAsync(asset));
     }
 
@@ -342,6 +398,10 @@ public class ProjectAssetsController : ControllerBase
     {
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
+        if (!await _accessScope.CanParticipateInProjectAsync(User, asset.ProjectId))
+        {
+            return Forbid();
+        }
 
         asset.IssuesJson = string.IsNullOrWhiteSpace(request.IssuesJson) ? "[]" : request.IssuesJson;
         asset.UpdatedAt = DateTime.UtcNow;
@@ -354,22 +414,71 @@ public class ProjectAssetsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
+        var asset = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(a => a.Id == id);
+        if (asset is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId, includeDeleted: true))
+        {
+            return Forbid();
+        }
+        if (asset.IsDeleted) return NoContent();
+
+        asset.IsDeleted = true;
+        asset.DeletedAtUtc = DateTime.UtcNow;
+        asset.DeletedByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "asset_archived", $"{asset.AssetTag} ({asset.Id})");
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        var asset = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(a => a.Id == id);
+        if (asset is null) return NotFound();
+        if (!await _projectAuthorization.CanEditProjectAsync(User, asset.ProjectId, includeDeleted: true))
+        {
+            return Forbid();
+        }
+
+        asset.IsDeleted = false;
+        asset.DeletedAtUtc = null;
+        asset.DeletedByUserId = null;
+        asset.DeleteReason = null;
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "asset_restored", $"{asset.AssetTag} ({asset.Id})");
+        return NoContent();
+    }
+
+    [HttpDelete("{id}/purge")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Purge(string id)
+    {
+        var asset = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
 
-        // Remove dependent workflow records if those tables exist (migration may not be applied yet)
-        try
+        _db.AssetWorkflowAssignments.RemoveRange(_db.AssetWorkflowAssignments.Where(a => a.AssetId == id));
+        _db.AssetWorkflowRuns.RemoveRange(_db.AssetWorkflowRuns.Where(r => r.AssetId == id));
+        _db.AssetDocumentLinks.RemoveRange(_db.AssetDocumentLinks.Where(l => l.AssetId == id));
+        var docIds = await _db.AssetDocuments
+            .Where(d => d.AssetId == id)
+            .Select(d => d.Id)
+            .ToListAsync();
+        if (docIds.Count > 0)
         {
-            var assignments = await _db.AssetWorkflowAssignments.Where(a => a.AssetId == id).ToListAsync();
-            _db.AssetWorkflowAssignments.RemoveRange(assignments);
-
-            var runs = await _db.AssetWorkflowRuns.Where(r => r.AssetId == id).ToListAsync();
-            _db.AssetWorkflowRuns.RemoveRange(runs);
+            _db.AssetDocumentRevisions.RemoveRange(_db.AssetDocumentRevisions.Where(r => docIds.Contains(r.DocumentId)));
         }
-        catch { /* tables may not exist yet if migration is pending — skip */ }
+        _db.AssetDocuments.RemoveRange(_db.AssetDocuments.Where(d => d.AssetId == id));
 
         _db.ProjectAssets.Remove(asset);
         await _db.SaveChangesAsync();
+        await _audit.LogAsync(User, HttpContext, "asset_purged", $"{asset.AssetTag} ({asset.Id})");
         return NoContent();
     }
 
@@ -402,27 +511,67 @@ public class ProjectAssetsController : ControllerBase
             .GroupBy(r => r.AssetId)
             .ToDictionary(g => g.Key, g => g.First());
 
+        var configIds = assetList
+            .Select(a => a.ProductConfigId)
+            .Concat(latestRuns.Select(r => r.WorkflowConfigId))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct()
+            .ToList()!;
+
+        var workflowConfigs = configIds.Count == 0
+            ? []
+            : await _db.WorkflowConfigs
+                .Where(c => configIds.Contains(c.Id))
+                .Select(c => new { c.Id, c.FeatureSelectionsJson })
+                .ToListAsync();
+
+        var selectedFeatureIds = workflowConfigs
+            .SelectMany(c => ParseSelectedFeatureIds(c.FeatureSelectionsJson))
+            .Distinct()
+            .ToList();
+
+        var inventoryFeatureIds = selectedFeatureIds.Count == 0
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : (await _db.Features
+                .Where(f => selectedFeatureIds.Contains(f.Id) && f.IsInventory)
+                .Select(f => f.Id)
+                .ToListAsync())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var workflowSelectionByConfigId = workflowConfigs.ToDictionary(
+            c => c.Id,
+            c => BuildSelectionSummary(c.FeatureSelectionsJson, inventoryFeatureIds));
+
         var summaries = new Dictionary<string, ProjectAssetWorkflowSummaryDto>(assetIds.Count);
         foreach (var asset in assetList)
         {
             latestRunByAsset.TryGetValue(asset.Id, out var latestRun);
-            summaries[asset.Id] = BuildWorkflowSummary(asset, latestRun);
+            var workflowConfigId = asset.ProductConfigId ?? latestRun?.WorkflowConfigId;
+            workflowSelectionByConfigId.TryGetValue(workflowConfigId ?? string.Empty, out var selectionSummary);
+            summaries[asset.Id] = BuildWorkflowSummary(asset, latestRun, selectionSummary);
         }
 
         return summaries;
     }
 
-    private static ProjectAssetWorkflowSummaryDto BuildWorkflowSummary(ProjectAssetEntity asset, AssetWorkflowRunEntity? latestRun)
+    private static ProjectAssetWorkflowSummaryDto BuildWorkflowSummary(
+        ProjectAssetEntity asset,
+        AssetWorkflowRunEntity? latestRun,
+        WorkflowSelectionSummary? selectionSummary = null)
     {
         var hasWorkflow = !string.IsNullOrWhiteSpace(asset.ProductConfigId)
             || !string.IsNullOrWhiteSpace(asset.WorkflowTemplateId)
             || latestRun is not null;
+        var inventorySummary = selectionSummary ?? BuildSelectionSummaryFromSnapshot(latestRun?.WorkflowSnapshotJson);
+        var completedInventoryFeatures = CountCompletedInventoryFeatures(asset.FeatureValuesJson, inventorySummary.InventoryFeatureIds);
 
         if (latestRun is null)
         {
             return new ProjectAssetWorkflowSummaryDto(
                 hasWorkflow,
                 hasWorkflow ? "Pending" : "None",
+                completedInventoryFeatures,
+                inventorySummary.TotalInventoryFeatures,
                 0,
                 0,
                 0,
@@ -460,6 +609,8 @@ public class ProjectAssetsController : ControllerBase
         return new ProjectAssetWorkflowSummaryDto(
             true,
             evidenceStatus,
+            completedInventoryFeatures,
+            inventorySummary.TotalInventoryFeatures,
             counts.RequiredItems,
             counts.CompletedItems,
             counts.MissingItems,
@@ -626,7 +777,82 @@ public class ProjectAssetsController : ControllerBase
             a.AssetTag, a.AssetName, a.SerialNumber, a.AssetModel, a.Manufacturer,
             a.Location, a.AssignedUserId, a.Status, a.WorkOrderId, a.Notes,
             a.FeatureValuesJson, a.IssuesJson, a.ConfigLabel, a.InstalledAt, a.InstalledBy,
-            a.AsBuiltJson, a.CreatedAt, a.UpdatedAt, workflowSummary);
+            a.AsBuiltJson, a.CreatedAt, a.UpdatedAt, workflowSummary,
+            a.IsDeleted, a.DeletedAtUtc, a.DeletedByUserId, a.DeleteReason);
+
+    private static WorkflowSelectionSummary BuildSelectionSummary(string? featureSelectionsJson, HashSet<string> inventoryFeatureIds)
+    {
+        var selectedInventoryIds = ParseSelectedFeatureIds(featureSelectionsJson)
+            .Where(id => inventoryFeatureIds.Contains(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return new WorkflowSelectionSummary(selectedInventoryIds, selectedInventoryIds.Count);
+    }
+
+    private static IEnumerable<string> ParseSelectedFeatureIds(string? featureSelectionsJson)
+    {
+        if (string.IsNullOrWhiteSpace(featureSelectionsJson) || featureSelectionsJson == "[]")
+            return [];
+
+        try
+        {
+            var selections = JsonSerializer.Deserialize<List<FeatureSelectionDto>>(featureSelectionsJson, _json) ?? [];
+            return selections
+                .Where(s => s.Included && s.ActiveCount > 0 && !string.IsNullOrWhiteSpace(s.FeatureId))
+                .Select(s => s.FeatureId);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static WorkflowSelectionSummary BuildSelectionSummaryFromSnapshot(string? workflowSnapshotJson)
+    {
+        var featureIds = ParseWorkflowSteps(workflowSnapshotJson)
+            .SelectMany(step =>
+                (step.CaptureFields ?? [])
+                    .Where(field => !string.IsNullOrWhiteSpace(field.FeatureId))
+                    .Select(field => field.FeatureId!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return new WorkflowSelectionSummary(featureIds, featureIds.Count);
+    }
+
+    private static int CountCompletedInventoryFeatures(string? featureValuesJson, HashSet<string> inventoryFeatureIds)
+    {
+        if (inventoryFeatureIds.Count == 0 || string.IsNullOrWhiteSpace(featureValuesJson))
+            return 0;
+
+        try
+        {
+            var values = JsonSerializer.Deserialize<Dictionary<string, string>>(featureValuesJson, _json) ?? new();
+            return inventoryFeatureIds.Count(id => HasStoredFeatureValue(values.GetValueOrDefault(id)));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static bool HasStoredFeatureValue(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return false;
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, string>>(raw, _json);
+            if (parsed is not null)
+                return parsed.Values.Any(value => !string.IsNullOrWhiteSpace(value));
+        }
+        catch
+        {
+        }
+
+        return !string.IsNullOrWhiteSpace(raw);
+    }
 
     private sealed class WorkflowStepSummary
     {
@@ -652,9 +878,13 @@ public class ProjectAssetsController : ControllerBase
     {
         [System.Text.Json.Serialization.JsonPropertyName("id")]
         public string Id { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("featureId")]
+        public string? FeatureId { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("required")]
         public bool Required { get; set; }
     }
+
+    private sealed record WorkflowSelectionSummary(HashSet<string> InventoryFeatureIds, int TotalInventoryFeatures);
 
     private sealed class WorkflowStepResultSummary
     {
@@ -662,5 +892,114 @@ public class ProjectAssetsController : ControllerBase
         public string StepId { get; set; } = string.Empty;
         [System.Text.Json.Serialization.JsonPropertyName("values")]
         public Dictionary<string, string>? Values { get; set; }
+    }
+
+    private async Task NotifyAssetAssignmentChangeAsync(
+        ProjectAssetEntity asset,
+        string? previousAssignedUserId,
+        string? nextAssignedUserId,
+        string eventType)
+    {
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+        var actorName = User.Identity?.Name ?? User.FindFirst("email")?.Value;
+        var actorUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        var actorRole = User.FindFirst("role")?.Value;
+        var nextUser = !string.IsNullOrWhiteSpace(nextAssignedUserId)
+            ? await _db.Users.FirstOrDefaultAsync(u => u.Id == nextAssignedUserId)
+            : null;
+        var previousUser = !string.IsNullOrWhiteSpace(previousAssignedUserId)
+            ? await _db.Users.FirstOrDefaultAsync(u => u.Id == previousAssignedUserId)
+            : null;
+
+        var managerDriven = string.Equals(actorRole, "Admin", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(actorRole, "Project Manager", StringComparison.OrdinalIgnoreCase);
+        var isSelfAssign = !string.IsNullOrWhiteSpace(nextAssignedUserId)
+            && string.Equals(actorUserId, nextAssignedUserId, StringComparison.OrdinalIgnoreCase);
+        var isTakeover = isSelfAssign && !string.IsNullOrWhiteSpace(previousAssignedUserId)
+            && !string.Equals(previousAssignedUserId, nextAssignedUserId, StringComparison.OrdinalIgnoreCase);
+
+        var roleEventType = eventType;
+        var roleTitle = $"Asset assignment updated: {asset.AssetTag}";
+        var roleMessage = $"Asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"} is now assigned to {(nextUser?.FullName ?? nextAssignedUserId ?? "no installer")}.";
+
+        if (managerDriven && nextUser is not null)
+        {
+            roleEventType = "manager-assigned";
+            roleTitle = $"Asset assigned by PM/Admin: {asset.AssetTag}";
+            roleMessage = $"{actorName ?? "PM/Admin"} assigned asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"} to {nextUser.FullName}.";
+            if (!string.IsNullOrWhiteSpace(previousUser?.FullName))
+            {
+                roleMessage += $" Previous assignee: {previousUser.FullName}.";
+            }
+        }
+        else if (isTakeover && nextUser is not null)
+        {
+            roleEventType = "asset-takeover";
+            roleTitle = $"Asset taken over: {asset.AssetTag}";
+            roleMessage = $"{nextUser.FullName} took over asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"}";
+            if (!string.IsNullOrWhiteSpace(previousUser?.FullName))
+            {
+                roleMessage += $" from {previousUser.FullName}";
+            }
+            roleMessage += ".";
+        }
+        else if (isSelfAssign && nextUser is not null)
+        {
+            roleEventType = "asset-self-assigned";
+            roleTitle = $"Asset self-assigned: {asset.AssetTag}";
+            roleMessage = $"{nextUser.FullName} self-assigned asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"}.";
+        }
+
+        await _feed.NotifyRolesAsync(
+            roleEventType,
+            "info",
+            roleTitle,
+            roleMessage,
+            ["Admin", "Project Manager"],
+            asset.ProjectId,
+            asset.Id,
+            null,
+            "project-asset",
+            asset.Id,
+            actorUserId,
+            actorName
+        );
+
+        if (!string.IsNullOrWhiteSpace(nextAssignedUserId))
+        {
+            await _feed.NotifyUsersAsync(
+                "asset-assigned",
+                "info",
+                $"Asset assigned: {asset.AssetTag}",
+                $"You were assigned asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"}.",
+                [nextAssignedUserId],
+                asset.ProjectId,
+                asset.Id,
+                null,
+                "project-asset",
+                asset.Id,
+                null,
+                actorName
+            );
+        }
+
+        if (!string.IsNullOrWhiteSpace(previousAssignedUserId) &&
+            !string.Equals(previousAssignedUserId, nextAssignedUserId, StringComparison.OrdinalIgnoreCase))
+        {
+            await _feed.NotifyUsersAsync(
+                "asset-unassigned",
+                "warning",
+                $"Asset reassigned: {asset.AssetTag}",
+                $"Asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"} is no longer assigned to you.",
+                [previousAssignedUserId],
+                asset.ProjectId,
+                asset.Id,
+                null,
+                "project-asset",
+                asset.Id,
+                null,
+                actorName
+            );
+        }
     }
 }

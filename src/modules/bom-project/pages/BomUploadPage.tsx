@@ -56,6 +56,10 @@ export default function BomUploadPage() {
       });
 
       const rawRows = await extractRawRows(file, run.id, selectedSheets);
+      await bomApiService.saveRunData(run.id, {
+        totalRawRows: rawRows.length,
+        rawRows,
+      });
       const firstSheet = parsedWorkbook.sheets.find((s) => selectedSheets.includes(s.name));
       const suggested = firstSheet ? suggestMappings(firstSheet.headers) : [];
 

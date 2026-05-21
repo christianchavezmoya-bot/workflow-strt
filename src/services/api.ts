@@ -24,6 +24,14 @@ const api = axios.create({
   timeout: 5000,
 });
 
+const getAccessMode = () => {
+  try {
+    return localStorage.getItem("app_access_mode") === "view-only" ? "view-only" : "normal";
+  } catch {
+    return "normal";
+  }
+};
+
 type DebugLog = {
   id: string;
   time: string;
@@ -111,11 +119,8 @@ api.interceptors.request.use(async (config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-
-  // Auth endpoints must never time out — give them unlimited time.
-  // The 8s timeout only applies to data GETs so the cache kicks in quickly.
-  if (url.includes("/auth/")) {
-    config.timeout = 0;
+  if (getAccessMode() === "view-only") {
+    config.headers["X-View-Only"] = "true";
   }
 
   (config as typeof config & { metadata?: { start: number } }).metadata = { start: Date.now() };

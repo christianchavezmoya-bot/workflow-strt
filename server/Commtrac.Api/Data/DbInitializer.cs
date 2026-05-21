@@ -1,6 +1,7 @@
 using System.Text.Json;
 using BCrypt.Net;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Commtrac.Api.Data;
@@ -20,6 +21,7 @@ public static class DbInitializer
         db.Database.Migrate();
         EnsureAuditLogTable(db);
         EnsureSessionsTable(db);
+        EnsureNotificationInboxTable(db);
         EnsurePasswordChangedAtColumn(db);
         EnsureDocumentTables(db);
         EnsureAssetDocumentTables(db);
@@ -27,6 +29,10 @@ public static class DbInitializer
         EnsureRunTimeTrackingColumns(db);
         EnsureMarch15Columns(db);
         EnsureFeatureProcurementColumns(db);
+        EnsureRecoverableDeleteColumns(db);
+        EnsureAssignedPmUserIdColumn(db);
+        EnsureInspectionImportArchiveColumns(db);
+        BackfillDocumentOwnership(db);
         EnsureLinkableKeyFieldDefinitions(db);
 
         if (!db.Users.Any())
@@ -75,6 +81,7 @@ public static class DbInitializer
         CleanupSeederArtifacts(db);
         SeedDivisions(db);
         SeedProducts(db);
+        CleanupLegacySeedProducts(db);
         db.SaveChanges(); // flush products before feature patch so LINQ queries can find them
 
         EnsureAim100Features(db);
@@ -157,6 +164,8 @@ public static class DbInitializer
             });
         }
 
+        NormalizeExistingUserOffices(db);
+        NormalizeProjectManagerOwnership(db);
         db.SaveChanges();
     }
 
@@ -357,8 +366,6 @@ public static class DbInitializer
         ("Hazard Avert",          "Hazard detection and avoidance",         DivSafetyId),
         ("Hazard Avert - Gen 2",  "Hazard Avert second generation",         DivSafetyId),
         ("Ping Alert",            "Personnel alerting system",              DivSafetyId),
-        ("New Ice Cream",         null,                                     null),
-        ("Coffee",                null,                                     null),
     ];
 
     private static void SeedProducts(AppDbContext db)
@@ -390,6 +397,78 @@ public static class DbInitializer
                 if (divId != null && productsByName.TryGetValue(name, out var p) && p.DivisionId == null)
                     p.DivisionId = divId;
             }
+        }
+    }
+
+    private static void CleanupLegacySeedProducts(AppDbContext db)
+    {
+        var legacyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "New Ice Cream",
+            "Coffee"
+        };
+
+        var candidates = db.Products
+            .Where(p => legacyNames.Contains(p.Name) && p.Description == null && p.DivisionId == null)
+            .ToList();
+
+        foreach (var product in candidates)
+        {
+            var hasFeatureLinks = db.ProductFeatures.Any(pf => pf.ProductId == product.Id);
+            var usedByAssets = db.ProjectAssets.Any(a => a.ProductId == product.Id);
+            var usedByWorkflows = db.WorkflowConfigs.Any(w => w.ProductId == product.Id);
+            var usedByProjects = db.Projects
+                .AsEnumerable()
+                .Any(p => p.ProductIds != null && p.ProductIds.Contains(product.Id));
+
+            if (!hasFeatureLinks && !usedByAssets && !usedByWorkflows && !usedByProjects)
+            {
+                db.Products.Remove(product);
+            }
+        }
+    }
+
+    private static void EnsureNotificationInboxTable(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS NotificationInbox (
+                    Id TEXT PRIMARY KEY NOT NULL,
+                    RecipientUserId TEXT NULL,
+                    RecipientRole TEXT NULL,
+                    EventType TEXT NOT NULL DEFAULT '',
+                    Severity TEXT NOT NULL DEFAULT 'info',
+                    Title TEXT NOT NULL DEFAULT '',
+                    Message TEXT NOT NULL DEFAULT '',
+                    ProjectId TEXT NULL,
+                    AssetId TEXT NULL,
+                    RunId TEXT NULL,
+                    EntityType TEXT NULL,
+                    EntityId TEXT NULL,
+                    TriggeredByUserId TEXT NULL,
+                    TriggeredByName TEXT NULL,
+                    CreatedAtUtc TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                    ReadAtUtc TEXT NULL,
+                    ReadByUserId TEXT NULL
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_NotificationInbox_RecipientUserId ON NotificationInbox (RecipientUserId)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_NotificationInbox_RecipientRole ON NotificationInbox (RecipientRole)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_NotificationInbox_CreatedAtUtc ON NotificationInbox (CreatedAtUtc)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
         }
     }
 
@@ -591,6 +670,41 @@ public static class DbInitializer
             if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
             {
                 cmd.CommandText = "ALTER TABLE Documents ADD COLUMN DownloadUrl TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='ProjectId'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN ProjectId TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='AssetId'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN AssetId TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='CreatedByUserId'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN CreatedByUserId TEXT";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='IsLegacyUnclassified'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN IsLegacyUnclassified INTEGER NOT NULL DEFAULT 0";
+                cmd.ExecuteNonQuery();
+            }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='VisibilityScope'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Documents ADD COLUMN VisibilityScope TEXT NOT NULL DEFAULT 'Global'";
                 cmd.ExecuteNonQuery();
             }
 
@@ -858,4 +972,248 @@ public static class DbInitializer
             conn.Close();
         }
     }
+
+    private static void BackfillDocumentOwnership(AppDbContext db)
+    {
+        var docsNeedingBackfill = db.Documents.IgnoreQueryFilters()
+            .Where(d => string.IsNullOrWhiteSpace(d.ProjectId))
+            .ToList();
+
+        if (docsNeedingBackfill.Count == 0)
+        {
+            return;
+        }
+
+        var assets = db.ProjectAssets.IgnoreQueryFilters().ToList();
+        var assetById = assets.ToDictionary(a => a.Id, StringComparer.OrdinalIgnoreCase);
+        var assetByLinkedDocId = db.AssetDocumentLinks
+            .Join(
+                db.ProjectAssets.IgnoreQueryFilters(),
+                link => link.AssetId,
+                asset => asset.Id,
+                (link, asset) => new { link.DocumentId, asset.Id, asset.ProjectId })
+            .ToList()
+            .GroupBy(x => x.DocumentId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var projectIds = db.Projects.IgnoreQueryFilters().Select(p => p.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var installations = db.Installations.IgnoreQueryFilters().ToDictionary(i => i.Id, StringComparer.OrdinalIgnoreCase);
+        var issueProjectIds = (
+            from issue in db.Issues
+            join installation in db.Installations.IgnoreQueryFilters() on issue.InstallationId equals installation.Id
+            select new { issue.Id, installation.ProjectId }
+        ).ToDictionary(x => x.Id, x => x.ProjectId, StringComparer.OrdinalIgnoreCase);
+
+        var changed = false;
+        foreach (var doc in docsNeedingBackfill)
+        {
+            string? projectId = null;
+            string? assetId = null;
+
+            if (assetByLinkedDocId.TryGetValue(doc.Id, out var linkedAsset))
+            {
+                projectId = linkedAsset.ProjectId;
+                assetId = linkedAsset.Id;
+            }
+            else if (!string.IsNullOrWhiteSpace(doc.LinkedTo) && assetById.TryGetValue(doc.LinkedTo, out var asset))
+            {
+                projectId = asset.ProjectId;
+                assetId = asset.Id;
+            }
+            else if (!string.IsNullOrWhiteSpace(doc.LinkedTo) && projectIds.Contains(doc.LinkedTo))
+            {
+                projectId = doc.LinkedTo;
+            }
+            else if (!string.IsNullOrWhiteSpace(doc.LinkedTo) && installations.TryGetValue(doc.LinkedTo, out var installation))
+            {
+                projectId = installation.ProjectId;
+            }
+            else if (!string.IsNullOrWhiteSpace(doc.LinkedTo) && issueProjectIds.TryGetValue(doc.LinkedTo, out var issueProjectId))
+            {
+                projectId = issueProjectId;
+            }
+
+            doc.ProjectId = projectId;
+            doc.AssetId = assetId;
+            doc.IsLegacyUnclassified = string.IsNullOrWhiteSpace(projectId);
+            doc.VisibilityScope = doc.IsLegacyUnclassified
+                ? "Legacy"
+                : !string.IsNullOrWhiteSpace(assetId)
+                    ? "Asset"
+                    : !string.IsNullOrWhiteSpace(projectId)
+                        ? "Project"
+                        : "Global";
+            changed = true;
+        }
+
+        foreach (var doc in db.Documents.IgnoreQueryFilters().Where(d => string.IsNullOrWhiteSpace(d.VisibilityScope)).ToList())
+        {
+            doc.VisibilityScope = doc.IsLegacyUnclassified
+                ? "Legacy"
+                : !string.IsNullOrWhiteSpace(doc.AssetId)
+                    ? "Asset"
+                    : !string.IsNullOrWhiteSpace(doc.ProjectId)
+                        ? "Project"
+                        : "Global";
+            changed = true;
+        }
+
+        if (changed)
+        {
+            db.SaveChanges();
+        }
+    }
+
+    private static void EnsureRecoverableDeleteColumns(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            void AddIfMissing(string table, string column, string columnDef)
+            {
+                cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{column}'";
+                if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+                {
+                    cmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {columnDef}";
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            foreach (var table in new[] { "Projects", "Installations", "ProjectAssets", "BomImportRuns", "Documents" })
+            {
+                AddIfMissing(table, "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+                AddIfMissing(table, "DeletedAtUtc", "TEXT NULL");
+                AddIfMissing(table, "DeletedByUserId", "TEXT NULL");
+                AddIfMissing(table, "DeleteReason", "TEXT NULL");
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureAssignedPmUserIdColumn(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Projects') WHERE name='AssignedPmUserId'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Projects ADD COLUMN AssignedPmUserId TEXT NULL";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureInspectionImportArchiveColumns(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            void AddIfMissing(string column, string columnDef)
+            {
+                cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('InspectionImports') WHERE name='{column}'";
+                if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+                {
+                    cmd.CommandText = $"ALTER TABLE InspectionImports ADD COLUMN {column} {columnDef}";
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            AddIfMissing("IsArchived",    "INTEGER NOT NULL DEFAULT 0");
+            AddIfMissing("ArchivedAt",    "TEXT NULL");
+            AddIfMissing("ArchivedBy",    "TEXT NULL");
+            AddIfMissing("ArchiveReason", "TEXT NULL");
+            AddIfMissing("ArchiveRef",    "TEXT NULL");
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void NormalizeExistingUserOffices(AppDbContext db)
+    {
+        var offices = db.Offices.AsNoTracking().ToList();
+        if (offices.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var user in db.Users)
+        {
+            user.Office = OfficeNormalizationService.NormalizeOfficeValue(user.Office, offices);
+        }
+    }
+
+    private static void NormalizeProjectManagerOwnership(AppDbContext db)
+    {
+        var users = db.Users
+            .AsNoTracking()
+            .Select(u => new { u.Id, u.FullName, u.Email, u.Role })
+            .AsEnumerable()
+            .Select(u => new ProjectManagerIdentity(u.Id, u.FullName, u.Email, u.Role))
+            .ToList();
+
+        foreach (var project in db.Projects)
+        {
+            project.AssignedPmUserId = ResolveAssignedPmUserId(project.ProjectManager, project.AssignedPmUserId, users);
+        }
+    }
+
+    private static string? ResolveAssignedPmUserId(
+        string? projectManager,
+        string? assignedPmUserId,
+        List<ProjectManagerIdentity> users)
+    {
+        if (!string.IsNullOrWhiteSpace(assignedPmUserId)
+            && users.Any(u => string.Equals((string)u.Id, assignedPmUserId, StringComparison.OrdinalIgnoreCase)))
+        {
+            return assignedPmUserId;
+        }
+
+        var normalizedManager = NormalizeIdentity(projectManager);
+        if (string.IsNullOrWhiteSpace(normalizedManager))
+        {
+            return null;
+        }
+
+        var exactPmMatches = users
+            .Where(u => string.Equals((string)u.Role, "Project Manager", StringComparison.OrdinalIgnoreCase))
+            .Where(u =>
+                NormalizeIdentity(u.FullName) == normalizedManager
+                || NormalizeIdentity(u.Email) == normalizedManager)
+            .ToList();
+
+        if (exactPmMatches.Count == 1)
+        {
+            return exactPmMatches[0].Id;
+        }
+
+        var anyRoleMatches = users
+            .Where(u =>
+                NormalizeIdentity(u.FullName) == normalizedManager
+                || NormalizeIdentity(u.Email) == normalizedManager)
+            .ToList();
+
+        return anyRoleMatches.Count == 1 ? anyRoleMatches[0].Id : null;
+    }
+
+    private static string NormalizeIdentity(string? value) =>
+        (value ?? string.Empty).Trim().ToLowerInvariant();
+
+    private sealed record ProjectManagerIdentity(string Id, string FullName, string Email, string Role);
 }

@@ -48,6 +48,7 @@ import { documentService, type DocumentRecord } from "../../services/documentSer
 import QRUploadButton from "../../components/QRUploadButton";
 import { productService } from "../../services/productService";
 import { projectService } from "../../services/projectService";
+import { projectAssetService } from "../../services/projectAssetService";
 import { customerService } from "../../services/customerService";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -77,9 +78,17 @@ interface BulkFile {
   name: string;
 }
 
+interface RelationOption {
+  id: string;
+  name: string;
+}
+
 interface DocForm {
   name: string;
   type: string;
+  visibilityScope: "Global" | "Project" | "Asset";
+  projectId: string;
+  assetId: string;
   linkedTo: string;
   notes: string;
   mode: "url" | "upload";
@@ -104,6 +113,12 @@ const DEFAULT_TABS: DocTab[] = [
   { id: "bulletins",   label: "Tech Bulletins",     color: "warning"   },
   { id: "informative", label: "Informative",        color: "default"   },
 ];
+
+const DOCUMENT_VISIBILITY_OPTIONS = [
+  { value: "Global", label: "Global library" },
+  { value: "Project", label: "Project scoped" },
+  { value: "Asset", label: "Asset scoped" },
+] as const;
 
 const TAB_COLOR_OPTIONS: DocTab["color"][] = [
   "default", "primary", "secondary", "info", "success", "warning", "error",
@@ -191,8 +206,10 @@ function parseFieldsJson(json: string): { customFields: CustomField[]; columnOrd
 // ------------------------------------------------------------------
 
 export default function DocumentsPage() {
-  useAuth(); // keep auth context available for future use
+  const { user } = useAuth();
   const can = usePermissions();
+  const isAdminUser = user?.role === "Admin";
+
   // ---- data -------------------------------------------------------
   const [docs, setDocs]       = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -217,6 +234,9 @@ export default function DocumentsPage() {
   const [relProducts,  setRelProducts]  = useState<{ id: string; name: string }[]>([]);
   const [relProjects,  setRelProjects]  = useState<{ id: string; name: string }[]>([]);
   const [relCustomers, setRelCustomers] = useState<{ id: string; name: string }[]>([]);
+  const [projectOptions, setProjectOptions] = useState<RelationOption[]>([]);
+  const [addAssetOptions, setAddAssetOptions] = useState<RelationOption[]>([]);
+  const [editAssetOptions, setEditAssetOptions] = useState<RelationOption[]>([]);
 
   // Derived — must precede makeEmptyForm (which is a lazy useState initializer)
   const activeCategoryId = tabs[catTab]?.id ?? "all";
@@ -225,6 +245,9 @@ export default function DocumentsPage() {
   const makeEmptyForm = (): DocForm => ({
     name: "",
     type: activeCategoryId !== "all" ? activeCategoryId : (tabs.find((t) => t.id !== "all")?.id ?? "technical"),
+    visibilityScope: "Global",
+    projectId: "",
+    assetId: "",
     linkedTo: "",
     notes: "",
     mode: "url",
@@ -243,6 +266,8 @@ export default function DocumentsPage() {
   const [editDoc,          setEditDoc]          = useState<DocumentRecord | null>(null);
   const [editName,         setEditName]         = useState("");
   const [editLinkedTo,     setEditLinkedTo]     = useState("");
+  const [editProjectId,    setEditProjectId]    = useState("");
+  const [editAssetId,      setEditAssetId]      = useState("");
   const [editNotes,        setEditNotes]        = useState("");
   const [editCustomValues, setEditCustomValues] = useState<Record<string, string>>({});
   const [editSaving,       setEditSaving]       = useState(false);
@@ -320,6 +345,49 @@ export default function DocumentsPage() {
     if (needs.has("customers") && !relCustomers.length) customerService.getCustomers().then((r) => setRelCustomers((r as { id: string; name: string }[]).map((c) => ({ id: c.id, name: c.name })))).catch(() => {});
   }, [customFields]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!can.modifyData) return;
+    projectService.getProjects({ includeDeleted: false }).then((response) => {
+      const items = Array.isArray(response) ? response : response.items;
+      setProjectOptions(items.map((project) => ({
+        id: project.id,
+        name: `${project.jobNumber} — ${project.customerName}`,
+      })));
+    }).catch(() => {});
+  }, [can.modifyData]);
+
+  useEffect(() => {
+    if (!can.modifyData || !addForm.projectId) {
+      setAddAssetOptions([]);
+      if (addForm.assetId) {
+        setAddForm((prev) => ({ ...prev, assetId: "" }));
+      }
+      return;
+    }
+
+    projectAssetService.listByProject(addForm.projectId).then((assets) => {
+      setAddAssetOptions(assets.map((asset) => ({
+        id: asset.id,
+        name: asset.assetName?.trim() || asset.assetTag?.trim() || asset.id,
+      })));
+    }).catch(() => setAddAssetOptions([]));
+  }, [addForm.projectId, addForm.assetId, can.modifyData]);
+
+  useEffect(() => {
+    if (!can.modifyData || !editProjectId) {
+      setEditAssetOptions([]);
+      setEditAssetId("");
+      return;
+    }
+
+    projectAssetService.listByProject(editProjectId).then((assets) => {
+      setEditAssetOptions(assets.map((asset) => ({
+        id: asset.id,
+        name: asset.assetName?.trim() || asset.assetTag?.trim() || asset.id,
+      })));
+    }).catch(() => setEditAssetOptions([]));
+  }, [editProjectId, can.modifyData]);
+
   // ----------------------------------------------------------------
   // Derived
   // ----------------------------------------------------------------
@@ -375,6 +443,16 @@ export default function DocumentsPage() {
   // ----------------------------------------------------------------
 
   async function saveDoc() {
+    if (addForm.visibilityScope !== "Global" && !addForm.projectId) {
+      setAddError("Select a project for project- or asset-scoped documents.");
+      return;
+    }
+
+    if (addForm.visibilityScope === "Asset" && !addForm.assetId) {
+      setAddError("Select an asset for asset-scoped documents.");
+      return;
+    }
+
     if (addForm.mode === "url") {
       if (!addForm.name.trim()) { setAddError("Document name is required."); return; }
       if (!addForm.url.trim())  { setAddError("URL is required."); return; }
@@ -398,7 +476,15 @@ export default function DocumentsPage() {
           try {
             const displayName = bf.name.trim() || bf.file.name;
             let record = await documentService.uploadDocument(
-              bf.file, addForm.type, addForm.linkedTo.trim(), undefined, notes, customValues
+              bf.file,
+              addForm.type,
+              addForm.linkedTo.trim(),
+              undefined,
+              notes,
+              customValues,
+              addForm.visibilityScope,
+              addForm.projectId || undefined,
+              addForm.assetId || undefined,
             );
             // Patch the display name if it differs from the original filename
             if (record.name !== displayName) {
@@ -418,6 +504,9 @@ export default function DocumentsPage() {
           id: "", name: addForm.name.trim(), type: addForm.type,
           linkedTo: addForm.linkedTo.trim(), uploadedAt: new Date().toISOString(),
           downloadUrl: addForm.url.trim(), notes, customValues,
+          visibilityScope: addForm.visibilityScope,
+          projectId: addForm.projectId || undefined,
+          assetId: addForm.assetId || undefined,
         });
         setDocs((prev) => [raw, ...prev]);
         setAddOpen(false); setAddForm(makeEmptyForm());
@@ -437,6 +526,17 @@ export default function DocumentsPage() {
   function openEdit(doc: DocumentRecord) {
     setEditDoc(doc); setEditName(doc.name);
     setEditLinkedTo(doc.linkedTo ?? ""); setEditNotes(doc.notes ?? "");
+    const normalizedScope =
+      doc.isLegacyUnclassified ? "Global" :
+      doc.visibilityScope === "Asset" ? "Asset" :
+      doc.visibilityScope === "Project" ? "Project" :
+      "Global";
+    setEditProjectId(doc.projectId ?? "");
+    setEditAssetId(doc.assetId ?? "");
+    if (normalizedScope === "Global") {
+      setEditAssetId("");
+    }
+    setEditDoc({ ...doc, visibilityScope: normalizedScope });
     setEditCustomValues(doc.customValues ?? {});
   }
 
@@ -448,6 +548,9 @@ export default function DocumentsPage() {
         ...editDoc,
         name: editName.trim(),
         linkedTo: editLinkedTo.trim(),
+        visibilityScope: editDoc.visibilityScope ?? "Global",
+        projectId: (editDoc.visibilityScope === "Project" || editDoc.visibilityScope === "Asset") ? (editProjectId || undefined) : undefined,
+        assetId: editDoc.visibilityScope === "Asset" ? (editAssetId || undefined) : undefined,
         notes: editNotes.trim() || undefined,
         customValues: Object.keys(editCustomValues).length ? editCustomValues : undefined,
       });
@@ -794,7 +897,15 @@ export default function DocumentsPage() {
                           <Stack direction="row" alignItems="flex-start" spacing={0.75}>
                             <FolderOutlined fontSize="small" sx={{ color: "text.disabled", flexShrink: 0, mt: 0.25 }} />
                             <Box>
-                              <Typography variant="body2" fontWeight={500}>{addExtIfMissing(doc.name, doc.contentType)}</Typography>
+                              <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+                                <Typography variant="body2" fontWeight={500}>{addExtIfMissing(doc.name, doc.contentType)}</Typography>
+                                {doc.visibilityScope && doc.visibilityScope !== "Legacy" && (
+                                  <Chip size="small" variant="outlined" label={doc.visibilityScope} />
+                                )}
+                                {doc.isLegacyUnclassified && (
+                                  <Chip size="small" color="warning" variant="outlined" label="Legacy unclassified" />
+                                )}
+                              </Stack>
                               {doc.notes && (
                                 <Typography variant="caption" color="text.secondary" display="block">
                                   {doc.notes.length > 64 ? doc.notes.slice(0, 64) + "…" : doc.notes}
@@ -908,6 +1019,57 @@ export default function DocumentsPage() {
                 ))}
               </Select>
             </FormControl>
+            <Divider><Typography variant="caption" color="text.secondary">Visibility</Typography></Divider>
+            <FormControl size="small" fullWidth>
+              <InputLabel shrink>Visibility scope</InputLabel>
+              <Select
+                label="Visibility scope"
+                value={addForm.visibilityScope}
+                onChange={(e) => {
+                  const nextScope = e.target.value as DocForm["visibilityScope"];
+                  setAddForm((p) => ({
+                    ...p,
+                    visibilityScope: nextScope,
+                    projectId: nextScope === "Global" ? "" : p.projectId,
+                    assetId: nextScope === "Asset" ? p.assetId : "",
+                  }));
+                }}
+              >
+                {DOCUMENT_VISIBILITY_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {addForm.visibilityScope !== "Global" && (
+              <FormControl size="small" fullWidth>
+                <InputLabel shrink>Project</InputLabel>
+                <Select
+                  label="Project"
+                  value={addForm.projectId}
+                  onChange={(e) => setAddForm((p) => ({ ...p, projectId: e.target.value, assetId: "" }))}
+                >
+                  <MenuItem value=""><em>Select project</em></MenuItem>
+                  {projectOptions.map((project) => (
+                    <MenuItem key={project.id} value={project.id}>{project.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+            {addForm.visibilityScope === "Asset" && (
+              <FormControl size="small" fullWidth disabled={!addForm.projectId}>
+                <InputLabel shrink>Asset</InputLabel>
+                <Select
+                  label="Asset"
+                  value={addForm.assetId}
+                  onChange={(e) => setAddForm((p) => ({ ...p, assetId: e.target.value }))}
+                >
+                  <MenuItem value=""><em>Select asset</em></MenuItem>
+                  {addAssetOptions.map((asset) => (
+                    <MenuItem key={asset.id} value={asset.id}>{asset.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
             <TextField label="Linked To (asset tag or product name)" size="small" fullWidth
               value={addForm.linkedTo} onChange={(e) => setAddForm((p) => ({ ...p, linkedTo: e.target.value }))}
               placeholder="e.g. VEH-001 or leave blank for general"
@@ -1014,7 +1176,7 @@ export default function DocumentsPage() {
                     ))}
                     <Typography variant="caption" color="text.secondary">
                       {addForm.files.length} file{addForm.files.length !== 1 ? "s" : ""} selected
-                      {" Â· "}{formatBytes(addForm.files.reduce((s, bf) => s + bf.file.size, 0))} total
+                      {" | "}{formatBytes(addForm.files.reduce((s, bf) => s + bf.file.size, 0))} total
                     </Typography>
                   </Stack>
                 )}
@@ -1053,6 +1215,67 @@ export default function DocumentsPage() {
             <TextField label="Linked To" size="small" fullWidth value={editLinkedTo}
               onChange={(e) => setEditLinkedTo(e.target.value)} placeholder="Asset tag, product name, or leave blank"
               InputLabelProps={{ shrink: true }} />
+            {can.modifyData && (
+              <>
+                <Divider><Typography variant="caption" color="text.secondary">Ownership</Typography></Divider>
+                {editDoc?.isLegacyUnclassified && (
+                  <Alert severity="warning">
+                    This legacy document is currently admin-only until it is assigned to a project or asset.
+                  </Alert>
+                )}
+                <FormControl size="small" fullWidth>
+                  <InputLabel shrink>Visibility scope</InputLabel>
+                  <Select
+                    label="Visibility scope"
+                    value={editDoc?.visibilityScope === "Asset" || editDoc?.visibilityScope === "Project" ? editDoc.visibilityScope : "Global"}
+                    onChange={(e) => {
+                      const nextScope = e.target.value as NonNullable<DocumentRecord["visibilityScope"]>;
+                      setEditDoc((prev) => prev ? ({ ...prev, visibilityScope: nextScope }) : prev);
+                      if (nextScope === "Global") {
+                        setEditProjectId("");
+                        setEditAssetId("");
+                      } else if (nextScope === "Project") {
+                        setEditAssetId("");
+                      }
+                    }}
+                  >
+                    {DOCUMENT_VISIBILITY_OPTIONS.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" fullWidth disabled={editDoc?.visibilityScope === "Global"}>
+                  <InputLabel shrink>Project</InputLabel>
+                  <Select
+                    label="Project"
+                    value={editProjectId}
+                    onChange={(e) => {
+                      const nextProjectId = e.target.value;
+                      setEditProjectId(nextProjectId);
+                      setEditAssetId("");
+                    }}
+                  >
+                    <MenuItem value=""><em>Admin-only / unassigned</em></MenuItem>
+                    {projectOptions.map((project) => (
+                      <MenuItem key={project.id} value={project.id}>{project.name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" fullWidth disabled={!editProjectId || editDoc?.visibilityScope !== "Asset"}>
+                  <InputLabel shrink>Asset</InputLabel>
+                  <Select
+                    label="Asset"
+                    value={editAssetId}
+                    onChange={(e) => setEditAssetId(e.target.value)}
+                  >
+                    <MenuItem value=""><em>No asset / project-level document</em></MenuItem>
+                    {editAssetOptions.map((asset) => (
+                      <MenuItem key={asset.id} value={asset.id}>{asset.name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </>
+            )}
             <TextField label="Notes / Description" size="small" fullWidth multiline rows={3} value={editNotes}
               onChange={(e) => setEditNotes(e.target.value)} />
 
@@ -1293,7 +1516,7 @@ export default function DocumentsPage() {
                   <Box sx={{ flex: 1 }}>
                     <Typography variant="body2">{label}</Typography>
                     {!isBuiltin && cf?.type === "relation" && cf.relatesTo && (
-                      <Typography variant="caption" color="text.secondary">â†’ {cf.relatesTo}</Typography>
+                        <Typography variant="caption" color="text.secondary">{"->"} {cf.relatesTo}</Typography>
                     )}
                   </Box>
                   <Chip size="small" label={isBuiltin ? "built-in" : cf?.type} variant="outlined" sx={{ fontSize: 10 }} />

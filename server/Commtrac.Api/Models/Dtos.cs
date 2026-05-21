@@ -34,6 +34,42 @@ public record NotificationSettingsDto(
     string SmsSender
 );
 
+public record NotificationInboxDto(
+    string Id,
+    string EventType,
+    string Severity,
+    string Title,
+    string Message,
+    string? ProjectId,
+    string? AssetId,
+    string? RunId,
+    string? EntityType,
+    string? EntityId,
+    string? TriggeredByUserId,
+    string? TriggeredByName,
+    DateTime CreatedAtUtc,
+    DateTime? ReadAtUtc,
+    bool IsRead
+);
+
+public record CreateNotificationRequest(
+    string EventType,
+    string Severity,
+    string Title,
+    string Message,
+    List<string>? RecipientUserIds,
+    List<string>? RecipientRoles,
+    string? ProjectId,
+    string? AssetId,
+    string? RunId,
+    string? EntityType,
+    string? EntityId,
+    string? TriggeredByUserId,
+    string? TriggeredByName
+);
+
+public record AcknowledgeNotificationsRequest(List<string>? NotificationIds);
+
 public record UserDto(
     string Id,
     string Email,
@@ -381,17 +417,17 @@ public record ProjectDto(
     string ProjectType,
     string Status,
     string? ApprovalDecision,
+    string WorkflowMode,
     bool IsInstallationProject,
     string? InstallationMode,
     string? ProjectManager,
+    string? AssignedPmUserId,
     decimal? ContractValue,
     string? ProbabilityStage,
     List<string>? ProductIds,
     Dictionary<string, string>? ProductFeatureValues,
     string? OfficeId = null,
-    int AssetCount = 0,
-    /// <summary>INSTALLATION_ONLY | INSPECTION_ONLY | MIXED. Null on legacy rows.</summary>
-    string? WorkflowMode = null
+    int AssetCount = 0
 );
 
 public record UpdateProjectStatusRequest(
@@ -559,7 +595,56 @@ public record DocumentDto(
     string? DownloadUrl,
     string? CreatedBy,
     string? Notes,
-    string? CustomValuesJson
+    string? CustomValuesJson,
+    string? VisibilityScope,
+    string? ProjectId,
+    string? AssetId,
+    string? CreatedByUserId,
+    bool IsLegacyUnclassified
+);
+
+public record RecycleBinItemDto(
+    string EntityType,
+    string Id,
+    string Title,
+    string? Subtitle,
+    string? ParentId,
+    string? ParentTitle,
+    DateTime? DeletedAtUtc,
+    string? DeletedByUserId
+);
+
+public record BackupCatalogItemDto(
+    string EntityType,
+    string Id,
+    string Title,
+    string? Subtitle,
+    string? ParentId,
+    string? ParentTitle,
+    bool IsDeleted,
+    DateTime? DeletedAtUtc
+);
+
+public record RestoreBackupRequest(string FileName);
+
+public record RestoreBackupItemRequest(
+    string FileName,
+    string EntityType,
+    string EntityId
+);
+
+public record RestoreBackupResponse(
+    string RestoredFromFileName,
+    string SafeguardBackupFileName,
+    DateTime RestoredAtUtc
+);
+
+public record SelectiveRestoreResultDto(
+    string EntityType,
+    string EntityId,
+    string Title,
+    int RecordsRestored,
+    string? Note
 );
 
 public record DocumentConfigDto(string TabsJson, string FieldsJson);
@@ -709,12 +794,18 @@ public record ProjectAssetDto(
     string AsBuiltJson,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    ProjectAssetWorkflowSummaryDto? WorkflowSummary
+    ProjectAssetWorkflowSummaryDto? WorkflowSummary,
+    bool IsDeleted,
+    DateTime? DeletedAtUtc,
+    string? DeletedByUserId,
+    string? DeleteReason
 );
 
 public record ProjectAssetWorkflowSummaryDto(
     bool HasWorkflow,
     string EvidenceStatus,
+    int CompletedInventoryFeatures,
+    int TotalInventoryFeatures,
     int RequiredItems,
     int CompletedItems,
     int MissingItems,
@@ -867,6 +958,51 @@ public record AssetWorkflowRunDto(
 
 public record StartRunRequest(
     string AssetId,
+    string WorkflowConfigId,
+    string? TechnicianUserId
+);
+
+public record InspectionImportDto(
+    string Id,
+    string Source,
+    DateTime ReceivedAt,
+    string RawJson,
+    string Hash,
+    string? ProjectId,
+    string? ProjectAssetId,
+    string Status,
+    string? Error,
+    string? MappedRunId,
+    bool IsArchived,
+    DateTime? ArchivedAt,
+    string? ArchivedBy,
+    string? ArchiveReason,
+    string? ArchiveRef
+);
+
+public record CreateInspectionImportRequest(
+    string? Source,
+    string RawJson,
+    string? ProjectId,
+    string? ProjectAssetId
+);
+
+public record AssignInspectionImportRequest(
+    string ProjectId,
+    string ProjectAssetId
+);
+
+public record UpdateInspectionImportRequest(
+    string? Source,
+    string RawJson
+);
+
+public record ArchiveInspectionImportRequest(
+    string? Reason,
+    string? ArchiveRef
+);
+
+public record CreateInspectionRunRequest(
     string WorkflowConfigId,
     string? TechnicianUserId
 );
@@ -1330,33 +1466,15 @@ public record BulkImportUsersResult(
     List<string> Errors
 );
 
-// ─── Inspection Imports ───────────────────────────────────────────────────────
-
-public record InspectionImportDto(
-    string Id,
-    string Source,
-    DateTime ReceivedAt,
-    string? FileName,
-    string? ContentHash,
-    string? RawJson,
-    string? ProjectId,
-    string? AssetId,
-    string Status,
-    string? ErrorText,
-    string? MappedRunId,
-    string? UploadedBy
+// ─── Analytics ────────────────────────────────────────────────────────────────
+/// <summary>Single analytics event as POSTed by the frontend.</summary>
+public record AnalyticsEventRequest(
+    string EventName,
+    string? UserId,
+    string? Role,
+    string? OccurredAtUtc,
+    Dictionary<string, object?>? Payload
 );
 
-public record CreateInspectionImportRequest(
-    string Source,
-    string? FileName,
-    string? RawJson,
-    string? ProjectId,
-    string? AssetId,
-    string? UploadedBy
-);
-
-public record AssignInspectionImportRequest(
-    string ProjectId,
-    string? AssetId
-);
+/// <summary>Batch POST — frontend flushes the queue as an array.</summary>
+public record AnalyticsEventBatchRequest(List<AnalyticsEventRequest> Events);

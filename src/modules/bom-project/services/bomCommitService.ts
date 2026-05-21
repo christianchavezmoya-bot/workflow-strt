@@ -15,6 +15,28 @@ import { productAdapter } from "../adapters/productAdapter";
 import { bomApiService } from "./bomApiService";
 import { projectService } from "../../../services/projectService";
 import { featureService } from "../../../services/featureService";
+import type { User } from "../../../types/user";
+
+const getLocalDateString = (offsetDays = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getCurrentAuthUser = (): User | null => {
+  try {
+    const raw = localStorage.getItem("auth_user");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<User>;
+    if (!parsed?.id) return null;
+    return parsed as User;
+  } catch {
+    return null;
+  }
+};
 
 export type CommitMode = "preview" | "draft" | "publish";
 
@@ -71,8 +93,9 @@ export async function commitDraft(
   }
 
   // ── publish mode — writes live records ──────────────────────────────────────
-  const today = new Date().toISOString().split("T")[0];
-  const finishDate = new Date(Date.now() + 90 * 86_400_000).toISOString().split("T")[0];
+  const today = getLocalDateString();
+  const finishDate = getLocalDateString(90);
+  const currentUser = getCurrentAuthUser();
 
   // 1. Create the Project record
   const project = await projectService.createProject({
@@ -88,8 +111,11 @@ export async function commitDraft(
     office: publishDetails?.office || "",
     projectType: "Internal",
     status: "Draft",
+    workflowMode: "INSTALLATION_ONLY",
     isInstallationProject: true,
     installationMode: "Multiple Installations",
+    projectManager: currentUser?.fullName,
+    assignedPmUserId: currentUser?.id,
     productIds: publishDetails?.productId ? [publishDetails.productId] : [],
   });
 
