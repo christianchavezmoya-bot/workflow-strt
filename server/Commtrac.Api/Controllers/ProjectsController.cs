@@ -601,7 +601,6 @@ public class ProjectsController : ControllerBase
 
     private static ProjectDto ToDto(ProjectEntity project, string? siteName, int assetCount = 0)
     {
-        var effectiveMode = project.WorkflowMode ?? (project.IsInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY");
         return new(
             project.Id,
             project.CustomerName,
@@ -630,8 +629,7 @@ public class ProjectsController : ControllerBase
                 ? new Dictionary<string, string>()
                 : JsonSerializer.Deserialize<Dictionary<string, string>>(project.ProductFeatureValuesJson, JsonOptions) ?? new Dictionary<string, string>(),
             project.OfficeId,
-            assetCount,
-            effectiveMode
+            assetCount
         );
     }
 

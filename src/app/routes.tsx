@@ -1,4 +1,4 @@
-﻿import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+﻿import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 import { usePermissions } from "../hooks/usePermissions";
 import Dashboard from "../features/dashboard/Dashboard";
@@ -35,6 +35,11 @@ const SettingsRoute = () => {
   return can.viewOnly ? <Navigate to="/" replace /> : <Settings />;
 };
 
+const ProjectInspectionsRedirect = () => {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/projects/${id}`} replace />;
+};
+
 const AppRoutes = () => {
   return (
     <Routes>
@@ -49,7 +54,7 @@ const AppRoutes = () => {
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/new" element={<ProjectForm />} />
         <Route path="/projects/:id" element={<ProjectDetail />} />
-        <Route path="/projects/:id/inspections" element={<ProjectDetail />} />
+        <Route path="/projects/:id/inspections" element={<ProjectInspectionsRedirect />} />
         <Route path="/projects/:id/inspections/inbox" element={<ProjectDetail />} />
         <Route path="/projects/:id/assets/:assetId/inspections" element={<ProjectAssetInspectionPage />} />
         <Route path="/installations/assets" element={<AssetInstallationPage />} />

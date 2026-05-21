@@ -13,10 +13,9 @@ import type { Project, WorkflowMode } from "../../types/project";
 import type { ProjectAsset } from "../../types/projectAsset";
 import ProjectForm from "./ProjectForm";
 import ProjectInspectionInboxPage from "./ProjectInspectionInboxPage";
-import ProjectInspectionsPage from "./ProjectInspectionsPage";
 import { getProjectCompletionSummary, notifyProjectReadyForCompletion } from "./projectActionUtils";
 
-type DetailTab = "overview" | "inspections" | "inbox";
+type DetailTab = "overview" | "inbox";
 
 const installationEnabled = (workflowMode?: WorkflowMode) =>
   workflowMode === "INSTALLATION_ONLY" || workflowMode === "MIXED" || !workflowMode;
@@ -80,7 +79,6 @@ const ProjectDetail = () => {
 
   const currentTab = useMemo<DetailTab>(() => {
     if (location.pathname.endsWith("/inspections/inbox")) return "inbox";
-    if (location.pathname.endsWith("/inspections")) return "inspections";
     return "overview";
   }, [location.pathname]);
 
@@ -88,14 +86,14 @@ const ProjectDetail = () => {
     if (!project) return [] as DetailTab[];
     const tabs: DetailTab[] = [];
     if (installationEnabled(project.workflowMode)) tabs.push("overview");
-    if (inspectionEnabled(project.workflowMode)) tabs.push("inspections", "inbox");
+    if (inspectionEnabled(project.workflowMode)) tabs.push("inbox");
     return tabs;
   }, [project]);
 
   useEffect(() => {
     if (!project || availableTabs.length === 0) return;
     if (!availableTabs.includes(currentTab)) {
-      navigate(inspectionEnabled(project.workflowMode) ? `/projects/${project.id}/inspections` : `/projects/${project.id}`, {
+      navigate(inspectionEnabled(project.workflowMode) ? `/projects/${project.id}/inspections/inbox` : `/projects/${project.id}`, {
         replace: true,
       });
     }
@@ -121,9 +119,7 @@ const ProjectDetail = () => {
     const route =
       value === "overview"
         ? `/projects/${project.id}`
-        : value === "inspections"
-          ? `/projects/${project.id}/inspections`
-          : `/projects/${project.id}/inspections/inbox`;
+        : `/projects/${project.id}/inspections/inbox`;
     navigate(route);
   };
 
@@ -247,7 +243,6 @@ const ProjectDetail = () => {
         <Box className="glass-card" sx={{ p: 1.5 }}>
           <Tabs value={currentTab} onChange={handleTabChange}>
             {installationEnabled(project.workflowMode) && <Tab value="overview" label="Installation" />}
-            {inspectionEnabled(project.workflowMode) && <Tab value="inspections" label="Inspections" />}
             {inspectionEnabled(project.workflowMode) && <Tab value="inbox" label="Inspection Inbox" />}
           </Tabs>
         </Box>
@@ -303,8 +298,6 @@ const ProjectDetail = () => {
           </Box>
         </>
       )}
-
-      {currentTab === "inspections" && inspectionEnabled(project.workflowMode) && <ProjectInspectionsPage project={project} />}
 
       {currentTab === "inbox" && inspectionEnabled(project.workflowMode) && (
         <ProjectInspectionInboxPage projectId={project.id} assets={projectAssets} />

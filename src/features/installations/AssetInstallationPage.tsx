@@ -2603,7 +2603,7 @@ const AssetInstallationPage = () => {
             <Button
               size="small"
               variant="outlined"
-              onClick={() => navigate(`/projects/${selectedProject.id}/inspections`)}
+              onClick={() => navigate(`/projects/${selectedProject.id}`)}
             >
               Inspection Assets
             </Button>

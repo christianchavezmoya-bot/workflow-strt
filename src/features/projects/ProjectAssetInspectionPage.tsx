@@ -99,7 +99,7 @@ export default function ProjectAssetInspectionPage() {
             {asset.assetTag || asset.assetName || asset.id} inspections
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            <Link to={`/projects/${project.id}/inspections`} style={{ color: "inherit" }}>{project.jobNumber}</Link>
+            <Link to={`/projects/${project.id}`} style={{ color: "inherit" }}>{project.jobNumber}</Link>
             {" "}• {project.customerName}
           </Typography>
         </Box>
