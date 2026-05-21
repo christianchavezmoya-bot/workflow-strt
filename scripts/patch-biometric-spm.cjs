@@ -38,8 +38,7 @@ let package = Package(
                 .product(name: "Cordova", package: "capacitor-swift-pm")
             ],
             path: "ios/Plugin",
-            sources: ["Plugin.swift", "Plugin.m", "Plugin.h"],
-            publicHeadersPath: "."
+            sources: ["Plugin.swift"]
         )
     ]
 )
