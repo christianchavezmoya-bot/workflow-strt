@@ -13,6 +13,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
+import { Network } from "@capacitor/network";
 import api from "../services/api";
 import {
   pendingAdd,
@@ -160,11 +162,25 @@ export function useSyncEngine(): SyncState {
       void flush();
     };
     const handleOffline = () => setConnectivity("offline");
+
+    // Browser events (web / fallback)
     window.addEventListener("online",  handleOnline);
     window.addEventListener("offline", handleOffline);
+
+    // Capacitor Network plugin — reliable on iOS WebView where browser events may not fire
+    let capListener: { remove: () => void } | undefined;
+    if (Capacitor.isNativePlatform()) {
+      Network.addListener("networkStatusChange", (status) => {
+        console.log("[SyncEngine] Network change:", status.connected ? "online" : "offline", status.connectionType);
+        if (status.connected) handleOnline();
+        else handleOffline();
+      }).then(l => { capListener = l; });
+    }
+
     return () => {
       window.removeEventListener("online",  handleOnline);
       window.removeEventListener("offline", handleOffline);
+      capListener?.remove();
     };
   }, [flush]);
 

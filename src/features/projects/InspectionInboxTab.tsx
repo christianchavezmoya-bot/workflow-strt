@@ -24,7 +24,6 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import CodeIcon from "@mui/icons-material/Code";
 import DownloadIcon from "@mui/icons-material/Download";
 import { useEffect, useRef, useState } from "react";
-import { useAuth } from "../../hooks/useAuth";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import type { InspectionImport } from "../../types/inspectionImport";
 import api from "../../services/api";
@@ -43,7 +42,6 @@ const STATUS_COLOR: Record<string, "default" | "info" | "warning" | "success" | 
 };
 
 const InspectionInboxTab = ({ projectId }: Props) => {
-  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [imports, setImports] = useState<InspectionImport[]>([]);
@@ -81,15 +79,8 @@ const InspectionInboxTab = ({ projectId }: Props) => {
     setUploading(true);
     setError(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file, file.name);
-      formData.append("projectId", projectId);
-      formData.append("source", uploadSource);
-      if (user?.email) formData.append("uploadedBy", user.email);
-
-      await api.post("/inspection-imports/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const rawJson = await file.text();
+      await inspectionImportService.create({ rawJson, projectId, source: uploadSource });
       load();
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
