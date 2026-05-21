@@ -676,7 +676,7 @@ const WorkInstructions = () => {
         name,
         productId: activeProduct.id,
         notes: configForm.notes.trim() || undefined,
-        configType: selectedWorkflowType?.name ?? configForm.configType.trim() || undefined,
+        configType: (selectedWorkflowType?.name ?? configForm.configType.trim()) || undefined,
         workflowTypeId: configForm.workflowTypeId || undefined,
         featureSelectionsJson: JSON.stringify(configForm.featureSelections),
       };
