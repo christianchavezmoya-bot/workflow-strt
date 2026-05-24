@@ -87,6 +87,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
   }, [initialAuthMode]);
 
   const storedUser = secureGet("auth_user");
+  const noLocalUnlockMethod = !biometricAvailable && !hasPin;
   const userName = (() => {
     try { return storedUser ? (JSON.parse(storedUser) as { fullName?: string }).fullName : null; }
     catch { return null; }
@@ -194,7 +195,9 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
             {userName ? `Welcome back, ${userName.split(" ")[0]}` : "Welcome back"}
           </Typography>
           <Typography variant="body2" color="text.secondary" textAlign="center">
-            {authMode === "biometric" 
+            {noLocalUnlockMethod
+              ? "This device no longer has a local unlock method. Sign in online to continue."
+              : authMode === "biometric" 
               ? isOffline 
                 ? "You're offline. Use Face ID to unlock with your saved session."
                 : "Use Face ID to unlock the app."
@@ -215,7 +218,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
         )}
 
         {/* Biometric unlock */}
-        {authMode === "biometric" && (
+        {authMode === "biometric" && !noLocalUnlockMethod && (
           <>
             <Button
               variant="contained"
@@ -242,11 +245,6 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
             )}
             
             {/* No PIN set up message */}
-            {!hasPin && !biometricAvailable && (
-              <Alert severity="warning" sx={{ width: "100%", mt: 2 }}>
-                No PIN set up. Use "Sign out" to login online.
-              </Alert>
-            )}
           </>
         )}
 
@@ -292,18 +290,32 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
           </>
         )}
 
+        {noLocalUnlockMethod && (
+          <Button
+            variant="contained"
+            size="large"
+            fullWidth
+            onClick={handleSignOut}
+            sx={{ borderRadius: 2, py: 1.5, fontWeight: 700 }}
+          >
+            Sign out and sign in online
+          </Button>
+        )}
+
         <Divider sx={{ width: "100%" }} />
 
         {/* Sign out link */}
-        <Button
-          variant="text"
-          size="small"
-          color="inherit"
-          onClick={handleSignOut}
-          sx={{ color: "text.disabled", fontSize: "0.75rem" }}
-        >
-          Sign out and use different account
-        </Button>
+        {!noLocalUnlockMethod && (
+          <Button
+            variant="text"
+            size="small"
+            color="inherit"
+            onClick={handleSignOut}
+            sx={{ color: "text.secondary", fontSize: "0.75rem" }}
+          >
+            Sign out and use different account
+          </Button>
+        )}
 
       </Stack>
     </Box>
