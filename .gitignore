@@ -57,6 +57,8 @@ server/**/commtrac.db-shm
 server/**/commtrac.db-wal
 server/**/commtrac.db-journal
 server/**/commtrac_old.db
+server/Commtrac.Api/Storage/
+server/Commtrac.Api/backups/
 server/**/objbuildcheck*/
 server/**/objbuildcheck2*/
 
