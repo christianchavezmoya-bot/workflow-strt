@@ -22,20 +22,22 @@ public class InspectionImportsController : ControllerBase
         _env = env;
     }
 
-    // GET /api/inspection-imports?projectId=&assetId=&status=
+    // GET /api/inspection-imports?projectId=&assetId=&projectAssetId=&status=
     [HttpGet]
     public async Task<ActionResult<List<InspectionImportDto>>> GetAll(
         [FromQuery] string? projectId,
         [FromQuery] string? assetId,
+        [FromQuery] string? projectAssetId,
         [FromQuery] string? status)
     {
         var query = _db.InspectionImports.AsQueryable();
+        var effectiveAssetId = !string.IsNullOrWhiteSpace(projectAssetId) ? projectAssetId : assetId;
 
         if (!string.IsNullOrWhiteSpace(projectId))
             query = query.Where(x => x.ProjectId == projectId);
 
-        if (!string.IsNullOrWhiteSpace(assetId))
-            query = query.Where(x => x.AssetId == assetId);
+        if (!string.IsNullOrWhiteSpace(effectiveAssetId))
+            query = query.Where(x => x.AssetId == effectiveAssetId);
 
         if (!string.IsNullOrWhiteSpace(status))
             query = query.Where(x => x.Status == status);
@@ -60,6 +62,7 @@ public class InspectionImportsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<InspectionImportDto>> Create([FromBody] CreateInspectionImportRequest request)
     {
+        var effectiveAssetId = !string.IsNullOrWhiteSpace(request.ProjectAssetId) ? request.ProjectAssetId : request.AssetId;
         string? hash = null;
         if (!string.IsNullOrWhiteSpace(request.RawJson))
         {
@@ -77,7 +80,7 @@ public class InspectionImportsController : ControllerBase
             ContentHash = hash,
             RawJson = request.RawJson,
             ProjectId = request.ProjectId,
-            AssetId = request.AssetId,
+            AssetId = effectiveAssetId,
             Status = string.IsNullOrWhiteSpace(request.ProjectId) ? "RECEIVED" : "NEEDS_ASSIGNMENT",
             UploadedBy = request.UploadedBy
         };
@@ -95,9 +98,11 @@ public class InspectionImportsController : ControllerBase
         [FromForm] IFormFile file,
         [FromForm] string? projectId,
         [FromForm] string? assetId,
+        [FromForm] string? projectAssetId,
         [FromForm] string? source,
         [FromForm] string? uploadedBy)
     {
+        var effectiveAssetId = !string.IsNullOrWhiteSpace(projectAssetId) ? projectAssetId : assetId;
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file received." });
 
@@ -122,34 +127,14 @@ public class InspectionImportsController : ControllerBase
         if (await _db.InspectionImports.AnyAsync(x => x.ContentHash == hash && x.ProjectId == projectId))
             return Conflict(new { error = "Duplicate import: identical content already received for this project." });
 
-        // Save to disk when file is > 128 KB; store inline for smaller payloads
-        string? rawPath = null;
-        string? inlineJson = null;
-        const int inlineThreshold = 128 * 1024;
-
-        if (rawJson.Length > inlineThreshold)
-        {
-            var storageDir = Path.Combine(_env.ContentRootPath, "Storage", "InspectionImports");
-            Directory.CreateDirectory(storageDir);
-            var storedName = $"{Guid.NewGuid()}.json";
-            rawPath = Path.Combine("Storage", "InspectionImports", storedName);
-            var fullPath = Path.Combine(_env.ContentRootPath, rawPath);
-            await System.IO.File.WriteAllTextAsync(fullPath, rawJson);
-        }
-        else
-        {
-            inlineJson = rawJson;
-        }
-
         var entity = new InspectionImportEntity
         {
             Source = source ?? "LOCAL",
             FileName = file.FileName,
             ContentHash = hash,
-            RawJson = inlineJson,
-            RawPath = rawPath,
+            RawJson = rawJson,
             ProjectId = projectId,
-            AssetId = assetId,
+            AssetId = effectiveAssetId,
             Status = string.IsNullOrWhiteSpace(projectId) ? "RECEIVED" : "NEEDS_ASSIGNMENT",
             UploadedBy = uploadedBy
         };
@@ -190,12 +175,13 @@ public class InspectionImportsController : ControllerBase
     {
         var item = await _db.InspectionImports.FirstOrDefaultAsync(x => x.Id == id);
         if (item is null) return NotFound();
+        var effectiveAssetId = !string.IsNullOrWhiteSpace(request.ProjectAssetId) ? request.ProjectAssetId : request.AssetId;
 
         if (string.IsNullOrWhiteSpace(request.ProjectId))
             return BadRequest(new { error = "ProjectId is required." });
 
         item.ProjectId = request.ProjectId;
-        item.AssetId = request.AssetId;
+        item.AssetId = effectiveAssetId;
         item.Status = "MAPPED";
         await _db.SaveChangesAsync();
 

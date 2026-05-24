@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Commtrac.Api.Models;
 
@@ -1227,10 +1228,11 @@ public class InspectionImportEntity
 
     public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;
 
-    [MaxLength(500)]
+    [NotMapped]
     public string? FileName { get; set; }
 
     /// <summary>SHA-256 of raw content for deduplication.</summary>
+    [Column("Hash")]
     [MaxLength(64)]
     public string? ContentHash { get; set; }
 
@@ -1238,7 +1240,7 @@ public class InspectionImportEntity
     public string? RawJson { get; set; }
 
     /// <summary>Optional path to file on disk for payloads too large for inline storage.</summary>
-    [MaxLength(1000)]
+    [NotMapped]
     public string? RawPath { get; set; }
 
     /// <summary>Nullable until assigned by a user.</summary>
@@ -1246,6 +1248,7 @@ public class InspectionImportEntity
     public string? ProjectId { get; set; }
 
     /// <summary>Nullable until assigned by a user.</summary>
+    [Column("ProjectAssetId")]
     [MaxLength(100)]
     public string? AssetId { get; set; }
 
@@ -1253,6 +1256,7 @@ public class InspectionImportEntity
     [MaxLength(40)]
     public string Status { get; set; } = "RECEIVED";
 
+    [Column("Error")]
     [MaxLength(2000)]
     public string? ErrorText { get; set; }
 
@@ -1260,6 +1264,6 @@ public class InspectionImportEntity
     [MaxLength(100)]
     public string? MappedRunId { get; set; }
 
-    [MaxLength(200)]
+    [NotMapped]
     public string? UploadedBy { get; set; }
 }

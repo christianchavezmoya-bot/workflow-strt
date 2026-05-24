@@ -1332,10 +1332,12 @@ public record CreateInspectionImportRequest(
     string? RawJson,
     string? ProjectId,
     string? AssetId,
+    string? ProjectAssetId,
     string? UploadedBy
 );
 
 public record AssignInspectionImportRequest(
     string ProjectId,
-    string? AssetId
+    string? AssetId,
+    string? ProjectAssetId
 );
