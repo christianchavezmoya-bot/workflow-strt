@@ -7,6 +7,7 @@
  */
 
 import { Capacitor } from "@capacitor/core";
+import { CapacitorHttp } from "@capacitor/core";
 import { Network } from "@capacitor/network";
 
 // Get API base URL the same way api.ts does
@@ -47,22 +48,28 @@ export async function hasInternetConnection(): Promise<boolean> {
  */
 export async function isServerReachable(): Promise<boolean> {
   try {
-    // Use a short timeout to quickly detect server issues
+    const apiUrl = getApiBaseUrl();
+
+    if (Capacitor.isNativePlatform()) {
+      const response = await CapacitorHttp.get({
+        url: `${apiUrl}/health`,
+        connectTimeout: 5000,
+        readTimeout: 5000,
+        responseType: "json",
+      });
+      return response.status >= 200 && response.status < 500;
+    }
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
-    // Try to reach the API health endpoint or base URL
-    const apiUrl = getApiBaseUrl();
     const response = await fetch(`${apiUrl}/health`, {
-      method: "HEAD",
+      method: "GET",
       signal: controller.signal,
-      cache: "no-store"
+      cache: "no-store",
     });
-    
     clearTimeout(timeoutId);
     return response.ok || response.status < 500;
-  } catch (error) {
-    // If we get here, server is unreachable (timeout, network error, etc.)
+  } catch {
     return false;
   }
 }

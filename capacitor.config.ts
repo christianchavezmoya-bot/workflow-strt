@@ -4,6 +4,10 @@ const config: CapacitorConfig = {
   appId: 'com.christianchavez.kinet',
   appName: 'Kinet',
   webDir: 'dist',
+  server: {
+    androidScheme: 'http',
+    cleartext: true,
+  },
   plugins: {
     StatusBar: {
       overlaysWebView: false,
