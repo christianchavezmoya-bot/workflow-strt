@@ -1,9 +1,14 @@
+using Commtrac.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace Commtrac.Api.Migrations;
 
+[DbContext(typeof(AppDbContext))]
+[Migration("20260521120000_WorkflowTypeIdsForTemplatesAndConfigs")]
 public partial class WorkflowTypeIdsForTemplatesAndConfigs : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
