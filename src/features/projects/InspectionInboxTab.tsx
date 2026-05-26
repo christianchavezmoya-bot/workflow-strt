@@ -15,6 +15,7 @@ import {
   MenuItem,
   Select,
   Stack,
+  TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -23,6 +24,7 @@ import AssignmentIcon from "@mui/icons-material/Assignment";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import CodeIcon from "@mui/icons-material/Code";
 import DownloadIcon from "@mui/icons-material/Download";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { inspectionImportService } from "../../services/inspectionImportService";
@@ -57,6 +59,9 @@ const InspectionInboxTab = ({ projectId }: Props) => {
   const [viewItem, setViewItem] = useState<InspectionImport | null>(null);
   const [viewRaw, setViewRaw] = useState<string | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+  const [failingId, setFailingId] = useState<string | null>(null);
+  const [failText, setFailText] = useState("");
+  const [failSaving, setFailSaving] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -129,6 +134,21 @@ const InspectionInboxTab = ({ projectId }: Props) => {
       setImports((prev) => prev.filter((x) => x.id !== id));
     } catch {
       setError("Failed to delete import.");
+    }
+  };
+
+  const handleMarkFailed = async () => {
+    if (!failingId) return;
+    setFailSaving(true);
+    try {
+      await inspectionImportService.markFailed(failingId, failText || undefined);
+      setFailingId(null);
+      setFailText("");
+      load();
+    } catch {
+      setError("Failed to mark import as failed.");
+    } finally {
+      setFailSaving(false);
     }
   };
 
@@ -251,6 +271,17 @@ const InspectionInboxTab = ({ projectId }: Props) => {
                   <CodeIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
+              {item.status !== "FAILED" && (
+                <Tooltip title="Mark as failed">
+                  <IconButton
+                    size="small"
+                    color="warning"
+                    onClick={() => { setFailingId(item.id); setFailText(""); }}
+                  >
+                    <ErrorOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
               <Tooltip title="Delete import">
                 <IconButton size="small" color="error" onClick={() => handleDelete(item.id)}>
                   <DeleteOutlineIcon fontSize="small" />
@@ -259,7 +290,43 @@ const InspectionInboxTab = ({ projectId }: Props) => {
             </Stack>
           </Stack>
 
-          {item.errorText && (
+          {/* Inline mark-failed form */}
+          {failingId === item.id && (
+            <>
+              <Divider sx={{ my: 1 }} />
+              <Stack spacing={1}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="Reason for failure (optional)"
+                  value={failText}
+                  onChange={(e) => setFailText(e.target.value)}
+                  multiline
+                  rows={2}
+                />
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="warning"
+                    disabled={failSaving}
+                    onClick={handleMarkFailed}
+                  >
+                    {failSaving ? "Saving…" : "Confirm Failed"}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={() => { setFailingId(null); setFailText(""); }}
+                  >
+                    Cancel
+                  </Button>
+                </Stack>
+              </Stack>
+            </>
+          )}
+
+          {item.errorText && failingId !== item.id && (
             <>
               <Divider sx={{ my: 1 }} />
               <Typography variant="caption" color="error.main">
