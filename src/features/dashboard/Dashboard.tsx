@@ -1,6 +1,6 @@
 ﻿import {
   Alert, Box, Button, Chip, CircularProgress, Collapse, Divider, Grid,
-  IconButton, LinearProgress, MenuItem, Paper, Select, Stack, Tooltip, Typography,
+  IconButton, LinearProgress, MenuItem, Paper, Select, Stack, Tab, Tabs, Tooltip, Typography,
 } from "@mui/material";
 import {
   AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined,
@@ -27,6 +27,7 @@ import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag, type PhotoUpdateNotification } from "./PhotoUploadDialog";
+import type { InspectionImport } from "../../types/project";
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "â€”";
@@ -85,6 +86,8 @@ function GaugeCircle({ value, size = 80, color = "primary.main" }: { value: numb
 }
 
 const WINDOW_OPTIONS = [30, 60, 90, 180];
+
+type PmDashboardTab = "pm-projects" | "my-inspections" | "my-installs";
 
 type InspectionRunSignal = {
   id: string;
@@ -161,6 +164,10 @@ const Dashboard = () => {
   const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
   const [inspectionImportsWaiting, setInspectionImportsWaiting] = useState(0);
   const [inspectionImportsFailed, setInspectionImportsFailed] = useState(0);
+  const [pmDashboardTab, setPmDashboardTab] = useState<PmDashboardTab>("pm-projects");
+  const [inspectionAssets, setInspectionAssets] = useState<OpenAssetItem[]>([]);
+  const [inspectionImports, setInspectionImports] = useState<InspectionImport[]>([]);
+  const [inspectionLoading, setInspectionLoading] = useState(false);
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
@@ -312,6 +319,40 @@ const Dashboard = () => {
     filteredProjects.filter(p => p.status === "Pending Approval"),
     [filteredProjects]);
 
+  const showPmTabs = user.role === "Project Manager";
+
+  const inspectionProjects = useMemo(
+    () => filteredProjects.filter((p) => p.workflowMode === "INSPECTION_ONLY" || p.workflowMode === "MIXED"),
+    [filteredProjects]
+  );
+  const inspectionProjectIds = useMemo(
+    () => new Set(inspectionProjects.map((p) => p.id)),
+    [inspectionProjects]
+  );
+  const myInspectionAssets = useMemo(
+    () => inspectionAssets.filter((a) => inspectionProjectIds.has(a.projectId) && a.assignedUserId === user.id),
+    [inspectionAssets, inspectionProjectIds, user.id]
+  );
+  const myInspectionImports = useMemo(() => {
+    const assignedAssetIds = new Set(myInspectionAssets.map((a) => a.id));
+    return inspectionImports.filter((item) => !item.assetId || assignedAssetIds.has(item.assetId));
+  }, [inspectionImports, myInspectionAssets]);
+
+  useEffect(() => {
+    if (!showPmTabs || pmDashboardTab !== "my-inspections" || inspectionProjects.length === 0) return;
+    let cancelled = false;
+    setInspectionLoading(true);
+    Promise.all([
+      Promise.all(inspectionProjects.map((p) => projectAssetService.listByProject(p.id).catch(() => []))),
+      Promise.all(inspectionProjects.map((p) => inspectionImportService.list({ projectId: p.id }).catch(() => []))),
+    ]).then(([assetGroups, importGroups]) => {
+      if (cancelled) return;
+      setInspectionAssets((assetGroups as OpenAssetItem[][]).flat());
+      setInspectionImports((importGroups as InspectionImport[][]).flat());
+    }).finally(() => { if (!cancelled) setInspectionLoading(false); });
+    return () => { cancelled = true; };
+  }, [showPmTabs, pmDashboardTab, inspectionProjects]);
+
   // Installer: my pending sigs
   const myPendingSigs = useMemo(() =>
     pendingSigs.filter(s => myAssets.some(a => a.id === s.assetId || a.jobNumber === s.jobNumber)),
@@ -383,6 +424,61 @@ const Dashboard = () => {
     "In Progress": "primary", "Completed": "success", "Pending Approval": "warning",
     "Cancelled": "error", "Draft": "default", "Approved": "info", "On Hold": "warning",
   };
+
+  const MyInspectionWorkspace = (
+    <Box className="glass-card" sx={{ p: 2.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+        <AssessmentOutlined sx={{ color: "primary.main", fontSize: 20 }} />
+        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Inspections</Typography>
+        {inspectionLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
+      </Stack>
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+        Inspection assets assigned to you across inspection-only and mixed projects.
+      </Typography>
+      {myInspectionAssets.length === 0 && !inspectionLoading ? (
+        <Typography variant="caption" color="text.disabled">No inspection assets currently assigned to you.</Typography>
+      ) : (
+        <Grid container spacing={1.5}>
+          {myInspectionAssets.slice(0, 6).map((asset) => {
+            const project = inspectionProjects.find((p) => p.id === asset.projectId);
+            return (
+              <Grid item xs={12} sm={6} md={4} key={asset.id}>
+                <Paper elevation={0}
+                  onClick={() => navigate(`/projects/${asset.projectId}`)}
+                  sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                    transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                  <Stack spacing={0.75}>
+                    <Typography variant="caption" fontWeight={600} noWrap display="block">
+                      {asset.assetTag || asset.assetName || asset.id}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
+                      {project?.jobNumber ?? asset.projectId}
+                    </Typography>
+                    <Chip label={asset.status || "Not Started"} size="small" variant="outlined"
+                      sx={{ alignSelf: "flex-start", height: 16, fontSize: "0.58rem" }} />
+                  </Stack>
+                </Paper>
+              </Grid>
+            );
+          })}
+        </Grid>
+      )}
+      {myInspectionAssets.length > 6 && (
+        <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
+          +{myInspectionAssets.length - 6} more &mdash;{" "}
+          <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }}
+            onClick={() => navigate("/installations/assets?workflowType=Inspection")}>
+            view all
+          </Box>
+        </Typography>
+      )}
+      {myInspectionImports.length > 0 && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
+          {myInspectionImports.length} inspection inbox item{myInspectionImports.length === 1 ? "" : "s"} pending in this workspace.
+        </Typography>
+      )}
+    </Box>
+  );
 
   async function handleGenerateTechReport(w: WorkloadSummaryItem) {
     setReportingTechId(w.userId);
@@ -1353,11 +1449,26 @@ const Dashboard = () => {
       {/* â•â• PROJECT MANAGER / ADMIN VIEW â•â• */}
       {isManager && (
         <>
+          {/* PM tab switcher (Project Manager only) */}
+          {showPmTabs && (
+            <Box className="glass-card" sx={{ p: 1.5 }}>
+              <Tabs value={pmDashboardTab} onChange={(_, v: PmDashboardTab) => setPmDashboardTab(v)}
+                sx={{ minHeight: 36, "& .MuiTab-root": { minHeight: 36, py: 0.5, fontSize: "0.8rem" } }}>
+                <Tab value="pm-projects" label="My PM Projects" />
+                <Tab value="my-inspections" label="My Inspections" />
+                <Tab value="my-installs" label="My Installs" />
+              </Tabs>
+            </Box>
+          )}
+
           {/* Needs Attention â€” company-wide */}
-          {NeedsAttentionSection}
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && NeedsAttentionSection}
+
+          {/* My Inspections workspace */}
+          {showPmTabs && pmDashboardTab === "my-inspections" && MyInspectionWorkspace}
 
           {/* Pending Approvals strip â€” if any */}
-          {pendingApprovals.length > 0 && (
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && pendingApprovals.length > 0 && (
             <Box className="glass-card" sx={{ p: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <AssignmentLateOutlined sx={{ fontSize: 18, color: "warning.main" }} />
@@ -1381,7 +1492,7 @@ const Dashboard = () => {
           )}
 
           {/* Inspection signals */}
-          {(inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || inspectionImportsFailed > 0) && (
+          {(!showPmTabs || pmDashboardTab === "pm-projects" || pmDashboardTab === "my-inspections") && (inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || inspectionImportsFailed > 0) && (
             <Box className="glass-card" sx={{ p: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
                 <AssignmentLateOutlined sx={{ fontSize: 18, color: "info.main" }} />
@@ -1421,7 +1532,7 @@ const Dashboard = () => {
           )}
 
           {/* Auto-assignment flags â€” installer self-assigned */}
-          {autoAssignFlags.length > 0 && (
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && autoAssignFlags.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PersonOutlined sx={{ fontSize: 18, color: "info.main" }} />
@@ -1465,7 +1576,7 @@ const Dashboard = () => {
           )}
 
           {/* Installer media updates â€” PM notification when installers upload missing media */}
-          {photoUpdateNotifications.length > 0 && (
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && photoUpdateNotifications.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PhotoCameraOutlined sx={{ fontSize: 18, color: "info.main" }} />
@@ -1510,7 +1621,7 @@ const Dashboard = () => {
           )}
 
           {/* Missing media flags â€” PM sees all runs without required media */}
-          {missingMediaFlags.length > 0 && (
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && missingMediaFlags.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PhotoCameraOutlined sx={{ fontSize: 18, color: "warning.main" }} />
@@ -1608,16 +1719,63 @@ const Dashboard = () => {
           )}
 
           {/* Regional Snapshot */}
-          {RegionalSnapshotSection}
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && RegionalSnapshotSection}
 
           {/* Project Status + Lifecycle */}
-          {ProjectStatusGrid}
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && ProjectStatusGrid}
 
           {/* Evidence + Health */}
-          {EvidenceHealthGrid}
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && EvidenceHealthGrid}
 
           {/* Workload */}
-          {WorkloadPanel}
+          {(!showPmTabs || pmDashboardTab === "pm-projects") && WorkloadPanel}
+
+          {/* My Installs workspace */}
+          {showPmTabs && pmDashboardTab === "my-installs" && (
+            <Box className="glass-card" sx={{ p: 2.5 }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                <WorkOutlineOutlined sx={{ color: "primary.main", fontSize: 20 }} />
+                <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Installs</Typography>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+                Installation assets currently assigned to you as a technician.
+              </Typography>
+              {myAssets.length === 0 ? (
+                <Typography variant="caption" color="text.disabled">No installation assets currently assigned to you.</Typography>
+              ) : (
+                <>
+                  <Grid container spacing={1.5}>
+                    {myAssets.slice(0, 6).map((a) => (
+                      <Grid item xs={12} sm={6} md={4} key={a.id}>
+                        <Paper elevation={0} onClick={() => navigate("/installations/assets")}
+                          sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                            transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                          <Stack spacing={0.75}>
+                            <Typography variant="caption" fontWeight={600} noWrap display="block">
+                              {a.assetTag || a.assetName}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
+                              {a.jobNumber}
+                            </Typography>
+                            <Chip label={isInProgressAsset(a.runStatus) ? "Active" : isPausedAsset(a.runStatus) ? "Paused" : "Queued"}
+                              size="small" variant="outlined"
+                              color={isInProgressAsset(a.runStatus) ? "primary" : isPausedAsset(a.runStatus) ? "warning" : "default"}
+                              sx={{ alignSelf: "flex-start", height: 16, fontSize: "0.58rem" }} />
+                          </Stack>
+                        </Paper>
+                      </Grid>
+                    ))}
+                  </Grid>
+                  {myAssets.length > 6 && (
+                    <Button size="small" variant="text" sx={{ mt: 1 }}
+                      onClick={() => navigate("/installations/assets")}>
+                      View all {myAssets.length} assets
+                    </Button>
+                  )}
+                </>
+              )}
+            </Box>
+          )}
         </>
       )}
 
