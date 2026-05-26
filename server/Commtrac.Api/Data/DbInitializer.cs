@@ -471,6 +471,21 @@ public static class DbInitializer
 
             EnsureRecorded("20260315130000_AssetWorkflowRunBomActualJson",
                 "SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='BomActualJson'");
+
+            // FeatureProcurementFields — columns added by EnsureFeatureProcurementColumns before migration
+            // was discoverable (missing [Migration] attribute). Must be recorded before Migrate() runs.
+            EnsureRecorded("20260321100000_FeatureProcurementFields",
+                "SELECT COUNT(*) FROM pragma_table_info('Features') WHERE name='Brand'");
+
+            // WorkflowModeAndInspectionImports — WorkflowMode column and InspectionImports table may have
+            // been applied to the DB before the migration was discoverable.
+            EnsureRecorded("20260322100000_WorkflowModeAndInspectionImports",
+                "SELECT COUNT(*) FROM pragma_table_info('Projects') WHERE name='WorkflowMode'");
+
+            // WorkflowTypeIdsForTemplatesAndConfigs — WorkflowTypeId columns added to WorkflowConfigs
+            // and WorkflowTemplates before the migration was discoverable.
+            EnsureRecorded("20260521120000_WorkflowTypeIdsForTemplatesAndConfigs",
+                "SELECT COUNT(*) FROM pragma_table_info('WorkflowConfigs') WHERE name='WorkflowTypeId'");
         }
         finally
         {
