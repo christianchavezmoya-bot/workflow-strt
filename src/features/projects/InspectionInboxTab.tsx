@@ -9,7 +9,11 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
   IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
   Stack,
   Tooltip,
   Typography,
@@ -18,13 +22,14 @@ import UploadFileIcon from "@mui/icons-material/UploadFile";
 import AssignmentIcon from "@mui/icons-material/Assignment";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import CodeIcon from "@mui/icons-material/Code";
+import DownloadIcon from "@mui/icons-material/Download";
 import { useEffect, useRef, useState } from "react";
-import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
-import { Capacitor } from "@capacitor/core";
 import { useAuth } from "../../hooks/useAuth";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import type { InspectionImport } from "../../types/project";
 import api from "../../services/api";
+import { projectAssetService } from "../../services/projectAssetService";
+import type { ProjectAsset } from "../../types/projectAsset";
 
 interface Props {
   projectId: string;
@@ -37,25 +42,32 @@ const STATUS_COLOR: Record<string, "default" | "info" | "warning" | "success" | 
   FAILED: "error",
 };
 
-const isNative = Capacitor.isNativePlatform();
-
 const InspectionInboxTab = ({ projectId }: Props) => {
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [imports, setImports] = useState<InspectionImport[]>([]);
+  const [projectAssets, setProjectAssets] = useState<ProjectAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadSource, setUploadSource] = useState<"LOCAL" | "ONEDRIVE" | "EMAIL">("LOCAL");
+  const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [selectedAssetId, setSelectedAssetId] = useState<string>("");
   const [viewItem, setViewItem] = useState<InspectionImport | null>(null);
   const [viewRaw, setViewRaw] = useState<string | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
 
   const load = () => {
     setLoading(true);
-    inspectionImportService
-      .list({ projectId })
-      .then(setImports)
+    Promise.all([
+      inspectionImportService.list({ projectId }),
+      projectAssetService.listByProject(projectId),
+    ])
+      .then(([items, assets]) => {
+        setImports(items);
+        setProjectAssets(assets);
+      })
       .catch(() => setError("Unable to load inspection imports."))
       .finally(() => setLoading(false));
   };
@@ -72,7 +84,7 @@ const InspectionInboxTab = ({ projectId }: Props) => {
       const formData = new FormData();
       formData.append("file", file, file.name);
       formData.append("projectId", projectId);
-      formData.append("source", "LOCAL");
+      formData.append("source", uploadSource);
       if (user?.email) formData.append("uploadedBy", user.email);
 
       await api.post("/inspection-imports/upload", formData, {
@@ -93,43 +105,20 @@ const InspectionInboxTab = ({ projectId }: Props) => {
     if (file) uploadFile(file);
   };
 
-  // On native, use Camera plugin to let user pick a file from their device.
-  // On web, fall back to the hidden <input type="file">.
-  const handleUploadClick = async () => {
-    if (!isNative) {
-      fileInputRef.current?.click();
-      return;
-    }
-    // Native: use Camera plugin to pick from photo library or files app.
-    // For JSON files the user will need to pick from Files; photo-based
-    // JSON exports can come from the camera roll.
-    try {
-      const photo = await Camera.getPhoto({
-        resultType: CameraResultType.DataUrl,
-        source: CameraSource.Photos,
-        quality: 90,
-      });
-      // Convert data URL back to a File object
-      const res = await fetch(photo.dataUrl!);
-      const blob = await res.blob();
-      const file = new File([blob], `inspection-${Date.now()}.json`, {
-        type: "application/json",
-      });
-      await uploadFile(file);
-    } catch (e: unknown) {
-      const msg = (e as Error)?.message || "";
-      // User cancelled — not an error
-      if (!msg.toLowerCase().includes("cancel") && !msg.toLowerCase().includes("user denied")) {
-        setError("Could not open file picker: " + msg);
-      }
-    }
-  };
+  const handleUploadClick = () => fileInputRef.current?.click();
 
   const handleAssign = async (item: InspectionImport) => {
     try {
-      await inspectionImportService.assign(item.id, { projectId });
+      setAssigningId(item.id);
+      await inspectionImportService.assign(item.id, {
+        projectId,
+        assetId: selectedAssetId || undefined,
+      });
+      setAssigningId(null);
+      setSelectedAssetId("");
       load();
     } catch {
+      setAssigningId(null);
       setError("Failed to assign import.");
     }
   };
@@ -145,6 +134,7 @@ const InspectionInboxTab = ({ projectId }: Props) => {
 
   const handleViewRaw = async (item: InspectionImport) => {
     setViewItem(item);
+    setViewRaw(null);
     // If rawJson is inline use it directly; otherwise fetch from /raw endpoint
     if (item.rawJson) {
       setViewRaw(item.rawJson);
@@ -163,6 +153,17 @@ const InspectionInboxTab = ({ projectId }: Props) => {
     }
   };
 
+  const handleDownloadRaw = () => {
+    if (!viewItem || !viewRaw) return;
+    const blob = new Blob([viewRaw], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = viewItem.fileName || `${viewItem.id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
@@ -175,7 +176,19 @@ const InspectionInboxTab = ({ projectId }: Props) => {
     <Stack spacing={2}>
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         <Typography variant="subtitle1">Inspection inbox</Typography>
-        <Box>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <FormControl size="small" sx={{ minWidth: 140 }}>
+            <InputLabel shrink>Source</InputLabel>
+            <Select
+              label="Source"
+              value={uploadSource}
+              onChange={(e) => setUploadSource(e.target.value as typeof uploadSource)}
+            >
+              <MenuItem value="LOCAL">Local disk</MenuItem>
+              <MenuItem value="ONEDRIVE">OneDrive</MenuItem>
+              <MenuItem value="EMAIL">Email attachment</MenuItem>
+            </Select>
+          </FormControl>
           {/* Hidden input for web fallback */}
           <input
             ref={fileInputRef}
@@ -193,7 +206,7 @@ const InspectionInboxTab = ({ projectId }: Props) => {
           >
             {uploading ? "Uploading…" : "Upload JSON"}
           </Button>
-        </Box>
+        </Stack>
       </Stack>
 
       {error && (
@@ -227,8 +240,8 @@ const InspectionInboxTab = ({ projectId }: Props) => {
                 color={STATUS_COLOR[item.status] ?? "default"}
               />
               {item.status === "RECEIVED" && (
-                <Tooltip title="Assign to this project">
-                  <IconButton size="small" onClick={() => handleAssign(item)}>
+                <Tooltip title="Assign to project and selected asset">
+                  <IconButton size="small" disabled={assigningId === item.id} onClick={() => handleAssign(item)}>
                     <AssignmentIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
@@ -259,9 +272,34 @@ const InspectionInboxTab = ({ projectId }: Props) => {
             <>
               <Divider sx={{ my: 1 }} />
               <Typography variant="caption" color="text.secondary">
-                Asset: {item.assetId}
+                Asset: {projectAssets.find((asset) => asset.id === item.assetId)?.assetTag || item.assetId}
                 {item.mappedRunId && " · Run: " + item.mappedRunId}
               </Typography>
+            </>
+          )}
+
+          {!item.assetId && (item.status === "RECEIVED" || item.status === "NEEDS_ASSIGNMENT") && (
+            <>
+              <Divider sx={{ my: 1 }} />
+              <FormControl size="small" fullWidth>
+                <InputLabel shrink>Assign Asset</InputLabel>
+                <Select
+                  label="Assign Asset"
+                  value={assigningId === item.id ? selectedAssetId : ""}
+                  onChange={(e) => {
+                    setAssigningId(item.id);
+                    setSelectedAssetId(e.target.value);
+                  }}
+                >
+                  <MenuItem value="">Project only</MenuItem>
+                  {projectAssets.map((asset) => (
+                    <MenuItem key={asset.id} value={asset.id}>
+                      {asset.assetTag}
+                      {asset.assetName ? ` — ${asset.assetName}` : ""}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </>
           )}
         </Box>
@@ -300,6 +338,7 @@ const InspectionInboxTab = ({ projectId }: Props) => {
           )}
         </DialogContent>
         <DialogActions>
+          <Button onClick={handleDownloadRaw} disabled={!viewRaw} startIcon={<DownloadIcon />}>Download</Button>
           <Button onClick={() => { setViewItem(null); setViewRaw(null); }}>Close</Button>
         </DialogActions>
       </Dialog>

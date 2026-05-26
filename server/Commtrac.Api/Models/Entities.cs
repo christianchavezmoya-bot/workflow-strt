@@ -599,6 +599,8 @@ public class WorkflowTemplateEntity
     public string Name { get; set; } = string.Empty;
     [MaxLength(100)]
     public string ProductId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? WorkflowTypeId { get; set; }
     public string StepsJson { get; set; } = "[]";
     public string MediaJson { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -736,6 +738,8 @@ public class WorkflowConfigEntity
     public string? DisplayName { get; set; }
     [MaxLength(100)]
     public string? ConfigType { get; set; }
+    [MaxLength(100)]
+    public string? WorkflowTypeId { get; set; }
     /// <summary>Draft | Published | Archived</summary>
     [MaxLength(20)]
     public string Status { get; set; } = "Draft";

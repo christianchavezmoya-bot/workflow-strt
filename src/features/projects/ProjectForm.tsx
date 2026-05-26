@@ -203,7 +203,7 @@ const ProjectForm = () => {
         projectType: localProject.projectType,
         status: localProject.status,
         approvalDecision: localProject.approvalDecision || "",
-        workflowMode: (localProject.workflowMode as WorkflowMode) ?? (localProject.isInstallationProject ? "INSTALLATION_ONLY" : "INSTALLATION_ONLY"),
+        workflowMode: (localProject.workflowMode as WorkflowMode) ?? (localProject.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
         productIds: localProject.productIds ?? []
       });
       setProductFeatureValues(localProject.productFeatureValues || {});
@@ -226,7 +226,7 @@ const ProjectForm = () => {
         projectType: project.projectType,
         status: project.status,
         approvalDecision: project.approvalDecision || "",
-        workflowMode: (project.workflowMode as WorkflowMode) ?? (project.isInstallationProject ? "INSTALLATION_ONLY" : "INSTALLATION_ONLY"),
+        workflowMode: (project.workflowMode as WorkflowMode) ?? (project.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
         productIds: project.productIds ?? []
       });
       setProductFeatureValues(project.productFeatureValues || {});
@@ -1701,6 +1701,5 @@ const ProjectForm = () => {
 };
 
 export default ProjectForm;
-
 
 

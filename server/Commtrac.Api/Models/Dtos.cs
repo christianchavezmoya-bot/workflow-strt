@@ -627,6 +627,7 @@ public record WorkflowTemplateDto(
     string Id,
     string Name,
     string ProductId,
+    string? WorkflowTypeId,
     string StepsJson,
     string MediaJson,
     DateTime CreatedAt,
@@ -636,6 +637,7 @@ public record WorkflowTemplateDto(
 public record UpsertWorkflowTemplateRequest(
     string Name,
     string ProductId,
+    string? WorkflowTypeId,
     string StepsJson,
     string? MediaJson
 );
@@ -761,6 +763,7 @@ public record WorkflowConfigDto(
     string Name,
     string? DisplayName,
     string? ConfigType,
+    string? WorkflowTypeId,
     string Status,
     int Version,
     string? TemplateSourceId,
@@ -778,6 +781,7 @@ public record UpsertWorkflowConfigRequest(
     string? ProductId,
     string? DisplayName,
     string? ConfigType,
+    string? WorkflowTypeId,
     string? Notes,
     string? StepsJson,
     string? MediaJson,
@@ -814,6 +818,23 @@ public record CreateAssignmentRequest(
     string AssetId,
     string WorkflowConfigId,
     string WorkflowTypeId
+);
+
+public record AssetWorkflowRunListItemDto(
+    string Id,
+    string AssetId,
+    string ProjectId,
+    string WorkflowConfigId,
+    string? WorkflowTypeId,
+    string WorkflowTypeName,
+    string? AssetName,
+    string? AssignedUserId,
+    string? AssignedTo,
+    string Status,
+    bool IsLocked,
+    DateTime StartedAt,
+    DateTime? CompletedAt,
+    DateTime UpdatedAt
 );
 
 public record AssetWorkflowRunDto(

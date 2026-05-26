@@ -20,6 +20,8 @@ import { officesService } from "../../services/officesService";
 import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
 import { projectAssetService, type OpenAssetItem, type WorkloadSummaryItem } from "../../services/projectAssetService";
 import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
+import { inspectionImportService } from "../../services/inspectionImportService";
+import api from "../../services/api";
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
@@ -43,6 +45,11 @@ function isInProgressAsset(status?: string | null) {
 function isNotStartedAsset(status?: string | null) {
   const value = (status ?? "").toLowerCase();
   return value === "notstarted" || value === "not started";
+}
+
+function isOpenInspectionStatus(status?: string | null) {
+  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+  return value === "notstarted" || value === "inprogress" || value === "paused" || value === "onhold";
 }
 
 function displayRunState(asset: OpenAssetItem) {
@@ -78,6 +85,13 @@ function GaugeCircle({ value, size = 80, color = "primary.main" }: { value: numb
 }
 
 const WINDOW_OPTIONS = [30, 60, 90, 180];
+
+type InspectionRunSignal = {
+  id: string;
+  projectId: string;
+  assignedUserId?: string;
+  status: string;
+};
 
 const Dashboard = () => {
   const navigate   = useNavigate();
@@ -144,6 +158,9 @@ const Dashboard = () => {
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
   const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
+  const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
+  const [inspectionImportsWaiting, setInspectionImportsWaiting] = useState(0);
+  const [inspectionImportsFailed, setInspectionImportsFailed] = useState(0);
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
@@ -184,24 +201,6 @@ const Dashboard = () => {
       }).catch(() => {});
     }
   }, [dispatch, loadAttention, isEngineer]);
-
-  // Load inspection signals for PM/Admin
-  useEffect(() => {
-    if (!isManager) return;
-    import("../../services/inspectionImportService").then(({ inspectionImportService }) => {
-      inspectionImportService.list({ status: "NEEDS_ASSIGNMENT" })
-        .then((items) => setInspectionImportsWaiting(items.length))
-        .catch(() => {});
-      inspectionImportService.list({ status: "FAILED" })
-        .then((items) => setInspectionImportsFailed(items.length))
-        .catch(() => {});
-    });
-    import("../../services/api").then(({ default: api }) => {
-      api.get("/asset-workflow-runs", { params: { workflowType: "Inspection", status: "in-progress" } })
-        .then((r: { data: unknown[] }) => setInspectionRunsDue(r.data.length))
-        .catch(() => {});
-    });
-  }, [isManager]);
 
   // PM: listen for new auto-assign flags written by AssetInstallationPage
   useEffect(() => {
@@ -265,14 +264,31 @@ const Dashboard = () => {
     });
   }, [activeOffice, projects, officeIdsForRegion, countryForOffice]);
 
+  const visibleProjectIds = useMemo(
+    () => new Set(filteredProjects.map((project) => project.id)),
+    [filteredProjects],
+  );
+  const visibleOpenAssets = useMemo(
+    () => openAssets.filter((asset) => visibleProjectIds.has(asset.projectId)),
+    [openAssets, visibleProjectIds],
+  );
+  const visibleOpenIssues = useMemo(
+    () => openIssues.filter((issue) => visibleProjectIds.has(issue.projectId)),
+    [openIssues, visibleProjectIds],
+  );
+  const visiblePendingSigs = useMemo(
+    () => pendingSigs.filter((sig) => visibleProjectIds.has(sig.projectId)),
+    [pendingSigs, visibleProjectIds],
+  );
+
   const projectCount    = filteredProjects.length;
-  const blockingIssues  = openIssues.filter((i) => i.isBlocking);
-  const highIssues      = openIssues.filter((i) => !i.isBlocking && i.severity === "high");
+  const blockingIssues  = visibleOpenIssues.filter((i) => i.isBlocking);
+  const highIssues      = visibleOpenIssues.filter((i) => !i.isBlocking && i.severity === "high");
   const overdueProjects = filteredProjects.filter((p) => {
     if (!p.finishDate || p.status === "Completed" || p.status === "Cancelled") return false;
     return new Date(p.finishDate) < new Date();
   });
-  const attentionCount = blockingIssues.length + pendingSigs.length + overdueProjects.length + highIssues.length;
+  const attentionCount = blockingIssues.length + visiblePendingSigs.length + overdueProjects.length + highIssues.length;
 
   // Phase 1 â€” personal workspace
   const myAssets   = useMemo(() => openAssets.filter((a) => a.assignedUserId === user.id), [openAssets, user.id]);
@@ -283,28 +299,78 @@ const Dashboard = () => {
 
   // Supervisor: unassigned open assets
   const unassignedAssets = useMemo(() =>
-    openAssets.filter(a => !a.assignedUserId && a.status !== "Complete" && a.status !== "Completed"),
-    [openAssets]);
+    visibleOpenAssets.filter(a => !a.assignedUserId && a.status !== "Complete" && a.status !== "Completed"),
+    [visibleOpenAssets]);
 
   // Supervisor: not-started assets
   const notStartedAssets = useMemo(() =>
-    openAssets.filter(a => isNotStartedAsset(a.status)),
-    [openAssets]);
+    visibleOpenAssets.filter(a => isNotStartedAsset(a.status)),
+    [visibleOpenAssets]);
 
   // PM: pending approval projects
   const pendingApprovals = useMemo(() =>
     filteredProjects.filter(p => p.status === "Pending Approval"),
     [filteredProjects]);
 
-  // Inspection signals (PM/Manager only)
-  const [inspectionRunsDue,       setInspectionRunsDue]       = useState(0);
-  const [inspectionImportsWaiting, setInspectionImportsWaiting] = useState(0);
-  const [inspectionImportsFailed,  setInspectionImportsFailed]  = useState(0);
-
   // Installer: my pending sigs
   const myPendingSigs = useMemo(() =>
     pendingSigs.filter(s => myAssets.some(a => a.id === s.assetId || a.jobNumber === s.jobNumber)),
     [pendingSigs, myAssets]);
+
+  // Load inspection signals for PM/Admin and installers
+  useEffect(() => {
+    if (!isManager && !isInstaller) {
+      setInspectionRunsDue(0);
+      setInspectionImportsWaiting(0);
+      setInspectionImportsFailed(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [runResponse, waitingImports, failedImports] = await Promise.all([
+          api.get<InspectionRunSignal[]>("/asset-workflow-runs", {
+            params: { workflowType: "Inspection" },
+          }),
+          isManager ? inspectionImportService.list({ status: "NEEDS_ASSIGNMENT" }) : Promise.resolve([]),
+          isManager ? inspectionImportService.list({ status: "FAILED" }) : Promise.resolve([]),
+        ]);
+
+        if (cancelled) return;
+
+        const scopedRuns = isManager
+          ? runResponse.data.filter((run) => visibleProjectIds.has(run.projectId))
+          : runResponse.data.filter((run) => run.assignedUserId === user.id);
+
+        setInspectionRunsDue(scopedRuns.filter((run) => isOpenInspectionStatus(run.status)).length);
+
+        if (isManager) {
+          const canSeeImport = (projectId?: string) => {
+            if (projectId) return visibleProjectIds.has(projectId);
+            return user.role === "Admin";
+          };
+
+          setInspectionImportsWaiting(waitingImports.filter((item) => canSeeImport(item.projectId)).length);
+          setInspectionImportsFailed(failedImports.filter((item) => canSeeImport(item.projectId)).length);
+        } else {
+          setInspectionImportsWaiting(0);
+          setInspectionImportsFailed(0);
+        }
+      } catch {
+        if (!cancelled) {
+          setInspectionRunsDue(0);
+          setInspectionImportsWaiting(0);
+          setInspectionImportsFailed(0);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isInstaller, isManager, user.id, user.role, visibleProjectIds]);
 
   // Project status chart
   const statusGroups = useMemo(() => {
@@ -436,27 +502,27 @@ const Dashboard = () => {
           <Box sx={{
             p: 2, borderRadius: 2, height: "100%",
             border: "1px solid", transition: "all 0.2s",
-            borderColor: pendingSigs.length > 0 ? "warning.main" : "rgba(255,255,255,0.08)",
-            background:  pendingSigs.length > 0 ? "rgba(230,119,0,0.07)" : "rgba(255,255,255,0.03)",
+            borderColor: visiblePendingSigs.length > 0 ? "warning.main" : "rgba(255,255,255,0.08)",
+            background:  visiblePendingSigs.length > 0 ? "rgba(230,119,0,0.07)" : "rgba(255,255,255,0.03)",
           }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <PendingActionsOutlined sx={{ fontSize: 18, color: pendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
+              <PendingActionsOutlined sx={{ fontSize: 18, color: visiblePendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
               <Typography variant="subtitle2" fontWeight={700}>Pending Signatures</Typography>
             </Stack>
-            <Typography variant="h4" fontWeight={700} color={pendingSigs.length > 0 ? "warning.main" : "text.secondary"}>
-              {pendingSigs.length}
+            <Typography variant="h4" fontWeight={700} color={visiblePendingSigs.length > 0 ? "warning.main" : "text.secondary"}>
+              {visiblePendingSigs.length}
             </Typography>
-            {pendingSigs.length > 0 ? (
+            {visiblePendingSigs.length > 0 ? (
               <Stack spacing={0.25} sx={{ mt: 1 }}>
-                {pendingSigs.slice(0, 4).map((s) => (
+                {visiblePendingSigs.slice(0, 4).map((s) => (
                   <ItemRow key={s.runId}
                     label={`${s.jobNumber}: ${s.assetTag}`}
                     sub={`Completed ${fmtDate(s.completedAt)}`}
                     onClick={() => navigate(`/projects/${s.projectId}`)} />
                 ))}
-                {pendingSigs.length > 4 && (
+                {visiblePendingSigs.length > 4 && (
                   <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                    +{pendingSigs.length - 4} more
+                    +{visiblePendingSigs.length - 4} more
                   </Typography>
                 )}
               </Stack>
@@ -924,6 +990,29 @@ const Dashboard = () => {
       {/* â•â• INSTALLER / TECHNICIAN VIEW â•â• */}
       {isInstaller && (
         <>
+          {inspectionRunsDue > 0 && (
+            <Box className="glass-card" sx={{ p: 2 }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                <AssignmentLateOutlined sx={{ fontSize: 18, color: "info.main" }} />
+                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                  Inspection Work
+                </Typography>
+                <Chip label={inspectionRunsDue} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+                Internal inspections currently assigned to you and still open
+              </Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                color="info"
+                onClick={() => navigate("/installations/assets?workflowType=Inspection")}
+              >
+                Open inspections
+              </Button>
+            </Box>
+          )}
+
           {/* My Jobs Today */}
           <Box className="glass-card" sx={{ p: 2.5 }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -1303,7 +1392,7 @@ const Dashboard = () => {
               <Stack direction="row" spacing={2} flexWrap="wrap">
                 {inspectionRunsDue > 0 && (
                   <Chip
-                    label={inspectionRunsDue + (inspectionRunsDue === 1 ? " run" : " runs") + " in progress"}
+                    label={inspectionRunsDue + (inspectionRunsDue === 1 ? " run" : " runs") + " due / in progress"}
                     size="small"
                     color="info"
                     variant="outlined"
@@ -1604,4 +1693,3 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
-
