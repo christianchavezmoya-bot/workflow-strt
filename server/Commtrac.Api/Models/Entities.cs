@@ -736,6 +736,8 @@ public class WorkflowConfigEntity
     public string? DisplayName { get; set; }
     [MaxLength(100)]
     public string? ConfigType { get; set; }
+    [MaxLength(100)]
+    public string? WorkflowTypeId { get; set; }
     /// <summary>Draft | Published | Archived</summary>
     [MaxLength(20)]
     public string Status { get; set; } = "Draft";
