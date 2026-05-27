@@ -13,9 +13,20 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
 
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+// Resolve DB path relative to ContentRootPath (project dir) so it can never resolve
+// to the bin/Debug output folder regardless of how the process is started.
+var rawConnectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=commtrac.db";
+var dbDataSource = rawConnectionString.Replace("Data Source=", "", StringComparison.OrdinalIgnoreCase).Trim();
+if (!Path.IsPathRooted(dbDataSource))
+    dbDataSource = Path.Combine(builder.Environment.ContentRootPath, dbDataSource);
+var resolvedConnectionString = $"Data Source={dbDataSource}";
+Console.WriteLine($"[DB] Resolved path: {dbDataSource}");
 
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite(resolvedConnectionString));
+
+builder.Services.AddScoped<IInspectionImportAdapterService, InspectionImportAdapterService>();
+builder.Services.AddScoped<IInspectionImportValidatorService, InspectionImportValidatorService>();
 builder.Services.AddScoped<NotificationSettingsService>();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.AddScoped<IEmailSender, EmailSender>();
