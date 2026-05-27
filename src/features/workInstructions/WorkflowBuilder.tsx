@@ -11,6 +11,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   ImageOutlined,
+  PersonOutlined,
   PlayArrowOutlined,
   PublishOutlined,
   QrCodeScannerOutlined,
@@ -3336,6 +3337,12 @@ function InputPreview({ inp }: { inp: StepInput }) {
   if (inp.type === "photo") return <Button disabled size="small" startIcon={<ImageOutlined />}>Capture photo</Button>;
   if (inp.type === "video") return <Button disabled size="small" startIcon={<VideocamOutlined />}>Capture video</Button>;
   if (inp.type === "signature") return <Button disabled size="small" startIcon={<EditOutlined />}>Capture signature</Button>;
+  if (inp.type === "user-select") return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <PersonOutlined fontSize="small" color="action" />
+      <Typography variant="caption" color="text.secondary">Select from project team</Typography>
+    </Stack>
+  );
   return <Typography variant="caption" color="text.secondary">Unsupported input type</Typography>;
 }
 
