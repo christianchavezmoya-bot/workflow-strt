@@ -1,4 +1,4 @@
-﻿import {
+import {
   Alert, Box, Button, Chip, CircularProgress, Collapse, Divider, FormControl, Grid,
   IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Tab, Tabs, Tooltip, Typography,
 } from "@mui/material";
@@ -166,7 +166,9 @@ const Dashboard = () => {
   const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
   const [inspectionImportsWaiting, setInspectionImportsWaiting] = useState(0);
   const [inspectionImportsFailed, setInspectionImportsFailed] = useState(0);
-  const [pmDashboardTab, setPmDashboardTab] = useState<PmDashboardTab>("pm-projects");
+  const [pmDashboardTab, setPmDashboardTab] = useState<PmDashboardTab>(
+    isManager ? "pm-projects" : "my-installs"
+  );
   const [inspectionAssets, setInspectionAssets] = useState<OpenAssetItem[]>([]);
   const [inspectionImports, setInspectionImports] = useState<InspectionImport[]>([]);
   const [inspectionLoading, setInspectionLoading] = useState(false);
@@ -344,7 +346,13 @@ const Dashboard = () => {
     filteredProjects.filter(p => p.status === "Pending Approval"),
     [filteredProjects]);
 
-  const showPmTabs = viewingOwnDashboard && user.role === "Project Manager";
+  // Tab bar is shown for all non-viewers.
+  // Admins and PMs see all 3 tabs; others see My Inspections and/or My Installs
+  // depending on which asset types they have assigned.
+  const showTabBar       = !isViewer;
+  const showPmProjectsTab = isManager;
+  // Keep for legacy gating inside the isManager block
+  const showPmTabs = isManager;
 
   const inspectionProjects = useMemo(
     () => filteredProjects.filter((p) => p.workflowMode === "INSPECTION_ONLY" || p.workflowMode === "MIXED"),
@@ -363,8 +371,17 @@ const Dashboard = () => {
     return inspectionImports.filter((item) => !item.assetId || assignedAssetIds.has(item.assetId));
   }, [inspectionImports, myInspectionAssets]);
 
+  // Install assets = assigned assets that are NOT in an inspection project
+  const myInstallAssets = useMemo(
+    () => myAssets.filter((a) => !inspectionProjectIds.has(a.projectId)),
+    [myAssets, inspectionProjectIds]
+  );
+
+  // Show My Inspections tab for managers always; for others only if assigned to inspection assets
+  const hasInspectionsTab = isManager || myInspectionAssets.length > 0 || inspectionRunsDue > 0;
+
   useEffect(() => {
-    if (!showPmTabs || pmDashboardTab !== "my-inspections" || inspectionProjects.length === 0) return;
+    if (isViewer || inspectionProjects.length === 0) return;
     let cancelled = false;
     setInspectionLoading(true);
     Promise.all([
@@ -376,7 +393,17 @@ const Dashboard = () => {
       setInspectionImports((importGroups as InspectionImport[][]).flat());
     }).finally(() => { if (!cancelled) setInspectionLoading(false); });
     return () => { cancelled = true; };
-  }, [showPmTabs, pmDashboardTab, inspectionProjects]);
+  }, [isViewer, inspectionProjects]);
+
+  // Redirect to a valid tab when the current selection isn't available for this user
+  useEffect(() => {
+    if (pmDashboardTab === "pm-projects" && !showPmProjectsTab) {
+      setPmDashboardTab(hasInspectionsTab ? "my-inspections" : "my-installs");
+    }
+    if (pmDashboardTab === "my-inspections" && !hasInspectionsTab) {
+      setPmDashboardTab("my-installs");
+    }
+  }, [pmDashboardTab, showPmProjectsTab, hasInspectionsTab]);
 
   // Installer: my pending sigs
   const myPendingSigs = useMemo(() =>
@@ -1135,9 +1162,24 @@ const Dashboard = () => {
           </Collapse>
         </Box>
       )}
+      {/* ══ UNIVERSAL TAB BAR (all non-viewer users) ══ */}
+      {showTabBar && (
+        <Box className="glass-card" sx={{ p: 1.5 }}>
+          <Tabs value={pmDashboardTab} onChange={(_, v: PmDashboardTab) => setPmDashboardTab(v)}
+            sx={{ minHeight: 36, "& .MuiTab-root": { minHeight: 36, py: 0.5, fontSize: "0.8rem" } }}>
+            {showPmProjectsTab && <Tab value="pm-projects" label="My PM Projects" />}
+            {hasInspectionsTab && <Tab value="my-inspections" label="My Inspections" />}
+            <Tab value="my-installs" label="My Installs" />
+          </Tabs>
+        </Box>
+      )}
+
+      {/* My Inspections tab content — non-manager users */}
+      {showTabBar && !isManager && pmDashboardTab === "my-inspections" && MyInspectionWorkspace}
+
 
       {/* â•â• INSTALLER / TECHNICIAN VIEW â•â• */}
-      {isInstaller && (
+      {isInstaller && pmDashboardTab === "my-installs" && (
         <>
           {inspectionRunsDue > 0 && (
             <Box className="glass-card" sx={{ p: 2 }}>
@@ -1352,7 +1394,7 @@ const Dashboard = () => {
       )}
 
       {/* â•â• SUPERVISOR VIEW â•â• */}
-      {isSupervisor && (
+      {isSupervisor && pmDashboardTab === "my-installs" && (
         <>
           {/* Needs Attention â€" team issues */}
           {NeedsAttentionSection}
@@ -1429,7 +1471,7 @@ const Dashboard = () => {
       )}
 
       {/* â•â• ENGINEER VIEW â•â• */}
-      {isEngineer && (
+      {isEngineer && pmDashboardTab === "my-installs" && (
         <>
           {/* Needs Attention â€" scoped */}
           {NeedsAttentionSection}
@@ -1515,13 +1557,13 @@ const Dashboard = () => {
           )}
 
           {/* Needs Attention â€" company-wide */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects") && NeedsAttentionSection}
+          {pmDashboardTab === "pm-projects" && NeedsAttentionSection}
 
           {/* My Inspections workspace */}
-          {showPmTabs && pmDashboardTab === "my-inspections" && MyInspectionWorkspace}
+          {pmDashboardTab === "my-inspections" && MyInspectionWorkspace}
 
           {/* Pending Approvals strip â€" if any */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects") && pendingApprovals.length > 0 && (
+          {pmDashboardTab === "pm-projects" && pendingApprovals.length > 0 && (
             <Box className="glass-card" sx={{ p: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <AssignmentLateOutlined sx={{ fontSize: 18, color: "warning.main" }} />
@@ -1545,7 +1587,7 @@ const Dashboard = () => {
           )}
 
           {/* Inspection signals */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects" || pmDashboardTab === "my-inspections") && (inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || inspectionImportsFailed > 0) && (
+          {(pmDashboardTab === "pm-projects" || pmDashboardTab === "my-inspections") && (inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || inspectionImportsFailed > 0) && (
             <Box className="glass-card" sx={{ p: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
                 <AssignmentLateOutlined sx={{ fontSize: 18, color: "info.main" }} />
@@ -1585,7 +1627,7 @@ const Dashboard = () => {
           )}
 
           {/* Auto-assignment flags â€" installer self-assigned */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects") && autoAssignFlags.length > 0 && (
+          {pmDashboardTab === "pm-projects" && autoAssignFlags.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PersonOutlined sx={{ fontSize: 18, color: "info.main" }} />
@@ -1629,7 +1671,7 @@ const Dashboard = () => {
           )}
 
           {/* Installer media updates â€" PM notification when installers upload missing media */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects") && photoUpdateNotifications.length > 0 && (
+          {pmDashboardTab === "pm-projects" && photoUpdateNotifications.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PhotoCameraOutlined sx={{ fontSize: 18, color: "info.main" }} />
@@ -1674,7 +1716,7 @@ const Dashboard = () => {
           )}
 
           {/* Missing media flags â€" PM sees all runs without required media */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects") && missingMediaFlags.length > 0 && (
+          {pmDashboardTab === "pm-projects" && missingMediaFlags.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <PhotoCameraOutlined sx={{ fontSize: 18, color: "warning.main" }} />
@@ -1772,19 +1814,19 @@ const Dashboard = () => {
           )}
 
           {/* Regional Snapshot */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects") && RegionalSnapshotSection}
+          {pmDashboardTab === "pm-projects" && RegionalSnapshotSection}
 
           {/* Project Status + Lifecycle */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects") && ProjectStatusGrid}
+          {pmDashboardTab === "pm-projects" && ProjectStatusGrid}
 
           {/* Evidence + Health */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects") && EvidenceHealthGrid}
+          {pmDashboardTab === "pm-projects" && EvidenceHealthGrid}
 
           {/* Workload */}
-          {(!showPmTabs || pmDashboardTab === "pm-projects") && WorkloadPanel}
+          {pmDashboardTab === "pm-projects" && WorkloadPanel}
 
           {/* My Installs workspace */}
-          {showPmTabs && pmDashboardTab === "my-installs" && (
+          {pmDashboardTab === "my-installs" && (
             <Box className="glass-card" sx={{ p: 2.5 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <WorkOutlineOutlined sx={{ color: "primary.main", fontSize: 20 }} />
