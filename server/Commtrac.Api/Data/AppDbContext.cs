@@ -211,6 +211,9 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<WorkflowTemplateEntity>()
             .HasIndex(w => w.ProductId);
 
+        modelBuilder.Entity<WorkflowTemplateEntity>()
+            .HasIndex(w => w.WorkflowTypeId);
+
         modelBuilder.Entity<WorkInstructionEntity>()
             .Property(w => w.StepsJson)
             .HasDefaultValue("[]");
@@ -258,6 +261,9 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<WorkflowConfigEntity>()
             .HasIndex(c => c.Status);
+
+        modelBuilder.Entity<WorkflowConfigEntity>()
+            .HasIndex(c => c.WorkflowTypeId);
 
         modelBuilder.Entity<WorkflowConfigEntity>()
             .Property(c => c.StepsJson).HasDefaultValue("[]");
@@ -310,7 +316,8 @@ public class AppDbContext : DbContext
             new WorkflowTypeEntity { Id = "wftype-installation",   Name = "Installation",   SortOrder = 1, IsActive = true },
             new WorkflowTypeEntity { Id = "wftype-commissioning",  Name = "Commissioning",  SortOrder = 2, IsActive = true },
             new WorkflowTypeEntity { Id = "wftype-inspection",     Name = "Inspection",     SortOrder = 3, IsActive = true },
-            new WorkflowTypeEntity { Id = "wftype-repair",         Name = "Repair",         SortOrder = 4, IsActive = true }
+            new WorkflowTypeEntity { Id = "wftype-repair",         Name = "Repair",         SortOrder = 4, IsActive = true },
+            new WorkflowTypeEntity { Id = "wftype-other",          Name = "Other",          SortOrder = 5, IsActive = true }
         );
 
         modelBuilder.Entity<FieldDefinitionEntity>()
@@ -379,4 +386,3 @@ public class AppDbContext : DbContext
             .HasIndex(i => i.Status);
     }
 }
-

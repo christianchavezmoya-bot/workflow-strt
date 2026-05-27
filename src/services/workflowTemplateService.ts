@@ -6,6 +6,7 @@ export interface WorkflowTemplateDto {
   id: string;
   name: string;
   productId: string;
+  workflowTypeId?: string;
   stepsJson: string;
   mediaJson: string;
   createdAt: string;
@@ -28,6 +29,7 @@ function toWorkflow(dto: WorkflowTemplateDto): Workflow {
     id: dto.id,
     name: dto.name,
     productId: dto.productId,
+    workflowTypeId: dto.workflowTypeId,
     createdAt: new Date(dto.createdAt).getTime(),
     steps,
     media,
@@ -128,6 +130,7 @@ export const workflowTemplateService = {
     const res = await api.post<WorkflowTemplateDto>("/workflow-templates", {
       name: workflow.name,
       productId: workflow.productId,
+      workflowTypeId: workflow.workflowTypeId,
       stepsJson: JSON.stringify(workflow.steps),
       mediaJson: JSON.stringify(workflow.media ?? []),
     });
@@ -142,6 +145,7 @@ export const workflowTemplateService = {
     const res = await api.put<WorkflowTemplateDto>(`/workflow-templates/${id}`, {
       name: workflow.name,
       productId: workflow.productId,
+      workflowTypeId: workflow.workflowTypeId,
       stepsJson: JSON.stringify(workflow.steps),
       mediaJson: JSON.stringify(workflow.media ?? []),
     });

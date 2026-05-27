@@ -54,6 +54,7 @@ import { STEP_TYPE_LABELS } from "../../types/workflow";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
+import { workflowTypeService } from "../../services/workflowTypeService";
 import QRUploadButton from "../../components/QRUploadButton";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import { workflowConfigFeatureService } from "../../services/workflowConfigFeatureService";
@@ -62,6 +63,7 @@ import { featureDependencyService } from "../../services/featureDependencyServic
 import type { FeatureDependency } from "../../types/featureDependency";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
+import type { WorkflowType } from "../../types/workflowType";
 import WorkOrderRunner from "./WorkOrderRunner";
 
 // ------------------------------------------------------------------
@@ -201,6 +203,7 @@ function TabPanel({ value, index, children }: { value: number; index: number; ch
 interface PublishForm {
   name: string;
   configType: string;
+  workflowTypeId: string;
   notes: string;
   featureSelections: FeatureSelection[];
 }
@@ -241,6 +244,10 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     featureService.getByProduct(productId).then(setLibFeatures).catch(() => {});
   }, [productId]);
 
+  useEffect(() => {
+    workflowTypeService.listAll().then(setWorkflowTypes).catch(() => {});
+  }, []);
+
   // Feature selections — managed in the builder (not just the publish dialog)
   const [featureSelections, setFeatureSelections] = useState<FeatureSelection[]>(() =>
     productFeatures.map((f) => ({ featureId: f.id, included: false, activeCount: 0 }))
@@ -251,7 +258,8 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
 
   const [publishSaving, setPublishSaving] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
-  const [publishForm, setPublishForm] = useState<PublishForm>({ name: "", configType: "", notes: "", featureSelections: [] });
+  const [publishForm, setPublishForm] = useState<PublishForm>({ name: "", configType: "", workflowTypeId: "", notes: "", featureSelections: [] });
+  const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
   const [pendingImport, setPendingImport] = useState<{ raw: Workflow; normalized: Workflow } | null>(null);
   // Tracks the active config ID — may be set by auto-save when initialConfigId is null
   const [resolvedConfigId, setResolvedConfigId] = useState<string | null>(initialConfigId ?? null);
@@ -849,6 +857,11 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     setPublishForm({
       name: currentConfig?.name ?? workflow.name,
       configType: currentConfig?.configType ?? "",
+      workflowTypeId:
+        currentConfig?.workflowTypeId ??
+        workflow.workflowTypeId ??
+        workflowTypes.find((type) => type.name === currentConfig?.configType)?.id ??
+        "",
       notes: currentConfig?.notes ?? "",
       featureSelections, // already managed in builder state
     });
@@ -863,9 +876,11 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     }
     setPublishSaving(true);
     try {
+      const selectedWorkflowType = workflowTypes.find((type) => type.id === publishForm.workflowTypeId);
       await workflowConfigService.update(cfgId, {
         name: publishForm.name.trim() || undefined,
-        configType: publishForm.configType.trim() || undefined,
+        configType: (selectedWorkflowType?.name ?? publishForm.configType.trim()) || undefined,
+        workflowTypeId: publishForm.workflowTypeId || undefined,
         notes: publishForm.notes.trim() || undefined,
         featureSelectionsJson: JSON.stringify(publishForm.featureSelections),
         stepsJson: JSON.stringify(workflow),
@@ -1214,15 +1229,27 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               required
               autoFocus
             />
-            <TextField
-              label="Configuration Type"
-              value={publishForm.configType}
-              onChange={(e) => setPublishForm((p) => ({ ...p, configType: e.target.value }))}
-              fullWidth
-              placeholder="e.g. Installation, Maintenance, Inspection"
-              helperText="Used to identify this instruction type when assigning to an asset"
-              InputLabelProps={{ shrink: true }}
-            />
+            <FormControl fullWidth>
+              <InputLabel shrink>Workflow Type</InputLabel>
+              <Select
+                label="Workflow Type"
+                value={publishForm.workflowTypeId}
+                onChange={(e) => {
+                  const workflowTypeId = e.target.value;
+                  const selected = workflowTypes.find((type) => type.id === workflowTypeId);
+                  setPublishForm((p) => ({
+                    ...p,
+                    workflowTypeId,
+                    configType: selected?.name ?? p.configType,
+                  }));
+                }}
+              >
+                <MenuItem value="">Unspecified</MenuItem>
+                {workflowTypes.map((type) => (
+                  <MenuItem key={type.id} value={type.id}>{type.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <Box>
               <Typography variant="body2" color="text.secondary">
                 Product: <strong>{productName}</strong>

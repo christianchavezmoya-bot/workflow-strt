@@ -40,6 +40,19 @@ public class AssetWorkflowRunsController : ControllerBase
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
+    private static string NormalizeRunStatus(string raw)
+    {
+        var value = raw.Trim().ToLowerInvariant().Replace("-", "").Replace("_", "").Replace(" ", "");
+        return value switch
+        {
+            "inprogress" => "InProgress",
+            "paused" => "Paused",
+            "complete" or "completed" => "Complete",
+            "issue" => "Issue",
+            _ => raw
+        };
+    }
+
     private static AssetWorkflowRunDto ToDto(AssetWorkflowRunEntity e) => new(
         e.Id, e.AssetId, e.WorkflowConfigId, e.WorkflowVersion,
         e.WorkflowSnapshotJson, e.WorkOrderId, e.Status, e.IsLocked,
@@ -50,6 +63,120 @@ public class AssetWorkflowRunsController : ControllerBase
         e.StartedAt, e.CompletedAt, e.CreatedAt, e.UpdatedAt,
         e.BomActualJson
     );
+
+    [HttpGet]
+    public async Task<IActionResult> List(
+        [FromQuery] string? projectId,
+        [FromQuery] string? assetId,
+        [FromQuery] string? workflowType,
+        [FromQuery] string? workflowTypeId,
+        [FromQuery] string? status)
+    {
+        var query = _db.AssetWorkflowRuns.AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(assetId))
+        {
+            query = query.Where(r => r.AssetId == assetId);
+        }
+        else if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            var projectAssetIds = await _db.ProjectAssets
+                .Where(a => a.ProjectId == projectId)
+                .Select(a => a.Id)
+                .ToListAsync();
+            query = query.Where(r => projectAssetIds.Contains(r.AssetId));
+        }
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var normalizedStatus = NormalizeRunStatus(status);
+            query = query.Where(r => r.Status == normalizedStatus);
+        }
+
+        var runs = await query
+            .OrderByDescending(r => r.StartedAt)
+            .ThenByDescending(r => r.UpdatedAt)
+            .ToListAsync();
+
+        if (runs.Count == 0)
+        {
+            return Ok(Array.Empty<AssetWorkflowRunListItemDto>());
+        }
+
+        var assetIds = runs.Select(r => r.AssetId).Distinct().ToList();
+        var configIds = runs.Select(r => r.WorkflowConfigId).Distinct().ToList();
+
+        var assets = await _db.ProjectAssets
+            .Where(a => assetIds.Contains(a.Id))
+            .ToListAsync();
+        var assetsById = assets.ToDictionary(a => a.Id);
+
+        var configs = await _db.WorkflowConfigs
+            .Where(c => configIds.Contains(c.Id))
+            .ToListAsync();
+        var configsById = configs.ToDictionary(c => c.Id);
+
+        var assignments = await _db.AssetWorkflowAssignments
+            .Where(a => assetIds.Contains(a.AssetId) && configIds.Contains(a.WorkflowConfigId) && a.Active)
+            .ToListAsync();
+
+        var typeIds = assignments.Select(a => a.WorkflowTypeId)
+            .Concat(configs.Where(c => !string.IsNullOrWhiteSpace(c.WorkflowTypeId)).Select(c => c.WorkflowTypeId!))
+            .Distinct()
+            .ToList();
+        var typesById = await _db.WorkflowTypes
+            .Where(t => typeIds.Contains(t.Id))
+            .ToDictionaryAsync(t => t.Id, t => t.Name);
+
+        var userIds = assets.Where(a => !string.IsNullOrWhiteSpace(a.AssignedUserId)).Select(a => a.AssignedUserId!).Distinct().ToList();
+        var usersById = await _db.Users
+            .Where(u => userIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        var items = runs.Select(run =>
+        {
+            assetsById.TryGetValue(run.AssetId, out var asset);
+            configsById.TryGetValue(run.WorkflowConfigId, out var config);
+            var assignment = assignments.FirstOrDefault(a => a.AssetId == run.AssetId && a.WorkflowConfigId == run.WorkflowConfigId);
+            var resolvedWorkflowTypeId = assignment?.WorkflowTypeId ?? config?.WorkflowTypeId;
+            var resolvedWorkflowTypeName =
+                (resolvedWorkflowTypeId != null && typesById.TryGetValue(resolvedWorkflowTypeId, out var knownType) ? knownType : null)
+                ?? config?.ConfigType
+                ?? "Workflow";
+            var assignedTo = asset?.AssignedUserId is { Length: > 0 } assignedUserId && usersById.TryGetValue(assignedUserId, out var fullName)
+                ? fullName
+                : null;
+
+            return new AssetWorkflowRunListItemDto(
+                run.Id,
+                run.AssetId,
+                asset?.ProjectId ?? string.Empty,
+                run.WorkflowConfigId,
+                resolvedWorkflowTypeId,
+                resolvedWorkflowTypeName,
+                asset?.AssetName ?? asset?.AssetTag,
+                asset?.AssignedUserId,
+                assignedTo,
+                run.Status,
+                run.IsLocked,
+                run.StartedAt,
+                run.CompletedAt,
+                run.UpdatedAt
+            );
+        });
+
+        if (!string.IsNullOrWhiteSpace(workflowTypeId))
+        {
+            items = items.Where(i => i.WorkflowTypeId == workflowTypeId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(workflowType))
+        {
+            items = items.Where(i => string.Equals(i.WorkflowTypeName, workflowType, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Ok(items.ToList());
+    }
 
     // GET api/asset-workflow-runs/by-project/{projectId} — latest run per asset for a project
     [HttpGet("by-project/{projectId}")]
