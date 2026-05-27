@@ -493,6 +493,27 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         bodyRows.push(["(No inputs captured)", ""]);
       } else {
         const values = sr?.values ?? {};
+
+        // Detect an externally-imported step result: values only contain the generic canonical keys
+        // (value / unit / pass / notes / label) and none match the workflow's specific inputDef IDs.
+        // In that case skip the MISSING rows — the external tool uses its own schema.
+        const IMPORT_ONLY_KEYS = new Set(["value", "unit", "pass", "label", "notes"]);
+        const isImportedResult = inputDefs.length > 0
+          && !inputDefs.some((def) => def.id in values)
+          && Object.keys(values).every((k) => IMPORT_ONLY_KEYS.has(k));
+
+        if (isImportedResult) {
+          const IMPORT_LABELS: Record<string, string> = { value: "Measured Value", unit: "Unit", pass: "Result", notes: "Notes" };
+          for (const [inputId, val] of entries) {
+            const label   = IMPORT_LABELS[inputId] ?? inputId;
+            const display = inputId === "pass"
+              ? (val === "true" ? "✓ Pass" : "✗ Fail")
+              : (val === "true" ? "Yes" : val === "false" ? "No" : val);
+            bodyRows.push([label, display]);
+          }
+        } else {
+        // Normal workflow completion — compare against inputDefs, flag missing required fields.
+
         const missingItems = new Map(getMissingWorkflowItems(step, values).map((item) => [item.id, item]));
         const handledIds = new Set<string>();
 
@@ -574,6 +595,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
             : (val === "true" ? "Yes" : val === "false" ? "No" : val);
           bodyRows.push([label, display]);
         }
+        } // end normal workflow completion block
       }
 
       // Card body background rect (drawn before table so table renders on top)
