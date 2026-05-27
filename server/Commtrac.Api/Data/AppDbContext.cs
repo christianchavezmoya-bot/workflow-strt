@@ -377,10 +377,12 @@ public class AppDbContext : DbContext
             .HasIndex(i => i.ProjectId);
 
         modelBuilder.Entity<InspectionImportEntity>()
-            .HasIndex(i => i.AssetId);
+            .HasIndex(i => i.AssetId)
+            .HasDatabaseName("IX_InspectionImports_ProjectAssetId");
 
         modelBuilder.Entity<InspectionImportEntity>()
-            .HasIndex(i => i.ContentHash);
+            .HasIndex(i => i.ContentHash)
+            .HasDatabaseName("IX_InspectionImports_Hash");
 
         modelBuilder.Entity<InspectionImportEntity>()
             .HasIndex(i => i.Status);
