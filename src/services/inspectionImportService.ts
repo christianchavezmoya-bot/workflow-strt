@@ -2,7 +2,7 @@ import api from "./api";
 import type { InspectionImport, InspectionImportStatus, InspectionImportSource } from "../types/project";
 
 export interface CreateInspectionImportPayload {
-  source: InspectionImportSource;
+  source: InspectionImportSource | string;
   fileName?: string;
   rawJson?: string;
   projectId?: string;

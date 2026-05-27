@@ -110,6 +110,7 @@ import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
 import AssetDocumentsDialog from "./AssetDocumentsDialog";
 import AssetInspectionDialog from "./AssetInspectionDialog";
+import InspectionImportDialog from "../projects/InspectionImportDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
@@ -361,6 +362,7 @@ const AssetInstallationPage = () => {
   const [assignForm, setAssignForm] = useState({ workflowTypeId: "", workflowConfigId: "" });
   const [assignSaving, setAssignSaving] = useState(false);
   const [inspectionDialogAsset, setInspectionDialogAsset] = useState<ProjectAsset | null>(null);
+  const [importDialogAsset, setImportDialogAsset] = useState<ProjectAsset | null>(null);
   const [runHistoryAsset, setRunHistoryAsset] = useState<ProjectAsset | null>(null);
   const [runHistoryAssignment, setRunHistoryAssignment] = useState<WorkflowAssignment | null>(null);
   // New run history dialog (with re-run support)
@@ -2157,6 +2159,24 @@ const AssetInstallationPage = () => {
             >
               Inspections
             </Button>
+            {(() => {
+              const proj = projects.find((p) => p.id === asset.projectId);
+              const mode = proj?.workflowMode;
+              if (mode === "INSPECTION_ONLY" || mode === "MIXED") {
+                return (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="info"
+                    sx={{ fontSize: 11, py: 0.25 }}
+                    onClick={() => setImportDialogAsset(asset)}
+                  >
+                    Import JSON
+                  </Button>
+                );
+              }
+              return null;
+            })()}
             <Button
               size="small"
               variant="outlined"
@@ -4151,6 +4171,16 @@ const AssetInstallationPage = () => {
         open={!!inspectionDialogAsset}
         onClose={() => setInspectionDialogAsset(null)}
       />
+
+      {importDialogAsset && (
+        <InspectionImportDialog
+          open={!!importDialogAsset}
+          onClose={() => setImportDialogAsset(null)}
+          projectId={importDialogAsset.projectId}
+          asset={importDialogAsset}
+          onChanged={refreshAssets}
+        />
+      )}
     </Stack>
   );
 };
