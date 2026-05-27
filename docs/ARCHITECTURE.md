@@ -1,5 +1,5 @@
 # Commtrac Codex 915 — Application Architecture
-**Last updated: 2026-03-26**
+**Last updated: 2026-05-27**
 
 ---
 
@@ -288,8 +288,8 @@ CORS (frontend policy: localhost + 10.x + 192.168.x + any IP)
 |---|---|---|
 | `AuthController` | `/api/auth` | login, logout, refresh, invite, reset-password, 2FA |
 | `UsersController` | `/api/users` | CRUD users, role assignment |
-| `ProjectsController` | `/api/projects` | CRUD projects, clone, workload |
-| `ProjectAssetsController` | `/api/project-assets` | CRUD assets per project, bulk import |
+| `ProjectsController` | `/api/projects` | CRUD projects, clone, workload; `teamMemberIds` field added 2026-05-27 |
+| `ProjectAssetsController` | `/api/project-assets` | CRUD assets per project, bulk import; `workflowSummary` (hasWorkflow, evidenceStatus) included in list response |
 | `ProjectContactsController` | `/api/project-contacts` | Contacts per project |
 | `ProjectDeliveryProfilesController` | `/api/project-delivery-profiles` | Delivery addresses |
 | `ProjectInboundItemsController` | `/api/project-inbound-items` | Inbound parts/warranty |
@@ -297,12 +297,13 @@ CORS (frontend policy: localhost + 10.x + 192.168.x + any IP)
 | `AssetWorkflowRunsController` | `/api/asset-workflow-runs` | Start/step/complete workflow runs |
 | `AssetWorkflowAssignmentsController` | `/api/asset-workflow-assignments` | Asset ↔ config assignments |
 | `WorkflowConfigsController` | `/api/workflow-configs` | Workflow config CRUD (builder) |
-| `WorkflowTypesController` | `/api/workflow-types` | Workflow types |
+| `WorkflowTypesController` | `/api/workflow-types` | Pre-seeded: Installation, Commissioning, Inspection, Repair, Other |
 | `WorkflowTemplatesController` | `/api/workflow-templates` | Legacy templates |
 | `WorkInstructionsController` | `/api/work-instructions` | Work instructions |
 | `WorkInstructionTemplatesController` | `/api/work-instruction-templates` | WI templates |
 | `WorkOrdersController` | `/api/work-orders` | Work orders |
 | `IssuesController` | `/api/issues` | Issues CRUD, comments, escalation |
+| `InspectionImportsController` | `/api/inspection-imports` | Upload/list/delete inspection JSON imports; `POST /{id}/reprocess`; `POST /upload` (multipart) |
 | `SignatureTokensController` | `/api/signature-tokens` | Generate / validate signature tokens |
 | `SignatureEventsController` | `/api/signature-events` | Signature event log |
 | `PublicSignController` | `/api/public/sign` | Public (no-auth) signature submission |
@@ -403,6 +404,10 @@ CORS (frontend policy: localhost + 10.x + 192.168.x + any IP)
 | 2026-03-19 | `BomModule` | BomImportRuns, BomImportItems |
 | 2026-03-20 | `ProjectOfficeId` | OfficeId FK on Projects |
 | 2026-03-21 | `FeatureProcurementFields` | Procurement fields on Features |
+| 2026-03-22 | `WorkflowModeAndInspectionImports` | WorkflowMode on Projects; InspectionImports table |
+| 2026-05-21 | `WorkflowTypeIdsForTemplatesAndConfigs` | WorkflowTypeId FK on WorkflowConfigs + WorkflowTemplates; seeds `wftype-other` |
+| 2026-05-27 | `ProjectTeamMembers` | `TeamMemberIdsJson` column on Projects |
+| 2026-05-27 | `InspectionImportArchiveFields` | Archive columns on InspectionImports (IsArchived, ArchivedAt, ArchivedBy, ArchiveReason, ArchiveRef) |
 
 ### 6.2 Core domain entities
 
@@ -427,6 +432,7 @@ CORS (frontend policy: localhost + 10.x + 192.168.x + any IP)
 | `ProductEntity` | Products | → Division |
 | `FeatureEntity` | Features | → Product |
 | `FeatureDependencyEntity` | FeatureDependencies | → Feature (from/to) |
+| `InspectionImportEntity` | InspectionImports | → Project, Asset, MappedRunId; archive fields added 2026-05-27 |
 | `BomImportRunEntity` | BomImportRuns | → Project |
 | `BomImportItemEntity` | BomImportItems | → BomImportRun |
 | `CustomerEntity` | Customers | |
@@ -527,7 +533,60 @@ Permissions configurable per role via `RoleConfigs` table.
 
 ---
 
-## 11. Development Setup
+## 11. Recent Changes (2026-05-27)
+
+### 11.1 Project Team Members
+- `ProjectEntity.TeamMemberIdsJson` — JSON array of user IDs assigned to a project
+- `ProjectDto.TeamMemberIds: string[]` — exposed on all project endpoints
+- UI: Autocomplete multi-select in the project add/edit form
+- Mobile use: fetch `GET /api/projects/{id}` → `teamMemberIds`, then resolve against `GET /api/users` to build team name list
+
+### 11.2 User-Select Step Input Type (`"user-select"`)
+- New `StepInputType` value added to workflow step inputs
+- At design time (WorkflowBuilder): label auto-defaults to **"Installed By"** (Installation workflows) or **"Inspected By"** (Inspection workflows)
+- At run time (WorkOrderRunner): renders as a dropdown of the project's team members; falls back to all active users if team is empty
+- Value stored as the selected person's **full name** (not ID) — safe to display in PDF and history without a user lookup
+- Mobile: render as a native picker populated from `project.teamMemberIds` joined against the users list
+
+### 11.3 Inspection Imports
+- **Table:** `InspectionImports` — stores raw JSON payloads uploaded per asset
+- **Statuses:** `RECEIVED → NEEDS_ASSIGNMENT → MAPPED → FAILED`
+- **Key endpoints:**
+  - `GET /api/inspection-imports?assetId=xxx` — list imports for an asset
+  - `POST /api/inspection-imports` — create import (JSON body: `{ source, rawJson, projectId, assetId, uploadedBy }`)
+  - `POST /api/inspection-imports/upload` — multipart file upload
+  - `POST /api/inspection-imports/{id}/reprocess` — re-map already-imported JSON to the asset's workflow run (Admin/PM only)
+  - `POST /api/inspection-imports/{id}/mark-failed` — mark as failed with optional reason
+  - `DELETE /api/inspection-imports/{id}` — delete
+- **Canonical JSON format** (imported inspection data):
+```json
+{
+  "inspectionDate": "2026-05-01T10:00:00Z",
+  "technicianName": "John Smith",
+  "assetTag": "RC-001",
+  "notes": "All checks passed",
+  "results": [
+    { "checkId": "chk-001", "label": "Voltage", "value": "24.5", "unit": "V", "pass": true, "notes": "" }
+  ]
+}
+```
+- When imported for an `INSPECTION_ONLY` project asset, the backend automatically creates/updates an `AssetWorkflowRun` (status = Complete, locked) using `TryCompleteInspectionOnlyAssetAsync`
+- **Evidence status fix (2026-05-27):** Imported step results use generic keys (`value`, `unit`, `pass`, `label`, `notes`). The evidence completeness engine now detects imported results and skips the "missing required fields" check — so `evidenceStatus` correctly returns `Complete` rather than `MissingData`
+
+### 11.4 Evidence Status (`workflowSummary.evidenceStatus`)
+Returned on every asset in `GET /api/project-assets`. Possible values:
+
+| Value | Meaning |
+|---|---|
+| `"Pending"` | No workflow run started |
+| `"Running"` | Run in progress (not locked) |
+| `"Paused"` | Run paused |
+| `"Complete"` | Run locked, all required fields filled |
+| `"MissingData"` | Run locked but required fields missing |
+
+---
+
+## 12. Development Setup
 
 ```bash
 # Frontend (port 5173)
