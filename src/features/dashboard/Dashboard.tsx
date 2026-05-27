@@ -190,11 +190,11 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-    if (user.role !== "Admin") return;
+    if (!isManager) return;
     api.get<DashboardUserEntry[]>("/users")
       .then((res) => setDashboardUsers(res.data.filter((u) => u.id !== user.id)))
       .catch(() => {});
-  }, [user.role, user.id]);
+  }, [isManager, user.id]);
 
   const loadAttention = useCallback(async () => {
     setAttentionLoading(true);
@@ -1030,7 +1030,7 @@ const Dashboard = () => {
       {/* â"€â"€ PERSONAL WORKSPACE STRIP â€" all except Viewer â"€â"€ */}
       {!isViewer && (
         <Box className="glass-card" sx={{ p: 2.5 }}>
-          {user.role === "Admin" && !viewingOwnDashboard && viewedDashboardUser && (
+          {isManager && !viewingOwnDashboard && viewedDashboardUser && (
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, p: 1, borderRadius: 1, background: "rgba(2,136,209,0.1)", border: "1px solid rgba(2,136,209,0.3)" }}>
               <SwitchAccountOutlined sx={{ fontSize: 16, color: "info.main", flexShrink: 0 }} />
               <Typography variant="caption" sx={{ flex: 1, color: "info.main" }}>
@@ -1051,7 +1051,7 @@ const Dashboard = () => {
                 {viewingOwnDashboard ? user.role : viewedDashboardUser?.role ?? ""}
               </Typography>
             </Box>
-            {user.role === "Admin" && (dashboardUsers.length > 0 || selectedDashboardId !== user.id) && (
+            {isManager && (dashboardUsers.length > 0 || selectedDashboardId !== user.id) && (
               <FormControl size="small" sx={{ minWidth: 180 }}>
                 <InputLabel shrink>View as</InputLabel>
                 <Select
