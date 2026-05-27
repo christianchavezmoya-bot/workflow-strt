@@ -775,11 +775,11 @@ export default function WorkflowRunHistoryDialog({
                                 {stepResults.map((sr) => {
                                   const step: WorkflowStep | undefined = stepMap[sr.stepId];
                                   const stepTitle =
-                                    step?.title ?? sr.stepId.slice(0, 8) + "…";
+                                    step?.title ?? (sr.values as Record<string,string>)?.["label"] ?? sr.stepId.slice(0, 8) + "…";
                                   const inputDefs: StepInput[] = step?.inputs ?? [];
                                   const missingInputs = getMissingWorkflowItems(step, sr.values);
                                   const entries = Object.entries(sr.values ?? {}).filter(
-                                    ([, v]) => v
+                                    ([k, v]) => v && k !== "label"
                                   );
                                   return (
                                     <TableRow key={sr.stepId}>
@@ -833,7 +833,9 @@ export default function WorkflowRunHistoryDialog({
                                               const captureDef = !inputDef
                                                 ? (step?.captureFields ?? []).find((f) => f.id === inputId)
                                                 : undefined;
-                                              const label = inputDef?.label ?? captureDef?.label ?? inputId;
+                                              const IMPORT_LABELS: Record<string, string> = { value: "Measured Value", unit: "Unit", pass: "Result", notes: "Notes" };
+                                              const label = inputDef?.label ?? captureDef?.label ?? IMPORT_LABELS[inputId] ?? inputId;
+                                              const display = inputId === "pass" ? (val === "true" ? "✓ Pass" : "✗ Fail") : val;
 
                                               // Component inputs: decode JSON sub-fields
                                               if (inputDef?.type === "component" && inputDef.subFields?.length && val) {
@@ -875,7 +877,7 @@ export default function WorkflowRunHistoryDialog({
                                                     component="span"
                                                     variant="caption"
                                                   >
-                                                    {val}
+                                                    {display}
                                                   </Typography>
                                                 </Box>
                                               );

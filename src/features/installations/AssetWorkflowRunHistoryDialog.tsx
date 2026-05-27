@@ -539,11 +539,18 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
                                 return stepResults.map((sr) => {
                                   const step = stepMap.get(sr.stepId);
                                   const missingInputs = getMissingWorkflowItems(step, sr.values);
-                                  const entries = Object.entries(sr.values ?? {}).filter(([, v]) => v);
+                                  // For imported runs the stepId is a checkId (not a workflow UUID).
+                                  // Fall back to values.label (set by BuildStepResultsJson) so the step
+                                  // column shows a human-readable name instead of a truncated ID.
+                                  const stepTitle = stepTitleMap.get(sr.stepId)
+                                    ?? sr.values?.["label"]
+                                    ?? sr.stepId;
+                                  const entries = Object.entries(sr.values ?? {})
+                                    .filter(([k, v]) => v && k !== "label");
                                   return (
                                     <TableRow key={sr.stepId} sx={{ verticalAlign: "top" }}>
                                       <TableCell sx={{ fontSize: 12, py: 0.75, whiteSpace: "nowrap" }}>
-                                        {stepTitleMap.get(sr.stepId) ?? `${sr.stepId.slice(0, 8)}…`}
+                                        {stepTitle}
                                         {missingInputs.length > 0 && (
                                           <Chip
                                             size="small"
