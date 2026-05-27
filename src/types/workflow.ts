@@ -145,6 +145,7 @@ export interface Workflow {
   id: string;
   name: string;
   productId: string;
+  workflowTypeId?: string;
   createdAt: number;
   steps: WorkflowStep[];
   media: MediaItem[];

@@ -181,6 +181,13 @@ body {
   }
 }
 
+/* ── Desktop: hide bottom tab bar (mobile-only UI) ───────────────────────── */
+@media (min-width: 769px) {
+  .bottom-tab-bar {
+    display: none !important;
+  }
+}
+
 /* ── Mobile: hide sidebar, show bottom tab bar ────────────────────────────── */
 @media (max-width: 768px) {
   .sidebar {

@@ -398,7 +398,11 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   const stepResultMap = new Map(stepResults.map((sr) => [sr.stepId, sr]));
   const stepsToRender: Array<{ step: WorkflowStep; sr: StepResult | undefined }> = includeAllSteps
     ? [...steps].sort((a, b) => a.order - b.order).map((s) => ({ step: s, sr: stepResultMap.get(s.id) }))
-    : stepResults.map((sr) => ({ step: stepMap.get(sr.stepId) ?? ({ id: sr.stepId, title: sr.stepId, order: 0, inputs: [] } as unknown as WorkflowStep), sr }));
+    : stepResults.map((sr) => {
+        const found = stepMap.get(sr.stepId);
+        const importedLabel = (sr.values as Record<string, string>)?.["label"];
+        return { step: found ?? ({ id: sr.stepId, title: importedLabel ?? sr.stepId, order: 0, inputs: [] } as unknown as WorkflowStep), sr };
+      });
 
   const completedCount = stepResults.length;
   const totalCount     = steps.length;
@@ -421,7 +425,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       const stepNumber  = includeAllSteps ? step.order : idx + 1;
       const title       = step.title ?? `Step ${stepNumber}`;
       const inputDefs   = step.inputs ?? [];
-      const entries     = sr ? Object.entries(sr.values ?? {}).filter(([, v]) => v) : [];
+      const entries     = sr ? Object.entries(sr.values ?? {}).filter(([k, v]) => v && k !== "label") : [];
       const time        = sr?.completedAt ? fmtTime(sr.completedAt) : "";
       const desc        = step.description ?? "";
       const isCompleted = Boolean(sr);
@@ -559,12 +563,15 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
           handledIds.add(captureDef.id);
         }
 
+        const IMPORT_LABELS: Record<string, string> = { value: "Measured Value", unit: "Unit", pass: "Result", notes: "Notes" };
         for (const [inputId, val] of entries) {
           if (handledIds.has(inputId)) continue;
           const inputDef   = inputDefs.find((i) => i.id === inputId);
           const captureDef = !inputDef ? (step.captureFields ?? []).find((f) => f.id === inputId) : undefined;
-          const label      = inputDef?.label ?? captureDef?.label ?? inputId;
-          const display = val === "true" ? "Yes" : val === "false" ? "No" : val;
+          const label      = inputDef?.label ?? captureDef?.label ?? IMPORT_LABELS[inputId] ?? inputId;
+          const display = inputId === "pass"
+            ? (val === "true" ? "✓ Pass" : "✗ Fail")
+            : (val === "true" ? "Yes" : val === "false" ? "No" : val);
           bodyRows.push([label, display]);
         }
       }

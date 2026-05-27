@@ -1,10 +1,14 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Schemas;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
 
@@ -15,11 +19,19 @@ public class InspectionImportsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
+    private readonly IInspectionImportAdapterService _adapter;
+    private readonly IInspectionImportValidatorService _validator;
 
-    public InspectionImportsController(AppDbContext db, IWebHostEnvironment env)
+    public InspectionImportsController(
+        AppDbContext db,
+        IWebHostEnvironment env,
+        IInspectionImportAdapterService adapter,
+        IInspectionImportValidatorService validator)
     {
         _db = db;
         _env = env;
+        _adapter = adapter;
+        _validator = validator;
     }
 
     // GET /api/inspection-imports?projectId=&assetId=&projectAssetId=&status=
@@ -63,29 +75,42 @@ public class InspectionImportsController : ControllerBase
     public async Task<ActionResult<InspectionImportDto>> Create([FromBody] CreateInspectionImportRequest request)
     {
         var effectiveAssetId = !string.IsNullOrWhiteSpace(request.ProjectAssetId) ? request.ProjectAssetId : request.AssetId;
+        var source = request.Source ?? "LOCAL";
+
+        string? adaptedJson = null;
         string? hash = null;
+        string? validationError = null;
+        CanonicalInspection? canonical = null;
+
         if (!string.IsNullOrWhiteSpace(request.RawJson))
         {
-            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(request.RawJson));
+            adaptedJson = _adapter.Adapt(request.RawJson, source);
+            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(adaptedJson));
             hash = Convert.ToHexString(bytes).ToLowerInvariant();
 
             if (await _db.InspectionImports.AnyAsync(x => x.ContentHash == hash && x.ProjectId == request.ProjectId))
                 return Conflict(new { error = "Duplicate import: identical content already received for this project." });
+
+            var validation = _validator.Validate(adaptedJson);
+            validationError = validation.IsValid ? null : validation.Error;
+            canonical = validation.Parsed;
         }
 
         var entity = new InspectionImportEntity
         {
-            Source = request.Source ?? "LOCAL",
+            Source = source,
             FileName = request.FileName,
             ContentHash = hash,
-            RawJson = request.RawJson,
+            RawJson = adaptedJson,
             ProjectId = request.ProjectId,
             AssetId = effectiveAssetId,
             Status = string.IsNullOrWhiteSpace(request.ProjectId) ? "RECEIVED" : "NEEDS_ASSIGNMENT",
-            UploadedBy = request.UploadedBy
+            UploadedBy = request.UploadedBy,
+            ErrorText = validationError,
         };
 
         _db.InspectionImports.Add(entity);
+        await TryCompleteInspectionOnlyAssetAsync(entity, canonical);
         await _db.SaveChangesAsync();
 
         return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity));
@@ -103,6 +128,8 @@ public class InspectionImportsController : ControllerBase
         [FromForm] string? uploadedBy)
     {
         var effectiveAssetId = !string.IsNullOrWhiteSpace(projectAssetId) ? projectAssetId : assetId;
+        var effectiveSource = source ?? "LOCAL";
+
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file received." });
 
@@ -113,39 +140,43 @@ public class InspectionImportsController : ControllerBase
             return BadRequest(new { error = "Only JSON files are accepted." });
         }
 
-        // Compute hash to deduplicate
-        string hash;
-        string rawJson;
+        string rawText;
         using (var ms = new MemoryStream())
         {
             await file.CopyToAsync(ms);
-            var rawBytes = ms.ToArray();
-            hash = Convert.ToHexString(SHA256.HashData(rawBytes)).ToLowerInvariant();
-            rawJson = Encoding.UTF8.GetString(rawBytes);
+            rawText = Encoding.UTF8.GetString(ms.ToArray());
         }
+
+        var adaptedJson = _adapter.Adapt(rawText, effectiveSource);
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(adaptedJson))).ToLowerInvariant();
 
         if (await _db.InspectionImports.AnyAsync(x => x.ContentHash == hash && x.ProjectId == projectId))
             return Conflict(new { error = "Duplicate import: identical content already received for this project." });
 
+        var validation = _validator.Validate(adaptedJson);
+        var canonical = validation.Parsed;
+
         var entity = new InspectionImportEntity
         {
-            Source = source ?? "LOCAL",
+            Source = effectiveSource,
             FileName = file.FileName,
             ContentHash = hash,
-            RawJson = rawJson,
+            RawJson = adaptedJson,
             ProjectId = projectId,
             AssetId = effectiveAssetId,
             Status = string.IsNullOrWhiteSpace(projectId) ? "RECEIVED" : "NEEDS_ASSIGNMENT",
-            UploadedBy = uploadedBy
+            UploadedBy = uploadedBy,
+            ErrorText = validation.IsValid ? null : validation.Error,
         };
 
         _db.InspectionImports.Add(entity);
+        await TryCompleteInspectionOnlyAssetAsync(entity, canonical);
         await _db.SaveChangesAsync();
 
         return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity));
     }
 
-    // GET /api/inspection-imports/{id}/raw  — stream the raw JSON file from disk
+    // GET /api/inspection-imports/{id}/raw
     [HttpGet("{id}/raw")]
     public async Task<IActionResult> GetRaw(string id)
     {
@@ -183,6 +214,13 @@ public class InspectionImportsController : ControllerBase
         item.ProjectId = request.ProjectId;
         item.AssetId = effectiveAssetId;
         item.Status = "MAPPED";
+
+        // Re-validate to get canonical data for step result population
+        var validation = _validator.Validate(item.RawJson);
+        if (!validation.IsValid && item.ErrorText is null)
+            item.ErrorText = validation.Error;
+
+        await TryCompleteInspectionOnlyAssetAsync(item, validation.Parsed);
         await _db.SaveChangesAsync();
 
         return Ok(ToDto(item));
@@ -211,7 +249,6 @@ public class InspectionImportsController : ControllerBase
         var item = await _db.InspectionImports.FirstOrDefaultAsync(x => x.Id == id);
         if (item is null) return NotFound();
 
-        // Remove stored file from disk if present
         if (!string.IsNullOrWhiteSpace(item.RawPath))
         {
             var fullPath = Path.Combine(_env.ContentRootPath, item.RawPath);
@@ -224,13 +261,200 @@ public class InspectionImportsController : ControllerBase
         return NoContent();
     }
 
+    // ── Auto-complete logic for inspection-only projects ──────────────────────
+
+    private async Task TryCompleteInspectionOnlyAssetAsync(InspectionImportEntity entity, CanonicalInspection? canonical)
+    {
+        if (string.IsNullOrWhiteSpace(entity.AssetId) || string.IsNullOrWhiteSpace(entity.ProjectId))
+            return;
+
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == entity.ProjectId);
+        if (project?.WorkflowMode != "INSPECTION_ONLY") return;
+
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == entity.AssetId);
+        if (asset is null) return;
+
+        var now = DateTime.UtcNow;
+        var actorName = ResolveActorName();
+
+        var inspectionConfigIds = await _db.WorkflowConfigs
+            .Where(c => c.WorkflowTypeId == "wftype-inspection" && c.Status == "Published")
+            .Select(c => c.Id)
+            .ToListAsync();
+
+        List<AssetWorkflowRunEntity> openRuns;
+        if (inspectionConfigIds.Count > 0)
+        {
+            openRuns = await _db.AssetWorkflowRuns
+                .Where(r => r.AssetId == entity.AssetId && !r.IsLocked && inspectionConfigIds.Contains(r.WorkflowConfigId))
+                .OrderByDescending(r => r.StartedAt)
+                .ToListAsync();
+        }
+        else
+        {
+            openRuns = await _db.AssetWorkflowRuns
+                .Where(r => r.AssetId == entity.AssetId && !r.IsLocked)
+                .OrderByDescending(r => r.StartedAt)
+                .ToListAsync();
+        }
+
+        if (openRuns.Count == 0)
+        {
+            var syntheticRun = await CreateSyntheticInspectionRunAsync(asset, inspectionConfigIds, actorName, now);
+            _db.AssetWorkflowRuns.Add(syntheticRun);
+            openRuns.Add(syntheticRun);
+        }
+
+        foreach (var run in openRuns)
+        {
+            run.Status = "Complete";
+            run.IsLocked = true;
+            run.SignatureStatus = "WaivedCustomer";
+            run.CompletedByName = actorName;
+            run.CompletedAt = now;
+            run.UpdatedAt = now;
+
+            if (canonical is not null)
+            {
+                run.StepResultsJson = BuildStepResultsJson(canonical);
+                run.IssuesJson = BuildIssuesJson(canonical);
+            }
+            else
+            {
+                run.IssuesJson = "[]";
+            }
+
+            if (entity.MappedRunId is null)
+            {
+                entity.MappedRunId = run.Id;
+                entity.Status = "MAPPED";
+            }
+
+            // Ensure a workflow assignment exists so the run is visible in the UI history panel.
+            if (!string.IsNullOrWhiteSpace(run.WorkflowConfigId))
+            {
+                var existingAssignment = await _db.AssetWorkflowAssignments
+                    .AnyAsync(a => a.AssetId == entity.AssetId && a.WorkflowConfigId == run.WorkflowConfigId);
+                if (!existingAssignment)
+                {
+                    _db.AssetWorkflowAssignments.Add(new AssetWorkflowAssignmentEntity
+                    {
+                        AssetId = entity.AssetId!,
+                        WorkflowConfigId = run.WorkflowConfigId,
+                        WorkflowTypeId = "wftype-inspection",
+                        Active = true,
+                        AssignedBy = actorName,
+                    });
+                }
+            }
+        }
+
+        asset.Status = "Complete";
+        asset.IssuesJson = "[]";
+        asset.InstalledAt = now;
+        asset.InstalledBy = actorName;
+        asset.UpdatedAt = now;
+    }
+
+    private async Task<AssetWorkflowRunEntity> CreateSyntheticInspectionRunAsync(
+        ProjectAssetEntity asset,
+        List<string> inspectionConfigIds,
+        string actorName,
+        DateTime now)
+    {
+        WorkflowConfigEntity? config = null;
+        if (inspectionConfigIds.Count > 0)
+        {
+            config = await _db.WorkflowConfigs
+                .Where(c => inspectionConfigIds.Contains(c.Id) && c.ProductId == asset.ProductId)
+                .FirstOrDefaultAsync()
+                ?? await _db.WorkflowConfigs
+                .Where(c => inspectionConfigIds.Contains(c.Id))
+                .FirstOrDefaultAsync();
+        }
+
+        var configId = config?.Id ?? string.Empty;
+        var snapshot = JsonSerializer.Serialize(new
+        {
+            id = configId,
+            name = config?.DisplayName ?? config?.Name ?? "Inspection Import",
+            version = config?.Version ?? 1,
+            stepsJson = config?.StepsJson ?? "[]",
+            mediaJson = config?.MediaJson ?? "[]",
+            featureSelectionsJson = config?.FeatureSelectionsJson ?? "[]",
+            snapshotAt = now,
+        });
+
+        var runCount = await _db.AssetWorkflowRuns
+            .CountAsync(r => r.AssetId == asset.Id && r.WorkflowConfigId == configId);
+
+        return new AssetWorkflowRunEntity
+        {
+            Id = Guid.NewGuid().ToString(),
+            AssetId = asset.Id,
+            WorkflowConfigId = configId,
+            WorkflowVersion = config?.Version ?? 1,
+            WorkflowSnapshotJson = snapshot,
+            Status = "InProgress",
+            IsLocked = false,
+            TechnicianUserId = asset.AssignedUserId,
+            RunNumber = runCount + 1,
+            StepResultsJson = "[]",
+            IssuesJson = "[]",
+            StartedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+    }
+
+    private static string BuildStepResultsJson(CanonicalInspection canonical)
+    {
+        var completedAt = canonical.InspectionDate;
+        var results = canonical.Results.Select(r =>
+        {
+            var values = new Dictionary<string, string>();
+            if (!string.IsNullOrWhiteSpace(r.Value))  values["value"] = r.Value;
+            if (!string.IsNullOrWhiteSpace(r.Unit))   values["unit"] = r.Unit!;
+            if (r.Pass.HasValue)                       values["pass"] = r.Pass.Value ? "true" : "false";
+            if (!string.IsNullOrWhiteSpace(r.Label))  values["label"] = r.Label!;
+            if (!string.IsNullOrWhiteSpace(r.Notes))  values["notes"] = r.Notes!;
+            return new { stepId = r.CheckId, values, completedAt };
+        });
+        return JsonSerializer.Serialize(results);
+    }
+
+    private static string BuildIssuesJson(CanonicalInspection canonical)
+    {
+        var issues = canonical.Results
+            .Where(r => r.Pass == false)
+            .Select(r => new
+            {
+                id = Guid.NewGuid().ToString(),
+                description = $"{r.Label ?? r.CheckId}: {r.Value ?? "Failed"}",
+                issueType = "observation",
+                severity = "medium",
+                stepId = r.CheckId,
+                stepTitle = r.Label ?? r.CheckId,
+                reportedAt = canonical.InspectionDate,
+                resolved = false,
+                isBlocking = false,
+                createdBy = "Inspection Import",
+            });
+        return JsonSerializer.Serialize(issues);
+    }
+
+    private string ResolveActorName()
+    {
+        var name = User.FindFirstValue("fullName") ?? User.FindFirstValue(ClaimTypes.Name);
+        return string.IsNullOrWhiteSpace(name) ? "System" : name;
+    }
+
     private static InspectionImportDto ToDto(InspectionImportEntity e) => new(
         e.Id,
         e.Source,
         e.ReceivedAt,
         e.FileName,
         e.ContentHash,
-        // Return inline JSON only; large files should be fetched via GET /{id}/raw
         e.RawPath == null ? e.RawJson : null,
         e.ProjectId,
         e.AssetId,

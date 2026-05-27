@@ -1,10 +1,15 @@
 using System;
+using Commtrac.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace Commtrac.Api.Migrations;
 
+[DbContext(typeof(AppDbContext))]
+[Migration("20260322100000_WorkflowModeAndInspectionImports")]
 public partial class WorkflowModeAndInspectionImports : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

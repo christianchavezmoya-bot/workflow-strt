@@ -109,6 +109,8 @@ import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
 import AssetDocumentsDialog from "./AssetDocumentsDialog";
+import AssetInspectionDialog from "./AssetInspectionDialog";
+import InspectionImportDialog from "../projects/InspectionImportDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
@@ -359,6 +361,8 @@ const AssetInstallationPage = () => {
   const [assignDialogAsset, setAssignDialogAsset] = useState<ProjectAsset | null>(null);
   const [assignForm, setAssignForm] = useState({ workflowTypeId: "", workflowConfigId: "" });
   const [assignSaving, setAssignSaving] = useState(false);
+  const [inspectionDialogAsset, setInspectionDialogAsset] = useState<ProjectAsset | null>(null);
+  const [importDialogAsset, setImportDialogAsset] = useState<ProjectAsset | null>(null);
   const [runHistoryAsset, setRunHistoryAsset] = useState<ProjectAsset | null>(null);
   const [runHistoryAssignment, setRunHistoryAssignment] = useState<WorkflowAssignment | null>(null);
   // New run history dialog (with re-run support)
@@ -468,9 +472,25 @@ const AssetInstallationPage = () => {
 
   const activeProduct = products[tab];
   const activeFeatures = useMemo(() => (activeProduct?.features ?? []) as FeatureDef[], [activeProduct]);
+  const requestedWorkflowType = searchParams.get("workflowType");
+  const resolveRequestedWorkflowTypeId = useCallback((types: WorkflowType[]) => {
+    if (!requestedWorkflowType) return "";
+    const normalized = requestedWorkflowType.trim().toLowerCase();
+    return types.find((type) =>
+      type.id.trim().toLowerCase() === normalized ||
+      type.name.trim().toLowerCase() === normalized
+    )?.id ?? "";
+  }, [requestedWorkflowType]);
 
   useEffect(() => {
-    if (!activeProduct?.id) { setAssets([]); setConfigs([]); setPublishedWfConfigs([]); return; }
+    if (!activeProduct?.id) {
+      setAssets([]);
+      setConfigs([]);
+      setPublishedWfConfigs([]);
+      setWorkflowConfigs([]);
+      setWorkflowTypes([]);
+      return;
+    }
     // Increment the load ID so any in-flight load from a previous product is ignored
     const loadId = ++assetLoadIdRef.current;
     setLoadingAssets(true);
@@ -478,11 +498,14 @@ const AssetInstallationPage = () => {
       projectAssetService.listByProduct(activeProduct.id),
       productConfigService.listByProduct(activeProduct.id),
       workflowConfigService.listByProduct(activeProduct.id, "Published"),
-    ]).then(([a, c, wc]) => {
+      workflowTypeService.list(),
+    ]).then(([a, c, wc, types]) => {
       if (loadId !== assetLoadIdRef.current) return; // Stale â€” a newer load is in flight
       setAssets(a);
       setConfigs(c);
       setPublishedWfConfigs(wc);
+      setWorkflowConfigs(wc);
+      setWorkflowTypes(types);
       setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
       // Pre-load latest run per asset (for signature status in status chip) â€” fire-and-forget
       const uniqueProjectIds = [...new Set(a.map(asset => asset.projectId).filter(Boolean))];
@@ -580,6 +603,28 @@ const AssetInstallationPage = () => {
       `${a.configType ?? ""}${a.name}`.localeCompare(`${b.configType ?? ""}${b.name}`)
     );
   }, [publishedWfConfigs]);
+  const selectedAssignWorkflowType = useMemo(
+    () => workflowTypes.find((type) => type.id === assignForm.workflowTypeId) ?? null,
+    [workflowTypes, assignForm.workflowTypeId],
+  );
+  const filteredAssignWorkflowConfigs = useMemo(() => {
+    if (!selectedAssignWorkflowType) return workflowConfigs;
+    return workflowConfigs.filter((config) =>
+      config.workflowTypeId === selectedAssignWorkflowType.id ||
+      config.configType === selectedAssignWorkflowType.name
+    );
+  }, [workflowConfigs, selectedAssignWorkflowType]);
+  const selectedBulkWorkflowType = useMemo(
+    () => workflowTypes.find((type) => type.id === bulkWfTypeId) ?? null,
+    [workflowTypes, bulkWfTypeId],
+  );
+  const filteredBulkWorkflowConfigs = useMemo(() => {
+    if (!selectedBulkWorkflowType) return latestPublishedWfConfigs;
+    return latestPublishedWfConfigs.filter((config) =>
+      config.workflowTypeId === selectedBulkWorkflowType.id ||
+      config.configType === selectedBulkWorkflowType.name
+    );
+  }, [latestPublishedWfConfigs, selectedBulkWorkflowType]);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
   // â”€â”€ Print scope computation (needs userMap / projectMap / configMap / runsMap) â”€â”€
@@ -1082,6 +1127,17 @@ const AssetInstallationPage = () => {
       ]);
       setWorkflowTypes(types);
       setWorkflowConfigs(cfgs);
+      const requestedWorkflowTypeId = resolveRequestedWorkflowTypeId(types);
+      const matchingConfigs = requestedWorkflowTypeId
+        ? cfgs.filter((config) =>
+            config.workflowTypeId === requestedWorkflowTypeId ||
+            config.configType?.trim().toLowerCase() === requestedWorkflowType?.trim().toLowerCase()
+          )
+        : [];
+      setAssignForm({
+        workflowTypeId: requestedWorkflowTypeId,
+        workflowConfigId: matchingConfigs.length === 1 ? matchingConfigs[0].id : "",
+      });
     } catch { console.warn("[AssetInstallationPage] failed to load workflow types/configs"); }
   }
 
@@ -2093,16 +2149,45 @@ const AssetInstallationPage = () => {
             sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
             Workflow Assignments {assignments.length > 0 && `(${assignments.length})`}
           </Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            color="primary"
-            startIcon={<AssignmentOutlined fontSize="small" />}
-            sx={{ fontSize: 11, py: 0.25 }}
-            onClick={() => openAssignDialog(asset)}
-          >
-            Assign workflow
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button
+              size="small"
+              variant="outlined"
+              color="inherit"
+              sx={{ fontSize: 11, py: 0.25 }}
+              onClick={() => setInspectionDialogAsset(asset)}
+            >
+              Inspections
+            </Button>
+            {(() => {
+              const proj = projects.find((p) => p.id === asset.projectId);
+              const mode = proj?.workflowMode;
+              if (mode === "INSPECTION_ONLY" || mode === "MIXED") {
+                return (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="info"
+                    sx={{ fontSize: 11, py: 0.25 }}
+                    onClick={() => setImportDialogAsset(asset)}
+                  >
+                    Import JSON
+                  </Button>
+                );
+              }
+              return null;
+            })()}
+            <Button
+              size="small"
+              variant="outlined"
+              color="primary"
+              startIcon={<AssignmentOutlined fontSize="small" />}
+              sx={{ fontSize: 11, py: 0.25 }}
+              onClick={() => openAssignDialog(asset)}
+            >
+              Assign workflow
+            </Button>
+          </Stack>
         </Stack>
         {assignments.length === 0 ? (
           <Typography variant="caption" color="text.disabled">
@@ -2483,7 +2568,8 @@ const AssetInstallationPage = () => {
             size="small"
             variant="outlined"
             onClick={() => {
-              setBulkWfConfigId(""); setBulkWfTypeId("");
+              setBulkWfConfigId("");
+              setBulkWfTypeId(resolveRequestedWorkflowTypeId(workflowTypes));
               const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
               const withWf = sel.filter((a) =>
                 (assignmentsMap[a.id] && assignmentsMap[a.id].length > 0) ||
@@ -3226,7 +3312,7 @@ const AssetInstallationPage = () => {
               <Select
                 label="Workflow Type *"
                 value={assignForm.workflowTypeId}
-                onChange={(e) => setAssignForm((p) => ({ ...p, workflowTypeId: e.target.value }))}
+                onChange={(e) => setAssignForm({ workflowTypeId: e.target.value, workflowConfigId: "" })}
               >
                 {workflowTypes.map((t) => (
                   <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
@@ -3240,10 +3326,10 @@ const AssetInstallationPage = () => {
                 value={assignForm.workflowConfigId}
                 onChange={(e) => setAssignForm((p) => ({ ...p, workflowConfigId: e.target.value }))}
               >
-                {workflowConfigs.length === 0 && (
+                {filteredAssignWorkflowConfigs.length === 0 && (
                   <MenuItem value="" disabled>No published configs available</MenuItem>
                 )}
-                {workflowConfigs.map((c) => (
+                {filteredAssignWorkflowConfigs.map((c) => (
                   <MenuItem key={c.id} value={c.id}>
                     {c.name}
                     {c.configType ? ` â€” ${c.configType}` : ""}
@@ -3687,7 +3773,14 @@ const AssetInstallationPage = () => {
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl fullWidth>
               <InputLabel shrink>Workflow type</InputLabel>
-              <Select label="Workflow type" value={bulkWfTypeId} onChange={(e) => setBulkWfTypeId(e.target.value)}>
+              <Select
+                label="Workflow type"
+                value={bulkWfTypeId}
+                onChange={(e) => {
+                  setBulkWfTypeId(e.target.value);
+                  setBulkWfConfigId("");
+                }}
+              >
                 {workflowTypes.map((wt) => (
                   <MenuItem key={wt.id} value={wt.id}>{wt.name}</MenuItem>
                 ))}
@@ -3696,7 +3789,7 @@ const AssetInstallationPage = () => {
             <FormControl fullWidth>
               <InputLabel shrink>Workflow config</InputLabel>
               <Select label="Workflow config" value={bulkWfConfigId} onChange={(e) => setBulkWfConfigId(e.target.value)}>
-                {latestPublishedWfConfigs.map((wc) => (
+                {filteredBulkWorkflowConfigs.map((wc) => (
                   <MenuItem key={wc.id} value={wc.id}>{wc.name}</MenuItem>
                 ))}
               </Select>
@@ -4072,6 +4165,22 @@ const AssetInstallationPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <AssetInspectionDialog
+        asset={inspectionDialogAsset}
+        open={!!inspectionDialogAsset}
+        onClose={() => setInspectionDialogAsset(null)}
+      />
+
+      {importDialogAsset && (
+        <InspectionImportDialog
+          open={!!importDialogAsset}
+          onClose={() => setImportDialogAsset(null)}
+          projectId={importDialogAsset.projectId}
+          asset={importDialogAsset}
+          onChanged={refreshAssets}
+        />
+      )}
     </Stack>
   );
 };

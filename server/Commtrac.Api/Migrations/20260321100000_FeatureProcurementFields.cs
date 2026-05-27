@@ -1,9 +1,14 @@
+using Commtrac.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace Commtrac.Api.Migrations;
 
+[DbContext(typeof(AppDbContext))]
+[Migration("20260321100000_FeatureProcurementFields")]
 public partial class FeatureProcurementFields : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

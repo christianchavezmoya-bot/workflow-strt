@@ -17,6 +17,7 @@ import { useAppSelector } from "../../store/hooks";
 import GlobalSearchDialog from "./GlobalSearchDialog";
 import { searchIndexService, type SearchIndexStatus } from "../../services/searchIndexService";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import { secureClearAuth } from "../../services/secureStorage";
 
 function getRolesFromCache(): string[] {
   try {
@@ -256,7 +257,8 @@ const Topbar = () => {
     setRoleMenuAnchor(null);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await secureClearAuth();
     localStorage.removeItem("auth_token");
     localStorage.removeItem("auth_user");
     localStorage.removeItem("local_auth_user");

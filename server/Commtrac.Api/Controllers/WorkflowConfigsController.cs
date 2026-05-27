@@ -23,7 +23,7 @@ public class WorkflowConfigsController : ControllerBase
     }
 
     private static WorkflowConfigDto ToDto(WorkflowConfigEntity e) => new(
-        e.Id, e.ProductId, e.Name, e.DisplayName, e.ConfigType, e.Status, e.Version,
+        e.Id, e.ProductId, e.Name, e.DisplayName, e.ConfigType, e.WorkflowTypeId, e.Status, e.Version,
         e.TemplateSourceId, e.StepsJson, e.MediaJson, e.FeatureSelectionsJson,
         e.Notes, e.CreatedBy, e.CreatedAt, e.UpdatedAt
     );
@@ -64,6 +64,7 @@ public class WorkflowConfigsController : ControllerBase
             Name                  = req.Name!,
             DisplayName           = req.DisplayName,
             ConfigType            = req.ConfigType,
+            WorkflowTypeId        = string.IsNullOrWhiteSpace(req.WorkflowTypeId) ? null : req.WorkflowTypeId,
             Status                = "Draft",
             Version               = 1,
             StepsJson             = req.StepsJson ?? "[]",
@@ -92,6 +93,7 @@ public class WorkflowConfigsController : ControllerBase
         if (req.Name is not null)                  entity.Name                  = req.Name;
         if (req.DisplayName is not null)           entity.DisplayName           = req.DisplayName;
         if (req.ConfigType is not null)            entity.ConfigType            = req.ConfigType;
+        if (req.WorkflowTypeId is not null)        entity.WorkflowTypeId        = string.IsNullOrWhiteSpace(req.WorkflowTypeId) ? null : req.WorkflowTypeId;
         if (req.Notes is not null)                 entity.Notes                 = req.Notes;
         if (req.StepsJson is not null)             entity.StepsJson             = req.StepsJson;
         if (req.MediaJson is not null)             entity.MediaJson             = req.MediaJson;
@@ -260,6 +262,7 @@ public class WorkflowConfigsController : ControllerBase
             Name                  = source.Name,
             DisplayName           = source.DisplayName,
             ConfigType            = source.ConfigType,
+            WorkflowTypeId        = source.WorkflowTypeId,
             Status                = "Draft",
             Version               = source.Version + 1,
             TemplateSourceId      = source.Id,

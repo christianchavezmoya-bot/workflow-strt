@@ -599,6 +599,8 @@ public class WorkflowTemplateEntity
     public string Name { get; set; } = string.Empty;
     [MaxLength(100)]
     public string ProductId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? WorkflowTypeId { get; set; }
     public string StepsJson { get; set; } = "[]";
     public string MediaJson { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -736,6 +738,8 @@ public class WorkflowConfigEntity
     public string? DisplayName { get; set; }
     [MaxLength(100)]
     public string? ConfigType { get; set; }
+    [MaxLength(100)]
+    public string? WorkflowTypeId { get; set; }
     /// <summary>Draft | Published | Archived</summary>
     [MaxLength(20)]
     public string Status { get; set; } = "Draft";
@@ -1228,18 +1232,19 @@ public class InspectionImportEntity
 
     public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;
 
+    /// <summary>Not persisted — kept for in-memory pass-through to the DTO only.</summary>
     [NotMapped]
     public string? FileName { get; set; }
 
-    /// <summary>SHA-256 of raw content for deduplication.</summary>
+    /// <summary>SHA-256 of raw content for deduplication. DB column name: Hash.</summary>
     [Column("Hash")]
     [MaxLength(64)]
     public string? ContentHash { get; set; }
 
-    /// <summary>Raw JSON body (stored inline for MVP; large files should use RawPath).</summary>
+    /// <summary>Raw JSON body stored inline.</summary>
     public string? RawJson { get; set; }
 
-    /// <summary>Optional path to file on disk for payloads too large for inline storage.</summary>
+    /// <summary>Not persisted — DB column does not exist in this schema.</summary>
     [NotMapped]
     public string? RawPath { get; set; }
 
@@ -1247,7 +1252,7 @@ public class InspectionImportEntity
     [MaxLength(100)]
     public string? ProjectId { get; set; }
 
-    /// <summary>Nullable until assigned by a user.</summary>
+    /// <summary>Nullable until assigned by a user. DB column name: ProjectAssetId.</summary>
     [Column("ProjectAssetId")]
     [MaxLength(100)]
     public string? AssetId { get; set; }
@@ -1256,6 +1261,7 @@ public class InspectionImportEntity
     [MaxLength(40)]
     public string Status { get; set; } = "RECEIVED";
 
+    /// <summary>Validation or processing error text. DB column name: Error.</summary>
     [Column("Error")]
     [MaxLength(2000)]
     public string? ErrorText { get; set; }
@@ -1264,6 +1270,17 @@ public class InspectionImportEntity
     [MaxLength(100)]
     public string? MappedRunId { get; set; }
 
+    /// <summary>Not persisted — DB column does not exist in this schema.</summary>
     [NotMapped]
     public string? UploadedBy { get; set; }
+
+    // Archive columns present in the DB schema
+    public bool IsArchived { get; set; } = false;
+    public DateTime? ArchivedAt { get; set; }
+    [MaxLength(200)]
+    public string? ArchivedBy { get; set; }
+    [MaxLength(1000)]
+    public string? ArchiveReason { get; set; }
+    [MaxLength(200)]
+    public string? ArchiveRef { get; set; }
 }

@@ -2193,11 +2193,17 @@ namespace Commtrac.Api.Migrations
                     b.Property<int>("Version")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("WorkflowTypeId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ProductId");
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("WorkflowTypeId");
 
                     b.ToTable("WorkflowConfigs");
                 });
@@ -2266,6 +2272,10 @@ namespace Commtrac.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("WorkflowTypeId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("StepsJson")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -2278,6 +2288,8 @@ namespace Commtrac.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ProductId");
+
+                    b.HasIndex("WorkflowTypeId");
 
                     b.ToTable("WorkflowTemplates");
                 });
@@ -2334,6 +2346,13 @@ namespace Commtrac.Api.Migrations
                             IsActive = true,
                             Name = "Repair",
                             SortOrder = 4
+                        },
+                        new
+                        {
+                            Id = "wftype-other",
+                            IsActive = true,
+                            Name = "Other",
+                            SortOrder = 5
                         });
                 });
 

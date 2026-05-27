@@ -54,6 +54,7 @@ public class WorkflowTemplatesController : ControllerBase
         {
             Name = request.Name.Trim(),
             ProductId = request.ProductId,
+            WorkflowTypeId = string.IsNullOrWhiteSpace(request.WorkflowTypeId) ? null : request.WorkflowTypeId,
             StepsJson = string.IsNullOrWhiteSpace(request.StepsJson) ? "[]" : request.StepsJson,
             MediaJson = string.IsNullOrWhiteSpace(request.MediaJson) ? "[]" : request.MediaJson ?? "[]",
         };
@@ -71,6 +72,7 @@ public class WorkflowTemplatesController : ControllerBase
         if (template is null) return NotFound();
 
         if (!string.IsNullOrWhiteSpace(request.Name)) template.Name = request.Name.Trim();
+        if (request.WorkflowTypeId is not null) template.WorkflowTypeId = string.IsNullOrWhiteSpace(request.WorkflowTypeId) ? null : request.WorkflowTypeId;
         if (!string.IsNullOrWhiteSpace(request.StepsJson)) template.StepsJson = request.StepsJson;
         if (request.MediaJson is not null) template.MediaJson = request.MediaJson;
         template.UpdatedAt = DateTime.UtcNow;
@@ -196,7 +198,7 @@ public class WorkflowTemplatesController : ControllerBase
     }
 
     private static WorkflowTemplateDto ToDto(WorkflowTemplateEntity t) =>
-        new(t.Id, t.Name, t.ProductId, t.StepsJson, t.MediaJson, t.CreatedAt, t.UpdatedAt);
+        new(t.Id, t.Name, t.ProductId, t.WorkflowTypeId, t.StepsJson, t.MediaJson, t.CreatedAt, t.UpdatedAt);
 }
 
 public class UploadWorkflowMediaRequest
