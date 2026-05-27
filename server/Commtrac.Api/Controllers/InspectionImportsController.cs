@@ -261,6 +261,27 @@ public class InspectionImportsController : ControllerBase
         return NoContent();
     }
 
+    // POST /api/inspection-imports/{id}/reprocess
+    [HttpPost("{id}/reprocess")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<ActionResult<InspectionImportDto>> Reprocess(string id)
+    {
+        var item = await _db.InspectionImports.FirstOrDefaultAsync(x => x.Id == id);
+        if (item is null) return NotFound();
+
+        if (string.IsNullOrWhiteSpace(item.RawJson))
+            return BadRequest(new { error = "No raw JSON stored for this import." });
+
+        var validation = _validator.Validate(item.RawJson);
+        if (!validation.IsValid)
+            return UnprocessableEntity(new { error = validation.Error });
+
+        await TryCompleteInspectionOnlyAssetAsync(item, validation.Parsed);
+        await _db.SaveChangesAsync();
+
+        return Ok(ToDto(item));
+    }
+
     // ── Auto-complete logic for inspection-only projects ──────────────────────
 
     private async Task TryCompleteInspectionOnlyAssetAsync(InspectionImportEntity entity, CanonicalInspection? canonical)
@@ -271,11 +292,24 @@ public class InspectionImportsController : ControllerBase
         var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == entity.ProjectId);
         if (project?.WorkflowMode != "INSPECTION_ONLY") return;
 
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == entity.AssetId);
-        if (asset is null) return;
-
         var now = DateTime.UtcNow;
         var actorName = ResolveActorName();
+
+        // If already mapped to a run, just update step/issue data with fresh canonical data.
+        if (!string.IsNullOrWhiteSpace(entity.MappedRunId) && canonical is not null)
+        {
+            var existingMappedRun = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == entity.MappedRunId);
+            if (existingMappedRun is not null)
+            {
+                existingMappedRun.StepResultsJson = BuildStepResultsJson(canonical);
+                existingMappedRun.IssuesJson = BuildIssuesJson(canonical);
+                existingMappedRun.UpdatedAt = now;
+            }
+            return;
+        }
+
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == entity.AssetId);
+        if (asset is null) return;
 
         var inspectionConfigIds = await _db.WorkflowConfigs
             .Where(c => c.WorkflowTypeId == "wftype-inspection" && c.Status == "Published")
@@ -410,12 +444,25 @@ public class InspectionImportsController : ControllerBase
     private static string BuildStepResultsJson(CanonicalInspection canonical)
     {
         var completedAt = canonical.InspectionDate;
+
+        // When no individual check results exist, synthesise a summary step from canonical metadata
+        // so the PDF report always has at least one row of meaningful data.
+        if (canonical.Results.Count == 0)
+        {
+            var summaryValues = new Dictionary<string, string> { ["label"] = "Inspection Summary" };
+            if (!string.IsNullOrWhiteSpace(canonical.TechnicianName)) summaryValues["Technician"] = canonical.TechnicianName;
+            if (!string.IsNullOrWhiteSpace(canonical.AssetTag))       summaryValues["Asset Tag"]  = canonical.AssetTag;
+            if (!string.IsNullOrWhiteSpace(canonical.Notes))          summaryValues["Notes"]       = canonical.Notes;
+            var summary = new { stepId = "import-summary", values = summaryValues, completedAt };
+            return JsonSerializer.Serialize(new[] { summary });
+        }
+
         var results = canonical.Results.Select(r =>
         {
             var values = new Dictionary<string, string>();
             if (!string.IsNullOrWhiteSpace(r.Value))  values["value"] = r.Value;
-            if (!string.IsNullOrWhiteSpace(r.Unit))   values["unit"] = r.Unit!;
-            if (r.Pass.HasValue)                       values["pass"] = r.Pass.Value ? "true" : "false";
+            if (!string.IsNullOrWhiteSpace(r.Unit))   values["unit"]  = r.Unit!;
+            if (r.Pass.HasValue)                       values["pass"]  = r.Pass.Value ? "true" : "false";
             if (!string.IsNullOrWhiteSpace(r.Label))  values["label"] = r.Label!;
             if (!string.IsNullOrWhiteSpace(r.Notes))  values["notes"] = r.Notes!;
             return new { stepId = r.CheckId, values, completedAt };

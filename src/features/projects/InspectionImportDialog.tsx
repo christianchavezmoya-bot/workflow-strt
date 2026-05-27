@@ -23,6 +23,7 @@ import CodeIcon from "@mui/icons-material/Code";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import DownloadIcon from "@mui/icons-material/Download";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import SyncIcon from "@mui/icons-material/Sync";
 import WarningAmberOutlined from "@mui/icons-material/WarningAmberOutlined";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
@@ -80,6 +81,9 @@ export default function InspectionImportDialog({ open, onClose, projectId, asset
   const [viewItem, setViewItem] = useState<InspectionImport | null>(null);
   const [viewRaw, setViewRaw] = useState<string | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+
+  // Reprocess
+  const [reprocessingId, setReprocessingId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -180,6 +184,20 @@ export default function InspectionImportDialog({ open, onClose, projectId, asset
       setError("Failed to mark as failed.");
     } finally {
       setFailSaving(false);
+    }
+  }
+
+  // ── Reprocess ─────────────────────────────────────────────────────────────
+  async function handleReprocess(id: string) {
+    setReprocessingId(id);
+    try {
+      await api.post(`/inspection-imports/${id}/reprocess`);
+      await load();
+      await onChanged?.();
+    } catch {
+      setError("Failed to reprocess import.");
+    } finally {
+      setReprocessingId(null);
     }
   }
 
@@ -352,6 +370,20 @@ export default function InspectionImportDialog({ open, onClose, projectId, asset
                               <CodeIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
+                          {canEdit && item.status === "MAPPED" && (
+                            <Tooltip title="Reprocess — re-read JSON and update linked run step data">
+                              <IconButton
+                                size="small"
+                                color="info"
+                                disabled={reprocessingId === item.id}
+                                onClick={() => void handleReprocess(item.id)}
+                              >
+                                {reprocessingId === item.id
+                                  ? <CircularProgress size={14} />
+                                  : <SyncIcon fontSize="small" />}
+                              </IconButton>
+                            </Tooltip>
+                          )}
                           {canEdit && item.status !== "FAILED" && (
                             <Tooltip title="Mark as failed">
                               <IconButton

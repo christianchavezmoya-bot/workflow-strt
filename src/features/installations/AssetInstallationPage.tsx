@@ -4178,7 +4178,10 @@ const AssetInstallationPage = () => {
           onClose={() => setImportDialogAsset(null)}
           projectId={importDialogAsset.projectId}
           asset={importDialogAsset}
-          onChanged={refreshAssets}
+          onChanged={() => {
+            refreshAssets();
+            void loadAssignmentsForAsset(importDialogAsset.id);
+          }}
         />
       )}
     </Stack>
