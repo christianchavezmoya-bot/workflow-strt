@@ -14,11 +14,11 @@ public partial class InspectionImportArchiveFields : Migration
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("""
-            ALTER TABLE InspectionImports ADD COLUMN IsArchived    INTEGER NOT NULL DEFAULT 0;
-            ALTER TABLE InspectionImports ADD COLUMN ArchivedAt    TEXT NULL;
-            ALTER TABLE InspectionImports ADD COLUMN ArchivedBy    TEXT NULL;
-            ALTER TABLE InspectionImports ADD COLUMN ArchiveReason TEXT NULL;
-            ALTER TABLE InspectionImports ADD COLUMN ArchiveRef    TEXT NULL;
+            ALTER TABLE InspectionImports ADD COLUMN IF NOT EXISTS IsArchived    INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE InspectionImports ADD COLUMN IF NOT EXISTS ArchivedAt    TEXT NULL;
+            ALTER TABLE InspectionImports ADD COLUMN IF NOT EXISTS ArchivedBy    TEXT NULL;
+            ALTER TABLE InspectionImports ADD COLUMN IF NOT EXISTS ArchiveReason TEXT NULL;
+            ALTER TABLE InspectionImports ADD COLUMN IF NOT EXISTS ArchiveRef    TEXT NULL;
             """);
     }
 
