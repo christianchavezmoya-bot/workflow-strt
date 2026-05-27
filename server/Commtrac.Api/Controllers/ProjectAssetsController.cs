@@ -511,7 +511,19 @@ public class ProjectAssetsController : ControllerBase
 
                 var values = result.Values ?? new Dictionary<string, string>();
 
-                foreach (var input in step.Inputs ?? [])
+                // Imported step results use generic keys (value/unit/pass/label/notes), not workflow input IDs.
+                // Counting their required fields as missing is incorrect — skip them entirely.
+                var inputDefs = step.Inputs ?? [];
+                if (inputDefs.Count > 0 && values.Count > 0)
+                {
+                    var importOnlyKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "value", "unit", "pass", "label", "notes" };
+                    bool allKeysImportOnly = values.Keys.All(k => importOnlyKeys.Contains(k));
+                    bool noInputIdMatched = !inputDefs.Any(inp => values.ContainsKey(inp.Id));
+                    if (allKeysImportOnly && noInputIdMatched)
+                        continue;
+                }
+
+                foreach (var input in inputDefs)
                 {
                     var raw = values.GetValueOrDefault(input.Id);
                     if (string.Equals(input.Type, "photo", StringComparison.OrdinalIgnoreCase) ||
