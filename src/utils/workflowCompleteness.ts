@@ -64,11 +64,26 @@ export function parseWorkflowStepResults(json: string): StepResult[] {
   }
 }
 
+const IMPORT_ONLY_KEYS = new Set(["value", "unit", "pass", "label", "notes"]);
+
 export function getMissingWorkflowItems(
   step: WorkflowStep | undefined,
   values: Record<string, string> | undefined,
 ): MissingWorkflowItem[] {
   if (!step) return [];
+
+  // Externally-imported step results use generic keys, not workflow input IDs — no MISSING items apply.
+  const inputDefs = step.inputs ?? [];
+  if (values && inputDefs.length > 0) {
+    const valueKeys = Object.keys(values);
+    if (
+      valueKeys.length > 0 &&
+      valueKeys.every((k) => IMPORT_ONLY_KEYS.has(k)) &&
+      !inputDefs.some((def) => def.id in values)
+    ) {
+      return [];
+    }
+  }
 
   const missingInputs: MissingWorkflowItem[] = [];
   for (const input of step.inputs ?? []) {
