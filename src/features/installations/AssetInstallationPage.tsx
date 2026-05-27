@@ -3636,6 +3636,13 @@ const AssetInstallationPage = () => {
           jobNumber={(runnerAsset as any).jobNumber || ""}
           productFeatures={activeProduct.features}
           featureSelections={runnerFeatureSelections}
+          teamMembers={
+            (projects.find((p) => p.id === (runnerAsset.projectId || selectedProjectId))?.teamMemberIds ?? [])
+              .map((uid) => users.find((u) => u.id === uid))
+              .filter((u): u is NonNullable<typeof u> => !!u)
+              .map((u) => ({ id: u.id, fullName: u.fullName }))
+          }
+          allUsers={users.filter((u) => u.isActive).map((u) => ({ id: u.id, fullName: u.fullName }))}
           onComplete={(vals) => {
             // Clear paused progress badge on completion
             if (runnerAsset) setPausedProgress((prev) => { const n = { ...prev }; delete n[runnerAsset.id]; return n; });

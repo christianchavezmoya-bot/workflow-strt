@@ -209,7 +209,8 @@ public class ProjectsController : ControllerBase
             ContractValue = request.ContractValue,
             ProbabilityStage = request.ProbabilityStage,
             ProductIds = request.ProductIds ?? new List<string>(),
-            ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions)
+            ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions),
+            TeamMemberIdsJson = JsonSerializer.Serialize(request.TeamMemberIds ?? new List<string>(), JsonOptions)
         };
 
         _db.Projects.Add(project);
@@ -259,6 +260,7 @@ public class ProjectsController : ControllerBase
         project.ProbabilityStage = request.ProbabilityStage;
         project.ProductIds = request.ProductIds ?? new List<string>();
         project.ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions);
+        project.TeamMemberIdsJson = JsonSerializer.Serialize(request.TeamMemberIds ?? new List<string>(), JsonOptions);
 
         await _db.SaveChangesAsync();
         string? siteName = null;
@@ -410,7 +412,10 @@ public class ProjectsController : ControllerBase
                 : JsonSerializer.Deserialize<Dictionary<string, string>>(project.ProductFeatureValuesJson, JsonOptions) ?? new Dictionary<string, string>(),
             project.OfficeId,
             assetCount,
-            effectiveMode
+            effectiveMode,
+            string.IsNullOrWhiteSpace(project.TeamMemberIdsJson)
+                ? new List<string>()
+                : JsonSerializer.Deserialize<List<string>>(project.TeamMemberIdsJson, JsonOptions) ?? new List<string>()
         );
     }
 

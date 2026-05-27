@@ -174,7 +174,7 @@ function createDefaultWorkflow(productId: string, productName: string): Workflow
   };
 }
 
-function defaultLabelForInput(type: StepInputType): string {
+function defaultLabelForInput(type: StepInputType, workflowTypeName?: string): string {
   switch (type) {
     case "text": return "Text response";
     case "number": return "Numeric value";
@@ -184,6 +184,12 @@ function defaultLabelForInput(type: StepInputType): string {
     case "video": return "Upload video";
     case "signature": return "Signature";
     case "note": return "Note";
+    case "user-select": {
+      const name = (workflowTypeName ?? "").toLowerCase();
+      if (name.includes("install")) return "Installed By";
+      if (name.includes("inspect")) return "Inspected By";
+      return "Team Member";
+    }
     default: return "Input";
   }
 }
@@ -652,6 +658,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
 
   // Inputs
   function addInput(stepId: string, type: StepInputType, options?: string[], featureId?: string, label?: string, subFields?: { id: string; name: string }[]) {
+    const activeTypeName = workflowTypes.find((t) => t.id === (workflow.workflowTypeId ?? publishForm.workflowTypeId))?.name;
     updateWorkflow((wf) => {
       const step = wf.steps.find((s) => s.id === stepId);
       if (!step) return wf;
@@ -659,7 +666,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
       step.inputs.push({
         id: uid(),
         type,
-        label: label ?? defaultLabelForInput(type),
+        label: label ?? defaultLabelForInput(type, activeTypeName),
         required: false,
         options: options ?? (type === "choice" ? ["Option A", "Option B"] : undefined),
         featureId,
@@ -2026,6 +2033,7 @@ const INPUT_TYPES: { type: StepInputType; label: string }[] = [
   { type: "video", label: "Video capture" },
   { type: "signature", label: "Signature" },
   { type: "note", label: "Note / free text" },
+  { type: "user-select", label: "User select (project team)" },
 ];
 
 // Map product feature value types to step input types

@@ -12,7 +12,8 @@ export type StepInputType =
   | "note"
   | "scan"
   | "date"
-  | "component";
+  | "component"
+  | "user-select";
 
 export type CaptureFieldType = "text" | "number" | "scan" | "date";
 

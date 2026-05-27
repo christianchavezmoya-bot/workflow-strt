@@ -248,6 +248,7 @@ public class ProjectEntity
     public string? ProbabilityStage { get; set; }
     public List<string> ProductIds { get; set; } = new();
     public string ProductFeatureValuesJson { get; set; } = "{}";
+    public string TeamMemberIdsJson { get; set; } = "[]";
 }
 
 public class InstallationEntity

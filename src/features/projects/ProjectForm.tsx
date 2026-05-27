@@ -1,8 +1,10 @@
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Checkbox,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -207,6 +209,7 @@ const ProjectForm = () => {
         productIds: localProject.productIds ?? []
       });
       setProductFeatureValues(localProject.productFeatureValues || {});
+      setTeamMemberIds(localProject.teamMemberIds ?? []);
       return;
     }
 
@@ -230,6 +233,7 @@ const ProjectForm = () => {
         productIds: project.productIds ?? []
       });
       setProductFeatureValues(project.productFeatureValues || {});
+      setTeamMemberIds(project.teamMemberIds ?? []);
     });
   }, [id, items, reset]);
 
@@ -270,6 +274,7 @@ const ProjectForm = () => {
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
   const [globalOfficePrompt, setGlobalOfficePrompt] = useState<{ country: string; managerName: string } | null>(null);
   const [productFeatureValues, setProductFeatureValues] = useState<Record<string, string>>({});
+  const [teamMemberIds, setTeamMemberIds] = useState<string[]>([]);
 
   useEffect(() => {
     setSitesLoading(true);
@@ -555,7 +560,8 @@ const ProjectForm = () => {
       isInstallationProject: data.workflowMode === "INSTALLATION_ONLY" || data.workflowMode === "MIXED",
       projectManager: data.projectManager,
       productIds: data.productIds ?? [],
-      productFeatureValues
+      productFeatureValues,
+      teamMemberIds
     };
 
     try {
@@ -1402,6 +1408,31 @@ const ProjectForm = () => {
 
             {visibleIdSet.has("projectManager") && renderFormField("projectManager")}
             {visibleIdSet.has("office") ? renderFormField("office") : <Grid item xs={12} md={6} />}
+
+            <Grid item xs={12}>
+              <Autocomplete
+                multiple
+                options={usersState.items.filter((u) => u.isActive)}
+                getOptionLabel={(u) => `${u.fullName} (${u.role})`}
+                value={usersState.items.filter((u) => teamMemberIds.includes(u.id))}
+                onChange={(_, selected) => setTeamMemberIds(selected.map((u) => u.id))}
+                isOptionEqualToValue={(a, b) => a.id === b.id}
+                renderTags={(selected, getTagProps) =>
+                  selected.map((u, idx) => {
+                    const { key, ...tagProps } = getTagProps({ index: idx });
+                    return <Chip key={key} label={u.fullName} size="small" {...tagProps} />;
+                  })
+                }
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Project Team"
+                    size="small"
+                    helperText="Members who will perform work on this project — available in user-select step inputs."
+                  />
+                )}
+              />
+            </Grid>
 
             {visibleIdSet.has("region") && renderFormField("region")}
             <Grid item xs={12} md={6} />

@@ -111,6 +111,10 @@ interface WorkOrderRunnerProps {
   productFeatures?: ProductFeatureDefinition[];
   /** Feature selections from the workflow config — provides expected qty per feature. */
   featureSelections?: FeatureSelection[];
+  /** Project team members for user-select inputs. Falls back to allUsers when empty. */
+  teamMembers?: { id: string; fullName: string }[];
+  /** All active users — fallback when no team is assigned to the project. */
+  allUsers?: { id: string; fullName: string }[];
 }
 
 type Stage = "setup" | "running" | "summary" | "bom" | "consumables" | "installer-sign" | "customer-sign";
@@ -166,7 +170,10 @@ export default function WorkOrderRunner({
   jobNumber,
   productFeatures,
   featureSelections,
+  teamMembers,
+  allUsers,
 }: WorkOrderRunnerProps) {
+  const userSelectOptions = (teamMembers && teamMembers.length > 0 ? teamMembers : (allUsers ?? [])).map((u) => u.fullName);
   const stepsSorted = useMemo(
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
     [workflow.steps],
@@ -1040,6 +1047,26 @@ export default function WorkOrderRunner({
             </Box>
           )}
         </Box>
+      );
+    }
+    if (inp.type === "user-select") {
+      return (
+        <FormControl size="small" fullWidth error={isReq}>
+          <InputLabel>{inp.label || "Select team member"}</InputLabel>
+          <Select
+            value={val}
+            label={inp.label || "Select team member"}
+            onChange={(e) => onChange(e.target.value)}
+          >
+            {userSelectOptions.length === 0 ? (
+              <MenuItem disabled value="">No team members assigned</MenuItem>
+            ) : (
+              userSelectOptions.map((name) => (
+                <MenuItem key={name} value={name}>{name}</MenuItem>
+              ))
+            )}
+          </Select>
+        </FormControl>
       );
     }
     if (inp.type === "signature") {

@@ -47,6 +47,7 @@ export interface Project {
   productIds?: string[];
   productFeatureValues?: Record<string, string>;
   assetCount?: number;
+  teamMemberIds?: string[];
 }
 
 // ── Inspection Imports ────────────────────────────────────────────────────────

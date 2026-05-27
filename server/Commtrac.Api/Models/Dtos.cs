@@ -391,7 +391,8 @@ public record ProjectDto(
     string? OfficeId = null,
     int AssetCount = 0,
     /// <summary>INSTALLATION_ONLY | INSPECTION_ONLY | MIXED. Null on legacy rows.</summary>
-    string? WorkflowMode = null
+    string? WorkflowMode = null,
+    List<string>? TeamMemberIds = null
 );
 
 public record UpdateProjectStatusRequest(
