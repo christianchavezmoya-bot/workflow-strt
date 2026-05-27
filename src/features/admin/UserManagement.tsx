@@ -1424,15 +1424,10 @@ export const UserManagement: React.FC = () => {
   }, [sitesList, customerSearch, customerFilters, customerSort, siteAccessors, customersState.items]);
 
   const filteredUsers = useMemo(() => {
-    const officeFiltered = numberedUsers.filter((row) => {
-      if (activeOffice === "All") return true;
-      const userCountry = getCountryForOffice(row.office || "");
-      return userCountry === activeOffice || row.office === activeOffice;
-    });
-
-    const filtered = applyAutoFilter(officeFiltered, userFilters, userAccessors);
+    // Users: always show all users regardless of active office — admins manage accounts across all offices
+    const filtered = applyAutoFilter(numberedUsers, userFilters, userAccessors);
     return applyAutoSort(filtered, userSort, userAccessors);
-  }, [numberedUsers, activeOffice, userFilters, userSort, userAccessors, getCountryForOffice]);
+  }, [numberedUsers, userFilters, userSort, userAccessors]);
 
   const pagedUsers = useMemo(() => {
     const start = usersPage * usersRowsPerPage;
