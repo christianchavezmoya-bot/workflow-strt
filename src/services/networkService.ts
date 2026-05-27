@@ -9,16 +9,7 @@
 import { Capacitor } from "@capacitor/core";
 import { CapacitorHttp } from "@capacitor/core";
 import { Network } from "@capacitor/network";
-
-// Get API base URL the same way api.ts does
-const getApiBaseUrl = () => {
-  if (import.meta.env.VITE_API_BASE) {
-    return import.meta.env.VITE_API_BASE;
-  }
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  return `${protocol}//${hostname}:4000/api`;
-};
+import { getApiBaseUrl } from "./apiBase";
 
 export interface NetworkStatus {
   hasInternet: boolean;      // Phone has internet connection

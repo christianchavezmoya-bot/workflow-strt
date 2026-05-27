@@ -1,12 +1,16 @@
 import api from "../services/api";
 import type { ProjectAsset, ProjectAssetStatus } from "../types/projectAsset";
 import {
+  entityGetAsset,
   entityGetAssetsByProduct,
   entityGetAssetsByProject,
   entityPutAssets,
   entityPutAsset,
   pendingAdd,
+  pendingGetByEntityId,
+  pendingRemove,
 } from "../services/localDB";
+import { mediaStore } from "../services/mediaStore";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -21,6 +25,18 @@ function fromDto(dto: ProjectAsset): ProjectAsset {
     ...dto,
     status: normalizeStatus(dto.status),
   };
+}
+
+function isQueueableOfflineError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return !navigator.onLine;
+  const e = error as { response?: unknown; code?: string; message?: string };
+  if (e.response) return false;
+  return (
+    !navigator.onLine ||
+    e.code === "ECONNABORTED" ||
+    e.code === "ERR_NETWORK" ||
+    e.message === "Network Error"
+  );
 }
 
 export const AssetRepository = {
@@ -73,9 +89,10 @@ export const AssetRepository = {
   async update(
     id: string,
     patch: Partial<ProjectAsset> & Record<string, unknown>
-  ): Promise<ProjectAsset | null> {
+  ): Promise<ProjectAsset> {
     try {
-      const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
+      const requestPatch = await mediaStore.resolveUploadPayload(patch);
+      const res = await api.put<ProjectAsset>(`/project-assets/${id}`, requestPatch);
       await entityPutAsset({
         id: res.data.id,
         productId: res.data.productId,
@@ -84,8 +101,39 @@ export const AssetRepository = {
         dirty: false,
       });
       return fromDto(res.data);
-    } catch {
-      // Queue for later — caller has already applied optimistic update
+    } catch (error) {
+      if (!isQueueableOfflineError(error)) {
+        throw error;
+      }
+
+      const local = await entityGetAsset(id);
+      if (!local) {
+        throw error;
+      }
+
+      const optimistic = {
+        ...(local.data as ProjectAsset),
+        ...patch,
+        id,
+      } as ProjectAsset;
+
+      await entityPutAsset({
+        id,
+        productId: local.productId,
+        projectId: local.projectId,
+        data: optimistic,
+        dirty: true,
+      });
+
+      // Keep only the latest queued PUT for this asset so repeated offline
+      // edits don't stack duplicate writes for the same record.
+      const existing = await pendingGetByEntityId(id);
+      await Promise.all(
+        existing
+          .filter((a) => a.method === "PUT" && a.url === `/project-assets/${id}`)
+          .map((a) => pendingRemove(a.id))
+      );
+
       await pendingAdd({
         id: crypto.randomUUID(),
         url: `/project-assets/${id}`,
@@ -96,7 +144,7 @@ export const AssetRepository = {
         optimisticPatch: patch as Record<string, unknown>,
         createdAt: new Date().toISOString(),
       });
-      return null;
+      return fromDto(optimistic);
     }
   },
 };

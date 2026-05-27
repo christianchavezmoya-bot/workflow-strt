@@ -18,6 +18,7 @@ import {
   HistoryOutlined,
   HourglassEmptyOutlined,
   DragIndicatorOutlined,
+  InfoOutlined,
   PlayArrowOutlined,
   PrintOutlined,
   RefreshOutlined,
@@ -70,7 +71,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
@@ -84,6 +85,7 @@ import { workflowTemplateService } from "../../services/workflowTemplateService"
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import offlineStore from "../../services/offlineStore";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { customerService } from "../../services/customerService";
@@ -168,6 +170,10 @@ const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   Issue: "Issue",
 };
 
+function projectHasInspection(workflowMode?: string | null) {
+  return workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED";
+}
+
 // ------------------------------------------------------------------
 // Health tracking
 // ------------------------------------------------------------------
@@ -249,6 +255,7 @@ type FeatureDef = {
 
 const AssetInstallationPage = () => {
   const dispatch = useAppDispatch();
+  const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const can = usePermissions();
   const productsState = useAppSelector((s) => s.products);
@@ -481,6 +488,11 @@ const AssetInstallationPage = () => {
       type.name.trim().toLowerCase() === normalized
     )?.id ?? "";
   }, [requestedWorkflowType]);
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  );
+  const selectedProjectHasInspection = projectHasInspection(selectedProject?.workflowMode);
 
   useEffect(() => {
     if (!activeProduct?.id) {
@@ -976,6 +988,9 @@ const AssetInstallationPage = () => {
             }
           }
           if (activeRun) existingRunId = activeRun.id;
+          if (!existingRunId) {
+            existingRunId = await offlineStore.getPreviousRunRef(asset.id, wfConfig.id) ?? undefined;
+          }
         }
 
         setRunnerExistingRunId(existingRunId);
@@ -1625,6 +1640,8 @@ const AssetInstallationPage = () => {
                     label="Attach Photo / Video"
                     qrDocType="issue-photo"
                     qrLinkedTo={issue.id}
+                    linkedToType="issue-report"
+                    linkedToId={issue.id}
                   />
                 </Box>
               )}
@@ -1719,6 +1736,8 @@ const AssetInstallationPage = () => {
                       label="Resolution Evidence"
                       qrDocType="issue-photo"
                       qrLinkedTo={issue.id}
+                      linkedToType="issue-resolution"
+                      linkedToId={issue.id}
                     />
                   </Box>
                   <Button
@@ -2424,14 +2443,36 @@ const AssetInstallationPage = () => {
     <Stack spacing={3}>
       {/* Header */}
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
-        <Box>
-          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Installation Assets</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Track assets across projects â€” start work orders, record status, and monitor progress.
-          </Typography>
-        </Box>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Project Assets</Typography>
+          {activeProduct?.name && <Chip size="small" color="primary" variant="outlined" label={activeProduct.name} />}
+          <Tooltip
+            title={
+              selectedProject
+                ? selectedProjectHasInspection
+                  ? `Track project assets for ${selectedProject.jobNumber} — manage installation and inspection workflows from one workspace.`
+                  : `Track assets for ${selectedProject.jobNumber} — start work orders, record status, and monitor progress.`
+                : "Track assets across all projects — start work orders, record status, and monitor progress."
+            }
+          >
+            <InfoOutlined sx={{ fontSize: 16, color: "text.secondary", cursor: "pointer" }} />
+          </Tooltip>
+          <Tooltip title="Refresh">
+            <IconButton size="small" onClick={refreshAssets}>
+              <RefreshOutlined sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
+        </Stack>
         <Stack direction="row" spacing={1} alignItems="center">
-          <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={refreshAssets}>Refresh</Button>
+          {selectedProjectHasInspection && selectedProject && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => navigate(`/projects/${selectedProject.id}`)}
+            >
+              Inspection Assets
+            </Button>
+          )}
           {can.modifyData && (
             <Button
               size="small"
@@ -3223,6 +3264,8 @@ const AssetInstallationPage = () => {
               label="Attach Photo / Video (optional)"
               qrDocType="issue-photo"
               qrLinkedTo={issueDialogAsset?.id ?? ""}
+              linkedToType="issue-report"
+              linkedToId={issueDialogAsset?.id ?? "asset-issue"}
             />
           </Stack>
         </DialogContent>

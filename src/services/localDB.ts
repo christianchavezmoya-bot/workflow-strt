@@ -36,6 +36,9 @@ export interface PendingAction {
   lastError?: string;
   status: "pending" | "uploading" | "failed";
   nextRetryAt?: string;  // ISO timestamp — when to next attempt this action
+  opType?: string;
+  serverEntityId?: string;
+  dependsOnOpId?: string;
 }
 
 export interface SyncMeta {
@@ -363,6 +366,13 @@ export async function entityGetAssetsByProject(projectId: string): Promise<unkno
   } catch { return []; }
 }
 
+export async function entityGetAsset(id: string): Promise<AssetRecord | null> {
+  try {
+    const db = await getDB();
+    return (await db.get("assets", id)) ?? null;
+  } catch { return null; }
+}
+
 // ── Issue entity helpers ──────────────────────────────────────────────────────
 
 export async function entityPutIssue(record: { id: string; assetId: string; projectId: string; data: unknown; dirty?: boolean }): Promise<void> {
@@ -399,6 +409,13 @@ export async function entityGetIssuesByProject(projectId: string): Promise<unkno
     const records = await db.getAllFromIndex("issues", "by_project", projectId);
     return records.map((r) => r.data);
   } catch { return []; }
+}
+
+export async function entityGetIssue(id: string): Promise<IssueRecord | null> {
+  try {
+    const db = await getDB();
+    return (await db.get("issues", id)) ?? null;
+  } catch { return null; }
 }
 
 export async function entityGetAllIssues(): Promise<unknown[]> {
@@ -452,5 +469,27 @@ export async function entityGetWorkflowRunsByProject(projectId: string): Promise
     const db = await getDB();
     const records = await db.getAllFromIndex("workflow_runs", "by_project", projectId);
     return records.map((r) => r.data);
+  } catch { return []; }
+}
+
+export async function entityGetWorkflowRun(id: string): Promise<WorkflowRunRecord | null> {
+  try {
+    const db = await getDB();
+    return (await db.get("workflow_runs", id)) ?? null;
+  } catch { return null; }
+}
+
+export async function entityDeleteWorkflowRun(id: string): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.delete("workflow_runs", id);
+  } catch { /* ignore */ }
+}
+
+export async function entityGetAllWorkflowRuns(): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const all = await db.getAll("workflow_runs");
+    return all.map((r) => r.data);
   } catch { return []; }
 }

@@ -1,6 +1,6 @@
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
-import { pendingGetAll } from "./localDB";
+import { entityGetAsset, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
@@ -51,7 +51,8 @@ export const projectAssetService = {
       const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
       return fromDto(res.data);
     } catch {
-      return null;
+      const local = await entityGetAsset(id);
+      return local ? fromDto(local.data as ProjectAsset) : null;
     }
   },
 

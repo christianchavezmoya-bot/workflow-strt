@@ -26,7 +26,6 @@ import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
 import { NavLink } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
-import { usePermissions } from "../../hooks/usePermissions";
 import { officesService } from "../../services/officesService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import type { Office } from "../../components/GlobalOfficeMap";
@@ -43,19 +42,12 @@ const navItems = [
   { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents",                         tourKey: "nav-documents" },
   { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,          to: "/tips",                              tourKey: "nav-tips" },
   ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project", tourKey: "nav-bom" }] : []),
-  { label: "Admin",             icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin",                 end: true,  tourKey: "nav-admin" },
-  { label: "Settings",          icon: <SettingsOutlinedIcon />,           to: "/settings",                          tourKey: "nav-settings" },
   { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,      to: "/profile",                           tourKey: "nav-profile" },
 ];
 
 const Sidebar = () => {
   const { user } = useAuth();
-  const can = usePermissions();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
-  const visibleNavItems = navItems.filter((item) => {
-    if (item.to === "/settings" && can.viewOnly) return false;
-    return true;
-  });
   const [officeOptions, setOfficeOptions] = useState<string[]>(["All"]);
   const [appName, setAppName] = useState("Field Operations");
 
@@ -112,7 +104,7 @@ const Sidebar = () => {
       </Stack>
       <FavoritesSection />
       <List sx={{ display: "flex", flexDirection: "column", gap: 0.5 }} data-tour="nav-sidebar">
-        {visibleNavItems.map((item) => (
+        {navItems.map((item) => (
           <ListItemButton
             key={item.label}
             component={NavLink}

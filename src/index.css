@@ -121,19 +121,22 @@ body {
     top: 0;
     left: 0;
     right: 0;
-    /* Push content below iPhone status bar — 50px fallback for older devices */
-    padding-top: max(env(safe-area-inset-top), 50px);
-    padding-bottom: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    /* The native WebView already sits below the status bar. */
+    padding-top: 12px;
+    padding-bottom: 12px;
     padding-left: 16px;
     padding-right: 16px;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     z-index: 150;
+    overflow: hidden;
   }
 
-  /* Push page content below the fixed topbar (status bar ~50px + bar content ~56px) */
+  /* Push page content below the fixed mobile topbar. */
   .app-main {
-    padding-top: calc(max(env(safe-area-inset-top), 50px) + 56px) !important;
+    padding-top: 76px !important;
   }
 }
 

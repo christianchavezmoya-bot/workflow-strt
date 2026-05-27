@@ -59,7 +59,6 @@ import type { Feature } from "../../types/feature";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
-import QRUploadButton from "../../components/QRUploadButton";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
@@ -522,7 +521,11 @@ export default function WorkOrderRunner({
         : await assetWorkflowRunService.startRun(projectAssetId!, workflowConfigId!);
 
       if (!run) {
-        setStartError("Could not load run. Please try again.");
+        setStartError(
+          activeRunId && !isOnline
+            ? "Run not available offline. Connect once to cache it."
+            : "Could not load run. Please try again.",
+        );
         return;
       }
       setActiveRunId(run.id);
@@ -583,7 +586,11 @@ export default function WorkOrderRunner({
         }
       }
     } catch {
-      setStartError("Could not start run. Check your connection and try again.");
+      setStartError(
+        activeRunId && !isOnline
+          ? "Run not available offline. Connect once to cache it."
+          : "Could not start run. Check your connection and try again.",
+      );
       return;
     } finally {
       setStartingRun(false);
@@ -993,60 +1000,15 @@ export default function WorkOrderRunner({
       let media: string[] = [];
       try { media = JSON.parse(val || "[]"); } catch {}
       return (
-        <Box>
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-          <Button
-            size="small"
-            variant="outlined"
-            component="label"
-            startIcon={isVideo ? <VideocamOutlined /> : <PhotoCameraOutlined />}
-          >
-            {media.length > 0 ? (isVideo ? "Add video" : "Add photo") : (isVideo ? "Capture video" : "Capture photo")}
-            <input
-              type="file"
-              accept={isVideo ? "video/*" : "image/*"}
-              capture="environment"
-              hidden
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = () => { onChange(JSON.stringify([...media, reader.result as string])); };
-                reader.readAsDataURL(file);
-                e.target.value = "";
-              }}
-            />
-          </Button>
-          <QRUploadButton
-            docType="workflow-evidence"
-            linkedTo={inp.label}
-            label="Upload from Phone"
-            onUploaded={() => { /* handled by onUploadedWithData */ }}
-            onUploadedWithData={(_, dataUrl) => {
-              onChange(JSON.stringify([...media, dataUrl]));
-            }}
-          />
-          </Stack>
-          {media.length > 0 && (
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1 }}>
-              {media.map((src, idx) => (
-                <Box key={idx} sx={{ position: "relative" }}>
-                  {isVideo
-                    ? <Box component="video" src={src} controls sx={{ width: 160, height: 90, borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)" }} />
-                    : <Box component="img" src={src} sx={{ width: 80, height: 60, objectFit: "cover", borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)" }} />
-                  }
-                  <IconButton
-                    size="small"
-                    onClick={() => onChange(JSON.stringify(media.filter((_, i) => i !== idx)))}
-                    sx={{ position: "absolute", top: -8, right: -8, background: "rgba(0,0,0,0.7)", padding: "2px" }}
-                  >
-                    <DeleteOutlineOutlined sx={{ fontSize: 14 }} />
-                  </IconButton>
-                </Box>
-              ))}
-            </Box>
-          )}
-        </Box>
+        <MediaCapture
+          media={media}
+          onChange={(next) => onChange(JSON.stringify(next))}
+          allowedKinds={[isVideo ? "video" : "photo"]}
+          linkedToType="run-step"
+          linkedToId={`${activeRunId ?? projectAssetId ?? workflow.id}:${step.id}:${inp.id}`}
+          qrDocType="workflow-evidence"
+          qrLinkedTo={inp.label}
+        />
       );
     }
     if (inp.type === "user-select") {
@@ -1821,6 +1783,8 @@ export default function WorkOrderRunner({
                 media={flagMedia}
                 onChange={setFlagMedia}
                 label="Attach Photo / Video (optional)"
+                linkedToType="issue-report"
+                linkedToId={`run-issue:${activeRunId ?? projectAssetId ?? workflow.id}`}
               />
             </Stack>
           </DialogContent>

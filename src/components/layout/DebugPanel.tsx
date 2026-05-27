@@ -1,8 +1,15 @@
-import { Box, Button, Divider, IconButton, Stack, Typography } from "@mui/material";
+import { Box, Button, Divider, IconButton, Stack, TextField, Typography } from "@mui/material";
 import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
 import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import { useEffect, useState } from "react";
 import { secureGet } from "../../services/secureStorage";
+import {
+  clearStoredApiBaseUrl,
+  getApiBaseUrl,
+  getDefaultApiBaseUrl,
+  getStoredApiBaseUrl,
+  setStoredApiBaseUrl,
+} from "../../services/apiBase";
 
 type DebugLog = {
   id: string;
@@ -26,6 +33,8 @@ const DebugPanel = () => {
     token: secureGet("auth_token") || "",
     user: secureGet("auth_user") || secureGet("local_auth_user") || ""
   });
+  const [apiBaseDraft, setApiBaseDraft] = useState(() => getStoredApiBaseUrl() ?? "");
+  const [resolvedApiBase, setResolvedApiBase] = useState(() => getApiBaseUrl());
 
   useEffect(() => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: DebugLog[] };
@@ -39,9 +48,15 @@ const DebugPanel = () => {
         token: secureGet("auth_token") || "",
         user: secureGet("auth_user") || secureGet("local_auth_user") || ""
       });
+      setApiBaseDraft(getStoredApiBaseUrl() ?? "");
+      setResolvedApiBase(getApiBaseUrl());
     };
     window.addEventListener("api-debug-log", handler);
-    return () => window.removeEventListener("api-debug-log", handler);
+    window.addEventListener("api-base-changed", handler);
+    return () => {
+      window.removeEventListener("api-debug-log", handler);
+      window.removeEventListener("api-base-changed", handler);
+    };
   }, []);
 
   return (
@@ -97,6 +112,47 @@ const DebugPanel = () => {
               User: {authInfo.user || "none"}
             </Typography>
           </Box>
+          <Divider sx={{ my: 1 }} />
+          <Stack spacing={1.25} sx={{ mb: 1.5 }}>
+            <Typography variant="subtitle2">Mobile API Base</Typography>
+            <Typography variant="caption" color="text.secondary">
+              Active: {resolvedApiBase}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Default: {getDefaultApiBaseUrl()}
+            </Typography>
+            <TextField
+              size="small"
+              label="Override API Base URL"
+              placeholder="http://192.168.1.10:4000/api"
+              value={apiBaseDraft}
+              onChange={(e) => setApiBaseDraft(e.target.value)}
+            />
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => {
+                  const next = setStoredApiBaseUrl(apiBaseDraft);
+                  setApiBaseDraft(next);
+                  setResolvedApiBase(getApiBaseUrl());
+                }}
+              >
+                Save API URL
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => {
+                  clearStoredApiBaseUrl();
+                  setApiBaseDraft("");
+                  setResolvedApiBase(getApiBaseUrl());
+                }}
+              >
+                Reset
+              </Button>
+            </Stack>
+          </Stack>
           <Stack spacing={1}>
             {logs.length === 0 && (
               <Typography variant="body2" color="text.secondary">

@@ -193,6 +193,8 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
               label="Attach Photo / Video (optional)"
               qrDocType="issue-photo"
               qrLinkedTo={issue.id}
+              linkedToType="issue-report"
+              linkedToId={issue.id}
             />
           </Box>
         )}
@@ -310,6 +312,8 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
                   label="Resolution Evidence — Photo / Video (optional)"
                   qrDocType="issue-photo"
                   qrLinkedTo={issue.id}
+                  linkedToType="issue-resolution"
+                  linkedToId={issue.id}
                 />
                 <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                   <Button

@@ -18,15 +18,13 @@ import {
 import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
 import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
 import LightbulbOutlinedIcon from "@mui/icons-material/LightbulbOutlined";
-import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
-import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
 import { NavLink } from "react-router-dom";
 
 const PRIMARY_TABS = [
   { label: "Home",      icon: <HomeOutlinedIcon />,           path: "/" },
   { label: "Projects",  icon: <AssignmentOutlinedIcon />,     path: "/projects" },
-  { label: "Installs",  icon: <TableChartOutlinedIcon />,     path: "/installations/assets" },
+  { label: "Project Assets", icon: <TableChartOutlinedIcon />, path: "/installations/assets" },
   { label: "Issues",    icon: <ErrorOutlineOutlinedIcon />,   path: "/issues" },
   { label: "More",      icon: <MenuOutlinedIcon />,           path: "__more__" },
 ];
@@ -35,8 +33,6 @@ const MORE_ITEMS = [
   { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
   { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents" },
   { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,          to: "/tips" },
-  { label: "Admin",             icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin" },
-  { label: "Settings",          icon: <SettingsOutlinedIcon />,           to: "/settings" },
   { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,      to: "/profile" },
 ];
 

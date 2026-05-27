@@ -1,7 +1,11 @@
 import api from "./api";
 import type { WorkflowConfig, UpsertWorkflowConfigInput, WorkflowConfigStatus } from "../types/workflowConfig";
+import offlineStore from "./offlineStore";
 
 const LS_KEY = (productId: string) => `workflow_configs_v1_${productId}`;
+const CACHE_ALL_KEY = "workflow-configs:all";
+const CACHE_PRODUCT_KEY = (productId: string) => `workflow-configs:product:${productId}`;
+const CACHE_ID_KEY = (id: string) => `workflow-configs:id:${id}`;
 
 function lsRead(productId: string): WorkflowConfig[] {
   try {
@@ -36,15 +40,25 @@ function lsReadAll(): WorkflowConfig[] {
   } catch { return []; }
 }
 
+async function cacheConfigs(configs: WorkflowConfig[]): Promise<void> {
+  await Promise.all(
+    configs.map((config) => offlineStore.saveCache(CACHE_ID_KEY(config.id), config))
+  );
+}
+
 export const workflowConfigService = {
   async getAll(status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
     try {
       const params = status ? `?status=${status}` : "";
       const res = await api.get<WorkflowConfig[]>(`/workflow-configs${params}`);
+      if (!status) await offlineStore.saveCache(CACHE_ALL_KEY, res.data);
+      await cacheConfigs(res.data);
       return res.data;
     } catch {
-      const cached = lsReadAll();
-      return status ? cached.filter((c) => c.status === status) : cached;
+      const cached = !status ? await offlineStore.getCache<WorkflowConfig[]>(CACHE_ALL_KEY) : null;
+      const all = cached ?? lsReadAll();
+      const filtered = status ? all.filter((c) => c.status === status) : all;
+      return filtered;
     }
   },
 
@@ -54,23 +68,35 @@ export const workflowConfigService = {
       const res = await api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}${params}`);
       // Only cache unfiltered results — a status-filtered response would corrupt the cache
       // for callers that need all statuses (e.g. WorkInstructions table).
-      if (!status) lsWrite(productId, res.data);
+      if (!status) {
+        lsWrite(productId, res.data);
+        await offlineStore.saveCache(CACHE_PRODUCT_KEY(productId), res.data);
+      }
+      await cacheConfigs(res.data);
       return res.data;
     } catch (err: unknown) {
       console.warn("[workflowConfigService] API unavailable, falling back to localStorage", err);
-      const cached = lsRead(productId);
-      return status ? cached.filter((c) => c.status === status) : cached;
+      const cached = !status ? await offlineStore.getCache<WorkflowConfig[]>(CACHE_PRODUCT_KEY(productId)) : null;
+      if (cached && cached.length > 0) return status ? cached.filter((c) => c.status === status) : cached;
+      const local = lsRead(productId);
+      return status ? local.filter((c) => c.status === status) : local;
     }
   },
 
   async getById(id: string): Promise<WorkflowConfig | null> {
     try {
       const res = await api.get<WorkflowConfig>(`/workflow-configs/${id}`);
+      await offlineStore.saveCache(CACHE_ID_KEY(id), res.data);
       return res.data;
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) return null;
       console.warn("[workflowConfigService] getById failed", err);
+      const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
+      if (cached) return cached;
+      const all = lsReadAll();
+      const local = all.find((c) => c.id === id);
+      if (local) return local;
       return null;
     }
   },

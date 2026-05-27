@@ -1,12 +1,12 @@
 import {
-  Box, Button, Divider, Drawer, IconButton, Stack,
-  Tooltip, Typography,
+  Box, Button, Divider, Drawer, IconButton, Stack, Typography,
 } from "@mui/material";
 import HelpOutlineOutlinedIcon from "@mui/icons-material/HelpOutlineOutlined";
 import ReplayOutlinedIcon from "@mui/icons-material/ReplayOutlined";
 import AutoAwesomeOutlinedIcon from "@mui/icons-material/AutoAwesomeOutlined";
 import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
+import { useEffect } from "react";
 import type { OnboardingControls } from "../hooks/useOnboarding";
 
 interface Props {
@@ -16,23 +16,14 @@ interface Props {
 export default function HelpCenterLauncher({ controls }: Props) {
   const { helpOpen, openHelp, closeHelp, replayTour, resetOnboarding, flags } = controls;
 
+  useEffect(() => {
+    const handler = () => openHelp();
+    window.addEventListener("open-help-drawer", handler);
+    return () => window.removeEventListener("open-help-drawer", handler);
+  }, [openHelp]);
+
   return (
     <>
-      {/* Floating launcher button — rendered in sidebar via data-tour attribute */}
-      <Tooltip title="Help & tours" placement="right">
-        <IconButton
-          size="small"
-          onClick={openHelp}
-          data-tour="help-launcher"
-          sx={{
-            color: "text.secondary",
-            "&:hover": { color: "primary.main" },
-          }}
-        >
-          <HelpOutlineOutlinedIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
-
       {/* Help drawer */}
       <Drawer
         anchor="right"

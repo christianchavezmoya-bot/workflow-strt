@@ -3,6 +3,10 @@
  * Package.swift, so Capacitor 8's SPM build silently omits it. This script
  * writes a minimal Package.swift shim into the plugin's node_modules folder
  * after every `npm install` so that `npx cap sync ios` picks it up correctly.
+ *
+ * The plugin ships a legacy Objective-C registration shim (`Plugin.m`) alongside
+ * a modern Swift `CAPBridgedPlugin` implementation. SwiftPM cannot compile a
+ * mixed Swift/Objective-C target, so we expose only the Swift source here.
  */
 
 const fs = require("fs");
@@ -38,8 +42,7 @@ let package = Package(
                 .product(name: "Cordova", package: "capacitor-swift-pm")
             ],
             path: "ios/Plugin",
-            sources: ["Plugin.swift", "Plugin.m", "Plugin.h"],
-            publicHeadersPath: "."
+            sources: ["Plugin.swift"]
         )
     ]
 )

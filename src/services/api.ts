@@ -1,19 +1,7 @@
 import axios from "axios";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
-
-// Automatically determine API base URL based on current hostname
-const getApiBaseUrl = () => {
-  // If VITE_API_BASE is explicitly set, use it
-  if (import.meta.env.VITE_API_BASE) {
-    return import.meta.env.VITE_API_BASE;
-  }
-
-  // Otherwise, use the same host as the frontend
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  return `${protocol}//${hostname}:4000/api`;
-};
+import { getApiBaseUrl } from "./apiBase";
 
 const api = axios.create({
   baseURL: getApiBaseUrl(),
@@ -101,6 +89,7 @@ const silentRefresh = async () => {
 
 api.interceptors.request.use(async (config) => {
   const url = config.url ?? "";
+  config.baseURL = getApiBaseUrl();
 
   // Skip refresh for the refresh call itself and for login-related endpoints
   if (!url.includes("/auth/refresh") && !url.includes("/auth/login")) {

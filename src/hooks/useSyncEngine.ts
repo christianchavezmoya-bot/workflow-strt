@@ -13,10 +13,15 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
+import { Network } from "@capacitor/network";
 import api from "../services/api";
 import {
+  entityGetAsset,
+  entityPutAsset,
   pendingAdd,
   pendingCount,
+  pendingGetByEntityId,
   pendingGetAll,
   pendingGetDue,
   pendingMarkRetry,
@@ -26,6 +31,12 @@ import {
   type PendingAction,
   type PendingActionMethod,
 } from "../services/localDB";
+import offlineStore, { type OfflineRun } from "../services/offlineStore";
+import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
+import type { ProjectAsset } from "../types/projectAsset";
+import type { SignatureEvent } from "../types/signature";
+import { mediaStore } from "../services/mediaStore";
+import syncQueue from "../services/syncQueue";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -66,6 +77,149 @@ export interface QueueOrSendOpts {
 
 // ── Singleton flush lock so multiple hook instances don't double-flush ────────
 let _flushing = false;
+
+function isNetworkLikeError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return !navigator.onLine;
+  const candidate = error as { response?: unknown; code?: string; message?: string };
+  if (candidate.response) return false;
+  return (
+    !navigator.onLine ||
+    candidate.code === "ECONNABORTED" ||
+    candidate.code === "ERR_NETWORK" ||
+    candidate.message === "Network Error"
+  );
+}
+
+async function markRunSyncedFromServer(run: AssetWorkflowRun, fallbackRunId: string): Promise<void> {
+  const cachedRun = await offlineStore.getRun(fallbackRunId);
+  const assetRecord = await entityGetAsset(run.assetId);
+  const projectId = cachedRun?.projectId ?? assetRecord?.projectId ?? "";
+  const syncedRun: OfflineRun = {
+    ...run,
+    projectId,
+    serverRunId: run.id,
+    localRunId: cachedRun?.localRunId ?? run.id,
+    localStatus: "Synced",
+    lastLocalSavedAt: new Date().toISOString(),
+    dirty: false,
+    syncError: undefined,
+  };
+  await offlineStore.saveRun(syncedRun);
+}
+
+function remapRunIdInUrl(url: string, oldRunId: string, newRunId: string): string {
+  return url.split(oldRunId).join(newRunId);
+}
+
+async function processRunCreateAction(action: PendingAction, responseData: unknown): Promise<void> {
+  if (!responseData || typeof responseData !== "object") return;
+  const serverRun = responseData as AssetWorkflowRun;
+  const localRun = await offlineStore.getRun(action.entityId);
+  const otherPending = (await pendingGetByEntityId(action.entityId)).filter((item: PendingAction) => item.id !== action.id);
+  const hasFollowUpOps = otherPending.length > 0;
+
+  const mergedRun: OfflineRun = {
+    ...serverRun,
+    projectId: localRun?.projectId ?? (await entityGetAsset(serverRun.assetId))?.projectId ?? "",
+    localRunId: localRun?.localRunId ?? action.entityId,
+    serverRunId: serverRun.id,
+    stepResultsJson: localRun?.stepResultsJson ?? serverRun.stepResultsJson,
+    issuesJson: localRun?.issuesJson ?? serverRun.issuesJson,
+    timeTrackingJson: localRun?.timeTrackingJson ?? serverRun.timeTrackingJson,
+    productiveSeconds: localRun?.productiveSeconds ?? serverRun.productiveSeconds,
+    downtimeSeconds: localRun?.downtimeSeconds ?? serverRun.downtimeSeconds,
+    downtimeEvents: localRun?.downtimeEvents ?? serverRun.downtimeEvents,
+    status: localRun?.status ?? serverRun.status,
+    isLocked: localRun?.isLocked ?? serverRun.isLocked,
+    completedAt: localRun?.completedAt ?? serverRun.completedAt,
+    completedByName: localRun?.completedByName ?? serverRun.completedByName,
+    bomActualJson: localRun?.bomActualJson ?? serverRun.bomActualJson,
+    installerSignedAt: localRun?.installerSignedAt ?? serverRun.installerSignedAt,
+    customerSignedAt: localRun?.customerSignedAt ?? serverRun.customerSignedAt,
+    signatureStatus: localRun?.signatureStatus ?? serverRun.signatureStatus,
+    localStatus: hasFollowUpOps ? "PendingSync" : "Synced",
+    lastLocalSavedAt: localRun?.lastLocalSavedAt ?? new Date().toISOString(),
+    dirty: hasFollowUpOps,
+    syncError: undefined,
+  };
+
+  await offlineStore.saveIdMapping("workflow-run", action.entityId, serverRun.id);
+  await offlineStore.saveRun(mergedRun);
+  if (action.entityId !== serverRun.id) {
+    await syncQueue.replaceRunIdReferences(action.entityId, serverRun.id);
+    await offlineStore.deleteRun(action.entityId);
+  }
+}
+
+async function markRunSyncFailed(runId: string, error: string): Promise<void> {
+  const cachedRun = await offlineStore.getRun(runId);
+  if (!cachedRun) return;
+  await offlineStore.saveRun({
+    ...cachedRun,
+    localStatus: "FailedSync",
+    dirty: true,
+    syncError: error,
+    lastLocalSavedAt: cachedRun.lastLocalSavedAt ?? new Date().toISOString(),
+  });
+}
+
+async function markRunSyncing(runId: string): Promise<void> {
+  const cachedRun = await offlineStore.getRun(runId);
+  if (!cachedRun) return;
+  await offlineStore.saveRun({
+    ...cachedRun,
+    localStatus: "Syncing",
+    dirty: true,
+    syncError: undefined,
+    lastLocalSavedAt: cachedRun.lastLocalSavedAt ?? new Date().toISOString(),
+  });
+}
+
+async function markAssetSyncedFromServer(asset: ProjectAsset): Promise<void> {
+  await entityPutAsset({
+    id: asset.id,
+    productId: asset.productId,
+    projectId: asset.projectId,
+    data: asset,
+    dirty: false,
+  });
+}
+
+async function processSyncedAction(action: PendingAction, responseData: unknown): Promise<void> {
+  if (action.opType === "RUN_CREATE") {
+    await processRunCreateAction(action, responseData);
+    return;
+  }
+
+  if (action.opType === "SIGNATURE_SUBMIT") {
+    const cachedRun = await offlineStore.getRun(action.entityId);
+    const signature = responseData as SignatureEvent | undefined;
+    const payload = action.body as { signerRole?: "Installer" | "Customer" } | undefined;
+    if (cachedRun && payload?.signerRole) {
+      const signedAt = signature?.signedAtUtc ?? new Date().toISOString();
+      await offlineStore.saveRun({
+        ...cachedRun,
+        installerSignedAt: payload.signerRole === "Installer" ? signedAt : cachedRun.installerSignedAt,
+        customerSignedAt: payload.signerRole === "Customer" ? signedAt : cachedRun.customerSignedAt,
+        signatureStatus: payload.signerRole === "Customer" ? "Signed" : (cachedRun.customerSignedAt ? "Signed" : "PendingCustomer"),
+        localStatus: "Synced",
+        dirty: false,
+        syncError: undefined,
+        lastLocalSavedAt: signedAt,
+      });
+    }
+    return;
+  }
+
+  if (action.entityType === "workflow-run" && responseData && typeof responseData === "object") {
+    await markRunSyncedFromServer(responseData as AssetWorkflowRun, action.entityId);
+    return;
+  }
+
+  if (action.entityType === "asset" && responseData && typeof responseData === "object") {
+    await markAssetSyncedFromServer(responseData as ProjectAsset);
+  }
+}
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
@@ -111,18 +265,35 @@ export function useSyncEngine(): SyncState {
     for (const action of due) {
       try {
         await pendingSetStatus(action.id, "uploading");
-        await api.request({
-          url: action.url,
+        if (action.entityType === "workflow-run") {
+          await markRunSyncing(action.entityId);
+        }
+        const mappedRunId = action.entityType === "workflow-run"
+          ? await offlineStore.getMappedId("workflow-run", action.entityId)
+          : null;
+        const requestUrl = mappedRunId
+          ? remapRunIdInUrl(action.url, action.entityId, mappedRunId)
+          : action.url;
+        const requestData = await mediaStore.resolveUploadPayload(action.body);
+        const response = await api.request({
+          url: requestUrl,
           method: action.method,
-          data: action.body,
+          data: requestData,
         });
+        await processSyncedAction(action, response.data);
         await pendingRemove(action.id);
         await syncMetaSet(action.entityType);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         await pendingMarkRetry(action.id, msg);
+        if (action.entityType === "workflow-run") {
+          await markRunSyncFailed(action.entityId, msg);
+        }
         anyError = true;
-        // Don't break — try remaining actions in queue
+        if (isNetworkLikeError(e)) {
+          setConnectivity(navigator.onLine ? "server-unreachable" : "offline");
+          break;
+        }
       }
     }
 
@@ -165,6 +336,30 @@ export function useSyncEngine(): SyncState {
     return () => {
       window.removeEventListener("online",  handleOnline);
       window.removeEventListener("offline", handleOffline);
+    };
+  }, [flush]);
+
+  // Native mobile connectivity events are more reliable than window online/offline.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let active = true;
+    let remove: (() => void) | undefined;
+
+    void Network.addListener("networkStatusChange", (status) => {
+      if (!active) return;
+      if (status.connected) {
+        setConnectivity((prev) => prev === "token-expired" ? prev : "online");
+        void flush();
+      } else {
+        setConnectivity("offline");
+      }
+    }).then((listener) => {
+      remove = () => { void listener.remove(); };
+    });
+
+    return () => {
+      active = false;
+      remove?.();
     };
   }, [flush]);
 
@@ -215,7 +410,8 @@ export function useSyncEngine(): SyncState {
 
     if (navigator.onLine) {
       try {
-        const res = await api.request<T>({ url, method, data: body });
+        const requestBody = await mediaStore.resolveUploadPayload(body);
+        const res = await api.request<T>({ url, method, data: requestBody });
         setLastSyncAt(new Date());
         await syncMetaSet(entityType);
         return res.data;

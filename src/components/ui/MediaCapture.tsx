@@ -1,29 +1,29 @@
 /**
  * MediaCapture.tsx
  * Reusable photo + video capture widget.
- * Renders "Add Photo" / "Add Video" buttons backed by hidden file inputs.
- * Captured items are stored as base64 data URLs and shown as thumbnails.
+ * On native mobile, captures can be persisted to Filesystem and referenced by
+ * durable file-backed tokens instead of in-memory data URLs.
  */
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Box, Button, IconButton, Stack, Tooltip, Typography } from "@mui/material";
 import PhotoCameraOutlinedIcon from "@mui/icons-material/PhotoCameraOutlined";
 import VideocamOutlinedIcon from "@mui/icons-material/VideocamOutlined";
 import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import PlayCircleOutlineOutlinedIcon from "@mui/icons-material/PlayCircleOutlineOutlined";
 import QRUploadButton from "../QRUploadButton";
+import { mediaStore } from "../../services/mediaStore";
 
 interface Props {
   media: string[];
   onChange: (media: string[]) => void;
   label?: string;
   disabled?: boolean;
+  allowedKinds?: Array<"photo" | "video">;
+  linkedToType?: "run-step" | "issue-report" | "issue-resolution" | "signature";
+  linkedToId?: string;
   /** When provided, a "Upload from Phone" QR button is shown */
   qrDocType?: string;
   qrLinkedTo?: string;
-}
-
-function isVideo(dataUrl: string) {
-  return dataUrl.startsWith("data:video");
 }
 
 function toBase64(file: File): Promise<string> {
@@ -35,16 +35,43 @@ function toBase64(file: File): Promise<string> {
   });
 }
 
-export default function MediaCapture({ media, onChange, label, disabled = false, qrDocType, qrLinkedTo }: Props) {
+export default function MediaCapture({
+  media,
+  onChange,
+  label,
+  disabled = false,
+  allowedKinds = ["photo", "video"],
+  linkedToType,
+  linkedToId,
+  qrDocType,
+  qrLinkedTo,
+}: Props) {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const [previewMedia, setPreviewMedia] = useState<string[]>(media);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(media.map((item) => mediaStore.resolveMediaValue(item).catch(() => item))).then((resolved) => {
+      if (!cancelled) setPreviewMedia(resolved);
+    });
+    return () => { cancelled = true; };
+  }, [media]);
+
+  async function persistValue(source: File | string, kind: "photo" | "video"): Promise<string> {
+    if (!linkedToType || !linkedToId) {
+      return typeof source === "string" ? source : await toBase64(source);
+    }
+    return await mediaStore.persistMediaValue(source, kind, linkedToType, linkedToId);
+  }
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     const results: string[] = [];
     for (const file of Array.from(files)) {
       try {
-        results.push(await toBase64(file));
+        const kind = file.type.startsWith("video/") ? "video" : "photo";
+        results.push(await persistValue(file, kind));
       } catch {
         // skip unreadable files
       }
@@ -67,53 +94,64 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
 
       {/* Capture buttons */}
       <Stack direction="row" spacing={1} flexWrap="wrap" mb={media.length > 0 ? 1.25 : 0}>
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<PhotoCameraOutlinedIcon />}
-          disabled={disabled}
-          onClick={() => photoInputRef.current?.click()}
-          sx={{ fontSize: 12 }}
-        >
-          Add Photo
-        </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<VideocamOutlinedIcon />}
-          disabled={disabled}
-          onClick={() => videoInputRef.current?.click()}
-          sx={{ fontSize: 12 }}
-        >
-          Add Video
-        </Button>
+        {allowedKinds.includes("photo") && (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<PhotoCameraOutlinedIcon />}
+            disabled={disabled}
+            onClick={() => photoInputRef.current?.click()}
+            sx={{ fontSize: 12 }}
+          >
+            Add Photo
+          </Button>
+        )}
+        {allowedKinds.includes("video") && (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<VideocamOutlinedIcon />}
+            disabled={disabled}
+            onClick={() => videoInputRef.current?.click()}
+            sx={{ fontSize: 12 }}
+          >
+            Add Video
+          </Button>
+        )}
         {qrDocType && qrLinkedTo && !disabled && (
           <QRUploadButton
             docType={qrDocType}
             linkedTo={qrLinkedTo}
             label="Phone"
             onUploaded={() => {}}
-            onUploadedWithData={(_docId, dataUrl) => onChange([...media, dataUrl])}
+            onUploadedWithData={(_docId, dataUrl) => {
+              const kind = dataUrl.startsWith("data:video") ? "video" : "photo";
+              void persistValue(dataUrl, kind).then((stored) => onChange([...media, stored]));
+            }}
           />
         )}
 
         {/* Hidden inputs */}
-        <input
-          ref={photoInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          style={{ display: "none" }}
-          onChange={(e) => { void handleFiles(e.target.files); e.target.value = ""; }}
-        />
-        <input
-          ref={videoInputRef}
-          type="file"
-          accept="video/*"
-          multiple
-          style={{ display: "none" }}
-          onChange={(e) => { void handleFiles(e.target.files); e.target.value = ""; }}
-        />
+        {allowedKinds.includes("photo") && (
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => { void handleFiles(e.target.files); e.target.value = ""; }}
+          />
+        )}
+        {allowedKinds.includes("video") && (
+          <input
+            ref={videoInputRef}
+            type="file"
+            accept="video/*"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => { void handleFiles(e.target.files); e.target.value = ""; }}
+          />
+        )}
       </Stack>
 
       {/* Thumbnail grid */}
@@ -125,9 +163,9 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
             gap: 0.75,
           }}
         >
-          {media.map((src, idx) => (
+          {previewMedia.map((src, idx) => (
             <Box
-              key={idx}
+              key={`${media[idx] ?? src}-${idx}`}
               sx={{
                 position: "relative",
                 width: "100%",
@@ -139,7 +177,7 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
                 bgcolor: "background.default",
               }}
             >
-              {isVideo(src) ? (
+              {mediaStore.getMediaKind(media[idx] ?? src) === "video" ? (
                 // Video placeholder — show icon (base64 video is too large to render inline efficiently)
                 <Box
                   sx={{

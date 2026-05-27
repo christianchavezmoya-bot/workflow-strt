@@ -65,6 +65,7 @@ import type { FeatureDependency } from "../../types/featureDependency";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
 import type { WorkflowType } from "../../types/workflowType";
+import { Capacitor } from "@capacitor/core";
 import WorkOrderRunner from "./WorkOrderRunner";
 
 // ------------------------------------------------------------------
@@ -909,6 +910,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   // ------------------------------------------------------------------
 
   const isReadOnly = currentConfig?.status === "Published" || currentConfig?.status === "Archived";
+  const isMobile = Capacitor.isNativePlatform();
 
   return (
     <Stack spacing={2}>
@@ -1101,6 +1103,17 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             onMove={moveStep}
           />
         </Grid>
+
+        {isMobile && (
+          <Grid item xs={12}>
+            <MobileStepStrip
+              stepsSorted={stepsSorted}
+              selectedStepId={selectedStepId}
+              onSelect={setSelectedStepId}
+              onAdd={addStep}
+            />
+          </Grid>
+        )}
 
         {/* Middle: step editor */}
         <Grid item xs={12} md={5}>
@@ -1366,6 +1379,72 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     </Stack>
   );
 };
+
+// ------------------------------------------------------------------
+// MobileStepStrip
+// ------------------------------------------------------------------
+
+interface MobileStepStripProps {
+  stepsSorted: WorkflowStep[];
+  selectedStepId: string | null;
+  onSelect: (id: string) => void;
+  onAdd: () => void;
+}
+
+function MobileStepStrip({ stepsSorted, selectedStepId, onSelect, onAdd }: MobileStepStripProps) {
+  return (
+    <Paper className="glass-card" sx={{ p: 1.5 }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ overflowX: "auto", pb: 0.25 }}>
+        {stepsSorted.map((step) => {
+          const isSelected = step.id === selectedStepId;
+          return (
+            <Box
+              key={step.id}
+              onClick={() => onSelect(step.id)}
+              sx={{
+                width: 38,
+                height: 38,
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                bgcolor: isSelected ? "primary.main" : "action.selected",
+                color: isSelected ? "primary.contrastText" : "text.primary",
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 13,
+                flexShrink: 0,
+                border: "2px solid",
+                borderColor: isSelected ? "primary.main" : "divider",
+                transition: "background-color 0.15s",
+                userSelect: "none",
+              }}
+            >
+              {step.order}
+            </Box>
+          );
+        })}
+        <Tooltip title="Add step">
+          <IconButton
+            size="small"
+            onClick={onAdd}
+            sx={{
+              width: 38,
+              height: 38,
+              border: "2px dashed",
+              borderColor: "primary.main",
+              color: "primary.main",
+              borderRadius: "50%",
+              flexShrink: 0,
+            }}
+          >
+            <AddOutlined sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+    </Paper>
+  );
+}
 
 // ------------------------------------------------------------------
 // StepListPanel

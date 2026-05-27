@@ -558,6 +558,8 @@ const IssuesBoard = () => {
                                     label="Resolution Evidence — Photo / Video (optional)"
                                     qrDocType="issue-photo"
                                     qrLinkedTo={iss.issueId}
+                                    linkedToType="issue-resolution"
+                                    linkedToId={iss.issueId}
                                   />
                                 </Box>
                               </Stack>
