@@ -231,6 +231,8 @@ function DocPreviewDialog({
 export default function TipsAndTricksPage() {
   const { user } = useAuth();
   const can = usePermissions();
+  const canUploadTips = can.documents.upload;
+  const canDeleteTips = can.documents.delete;
 
   const [docs, setDocs] = useState<DocumentRecord[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -400,6 +402,7 @@ export default function TipsAndTricksPage() {
   };
 
   const handleSaveTip = async () => {
+    if (!canUploadTips) return;
     if (!addTitle.trim()) return;
     setSaving(true);
     try {
@@ -440,6 +443,7 @@ export default function TipsAndTricksPage() {
   };
 
   const handleDelete = async (id: string) => {
+    if (!canDeleteTips) return;
     await documentService.deleteDocument(id);
     await loadDocs();
   };
@@ -658,7 +662,7 @@ export default function TipsAndTricksPage() {
                         <DownloadOutlined sx={{ fontSize: 14, color: "text.disabled" }} />
                       </IconButton>
                     )}
-                    {can.modifyData && (
+                    {canDeleteTips && (
                       <IconButton
                         size="small"
                         color="error"
@@ -728,7 +732,7 @@ export default function TipsAndTricksPage() {
                         Download
                       </Button>
                     )}
-                    {can.modifyData && (
+                    {canDeleteTips && (
                       <Button size="small" color="error" onClick={() => void handleDelete(doc.id)}>
                         Delete
                       </Button>
@@ -783,7 +787,7 @@ export default function TipsAndTricksPage() {
               </Tooltip>
             </Box>
 
-            {can.modifyData && (
+            {canUploadTips && (
               <>
                 <QRUploadButton
                   docType="tips"

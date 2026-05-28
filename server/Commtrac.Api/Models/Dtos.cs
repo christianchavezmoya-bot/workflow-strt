@@ -586,13 +586,28 @@ public record CustomFieldDefinitionDto(
     bool IsActive
 );
 
+public record ProjectDomainPermissions(bool View, bool Edit, bool Approve, bool Delete);
+public record InstallationAssetsDomainPermissions(bool View, bool Edit, bool RunWorkflow, bool Delete);
+public record WorkInstructionsBuilderDomainPermissions(bool View, bool Build, bool Publish, bool Archive);
+public record DocumentsDomainPermissions(bool View, bool Upload, bool Delete);
+public record SettingsDomainPermissions(bool View, bool Edit);
+
+public record DomainPermissions(
+    ProjectDomainPermissions Projects,
+    InstallationAssetsDomainPermissions InstallationAssets,
+    WorkInstructionsBuilderDomainPermissions WorkInstructionsBuilder,
+    DocumentsDomainPermissions Documents,
+    SettingsDomainPermissions Settings
+);
+
 public record RolePermissions(
     bool ViewOnly,
     bool CreateDeleteTables,
     bool CreateUsers,
     bool EditFields,
     bool ModifyData,
-    bool EditForms
+    bool EditForms,
+    DomainPermissions? Domains = null
 );
 
 public record RoleConfigDto(

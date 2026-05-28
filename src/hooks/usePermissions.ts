@@ -1,17 +1,47 @@
 import { useEffect, useMemo, useState } from "react";
-import { defaultDomains, roleConfigService, RolePermissions } from "../services/roleConfigService";
+import { defaultDomains, roleConfigService, RolePermissions, DomainPermissions } from "../services/roleConfigService";
 import { useAuth } from "./useAuth";
 
+const createRolePermissions = (
+  base: Omit<RolePermissions, "domains">,
+  documentOverrides?: Partial<DomainPermissions["documents"]>
+): RolePermissions => {
+  const domains = defaultDomains(base);
+  return {
+    ...base,
+    domains: {
+      ...domains,
+      documents: {
+        ...domains.documents,
+        ...(documentOverrides ?? {}),
+      },
+    },
+  };
+};
+
 const FALLBACK_PERMISSIONS: Record<string, RolePermissions> = {
-  Admin:             { viewOnly: false, createDeleteTables: true,  createUsers: true,  editFields: true,  modifyData: true,  editForms: true  },
-  "Project Manager": { viewOnly: false, createDeleteTables: true,  createUsers: false, editFields: true,  modifyData: true,  editForms: true  },
-  Supervisor:        { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: true,  editForms: true  },
-  Engineer:          { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: false },
-  "QA Inspector":    { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: true  },
-  Installer:         { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: false, editForms: true  },
-  Technician:        { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: true  },
-  Client:            { viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false },
-  Viewer:            { viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false },
+  Admin:             createRolePermissions({ viewOnly: false, createDeleteTables: true,  createUsers: true,  editFields: true,  modifyData: true,  editForms: true }, { upload: true, delete: true }),
+  "Project Manager": createRolePermissions({ viewOnly: false, createDeleteTables: true,  createUsers: false, editFields: true,  modifyData: true,  editForms: true }, { upload: true, delete: true }),
+  Supervisor:        createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: true,  editForms: true }, { upload: false, delete: false }),
+  Engineer:          createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: false }, { upload: false, delete: false }),
+  "QA Inspector":    createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: true }, { upload: false, delete: false }),
+  Installer:         createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: false, editForms: true }, { upload: false, delete: false }),
+  Technician:        createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: true }, { upload: false, delete: false }),
+  Client:            createRolePermissions({ viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false }, { upload: false, delete: false }),
+  Viewer:            createRolePermissions({ viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false }, { upload: false, delete: false }),
+};
+
+const resolveDomains = (roleName: string | undefined, permissions: RolePermissions) => {
+  if (permissions.domains) {
+    return permissions.domains;
+  }
+
+  const fallback = roleName ? FALLBACK_PERMISSIONS[roleName] : undefined;
+  if (fallback?.domains) {
+    return fallback.domains;
+  }
+
+  return defaultDomains(permissions);
 };
 
 export const usePermissions = () => {
@@ -45,7 +75,7 @@ export const usePermissions = () => {
     const p = perms ?? FALLBACK_PERMISSIONS[user?.role ?? ""] ?? FALLBACK_PERMISSIONS.Viewer;
 
     // Tier 2: use saved domains or derive from Tier 1 flags
-    const domains = p.domains ?? defaultDomains(p);
+    const domains = resolveDomains(user?.role, p);
 
     if (p.viewOnly) {
       return {

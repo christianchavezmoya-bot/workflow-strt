@@ -98,10 +98,17 @@ const KNOWN_ROLE_ORDER = [
 ] as const;
 
 const createRolePermissions = (
-  base: Omit<RolePermissions, "domains">
+  base: Omit<RolePermissions, "domains">,
+  documentOverrides?: Partial<DomainPermissions["documents"]>
 ): RolePermissions => ({
   ...base,
-  domains: defaultDomains(base),
+  domains: {
+    ...defaultDomains(base),
+    documents: {
+      ...defaultDomains(base).documents,
+      ...(documentOverrides ?? {}),
+    },
+  },
 });
 
 const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
@@ -112,7 +119,7 @@ const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
     editFields: true,
     modifyData: true,
     editForms: true,
-  }),
+  }, { upload: true, delete: true }),
   "Project Manager": createRolePermissions({
     viewOnly: false,
     createDeleteTables: true,
@@ -120,7 +127,7 @@ const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
     editFields: true,
     modifyData: true,
     editForms: true,
-  }),
+  }, { upload: true, delete: true }),
   Engineer: createRolePermissions({
     viewOnly: false,
     createDeleteTables: false,
@@ -128,7 +135,7 @@ const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
     editFields: false,
     modifyData: true,
     editForms: false,
-  }),
+  }, { upload: false, delete: false }),
   Viewer: createRolePermissions({
     viewOnly: true,
     createDeleteTables: false,
@@ -136,7 +143,7 @@ const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
     editFields: false,
     modifyData: false,
     editForms: false,
-  }),
+  }, { upload: false, delete: false }),
   Installer: createRolePermissions({
     viewOnly: false,
     createDeleteTables: false,
@@ -144,7 +151,7 @@ const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
     editFields: true,
     modifyData: false,
     editForms: true,
-  }),
+  }, { upload: false, delete: false }),
   Supervisor: createRolePermissions({
     viewOnly: false,
     createDeleteTables: false,
@@ -152,7 +159,7 @@ const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
     editFields: true,
     modifyData: true,
     editForms: true,
-  }),
+  }, { upload: false, delete: false }),
   Technician: createRolePermissions({
     viewOnly: false,
     createDeleteTables: false,
@@ -160,7 +167,7 @@ const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
     editFields: false,
     modifyData: true,
     editForms: true,
-  }),
+  }, { upload: false, delete: false }),
   "QA Inspector": createRolePermissions({
     viewOnly: false,
     createDeleteTables: false,
@@ -168,7 +175,7 @@ const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
     editFields: false,
     modifyData: true,
     editForms: true,
-  }),
+  }, { upload: false, delete: false }),
   Client: createRolePermissions({
     viewOnly: true,
     createDeleteTables: false,
@@ -176,20 +183,20 @@ const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
     editFields: false,
     modifyData: false,
     editForms: false,
-  }),
+  }, { upload: false, delete: false }),
 };
 
 const getRoleTemplate = (roleName: string): RolePermissions =>
   KNOWN_ROLE_DEFAULTS[roleName] ?? KNOWN_ROLE_DEFAULTS.Viewer;
 
-const normalizeRolePermissions = (permissions: RolePermissions): RolePermissions => ({
+const normalizeRolePermissions = (roleName: string, permissions: RolePermissions): RolePermissions => ({
   viewOnly: permissions.viewOnly,
   createDeleteTables: permissions.createDeleteTables,
   createUsers: permissions.createUsers,
   editFields: permissions.editFields,
   modifyData: permissions.modifyData,
   editForms: permissions.editForms,
-  domains: permissions.domains ?? defaultDomains({
+  domains: permissions.domains ?? getRoleTemplate(roleName).domains ?? defaultDomains({
     viewOnly: permissions.viewOnly,
     createDeleteTables: permissions.createDeleteTables,
     createUsers: permissions.createUsers,
@@ -207,12 +214,12 @@ const buildNormalizedRolesConfig = (
   const requestedNames = Array.from(new Set([...KNOWN_ROLE_ORDER, ...extraRoleNames]));
 
   requestedNames.forEach((roleName) => {
-    merged[roleName] = normalizeRolePermissions(current[roleName] ?? getRoleTemplate(roleName));
+    merged[roleName] = normalizeRolePermissions(roleName, current[roleName] ?? getRoleTemplate(roleName));
   });
 
   Object.entries(current).forEach(([roleName, permissions]) => {
     if (!merged[roleName]) {
-      merged[roleName] = normalizeRolePermissions(permissions);
+      merged[roleName] = normalizeRolePermissions(roleName, permissions);
     }
   });
 
@@ -823,13 +830,9 @@ export const UserManagement: React.FC = () => {
 
     const missingUserRoles = discoveredUserRoles.filter((roleName) => !rolesConfig[roleName]);
     const normalized = buildNormalizedRolesConfig(rolesConfig, discoveredUserRoles);
-    const currentKeys = Object.keys(rolesConfig);
-    const normalizedKeys = Object.keys(normalized);
-    const sameShape =
-      currentKeys.length === normalizedKeys.length &&
-      normalizedKeys.every((roleName) => currentKeys.includes(roleName));
+    const sameConfig = JSON.stringify(normalized) === JSON.stringify(rolesConfig);
 
-    if (!sameShape) {
+    if (!sameConfig) {
       setRolesConfig(normalized);
     }
 

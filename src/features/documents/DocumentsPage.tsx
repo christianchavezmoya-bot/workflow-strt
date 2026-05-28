@@ -193,6 +193,8 @@ function parseFieldsJson(json: string): { customFields: CustomField[]; columnOrd
 export default function DocumentsPage() {
   useAuth(); // keep auth context available for future use
   const can = usePermissions();
+  const canUploadDocuments = can.documents.upload;
+  const canDeleteDocuments = can.documents.delete;
   // ---- data -------------------------------------------------------
   const [docs, setDocs]       = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -375,6 +377,10 @@ export default function DocumentsPage() {
   // ----------------------------------------------------------------
 
   async function saveDoc() {
+    if (!canUploadDocuments) {
+      setAddError("You don't have permission to add documents.");
+      return;
+    }
     if (addForm.mode === "url") {
       if (!addForm.name.trim()) { setAddError("Document name is required."); return; }
       if (!addForm.url.trim())  { setAddError("URL is required."); return; }
@@ -441,6 +447,7 @@ export default function DocumentsPage() {
   }
 
   async function saveEdit() {
+    if (!canUploadDocuments) return;
     if (!editDoc || !editName.trim()) return;
     setEditSaving(true);
     try {
@@ -530,6 +537,10 @@ export default function DocumentsPage() {
   // ----------------------------------------------------------------
 
   async function deleteDocConfirmed() {
+    if (!canDeleteDocuments) {
+      setDeleteError("You don't have permission to delete documents.");
+      return;
+    }
     if (!deleteDoc) return;
     setDeleteLoading(true);
     setDeleteError(null);
@@ -691,7 +702,7 @@ export default function DocumentsPage() {
             </>
           )}
 
-          {can.modifyData && (
+          {canUploadDocuments && (
             <>
               <QRUploadButton
                 docType={activeCategoryId !== "all" ? activeCategoryId : "technical"}
@@ -862,14 +873,14 @@ export default function DocumentsPage() {
                             </IconButton>
                           </Tooltip>
                         )}
-                        {can.modifyData && (
+                        {canUploadDocuments && (
                           <Tooltip title="Edit">
                             <IconButton size="small" onClick={() => openEdit(doc)}>
                               <EditOutlined fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
-                        {can.modifyData && (
+                        {canDeleteDocuments && (
                           <Tooltip title="Delete">
                             <IconButton size="small" color="error" onClick={() => setDeleteDoc(doc)}>
                               <DeleteOutline fontSize="small" />

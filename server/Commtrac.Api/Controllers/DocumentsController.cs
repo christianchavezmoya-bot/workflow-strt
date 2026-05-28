@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace Commtrac.Api.Controllers;
 
@@ -15,6 +16,11 @@ namespace Commtrac.Api.Controllers;
 public class DocumentsController : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly HashSet<string> DocumentManagers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Admin",
+        "Project Manager"
+    };
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
     private readonly IDocumentSearchIndexQueue _searchIndexQueue;
@@ -34,9 +40,13 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<DocumentDto>> Create([FromBody] DocumentDto request)
     {
+        if (!await CanUploadDocumentsAsync())
+        {
+            return Forbid();
+        }
+
         var doc = new DocumentEntity
         {
             Id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString() : request.Id,
@@ -59,10 +69,14 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpPost("upload")]
-    [Authorize(Roles = "Admin,Project Manager")]
     [RequestSizeLimit(50_000_000)]
     public async Task<ActionResult<DocumentDto>> Upload([FromForm] UploadDocumentRequest request)
     {
+        if (!await CanUploadDocumentsAsync())
+        {
+            return Forbid();
+        }
+
         if (request.File == null || request.File.Length == 0)
         {
             return BadRequest("File is required.");
@@ -123,9 +137,13 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpDelete("{id}")]
-    [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
+        if (!await CanDeleteDocumentsAsync())
+        {
+            return Forbid();
+        }
+
         var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
         if (doc is null) return NotFound();
 
@@ -144,9 +162,13 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpPut("{id}")]
-    [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<DocumentDto>> Update(string id, [FromBody] DocumentDto request)
     {
+        if (!await CanUploadDocumentsAsync())
+        {
+            return Forbid();
+        }
+
         var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
         if (doc is null)
         {
@@ -201,6 +223,70 @@ public class DocumentsController : ControllerBase
         }
         await _db.SaveChangesAsync();
         return Ok(new DocumentConfigDto(config.TabsJson, config.FieldsJson));
+    }
+
+    private async Task<bool> CanUploadDocumentsAsync()
+    {
+        return await HasDocumentPermissionAsync((documents) => documents.Upload);
+    }
+
+    private async Task<bool> CanDeleteDocumentsAsync()
+    {
+        return await HasDocumentPermissionAsync((documents) => documents.Delete);
+    }
+
+    private async Task<bool> HasDocumentPermissionAsync(Func<DocumentsDomainPermissions, bool> selector)
+    {
+        var role = User.FindFirstValue(ClaimTypes.Role)?.Trim();
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            return false;
+        }
+
+        var config = await _db.RoleConfigs.AsNoTracking().FirstOrDefaultAsync();
+        if (!string.IsNullOrWhiteSpace(config?.ConfigJson))
+        {
+            try
+            {
+                var roles = JsonSerializer.Deserialize<Dictionary<string, RolePermissions>>(config.ConfigJson, JsonOptions);
+                if (roles != null)
+                {
+                    var matchedRole = roles.FirstOrDefault(entry => string.Equals(entry.Key, role, StringComparison.OrdinalIgnoreCase));
+                    if (!string.IsNullOrWhiteSpace(matchedRole.Key))
+                    {
+                        return selector(ResolveDocumentPermissions(role, matchedRole.Value));
+                    }
+                }
+            }
+            catch
+            {
+                // Fall through to defaults if role config JSON cannot be parsed.
+            }
+        }
+
+        return selector(GetDefaultDocumentPermissions(role));
+    }
+
+    private static DocumentsDomainPermissions ResolveDocumentPermissions(string role, RolePermissions permissions)
+    {
+        if (permissions.Domains?.Documents != null)
+        {
+            return permissions.Domains.Documents;
+        }
+
+        if (DocumentManagers.Contains(role))
+        {
+            return new DocumentsDomainPermissions(true, true, true);
+        }
+
+        return new DocumentsDomainPermissions(true, false, false);
+    }
+
+    private static DocumentsDomainPermissions GetDefaultDocumentPermissions(string role)
+    {
+        return DocumentManagers.Contains(role)
+            ? new DocumentsDomainPermissions(true, true, true)
+            : new DocumentsDomainPermissions(true, false, false);
     }
 
     private static DocumentDto ToDto(DocumentEntity doc, HttpRequest request)
