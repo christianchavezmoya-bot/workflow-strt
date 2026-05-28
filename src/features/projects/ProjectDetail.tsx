@@ -1,7 +1,6 @@
 import { Alert, Box, Button, Chip, Stack, Tab, Tabs, Typography } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import StatusStepper from "../../components/ui/StatusStepper";
 import { demoProducts } from "../../data/demo";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -175,7 +174,6 @@ const ProjectDetail = () => {
         </Button>
       </Stack>
 
-      <StatusStepper type={project.projectType} status={project.status} />
 
       {/* ── Tabs ── */}
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>

@@ -40,14 +40,17 @@ function fmtSize(bytes?: number | null) {
 
 function fmtDate(iso?: string | null) {
   if (!iso) return "";
-  try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+  try {
+    return new Date(iso).toLocaleDateString();
+  } catch {
+    return iso;
+  }
 }
 
 function isImage(ct?: string | null) {
   return !!ct && ct.startsWith("image/");
 }
 
-// ── Document preview dialog ───────────────────────────────────────────────────
 function DocPreviewDialog({
   doc,
   onClose,
@@ -65,17 +68,25 @@ function DocPreviewDialog({
     mountedRef.current = true;
     setBlobUrl(null);
     if (!doc?.downloadUrl) return;
+
     setLoading(true);
-    documentService.openDocument(doc.downloadUrl)
-      .then((url) => { if (mountedRef.current) setBlobUrl(url); })
+    documentService
+      .openDocument(doc.downloadUrl)
+      .then((url) => {
+        if (mountedRef.current) setBlobUrl(url);
+      })
       .catch(() => {})
-      .finally(() => { if (mountedRef.current) setLoading(false); });
-    return () => { mountedRef.current = false; };
+      .finally(() => {
+        if (mountedRef.current) setLoading(false);
+      });
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, [doc?.downloadUrl]);
 
   if (!doc) return null;
 
-  // Title bar height approx 64px, meta footer approx 36px
   const contentHeight = isMobile ? "calc(100dvh - 110px)" : "72vh";
 
   return (
@@ -89,8 +100,6 @@ function DocPreviewDialog({
         sx: {
           borderRadius: isMobile ? 0 : 3,
           bgcolor: "background.paper",
-          // On mobile fullScreen mode the paper already fills the screen.
-          // On desktop constrain height so it doesn't overflow.
           maxHeight: isMobile ? "100dvh" : "90vh",
           height: isMobile ? "100dvh" : "auto",
           display: "flex",
@@ -98,11 +107,12 @@ function DocPreviewDialog({
         },
       }}
     >
-      {/* Fixed title bar */}
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, pb: 1, flexShrink: 0 }}>
         <LightbulbOutlined sx={{ color: "#f59e0b", fontSize: 20 }} />
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="subtitle1" fontWeight={700} noWrap>{doc.name}</Typography>
+          <Typography variant="subtitle1" fontWeight={700} noWrap>
+            {doc.name}
+          </Typography>
           {doc.notes && (
             <Typography variant="caption" color="text.secondary" sx={{ display: "block" }} noWrap>
               {doc.notes}
@@ -123,7 +133,6 @@ function DocPreviewDialog({
         </Stack>
       </DialogTitle>
 
-      {/* Scrollable content fills remaining height */}
       <DialogContent
         sx={{
           p: { xs: 1, sm: 2 },
@@ -171,14 +180,9 @@ function DocPreviewDialog({
           />
         )}
 
-        {/* Meta footer */}
         <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1, flexShrink: 0 }}>
-          {doc.createdBy && (
-            <Typography variant="caption" color="text.disabled">{doc.createdBy}</Typography>
-          )}
-          {doc.uploadedAt && (
-            <Typography variant="caption" color="text.disabled">· {fmtDate(doc.uploadedAt)}</Typography>
-          )}
+          {doc.createdBy && <Typography variant="caption" color="text.disabled">{doc.createdBy}</Typography>}
+          {doc.uploadedAt && <Typography variant="caption" color="text.disabled">• {fmtDate(doc.uploadedAt)}</Typography>}
           {fmtSize(doc.fileSize) && (
             <Chip label={fmtSize(doc.fileSize)} size="small" sx={{ fontSize: "0.6rem", height: 18, ml: "auto" }} />
           )}
@@ -188,13 +192,12 @@ function DocPreviewDialog({
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
 export default function TipsAndTricksPage() {
   const { user } = useAuth();
-  const [docs, setDocs]           = useState<DocumentRecord[]>([]);
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-  const [search, setSearch]       = useState("");
+  const [docs, setDocs] = useState<DocumentRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const [myProductIds, setMyProductIds] = useState<string[]>([]);
   const [productFilter, setProductFilter] = useState<string>("__mine__");
   const [previewDoc, setPreviewDoc] = useState<DocumentRecord | null>(null);
@@ -212,77 +215,103 @@ export default function TipsAndTricksPage() {
     }
   }
 
-  // Load user's assigned product IDs for default filter
   useEffect(() => {
     const role = user?.role ?? "";
     if (["Installer", "Engineer", "Supervisor", "Project Manager"].includes(role)) {
-      projectAssetService.myProjectIds().then(async (projectIds) => {
-        if (!projectIds.length) return;
-        const assetArrays = await Promise.all(
-          projectIds.map((id) => projectAssetService.listByProject(id).catch(() => []))
-        );
-        const ids = Array.from(new Set(assetArrays.flat().map((a) => a.productId).filter(Boolean)));
-        setMyProductIds(ids);
-      }).catch(() => {});
+      projectAssetService
+        .myProjectIds()
+        .then(async (projectIds) => {
+          if (!projectIds.length) return;
+          const assetArrays = await Promise.all(
+            projectIds.map((id) => projectAssetService.listByProject(id).catch(() => []))
+          );
+          const ids = Array.from(new Set(assetArrays.flat().map((a) => a.productId).filter(Boolean)));
+          setMyProductIds(ids);
+        })
+        .catch(() => {});
     }
   }, [user?.role]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
-  // All unique linkedTo values in the tips docs (act as product/topic buckets)
-  const allLinkedIds = useMemo(() =>
-    Array.from(new Set(docs.map((d) => d.linkedTo).filter(Boolean))),
+  const allLinkedIds = useMemo(
+    () => Array.from(new Set(docs.map((d) => d.linkedTo).filter(Boolean))),
     [docs]
   );
 
-  // Filtered docs
+  const myProductSet = useMemo(() => new Set(myProductIds), [myProductIds]);
+
   const filteredDocs = useMemo(() => {
     let result = docs;
 
-    // Product/topic filter
     if (productFilter === "__mine__" && myProductIds.length > 0) {
-      const mySet = new Set(myProductIds);
-      const mine = result.filter((d) => d.linkedTo && mySet.has(d.linkedTo));
-      // Fall back to all if no match (so page is never empty for new users)
+      const mine = result.filter((d) => d.linkedTo && myProductSet.has(d.linkedTo));
       if (mine.length > 0) result = mine;
     } else if (productFilter !== "__all__" && productFilter !== "__mine__") {
       result = result.filter((d) => d.linkedTo === productFilter);
     }
 
-    // Text search
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      result = result.filter(
-        (d) =>
-          d.name.toLowerCase().includes(q) ||
-          (d.notes ?? "").toLowerCase().includes(q)
-      );
+      result = result.filter((d) => d.name.toLowerCase().includes(q) || (d.notes ?? "").toLowerCase().includes(q));
     }
 
     return result;
-  }, [docs, productFilter, myProductIds, search]);
+  }, [docs, myProductIds.length, myProductSet, productFilter, search]);
+
+  const myMatches = useMemo(
+    () => docs.filter((d) => d.linkedTo && myProductSet.has(d.linkedTo)).length,
+    [docs, myProductSet]
+  );
 
   return (
-    <Box sx={{ maxWidth: 700, mx: "auto", pb: 6 }}>
-
-      {/* ── Header row: icon + title + search + refresh — all on one line ── */}
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-        <LightbulbOutlined sx={{ color: "#f59e0b", fontSize: 22, flexShrink: 0 }} />
-        <Typography variant="h6" sx={{ fontFamily: "Sora", fontWeight: 700, flexShrink: 0 }}>
-          Tips & Tricks
+    <Stack spacing={3} sx={{ pb: 6 }}>
+      <Box>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <LightbulbOutlined sx={{ color: "#f59e0b", fontSize: 22, flexShrink: 0 }} />
+          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
+            Tips & Tricks
+          </Typography>
+          <Tooltip title="Refresh">
+            <IconButton size="small" onClick={load} disabled={loading}>
+              {loading ? <CircularProgress size={16} /> : <RefreshOutlined fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+        </Stack>
+        <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", md: "block" } }}>
+          Field notes, pinouts, drawings, and quick references shared across products and projects.
         </Typography>
+      </Box>
 
-        {/* Search — grows to fill space */}
+      <Grid container spacing={1}>
+        {[
+          { label: "Visible", value: filteredDocs.length, color: "info.main" },
+          { label: "Total Tips", value: docs.length, color: "text.primary" },
+          { label: "My Products", value: myProductIds.length, color: "primary.main" },
+          { label: "My Matches", value: myMatches, color: "success.main" },
+        ].map(({ label, value, color }) => (
+          <Grid item xs={3} key={label}>
+            <Box className="glass-card" sx={{ py: { xs: 1, md: 1.5 }, px: { xs: 0.5, md: 2 }, textAlign: "center" }}>
+              <Typography variant="h5" fontWeight={700} color={color} sx={{ fontSize: { xs: "1.2rem", md: "2rem" } }}>
+                {value}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: "0.58rem", md: "0.75rem" }, lineHeight: 1.2, display: "block" }}>
+                {label}
+              </Typography>
+            </Box>
+          </Grid>
+        ))}
+      </Grid>
+
+      <Stack spacing={1}>
         <TextField
           size="small"
-          placeholder="Search…"
+          placeholder="Search title or notes…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          sx={{
-            flex: 1,
-            minWidth: 0,
-            "& .MuiOutlinedInput-root": { height: 32, fontSize: "0.8rem" },
-          }}
+          fullWidth
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
@@ -299,61 +328,57 @@ export default function TipsAndTricksPage() {
           }}
         />
 
-        <Tooltip title="Refresh">
-          <IconButton size="small" onClick={load} disabled={loading} sx={{ flexShrink: 0 }}>
-            <RefreshOutlined sx={{ fontSize: 18 }} />
-          </IconButton>
-        </Tooltip>
+        {(allLinkedIds.length > 0 || myProductIds.length > 0) && (
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <FilterListOutlined sx={{ fontSize: 16, color: "text.secondary", flexShrink: 0 }} />
+            {myProductIds.length > 0 && (
+              <Chip
+                label="My Products"
+                size="small"
+                color={productFilter === "__mine__" ? "primary" : "default"}
+                variant={productFilter === "__mine__" ? "filled" : "outlined"}
+                onClick={() => setProductFilter("__mine__")}
+              />
+            )}
+            <Chip
+              label="All"
+              size="small"
+              color={productFilter === "__all__" ? "primary" : "default"}
+              variant={productFilter === "__all__" ? "filled" : "outlined"}
+              onClick={() => setProductFilter("__all__")}
+            />
+            {allLinkedIds.map((id) => (
+              <Chip
+                key={id}
+                label={id}
+                size="small"
+                color={productFilter === id ? "secondary" : "default"}
+                variant={productFilter === id ? "filled" : "outlined"}
+                onClick={() => setProductFilter(id)}
+              />
+            ))}
+          </Stack>
+        )}
+
+        <Typography variant="caption" color="text.secondary">
+          {filteredDocs.length} of {docs.length} tips
+        </Typography>
       </Stack>
 
-      {/* ── Product / topic filter chips ── */}
-      {(allLinkedIds.length > 0 || myProductIds.length > 0) && (
-        <Stack direction="row" spacing={0.75} sx={{ mb: 2, flexWrap: "wrap", gap: 0.5 }}>
-          <FilterListOutlined sx={{ fontSize: 16, color: "text.disabled", mt: 0.25 }} />
-          {myProductIds.length > 0 && (
-            <Chip
-              label="My Products"
-              size="small"
-              color={productFilter === "__mine__" ? "primary" : "default"}
-              onClick={() => setProductFilter("__mine__")}
-              sx={{ fontSize: "0.7rem", height: 22 }}
-            />
-          )}
-          <Chip
-            label="All"
-            size="small"
-            color={productFilter === "__all__" ? "primary" : "default"}
-            onClick={() => setProductFilter("__all__")}
-            sx={{ fontSize: "0.7rem", height: 22 }}
-          />
-          {allLinkedIds.map((id) => (
-            <Chip
-              key={id}
-              label={id}
-              size="small"
-              color={productFilter === id ? "secondary" : "default"}
-              onClick={() => setProductFilter(id)}
-              sx={{ fontSize: "0.7rem", height: 22 }}
-            />
-          ))}
-        </Stack>
-      )}
-
-      {/* Loading */}
       {loading && (
         <Stack alignItems="center" sx={{ py: 6 }}>
           <CircularProgress size={28} />
         </Stack>
       )}
 
-      {/* Error */}
       {error && !loading && (
         <Box className="glass-card" sx={{ p: 2 }}>
-          <Typography variant="body2" color="error">{error}</Typography>
+          <Typography variant="body2" color="error">
+            {error}
+          </Typography>
         </Box>
       )}
 
-      {/* Empty */}
       {!loading && !error && filteredDocs.length === 0 && (
         <Box className="glass-card" sx={{ p: 4, textAlign: "center" }}>
           <LightbulbOutlined sx={{ fontSize: 40, color: "text.disabled", mb: 1 }} />
@@ -363,17 +388,17 @@ export default function TipsAndTricksPage() {
         </Box>
       )}
 
-      {/* ── 2-column card grid ── */}
       {!loading && filteredDocs.length > 0 && (
-        <Grid container spacing={1.5}>
+        <Grid container spacing={2}>
           {filteredDocs.map((doc) => (
-            <Grid item xs={6} key={doc.id}>
+            <Grid item xs={12} sm={6} lg={4} xl={3} key={doc.id}>
               <Card
+                className="glass-card"
                 elevation={0}
                 sx={{
                   height: "100%",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid var(--stroke)",
+                  background: "linear-gradient(180deg, rgba(10,18,24,0.92), rgba(8,14,19,0.96))",
                   borderRadius: 2,
                   overflow: "hidden",
                   transition: "all 0.2s",
@@ -388,20 +413,19 @@ export default function TipsAndTricksPage() {
                   onClick={() => setPreviewDoc(doc)}
                   sx={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "flex-start" }}
                 >
-                  {/* Thumbnail */}
                   {doc.downloadUrl && (
                     <DocThumbnail
                       downloadUrl={doc.downloadUrl}
                       contentType={doc.contentType}
-                      height={110}
+                      height={180}
                     />
                   )}
 
-                  <CardContent sx={{ width: "100%", p: "8px !important" }}>
+                  <CardContent sx={{ width: "100%", p: 1.5 }}>
                     <Typography
-                      variant="caption"
+                      variant="subtitle2"
                       fontWeight={700}
-                      sx={{ display: "block", lineHeight: 1.3, mb: 0.4 }}
+                      sx={{ display: "block", lineHeight: 1.35, mb: 0.4 }}
                       className="line-clamp-2"
                     >
                       {doc.name}
@@ -410,7 +434,7 @@ export default function TipsAndTricksPage() {
                       <Typography
                         variant="caption"
                         color="text.secondary"
-                        sx={{ display: "block", fontSize: "0.62rem", lineHeight: 1.3 }}
+                        sx={{ display: "block", lineHeight: 1.4 }}
                         className="line-clamp-2"
                       >
                         {doc.notes}
@@ -418,7 +442,7 @@ export default function TipsAndTricksPage() {
                     )}
                     <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mt: 0.75 }}>
                       {fmtSize(doc.fileSize) && (
-                        <Typography variant="caption" sx={{ fontSize: "0.58rem", color: "text.disabled" }}>
+                        <Typography variant="caption" sx={{ color: "text.disabled" }}>
                           {fmtSize(doc.fileSize)}
                         </Typography>
                       )}
@@ -441,8 +465,7 @@ export default function TipsAndTricksPage() {
         </Grid>
       )}
 
-      {/* ── Preview dialog ── */}
       <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />
-    </Box>
+    </Stack>
   );
 }

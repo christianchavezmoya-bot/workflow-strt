@@ -9,7 +9,7 @@ namespace Commtrac.Api.Controllers;
 
 [ApiController]
 [Route("api/role-configs")]
-[Authorize(Roles = "Admin")]
+[Authorize]
 public class RoleConfigsController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -36,6 +36,7 @@ public class RoleConfigsController : ControllerBase
     }
 
     [HttpPut]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<RoleConfigDto>> Update([FromBody] RoleConfigDto dto)
     {
         var config = await _db.RoleConfigs.FirstOrDefaultAsync();

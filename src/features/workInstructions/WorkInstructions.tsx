@@ -379,7 +379,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                             >
                               {inp.type}
                               {inp.type === "choice" && (inp.options ?? []).length > 0
-                                ? ` Â· ${inp.options!.join(" / ")}`
+                                ? ` · ${inp.options!.join(" / ")}`
                                 : ""}
                             </Typography>
                           </Box>
@@ -420,7 +420,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                       onClick={() => setActiveStep((p) => Math.max(0, p - 1))}
                       disabled={activeStep === 0}
                     >
-                      â† Previous
+                      ← Previous
                     </Button>
                     <Button
                       size="small"
@@ -428,7 +428,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                       onClick={() => setActiveStep((p) => Math.min(steps.length - 1, p + 1))}
                       disabled={activeStep === steps.length - 1}
                     >
-                      Next â†’
+                      Next →
                     </Button>
                     <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
                       Step {activeStep + 1} of {steps.length}

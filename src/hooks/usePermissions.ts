@@ -18,21 +18,22 @@ export const usePermissions = () => {
   const { user } = useAuth();
   const [roleConfig, setRoleConfig] = useState<Record<string, RolePermissions> | null>(null);
 
-  useEffect(() => {
+  const loadRoleConfig = () => {
     roleConfigService.get().then((config) => {
       if (config.roles && Object.keys(config.roles).length > 0) {
         setRoleConfig(config.roles);
       }
     }).catch(() => {});
+  };
+
+  useEffect(() => {
+    loadRoleConfig();
   }, []);
 
   useEffect(() => {
     const reload = () => {
-      roleConfigService.get().then((config) => {
-        if (config.roles && Object.keys(config.roles).length > 0) {
-          setRoleConfig(config.roles);
-        }
-      }).catch(() => {});
+      roleConfigService.clearCache();
+      loadRoleConfig();
     };
     window.addEventListener("roles-config-changed", reload);
     return () => window.removeEventListener("roles-config-changed", reload);

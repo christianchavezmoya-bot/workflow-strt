@@ -467,14 +467,24 @@ const TipsPage = () => {
         const isHelpful = helpfulCount > 0;
 
         return (
-          <Grid item xs={12} sm={6} md={4} lg={3} key={doc.id}>
-            <Card variant="outlined" sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+          <Grid item xs={12} md={6} xl={4} key={doc.id}>
+            <Card
+              className="glass-card"
+              variant="outlined"
+              sx={{
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                borderColor: "var(--stroke)",
+                background: "linear-gradient(180deg, rgba(10,18,24,0.92), rgba(8,14,19,0.96))",
+              }}
+            >
               <ThumbnailBox doc={doc} />
               <CardContent sx={{ flexGrow: 1, pb: 0 }}>
                 <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.5}>
                   {contentType ? renderContentTypeChip(contentType) : <span />}
                   {divProd && (
-                    <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: 120 }}>
+                    <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: 140 }}>
                       {divProd}
                     </Typography>
                   )}
@@ -528,10 +538,8 @@ const TipsPage = () => {
     </Grid>
   );
 
-  // ── Table View ──────────────────────────────────────────────────────────────
-
   const renderTable = () => (
-    <Paper variant="outlined">
+    <Paper className="glass-card" variant="outlined" sx={{ overflow: "hidden" }}>
       <TableContainer sx={{ overflowX: "auto" }}>
         <Table size="small" sx={{ minWidth: 900 }}>
           <TableHead>
@@ -828,60 +836,79 @@ const TipsPage = () => {
   // ── Page ────────────────────────────────────────────────────────────────────
 
   return (
-    <Box sx={{ p: 3 }}>
-      {/* Header */}
-      <Stack direction="row" alignItems="flex-start" justifyContent="space-between" mb={2}>
-        <Box>
-          <Typography variant="h5" fontWeight={700}>
-            Tips &amp; Tricks
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Field knowledge base — pinouts, configs, how-to guides
-          </Typography>
-        </Box>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <Tooltip title="Card grid">
-            <IconButton
-              color={viewMode === "grid" ? "primary" : "default"}
-              onClick={() => setViewMode("grid")}
-            >
-              <GridViewOutlinedIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Table view">
-            <IconButton
-              color={viewMode === "table" ? "primary" : "default"}
-              onClick={() => setViewMode("table")}
-            >
-              <TableRowsOutlinedIcon />
-            </IconButton>
-          </Tooltip>
-          <QRUploadButton
-            docType="tips"
-            linkedTo="General"
-            onUploaded={() => loadDocs()}
-          />
-          <Button
-            variant="contained"
-            startIcon={<AddOutlinedIcon />}
-            onClick={() => setAddOpen(true)}
-          >
-            Add Tip
-          </Button>
-        </Stack>
-      </Stack>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <Paper className="glass-card" sx={{ px: { xs: 2, md: 2.5 }, py: { xs: 1.5, md: 2 } }}>
+        <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems={{ lg: "center" }} justifyContent="space-between">
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="h5" fontWeight={700}>
+              Tips &amp; Tricks
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Field knowledge base — pinouts, configs, how-to guides
+            </Typography>
+          </Box>
 
-      {/* Filter bar */}
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
-        <Stack spacing={1.5}>
-          <Stack direction="row" spacing={1.5} flexWrap="wrap" alignItems="center">
-            {/* Search */}
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} sx={{ width: { xs: "100%", lg: "auto" } }}>
+            <Paper
+              className="glass-card"
+              variant="outlined"
+              sx={{ px: 0.5, py: 0.25, display: "flex", alignItems: "center", gap: 0.5, borderColor: "var(--stroke)" }}
+            >
+              <Tooltip title="Card grid">
+                <IconButton
+                  size="small"
+                  color={viewMode === "grid" ? "primary" : "default"}
+                  onClick={() => setViewMode("grid")}
+                >
+                  <GridViewOutlinedIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Table view">
+                <IconButton
+                  size="small"
+                  color={viewMode === "table" ? "primary" : "default"}
+                  onClick={() => setViewMode("table")}
+                >
+                  <TableRowsOutlinedIcon />
+                </IconButton>
+              </Tooltip>
+            </Paper>
+
+            <QRUploadButton
+              docType="tips"
+              linkedTo="General"
+              onUploaded={() => loadDocs()}
+            />
+
+            {can.modifyData && (
+              <Button
+                variant="contained"
+                startIcon={<AddOutlinedIcon />}
+                onClick={() => setAddOpen(true)}
+              >
+                Add Tip
+              </Button>
+            )}
+          </Stack>
+        </Stack>
+
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ md: "center" }} sx={{ mt: 1.5 }}>
+          <Chip size="small" label={`${filtered.length} visible`} color="primary" variant="outlined" />
+          <Chip size="small" label={`${docs.length} total`} variant="outlined" />
+          {filterDivision && <Chip size="small" label={`Division: ${filterDivision}`} variant="outlined" />}
+          {filterProduct && <Chip size="small" label={`Product: ${filterProduct}`} variant="outlined" />}
+        </Stack>
+      </Paper>
+
+      <Paper className="glass-card" sx={{ p: 1.5 }}>
+        <Grid container spacing={1.5}>
+          <Grid item xs={12} lg={5}>
             <TextField
               placeholder="Search tips…"
               size="small"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              sx={{ flex: 1, minWidth: 200 }}
+              fullWidth
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -890,8 +917,9 @@ const TipsPage = () => {
                 ),
               }}
             />
+          </Grid>
 
-            {/* Division */}
+          <Grid item xs={12} sm={6} lg={3}>
             <Select
               value={filterDivision}
               onChange={(e) => {
@@ -900,7 +928,7 @@ const TipsPage = () => {
               }}
               size="small"
               displayEmpty
-              sx={{ minWidth: 150 }}
+              fullWidth
             >
               <MenuItem value="">All Divisions</MenuItem>
               {divisions.map((d) => (
@@ -909,62 +937,60 @@ const TipsPage = () => {
                 </MenuItem>
               ))}
             </Select>
+          </Grid>
 
-            {/* Product */}
+          <Grid item xs={12} sm={6} lg={4}>
             <Autocomplete
               options={productsForDivision}
               getOptionLabel={(p) => p.name}
               value={productsForDivision.find((p) => p.name === filterProduct) ?? null}
               onChange={(_, val) => setFilterProduct(val?.name ?? "")}
-              sx={{ minWidth: 180 }}
               size="small"
+              fullWidth
               renderInput={(params) => (
                 <TextField {...params} placeholder="All Products" />
               )}
             />
-          </Stack>
+          </Grid>
+        </Grid>
 
-          {/* Content type chip bar */}
-          <Stack direction="row" spacing={1} flexWrap="wrap">
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
+          <Chip
+            label="All"
+            clickable
+            variant={filterContentType === "All" ? "filled" : "outlined"}
+            color={filterContentType === "All" ? "primary" : "default"}
+            onClick={() => setFilterContentType("All")}
+          />
+          {CONTENT_TYPES.map((ct) => (
             <Chip
-              label="All"
+              key={ct}
+              label={ct}
               clickable
-              variant={filterContentType === "All" ? "filled" : "outlined"}
-              color={filterContentType === "All" ? "primary" : "default"}
-              onClick={() => setFilterContentType("All")}
+              variant={filterContentType === ct ? "filled" : "outlined"}
+              color={filterContentType === ct ? CHIP_COLORS[ct] : "default"}
+              onClick={() => setFilterContentType(ct)}
             />
-            {CONTENT_TYPES.map((ct) => (
-              <Chip
-                key={ct}
-                label={ct}
-                clickable
-                variant={filterContentType === ct ? "filled" : "outlined"}
-                color={filterContentType === ct ? CHIP_COLORS[ct] : "default"}
-                onClick={() => setFilterContentType(ct)}
-              />
-            ))}
-          </Stack>
+          ))}
         </Stack>
       </Paper>
 
-      {/* Content area */}
       {loading ? (
         <Box display="flex" justifyContent="center" py={6}>
           <CircularProgress />
         </Box>
       ) : filtered.length === 0 ? (
-        <Box textAlign="center" py={6}>
+        <Paper className="glass-card" sx={{ p: 4, textAlign: "center" }}>
           <Typography color="text.secondary">
             No tips found. Try adjusting filters or add a new tip.
           </Typography>
-        </Box>
+        </Paper>
       ) : viewMode === "grid" ? (
         renderCardGrid()
       ) : (
         renderTable()
       )}
 
-      {/* Dialogs */}
       {renderAddDialog()}
       {renderViewDialog()}
     </Box>

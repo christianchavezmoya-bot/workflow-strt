@@ -1014,7 +1014,7 @@ export default function DocumentsPage() {
                     ))}
                     <Typography variant="caption" color="text.secondary">
                       {addForm.files.length} file{addForm.files.length !== 1 ? "s" : ""} selected
-                      {" Â· "}{formatBytes(addForm.files.reduce((s, bf) => s + bf.file.size, 0))} total
+                      {" · "}{formatBytes(addForm.files.reduce((s, bf) => s + bf.file.size, 0))} total
                     </Typography>
                   </Stack>
                 )}
@@ -1293,7 +1293,7 @@ export default function DocumentsPage() {
                   <Box sx={{ flex: 1 }}>
                     <Typography variant="body2">{label}</Typography>
                     {!isBuiltin && cf?.type === "relation" && cf.relatesTo && (
-                      <Typography variant="caption" color="text.secondary">â†’ {cf.relatesTo}</Typography>
+                      <Typography variant="caption" color="text.secondary">→ {cf.relatesTo}</Typography>
                     )}
                   </Box>
                   <Chip size="small" label={isBuiltin ? "built-in" : cf?.type} variant="outlined" sx={{ fontSize: 10 }} />

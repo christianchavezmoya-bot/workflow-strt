@@ -3,12 +3,12 @@
  * Builds a professional A4 PDF installation record and triggers a browser download.
  *
  * Sections:
- *  1. Header band â€” business logo (left) + title (centre) + customer logo (right)
- *  2. Asset & run metadata â€” 2-column table
- *  3. Workflow steps â€” individual rounded-corner cards per step with input tables
- *  4. Issues â€” always included; table with resolution notes
+ *  1. Header band — business logo (left) + title (centre) + customer logo (right)
+ *  2. Asset & run metadata — 2-column table
+ *  3. Workflow steps — individual rounded-corner cards per step with input tables
+ *  4. Issues — always included; table with resolution notes
  *  5. Signature block
- *  6. Footer (every page) â€” page number, company name, date generated
+ *  6. Footer (every page) — page number, company name, date generated
  */
 
 import { jsPDF } from "jspdf";
@@ -21,7 +21,7 @@ import { getMissingWorkflowItems } from "./workflowCompleteness";
 
 // â”€â”€â”€ Colour palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const NAVY: [number, number, number]       = [26,  39,  68];   // header band / step card header
-const TEAL: [number, number, number]       = [0,   128, 128];  // accent â€” section bars
+const TEAL: [number, number, number]       = [0,   128, 128];  // accent — section bars
 const TEAL_LIGHT: [number, number, number] = [224, 242, 242];  // step card body bg
 const GREY_BG: [number, number, number]    = [241, 243, 246];  // alternate row / meta table bg
 const GREY_LABEL: [number, number, number] = [100, 110, 125];  // label text
@@ -137,12 +137,12 @@ function fmtDur(totalSeconds: number): string {
 }
 
 function fmt(date: string | undefined): string {
-  if (!date) return "â€”";
+  if (!date) return "—";
   return new Date(date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 function fmtFull(date: string | undefined): string {
-  if (!date) return "â€”";
+  if (!date) return "—";
   return new Date(date).toLocaleString(undefined, {
     year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
@@ -169,7 +169,7 @@ export interface GenerateReportParams {
   assignedTechnician?: string;
   /** If true, renders ALL steps defined in the workflow snapshot (not just captured ones). */
   includeAllSteps?: boolean;
-  /** Installer and/or customer signature events â€” used to render the sign-off block. */
+  /** Installer and/or customer signature events — used to render the sign-off block. */
   signatureEvents?: SignatureEvent[];
 }
 
@@ -275,14 +275,14 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   y = drawSectionBar(y, "ASSET & RUN DETAILS");
 
   const metaRows: [string, string, string, string][] = [
-    ["Asset Tag",     asset.assetTag     ?? "â€”", "Date Completed",  run.completedAt ? fmtFull(run.completedAt) : "â€”"],
-    ["Asset Name",    asset.assetName    ?? "â€”", "Completed By",    run.completedByName ?? "â€”"],
-    ["Model",         asset.assetModel   ?? "â€”", "Workflow",        workflowConfigName],
-    ["Manufacturer",  asset.manufacturer ?? "â€”", "Run #",           String(run.runNumber ?? 1)],
-    ["Serial #",      (asset.serialNumber ?? "â€”"), "Status",        run.status],
+    ["Asset Tag",     asset.assetTag     ?? "—", "Date Completed",  run.completedAt ? fmtFull(run.completedAt) : "—"],
+    ["Asset Name",    asset.assetName    ?? "—", "Completed By",    run.completedByName ?? "—"],
+    ["Model",         asset.assetModel   ?? "—", "Workflow",        workflowConfigName],
+    ["Manufacturer",  asset.manufacturer ?? "—", "Run #",           String(run.runNumber ?? 1)],
+    ["Serial #",      (asset.serialNumber ?? "—"), "Status",        run.status],
   ];
-  if (customerName || jobNumber) metaRows.push(["Customer", customerName ?? "â€”", "Job #", jobNumber ?? "â€”"]);
-  if (siteName || siteLocation)  metaRows.push(["Site",     siteName    ?? "â€”", "Location", siteLocation ?? "â€”"]);
+  if (customerName || jobNumber) metaRows.push(["Customer", customerName ?? "—", "Job #", jobNumber ?? "—"]);
+  if (siteName || siteLocation)  metaRows.push(["Site",     siteName    ?? "—", "Location", siteLocation ?? "—"]);
   if (assignedTechnician)        metaRows.push(["Technician", assignedTechnician, "", ""]);
 
   autoTable(doc, {
@@ -312,9 +312,9 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     : null;
 
   const timeRows: [string, string, string, string][] = [
-    ["Started",       fmtFull(run.startedAt),                  "Completed",        run.completedAt ? fmtFull(run.completedAt) : "â€”"],
+    ["Started",       fmtFull(run.startedAt),                  "Completed",        run.completedAt ? fmtFull(run.completedAt) : "—"],
     ["Productive",    fmtDur(run.productiveSeconds ?? 0),       "Downtime",         fmtDur(run.downtimeSeconds ?? 0)],
-    ["Downtime Events", String(run.downtimeEvents ?? 0),        "Total Duration",   totalDurationSecs !== null ? fmtDur(totalDurationSecs) : "â€”"],
+    ["Downtime Events", String(run.downtimeEvents ?? 0),        "Total Duration",   totalDurationSecs !== null ? fmtDur(totalDurationSecs) : "—"],
   ];
 
   autoTable(doc, {
@@ -357,10 +357,10 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         ? new Date(e.endedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
         : "Open";
       return [
-        e.reason ?? "â€”",
+        e.reason ?? "—",
         startLabel,
         endLabel,
-        durSecs !== null ? fmtDur(durSecs) : "â€”",
+        durSecs !== null ? fmtDur(durSecs) : "—",
       ];
     });
 
@@ -393,7 +393,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     y += 4;
   }
 
-  // â”€â”€ 3. Workflow Steps â€” individual cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ 3. Workflow Steps — individual cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // In "full" mode iterate ALL snapshot steps; in standard mode only captured results.
   const stepResultMap = new Map(stepResults.map((sr) => [sr.stepId, sr]));
   const stepsToRender: Array<{ step: WorkflowStep; sr: StepResult | undefined }> = includeAllSteps
@@ -438,12 +438,12 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       const cardW = CONTENT_W;
       const hdrH  = 8;
 
-      // Card header â€” navy (completed) or muted grey (not completed)
+      // Card header — navy (completed) or muted grey (not completed)
       const hdrColor: [number, number, number] = isCompleted ? NAVY : [90, 100, 115];
       doc.setFillColor(...hdrColor);
       doc.roundedRect(cardX, y, cardW, hdrH, 2, 2, "F");
 
-      // Step number badge â€” teal (completed) or grey (not completed)
+      // Step number badge — teal (completed) or grey (not completed)
       const badgeColor: [number, number, number] = isCompleted ? TEAL : [130, 140, 155];
       const badgeCX = cardX + 5;
       const badgeCY = y + hdrH / 2;
@@ -484,7 +484,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         // Show expected inputs as blank rows
         if (inputDefs.length > 0) {
           for (const inp of inputDefs) {
-            bodyRows.push([inp.label ?? inp.id, "â€”"]);
+            bodyRows.push([inp.label ?? inp.id, "—"]);
           }
         } else {
           bodyRows.push(["(Step not completed)", ""]);
@@ -612,7 +612,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
           cellPadding: { top: 2, bottom: 2, left: 4, right: 4 },
           fillColor: bodyBg,
           textColor: BLACK,
-          lineWidth: 0,       // no cell borders â€” prevents first-row line overlap
+          lineWidth: 0,       // no cell borders — prevents first-row line overlap
         },
         columnStyles: {
           0: { fontStyle: "bold", textColor: GREY_LABEL, cellWidth: cardW * 0.38 },
@@ -694,11 +694,11 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     }
   }
 
-  // â”€â”€ 4. Issues â€” always included â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ 4. Issues — always included â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   y = ensureSpace(y, 30);
   const issueLabel = issues.length === 0
     ? "ISSUES  (none recorded)"
-    : `ISSUES  (${issues.length} total Â· ${openIssues.length} open Â· ${issues.length - openIssues.length} resolved)`;
+    : `ISSUES  (${issues.length} total · ${openIssues.length} open · ${issues.length - openIssues.length} resolved)`;
   y = drawSectionBar(y, issueLabel);
 
   if (issues.length === 0) {
@@ -713,8 +713,9 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         ? "Closed"
         : issue.isBlocking ? "Blocking" : "Open";
       const resolution = issue.resolved && issue.resolutionNote
-        ? `${issue.resolutionNote}${issue.resolvedBy ? `\nâ€” ${issue.resolvedBy}` : ""}${issue.resolvedAt ? `, ${fmt(issue.resolvedAt)}` : ""}`
-        : issue.resolved ? `Resolved${issue.resolvedBy ? ` by ${issue.resolvedBy}` : ""}` : "â€”";
+        ? `${issue.resolutionNote}${issue.resolvedBy ? `
+— ${issue.resolvedBy}` : ""}${issue.resolvedAt ? `, ${fmt(issue.resolvedAt)}` : ""}`
+        : issue.resolved ? `Resolved${issue.resolvedBy ? ` by ${issue.resolvedBy}` : ""}` : "—";
       const commentsCount = (issue.comments ?? []).length;
       const typeLabel = issue.issueType === "blocking" ? "Blocking"
         : issue.issueType === "scope-deviation" ? "Scope Dev." : "Observation";
@@ -723,18 +724,18 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
             issue.extraHours != null ? `+${issue.extraHours}h` : null,
             issue.costImpact ?? null,
             issue.approvedBy ? `Approved: ${issue.approvedBy}` : null,
-          ].filter(Boolean).join(" Â· ") || "â€”"
-        : "â€”";
+          ].filter(Boolean).join(" · ") || "—"
+        : "—";
       return [
         issue.description,
         typeLabel,
         issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1),
-        issue.stepTitle ?? "â€”",
+        issue.stepTitle ?? "—",
         statusLabel,
         fmt(issue.reportedAt),
         resolution,
         impact,
-        commentsCount > 0 ? String(commentsCount) : "â€”",
+        commentsCount > 0 ? String(commentsCount) : "—",
       ];
     });
 
@@ -856,7 +857,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         } catch { /* leave box blank */ }
       }
     } else if (!event) {
-      // Blank â€” label inside box for manual signing
+      // Blank — label inside box for manual signing
       doc.setFontSize(7.5);
       doc.setFont("helvetica", "italic");
       doc.setTextColor(180, 180, 190);

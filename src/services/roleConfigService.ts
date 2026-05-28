@@ -24,6 +24,10 @@ export interface RoleConfig {
   roles: Record<string, RolePermissions>;
 }
 
+const EMPTY_ROLE_CONFIG: RoleConfig = { roles: {} };
+let roleConfigCache: RoleConfig | null = null;
+let roleConfigPromise: Promise<RoleConfig> | null = null;
+
 // Derives sensible Tier 2 defaults from Tier 1 flags when domains not set.
 // Used as fallback so old saved configs still work correctly.
 export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermissions {
@@ -50,11 +54,32 @@ export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermi
 
 export const roleConfigService = {
   async get() {
-    const response = await api.get<RoleConfig>("/role-configs");
-    return response.data;
+    if (roleConfigCache) {
+      return roleConfigCache;
+    }
+
+    if (!roleConfigPromise) {
+      roleConfigPromise = api.get<RoleConfig>("/role-configs")
+        .then((response) => {
+          roleConfigCache = response.data ?? EMPTY_ROLE_CONFIG;
+          return roleConfigCache;
+        })
+        .catch((error) => {
+          roleConfigPromise = null;
+          throw error;
+        });
+    }
+
+    return roleConfigPromise;
   },
   async update(config: RoleConfig) {
     const response = await api.put<RoleConfig>("/role-configs", config);
-    return response.data;
+    roleConfigCache = response.data ?? EMPTY_ROLE_CONFIG;
+    roleConfigPromise = Promise.resolve(roleConfigCache);
+    return roleConfigCache;
+  },
+  clearCache() {
+    roleConfigCache = null;
+    roleConfigPromise = null;
   },
 };

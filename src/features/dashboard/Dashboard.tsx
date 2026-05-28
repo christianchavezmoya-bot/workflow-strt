@@ -11,14 +11,14 @@ import {
 } from "@mui/icons-material";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import StatusStepper from "../../components/ui/StatusStepper";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProjects } from "../../store/projectSlice";
+import { fetchProducts } from "../../store/productsSlice";
 import { officesService } from "../../services/officesService";
 import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
-import { projectAssetService, type OpenAssetItem, type WorkloadSummaryItem } from "../../services/projectAssetService";
+import { projectAssetService, type OpenAssetItem, type ProjectAssetSummaryItem, type WorkloadSummaryItem } from "../../services/projectAssetService";
 import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import api from "../../services/api";
@@ -110,6 +110,7 @@ const Dashboard = () => {
   const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch      = useAppDispatch();
   const projects      = useAppSelector((s) => s.projects.items);
+  const products      = useAppSelector((s) => s.products.items);
 
   const [globalOffices,      setGlobalOffices]      = useState<Office[]>([]);
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
@@ -117,6 +118,7 @@ const Dashboard = () => {
   const [pendingSigs,        setPendingSigs]        = useState<PendingSignatureRecord[]>([]);
   const [attentionLoading,   setAttentionLoading]   = useState(false);
   const [openAssets,         setOpenAssets]         = useState<OpenAssetItem[]>([]);
+  const [projectAssetSummary, setProjectAssetSummary] = useState<ProjectAssetSummaryItem[]>([]);
   const [workload,           setWorkload]           = useState<WorkloadSummaryItem[]>([]);
   const [workloadLoading,    setWorkloadLoading]    = useState(false);
   const [reportingTechId,    setReportingTechId]    = useState<string | null>(null);
@@ -214,10 +216,12 @@ const Dashboard = () => {
 
   useEffect(() => {
     dispatch(fetchProjects());
+    dispatch(fetchProducts());
     loadAttention();
     setWorkloadLoading(true);
     projectAssetService.workloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
     projectAssetService.listOpen().then(setOpenAssets);
+    projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
     if (isEngineer) {
       workflowConfigService.getAll().then((configs) => {
         setDraftConfigs(configs.filter((c: any) => c.status === "Draft" || c.status === "draft"));
@@ -243,14 +247,14 @@ const Dashboard = () => {
     return () => window.removeEventListener("missing-media-flags-changed", reload);
   }, []);
 
-  // Listen for photo update notifications (installer uploaded photos â†’ PM notified)
+  // Listen for photo update notifications (installer uploaded photos ? PM notified)
   useEffect(() => {
     const reload = () => setPhotoUpdateNotifications(JSON.parse(localStorage.getItem("pm_photo_update_notifications") ?? "[]"));
     window.addEventListener("photo-update-notifications-changed", reload);
     return () => window.removeEventListener("photo-update-notifications-changed", reload);
   }, []);
 
-  // Listen for photo reminders (PM sent reminder â†’ installer notified)
+  // Listen for photo reminders (PM sent reminder ? installer notified)
   useEffect(() => {
     const reload = () => setPhotoReminders(JSON.parse(localStorage.getItem("installer_photo_reminders") ?? "[]"));
     window.addEventListener("installer-photo-reminders-changed", reload);
@@ -346,13 +350,50 @@ const Dashboard = () => {
     filteredProjects.filter(p => p.status === "Pending Approval"),
     [filteredProjects]);
 
+  const scopedProjectIdsForUser = useMemo(() => {
+    if (!viewedDashboardUserId) return new Set(filteredProjects.map((project) => project.id));
+
+    const viewedName = (viewedDashboardUser?.fullName ?? user.fullName ?? "").trim().toLowerCase();
+    const assignedAssetProjectIds = new Set(
+      openAssets
+        .filter((asset) => asset.assignedUserId === viewedDashboardUserId)
+        .map((asset) => asset.projectId)
+    );
+
+    return new Set(
+      filteredProjects
+        .filter((project) => {
+          const managerMatch = viewedName
+            ? String(project.projectManager ?? "").trim().toLowerCase() === viewedName
+            : false;
+          const teamMatch = (project.teamMemberIds ?? []).includes(viewedDashboardUserId);
+          const assetMatch = assignedAssetProjectIds.has(project.id);
+          return managerMatch || teamMatch || assetMatch;
+        })
+        .map((project) => project.id)
+    );
+  }, [filteredProjects, openAssets, viewedDashboardUser?.fullName, viewedDashboardUserId, user.fullName]);
+
+  const scopedProjects = useMemo(() => {
+    if (!viewedDashboardUserId) return filteredProjects;
+    return filteredProjects.filter((project) => scopedProjectIdsForUser.has(project.id));
+  }, [filteredProjects, scopedProjectIdsForUser, viewedDashboardUserId]);
+
+  const projectSummaryById = useMemo(
+    () => new Map(projectAssetSummary.map((summary) => [summary.projectId, summary])),
+    [projectAssetSummary]
+  );
+
+  const productNameById = useMemo(
+    () => new Map(products.map((product) => [product.id, product.name])),
+    [products]
+  );
+
   // Tab bar is shown for all non-viewers.
   // Admins and PMs see all 3 tabs; others see My Inspections and/or My Installs
   // depending on which asset types they have assigned.
   const showTabBar       = !isViewer;
   const showPmProjectsTab = isManager;
-  // Keep for legacy gating inside the isManager block
-  const showPmTabs = isManager;
 
   const inspectionProjects = useMemo(
     () => filteredProjects.filter((p) => p.workflowMode === "INSPECTION_ONLY" || p.workflowMode === "MIXED"),
@@ -549,7 +590,7 @@ const Dashboard = () => {
         transition: "background 0.15s",
       }}>
       <Typography variant="caption" color="text.secondary" noWrap display="block">
-        â€¢ {label}
+        • {label}
       </Typography>
       {sub && <Typography variant="caption" color="text.disabled" noWrap display="block" sx={{ pl: 1.5, fontSize: "0.65rem" }}>{sub}</Typography>}
     </Box>
@@ -595,7 +636,7 @@ const Dashboard = () => {
                 {blockingIssues.slice(0, 4).map((iss) => (
                   <ItemRow key={iss.issueId}
                     label={`${iss.jobNumber}: ${iss.assetTag}`}
-                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "â€¦" : "")}
+                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "…" : "")}
                     onClick={() => navigate("/issues")} />
                 ))}
                 {blockingIssues.length > 4 && (
@@ -629,7 +670,7 @@ const Dashboard = () => {
               <Stack spacing={0.25} sx={{ mt: 1 }}>
                 {overdueProjects.slice(0, 4).map((p) => (
                   <ItemRow key={p.id}
-                    label={`${p.jobNumber} â€" ${p.customerName || ""}`}
+                    label={`${p.jobNumber} — ${p.customerName || ""}`}
                     sub={`Due ${fmtDate(p.finishDate)}`}
                     onClick={() => navigate(`/projects/${p.id}`)} />
                 ))}
@@ -700,7 +741,7 @@ const Dashboard = () => {
                 {highIssues.slice(0, 4).map((iss) => (
                   <ItemRow key={iss.issueId}
                     label={`${iss.jobNumber}: ${iss.assetTag}`}
-                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "â€¦" : "")}
+                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "…" : "")}
                     onClick={() => navigate("/issues")} />
                 ))}
                 {highIssues.length > 4 && (
@@ -746,7 +787,7 @@ const Dashboard = () => {
                 }}>
                 <Typography variant="subtitle1" sx={{ fontFamily: "Sora" }}>{region}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {rp.length} projects Â· {rp.filter(p => p.status === "In Progress").length} in progress
+                  {rp.length} projects · {rp.filter(p => p.status === "In Progress").length} in progress
                 </Typography>
                 <Typography variant="body2" color="text.secondary">{rAssets} active installations</Typography>
               </Box>
@@ -758,50 +799,115 @@ const Dashboard = () => {
   );
 
   const ProjectStatusGrid = (
-    <Grid container spacing={2}>
-      <Grid item xs={12} md={4}>
-        <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-            <TrendingUpOutlined sx={{ fontSize: 18, color: "primary.main" }} />
-            <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem" }}>Project Status</Typography>
-          </Stack>
-          <Stack spacing={1.25}>
-            {statusGroups.map(([status, count]) => (
-              <Stack key={status} direction="row" alignItems="center" spacing={1.5}>
-                <Chip label={status} size="small"
-                  color={(statusColor[status] ?? "default") as "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning"}
-                  variant="outlined" sx={{ fontSize: "0.68rem", height: 20, minWidth: 100 }} />
-                <Box sx={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                  <Box sx={{
-                    height: "100%", borderRadius: 3,
-                    width: `${Math.round((count / projectCount) * 100)}%`,
-                    background: status === "Completed" ? "#2e7d32" : status === "In Progress" ? "#1976d2" :
-                      status === "Pending Approval" ? "#ed6c02" : status === "Cancelled" ? "#d32f2f" : "#555",
-                  }} />
-                </Box>
-                <Typography variant="caption" fontWeight={700} sx={{ minWidth: 24, textAlign: "right" }}>{count}</Typography>
-              </Stack>
-            ))}
-            {statusGroups.length === 0 && (
-              <Typography variant="caption" color="text.disabled">No projects loaded.</Typography>
-            )}
-          </Stack>
-          <Divider sx={{ my: 2 }} />
-          <Stack direction="row" spacing={1}>
-            <CheckCircleOutlineOutlined sx={{ fontSize: 14, color: "success.main", mt: 0.25 }} />
-            <Typography variant="caption" color="text.secondary">
-              {filteredProjects.filter(p => p.status === "Completed").length} of {projectCount} completed
-            </Typography>
-          </Stack>
-        </Box>
-      </Grid>
-      <Grid item xs={12} md={8}>
-        <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
-          <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem", mb: 2 }}>Project Lifecycle</Typography>
-          <StatusStepper type="External" status="Pending Approval" />
-        </Box>
-      </Grid>
-    </Grid>
+    <Box className="glass-card" sx={{ p: 2.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+        <TrendingUpOutlined sx={{ fontSize: 18, color: "primary.main" }} />
+        <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem", flex: 1 }}>
+          Project Status
+        </Typography>
+        <Chip
+          label={scopedProjects.length}
+          size="small"
+          color="info"
+          variant="outlined"
+          sx={{ height: 20, fontSize: "0.7rem" }}
+        />
+      </Stack>
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+        {viewedDashboardUserId
+          ? `Projects assigned to ${viewingOwnDashboard ? "you" : viewedDashboardUser?.fullName ?? "this user"}`
+          : "Projects across the current dashboard scope"}
+      </Typography>
+
+      {scopedProjects.length === 0 ? (
+        <Typography variant="caption" color="text.disabled">No assigned projects in this scope.</Typography>
+      ) : (
+        <Stack spacing={1.25}>
+          {scopedProjects.map((project) => {
+            const summary = projectSummaryById.get(project.id);
+            const projectAssets = openAssets.filter((asset) => asset.projectId === project.id);
+            const issueCount = projectAssets.filter((asset) => String(asset.status ?? "").toLowerCase() === "issue").length;
+            const noWorkflowCount = projectAssets.filter((asset) => !asset.totalSteps && String(asset.status ?? "").toLowerCase() !== "complete").length;
+            const totalAssets = summary?.total ?? project.assetCount ?? projectAssets.length;
+            const notStarted = summary?.notStarted ?? projectAssets.filter((asset) => isNotStartedAsset(asset.status)).length;
+            const inProgress = summary?.inProgress ?? projectAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length;
+            const complete = summary?.complete ?? Math.max(0, totalAssets - notStarted - inProgress - issueCount);
+            const completionPct = totalAssets > 0 ? Math.round((complete / totalAssets) * 100) : 0;
+            const productNames = (project.productIds ?? [])
+              .map((id) => productNameById.get(id) ?? id)
+              .filter(Boolean)
+              .join(", ");
+
+            return (
+              <Box
+                key={project.id}
+                sx={{
+                  px: 2,
+                  py: 1.25,
+                  borderRadius: 2,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.03)",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                  "&:hover": {
+                    background: "rgba(45,212,191,0.06)",
+                    borderColor: "rgba(45,212,191,0.25)",
+                    transform: "translateY(-1px)",
+                  },
+                }}
+                onClick={() => navigate(`/projects/${project.id}`)}
+              >
+                <Stack spacing={0.7}>
+                  <Stack direction={{ xs: "column", xl: "row" }} spacing={0.9} alignItems={{ xl: "center" }}>
+                    <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle2" fontWeight={700}>
+                        {project.jobNumber}
+                      </Typography>
+                      <Chip
+                        label={project.status}
+                        size="small"
+                        color={(statusColor[project.status] ?? "default") as "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning"}
+                        variant="outlined"
+                        sx={{ height: 20, fontSize: "0.68rem" }}
+                      />
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        fontWeight={700}
+                        sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}
+                      >
+                        {totalAssets} assets
+                      </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+                      {notStarted > 0 && <Chip size="small" label={`${notStarted} Not Started`} sx={{ height: 20, fontSize: "0.68rem" }} />}
+                      {inProgress > 0 && <Chip size="small" label={`${inProgress} In Progress`} color="primary" sx={{ height: 20, fontSize: "0.68rem" }} />}
+                      {complete > 0 && <Chip size="small" label={`${complete} Complete`} color="success" sx={{ height: 20, fontSize: "0.68rem" }} />}
+                      {issueCount > 0 && <Chip size="small" label={`${issueCount} Issue`} color="error" sx={{ height: 20, fontSize: "0.68rem" }} />}
+                      {noWorkflowCount > 0 && <Chip size="small" label={`${noWorkflowCount} No Workflow`} color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.68rem" }} />}
+                    </Stack>
+                    <Box sx={{ flex: 1, minWidth: { xs: 120, xl: 180 } }}>
+                      <LinearProgress
+                        variant="determinate"
+                        value={completionPct}
+                        color={issueCount > 0 ? "error" : "success"}
+                        sx={{ height: 6, borderRadius: 1 }}
+                      />
+                    </Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ minWidth: 56, textAlign: { xl: "right" }, flexShrink: 0 }}>
+                      {completionPct}%
+                    </Typography>
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {[project.customerName, project.siteName, productNames || "No products linked"].filter(Boolean).join(" � ")}
+                  </Typography>
+                </Stack>
+              </Box>
+            );
+          })}
+        </Stack>
+      )}
+    </Box>
   );
 
   const EvidenceHealthGrid = (
@@ -924,7 +1030,7 @@ const Dashboard = () => {
                   </Stack>
                 </Box>
               )}
-              <Typography variant="caption" color="text.disabled">{healthData.totalRuns} runs in last {healthWindow} days Â· prev score {healthData.previousScore}%</Typography>
+              <Typography variant="caption" color="text.disabled">{healthData.totalRuns} runs in last {healthWindow} days · prev score {healthData.previousScore}%</Typography>
             </Stack>
           ) : (
             <Typography variant="caption" color="text.disabled">No data available for selected window.</Typography>
@@ -939,7 +1045,7 @@ const Dashboard = () => {
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
         <Box>
           <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Technician Workload</Typography>
-          <Typography variant="caption" color="text.secondary">Open assets â€" click to view in installations</Typography>
+          <Typography variant="caption" color="text.secondary">Open assets — click to view in installations</Typography>
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Stack direction="row" spacing={0.5} alignItems="center">
@@ -988,11 +1094,11 @@ const Dashboard = () => {
                       </Stack>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <Typography variant="caption" color="text.secondary">
-                          {w.inProgress} active Â· {w.paused} paused Â· {w.notStarted} queued
+                          {w.inProgress} active · {w.paused} paused · {w.notStarted} queued
                         </Typography>
                         {startLabel && (
                           <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.65rem" }}>
-                            Â· since {startLabel}
+                            · since {startLabel}
                           </Typography>
                         )}
                       </Stack>
@@ -1000,8 +1106,8 @@ const Dashboard = () => {
                     <Box sx={{ flex: 1 }}>
                       <Tooltip title={
                         w.totalSteps > 0
-                          ? `${w.completedSteps} / ${w.totalSteps} steps Â· ${w.inProgress} in-progress Â· ${w.paused} paused Â· ${w.notStarted} queued`
-                          : `${w.inProgress} in progress Â· ${w.paused} paused Â· ${w.notStarted} not started`
+                          ? `${w.completedSteps} / ${w.totalSteps} steps · ${w.inProgress} in-progress · ${w.paused} paused · ${w.notStarted} queued`
+                          : `${w.inProgress} in progress · ${w.paused} paused · ${w.notStarted} not started`
                       } arrow>
                         <Box sx={{ position: "relative", height: 10, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.08)", display: "flex" }}>
                           {w.totalSteps > 0 ? (
@@ -1137,7 +1243,7 @@ const Dashboard = () => {
                               {a.assetTag || a.assetName || a.id}
                             </Typography>
                             <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                              {a.jobNumber} â€" {displayRunState(a)}
+                              {a.jobNumber} — {displayRunState(a)}
                             </Typography>
                           </Box>
                           <Chip label={isPausedAsset(a.runStatus) ? "Paused" : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "Active" : "Queued"}
@@ -1152,7 +1258,7 @@ const Dashboard = () => {
                   {myAssets.length > 6 && (
                     <Grid item xs={12}>
                       <Typography variant="caption" color="text.disabled">
-                        +{myAssets.length - 6} more assets â€" <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }} onClick={() => navigate("/installations/assets")}>view all</Box>
+                        +{myAssets.length - 6} more assets — <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }} onClick={() => navigate("/installations/assets")}>view all</Box>
                       </Typography>
                     </Grid>
                   )}
@@ -1287,7 +1393,7 @@ const Dashboard = () => {
                   }}
                 >
                   <Typography variant="caption" fontWeight={600}>
-                    {r.sentByName} requested photos for: {r.assetTag} â€" {r.workflowName}
+                    {r.sentByName} requested photos for: {r.assetTag} — {r.workflowName}
                   </Typography>
                 </Alert>
               ))}
@@ -1315,7 +1421,7 @@ const Dashboard = () => {
                         {f.jobNumber ? `${f.jobNumber}: ` : ""}{f.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {f.workflowName} Â· {fmtDate(f.completedAt)}
+                        {f.workflowName} · {fmtDate(f.completedAt)}
                       </Typography>
                       {"totalExpected" in f && (
                         <Typography variant="caption" color="warning.main" display="block">
@@ -1333,7 +1439,7 @@ const Dashboard = () => {
                         localStorage.setItem("pm_missing_media_flags", JSON.stringify(updated));
                         setMissingMediaFlags(updated);
                       }}>
-                      âœ•
+                      ?
                     </Button>
                   </Stack>
                 ))}
@@ -1359,7 +1465,7 @@ const Dashboard = () => {
                     {myBlocking.map((iss) => (
                       <ItemRow key={iss.issueId}
                         label={`${iss.jobNumber}: ${iss.assetTag}`}
-                        sub={iss.description.slice(0, 60) + (iss.description.length > 60 ? "â€¦" : "")}
+                        sub={iss.description.slice(0, 60) + (iss.description.length > 60 ? "…" : "")}
                         onClick={() => navigate("/issues")} />
                     ))}
                   </Stack>
@@ -1454,7 +1560,7 @@ const Dashboard = () => {
                     {notStartedAssets.slice(0, 5).map((a) => (
                       <ItemRow key={a.id}
                         label={a.assetTag || a.assetName || a.id}
-                        sub={[a.jobNumber, a.assignedUserId ? `Assigned: ${a.assignedUserId}` : undefined].filter(Boolean).join(" Â· ")}
+                        sub={[a.jobNumber, a.assignedUserId ? `Assigned: ${a.assignedUserId}` : undefined].filter(Boolean).join(" · ")}
                         onClick={() => navigate("/installations/assets")} />
                     ))}
                     {notStartedAssets.length > 5 && (
@@ -1544,17 +1650,7 @@ const Dashboard = () => {
       {/* â•â• PROJECT MANAGER / ADMIN VIEW â•â• */}
       {isManager && (
         <>
-          {/* PM tab switcher (Project Manager only) */}
-          {showPmTabs && (
-            <Box className="glass-card" sx={{ p: 1.5 }}>
-              <Tabs value={pmDashboardTab} onChange={(_, v: PmDashboardTab) => setPmDashboardTab(v)}
-                sx={{ minHeight: 36, "& .MuiTab-root": { minHeight: 36, py: 0.5, fontSize: "0.8rem" } }}>
-                <Tab value="pm-projects" label="My PM Projects" />
-                <Tab value="my-inspections" label="My Inspections" />
-                <Tab value="my-installs" label="My Installs" />
-              </Tabs>
-            </Box>
-          )}
+          {pmDashboardTab === "pm-projects" && ProjectStatusGrid}
 
           {/* Needs Attention â€" company-wide */}
           {pmDashboardTab === "pm-projects" && NeedsAttentionSection}
@@ -1652,7 +1748,7 @@ const Dashboard = () => {
                     <Box sx={{ flex: 1 }}>
                       <ItemRow
                         label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
-                        sub={`Assigned to ${f.assignedBy} Â· ${fmtDate(f.assignedAt)}`}
+                        sub={`Assigned to ${f.assignedBy} · ${fmtDate(f.assignedAt)}`}
                         onClick={() => navigate("/installations")}
                       />
                     </Box>
@@ -1662,7 +1758,7 @@ const Dashboard = () => {
                         localStorage.setItem("pm_auto_assign_flags", JSON.stringify(updated));
                         setAutoAssignFlags(updated);
                       }}>
-                      âœ•
+                      ?
                     </Button>
                   </Stack>
                 ))}
@@ -1695,7 +1791,7 @@ const Dashboard = () => {
                         {n.installerName} updated media for {n.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {n.workflowName} Â· {fmtDate(n.updatedAt)}
+                        {n.workflowName} · {fmtDate(n.updatedAt)}
                       </Typography>
                       <Typography variant="caption" display="block" color={n.wasComplete ? "success.main" : "warning.main"}>
                         {n.wasComplete ? "All media added" : `${n.stillMissing} step${n.stillMissing !== 1 ? "s" : ""} still missing`}
@@ -1707,7 +1803,7 @@ const Dashboard = () => {
                         localStorage.setItem("pm_photo_update_notifications", JSON.stringify(updated));
                         setPhotoUpdateNotifications(updated);
                       }}>
-                      âœ•
+                      ?
                     </Button>
                   </Stack>
                 ))}
@@ -1743,7 +1839,7 @@ const Dashboard = () => {
                         {f.jobNumber ? `${f.jobNumber}: ` : ""}{f.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {f.workflowName} Â· {f.technicianName} Â· {fmtDate(f.completedAt)}
+                        {f.workflowName} · {f.technicianName} · {fmtDate(f.completedAt)}
                       </Typography>
                       {"totalExpected" in f && (
                         <>
@@ -1752,12 +1848,12 @@ const Dashboard = () => {
                           </Typography>
                           {(f as MissingMediaFlag).missingSteps?.slice(0, 3).map((ms) => (
                             <Typography key={`${ms.stepId}-${ms.inputId}`} variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
-                              Â· {ms.stepTitle} â€" {ms.inputLabel}: {ms.captured} captured
+                              • {ms.stepTitle} — {ms.inputLabel}: {ms.captured} captured
                             </Typography>
                           ))}
                           {((f as MissingMediaFlag).missingSteps?.length ?? 0) > 3 && (
                             <Typography variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
-                              +{((f as MissingMediaFlag).missingSteps?.length ?? 0) - 3} moreâ€¦
+                              +{((f as MissingMediaFlag).missingSteps?.length ?? 0) - 3} more…
                             </Typography>
                           )}
                         </>
@@ -1804,7 +1900,7 @@ const Dashboard = () => {
                           localStorage.setItem("pm_missing_media_flags", JSON.stringify(updated));
                           setMissingMediaFlags(updated);
                         }}>
-                        âœ•
+                        ?
                       </Button>
                     </Stack>
                   </Stack>
@@ -1815,9 +1911,6 @@ const Dashboard = () => {
 
           {/* Regional Snapshot */}
           {pmDashboardTab === "pm-projects" && RegionalSnapshotSection}
-
-          {/* Project Status + Lifecycle */}
-          {pmDashboardTab === "pm-projects" && ProjectStatusGrid}
 
           {/* Evidence + Health */}
           {pmDashboardTab === "pm-projects" && EvidenceHealthGrid}
