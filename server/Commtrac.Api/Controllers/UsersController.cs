@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
 
@@ -16,6 +17,20 @@ namespace Commtrac.Api.Controllers;
 [Authorize(Roles = "Admin,Project Manager")]
 public class UsersController : ControllerBase
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly string[] DefaultRoleNames =
+    [
+        "Admin",
+        "Project Manager",
+        "Engineer",
+        "Viewer",
+        "Installer",
+        "Supervisor",
+        "Technician",
+        "QA Inspector",
+        "Client"
+    ];
+
     private readonly AppDbContext _db;
     private readonly IEmailSender _emailSender;
     private readonly NotificationSettingsService _notificationSettings;
@@ -41,11 +56,18 @@ public class UsersController : ControllerBase
     [Authorize(Roles = "Admin")]
     public async Task<ActionResult<UserDto>> Create([FromBody] CreateUserRequest request)
     {
+        var requestedRole = NormalizeRole(request.Role);
+        var allowedRoles = await GetAllowedRoleNamesAsync();
+        if (!IsAllowedRole(requestedRole, allowedRoles))
+        {
+            return BadRequest($"Role '{request.Role}' is not defined in Roles configuration.");
+        }
+
         var user = new UserEntity
         {
             Email = request.Email,
             FullName = request.FullName,
-            Role = request.Role,
+            Role = requestedRole,
             Office = request.Office,
             IsActive = true,
             IsFirstLogin = true,
@@ -68,9 +90,23 @@ public class UsersController : ControllerBase
             return NotFound();
         }
 
+        if (!string.IsNullOrWhiteSpace(request.Role))
+        {
+            var requestedRole = NormalizeRole(request.Role);
+            var currentRole = NormalizeRole(user.Role);
+            if (!string.Equals(requestedRole, currentRole, StringComparison.Ordinal))
+            {
+                var allowedRoles = await GetAllowedRoleNamesAsync();
+                if (!IsAllowedRole(requestedRole, allowedRoles))
+                {
+                    return BadRequest($"Role '{request.Role}' is not defined in Roles configuration.");
+                }
+            }
+            user.Role = requestedRole;
+        }
+
         if (!string.IsNullOrWhiteSpace(request.FullName)) user.FullName = request.FullName;
         if (!string.IsNullOrWhiteSpace(request.Email)) user.Email = request.Email;
-        if (!string.IsNullOrWhiteSpace(request.Role)) user.Role = request.Role;
         if (!string.IsNullOrWhiteSpace(request.Office)) user.Office = request.Office;
         if (request.IsActive.HasValue) user.IsActive = request.IsActive.Value;
         if (request.IsFirstLogin.HasValue) user.IsFirstLogin = request.IsFirstLogin.Value;
@@ -97,6 +133,7 @@ public class UsersController : ControllerBase
         var created = 0;
         var skippedEmails = new List<string>();
         var errors = new List<string>();
+        var allowedRoles = await GetAllowedRoleNamesAsync();
 
         var existingEmails = new HashSet<string>(
             await _db.Users.Select(u => u.Email.ToLower()).ToListAsync()
@@ -117,13 +154,20 @@ public class UsersController : ControllerBase
                 continue;
             }
 
+            var requestedRole = NormalizeRole(row.Role);
+            if (!IsAllowedRole(requestedRole, allowedRoles))
+            {
+                errors.Add($"Row skipped — unknown role '{row.Role}' for '{row.Email}'.");
+                continue;
+            }
+
             try
             {
                 var user = new UserEntity
                 {
                     Email = row.Email.Trim(),
                     FullName = row.FullName.Trim(),
-                    Role = row.Role.Trim(),
+                    Role = requestedRole,
                     Office = row.Office?.Trim() ?? string.Empty,
                     IsActive = false,
                     IsFirstLogin = true,
@@ -239,6 +283,60 @@ public class UsersController : ControllerBase
     {
         var bytes = RandomNumberGenerator.GetBytes(32);
         return Convert.ToBase64String(bytes);
+    }
+
+    private async Task<HashSet<string>> GetAllowedRoleNamesAsync()
+    {
+        var allowedRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var roleName in DefaultRoleNames)
+        {
+            if (!string.IsNullOrWhiteSpace(roleName))
+            {
+                allowedRoles.Add(roleName);
+            }
+        }
+
+        var config = await _db.RoleConfigs.AsNoTracking().FirstOrDefaultAsync();
+        if (!string.IsNullOrWhiteSpace(config?.ConfigJson))
+        {
+            try
+            {
+                var roles = JsonSerializer.Deserialize<Dictionary<string, RolePermissions>>(config.ConfigJson, JsonOptions);
+                if (roles != null)
+                {
+                    foreach (var roleName in roles.Keys.Select(NormalizeRole).Where((role) => !string.IsNullOrWhiteSpace(role)))
+                    {
+                        allowedRoles.Add(roleName);
+                    }
+                }
+            }
+            catch
+            {
+                // Keep defaults if role config JSON is malformed.
+            }
+        }
+
+        foreach (var roleName in await _db.Users.Select(u => u.Role).Distinct().ToListAsync())
+        {
+            var normalized = NormalizeRole(roleName);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                allowedRoles.Add(normalized);
+            }
+        }
+
+        return allowedRoles;
+    }
+
+    private static string NormalizeRole(string? role)
+    {
+        return (role ?? string.Empty).Trim();
+    }
+
+    private static bool IsAllowedRole(string role, HashSet<string> allowedRoles)
+    {
+        return !string.IsNullOrWhiteSpace(role) && allowedRoles.Contains(role);
     }
 
     private string ResolveFrontendBaseUrl(string? configuredBaseUrl)

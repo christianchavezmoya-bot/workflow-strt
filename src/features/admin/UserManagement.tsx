@@ -85,6 +85,151 @@ const fieldLabelStyle = {
   fontWeight: 'bold'
 };
 
+const KNOWN_ROLE_ORDER = [
+  "Admin",
+  "Project Manager",
+  "Engineer",
+  "Viewer",
+  "Installer",
+  "Supervisor",
+  "Technician",
+  "QA Inspector",
+  "Client",
+] as const;
+
+const createRolePermissions = (
+  base: Omit<RolePermissions, "domains">
+): RolePermissions => ({
+  ...base,
+  domains: defaultDomains(base),
+});
+
+const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
+  Admin: createRolePermissions({
+    viewOnly: false,
+    createDeleteTables: true,
+    createUsers: true,
+    editFields: true,
+    modifyData: true,
+    editForms: true,
+  }),
+  "Project Manager": createRolePermissions({
+    viewOnly: false,
+    createDeleteTables: true,
+    createUsers: false,
+    editFields: true,
+    modifyData: true,
+    editForms: true,
+  }),
+  Engineer: createRolePermissions({
+    viewOnly: false,
+    createDeleteTables: false,
+    createUsers: false,
+    editFields: false,
+    modifyData: true,
+    editForms: false,
+  }),
+  Viewer: createRolePermissions({
+    viewOnly: true,
+    createDeleteTables: false,
+    createUsers: false,
+    editFields: false,
+    modifyData: false,
+    editForms: false,
+  }),
+  Installer: createRolePermissions({
+    viewOnly: false,
+    createDeleteTables: false,
+    createUsers: false,
+    editFields: true,
+    modifyData: false,
+    editForms: true,
+  }),
+  Supervisor: createRolePermissions({
+    viewOnly: false,
+    createDeleteTables: false,
+    createUsers: false,
+    editFields: true,
+    modifyData: true,
+    editForms: true,
+  }),
+  Technician: createRolePermissions({
+    viewOnly: false,
+    createDeleteTables: false,
+    createUsers: false,
+    editFields: false,
+    modifyData: true,
+    editForms: true,
+  }),
+  "QA Inspector": createRolePermissions({
+    viewOnly: false,
+    createDeleteTables: false,
+    createUsers: false,
+    editFields: false,
+    modifyData: true,
+    editForms: true,
+  }),
+  Client: createRolePermissions({
+    viewOnly: true,
+    createDeleteTables: false,
+    createUsers: false,
+    editFields: false,
+    modifyData: false,
+    editForms: false,
+  }),
+};
+
+const getRoleTemplate = (roleName: string): RolePermissions =>
+  KNOWN_ROLE_DEFAULTS[roleName] ?? KNOWN_ROLE_DEFAULTS.Viewer;
+
+const normalizeRolePermissions = (permissions: RolePermissions): RolePermissions => ({
+  viewOnly: permissions.viewOnly,
+  createDeleteTables: permissions.createDeleteTables,
+  createUsers: permissions.createUsers,
+  editFields: permissions.editFields,
+  modifyData: permissions.modifyData,
+  editForms: permissions.editForms,
+  domains: permissions.domains ?? defaultDomains({
+    viewOnly: permissions.viewOnly,
+    createDeleteTables: permissions.createDeleteTables,
+    createUsers: permissions.createUsers,
+    editFields: permissions.editFields,
+    modifyData: permissions.modifyData,
+    editForms: permissions.editForms,
+  }),
+});
+
+const buildNormalizedRolesConfig = (
+  current: Record<string, RolePermissions>,
+  extraRoleNames: string[] = []
+) => {
+  const merged: Record<string, RolePermissions> = {};
+  const requestedNames = Array.from(new Set([...KNOWN_ROLE_ORDER, ...extraRoleNames]));
+
+  requestedNames.forEach((roleName) => {
+    merged[roleName] = normalizeRolePermissions(current[roleName] ?? getRoleTemplate(roleName));
+  });
+
+  Object.entries(current).forEach(([roleName, permissions]) => {
+    if (!merged[roleName]) {
+      merged[roleName] = normalizeRolePermissions(permissions);
+    }
+  });
+
+  return merged;
+};
+
+const resolveRoleName = (roleName: string, availableRoles: string[]) => {
+  const trimmed = roleName.trim();
+  if (!trimmed) return "";
+  const exact = availableRoles.find((role) => role === trimmed);
+  if (exact) return exact;
+  const caseInsensitive = availableRoles.find(
+    (role) => role.toLowerCase() === trimmed.toLowerCase()
+  );
+  return caseInsensitive ?? trimmed;
+};
+
 const defaultCustomColumns = ["ID", "Name", "Created Date"];
 const getDefaultColumnType = (name: string) => {
   if (name === "ID") return "lookup field";
@@ -266,7 +411,7 @@ export const UserManagement: React.FC = () => {
     return result;
   }, [globalOffices]);
 
-  const [roles, setRoles] = useState<string[]>(["Admin", "Project Manager", "Engineer", "Viewer"]);
+  const [roles, setRoles] = useState<string[]>([...KNOWN_ROLE_ORDER]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [bulkImportRows, setBulkImportRows] = useState<{ fullName: string; email: string; role: string; office: string }[]>([]);
@@ -560,14 +705,13 @@ export const UserManagement: React.FC = () => {
     anchorEl: null,
     key: ""
   });
-  const [rolesConfig, setRolesConfig] = useState<Record<string, RolePermissions>>({
-    Viewer: { viewOnly: true, createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false },
-    "Project Manager": { viewOnly: false, createDeleteTables: true, createUsers: false, editFields: true, modifyData: true, editForms: true },
-    Admin: { viewOnly: false, createDeleteTables: true, createUsers: true, editFields: true, modifyData: true, editForms: true },
-    Engineer: { viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true, editForms: false }
-  });
+  const [rolesConfig, setRolesConfig] = useState<Record<string, RolePermissions>>(
+    buildNormalizedRolesConfig({})
+  );
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [rolesLoaded, setRolesLoaded] = useState(false);
+  const [roleSyncNotice, setRoleSyncNotice] = useState<string | null>(null);
 
   const emptyDomains = (): DomainPermissions => ({
     projects:  { view: false, edit: false, approve: false, delete: false },
@@ -615,25 +759,17 @@ export const UserManagement: React.FC = () => {
   const loadRolesFromDatabase = async () => {
     try {
       const config = await roleConfigService.get();
-      console.log('Loaded roles config:', config);
-      console.log('config.roles:', config.roles);
-      console.log('config.roles JSON:', JSON.stringify(config.roles, null, 2));
-      console.log('typeof config.roles:', typeof config.roles);
-
-      const roleNames = Object.keys(config.roles || {});
-      console.log('Role names for dropdown:', roleNames);
+      const normalizedRoles = buildNormalizedRolesConfig(config.roles || {});
+      const roleNames = Object.keys(normalizedRoles);
 
       if (roleNames.length > 0) {
         setRoles(roleNames);
-        setRolesConfig(config.roles);
-        console.log('✅ Roles refreshed from database');
-      } else {
-        console.warn('No roles found in config, using defaults');
-        console.log('Keeping default roles:', ["Admin", "Project Manager", "Engineer", "Viewer"]);
+        setRolesConfig(normalizedRoles);
       }
     } catch (error) {
       console.error("Failed to load roles:", error);
-      console.log('Using default roles:', ["Admin", "Project Manager", "Engineer", "Viewer"]);
+    } finally {
+      setRolesLoaded(true);
     }
   };
 
@@ -647,6 +783,62 @@ export const UserManagement: React.FC = () => {
       delete (window as any).refreshRoles;
     };
   }, []);
+
+  const discoveredUserRoles = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          usersState.items
+            .map((entry) => String(entry.role || "").trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b)),
+    [usersState.items]
+  );
+
+  const invalidBulkImportRoles = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          bulkImportRows
+            .map((row) => row.role.trim())
+            .filter((roleName) => roleName && !roles.includes(roleName))
+        )
+      ).sort((a, b) => a.localeCompare(b)),
+    [bulkImportRows, roles]
+  );
+
+  const assignedUserCountByRole = useMemo(() => {
+    const counts: Record<string, number> = {};
+    usersState.items.forEach((entry) => {
+      const roleName = String(entry.role || "").trim();
+      if (!roleName) return;
+      counts[roleName] = (counts[roleName] ?? 0) + 1;
+    });
+    return counts;
+  }, [usersState.items]);
+
+  useEffect(() => {
+    if (!rolesLoaded) return;
+
+    const missingUserRoles = discoveredUserRoles.filter((roleName) => !rolesConfig[roleName]);
+    const normalized = buildNormalizedRolesConfig(rolesConfig, discoveredUserRoles);
+    const currentKeys = Object.keys(rolesConfig);
+    const normalizedKeys = Object.keys(normalized);
+    const sameShape =
+      currentKeys.length === normalizedKeys.length &&
+      normalizedKeys.every((roleName) => currentKeys.includes(roleName));
+
+    if (!sameShape) {
+      setRolesConfig(normalized);
+    }
+
+    if (missingUserRoles.length > 0) {
+      setRoleSyncNotice(
+        `Synced ${missingUserRoles.length} user role${missingUserRoles.length === 1 ? "" : "s"} into Roles: ${missingUserRoles.join(", ")}`
+      );
+    }
+  }, [discoveredUserRoles, rolesConfig, rolesLoaded]);
 
   // Fetch sites from API
   useEffect(() => {
@@ -725,6 +917,23 @@ export const UserManagement: React.FC = () => {
         console.error('❌ Failed to save roles to database:', error);
       });
   }, [rolesConfig]);
+
+  useEffect(() => {
+    if (roles.length === 0) return;
+    if (!roles.includes(formData.role)) {
+      setFormData((prev) => ({ ...prev, role: roles.includes("Viewer") ? "Viewer" : (roles[0] as UserRole) }));
+    }
+  }, [formData.role, roles]);
+
+  useEffect(() => {
+    if (!editUserOpen || roles.length === 0) return;
+    if (!roles.includes(editUserForm.role)) {
+      setEditUserForm((prev) => ({
+        ...prev,
+        role: roles.includes("Viewer") ? "Viewer" : (roles[0] as UserRole),
+      }));
+    }
+  }, [editUserForm.role, editUserOpen, roles]);
 
   // Site Management Helper Functions
   const getCustomerName = (customerId: string | number) => {
@@ -1656,7 +1865,7 @@ export const UserManagement: React.FC = () => {
       const rows = raw.map((r) => ({
         fullName: r.fullname || r.full_name || r.name || "",
         email: r.email || "",
-        role: r.role || "",
+        role: resolveRoleName(r.role || "", roles),
         office: r.office || "",
       })).filter((r) => r.fullName && r.email && r.role);
       setBulkImportRows(rows);
@@ -2032,6 +2241,18 @@ export const UserManagement: React.FC = () => {
         </Stack>
       </Stack>
 
+      {roleSyncNotice && (
+        <Alert severity="info" onClose={() => setRoleSyncNotice(null)}>
+          {roleSyncNotice}
+        </Alert>
+      )}
+
+      {actionError && (
+        <Alert severity="error" onClose={() => setActionError(null)}>
+          {actionError}
+        </Alert>
+      )}
+
       <Paper className="glass-card" sx={{ p: 1.5 }}>
         <Tabs value={tab} onChange={(_, newValue) => {
           setTab(newValue);
@@ -2377,7 +2598,15 @@ export const UserManagement: React.FC = () => {
                         <Tooltip title="Delete role">
                           <IconButton
                             size="small"
-                            onClick={() => setDeleteTarget({ type: "role", id: row.role, label: row.role })}
+                            onClick={() => {
+                              if ((assignedUserCountByRole[row.role] ?? 0) > 0) {
+                                setActionError(
+                                  `Role "${row.role}" is assigned to ${assignedUserCountByRole[row.role]} user${assignedUserCountByRole[row.role] === 1 ? "" : "s"}. Reassign those users before deleting the role.`
+                                );
+                                return;
+                              }
+                              setDeleteTarget({ type: "role", id: row.role, label: row.role });
+                            }}
                           >
                             <DeleteOutline fontSize="small" />
                           </IconButton>
@@ -3775,6 +4004,11 @@ export const UserManagement: React.FC = () => {
               <Alert severity="info">
                 <strong>{bulkImportRows.length}</strong> valid row{bulkImportRows.length !== 1 ? "s" : ""} found. Review before importing.
               </Alert>
+              {invalidBulkImportRoles.length > 0 && (
+                <Alert severity="warning">
+                  Unknown role{invalidBulkImportRoles.length === 1 ? "" : "s"} in CSV: {invalidBulkImportRoles.join(", ")}. Add those roles in Admin/Roles first or change the CSV to use an existing role.
+                </Alert>
+              )}
               <Box sx={{ maxHeight: 320, overflowY: "auto" }}>
                 <Table size="small">
                   <TableHead>
@@ -3812,7 +4046,7 @@ export const UserManagement: React.FC = () => {
                 </Button>
               )}
               {bulkImportRows.length > 0 && (
-                <Button variant="contained" onClick={runBulkImport} disabled={bulkImporting}>
+                <Button variant="contained" onClick={runBulkImport} disabled={bulkImporting || invalidBulkImportRoles.length > 0}>
                   {bulkImporting ? "Importing…" : `Import ${bulkImportRows.length} users`}
                 </Button>
               )}
