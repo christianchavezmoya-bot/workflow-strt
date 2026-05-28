@@ -93,6 +93,21 @@ function isImage(ct?: string | null) {
   return !!ct && ct.startsWith("image/");
 }
 
+function getDocProductId(doc: DocumentRecord) {
+  return doc.customValues?.productId || doc.linkedTo || "";
+}
+
+function getDocProductLabel(doc: DocumentRecord, productNameById: Map<string, string>) {
+  const productId = getDocProductId(doc);
+  return (
+    doc.customValues?.productLabel ||
+    doc.customValues?.product ||
+    (productId ? productNameById.get(productId) : "") ||
+    doc.linkedTo ||
+    ""
+  );
+}
+
 function DocPreviewDialog({
   doc,
   onClose,
@@ -251,7 +266,7 @@ export default function TipsAndTricksPage() {
   const [addTitle, setAddTitle] = useState("");
   const [addContentType, setAddContentType] = useState<ContentTypeLabel>("Photo");
   const [addDivision, setAddDivision] = useState("");
-  const [addProduct, setAddProduct] = useState("");
+  const [addProductId, setAddProductId] = useState("");
   const [addNotes, setAddNotes] = useState("");
   const [addFile, setAddFile] = useState<File | null>(null);
   const [addDragOver, setAddDragOver] = useState(false);
@@ -303,9 +318,22 @@ export default function TipsAndTricksPage() {
     [myProductIds, productNameById]
   );
 
-  const allLinkedIds = useMemo(
-    () => Array.from(new Set(docs.map((d) => d.linkedTo).filter(Boolean))).sort(),
-    [docs]
+  const productFilterOptions = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          docs
+            .map((doc) => {
+              const value = getDocProductId(doc);
+              const label = getDocProductLabel(doc, productNameById);
+              return value && label ? [value, label] : null;
+            })
+            .filter(Boolean) as Array<[string, string]>
+        ).entries()
+      )
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [docs, productNameById]
   );
 
   const divisions = useMemo(
@@ -328,20 +356,20 @@ export default function TipsAndTricksPage() {
 
     if (productFilter === "__mine__" && myProductIds.length > 0) {
       const mine = result.filter((doc) => {
-        const linked = doc.linkedTo ?? "";
-        const docProduct = doc.customValues?.product ?? "";
-        return myProductIds.includes(linked) || myProductNameSet.has(linked) || myProductNameSet.has(docProduct);
+        const productId = getDocProductId(doc);
+        const productLabel = getDocProductLabel(doc, productNameById);
+        return myProductIds.includes(productId) || myProductNameSet.has(productLabel);
       });
       if (mine.length > 0) result = mine;
     } else if (productFilter !== "__all__" && productFilter !== "__mine__") {
-      result = result.filter((doc) => doc.linkedTo === productFilter);
+      result = result.filter((doc) => getDocProductId(doc) === productFilter);
     }
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter((doc) => {
         const division = doc.customValues?.division ?? "";
-        const product = doc.customValues?.product ?? "";
+        const product = getDocProductLabel(doc, productNameById);
         return (
           doc.name.toLowerCase().includes(q) ||
           (doc.notes ?? "").toLowerCase().includes(q) ||
@@ -355,7 +383,7 @@ export default function TipsAndTricksPage() {
     }
 
     if (filterProduct) {
-      result = result.filter((doc) => (doc.customValues?.product ?? "") === filterProduct);
+      result = result.filter((doc) => getDocProductId(doc) === filterProduct);
     }
 
     if (filterContentType !== "All") {
@@ -363,23 +391,23 @@ export default function TipsAndTricksPage() {
     }
 
     return result;
-  }, [docs, filterContentType, filterDivision, filterProduct, myProductIds, myProductNameSet, productFilter, search]);
+  }, [docs, filterContentType, filterDivision, filterProduct, myProductIds, myProductNameSet, productFilter, productNameById, search]);
 
   const myMatches = useMemo(
     () =>
       docs.filter((doc) => {
-        const linked = doc.linkedTo ?? "";
-        const docProduct = doc.customValues?.product ?? "";
-        return myProductIds.includes(linked) || myProductNameSet.has(linked) || myProductNameSet.has(docProduct);
+        const productId = getDocProductId(doc);
+        const productLabel = getDocProductLabel(doc, productNameById);
+        return myProductIds.includes(productId) || myProductNameSet.has(productLabel);
       }).length,
-    [docs, myProductIds, myProductNameSet]
+    [docs, myProductIds, myProductNameSet, productNameById]
   );
 
   const resetAddForm = () => {
     setAddTitle("");
     setAddContentType("Photo");
     setAddDivision("");
-    setAddProduct("");
+    setAddProductId("");
     setAddNotes("");
     setAddFile(null);
   };
@@ -406,11 +434,14 @@ export default function TipsAndTricksPage() {
     if (!addTitle.trim()) return;
     setSaving(true);
     try {
-      const linkedTo = addProduct || addDivision || "General";
+      const selectedProduct = products.find((product) => product.id === addProductId);
+      const linkedTo = selectedProduct?.id || addDivision || "General";
       const customValues: Record<string, string> = {
         contentType: addContentType,
         division: addDivision,
-        product: addProduct,
+        productId: selectedProduct?.id ?? "",
+        productLabel: selectedProduct?.name ?? "",
+        product: selectedProduct?.name ?? "",
       };
 
       if (addFile) {
@@ -486,7 +517,7 @@ export default function TipsAndTricksPage() {
               value={addDivision}
               onChange={(e) => {
                 setAddDivision(e.target.value);
-                setAddProduct("");
+                setAddProductId("");
               }}
               size="small"
               displayEmpty
@@ -503,8 +534,8 @@ export default function TipsAndTricksPage() {
           <Autocomplete
             options={addProductsForDivision}
             getOptionLabel={(product) => product.name}
-            value={addProductsForDivision.find((product) => product.name === addProduct) ?? null}
-            onChange={(_, next) => setAddProduct(next?.name ?? "")}
+            value={addProductsForDivision.find((product) => product.id === addProductId) ?? null}
+            onChange={(_, next) => setAddProductId(next?.id ?? "")}
             renderInput={(params) => <TextField {...params} label="Product" size="small" />}
           />
 
@@ -631,7 +662,7 @@ export default function TipsAndTricksPage() {
                   {doc.name}
                 </Typography>
                 <Typography variant="caption" color="text.secondary" display="block" noWrap>
-                  {[doc.customValues?.division, doc.customValues?.product, doc.customValues?.contentType].filter(Boolean).join(" • ")}
+                  {[doc.customValues?.division, getDocProductLabel(doc, productNameById), doc.customValues?.contentType].filter(Boolean).join(" • ")}
                 </Typography>
                 {doc.notes && (
                   <Typography
@@ -717,9 +748,9 @@ export default function TipsAndTricksPage() {
                   </Box>
                 </TableCell>
                 <TableCell>{doc.customValues?.division || "-"}</TableCell>
-                <TableCell>{doc.customValues?.product || "-"}</TableCell>
+                <TableCell>{getDocProductLabel(doc, productNameById) || "-"}</TableCell>
                 <TableCell>{doc.customValues?.contentType || "-"}</TableCell>
-                <TableCell>{doc.linkedTo || "-"}</TableCell>
+                <TableCell>{getDocProductLabel(doc, productNameById) || doc.linkedTo || "-"}</TableCell>
                 <TableCell>{doc.createdBy || "-"}</TableCell>
                 <TableCell>{fmtDate(doc.uploadedAt) || "-"}</TableCell>
                 <TableCell align="right">
@@ -827,7 +858,7 @@ export default function TipsAndTricksPage() {
             }}
           />
 
-          {(allLinkedIds.length > 0 || myProductIds.length > 0) && (
+          {(productFilterOptions.length > 0 || myProductIds.length > 0) && (
             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
               <FilterListOutlined sx={{ fontSize: 16, color: "text.secondary", flexShrink: 0 }} />
               {myProductIds.length > 0 && (
@@ -846,14 +877,14 @@ export default function TipsAndTricksPage() {
                 variant={productFilter === "__all__" ? "filled" : "outlined"}
                 onClick={() => setProductFilter("__all__")}
               />
-              {allLinkedIds.map((id) => (
+              {productFilterOptions.map((option) => (
                 <Chip
-                  key={id}
-                  label={id}
+                  key={option.value}
+                  label={option.label}
                   size="small"
-                  color={productFilter === id ? "secondary" : "default"}
-                  variant={productFilter === id ? "filled" : "outlined"}
-                  onClick={() => setProductFilter(id)}
+                  color={productFilter === option.value ? "secondary" : "default"}
+                  variant={productFilter === option.value ? "filled" : "outlined"}
+                  onClick={() => setProductFilter(option.value)}
                 />
               ))}
             </Stack>
@@ -883,8 +914,8 @@ export default function TipsAndTricksPage() {
               <Autocomplete
                 options={productsForDivision}
                 getOptionLabel={(product) => product.name}
-                value={productsForDivision.find((product) => product.name === filterProduct) ?? null}
-                onChange={(_, next) => setFilterProduct(next?.name ?? "")}
+                value={productsForDivision.find((product) => product.id === filterProduct) ?? null}
+                onChange={(_, next) => setFilterProduct(next?.id ?? "")}
                 size="small"
                 fullWidth
                 renderInput={(params) => <TextField {...params} placeholder="All Products" />}
