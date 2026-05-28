@@ -67,16 +67,7 @@ public sealed class NotificationSettingsService
     public async Task<EmailSettings> GetEmailSettingsAsync()
     {
         var s = await GetAsync();
-        var configuredFrontendBaseUrl = (_fallbackEmail.FrontendBaseUrl ?? "").Trim().TrimEnd('/');
-        var effectiveFrontendBaseUrl = (s.FrontendBaseUrl ?? "").Trim().TrimEnd('/');
-
-        if (string.IsNullOrWhiteSpace(effectiveFrontendBaseUrl) || IsLocalhostUrl(effectiveFrontendBaseUrl))
-        {
-            if (!string.IsNullOrWhiteSpace(configuredFrontendBaseUrl) && !IsLocalhostUrl(configuredFrontendBaseUrl))
-            {
-                effectiveFrontendBaseUrl = configuredFrontendBaseUrl;
-            }
-        }
+        var effectiveFrontendBaseUrl = ResolveFrontendBaseUrl(s.FrontendBaseUrl);
 
         return new EmailSettings
         {
@@ -88,6 +79,12 @@ public sealed class NotificationSettingsService
             FromAddress = string.IsNullOrWhiteSpace(s.SmtpFrom) ? "no-reply@commtrac.local" : s.SmtpFrom,
             FrontendBaseUrl = effectiveFrontendBaseUrl
         };
+    }
+
+    public async Task<string> GetFrontendBaseUrlAsync()
+    {
+        var settings = await GetAsync();
+        return ResolveFrontendBaseUrl(settings.FrontendBaseUrl);
     }
 
     public async Task<SmsSettings> GetSmsSettingsAsync()
@@ -124,5 +121,21 @@ public sealed class NotificationSettingsService
 
         var host = uri.Host.ToLowerInvariant();
         return host == "localhost" || host == "127.0.0.1" || host == "::1";
+    }
+
+    private string ResolveFrontendBaseUrl(string? configuredUrl)
+    {
+        var fallbackFrontendBaseUrl = (_fallbackEmail.FrontendBaseUrl ?? "").Trim().TrimEnd('/');
+        var effectiveFrontendBaseUrl = (configuredUrl ?? "").Trim().TrimEnd('/');
+
+        if (string.IsNullOrWhiteSpace(effectiveFrontendBaseUrl) || IsLocalhostUrl(effectiveFrontendBaseUrl))
+        {
+            if (!string.IsNullOrWhiteSpace(fallbackFrontendBaseUrl) && !IsLocalhostUrl(fallbackFrontendBaseUrl))
+            {
+                effectiveFrontendBaseUrl = fallbackFrontendBaseUrl;
+            }
+        }
+
+        return effectiveFrontendBaseUrl;
     }
 }

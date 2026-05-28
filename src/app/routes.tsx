@@ -1,33 +1,58 @@
-﻿import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Suspense, lazy, type ReactNode } from "react";
+import { Box, CircularProgress } from "@mui/material";
+import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 import { usePermissions } from "../hooks/usePermissions";
-import Dashboard from "../features/dashboard/Dashboard";
-import ProjectsPage from "../features/projects/ProjectsPage";
-import ProjectForm from "../features/projects/ProjectForm";
-import ProjectDetail from "../features/projects/ProjectDetail";
-import AssetInstallationPage from "../features/installations/AssetInstallationPage";
-import WorkInstructions from "../features/workInstructions/WorkInstructions";
-import UserManagement from "../features/admin/UserManagement";
-import CustomerSites from "../features/admin/CustomerSites";
-import DocumentsPage from "../features/documents/DocumentsPage";
-import TipsAndTricksPage from "../features/tips/TipsAndTricksPage";
-import ProfileWizard from "../features/profile/ProfileWizard";
-import Settings from "../features/settings/Settings";
-import Login from "../features/auth/Login";
-import ResetPassword from "../features/auth/ResetPassword";
-import ExternalSignPage from "../features/sign/ExternalSignPage";
-import IssuesBoard from "../features/issues/IssuesBoard";
-import MobileUploadPage from "../features/mobile-upload/MobileUploadPage";
-// ── BOM Module (feature-flagged, conditionally imported) ──────────────────────
-import {
-  BOM_MODULE_ENABLED,
-  BomProjectProvider,
-  BomDashboard,
-  BomUploadPage,
-  BomMappingPage,
-  BomClassificationPage,
-  BomCommitPage,
-} from "../modules/bom-project";
+import { BOM_MODULE_ENABLED } from "../modules/bom-project";
+
+const Dashboard = lazy(() => import("../features/dashboard/Dashboard"));
+const ProjectsPage = lazy(() => import("../features/projects/ProjectsPage"));
+const ProjectForm = lazy(() => import("../features/projects/ProjectForm"));
+const ProjectDetail = lazy(() => import("../features/projects/ProjectDetail"));
+const AssetInstallationPage = lazy(() => import("../features/installations/AssetInstallationPage"));
+const WorkInstructions = lazy(() => import("../features/workInstructions/WorkInstructions"));
+const UserManagement = lazy(() => import("../features/admin/UserManagement"));
+const CustomerSites = lazy(() => import("../features/admin/CustomerSites"));
+const DocumentsPage = lazy(() => import("../features/documents/DocumentsPage"));
+const TipsAndTricksPage = lazy(() => import("../features/tips/TipsAndTricksPage"));
+const ProfileWizard = lazy(() => import("../features/profile/ProfileWizard"));
+const Settings = lazy(() => import("../features/settings/Settings"));
+const Login = lazy(() => import("../features/auth/Login"));
+const ResetPassword = lazy(() => import("../features/auth/ResetPassword"));
+const ExternalSignPage = lazy(() => import("../features/sign/ExternalSignPage"));
+const IssuesBoard = lazy(() => import("../features/issues/IssuesBoard"));
+const MobileUploadPage = lazy(() => import("../features/mobile-upload/MobileUploadPage"));
+
+const BomProjectProvider = lazy(() =>
+  import("../modules/bom-project").then((module) => ({ default: module.BomProjectProvider }))
+);
+const BomDashboard = lazy(() =>
+  import("../modules/bom-project").then((module) => ({ default: module.BomDashboard }))
+);
+const BomUploadPage = lazy(() =>
+  import("../modules/bom-project").then((module) => ({ default: module.BomUploadPage }))
+);
+const BomMappingPage = lazy(() =>
+  import("../modules/bom-project").then((module) => ({ default: module.BomMappingPage }))
+);
+const BomClassificationPage = lazy(() =>
+  import("../modules/bom-project").then((module) => ({ default: module.BomClassificationPage }))
+);
+const BomCommitPage = lazy(() =>
+  import("../modules/bom-project").then((module) => ({ default: module.BomCommitPage }))
+);
+
+function RouteFallback() {
+  return (
+    <Box sx={{ minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <CircularProgress size={28} />
+    </Box>
+  );
+}
+
+function LazyRoute({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<RouteFallback />}>{children}</Suspense>;
+}
 
 const SettingsRoute = () => {
   const can = usePermissions();
@@ -37,43 +62,48 @@ const SettingsRoute = () => {
 const AppRoutes = () => {
   return (
     <Routes>
-      {/* ── Public routes (no auth) ── */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
-      <Route path="/sign/:tokenId" element={<ExternalSignPage />} />
+      <Route path="/login" element={<LazyRoute><Login /></LazyRoute>} />
+      <Route path="/reset-password" element={<LazyRoute><ResetPassword /></LazyRoute>} />
+      <Route path="/sign/:tokenId" element={<LazyRoute><ExternalSignPage /></LazyRoute>} />
 
-      {/* ── Authenticated app shell ── */}
       <Route element={<AppShell />}>
-        <Route index element={<Dashboard />} />
-        <Route path="/projects" element={<ProjectsPage />} />
-        <Route path="/projects/new" element={<ProjectForm />} />
-        <Route path="/projects/:id" element={<ProjectDetail />} />
-        <Route path="/projects/:id/edit" element={<ProjectForm />} />
-        <Route path="/installations/assets" element={<AssetInstallationPage />} />
-        <Route path="/work-instructions" element={<WorkInstructions />} />
-        <Route path="/documents" element={<DocumentsPage />} />
-        <Route path="/tips" element={<TipsAndTricksPage />} />
-        <Route path="/admin" element={<UserManagement />} />
-        <Route path="/admin/customers/:customerId/sites" element={<CustomerSites />} />
+        <Route index element={<LazyRoute><Dashboard /></LazyRoute>} />
+        <Route path="/projects" element={<LazyRoute><ProjectsPage /></LazyRoute>} />
+        <Route path="/projects/new" element={<LazyRoute><ProjectForm /></LazyRoute>} />
+        <Route path="/projects/:id" element={<LazyRoute><ProjectDetail /></LazyRoute>} />
+        <Route path="/projects/:id/edit" element={<LazyRoute><ProjectForm /></LazyRoute>} />
+        <Route path="/installations/assets" element={<LazyRoute><AssetInstallationPage /></LazyRoute>} />
+        <Route path="/work-instructions" element={<LazyRoute><WorkInstructions /></LazyRoute>} />
+        <Route path="/documents" element={<LazyRoute><DocumentsPage /></LazyRoute>} />
+        <Route path="/tips" element={<LazyRoute><TipsAndTricksPage /></LazyRoute>} />
+        <Route path="/admin" element={<LazyRoute><UserManagement /></LazyRoute>} />
+        <Route path="/admin/customers/:customerId/sites" element={<LazyRoute><CustomerSites /></LazyRoute>} />
         <Route path="/admin/asset-registry" element={<Navigate to="/projects" replace />} />
-        <Route path="/issues" element={<IssuesBoard />} />
-        <Route path="/settings" element={<SettingsRoute />} />
-        <Route path="/profile" element={<ProfileWizard />} />
-        {/* ── BOM Module routes (only when feature flag enabled) ── */}
+        <Route path="/issues" element={<LazyRoute><IssuesBoard /></LazyRoute>} />
+        <Route path="/settings" element={<LazyRoute><SettingsRoute /></LazyRoute>} />
+        <Route path="/profile" element={<LazyRoute><ProfileWizard /></LazyRoute>} />
         {BOM_MODULE_ENABLED && (
-          <Route element={<BomProjectProvider><Outlet /></BomProjectProvider>}>
-            <Route path="/admin/bom-project" element={<BomDashboard />} />
-            <Route path="/admin/bom-project/upload" element={<BomUploadPage />} />
-            <Route path="/admin/bom-project/imports/:id/mapping" element={<BomMappingPage />} />
-            <Route path="/admin/bom-project/imports/:id/classification" element={<BomClassificationPage />} />
+          <Route
+            element={
+              <LazyRoute>
+                <BomProjectProvider>
+                  <Outlet />
+                </BomProjectProvider>
+              </LazyRoute>
+            }
+          >
+            <Route path="/admin/bom-project" element={<LazyRoute><BomDashboard /></LazyRoute>} />
+            <Route path="/admin/bom-project/upload" element={<LazyRoute><BomUploadPage /></LazyRoute>} />
+            <Route path="/admin/bom-project/imports/:id/mapping" element={<LazyRoute><BomMappingPage /></LazyRoute>} />
+            <Route path="/admin/bom-project/imports/:id/classification" element={<LazyRoute><BomClassificationPage /></LazyRoute>} />
             <Route path="/admin/bom-project/imports/:id/compare" element={<Navigate to="/admin/bom-project" replace />} />
             <Route path="/admin/bom-project/imports/:id/preview" element={<Navigate to="/admin/bom-project" replace />} />
-            <Route path="/admin/bom-project/imports/:id/commit" element={<BomCommitPage />} />
+            <Route path="/admin/bom-project/imports/:id/commit" element={<LazyRoute><BomCommitPage /></LazyRoute>} />
           </Route>
         )}
       </Route>
-      {/* ── Mobile upload (public — phone camera scan) ── */}
-      <Route path="/mobile-upload" element={<MobileUploadPage />} />
+
+      <Route path="/mobile-upload" element={<LazyRoute><MobileUploadPage /></LazyRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

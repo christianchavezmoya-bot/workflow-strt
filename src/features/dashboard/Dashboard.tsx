@@ -126,12 +126,12 @@ const Dashboard = () => {
   // Phase 1 workspace
   const [workspaceExpanded, setWorkspaceExpanded] = useState(!isEngineer ? false : true);
 
-  // Phase 4 â€" evidence
+  // Phase 4 ÃƒÂ¢Ã¢â€šÂ¬" evidence
   const [evidenceData,    setEvidenceData]    = useState<EvidenceCompleteness | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceWindow,  setEvidenceWindow]  = useState(90);
 
-  // Phase 5 â€" health
+  // Phase 5 ÃƒÂ¢Ã¢â€šÂ¬" health
   const [healthData,    setHealthData]    = useState<WorkflowHealth | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthWindow,  setHealthWindow]  = useState(90);
@@ -147,7 +147,7 @@ const Dashboard = () => {
     JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]")
   );
 
-  // Missing media flags â€" runs completed without photos/videos (uses shared type from PhotoUploadDialog)
+  // Missing media flags ÃƒÂ¢Ã¢â€šÂ¬" runs completed without photos/videos (uses shared type from PhotoUploadDialog)
   type MissingMediaFlag = PhotoMissingMediaFlag;
   type PhotoReminder = { id: string; runId: string; assetTag: string; jobNumber: string; workflowName: string; sentAt: string; sentByName: string };
 
@@ -261,7 +261,7 @@ const Dashboard = () => {
     return () => window.removeEventListener("installer-photo-reminders-changed", reload);
   }, []);
 
-  // Phase 4 â€" evidence completeness
+  // Phase 4 ÃƒÂ¢Ã¢â€šÂ¬" evidence completeness
   useEffect(() => {
     if (!isManager) return;
     setEvidenceLoading(true);
@@ -271,7 +271,7 @@ const Dashboard = () => {
       .finally(() => setEvidenceLoading(false));
   }, [isManager, evidenceWindow]);
 
-  // Phase 5 â€" workflow health
+  // Phase 5 ÃƒÂ¢Ã¢â€šÂ¬" workflow health
   useEffect(() => {
     if (!isManager) return;
     setHealthLoading(true);
@@ -281,7 +281,7 @@ const Dashboard = () => {
       .finally(() => setHealthLoading(false));
   }, [isManager, healthWindow]);
 
-  // â"€â"€ Derived â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ Derived ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬
   const filteredProjects = useMemo(() => {
     if (activeOffice === "All" || !officeIdsForRegion) return projects;
     return projects.filter((p) => {
@@ -325,7 +325,7 @@ const Dashboard = () => {
     [dashboardUsers, viewedDashboardUserId],
   );
 
-  // Phase 1 â€" personal workspace
+  // Phase 1 ÃƒÂ¢Ã¢â€šÂ¬" personal workspace
   const myAssets   = useMemo(
     () => openAssets.filter((a) => a.assignedUserId === (viewedDashboardUserId ?? user.id)),
     [openAssets, viewedDashboardUserId, user.id],
@@ -558,7 +558,7 @@ const Dashboard = () => {
       )}
       {myInspectionAssets.length > 6 && (
         <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
-          +{myInspectionAssets.length - 6} more &mdash;{" "}
+          +{myInspectionAssets.length - 6} more {"\\u2014"}{" "}
           <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }}
             onClick={() => navigate("/installations/assets?workflowType=Inspection")}>
             view all
@@ -581,7 +581,7 @@ const Dashboard = () => {
     } finally { setReportingTechId(null); }
   }
 
-  // â"€â"€ Reusable: individual clickable item row â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ Reusable: individual clickable item row ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬
   const ItemRow = ({ label, sub, onClick }: { label: string; sub?: string; onClick: () => void }) => (
     <Box onClick={(e) => { e.stopPropagation(); onClick(); }}
       sx={{
@@ -590,13 +590,13 @@ const Dashboard = () => {
         transition: "background 0.15s",
       }}>
       <Typography variant="caption" color="text.secondary" noWrap display="block">
-        • {label}
+        Ã¢â‚¬Â¢ {label}
       </Typography>
       {sub && <Typography variant="caption" color="text.disabled" noWrap display="block" sx={{ pl: 1.5, fontSize: "0.65rem" }}>{sub}</Typography>}
     </Box>
   );
 
-  // â"€â"€ Reusable JSX blocks â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ Reusable JSX blocks ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬
 
   const NeedsAttentionSection = (
     <Box className="glass-card" sx={{ p: 2.5 }}>
@@ -636,7 +636,7 @@ const Dashboard = () => {
                 {blockingIssues.slice(0, 4).map((iss) => (
                   <ItemRow key={iss.issueId}
                     label={`${iss.jobNumber}: ${iss.assetTag}`}
-                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "…" : "")}
+                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "Ã¢â‚¬Â¦" : "")}
                     onClick={() => navigate("/issues")} />
                 ))}
                 {blockingIssues.length > 4 && (
@@ -670,7 +670,7 @@ const Dashboard = () => {
               <Stack spacing={0.25} sx={{ mt: 1 }}>
                 {overdueProjects.slice(0, 4).map((p) => (
                   <ItemRow key={p.id}
-                    label={`${p.jobNumber} — ${p.customerName || ""}`}
+                    label={`${p.jobNumber} Ã¢â‚¬â€ ${p.customerName || ""}`}
                     sub={`Due ${fmtDate(p.finishDate)}`}
                     onClick={() => navigate(`/projects/${p.id}`)} />
                 ))}
@@ -741,7 +741,7 @@ const Dashboard = () => {
                 {highIssues.slice(0, 4).map((iss) => (
                   <ItemRow key={iss.issueId}
                     label={`${iss.jobNumber}: ${iss.assetTag}`}
-                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "…" : "")}
+                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "Ã¢â‚¬Â¦" : "")}
                     onClick={() => navigate("/issues")} />
                 ))}
                 {highIssues.length > 4 && (
@@ -787,7 +787,7 @@ const Dashboard = () => {
                 }}>
                 <Typography variant="subtitle1" sx={{ fontFamily: "Sora" }}>{region}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {rp.length} projects · {rp.filter(p => p.status === "In Progress").length} in progress
+                  {rp.length} projects â€¢ {rp.filter(p => p.status === "In Progress").length} in progress
                 </Typography>
                 <Typography variant="body2" color="text.secondary">{rAssets} active installations</Typography>
               </Box>
@@ -899,7 +899,7 @@ const Dashboard = () => {
                     </Typography>
                   </Stack>
                   <Typography variant="caption" color="text.secondary" noWrap>
-                    {[project.customerName, project.siteName, productNames || "No products linked"].filter(Boolean).join(" � ")}
+                    {[project.customerName, project.siteName, productNames || "No products linked"].filter(Boolean).join(" â€” ")}
                   </Typography>
                 </Stack>
               </Box>
@@ -1030,7 +1030,7 @@ const Dashboard = () => {
                   </Stack>
                 </Box>
               )}
-              <Typography variant="caption" color="text.disabled">{healthData.totalRuns} runs in last {healthWindow} days · prev score {healthData.previousScore}%</Typography>
+              <Typography variant="caption" color="text.disabled">{healthData.totalRuns} runs in last {healthWindow} days â€¢ prev score {healthData.previousScore}%</Typography>
             </Stack>
           ) : (
             <Typography variant="caption" color="text.disabled">No data available for selected window.</Typography>
@@ -1045,7 +1045,7 @@ const Dashboard = () => {
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
         <Box>
           <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Technician Workload</Typography>
-          <Typography variant="caption" color="text.secondary">Open assets — click to view in installations</Typography>
+          <Typography variant="caption" color="text.secondary">Open assets Ã¢â‚¬â€ click to view in installations</Typography>
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Stack direction="row" spacing={0.5} alignItems="center">
@@ -1094,11 +1094,11 @@ const Dashboard = () => {
                       </Stack>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <Typography variant="caption" color="text.secondary">
-                          {w.inProgress} active · {w.paused} paused · {w.notStarted} queued
+                          {w.inProgress} active â€¢ {w.paused} paused â€¢ {w.notStarted} queued
                         </Typography>
                         {startLabel && (
                           <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.65rem" }}>
-                            · since {startLabel}
+                            â€¢ since {startLabel}
                           </Typography>
                         )}
                       </Stack>
@@ -1106,8 +1106,8 @@ const Dashboard = () => {
                     <Box sx={{ flex: 1 }}>
                       <Tooltip title={
                         w.totalSteps > 0
-                          ? `${w.completedSteps} / ${w.totalSteps} steps · ${w.inProgress} in-progress · ${w.paused} paused · ${w.notStarted} queued`
-                          : `${w.inProgress} in progress · ${w.paused} paused · ${w.notStarted} not started`
+                          ? `${w.completedSteps} / ${w.totalSteps} steps â€¢ ${w.inProgress} in-progress â€¢ ${w.paused} paused â€¢ ${w.notStarted} queued`
+                          : `${w.inProgress} in progress â€¢ ${w.paused} paused â€¢ ${w.notStarted} not started`
                       } arrow>
                         <Box sx={{ position: "relative", height: 10, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.08)", display: "flex" }}>
                           {w.totalSteps > 0 ? (
@@ -1160,7 +1160,7 @@ const Dashboard = () => {
   return (
     <Stack spacing={3}>
 
-      {/* â"€â"€ PERSONAL WORKSPACE STRIP â€" all except Viewer â"€â"€ */}
+      {/* ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ PERSONAL WORKSPACE STRIP ÃƒÂ¢Ã¢â€šÂ¬" all except Viewer ÃƒÂ¢"Ã¢â€šÂ¬ÃƒÂ¢"Ã¢â€šÂ¬ */}
       {!isViewer && (
         <Box className="glass-card" sx={{ p: 2.5 }}>
           {isManager && !viewingOwnDashboard && viewedDashboardUser && (
@@ -1243,7 +1243,7 @@ const Dashboard = () => {
                               {a.assetTag || a.assetName || a.id}
                             </Typography>
                             <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                              {a.jobNumber} — {displayRunState(a)}
+                              {a.jobNumber} Ã¢â‚¬â€ {displayRunState(a)}
                             </Typography>
                           </Box>
                           <Chip label={isPausedAsset(a.runStatus) ? "Paused" : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "Active" : "Queued"}
@@ -1258,7 +1258,7 @@ const Dashboard = () => {
                   {myAssets.length > 6 && (
                     <Grid item xs={12}>
                       <Typography variant="caption" color="text.disabled">
-                        +{myAssets.length - 6} more assets — <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }} onClick={() => navigate("/installations/assets")}>view all</Box>
+                        +{myAssets.length - 6} more assets Ã¢â‚¬â€ <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }} onClick={() => navigate("/installations/assets")}>view all</Box>
                       </Typography>
                     </Grid>
                   )}
@@ -1268,7 +1268,7 @@ const Dashboard = () => {
           </Collapse>
         </Box>
       )}
-      {/* ══ UNIVERSAL TAB BAR (all non-viewer users) ══ */}
+      {/* Ã¢â€¢ÂÃ¢â€¢Â UNIVERSAL TAB BAR (all non-viewer users) Ã¢â€¢ÂÃ¢â€¢Â */}
       {showTabBar && (
         <Box className="glass-card" sx={{ p: 1.5 }}>
           <Tabs value={pmDashboardTab} onChange={(_, v: PmDashboardTab) => setPmDashboardTab(v)}
@@ -1280,11 +1280,11 @@ const Dashboard = () => {
         </Box>
       )}
 
-      {/* My Inspections tab content — non-manager users */}
+      {/* My Inspections tab content Ã¢â‚¬â€ non-manager users */}
       {showTabBar && !isManager && pmDashboardTab === "my-inspections" && MyInspectionWorkspace}
 
 
-      {/* â•â• INSTALLER / TECHNICIAN VIEW â•â• */}
+      {/* ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â INSTALLER / TECHNICIAN VIEW ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â */}
       {isInstaller && pmDashboardTab === "my-installs" && (
         <>
           {inspectionRunsDue > 0 && (
@@ -1317,7 +1317,7 @@ const Dashboard = () => {
               <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Jobs Today</Typography>
             </Stack>
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-              Sorted by activity â€" tap to open
+              Sorted by activity {"\u2014"} tap to open
             </Typography>
             {myAssets.length === 0 ? (
               <Typography variant="caption" color="text.disabled">No jobs assigned to you.</Typography>
@@ -1346,7 +1346,7 @@ const Dashboard = () => {
                                 </Typography>
                                 {a.totalSteps > 0 && (
                                   <Typography variant="caption" color={a.missingItems > 0 ? "warning.main" : "text.disabled"} noWrap display="block" sx={{ fontSize: "0.62rem" }}>
-                                    {a.completedSteps}/{a.totalSteps} steps{a.missingItems > 0 ? ` · ${a.missingItems} missing` : ""}
+                                    {a.completedSteps}/{a.totalSteps} steps{a.missingItems > 0 ? ` \u2022 ${a.missingItems} missing` : ""}
                                   </Typography>
                                 )}
                               </Box>
@@ -1368,7 +1368,7 @@ const Dashboard = () => {
                 </Grid>
                 {myAssets.length > 6 && (
                   <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
-                    +{myAssets.length - 6} more â€"{" "}
+                    +{myAssets.length - 6} more {"\u2014"}{" "}
                     <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }}
                       onClick={() => navigate("/installations/assets")}>
                       view all
@@ -1393,7 +1393,7 @@ const Dashboard = () => {
                   }}
                 >
                   <Typography variant="caption" fontWeight={600}>
-                    {r.sentByName} requested photos for: {r.assetTag} — {r.workflowName}
+                    {r.sentByName} requested photos for: {r.assetTag} {"\u2014"} {r.workflowName}
                   </Typography>
                 </Alert>
               ))}
@@ -1411,7 +1411,7 @@ const Dashboard = () => {
                 <Chip label={missingMediaFlags.filter(f => f.technicianUserId === user.id).length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
               </Stack>
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Your completed runs with missing photo or video evidence â€" tap to upload missing media
+                Your completed runs with missing photo or video evidence {"\u2014"} tap to upload missing media
               </Typography>
               <Stack spacing={0.5}>
                 {missingMediaFlags.filter(f => f.technicianUserId === user.id).map((f) => (
@@ -1421,7 +1421,7 @@ const Dashboard = () => {
                         {f.jobNumber ? `${f.jobNumber}: ` : ""}{f.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {f.workflowName} · {fmtDate(f.completedAt)}
+                        {f.workflowName} {"\u2022"} {fmtDate(f.completedAt)}
                       </Typography>
                       {"totalExpected" in f && (
                         <Typography variant="caption" color="warning.main" display="block">
@@ -1465,7 +1465,7 @@ const Dashboard = () => {
                     {myBlocking.map((iss) => (
                       <ItemRow key={iss.issueId}
                         label={`${iss.jobNumber}: ${iss.assetTag}`}
-                        sub={iss.description.slice(0, 60) + (iss.description.length > 60 ? "…" : "")}
+                        sub={iss.description.slice(0, 60) + (iss.description.length > 60 ? "Ã¢â‚¬Â¦" : "")}
                         onClick={() => navigate("/issues")} />
                     ))}
                   </Stack>
@@ -1499,10 +1499,10 @@ const Dashboard = () => {
         </>
       )}
 
-      {/* â•â• SUPERVISOR VIEW â•â• */}
+      {/* ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â SUPERVISOR VIEW ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â */}
       {isSupervisor && pmDashboardTab === "my-installs" && (
         <>
-          {/* Needs Attention â€" team issues */}
+          {/* Needs Attention ÃƒÂ¢Ã¢â€šÂ¬" team issues */}
           {NeedsAttentionSection}
 
           {/* Field Activity: Workload panel */}
@@ -1560,7 +1560,7 @@ const Dashboard = () => {
                     {notStartedAssets.slice(0, 5).map((a) => (
                       <ItemRow key={a.id}
                         label={a.assetTag || a.assetName || a.id}
-                        sub={[a.jobNumber, a.assignedUserId ? `Assigned: ${a.assignedUserId}` : undefined].filter(Boolean).join(" · ")}
+                        sub={[a.jobNumber, a.assignedUserId ? `Assigned: ${a.assignedUserId}` : undefined].filter(Boolean).join(" â€¢ ")}
                         onClick={() => navigate("/installations/assets")} />
                     ))}
                     {notStartedAssets.length > 5 && (
@@ -1576,10 +1576,10 @@ const Dashboard = () => {
         </>
       )}
 
-      {/* â•â• ENGINEER VIEW â•â• */}
+      {/* ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â ENGINEER VIEW ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â */}
       {isEngineer && pmDashboardTab === "my-installs" && (
         <>
-          {/* Needs Attention â€" scoped */}
+          {/* Needs Attention ÃƒÂ¢Ã¢â€šÂ¬" scoped */}
           {NeedsAttentionSection}
 
           {/* Quality Focus: Sign-offs + Draft Configs */}
@@ -1622,7 +1622,7 @@ const Dashboard = () => {
                     sx={{ height: 20, fontSize: "0.7rem" }} />
                 </Stack>
                 <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                  Not yet published â€" review and publish
+                  Not yet published {"\u2014"} review and publish
                 </Typography>
                 {draftConfigs.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">No draft configs</Typography>
@@ -1647,18 +1647,18 @@ const Dashboard = () => {
         </>
       )}
 
-      {/* â•â• PROJECT MANAGER / ADMIN VIEW â•â• */}
+      {/* ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â PROJECT MANAGER / ADMIN VIEW ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â */}
       {isManager && (
         <>
           {pmDashboardTab === "pm-projects" && ProjectStatusGrid}
 
-          {/* Needs Attention â€" company-wide */}
+          {/* Needs Attention ÃƒÂ¢Ã¢â€šÂ¬" company-wide */}
           {pmDashboardTab === "pm-projects" && NeedsAttentionSection}
 
           {/* My Inspections workspace */}
           {pmDashboardTab === "my-inspections" && MyInspectionWorkspace}
 
-          {/* Pending Approvals strip â€" if any */}
+          {/* Pending Approvals strip ÃƒÂ¢Ã¢â€šÂ¬" if any */}
           {pmDashboardTab === "pm-projects" && pendingApprovals.length > 0 && (
             <Box className="glass-card" sx={{ p: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -1722,7 +1722,7 @@ const Dashboard = () => {
             </Box>
           )}
 
-          {/* Auto-assignment flags â€" installer self-assigned */}
+          {/* Auto-assignment flags ÃƒÂ¢Ã¢â€šÂ¬" installer self-assigned */}
           {pmDashboardTab === "pm-projects" && autoAssignFlags.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -1748,7 +1748,7 @@ const Dashboard = () => {
                     <Box sx={{ flex: 1 }}>
                       <ItemRow
                         label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
-                        sub={`Assigned to ${f.assignedBy} · ${fmtDate(f.assignedAt)}`}
+                        sub={`Assigned to ${f.assignedBy} â€¢ ${fmtDate(f.assignedAt)}`}
                         onClick={() => navigate("/installations")}
                       />
                     </Box>
@@ -1766,7 +1766,7 @@ const Dashboard = () => {
             </Box>
           )}
 
-          {/* Installer media updates â€" PM notification when installers upload missing media */}
+          {/* Installer media updates ÃƒÂ¢Ã¢â€šÂ¬" PM notification when installers upload missing media */}
           {pmDashboardTab === "pm-projects" && photoUpdateNotifications.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -1791,7 +1791,7 @@ const Dashboard = () => {
                         {n.installerName} updated media for {n.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {n.workflowName} · {fmtDate(n.updatedAt)}
+                        {n.workflowName} â€¢ {fmtDate(n.updatedAt)}
                       </Typography>
                       <Typography variant="caption" display="block" color={n.wasComplete ? "success.main" : "warning.main"}>
                         {n.wasComplete ? "All media added" : `${n.stillMissing} step${n.stillMissing !== 1 ? "s" : ""} still missing`}
@@ -1811,7 +1811,7 @@ const Dashboard = () => {
             </Box>
           )}
 
-          {/* Missing media flags â€" PM sees all runs without required media */}
+          {/* Missing media flags ÃƒÂ¢Ã¢â€šÂ¬" PM sees all runs without required media */}
           {pmDashboardTab === "pm-projects" && missingMediaFlags.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -1839,7 +1839,7 @@ const Dashboard = () => {
                         {f.jobNumber ? `${f.jobNumber}: ` : ""}{f.assetTag}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {f.workflowName} · {f.technicianName} · {fmtDate(f.completedAt)}
+                        {f.workflowName} {"\\u2022"} {fmtDate(f.completedAt)}
                       </Typography>
                       {"totalExpected" in f && (
                         <>
@@ -1848,12 +1848,12 @@ const Dashboard = () => {
                           </Typography>
                           {(f as MissingMediaFlag).missingSteps?.slice(0, 3).map((ms) => (
                             <Typography key={`${ms.stepId}-${ms.inputId}`} variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
-                              • {ms.stepTitle} — {ms.inputLabel}: {ms.captured} captured
+                              Ã¢â‚¬Â¢ {ms.stepTitle} Ã¢â‚¬â€ {ms.inputLabel}: {ms.captured} captured
                             </Typography>
                           ))}
                           {((f as MissingMediaFlag).missingSteps?.length ?? 0) > 3 && (
                             <Typography variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
-                              +{((f as MissingMediaFlag).missingSteps?.length ?? 0) - 3} more…
+                              +{((f as MissingMediaFlag).missingSteps?.length ?? 0) - 3} moreÃ¢â‚¬Â¦
                             </Typography>
                           )}
                         </>
@@ -1967,13 +1967,13 @@ const Dashboard = () => {
         </>
       )}
 
-      {/* â•â• VIEWER VIEW â•â• */}
+      {/* ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â VIEWER VIEW ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â */}
       {isViewer && (
         <>
-          {/* Needs Attention â€" read-only */}
+          {/* Needs Attention ÃƒÂ¢Ã¢â€šÂ¬" read-only */}
           {NeedsAttentionSection}
 
-          {/* Regional Snapshot â€" read only */}
+          {/* Regional Snapshot ÃƒÂ¢Ã¢â€šÂ¬" read only */}
           {RegionalSnapshotSection}
 
           {/* Project Status */}
@@ -2018,7 +2018,7 @@ const Dashboard = () => {
         </>
       )}
 
-      {/* Photo upload dialog â€" installer adds missing photos to a completed run */}
+      {/* Photo upload dialog ÃƒÂ¢Ã¢â€šÂ¬" installer adds missing photos to a completed run */}
       {photoUploadTarget && (
         <PhotoUploadDialog
           open={!!photoUploadTarget}

@@ -49,6 +49,7 @@ import { productService } from "../../services/productService";
 import type { Product } from "../../types/product";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
+import DocThumbnail from "../../components/ui/DocThumbnail";
 
 // Point PDF.js worker at the bundled copy shipped with pdfjs-dist
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -182,17 +183,17 @@ const PdfThumbnail = ({ downloadUrl, size }: { downloadUrl: string; size: number
 
 const ThumbnailBox = ({ doc, size = 160 }: ThumbnailBoxProps) => {
   const mimeType = doc.contentType ?? "";
-  const isImage = mimeType.startsWith("image/");
   const isVideo = mimeType.startsWith("video/");
   const isPdf = mimeType === "application/pdf";
 
   if (isPdf && doc.downloadUrl) return <PdfThumbnail downloadUrl={doc.downloadUrl} size={size} />;
+  if (doc.downloadUrl && !isVideo) {
+    return <DocThumbnail downloadUrl={doc.downloadUrl} contentType={doc.contentType} height={size} />;
+  }
 
   return (
     <Box sx={{ height: size, bgcolor: "action.hover", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      {isImage && doc.downloadUrl ? (
-        <img src={doc.downloadUrl} alt={doc.name} style={{ objectFit: "cover", width: "100%", height: "100%" }} />
-      ) : isVideo ? (
+      {isVideo ? (
         <OndemandVideoOutlinedIcon color="primary" sx={{ fontSize: 64 }} />
       ) : (
         <InsertDriveFileOutlinedIcon color="action" sx={{ fontSize: 64 }} />
@@ -203,9 +204,12 @@ const ThumbnailBox = ({ doc, size = 160 }: ThumbnailBoxProps) => {
 
 const SmallThumbnail = ({ doc }: { doc: DocumentRecord }) => {
   const mimeType = doc.contentType ?? "";
-  const isImage = mimeType.startsWith("image/");
   const isVideo = mimeType.startsWith("video/");
   const isPdf = mimeType === "application/pdf";
+
+  if (doc.downloadUrl && !isVideo && !isPdf) {
+    return <DocThumbnail downloadUrl={doc.downloadUrl} contentType={doc.contentType} width={40} height={40} />;
+  }
 
   return (
     <Box
@@ -221,13 +225,7 @@ const SmallThumbnail = ({ doc }: { doc: DocumentRecord }) => {
         flexShrink: 0,
       }}
     >
-      {isImage && doc.downloadUrl ? (
-        <img
-          src={doc.downloadUrl}
-          alt={doc.name}
-          style={{ objectFit: "cover", width: "100%", height: "100%" }}
-        />
-      ) : isVideo ? (
+      {isVideo ? (
         <OndemandVideoOutlinedIcon color="primary" sx={{ fontSize: 20 }} />
       ) : isPdf ? (
         <PictureAsPdfOutlinedIcon color="error" sx={{ fontSize: 20 }} />

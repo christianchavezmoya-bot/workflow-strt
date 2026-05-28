@@ -114,7 +114,6 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpGet("{id}/download")]
-    [AllowAnonymous]
     public async Task<IActionResult> Download(string id)
     {
         var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);

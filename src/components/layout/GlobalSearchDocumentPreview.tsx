@@ -12,6 +12,7 @@ import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import DragIndicatorOutlinedIcon from "@mui/icons-material/DragIndicatorOutlined";
 import OpenInNewOutlinedIcon from "@mui/icons-material/OpenInNewOutlined";
 import type { SearchDocumentPreview } from "../../services/globalSearchService";
+import { documentService } from "../../services/documentService";
 
 type Props = {
   open: boolean;
@@ -192,7 +193,7 @@ const GlobalSearchDocumentPreview = ({ open, loading, query, preview, preferredC
                   size="small"
                   variant="outlined"
                   startIcon={<OpenInNewOutlinedIcon />}
-                  onClick={() => window.open(preview.downloadUrl!, "_blank", "noopener,noreferrer")}
+                  onClick={() => void documentService.downloadDocument(preview.downloadUrl!, preview.title)}
                 >
                   Open file
                 </Button>

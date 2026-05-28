@@ -38,3 +38,7 @@ export interface NotificationSettingsPayload {
   smsApiKey: string;
   smsSender: string;
 }
+
+export interface PublicAppSettingsPayload {
+  frontendBaseUrl: string;
+}

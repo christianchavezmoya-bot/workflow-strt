@@ -30,6 +30,10 @@ export function hydrateCustomValues(doc: DocumentRecord): DocumentRecord {
   return doc;
 }
 
+export function isBackendDocumentUrl(downloadUrl: string): boolean {
+  return /\/api\/documents\/[^/]+\/download(?:\?|$)/.test(downloadUrl);
+}
+
 export const documentService = {
   async getDocuments() {
     const response = await api.get<DocumentRecord[]>("/documents");
@@ -90,5 +94,23 @@ export const documentService = {
   async openDocumentAsBuffer(downloadUrl: string): Promise<ArrayBuffer> {
     const response = await api.get<ArrayBuffer>(downloadUrl, { responseType: "arraybuffer" });
     return response.data;
+  },
+
+  /** Download a document while preserving auth for backend-hosted files. */
+  async downloadDocument(downloadUrl: string, fileName?: string): Promise<void> {
+    if (!isBackendDocumentUrl(downloadUrl)) {
+      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const response = await api.get<Blob>(downloadUrl, { responseType: "blob" });
+    const objectUrl = URL.createObjectURL(response.data);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    if (fileName) anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   },
 };

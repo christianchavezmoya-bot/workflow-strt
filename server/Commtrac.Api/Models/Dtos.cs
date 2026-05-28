@@ -34,6 +34,10 @@ public record NotificationSettingsDto(
     string SmsSender
 );
 
+public record PublicAppSettingsDto(
+    string FrontendBaseUrl
+);
+
 public record UserDto(
     string Id,
     string Email,

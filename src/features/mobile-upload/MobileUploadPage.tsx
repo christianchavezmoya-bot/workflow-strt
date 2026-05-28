@@ -142,7 +142,7 @@ export default function MobileUploadPage() {
         {/* Uploading progress */}
         {pageState === "uploading" && (
           <Stack spacing={2} py={2}>
-            <Typography variant="body2" textAlign="center">Uploading…</Typography>
+            <Typography variant="body2" textAlign="center">Uploading...</Typography>
             <LinearProgress variant="determinate" value={uploadProgress} sx={{ borderRadius: 1, height: 8 }} />
             <Typography variant="caption" color="text.secondary" textAlign="center">
               {uploadProgress}%
@@ -150,7 +150,7 @@ export default function MobileUploadPage() {
           </Stack>
         )}
 
-        {/* Ready — file picker */}
+        {/* Ready â€” file picker */}
         {pageState === "ready" && (
           <Stack spacing={2}>
             {/* Drop zone / file picker */}
@@ -188,7 +188,7 @@ export default function MobileUploadPage() {
                     {selectedFile.name}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {formatBytes(selectedFile.size)} · Tap to change
+                    {formatBytes(selectedFile.size)} • Tap to change
                   </Typography>
                 </Stack>
               ) : (

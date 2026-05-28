@@ -173,7 +173,10 @@ function DocPreviewDialog({
         <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
           {doc.downloadUrl && (
             <Tooltip title="Download">
-              <IconButton size="small" component="a" href={doc.downloadUrl} download>
+              <IconButton
+                size="small"
+                onClick={() => void documentService.downloadDocument(doc.downloadUrl!, doc.name)}
+              >
                 <DownloadOutlined fontSize="small" />
               </IconButton>
             </Tooltip>
@@ -684,10 +687,10 @@ export default function TipsAndTricksPage() {
                     {doc.downloadUrl && (
                       <IconButton
                         size="small"
-                        component="a"
-                        href={doc.downloadUrl}
-                        download
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void documentService.downloadDocument(doc.downloadUrl!, doc.name);
+                        }}
                         sx={{ p: 0.25 }}
                       >
                         <DownloadOutlined sx={{ fontSize: 14, color: "text.disabled" }} />
@@ -759,7 +762,7 @@ export default function TipsAndTricksPage() {
                       Open
                     </Button>
                     {doc.downloadUrl && (
-                      <Button size="small" component="a" href={doc.downloadUrl} download>
+                      <Button size="small" onClick={() => void documentService.downloadDocument(doc.downloadUrl!, doc.name)}>
                         Download
                       </Button>
                     )}

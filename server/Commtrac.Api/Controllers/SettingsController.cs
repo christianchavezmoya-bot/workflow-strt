@@ -69,6 +69,14 @@ public class SettingsController : ControllerBase
         return Ok(await _notificationSettings.GetAsync());
     }
 
+    [HttpGet("public")]
+    [AllowAnonymous]
+    public async Task<ActionResult<PublicAppSettingsDto>> GetPublicSettings()
+    {
+        var frontendBaseUrl = await _notificationSettings.GetFrontendBaseUrlAsync();
+        return Ok(new PublicAppSettingsDto(frontendBaseUrl));
+    }
+
     [HttpPost("notifications")]
     public async Task<ActionResult<NotificationSettingsDto>> SaveNotifications([FromBody] NotificationSettingsDto request)
     {

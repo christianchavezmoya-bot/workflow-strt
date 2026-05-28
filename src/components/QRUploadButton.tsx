@@ -8,6 +8,7 @@ import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import { QRCodeSVG } from "qrcode.react";
 import api from "../services/api";
 import { documentService, type DocumentRecord } from "../services/documentService";
+import { settingsService } from "../services/settingsService";
 
 interface QRUploadButtonProps {
   /** Document type to store (e.g. "tips") */
@@ -19,7 +20,7 @@ interface QRUploadButtonProps {
   /** Called with the new documentId once upload completes on the phone */
   onUploaded: (documentId: string) => void;
   /**
-   * Optional — when provided, after upload completes the component fetches the
+   * Optional Ã¢â‚¬â€ when provided, after upload completes the component fetches the
    * document record, converts the file to a base64 data URL, and calls this
    * callback with both the documentId and the dataUrl.
    */
@@ -55,6 +56,7 @@ export default function QRUploadButton({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [publicFrontendBaseUrl, setPublicFrontendBaseUrl] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = () => {
@@ -81,9 +83,18 @@ export default function QRUploadButton({
     }
   };
 
+  const loadPublicFrontendBaseUrl = async () => {
+    try {
+      const settings = await settingsService.getPublicAppSettings();
+      setPublicFrontendBaseUrl((settings.frontendBaseUrl || "").trim().replace(/\/+$/, ""));
+    } catch {
+      setPublicFrontendBaseUrl("");
+    }
+  };
+
   const handleOpen = async () => {
     setOpen(true);
-    await generateToken();
+    await Promise.all([generateToken(), loadPublicFrontendBaseUrl()]);
   };
 
   const handleClose = () => {
@@ -123,7 +134,7 @@ export default function QRUploadButton({
                 onUploadedWithData(documentId, dataUrl);
               }
             } catch {
-              // Non-fatal — onUploaded already called
+              // Non-fatal Ã¢â‚¬â€ onUploaded already called
             } finally {
               setProcessing(false);
             }
@@ -134,7 +145,7 @@ export default function QRUploadButton({
           setError("QR code expired. Click Regenerate to get a new one.");
         }
       } catch {
-        // network hiccup — keep polling
+        // network hiccup Ã¢â‚¬â€ keep polling
       }
     }, 3000);
     return stopPolling;
@@ -153,7 +164,7 @@ export default function QRUploadButton({
 
   // Build the URL the phone will open
   const uploadUrl = token
-    ? `${window.location.origin}/mobile-upload?token=${token}`
+    ? `${(publicFrontendBaseUrl || window.location.origin).replace(/\/+$/, "")}/mobile-upload?token=${token}`
     : "";
 
   const minutesLeft = Math.floor(secondsLeft / 60);
@@ -193,11 +204,11 @@ export default function QRUploadButton({
           )}
           {done && (
             <Stack alignItems="center" spacing={1} py={3}>
-              <Typography variant="h6" color="success.main" fontWeight={700}>✓ Upload complete!</Typography>
+              <Typography variant="h6" color="success.main" fontWeight={700}>{"\u2713"} Upload complete!</Typography>
               {processing ? (
                 <Stack direction="row" alignItems="center" spacing={1}>
                   <CircularProgress size={14} />
-                  <Typography variant="body2" color="text.secondary">Processing…</Typography>
+                  <Typography variant="body2" color="text.secondary">Processing...</Typography>
                 </Stack>
               ) : (
                 <Typography variant="body2" color="text.secondary">File received from your phone.</Typography>
@@ -224,7 +235,7 @@ export default function QRUploadButton({
               <Stack direction="row" alignItems="center" spacing={1}>
                 <CircularProgress size={12} />
                 <Typography variant="caption" color="text.secondary">
-                  Waiting for upload… expires in {timeStr}
+                  Waiting for upload... expires in {timeStr}
                 </Typography>
               </Stack>
               <Typography variant="caption" color="text.disabled" sx={{ wordBreak: "break-all", textAlign: "center" }}>
