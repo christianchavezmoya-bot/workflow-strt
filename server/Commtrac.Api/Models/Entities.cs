@@ -496,6 +496,27 @@ public class RoleConfigEntity
     public string ConfigJson { get; set; } = "{}";
 }
 
+public class MobileUploadTokenEntity
+{
+    [Key]
+    [MaxLength(32)]
+    public string Token { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string Type { get; set; } = "tips";
+    [MaxLength(200)]
+    public string LinkedTo { get; set; } = string.Empty;
+    public string? CustomValuesJson { get; set; }
+    [MaxLength(40)]
+    public string Status { get; set; } = "pending";
+    [MaxLength(100)]
+    public string? DocumentId { get; set; }
+    [MaxLength(100)]
+    public string? CreatedByUserId { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime ExpiresAtUtc { get; set; }
+    public DateTime? ConsumedAtUtc { get; set; }
+}
+
 public class QuickbaseSettingsEntity
 {
     [Key]

@@ -39,6 +39,7 @@ public class AppDbContext : DbContext
     public DbSet<InstallationTabRowEntity> InstallationTabRows => Set<InstallationTabRowEntity>();
     public DbSet<TableConfigEntity> TableConfigs => Set<TableConfigEntity>();
     public DbSet<RoleConfigEntity> RoleConfigs => Set<RoleConfigEntity>();
+    public DbSet<MobileUploadTokenEntity> MobileUploadTokens => Set<MobileUploadTokenEntity>();
     public DbSet<OfficeEntity> Offices => Set<OfficeEntity>();
     public DbSet<AuditLogEntity> AuditLogs => Set<AuditLogEntity>();
     public DbSet<SessionEntity> Sessions => Set<SessionEntity>();
@@ -163,6 +164,12 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<TableConfigEntity>()
             .Property(t => t.BaseFieldMetaJson)
             .HasDefaultValue("{}");
+
+        modelBuilder.Entity<MobileUploadTokenEntity>()
+            .HasIndex(t => t.Status);
+
+        modelBuilder.Entity<MobileUploadTokenEntity>()
+            .HasIndex(t => t.ExpiresAtUtc);
 
         // Foreign key relationships and indexes
         modelBuilder.Entity<SiteEntity>()

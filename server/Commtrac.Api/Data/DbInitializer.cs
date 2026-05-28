@@ -21,6 +21,7 @@ public static class DbInitializer
         EnsureAuditLogTable(db);
         EnsureSessionsTable(db);
         EnsurePasswordChangedAtColumn(db);
+        EnsureMobileUploadTokensTable(db);
         EnsureDocumentTables(db);
         EnsureAssetDocumentTables(db);
         EnsureAssetDocumentLinksTables(db);
@@ -272,6 +273,40 @@ public static class DbInitializer
                 cmd.CommandText = "ALTER TABLE Users ADD COLUMN PasswordChangedAt TEXT";
                 cmd.ExecuteNonQuery();
             }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureMobileUploadTokensTable(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS MobileUploadTokens (
+                    Token           TEXT PRIMARY KEY NOT NULL,
+                    Type            TEXT NOT NULL DEFAULT 'tips',
+                    LinkedTo        TEXT NOT NULL DEFAULT '',
+                    CustomValuesJson TEXT NULL,
+                    Status          TEXT NOT NULL DEFAULT 'pending',
+                    DocumentId      TEXT NULL,
+                    CreatedByUserId TEXT NULL,
+                    CreatedAtUtc    TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                    ExpiresAtUtc    TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                    ConsumedAtUtc   TEXT NULL
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_MobileUploadTokens_Status ON MobileUploadTokens (Status)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_MobileUploadTokens_ExpiresAtUtc ON MobileUploadTokens (ExpiresAtUtc)";
+            cmd.ExecuteNonQuery();
         }
         finally
         {

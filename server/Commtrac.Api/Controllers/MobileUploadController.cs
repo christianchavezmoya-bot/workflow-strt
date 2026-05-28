@@ -1,7 +1,9 @@
-using System.Collections.Concurrent;
+using System.Security.Claims;
 using Commtrac.Api.Data;
+using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Commtrac.Api.Controllers;
 
@@ -9,19 +11,6 @@ namespace Commtrac.Api.Controllers;
 [Route("api/mobile-upload")]
 public class MobileUploadController : ControllerBase
 {
-    // ── In-memory token store (no DB migration needed) ──────────────────────
-    private record UploadToken(
-        string Token,
-        string Type,
-        string LinkedTo,
-        string? CustomValuesJson,
-        DateTime ExpiresAt,
-        string Status,          // "pending" | "complete" | "expired"
-        string? DocumentId
-    );
-
-    private static readonly ConcurrentDictionary<string, UploadToken> Tokens = new();
-
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
 
@@ -31,72 +20,69 @@ public class MobileUploadController : ControllerBase
         _env = env;
     }
 
-    // ── POST /api/mobile-upload/token ────────────────────────────────────────
-    // Called by desktop to create a token. Requires auth.
     [HttpPost("token")]
     [Authorize]
-    public IActionResult CreateToken([FromBody] CreateTokenRequest request)
+    public async Task<IActionResult> CreateToken([FromBody] CreateTokenRequest request)
     {
-        // Purge expired tokens
-        var expired = Tokens.Where(kvp => kvp.Value.ExpiresAt < DateTime.UtcNow).Select(kvp => kvp.Key).ToList();
-        foreach (var k in expired) Tokens.TryRemove(k, out _);
+        await ExpireStaleTokensAsync();
 
-        var token = Guid.NewGuid().ToString("N")[..16]; // 16-char token
-        var entry = new UploadToken(
-            Token: token,
-            Type: request.Type ?? "tips",
-            LinkedTo: request.LinkedTo ?? "",
-            CustomValuesJson: request.CustomValuesJson,
-            ExpiresAt: DateTime.UtcNow.AddMinutes(10),
-            Status: "pending",
-            DocumentId: null
-        );
-        Tokens[token] = entry;
+        var token = Guid.NewGuid().ToString("N")[..16];
+        var entry = new MobileUploadTokenEntity
+        {
+            Token = token,
+            Type = request.Type ?? "tips",
+            LinkedTo = request.LinkedTo ?? string.Empty,
+            CustomValuesJson = request.CustomValuesJson,
+            Status = "pending",
+            CreatedByUserId = User.FindFirstValue(ClaimTypes.NameIdentifier),
+            CreatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10),
+        };
 
-        return Ok(new { token, expiresAt = entry.ExpiresAt });
+        _db.MobileUploadTokens.Add(entry);
+        await _db.SaveChangesAsync();
+
+        return Ok(new { token, expiresAt = entry.ExpiresAtUtc });
     }
 
-    // ── GET /api/mobile-upload/token/{token} ─────────────────────────────────
-    // Polled by desktop every 3s. No auth required (token IS the secret).
     [HttpGet("token/{token}")]
     [AllowAnonymous]
-    public IActionResult GetTokenStatus(string token)
+    public async Task<IActionResult> GetTokenStatus(string token)
     {
-        if (!Tokens.TryGetValue(token, out var entry))
+        var entry = await _db.MobileUploadTokens.AsNoTracking().FirstOrDefaultAsync(t => t.Token == token);
+        if (entry is null)
             return NotFound(new { status = "not_found" });
 
-        if (entry.ExpiresAt < DateTime.UtcNow)
+        if (IsPendingAndExpired(entry))
         {
-            Tokens.TryRemove(token, out _);
+            await MarkExpiredAsync(entry.Token);
             return Ok(new { status = "expired" });
         }
 
         return Ok(new { status = entry.Status, documentId = entry.DocumentId });
     }
 
-    // ── POST /api/mobile-upload/{token}/upload ───────────────────────────────
-    // Called by the phone. No auth — validated via token.
     [HttpPost("{token}/upload")]
     [AllowAnonymous]
     [RequestSizeLimit(100_000_000)]
     public async Task<IActionResult> UploadFile(string token, [FromForm] IFormFile? file)
     {
-        if (!Tokens.TryGetValue(token, out var entry))
+        var entry = await _db.MobileUploadTokens.FirstOrDefaultAsync(t => t.Token == token);
+        if (entry is null)
             return NotFound(new { error = "Token not found or expired." });
 
-        if (entry.ExpiresAt < DateTime.UtcNow)
+        if (IsPendingAndExpired(entry))
         {
-            Tokens.TryRemove(token, out _);
+            await MarkExpiredAsync(entry.Token);
             return BadRequest(new { error = "Token has expired." });
         }
 
-        if (entry.Status == "complete")
+        if (string.Equals(entry.Status, "complete", StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { error = "File already uploaded for this token." });
 
         if (file == null || file.Length == 0)
             return BadRequest(new { error = "No file provided." });
 
-        // Save file using same storage pattern as DocumentsController
         var storageRoot = Path.Combine(_env.ContentRootPath, "Storage", "Documents");
         Directory.CreateDirectory(storageRoot);
 
@@ -109,7 +95,7 @@ public class MobileUploadController : ControllerBase
             await file.CopyToAsync(stream);
         }
 
-        var doc = new Commtrac.Api.Models.DocumentEntity
+        var doc = new DocumentEntity
         {
             Name = file.FileName,
             Type = entry.Type,
@@ -124,25 +110,72 @@ public class MobileUploadController : ControllerBase
         };
 
         _db.Documents.Add(doc);
-        await _db.SaveChangesAsync();
+        entry.Status = "complete";
+        entry.DocumentId = doc.Id;
+        entry.ConsumedAtUtc = DateTime.UtcNow;
 
-        // Mark token complete
-        Tokens[token] = entry with { Status = "complete", DocumentId = doc.Id };
+        await _db.SaveChangesAsync();
 
         return Ok(new { documentId = doc.Id });
     }
 
-    // ── GET /api/mobile-upload/{token}/info ──────────────────────────────────
-    // Called by phone landing page to get context (type label etc.)
     [HttpGet("{token}/info")]
     [AllowAnonymous]
-    public IActionResult GetTokenInfo(string token)
+    public async Task<IActionResult> GetTokenInfo(string token)
     {
-        if (!Tokens.TryGetValue(token, out var entry))
+        var entry = await _db.MobileUploadTokens.AsNoTracking().FirstOrDefaultAsync(t => t.Token == token);
+        if (entry is null)
             return NotFound(new { error = "Token not found or expired." });
-        if (entry.ExpiresAt < DateTime.UtcNow)
+
+        if (IsPendingAndExpired(entry))
+        {
+            await MarkExpiredAsync(entry.Token);
             return Ok(new { error = "expired" });
-        return Ok(new { type = entry.Type, linkedTo = entry.LinkedTo, expiresAt = entry.ExpiresAt });
+        }
+
+        return Ok(new
+        {
+            type = entry.Type,
+            linkedTo = entry.LinkedTo,
+            expiresAt = entry.ExpiresAtUtc,
+            status = entry.Status,
+            createdBy = entry.CreatedByUserId,
+            consumedAt = entry.ConsumedAtUtc
+        });
+    }
+
+    private async Task ExpireStaleTokensAsync()
+    {
+        var stale = await _db.MobileUploadTokens
+            .Where(t => t.Status == "pending" && t.ExpiresAtUtc < DateTime.UtcNow)
+            .ToListAsync();
+
+        if (stale.Count == 0) return;
+
+        foreach (var token in stale)
+        {
+            token.Status = "expired";
+        }
+
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task MarkExpiredAsync(string token)
+    {
+        var entry = await _db.MobileUploadTokens.FirstOrDefaultAsync(t => t.Token == token);
+        if (entry is null || !string.Equals(entry.Status, "pending", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        entry.Status = "expired";
+        await _db.SaveChangesAsync();
+    }
+
+    private static bool IsPendingAndExpired(MobileUploadTokenEntity entry)
+    {
+        return string.Equals(entry.Status, "pending", StringComparison.OrdinalIgnoreCase)
+               && entry.ExpiresAtUtc < DateTime.UtcNow;
     }
 }
 
