@@ -558,6 +558,25 @@ const AssetInstallationPage = () => {
     });
   };
 
+  // Re-render with fresh server data when the background stale-while-revalidate fetch
+  // completes. Picks up changes from other devices (workflow assigned, run completed).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ productId?: string }>).detail;
+      if (activeProduct?.id && detail?.productId === activeProduct.id) refreshAssets();
+    };
+    window.addEventListener("repo:assets:updated", handler);
+    return () => window.removeEventListener("repo:assets:updated", handler);
+  }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fetch when the user returns to the tab/app (handles cross-device changes, e.g.
+  // a run completed on iOS appearing on the Windows browser when the tab regains focus).
+  useEffect(() => {
+    const handler = () => { if (document.visibilityState === "visible") refreshAssets(); };
+    document.addEventListener("visibilitychange", handler);
+    return () => document.removeEventListener("visibilitychange", handler);
+  }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const selectedAddConfig = useMemo(
     () => configs.find((c) => c.id === addForm.configId) ?? null,
     [configs, addForm.configId],
@@ -1027,6 +1046,13 @@ const AssetInstallationPage = () => {
       try { existing = JSON.parse(runnerAsset.featureValuesJson || "{}"); } catch {}
       const merged = { ...existing, ...capturedValues };
       await projectAssetService.update(runnerAsset.id, { featureValuesJson: JSON.stringify(merged) }).catch(console.warn);
+    }
+    // Direct API fetch for the completed asset so workflowSummary.latestRunStatus
+    // and evidenceStatus reflect the locked run immediately (bypasses stale cache).
+    if (runnerAsset) {
+      projectAssetService.getById(runnerAsset.id).then((fresh) => {
+        if (fresh) setAssets((prev) => prev.map((a) => a.id === fresh.id ? fresh : a));
+      }).catch(() => {});
     }
     refreshAssets();
   }
