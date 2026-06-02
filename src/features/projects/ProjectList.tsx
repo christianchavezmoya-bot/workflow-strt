@@ -684,8 +684,8 @@ const ProjectList = () => {
                     <Button
                       size="small"
                       variant="outlined"
-                      component="a"
-                      href={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`}
+                      component={Link}
+                      to={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`}
                       sx={{ fontSize: "0.7rem", py: 0.25, px: 1, height: 26, flexShrink: 0 }}
                     >
                       Asset Installs
@@ -699,7 +699,7 @@ const ProjectList = () => {
                     ))}
                     <Box sx={{ ml: "auto" }}>
                       {can.modifyData && (
-                        <IconButton size="small" component="a" href={`/projects/${project.id}/edit`}>
+                        <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
                           <EditOutlined fontSize="small" />
                         </IconButton>
                       )}
