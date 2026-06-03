@@ -95,6 +95,21 @@ public class AppDbContext : DbContext
             .HasConversion(listConverter)
             .Metadata.SetValueComparer(listComparer);
 
+        modelBuilder.Entity<ProjectEntity>()
+            .HasQueryFilter(p => !p.IsDeleted);
+
+        modelBuilder.Entity<InstallationEntity>()
+            .HasQueryFilter(i => !i.IsDeleted);
+
+        modelBuilder.Entity<DocumentEntity>()
+            .HasQueryFilter(d => !d.IsDeleted);
+
+        modelBuilder.Entity<ProjectAssetEntity>()
+            .HasQueryFilter(a => !a.IsDeleted);
+
+        modelBuilder.Entity<BomImportRunEntity>()
+            .HasQueryFilter(r => !r.IsDeleted);
+
         modelBuilder.Entity<FeatureDependencyEntity>()
             .HasIndex(d => d.FeatureId);
 

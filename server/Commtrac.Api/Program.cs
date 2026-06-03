@@ -28,6 +28,9 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddScoped<IInspectionImportAdapterService, InspectionImportAdapterService>();
 builder.Services.AddScoped<IInspectionImportValidatorService, InspectionImportValidatorService>();
 builder.Services.AddScoped<NotificationSettingsService>();
+builder.Services.AddSingleton<SqliteBackupService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());
+builder.Services.AddScoped<RecoveryService>();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.AddScoped<IEmailSender, EmailSender>();
 builder.Services.Configure<SmsSettings>(builder.Configuration.GetSection("Sms"));

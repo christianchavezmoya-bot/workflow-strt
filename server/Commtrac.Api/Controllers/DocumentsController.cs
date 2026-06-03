@@ -33,9 +33,10 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<DocumentDto>>> GetAll()
+    public async Task<ActionResult<IEnumerable<DocumentDto>>> GetAll([FromQuery] bool includeDeleted = false)
     {
-        var docs = await _db.Documents.OrderByDescending(d => d.UploadedAt).ToListAsync();
+        var docsQuery = includeDeleted ? _db.Documents.IgnoreQueryFilters() : _db.Documents;
+        var docs = await docsQuery.OrderByDescending(d => d.UploadedAt).ToListAsync();
         return Ok(docs.Select(doc => ToDto(doc, Request)));
     }
 
@@ -143,10 +144,45 @@ public class DocumentsController : ControllerBase
             return Forbid();
         }
 
-        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+        if (doc.IsDeleted) return NoContent();
+
+        doc.IsDeleted = true;
+        doc.DeletedAtUtc = DateTime.UtcNow;
+        doc.DeletedByUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
         if (doc is null) return NotFound();
 
-        // Delete the physical file if one exists
+        doc.IsDeleted = false;
+        doc.DeletedAtUtc = null;
+        doc.DeletedByUserId = null;
+        doc.DeleteReason = null;
+        await _db.SaveChangesAsync();
+        _searchIndexQueue.EnqueueLibraryDocument(id);
+        return NoContent();
+    }
+
+    [HttpDelete("{id}/purge")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Purge(string id)
+    {
+        if (!await CanDeleteDocumentsAsync())
+        {
+            return Forbid();
+        }
+
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+
         if (!string.IsNullOrWhiteSpace(doc.FilePath))
         {
             var fullPath = Path.Combine(_env.ContentRootPath, doc.FilePath);
@@ -302,7 +338,11 @@ public class DocumentsController : ControllerBase
                 : $"{request.Scheme}://{request.Host}/api/documents/{doc.Id}/download",
             doc.CreatedBy,
             doc.Notes,
-            doc.CustomValuesJson
+            doc.CustomValuesJson,
+            doc.IsDeleted,
+            doc.DeletedAtUtc,
+            doc.DeletedByUserId,
+            doc.DeleteReason
         );
 }
 

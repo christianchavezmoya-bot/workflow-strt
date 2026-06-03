@@ -249,6 +249,12 @@ public class ProjectEntity
     public List<string> ProductIds { get; set; } = new();
     public string ProductFeatureValuesJson { get; set; } = "{}";
     public string TeamMemberIdsJson { get; set; } = "[]";
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(100)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(500)]
+    public string? DeleteReason { get; set; }
 }
 
 public class InstallationEntity
@@ -303,6 +309,12 @@ public class InstallationEntity
     [MaxLength(200)]
     public string? Pm4Serial { get; set; }
     public string CustomFieldsJson { get; set; } = "{}";
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(100)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(500)]
+    public string? DeleteReason { get; set; }
 }
 
 public class CustomFieldDefinitionEntity
@@ -381,6 +393,12 @@ public class DocumentEntity
     public string? CustomValuesJson { get; set; }
     [MaxLength(2000)]
     public string? DownloadUrl { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(100)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(500)]
+    public string? DeleteReason { get; set; }
 }
 
 public class DocumentConfigEntity
@@ -739,6 +757,12 @@ public class ProjectAssetEntity
     public string AsBuiltJson { get; set; } = "{}";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(100)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(500)]
+    public string? DeleteReason { get; set; }
 }
 
 // ─── Workflow Config Unification (v2 architecture) ────────────────────────────
@@ -1208,6 +1232,12 @@ public class BomImportRunEntity
     public string? DraftProjectJson { get; set; }
     public string? ValidationResultJson { get; set; }
     public string? CommitLogsJson { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    [MaxLength(100)]
+    public string? DeletedByUserId { get; set; }
+    [MaxLength(500)]
+    public string? DeleteReason { get; set; }
 }
 
 public class BomMappingProfileEntity

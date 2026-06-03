@@ -217,9 +217,10 @@ public class ProjectAssetsController : ControllerBase
 
     // GET api/project-assets/by-project/{projectId}
     [HttpGet("by-project/{projectId}")]
-    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProject(string projectId)
+    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProject(string projectId, [FromQuery] bool includeDeleted = false)
     {
-        var assets = await _db.ProjectAssets
+        var assetsQuery = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
+        var assets = await assetsQuery
             .Where(a => a.ProjectId == projectId)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
@@ -229,9 +230,10 @@ public class ProjectAssetsController : ControllerBase
 
     // GET api/project-assets/by-product/{productId}
     [HttpGet("by-product/{productId}")]
-    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProduct(string productId)
+    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProduct(string productId, [FromQuery] bool includeDeleted = false)
     {
-        var assets = await _db.ProjectAssets
+        var assetsQuery = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
+        var assets = await assetsQuery
             .Where(a => a.ProductId == productId)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
@@ -241,9 +243,10 @@ public class ProjectAssetsController : ControllerBase
 
     // GET api/project-assets/{id}
     [HttpGet("{id}")]
-    public async Task<ActionResult<ProjectAssetDto>> GetById(string id)
+    public async Task<ActionResult<ProjectAssetDto>> GetById(string id, [FromQuery] bool includeDeleted = false)
     {
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
+        var assets = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
+        var asset = await assets.FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
         return Ok(await ToDtoAsync(asset));
     }
@@ -354,19 +357,57 @@ public class ProjectAssetsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
+        var asset = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(a => a.Id == id);
+        if (asset is null) return NotFound();
+        if (asset.IsDeleted) return NoContent();
+
+        asset.IsDeleted = true;
+        asset.DeletedAtUtc = DateTime.UtcNow;
+        asset.DeletedByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        var asset = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
 
-        // Remove dependent workflow records if those tables exist (migration may not be applied yet)
-        try
-        {
-            var assignments = await _db.AssetWorkflowAssignments.Where(a => a.AssetId == id).ToListAsync();
-            _db.AssetWorkflowAssignments.RemoveRange(assignments);
+        asset.IsDeleted = false;
+        asset.DeletedAtUtc = null;
+        asset.DeletedByUserId = null;
+        asset.DeleteReason = null;
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
 
-            var runs = await _db.AssetWorkflowRuns.Where(r => r.AssetId == id).ToListAsync();
-            _db.AssetWorkflowRuns.RemoveRange(runs);
+    [HttpDelete("{id}/purge")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Purge(string id)
+    {
+        var asset = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(a => a.Id == id);
+        if (asset is null) return NotFound();
+
+        _db.AssetWorkflowAssignments.RemoveRange(_db.AssetWorkflowAssignments.Where(a => a.AssetId == id));
+        _db.AssetWorkflowRuns.RemoveRange(_db.AssetWorkflowRuns.Where(r => r.AssetId == id));
+        _db.AssetDocumentLinks.RemoveRange(_db.AssetDocumentLinks.Where(l => l.AssetId == id));
+        var docIds = await _db.AssetDocuments
+            .Where(d => d.AssetId == id)
+            .Select(d => d.Id)
+            .ToListAsync();
+        if (docIds.Count > 0)
+        {
+            _db.AssetDocumentRevisions.RemoveRange(_db.AssetDocumentRevisions.Where(r => docIds.Contains(r.DocumentId)));
         }
-        catch { /* tables may not exist yet if migration is pending — skip */ }
+        _db.AssetDocuments.RemoveRange(_db.AssetDocuments.Where(d => d.AssetId == id));
 
         _db.ProjectAssets.Remove(asset);
         await _db.SaveChangesAsync();
@@ -638,7 +679,8 @@ public class ProjectAssetsController : ControllerBase
             a.AssetTag, a.AssetName, a.SerialNumber, a.AssetModel, a.Manufacturer,
             a.Location, a.AssignedUserId, a.Status, a.WorkOrderId, a.Notes,
             a.FeatureValuesJson, a.IssuesJson, a.ConfigLabel, a.InstalledAt, a.InstalledBy,
-            a.AsBuiltJson, a.CreatedAt, a.UpdatedAt, workflowSummary);
+            a.AsBuiltJson, a.CreatedAt, a.UpdatedAt, workflowSummary,
+            a.IsDeleted, a.DeletedAtUtc, a.DeletedByUserId, a.DeleteReason);
 
     private sealed class WorkflowStepSummary
     {

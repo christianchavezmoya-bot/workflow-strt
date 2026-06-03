@@ -23,9 +23,11 @@ public class InstallationsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<InstallationDto>>> GetAll([FromQuery] string? projectId)
+    public async Task<ActionResult<IEnumerable<InstallationDto>>> GetAll([FromQuery] string? projectId, [FromQuery] bool includeDeleted = false)
     {
-        var query = _db.Installations.AsQueryable();
+        var query = includeDeleted
+            ? _db.Installations.IgnoreQueryFilters().AsQueryable()
+            : _db.Installations.AsQueryable();
         if (!string.IsNullOrWhiteSpace(projectId))
         {
             query = query.Where(i => i.ProjectId == projectId);
@@ -128,11 +130,67 @@ public class InstallationsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
-        var installation = await _db.Installations.FirstOrDefaultAsync(i => i.Id == id);
+        var installation = await _db.Installations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.Id == id);
         if (installation is null)
         {
             return NotFound();
         }
+        if (installation.IsDeleted)
+        {
+            return NoContent();
+        }
+
+        installation.IsDeleted = true;
+        installation.DeletedAtUtc = DateTime.UtcNow;
+        installation.DeletedByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        var installation = await _db.Installations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.Id == id);
+        if (installation is null)
+        {
+            return NotFound();
+        }
+
+        installation.IsDeleted = false;
+        installation.DeletedAtUtc = null;
+        installation.DeletedByUserId = null;
+        installation.DeleteReason = null;
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpDelete("{id}/purge")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Purge(string id)
+    {
+        var installation = await _db.Installations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.Id == id);
+        if (installation is null)
+        {
+            return NotFound();
+        }
+
+        _db.Issues.RemoveRange(_db.Issues.Where(i => i.InstallationId == id));
+        var inspectionIds = await _db.Inspections
+            .Where(i => i.InstallationId == id)
+            .Select(i => i.Id)
+            .ToListAsync();
+        if (inspectionIds.Count > 0)
+        {
+            _db.InspectionPhotos.RemoveRange(_db.InspectionPhotos.Where(p => inspectionIds.Contains(p.InspectionId)));
+        }
+        _db.Inspections.RemoveRange(_db.Inspections.Where(i => i.InstallationId == id));
 
         _db.Installations.Remove(installation);
         await _db.SaveChangesAsync();
@@ -168,6 +226,10 @@ public class InstallationsController : ControllerBase
             installation.Pm4Serial,
             string.IsNullOrWhiteSpace(installation.CustomFieldsJson)
                 ? new Dictionary<string, string>()
-                : JsonSerializer.Deserialize<Dictionary<string, string>>(installation.CustomFieldsJson) ?? new Dictionary<string, string>()
+                : JsonSerializer.Deserialize<Dictionary<string, string>>(installation.CustomFieldsJson) ?? new Dictionary<string, string>(),
+            installation.IsDeleted,
+            installation.DeletedAtUtc,
+            installation.DeletedByUserId,
+            installation.DeleteReason
         );
 }

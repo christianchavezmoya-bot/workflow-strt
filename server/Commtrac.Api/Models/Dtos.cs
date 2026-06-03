@@ -396,7 +396,11 @@ public record ProjectDto(
     int AssetCount = 0,
     /// <summary>INSTALLATION_ONLY | INSPECTION_ONLY | MIXED. Null on legacy rows.</summary>
     string? WorkflowMode = null,
-    List<string>? TeamMemberIds = null
+    List<string>? TeamMemberIds = null,
+    bool IsDeleted = false,
+    DateTime? DeletedAtUtc = null,
+    string? DeletedByUserId = null,
+    string? DeleteReason = null
 );
 
 public record UpdateProjectStatusRequest(
@@ -430,7 +434,11 @@ public record InstallationDto(
     string? Pm2Serial,
     string? Pm3Serial,
     string? Pm4Serial,
-    Dictionary<string, string>? CustomFields
+    Dictionary<string, string>? CustomFields,
+    bool IsDeleted = false,
+    DateTime? DeletedAtUtc = null,
+    string? DeletedByUserId = null,
+    string? DeleteReason = null
 );
 
 public record QuickbaseSettingsDto(
@@ -564,7 +572,55 @@ public record DocumentDto(
     string? DownloadUrl,
     string? CreatedBy,
     string? Notes,
-    string? CustomValuesJson
+    string? CustomValuesJson,
+    bool IsDeleted = false,
+    DateTime? DeletedAtUtc = null,
+    string? DeletedByUserId = null,
+    string? DeleteReason = null
+);
+
+public record RecycleBinItemDto(
+    string EntityType,
+    string Id,
+    string Title,
+    string? Subtitle,
+    string? ParentId,
+    string? ParentTitle,
+    DateTime? DeletedAtUtc,
+    string? DeletedByUserId
+);
+
+public record BackupCatalogItemDto(
+    string EntityType,
+    string Id,
+    string Title,
+    string? Subtitle,
+    string? ParentId,
+    string? ParentTitle,
+    bool IsDeleted,
+    DateTime? DeletedAtUtc
+);
+
+public record RestoreBackupRequest(string FileName);
+
+public record RestoreBackupItemRequest(
+    string FileName,
+    string EntityType,
+    string EntityId
+);
+
+public record RestoreBackupResponse(
+    string RestoredFromFileName,
+    string SafeguardBackupFileName,
+    DateTime RestoredAtUtc
+);
+
+public record SelectiveRestoreResultDto(
+    string EntityType,
+    string EntityId,
+    string Title,
+    int RecordsRestored,
+    string? Note
 );
 
 public record DocumentConfigDto(string TabsJson, string FieldsJson);
@@ -729,7 +785,11 @@ public record ProjectAssetDto(
     string AsBuiltJson,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    ProjectAssetWorkflowSummaryDto? WorkflowSummary
+    ProjectAssetWorkflowSummaryDto? WorkflowSummary,
+    bool IsDeleted = false,
+    DateTime? DeletedAtUtc = null,
+    string? DeletedByUserId = null,
+    string? DeleteReason = null
 );
 
 public record ProjectAssetWorkflowSummaryDto(

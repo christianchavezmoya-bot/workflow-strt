@@ -59,6 +59,7 @@ import { brandSettingsService } from "../../services/brandSettingsService";
 import * as XLSX from "xlsx";
 import PasswordField from "../../components/ui/PasswordField";
 import { secureGet, secureRemove } from "../../services/secureStorage";
+import RecoveryCenter from "./RecoveryCenter";
 
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
 function BusinessLogoTab() {
@@ -292,7 +293,7 @@ interface AuditLogEntry {
   timestamp: string;
 }
 
-const SETTINGS_TAB_KEYS = ["quickbase", "sms", "fields", "divisions", "products", "features", "workflow-types", "logo", "audit"];
+const SETTINGS_TAB_KEYS = ["quickbase", "sms", "fields", "divisions", "products", "features", "workflow-types", "logo", "recovery", "audit"];
 
 const Settings = () => {
   const { addNotification } = useFieldNotifications();
@@ -1659,6 +1660,7 @@ const Settings = () => {
           <Tab label="Features" />
           <Tab label="Workflow Types" onClick={() => { if (wfTypes.length === 0) loadWfTypes(); }} />
           <Tab label="Business Logo" />
+          {isAdmin && <Tab label="Recovery" />}
           {isAdmin && <Tab label="Audit Log" />}
         </Tabs>
 
@@ -2629,7 +2631,9 @@ const Settings = () => {
 
         {tab === 7 && <BusinessLogoTab />}
 
-        {tab === 8 && isAdmin && (
+        {tab === 8 && isAdmin && <RecoveryCenter />}
+
+        {tab === 9 && isAdmin && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Typography variant="h6">2FA Audit Log</Typography>
             <Typography variant="body2" color="text.secondary">
