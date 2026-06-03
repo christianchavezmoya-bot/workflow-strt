@@ -27,7 +27,7 @@ interface BackupEntry {
 }
 
 interface RecycleBinItem {
-  entityType: "project" | "installation" | "asset" | "document";
+  entityType: "project" | "installation" | "asset" | "document" | "bomImportRun";
   id: string;
   title: string;
   subtitle?: string | null;
@@ -62,12 +62,13 @@ const entityLabel = {
   installation: "Installations",
   asset: "Assets",
   document: "Documents",
+  bomImportRun: "BOM Imports",
 } as const;
 
 export default function RecoveryCenter() {
   const [message, setMessage] = useState<{ severity: "success" | "error" | "info"; text: string } | null>(null);
 
-  const [recycleType, setRecycleType] = useState<"all" | "project" | "installation" | "asset" | "document">("all");
+  const [recycleType, setRecycleType] = useState<"all" | "project" | "installation" | "asset" | "document" | "bomImportRun">("all");
   const [recycleSearch, setRecycleSearch] = useState("");
   const [recycleItems, setRecycleItems] = useState<RecycleBinItem[]>([]);
   const [recycleLoading, setRecycleLoading] = useState(false);
@@ -157,6 +158,8 @@ export default function RecoveryCenter() {
         await api.post(`/installations/${item.id}/restore`);
       } else if (item.entityType === "asset") {
         await api.post(`/project-assets/${item.id}/restore`);
+      } else if (item.entityType === "bomImportRun") {
+        await api.post(`/bom-import-runs/${item.id}/restore`);
       } else {
         await api.post(`/documents/${item.id}/restore`);
       }
@@ -180,6 +183,8 @@ export default function RecoveryCenter() {
         await api.delete(`/installations/${item.id}/purge`);
       } else if (item.entityType === "asset") {
         await api.delete(`/project-assets/${item.id}/purge`);
+      } else if (item.entityType === "bomImportRun") {
+        await api.delete(`/bom-import-runs/${item.id}/purge`);
       } else {
         await api.delete(`/documents/${item.id}/purge`);
       }
@@ -271,6 +276,7 @@ export default function RecoveryCenter() {
               <MenuItem value="installation">{entityLabel.installation}</MenuItem>
               <MenuItem value="asset">{entityLabel.asset}</MenuItem>
               <MenuItem value="document">{entityLabel.document}</MenuItem>
+              <MenuItem value="bomImportRun">{entityLabel.bomImportRun}</MenuItem>
             </Select>
           </FormControl>
           <TextField

@@ -29,4 +29,8 @@ export interface BomImportRun {
   validationWarnings: number;
   publishedProjectId?: string;
   notes?: string;
+  isDeleted?: boolean;
+  deletedAtUtc?: string;
+  deletedByUserId?: string;
+  deleteReason?: string;
 }

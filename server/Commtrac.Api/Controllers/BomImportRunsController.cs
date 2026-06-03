@@ -36,10 +36,11 @@ public class BomImportRunsController : ControllerBase
     // ── CRUD: Import Runs ──────────────────────────────────────────────────────
 
     [HttpGet]
-    public async Task<IActionResult> List()
+    public async Task<IActionResult> List([FromQuery] bool includeDeleted = false)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var runs = await _db.BomImportRuns
+        var query = includeDeleted ? _db.BomImportRuns.IgnoreQueryFilters() : _db.BomImportRuns;
+        var runs = await query
             .OrderByDescending(r => r.UploadedAt)
             .Select(r => MapToDto(r))
             .ToListAsync();
@@ -47,10 +48,11 @@ public class BomImportRunsController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    public async Task<IActionResult> Get(string id)
+    public async Task<IActionResult> Get(string id, [FromQuery] bool includeDeleted = false)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var query = includeDeleted ? _db.BomImportRuns.IgnoreQueryFilters() : _db.BomImportRuns;
+        var run = await query.FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
         return Ok(MapToDto(run));
     }
@@ -100,9 +102,33 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Delete(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var run = await _db.BomImportRuns.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
+        if (run.IsDeleted) return NoContent();
+        run.IsDeleted = true;
+        run.DeletedAtUtc = DateTime.UtcNow;
+        run.DeletedByUserId = HttpContext.User.Identity?.Name;
         run.Status = "archived";
+        run.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpPost("{id}/restore")]
+    public async Task<IActionResult> Restore(string id)
+    {
+        if (!ModuleEnabled) return ModuleDisabled();
+        var run = await _db.BomImportRuns.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Id == id);
+        if (run == null) return NotFound();
+
+        run.IsDeleted = false;
+        run.DeletedAtUtc = null;
+        run.DeletedByUserId = null;
+        run.DeleteReason = null;
+        if (run.Status == "archived")
+        {
+            run.Status = string.IsNullOrWhiteSpace(run.PublishedProjectId) ? "ready" : "published";
+        }
         run.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return NoContent();
@@ -112,7 +138,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Purge(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
-        var run = await _db.BomImportRuns.FindAsync(id);
+        var run = await _db.BomImportRuns.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
         _db.BomImportRuns.Remove(run);
         await _db.SaveChangesAsync();
@@ -290,6 +316,10 @@ public class BomImportRunsController : ControllerBase
         validationWarnings = r.ValidationWarnings,
         publishedProjectId = r.PublishedProjectId,
         notes = r.Notes,
+        isDeleted = r.IsDeleted,
+        deletedAtUtc = r.DeletedAtUtc,
+        deletedByUserId = r.DeletedByUserId,
+        deleteReason = r.DeleteReason,
     };
 }
 

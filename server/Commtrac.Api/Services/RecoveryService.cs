@@ -144,6 +144,31 @@ public sealed class RecoveryService
             )));
         }
 
+        if (type is null || type == "bomImportRun")
+        {
+            var bomRuns = await _db.BomImportRuns
+                .IgnoreQueryFilters()
+                .Where(r => r.IsDeleted)
+                .Where(r =>
+                    string.IsNullOrWhiteSpace(term) ||
+                    r.FileName.ToLower().Contains(term!) ||
+                    (r.StatusMessage ?? string.Empty).ToLower().Contains(term!))
+                .OrderByDescending(r => r.DeletedAtUtc)
+                .Take(100)
+                .ToListAsync(cancellationToken);
+
+            items.AddRange(bomRuns.Select(r => new RecycleBinItemDto(
+                "bomImportRun",
+                r.Id,
+                r.FileName,
+                string.Join(" | ", new[] { r.Status, r.StatusMessage }.Where(v => !string.IsNullOrWhiteSpace(v))),
+                r.PublishedProjectId,
+                r.PublishedProjectId,
+                r.DeletedAtUtc,
+                r.DeletedByUserId
+            )));
+        }
+
         return items
             .OrderByDescending(i => i.DeletedAtUtc ?? DateTime.MinValue)
             .ToList();
@@ -659,7 +684,7 @@ LIMIT 1;";
         return type switch
         {
             null or "" or "all" => null,
-            "project" or "installation" or "asset" or "document" => type,
+            "project" or "installation" or "asset" or "document" or "bomimportrun" => type == "bomimportrun" ? "bomImportRun" : type,
             _ => throw new InvalidOperationException("Unsupported entity type.")
         };
     }

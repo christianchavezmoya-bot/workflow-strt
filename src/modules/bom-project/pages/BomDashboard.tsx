@@ -29,21 +29,21 @@ export default function BomDashboard() {
   useEffect(() => {
     dispatch({ type: "SET_RUNS_LOADING", payload: true });
     bomApiService
-      .listRuns()
+      .listRuns(showArchived)
       .then((runs) => dispatch({ type: "SET_RUNS", payload: runs }))
       .catch((err) => dispatch({ type: "SET_ERROR", payload: String(err) }))
       .finally(() => dispatch({ type: "SET_RUNS_LOADING", payload: false }));
-  }, [dispatch]);
+  }, [dispatch, showArchived]);
 
   const handleArchive = async (id: string, restore: boolean) => {
     setArchiving(id);
     try {
       if (restore) {
-        await bomApiService.updateRun(id, { status: "ready" } as never);
+        await bomApiService.restoreRun(id);
       } else {
         await bomApiService.deleteRun(id);
       }
-      const runs = await bomApiService.listRuns();
+      const runs = await bomApiService.listRuns(showArchived);
       dispatch({ type: "SET_RUNS", payload: runs });
     } catch { /* ignore */ }
     finally { setArchiving(null); }
@@ -54,7 +54,7 @@ export default function BomDashboard() {
     setDeleting(true);
     try {
       await bomApiService.purgeRun(deleteTarget.id);
-      const runs = await bomApiService.listRuns();
+      const runs = await bomApiService.listRuns(showArchived);
       dispatch({ type: "SET_RUNS", payload: runs });
     } catch { /* ignore */ }
     finally { setDeleting(false); setDeleteTarget(null); }
@@ -62,13 +62,13 @@ export default function BomDashboard() {
 
   const visibleRuns = showArchived
     ? state.runs
-    : state.runs.filter((r) => r.status !== "archived");
+    : state.runs.filter((r) => !r.isDeleted);
 
   const stats = {
-    total: state.runs.filter((r) => r.status !== "archived").length,
-    published: state.runs.filter((r) => r.status === "published").length,
-    ready: state.runs.filter((r) => r.status === "ready").length,
-    failed: state.runs.filter((r) => r.status === "failed").length,
+    total: state.runs.filter((r) => !r.isDeleted).length,
+    published: state.runs.filter((r) => !r.isDeleted && r.status === "published").length,
+    ready: state.runs.filter((r) => !r.isDeleted && r.status === "ready").length,
+    failed: state.runs.filter((r) => !r.isDeleted && r.status === "failed").length,
   };
 
   return (
@@ -192,7 +192,7 @@ export default function BomDashboard() {
             </TableHead>
             <TableBody>
               {visibleRuns.map((run) => {
-                const isArchived = run.status === "archived";
+                const isArchived = !!run.isDeleted;
                 return (
                   <TableRow key={run.id} hover sx={{ opacity: isArchived ? 0.55 : 1 }}>
                     <TableCell>
