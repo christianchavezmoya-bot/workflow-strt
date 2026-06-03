@@ -13,6 +13,7 @@ export interface ProjectFilters {
   sortDir?: "asc" | "desc";
   page?: number;
   pageSize?: number;
+  includeDeleted?: boolean;
 }
 
 export interface UpdateProjectStatusRequest {

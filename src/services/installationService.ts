@@ -2,9 +2,12 @@
 import { Installation } from "../types/installation";
 
 export const installationService = {
-  async getInstallations(projectId?: string) {
+  async getInstallations(projectId?: string, includeDeleted?: boolean) {
     const response = await api.get<Installation[]>("/installations", {
-      params: projectId ? { projectId } : undefined
+      params: {
+        projectId: projectId || undefined,
+        includeDeleted: includeDeleted || undefined,
+      }
     });
     return response.data;
   },

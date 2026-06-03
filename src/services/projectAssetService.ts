@@ -23,18 +23,18 @@ export async function pendingAssetIds(): Promise<Set<string>> {
 }
 
 export const projectAssetService = {
-  async listByProject(projectId: string): Promise<ProjectAsset[]> {
-    try { return await AssetRepository.getByProject(projectId); }
+  async listByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    try { return await AssetRepository.getByProject(projectId, includeDeleted); }
     catch { return []; }
   },
 
-  async listByProduct(productId: string): Promise<ProjectAsset[]> {
-    try { return await AssetRepository.getByProduct(productId); }
+  async listByProduct(productId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    try { return await AssetRepository.getByProduct(productId, includeDeleted); }
     catch { return []; }
   },
 
-  async listLocalByProduct(productId: string): Promise<ProjectAsset[]> {
-    try { return await AssetRepository.getLocalByProduct(productId); }
+  async listLocalByProduct(productId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    try { return await AssetRepository.getLocalByProduct(productId, includeDeleted); }
     catch { return []; }
   },
 

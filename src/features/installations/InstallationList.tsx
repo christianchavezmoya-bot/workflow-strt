@@ -1,6 +1,7 @@
 import {
   Box,
   Button,
+  Chip,
   Checkbox,
   Dialog,
   DialogActions,
@@ -10,6 +11,7 @@ import {
   Alert,
   Autocomplete,
   FormControl,
+  FormControlLabel,
   Grid,
   IconButton,
   ListItemText,
@@ -17,6 +19,7 @@ import {
   MenuItem,
   Select,
   Stack,
+  Switch,
   Tab,
   Tabs,
   Table,
@@ -203,6 +206,7 @@ const InstallationList = () => {
   });
   const [selectedJobNumber, setSelectedJobNumber] = useState("");
   const [showAllInstallations, setShowAllInstallations] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [newInspection, setNewInspection] = useState({
     name: "",
     installation: "",
@@ -447,8 +451,8 @@ const InstallationList = () => {
   };
 
   useEffect(() => {
-    dispatch(fetchInstallations());
-  }, [dispatch]);
+    dispatch(fetchInstallations({ includeDeleted: showArchived }));
+  }, [dispatch, showArchived]);
 
   useEffect(() => {
     dispatch(fetchUsers());
@@ -921,6 +925,11 @@ const InstallationList = () => {
           </Typography>
         </Box>
         <Stack direction="row" spacing={2} alignItems="center">
+          <FormControlLabel
+            control={<Switch size="small" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />}
+            label="Show archived"
+            sx={{ mr: 0 }}
+          />
           <Button
             variant="outlined"
             onClick={showInstallationsPlaceholder}
@@ -1316,8 +1325,8 @@ const InstallationList = () => {
                     </TableCell>
                       <TableCell>{row.siteLocation}</TableCell>
                       <TableCell>{row.scheduledStart || "-"}</TableCell>
-                      <TableCell>{row.status}</TableCell>
-                      <TableCell>{progressForStatus[row.status] ?? 0}%</TableCell>
+                    <TableCell>{row.status}</TableCell>
+                      <TableCell>{row.isDeleted ? <Chip label="Archived" size="small" color="warning" /> : `${progressForStatus[row.status] ?? 0}%`}</TableCell>
                     <TableCell>{row.assignedTeam}</TableCell>
                     <TableCell>{row.machineType || "-"}</TableCell>
                       <TableCell>{row.pm1Serial || "-"}</TableCell>
@@ -1337,12 +1346,14 @@ const InstallationList = () => {
                               setEditForm(row);
                               setEditOpen(true);
                             }}
+                            disabled={row.isDeleted}
                           >
                             <EditOutlined fontSize="small" />
                           </IconButton>
                           <IconButton
                             size="small"
                             onClick={() => setDeleteTarget(row)}
+                            disabled={!!row.isDeleted}
                           >
                             <DeleteOutline fontSize="small" />
                           </IconButton>
@@ -2306,7 +2317,11 @@ const InstallationList = () => {
           try {
             setDeleteSavingId(deleteTarget.id);
             await dispatch(deleteInstallation(deleteTarget.id)).unwrap();
-            setLocalInstallations((prev) => prev.filter((item) => item.id !== deleteTarget.id));
+            if (showArchived) {
+              await dispatch(fetchInstallations({ includeDeleted: true })).unwrap();
+            } else {
+              setLocalInstallations((prev) => prev.filter((item) => item.id !== deleteTarget.id));
+            }
             setDeleteTarget(null);
           } finally {
             setDeleteSavingId(null);

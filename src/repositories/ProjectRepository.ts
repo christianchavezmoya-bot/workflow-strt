@@ -20,6 +20,9 @@ export const ProjectRepository = {
     if (local.length > 0) {
       // Apply filters client-side on local data
       let items = local as Project[];
+      if (!filters?.includeDeleted) {
+        items = items.filter((p) => !p.isDeleted);
+      }
       if (filters?.search) {
         const q = filters.search.toLowerCase();
         items = items.filter(

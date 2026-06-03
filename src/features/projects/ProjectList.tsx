@@ -12,6 +12,7 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControlLabel,
   IconButton,
   ListItemText,
   Menu,
@@ -24,6 +25,7 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  Switch,
   Typography,
   useMediaQuery,
   useTheme,
@@ -297,6 +299,7 @@ const ProjectList = () => {
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const canDeleteProjects = can.modifyData;
@@ -317,10 +320,11 @@ const ProjectList = () => {
         // Filter by country on the server so pagination doesn't hide matching projects.
         country: activeOffice !== "All" ? activeOffice : undefined,
         page: page + 1,
-        pageSize: rowsPerPage
+        pageSize: rowsPerPage,
+        includeDeleted: showArchived,
       })
     );
-  }, [dispatch, activeOffice, page, rowsPerPage]);
+  }, [dispatch, activeOffice, page, rowsPerPage, showArchived]);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -527,7 +531,7 @@ const ProjectList = () => {
       actions.push("Mark Completed");
     }
 
-    if (actions.length === 0) {
+    if (project.isDeleted || actions.length === 0) {
       return null;
     }
 
@@ -568,6 +572,11 @@ const ProjectList = () => {
           </Typography>
         </Box>
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+          <FormControlLabel
+            control={<Switch size="small" checked={showArchived} onChange={(e) => { setShowArchived(e.target.checked); setPage(0); }} />}
+            label="Show archived"
+            sx={{ mr: 0 }}
+          />
           {can.modifyData && (
             <Button variant="contained" component={Link} to="/projects/new">
               Create project
@@ -638,6 +647,7 @@ const ProjectList = () => {
                         }}>
                           {project.assetCount ?? 0}
                         </Box>
+                        {project.isDeleted && <Chip label="Archived" size="small" color="warning" />}
                         <Box sx={{ ml: "auto", flexShrink: 0 }}><StatusChip status={project.status} /></Box>
                       </Stack>
 
@@ -699,11 +709,11 @@ const ProjectList = () => {
                     ))}
                     <Box sx={{ ml: "auto" }}>
                       {can.modifyData && (
-                        <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
+                        <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`} disabled={project.isDeleted}>
                           <EditOutlined fontSize="small" />
                         </IconButton>
                       )}
-                      {canDeleteProjects && (
+                      {canDeleteProjects && !project.isDeleted && (
                         <IconButton size="small" color="error" disabled={deleteSavingId === project.id}
                           onClick={() => setDeleteTarget(project)}>
                           <DeleteOutline fontSize="small" />
@@ -824,13 +834,14 @@ const ProjectList = () => {
                     ))}
                     <TableCell sx={{ padding: '8px 12px' }}>
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
+                        {project.isDeleted && <Chip label="Archived" size="small" color="warning" />}
                         {renderActions(project)}
                         {can.modifyData && (
-                          <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`}>
+                          <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`} disabled={project.isDeleted}>
                             <EditOutlined fontSize="small" />
                           </IconButton>
                         )}
-                        {canDeleteProjects && (
+                        {canDeleteProjects && !project.isDeleted && (
                           <IconButton
                             size="small"
                             disabled={deleteSavingId === project.id}
@@ -967,6 +978,16 @@ const ProjectList = () => {
           try {
             setDeleteSavingId(deleteTarget.id);
             await dispatch(deleteProject(deleteTarget.id)).unwrap();
+            if (showArchived) {
+              await dispatch(
+                fetchProjects({
+                  country: activeOffice !== "All" ? activeOffice : undefined,
+                  page: page + 1,
+                  pageSize: rowsPerPage,
+                  includeDeleted: true,
+                })
+              ).unwrap();
+            }
             setDeleteTarget(null);
           } catch (e) {
             console.error("Delete project failed:", e);

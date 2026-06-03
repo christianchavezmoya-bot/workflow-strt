@@ -335,6 +335,7 @@ const AssetInstallationPage = () => {
 
   // Archive view
   const [archiveMode, setArchiveMode] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   // Issues
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
@@ -495,7 +496,7 @@ const AssetInstallationPage = () => {
     const loadId = ++assetLoadIdRef.current;
     setLoadingAssets(true);
     Promise.all([
-      projectAssetService.listByProduct(activeProduct.id),
+      projectAssetService.listByProduct(activeProduct.id, showArchived),
       productConfigService.listByProduct(activeProduct.id),
       workflowConfigService.listByProduct(activeProduct.id, "Published"),
       workflowTypeService.list(),
@@ -536,13 +537,13 @@ const AssetInstallationPage = () => {
     }).finally(() => {
       if (loadId === assetLoadIdRef.current) setLoadingAssets(false);
     });
-  }, [activeProduct?.id]);
+  }, [activeProduct?.id, showArchived]);
 
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
   const refreshAssets = () => {
     if (!activeProduct?.id) return;
-    projectAssetService.listByProduct(activeProduct.id).then((a) => {
+    projectAssetService.listByProduct(activeProduct.id, showArchived).then((a) => {
       setAssets(a);
       setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
     });
@@ -554,7 +555,7 @@ const AssetInstallationPage = () => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ productId?: string }>).detail;
       if (!activeProduct?.id || detail?.productId !== activeProduct.id) return;
-      projectAssetService.listLocalByProduct(activeProduct.id).then((a) => {
+      projectAssetService.listLocalByProduct(activeProduct.id, showArchived).then((a) => {
         setAssets(a);
         setHealthMap((prev) => ({ ...prev, [activeProduct.id!]: computeHealth(a) }));
       });
@@ -562,7 +563,7 @@ const AssetInstallationPage = () => {
     };
     window.addEventListener("repo:assets:updated", handler);
     return () => window.removeEventListener("repo:assets:updated", handler);
-  }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeProduct?.id, showArchived]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-fetch when the user returns to the tab/app (handles cross-device changes, e.g.
   // a run completed on iOS appearing on the Windows browser when the tab regains focus).
@@ -893,7 +894,11 @@ const AssetInstallationPage = () => {
     setDeletingAsset(true);
     try {
       await projectAssetService.remove(assetId);
-      setAssets((prev) => prev.filter((asset) => asset.id !== assetId));
+      if (showArchived) {
+        refreshAssets();
+      } else {
+        setAssets((prev) => prev.filter((asset) => asset.id !== assetId));
+      }
       setDeleteAsset(null);
     } catch {
       alert("Failed to delete asset.");
@@ -907,7 +912,11 @@ const AssetInstallationPage = () => {
     const ids = Array.from(selectedAssetIds);
     try {
       await Promise.all(ids.map((id) => projectAssetService.remove(id)));
-      setAssets((prev) => prev.filter((asset) => !ids.includes(asset.id)));
+      if (showArchived) {
+        refreshAssets();
+      } else {
+        setAssets((prev) => prev.filter((asset) => !ids.includes(asset.id)));
+      }
       setSelectedAssetIds(new Set());
       setBulkDeleteOpen(false);
     } catch {
@@ -2744,6 +2753,11 @@ const AssetInstallationPage = () => {
       {/* Table toolbar */}
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <Stack direction="row" spacing={1} alignItems="center">
+          <FormControlLabel
+            control={<Switch size="small" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />}
+            label="Show archived"
+            sx={{ mr: 0 }}
+          />
           <Tooltip title={archiveMode ? "Exit archive view" : "Show completed assets archive"}>
             <Button
               size="small"
@@ -2782,6 +2796,11 @@ const AssetInstallationPage = () => {
         {archiveMode && (
           <Typography variant="caption" color="text.secondary">
             Showing completed assets · read-only view
+          </Typography>
+        )}
+        {!archiveMode && showArchived && (
+          <Typography variant="caption" color="text.secondary">
+            Archived assets included
           </Typography>
         )}
       </Box>
@@ -2867,6 +2886,7 @@ const AssetInstallationPage = () => {
                       <Stack direction="row" alignItems="center" spacing={0.75}>
                         {hasIssue && <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "error.main", flexShrink: 0 }} />}
                         <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
+                        {asset.isDeleted && <Chip label="Archived" size="small" color="warning" />}
                         {issuesBadge(asset)}
                       </Stack>
                     </TableCell>
@@ -2877,7 +2897,7 @@ const AssetInstallationPage = () => {
                     ))}
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-                        {(can.modifyData || asset.status === "Complete") && actionButton(asset)}
+                        {!asset.isDeleted && (can.modifyData || asset.status === "Complete") && actionButton(asset)}
                         {!can.viewOnly && (
                           <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
                             <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
@@ -2909,12 +2929,12 @@ const AssetInstallationPage = () => {
                         )}
                         {can.modifyData && (
                           <Tooltip title="Edit asset">
-                            <IconButton size="small" onClick={() => openEditAsset(asset)}>
+                            <IconButton size="small" onClick={() => openEditAsset(asset)} disabled={asset.isDeleted}>
                               <EditOutlined fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
-                        {can.modifyData && (
+                        {can.modifyData && !asset.isDeleted && (
                           <Tooltip title="Delete asset">
                             <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
                               <DeleteOutline fontSize="small" />

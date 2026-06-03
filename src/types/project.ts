@@ -48,6 +48,10 @@ export interface Project {
   productFeatureValues?: Record<string, string>;
   assetCount?: number;
   teamMemberIds?: string[];
+  isDeleted?: boolean;
+  deletedAtUtc?: string;
+  deletedByUserId?: string;
+  deleteReason?: string;
 }
 
 // ── Inspection Imports ────────────────────────────────────────────────────────

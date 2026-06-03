@@ -25,21 +25,25 @@ function fromDto(dto: ProjectAsset): ProjectAsset {
 }
 
 export const AssetRepository = {
-  async getLocalByProduct(productId: string): Promise<ProjectAsset[]> {
+  async getLocalByProduct(productId: string, includeDeleted = false): Promise<ProjectAsset[]> {
     const local = await entityGetAssetsByProduct(productId);
-    return (local as ProjectAsset[]).map(fromDto);
+    return (local as ProjectAsset[])
+      .filter((asset) => includeDeleted || !asset.isDeleted)
+      .map(fromDto);
   },
 
-  async getLocalByProject(projectId: string): Promise<ProjectAsset[]> {
+  async getLocalByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
     const local = await entityGetAssetsByProject(projectId);
-    return (local as ProjectAsset[]).map(fromDto);
+    return (local as ProjectAsset[])
+      .filter((asset) => includeDeleted || !asset.isDeleted)
+      .map(fromDto);
   },
 
-  async getByProduct(productId: string): Promise<ProjectAsset[]> {
-    const local = await this.getLocalByProduct(productId);
+  async getByProduct(productId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    const local = await this.getLocalByProduct(productId, includeDeleted);
 
     // Background network refresh — runs unconditionally to keep IndexedDB fresh
-    api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`)
+    api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`, { params: { includeDeleted: includeDeleted || undefined } })
       .then(async (res) => {
         await entityReplaceAssetsByProduct(
           productId,
@@ -52,7 +56,7 @@ export const AssetRepository = {
     if (local.length > 0) return local;
 
     // No local data — wait for network
-    const res = await api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`);
+    const res = await api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`, { params: { includeDeleted: includeDeleted || undefined } });
     await entityReplaceAssetsByProduct(
       productId,
       res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
@@ -60,11 +64,11 @@ export const AssetRepository = {
     return res.data.map(fromDto);
   },
 
-  async getByProject(projectId: string): Promise<ProjectAsset[]> {
-    const local = await this.getLocalByProject(projectId);
+  async getByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    const local = await this.getLocalByProject(projectId, includeDeleted);
 
     // Background network refresh — runs unconditionally to keep IndexedDB fresh
-    api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`)
+    api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, { params: { includeDeleted: includeDeleted || undefined } })
       .then(async (res) => {
         await entityReplaceAssetsByProject(
           projectId,
@@ -77,7 +81,7 @@ export const AssetRepository = {
     if (local.length > 0) return local;
 
     // No local data — wait for network
-    const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`);
+    const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, { params: { includeDeleted: includeDeleted || undefined } });
     await entityReplaceAssetsByProject(
       projectId,
       res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
