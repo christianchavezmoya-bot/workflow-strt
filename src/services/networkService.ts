@@ -9,16 +9,7 @@
 import { Capacitor } from "@capacitor/core";
 import { CapacitorHttp } from "@capacitor/core";
 import { Network } from "@capacitor/network";
-
-// Get API base URL the same way api.ts does
-const getApiBaseUrl = () => {
-  if (import.meta.env.VITE_API_BASE) {
-    return import.meta.env.VITE_API_BASE;
-  }
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  return `${protocol}//${hostname}:4000/api`;
-};
+import { API_BASE_URL } from "./api";
 
 export interface NetworkStatus {
   hasInternet: boolean;      // Phone has internet connection
@@ -48,11 +39,9 @@ export async function hasInternetConnection(): Promise<boolean> {
  */
 export async function isServerReachable(): Promise<boolean> {
   try {
-    const apiUrl = getApiBaseUrl();
-
     if (Capacitor.isNativePlatform()) {
       const response = await CapacitorHttp.get({
-        url: `${apiUrl}/health`,
+        url: `${API_BASE_URL}/health`,
         connectTimeout: 5000,
         readTimeout: 5000,
         responseType: "json",
@@ -62,7 +51,7 @@ export async function isServerReachable(): Promise<boolean> {
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`${apiUrl}/health`, {
+    const response = await fetch(`${API_BASE_URL}/health`, {
       method: "GET",
       signal: controller.signal,
       cache: "no-store",

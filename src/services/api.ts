@@ -2,21 +2,22 @@ import axios from "axios";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 
-// Automatically determine API base URL based on current hostname
-const getApiBaseUrl = () => {
-  // If VITE_API_BASE is explicitly set, use it
-  if (import.meta.env.VITE_API_BASE) {
-    return import.meta.env.VITE_API_BASE;
-  }
-
-  // Otherwise, use the same host as the frontend
+export const API_BASE_URL: string = (() => {
+  if (import.meta.env.VITE_API_BASE) return import.meta.env.VITE_API_BASE as string;
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
   return `${protocol}//${hostname}:4000/api`;
-};
+})();
+
+if (API_BASE_URL.includes("localhost") || API_BASE_URL.includes("127.0.0.1")) {
+  console.warn(
+    `[api] API_BASE_URL is "${API_BASE_URL}" — iOS/Android builds cannot reach localhost. ` +
+    `Set VITE_API_BASE to a LAN IP before building for device.`
+  );
+}
 
 const api = axios.create({
-  baseURL: getApiBaseUrl(),
+  baseURL: API_BASE_URL,
   headers: {
     "Content-Type": "application/json"
   },
@@ -81,7 +82,7 @@ const silentRefresh = async () => {
   refreshPromise = (async () => {
     try {
       const res = await axios.post(
-        `${getApiBaseUrl()}/auth/refresh`,
+        `${API_BASE_URL}/auth/refresh`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

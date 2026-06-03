@@ -309,6 +309,13 @@ export async function entityPutProjects(records: Array<{ id: string; data: unkno
   } catch { /* ignore */ }
 }
 
+export async function entityDeleteProject(id: string): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.delete("projects", id);
+  } catch { /* ignore */ }
+}
+
 export async function entityGetAllProjects(): Promise<unknown[]> {
   try {
     const db = await getDB();
@@ -459,6 +466,22 @@ export async function entityPutIssues(records: Array<{ id: string; assetId: stri
       ...records.map((r) =>
         tx.store.put({ id: r.id, assetId: r.assetId, projectId: r.projectId, data: r.data, syncedAt: now, dirty: false })
       ),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
+export async function entityReplaceAllIssues(records: Array<{ id: string; assetId: string; projectId: string; data: unknown }>): Promise<void> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction("issues", "readwrite");
+    const store = tx.objectStore("issues");
+    const existing = await store.getAll();
+    const nextIds = new Set(records.map((r) => r.id));
+    const now = new Date().toISOString();
+    await Promise.all([
+      ...existing.filter((r) => !nextIds.has(r.id)).map((r) => store.delete(r.id)),
+      ...records.map((r) => store.put({ id: r.id, assetId: r.assetId, projectId: r.projectId, data: r.data, syncedAt: now, dirty: false })),
       tx.done,
     ]);
   } catch { /* ignore */ }

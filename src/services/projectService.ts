@@ -1,6 +1,7 @@
 ﻿import api from "./api";
 import { Project, ProjectStatus, ProjectType } from "../types/project";
 import { ProjectRepository } from "../repositories/ProjectRepository";
+import { entityDeleteProject, entityPutProject } from "./localDB";
 
 export interface ProjectFilters {
   office?: string;
@@ -34,18 +35,22 @@ export const projectService = {
   },
   async createProject(payload: Project) {
     const response = await api.post<Project>("/projects", payload);
+    await entityPutProject({ id: response.data.id, data: response.data });
     return response.data;
   },
   async updateProject(id: string, payload: Partial<Project>) {
     const response = await api.put<Project>(`/projects/${id}`, payload);
+    await entityPutProject({ id: response.data.id, data: response.data });
     return response.data;
   },
   async updateProjectStatus(id: string, payload: UpdateProjectStatusRequest) {
     const response = await api.patch<Project>(`/projects/${id}/status`, payload);
+    await entityPutProject({ id: response.data.id, data: response.data });
     return response.data;
   },
   async deleteProject(id: string) {
     await api.delete(`/projects/${id}`);
+    await entityDeleteProject(id);
     return id;
   },
 

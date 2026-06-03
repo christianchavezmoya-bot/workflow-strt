@@ -119,9 +119,17 @@ export function useSyncEngine(): SyncState {
         await pendingRemove(action.id);
         await syncMetaSet(action.entityType);
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        await pendingMarkRetry(action.id, msg);
-        anyError = true;
+        const status = (e as { response?: { status?: number } }).response?.status;
+        // 4xx (except 429 rate-limit): the action will never succeed — entity was deleted,
+        // modified by another device, or the request was malformed. Drop it rather than retry.
+        if (status && status !== 429 && status >= 400 && status < 500) {
+          await pendingRemove(action.id);
+        } else {
+          // 5xx, network error, or 429 — retry with backoff
+          const msg = e instanceof Error ? e.message : String(e);
+          await pendingMarkRetry(action.id, msg);
+          anyError = true;
+        }
         // Don't break — try remaining actions in queue
       }
     }

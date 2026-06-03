@@ -1,5 +1,7 @@
+import axios from "axios";
 import api from "./api";
 import type { WorkflowAssignment } from "../types/workflowType";
+import { pendingAdd } from "./localDB";
 
 export const assetWorkflowAssignmentService = {
   async listByAsset(assetId: string): Promise<WorkflowAssignment[]> {
@@ -22,6 +24,24 @@ export const assetWorkflowAssignmentService = {
   },
 
   async remove(id: string): Promise<void> {
-    await api.delete(`/asset-workflow-assignments/${id}`);
+    try {
+      await api.delete(`/asset-workflow-assignments/${id}`);
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) return;
+      if (axios.isAxiosError(error) && !error.response) {
+        await pendingAdd({
+          id: crypto.randomUUID(),
+          url: `/asset-workflow-assignments/${id}`,
+          method: "DELETE",
+          body: undefined,
+          entityType: "workflowAssignment",
+          entityId: id,
+          optimisticPatch: {},
+          createdAt: new Date().toISOString(),
+        });
+        return;
+      }
+      throw error;
+    }
   },
 };

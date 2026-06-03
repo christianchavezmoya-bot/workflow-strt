@@ -1,7 +1,7 @@
 import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
-import { entityDeleteAsset, pendingGetAll } from "./localDB";
+import { entityDeleteAsset, entityPutAsset, pendingAdd, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
@@ -40,16 +40,16 @@ export const projectAssetService = {
 
   async create(input: CreateProjectAssetInput): Promise<ProjectAsset> {
     const res = await api.post<ProjectAsset>("/project-assets", input);
-    return fromDto(res.data);
+    const asset = fromDto(res.data);
+    await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+    return asset;
   },
 
   async bulkCreate(projectId: string, productId: string, assets: CreateProjectAssetInput[]): Promise<ProjectAsset[]> {
-    const res = await api.post<ProjectAsset[]>("/project-assets/bulk", {
-      projectId,
-      productId,
-      assets,
-    });
-    return res.data.map(fromDto);
+    const res = await api.post<ProjectAsset[]>("/project-assets/bulk", { projectId, productId, assets });
+    const created = res.data.map(fromDto);
+    await Promise.all(created.map((a) => entityPutAsset({ id: a.id, productId: a.productId, projectId: a.projectId, data: a })));
+    return created;
   },
 
   async getById(id: string): Promise<ProjectAsset | null> {
@@ -79,6 +79,21 @@ export const projectAssetService = {
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 404) {
         await entityDeleteAsset(id);
+        return;
+      }
+      // No response = network unreachable — delete locally and queue for server
+      if (axios.isAxiosError(error) && !error.response) {
+        await entityDeleteAsset(id);
+        await pendingAdd({
+          id: crypto.randomUUID(),
+          url: `/project-assets/${id}`,
+          method: "DELETE",
+          body: undefined,
+          entityType: "asset",
+          entityId: id,
+          optimisticPatch: {},
+          createdAt: new Date().toISOString(),
+        });
         return;
       }
       throw error;

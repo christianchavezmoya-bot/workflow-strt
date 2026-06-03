@@ -1,17 +1,19 @@
 import api from "../services/api";
 import type { OpenIssueRecord } from "../services/assetWorkflowRunService";
-import { entityGetAllIssues, entityPutIssues } from "../services/localDB";
+import { entityGetAllIssues, entityReplaceAllIssues } from "../services/localDB";
+
+function toRecord(i: OpenIssueRecord) {
+  return { id: i.issueId, assetId: i.assetId, projectId: i.projectId, data: i };
+}
 
 export const IssueRepository = {
   async getAll(): Promise<OpenIssueRecord[]> {
     const local = await entityGetAllIssues();
 
-    // Background refresh — runs unconditionally to keep IndexedDB fresh
+    // Background refresh — reconciles deleted rows via replace-all
     api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues")
       .then(async (res) => {
-        await entityPutIssues(
-          res.data.map((i) => ({ id: i.issueId, assetId: i.assetId, projectId: i.projectId, data: i }))
-        );
+        await entityReplaceAllIssues(res.data.map(toRecord));
         window.dispatchEvent(new Event("repo:issues:updated"));
       })
       .catch(() => {});
@@ -20,9 +22,7 @@ export const IssueRepository = {
 
     // No local data — wait for network
     const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues");
-    await entityPutIssues(
-      res.data.map((i) => ({ id: i.issueId, assetId: i.assetId, projectId: i.projectId, data: i }))
-    );
+    await entityReplaceAllIssues(res.data.map(toRecord));
     return res.data;
   },
 };

@@ -1,8 +1,10 @@
-import { Box, Button, Divider, IconButton, Stack, Typography } from "@mui/material";
+import { Box, Button, Chip, Divider, IconButton, Stack, Typography } from "@mui/material";
 import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
 import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import { useEffect, useState } from "react";
 import { secureGet } from "../../services/secureStorage";
+import { API_BASE_URL } from "../../services/api";
+import { pendingCount, syncMetaGet } from "../../services/localDB";
 
 type DebugLog = {
   id: string;
@@ -26,22 +28,44 @@ const DebugPanel = () => {
     token: secureGet("auth_token") || "",
     user: secureGet("auth_user") || secureGet("local_auth_user") || ""
   });
+  const [serverReachable, setServerReachable] = useState<boolean | null>(null);
+  const [pending, setPending] = useState(0);
+  const [lastAssetSync, setLastAssetSync] = useState<string | null>(null);
 
   useEffect(() => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: DebugLog[] };
-    if (!anyWindow.__apiDebugLogs) {
-      anyWindow.__apiDebugLogs = [];
-    }
+    if (!anyWindow.__apiDebugLogs) anyWindow.__apiDebugLogs = [];
     setLogs(getLogs());
+
+    const refreshCounts = async () => {
+      setPending(await pendingCount());
+      setLastAssetSync(await syncMetaGet("asset"));
+    };
+    void refreshCounts();
+
     const handler = () => {
       setLogs(getLogs());
       setAuthInfo({
         token: secureGet("auth_token") || "",
         user: secureGet("auth_user") || secureGet("local_auth_user") || ""
       });
+      void refreshCounts();
     };
+
+    const handleReachable  = () => setServerReachable(true);
+    const handleUnreachable = () => setServerReachable(false);
+    const handlePending = () => void refreshCounts();
+
     window.addEventListener("api-debug-log", handler);
-    return () => window.removeEventListener("api-debug-log", handler);
+    window.addEventListener("api-server-reachable", handleReachable);
+    window.addEventListener("api-serving-cache", handleUnreachable);
+    window.addEventListener("sync-pending-changed", handlePending);
+    return () => {
+      window.removeEventListener("api-debug-log", handler);
+      window.removeEventListener("api-server-reachable", handleReachable);
+      window.removeEventListener("api-serving-cache", handleUnreachable);
+      window.removeEventListener("sync-pending-changed", handlePending);
+    };
   }, []);
 
   return (
@@ -85,10 +109,43 @@ const DebugPanel = () => {
               <CloseOutlinedIcon fontSize="small" />
             </IconButton>
           </Stack>
-          <Typography variant="caption" color="text.secondary">
-            Latest requests and responses
-          </Typography>
+
           <Divider sx={{ my: 1 }} />
+
+          {/* Connection info */}
+          <Stack spacing={0.5} sx={{ mb: 1.5 }}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>API host</Typography>
+              <Typography variant="caption" sx={{ fontFamily: "monospace", wordBreak: "break-all", color: "text.primary" }}>
+                {API_BASE_URL}
+              </Typography>
+            </Stack>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>Server</Typography>
+              {serverReachable === null
+                ? <Chip label="unknown" size="small" sx={{ height: 16, fontSize: "0.65rem" }} />
+                : serverReachable
+                  ? <Chip label="reachable" size="small" color="success" sx={{ height: 16, fontSize: "0.65rem" }} />
+                  : <Chip label="unreachable" size="small" color="error" sx={{ height: 16, fontSize: "0.65rem" }} />
+              }
+            </Stack>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>Pending</Typography>
+              <Typography variant="caption" color={pending > 0 ? "warning.main" : "success.main"}>
+                {pending} action{pending !== 1 ? "s" : ""}
+              </Typography>
+            </Stack>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>Last asset sync</Typography>
+              <Typography variant="caption" color="text.primary">
+                {lastAssetSync ? new Date(lastAssetSync).toLocaleTimeString() : "never"}
+              </Typography>
+            </Stack>
+          </Stack>
+
+          <Divider sx={{ my: 1 }} />
+
+          {/* Auth info */}
           <Box sx={{ mb: 1 }}>
             <Typography variant="caption" color="text.secondary">
               Auth token: {authInfo.token ? authInfo.token.slice(0, 16) + "..." : "none"}
@@ -97,31 +154,28 @@ const DebugPanel = () => {
               User: {authInfo.user || "none"}
             </Typography>
           </Box>
-          <Stack spacing={1}>
+
+          <Divider sx={{ my: 1 }} />
+
+          {/* Request log */}
+          <Typography variant="caption" color="text.secondary">Latest requests</Typography>
+          <Stack spacing={1} sx={{ mt: 0.5 }}>
             {logs.length === 0 && (
-              <Typography variant="body2" color="text.secondary">
-                No requests yet.
-              </Typography>
+              <Typography variant="body2" color="text.secondary">No requests yet.</Typography>
             )}
             {logs
               .slice()
               .reverse()
               .map((log) => (
                 <Box key={log.id} sx={{ p: 1, borderRadius: 1, bgcolor: "rgba(255,255,255,0.04)" }}>
-                  <Typography variant="caption" color="text.secondary">
-                    {log.time}
-                  </Typography>
-                  <Typography variant="body2">
-                    {log.method} {log.url}
-                  </Typography>
+                  <Typography variant="caption" color="text.secondary">{log.time}</Typography>
+                  <Typography variant="body2">{log.method} {log.url}</Typography>
                   <Typography variant="body2" color={log.status && log.status >= 400 ? "error" : "success.main"}>
                     {log.status ? `Status ${log.status}` : "No status"}
                     {log.durationMs != null ? ` · ${log.durationMs}ms` : ""}
                   </Typography>
                   {log.error && (
-                    <Typography variant="caption" color="error">
-                      {log.error}
-                    </Typography>
+                    <Typography variant="caption" color="error">{log.error}</Typography>
                   )}
                 </Box>
               ))}

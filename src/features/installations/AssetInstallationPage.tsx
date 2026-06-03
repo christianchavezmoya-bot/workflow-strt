@@ -538,6 +538,8 @@ const AssetInstallationPage = () => {
     });
   }, [activeProduct?.id]);
 
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
+
   const refreshAssets = () => {
     if (!activeProduct?.id) return;
     projectAssetService.listByProduct(activeProduct.id).then((a) => {
@@ -556,6 +558,7 @@ const AssetInstallationPage = () => {
         setAssets(a);
         setHealthMap((prev) => ({ ...prev, [activeProduct.id!]: computeHealth(a) }));
       });
+      setLastRefreshedAt(new Date());
     };
     window.addEventListener("repo:assets:updated", handler);
     return () => window.removeEventListener("repo:assets:updated", handler);
@@ -567,6 +570,14 @@ const AssetInstallationPage = () => {
     const handler = () => { if (document.visibilityState === "visible") refreshAssets(); };
     document.addEventListener("visibilitychange", handler);
     return () => document.removeEventListener("visibilitychange", handler);
+  }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll every 30s while visible to pick up changes from other devices without any user action.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") refreshAssets();
+    }, 30_000);
+    return () => clearInterval(id);
   }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedAddConfig = useMemo(
@@ -884,7 +895,6 @@ const AssetInstallationPage = () => {
       await projectAssetService.remove(assetId);
       setAssets((prev) => prev.filter((asset) => asset.id !== assetId));
       setDeleteAsset(null);
-      refreshAssets();
     } catch {
       alert("Failed to delete asset.");
     } finally {
@@ -900,7 +910,6 @@ const AssetInstallationPage = () => {
       setAssets((prev) => prev.filter((asset) => !ids.includes(asset.id)));
       setSelectedAssetIds(new Set());
       setBulkDeleteOpen(false);
-      refreshAssets();
     } catch {
       alert("One or more assets could not be deleted.");
     } finally {
@@ -2471,6 +2480,15 @@ const AssetInstallationPage = () => {
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
+          {lastRefreshedAt && (() => {
+            const secs = Math.floor((Date.now() - lastRefreshedAt.getTime()) / 1000);
+            const label = secs < 10 ? "just now" : secs < 60 ? `${secs}s ago` : `${Math.floor(secs / 60)}m ago`;
+            return (
+              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+                Live · {label}
+              </Typography>
+            );
+          })()}
           <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={refreshAssets}>Refresh</Button>
           {can.modifyData && (
             <Button
