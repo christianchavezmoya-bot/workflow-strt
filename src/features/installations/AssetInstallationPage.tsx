@@ -551,7 +551,11 @@ const AssetInstallationPage = () => {
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ productId?: string }>).detail;
-      if (activeProduct?.id && detail?.productId === activeProduct.id) refreshAssets();
+      if (!activeProduct?.id || detail?.productId !== activeProduct.id) return;
+      projectAssetService.listLocalByProduct(activeProduct.id).then((a) => {
+        setAssets(a);
+        setHealthMap((prev) => ({ ...prev, [activeProduct.id!]: computeHealth(a) }));
+      });
     };
     window.addEventListener("repo:assets:updated", handler);
     return () => window.removeEventListener("repo:assets:updated", handler);
@@ -607,6 +611,13 @@ const AssetInstallationPage = () => {
     () => projects.filter((p) => p.productIds?.includes(activeProduct?.id ?? "")),
     [projects, activeProduct?.id],
   );
+
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    if (productProjects.some((project) => project.id === selectedProjectId)) return;
+    setSelectedProjectId("");
+    try { sessionStorage.removeItem("installations_selected_project_id"); } catch {}
+  }, [productProjects, selectedProjectId]);
 
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const configMap = useMemo(() => new Map(configs.map((c) => [c.id, c])), [configs]);
@@ -867,9 +878,11 @@ const AssetInstallationPage = () => {
 
   async function confirmDeleteAsset() {
     if (!deleteAsset) return;
+    const assetId = deleteAsset.id;
     setDeletingAsset(true);
     try {
-      await projectAssetService.remove(deleteAsset.id);
+      await projectAssetService.remove(assetId);
+      setAssets((prev) => prev.filter((asset) => asset.id !== assetId));
       setDeleteAsset(null);
       refreshAssets();
     } catch {
@@ -884,6 +897,7 @@ const AssetInstallationPage = () => {
     const ids = Array.from(selectedAssetIds);
     try {
       await Promise.all(ids.map((id) => projectAssetService.remove(id)));
+      setAssets((prev) => prev.filter((asset) => !ids.includes(asset.id)));
       setSelectedAssetIds(new Set());
       setBulkDeleteOpen(false);
       refreshAssets();

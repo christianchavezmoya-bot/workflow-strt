@@ -3,8 +3,9 @@ import type { ProjectAsset, ProjectAssetStatus } from "../types/projectAsset";
 import {
   entityGetAssetsByProduct,
   entityGetAssetsByProject,
-  entityPutAssets,
   entityPutAsset,
+  entityReplaceAssetsByProduct,
+  entityReplaceAssetsByProject,
   pendingAdd,
 } from "../services/localDB";
 
@@ -24,47 +25,61 @@ function fromDto(dto: ProjectAsset): ProjectAsset {
 }
 
 export const AssetRepository = {
-  async getByProduct(productId: string): Promise<ProjectAsset[]> {
+  async getLocalByProduct(productId: string): Promise<ProjectAsset[]> {
     const local = await entityGetAssetsByProduct(productId);
+    return (local as ProjectAsset[]).map(fromDto);
+  },
+
+  async getLocalByProject(projectId: string): Promise<ProjectAsset[]> {
+    const local = await entityGetAssetsByProject(projectId);
+    return (local as ProjectAsset[]).map(fromDto);
+  },
+
+  async getByProduct(productId: string): Promise<ProjectAsset[]> {
+    const local = await this.getLocalByProduct(productId);
 
     // Background network refresh — runs unconditionally to keep IndexedDB fresh
     api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`)
       .then(async (res) => {
-        await entityPutAssets(
+        await entityReplaceAssetsByProduct(
+          productId,
           res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
         );
         window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { productId } }));
       })
       .catch(() => {});
 
-    if (local.length > 0) return (local as ProjectAsset[]).map(fromDto);
+    if (local.length > 0) return local;
 
     // No local data — wait for network
     const res = await api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`);
-    await entityPutAssets(
+    await entityReplaceAssetsByProduct(
+      productId,
       res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
     );
     return res.data.map(fromDto);
   },
 
   async getByProject(projectId: string): Promise<ProjectAsset[]> {
-    const local = await entityGetAssetsByProject(projectId);
+    const local = await this.getLocalByProject(projectId);
 
     // Background network refresh — runs unconditionally to keep IndexedDB fresh
     api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`)
       .then(async (res) => {
-        await entityPutAssets(
+        await entityReplaceAssetsByProject(
+          projectId,
           res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
         );
         window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { projectId } }));
       })
       .catch(() => {});
 
-    if (local.length > 0) return (local as ProjectAsset[]).map(fromDto);
+    if (local.length > 0) return local;
 
     // No local data — wait for network
     const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`);
-    await entityPutAssets(
+    await entityReplaceAssetsByProject(
+      projectId,
       res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
     );
     return res.data.map(fromDto);

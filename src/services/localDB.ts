@@ -347,6 +347,77 @@ export async function entityPutAssets(records: Array<{ id: string; productId: st
   } catch { /* ignore */ }
 }
 
+export async function entityDeleteAsset(id: string): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.delete("assets", id);
+  } catch { /* ignore */ }
+}
+
+export async function entityReplaceAssetsByProduct(
+  productId: string,
+  records: Array<{ id: string; productId: string; projectId: string; data: unknown }>
+): Promise<void> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction("assets", "readwrite");
+    const store = tx.objectStore("assets");
+    const index = store.index("by_product");
+    const existing = await index.getAll(productId);
+    const nextIds = new Set(records.map((record) => record.id));
+    const now = new Date().toISOString();
+
+    await Promise.all([
+      ...existing
+        .filter((record) => !nextIds.has(record.id))
+        .map((record) => store.delete(record.id)),
+      ...records.map((record) =>
+        store.put({
+          id: record.id,
+          productId: record.productId,
+          projectId: record.projectId,
+          data: record.data,
+          syncedAt: now,
+          dirty: false,
+        })
+      ),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
+export async function entityReplaceAssetsByProject(
+  projectId: string,
+  records: Array<{ id: string; productId: string; projectId: string; data: unknown }>
+): Promise<void> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction("assets", "readwrite");
+    const store = tx.objectStore("assets");
+    const index = store.index("by_project");
+    const existing = await index.getAll(projectId);
+    const nextIds = new Set(records.map((record) => record.id));
+    const now = new Date().toISOString();
+
+    await Promise.all([
+      ...existing
+        .filter((record) => !nextIds.has(record.id))
+        .map((record) => store.delete(record.id)),
+      ...records.map((record) =>
+        store.put({
+          id: record.id,
+          productId: record.productId,
+          projectId: record.projectId,
+          data: record.data,
+          syncedAt: now,
+          dirty: false,
+        })
+      ),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
 export async function entityGetAssetsByProduct(productId: string): Promise<unknown[]> {
   try {
     const db = await getDB();

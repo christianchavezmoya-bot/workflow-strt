@@ -1,6 +1,7 @@
+import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
-import { pendingGetAll } from "./localDB";
+import { entityDeleteAsset, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
@@ -29,6 +30,11 @@ export const projectAssetService = {
 
   async listByProduct(productId: string): Promise<ProjectAsset[]> {
     try { return await AssetRepository.getByProduct(productId); }
+    catch { return []; }
+  },
+
+  async listLocalByProduct(productId: string): Promise<ProjectAsset[]> {
+    try { return await AssetRepository.getLocalByProduct(productId); }
     catch { return []; }
   },
 
@@ -67,7 +73,16 @@ export const projectAssetService = {
   },
 
   async remove(id: string): Promise<void> {
-    await api.delete(`/project-assets/${id}`);
+    try {
+      await api.delete(`/project-assets/${id}`);
+      await entityDeleteAsset(id);
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        await entityDeleteAsset(id);
+        return;
+      }
+      throw error;
+    }
   },
 
   async workloadSummary(): Promise<WorkloadSummaryItem[]> {
