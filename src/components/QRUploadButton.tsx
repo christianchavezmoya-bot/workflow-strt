@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import {
   Box, Button, CircularProgress, Dialog, DialogContent,
   DialogTitle, IconButton, Stack, Typography, Alert,
@@ -20,7 +20,7 @@ interface QRUploadButtonProps {
   /** Called with the new documentId once upload completes on the phone */
   onUploaded: (documentId: string) => void;
   /**
-   * Optional Ã¢â‚¬â€ when provided, after upload completes the component fetches the
+   * Optional - when provided, after upload completes the component fetches the
    * document record, converts the file to a base64 data URL, and calls this
    * callback with both the documentId and the dataUrl.
    */
@@ -134,7 +134,7 @@ export default function QRUploadButton({
                 onUploadedWithData(documentId, dataUrl);
               }
             } catch {
-              // Non-fatal Ã¢â‚¬â€ onUploaded already called
+              // Non-fatal - onUploaded already called
             } finally {
               setProcessing(false);
             }
@@ -145,7 +145,7 @@ export default function QRUploadButton({
           setError("QR code expired. Click Regenerate to get a new one.");
         }
       } catch {
-        // network hiccup Ã¢â‚¬â€ keep polling
+        // Network hiccup - keep polling
       }
     }, 3000);
     return stopPolling;
@@ -248,3 +248,4 @@ export default function QRUploadButton({
     </>
   );
 }
+

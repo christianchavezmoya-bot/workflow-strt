@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  Box, Button, CircularProgress, LinearProgress,
-  Stack, Typography, Alert, Paper,
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  LinearProgress,
+  Paper,
+  Stack,
+  Typography,
 } from "@mui/material";
 import UploadFileOutlinedIcon from "@mui/icons-material/UploadFileOutlined";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
@@ -36,15 +42,17 @@ export default function MobileUploadPage() {
       setPageState("error");
       return;
     }
+
     api.get<TokenInfo>(`/mobile-upload/${token}/info`)
       .then((res) => {
         if (res.data.error === "expired") {
           setErrorMsg("This QR code has expired. Please ask for a new one on the desktop.");
           setPageState("error");
-        } else {
-          setTokenInfo(res.data);
-          setPageState("ready");
+          return;
         }
+
+        setTokenInfo(res.data);
+        setPageState("ready");
       })
       .catch(() => {
         setErrorMsg("Upload link is invalid or has expired.");
@@ -55,27 +63,35 @@ export default function MobileUploadPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     setSelectedFile(file);
     if (file.type.startsWith("image/")) {
       setPreview(URL.createObjectURL(file));
-    } else {
-      setPreview(null);
+      return;
     }
+
+    setPreview(null);
   };
 
   const handleUpload = async () => {
     if (!selectedFile || !token) return;
+
     setPageState("uploading");
     setUploadProgress(0);
+
     try {
       const formData = new FormData();
       formData.append("file", selectedFile);
+
       await api.post(`/mobile-upload/${token}/upload`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress: (e) => {
-          if (e.total) setUploadProgress(Math.round((e.loaded / e.total) * 100));
+          if (e.total) {
+            setUploadProgress(Math.round((e.loaded / e.total) * 100));
+          }
         },
       });
+
       setPageState("done");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Upload failed. Please try again.";
@@ -102,7 +118,6 @@ export default function MobileUploadPage() {
       }}
     >
       <Paper variant="outlined" sx={{ width: "100%", maxWidth: 420, p: 3 }}>
-        {/* Header */}
         <Stack spacing={0.5} mb={3}>
           <Typography variant="h6" fontWeight={700}>Upload from Phone</Typography>
           {tokenInfo && (
@@ -112,21 +127,18 @@ export default function MobileUploadPage() {
           )}
         </Stack>
 
-        {/* Loading */}
         {pageState === "loading" && (
           <Box display="flex" justifyContent="center" py={4}>
             <CircularProgress />
           </Box>
         )}
 
-        {/* Error */}
         {pageState === "error" && (
           <Alert severity="error" icon={<ErrorOutlineIcon />}>
             {errorMsg ?? "Something went wrong."}
           </Alert>
         )}
 
-        {/* Done */}
         {pageState === "done" && (
           <Stack alignItems="center" spacing={2} py={3}>
             <CheckCircleOutlineIcon sx={{ fontSize: 64, color: "success.main" }} />
@@ -139,7 +151,6 @@ export default function MobileUploadPage() {
           </Stack>
         )}
 
-        {/* Uploading progress */}
         {pageState === "uploading" && (
           <Stack spacing={2} py={2}>
             <Typography variant="body2" textAlign="center">Uploading...</Typography>
@@ -150,10 +161,8 @@ export default function MobileUploadPage() {
           </Stack>
         )}
 
-        {/* Ready â€” file picker */}
         {pageState === "ready" && (
           <Stack spacing={2}>
-            {/* Drop zone / file picker */}
             <Box
               onClick={() => fileInputRef.current?.click()}
               sx={{
@@ -188,7 +197,7 @@ export default function MobileUploadPage() {
                     {selectedFile.name}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {formatBytes(selectedFile.size)} • Tap to change
+                    {formatBytes(selectedFile.size)} - Tap to change
                   </Typography>
                 </Stack>
               ) : (

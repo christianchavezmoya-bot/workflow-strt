@@ -246,6 +246,7 @@ public class ProjectEntity
     public decimal? ContractValue { get; set; }
     [MaxLength(120)]
     public string? ProbabilityStage { get; set; }
+    public int MinimumCompletionPercent { get; set; } = 100;
     public List<string> ProductIds { get; set; } = new();
     public string ProductFeatureValuesJson { get; set; } = "{}";
     public string TeamMemberIdsJson { get; set; } = "[]";

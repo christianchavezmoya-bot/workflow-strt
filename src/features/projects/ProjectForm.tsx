@@ -70,6 +70,7 @@ const schema = z
     office: z.string().optional(),
     region: z.string().optional(),
     projectManager: z.string().optional(),
+    minimumCompletionPercent: z.coerce.number().min(1).max(100).optional(),
     projectType: z.enum(["Internal", "External"]).optional(),
     status: z
       .enum([
@@ -167,6 +168,7 @@ const ProjectForm = () => {
       office: "",
       region: "",
       projectManager: "",
+      minimumCompletionPercent: 100,
       projectType: "Internal",
       status: "Draft",
       approvalDecision: "",
@@ -202,6 +204,7 @@ const ProjectForm = () => {
         office: localProject.officeId || globalOffices.find((o) => o.city === localProject.office)?.id || "",
         region: localProject.region,
         projectManager: localProject.projectManager,
+        minimumCompletionPercent: localProject.minimumCompletionPercent ?? 100,
         projectType: localProject.projectType,
         status: localProject.status,
         approvalDecision: localProject.approvalDecision || "",
@@ -226,6 +229,7 @@ const ProjectForm = () => {
         office: project.officeId || globalOffices.find((o) => o.city === project.office)?.id || "",
         region: project.region,
         projectManager: project.projectManager,
+        minimumCompletionPercent: project.minimumCompletionPercent ?? 100,
         projectType: project.projectType,
         status: project.status,
         approvalDecision: project.approvalDecision || "",
@@ -559,6 +563,7 @@ const ProjectForm = () => {
       workflowMode: data.workflowMode ?? "INSTALLATION_ONLY",
       isInstallationProject: data.workflowMode === "INSTALLATION_ONLY" || data.workflowMode === "MIXED",
       projectManager: data.projectManager,
+      minimumCompletionPercent: Math.min(100, Math.max(1, Number(data.minimumCompletionPercent || 100))),
       productIds: data.productIds ?? [],
       productFeatureValues,
       teamMemberIds
@@ -618,6 +623,7 @@ const ProjectForm = () => {
       office: labelOffice,
       region: labelRegion,
       projectManager: labelProjectManager,
+      minimumCompletionPercent: "Minimum completion to allow project completion",
       projectType: labelProjectType,
       status: labelStatus,
       productIds: labelProducts,
@@ -751,6 +757,7 @@ const ProjectForm = () => {
   const labelOffice = builtInLabel("office", "Office");
   const labelRegion = builtInLabel("region", "Country");
   const labelProjectManager = builtInLabel("projectManager", "Project Manager");
+  const labelMinimumCompletionPercent = "Minimum completion to allow Mark Completed";
   const labelDescription = builtInLabel("description", "Description");
   const labelStartDate = builtInLabel("startDate", "Start Date");
   const labelFinishDate = builtInLabel("finishDate", "Finish Date");
@@ -1469,6 +1476,24 @@ const ProjectForm = () => {
                   Controls which modules are visible on the project detail page.
                 </FormHelperText>
               </FormControl>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Controller
+                name="minimumCompletionPercent"
+                control={control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label={labelMinimumCompletionPercent}
+                    type="number"
+                    fullWidth
+                    inputProps={{ min: 1, max: 100, step: 1 }}
+                    error={!!errors.minimumCompletionPercent}
+                    helperText={errors.minimumCompletionPercent?.message || "Project progress required before Mark Completed becomes available."}
+                    onChange={(event) => field.onChange(event.target.value === "" ? 100 : Number(event.target.value))}
+                  />
+                )}
+              />
             </Grid>
             {projectType === "External" && (
               <Grid item xs={12}>

@@ -211,6 +211,7 @@ public class ProjectsController : ControllerBase
             ProjectManager = request.ProjectManager,
             ContractValue = request.ContractValue,
             ProbabilityStage = request.ProbabilityStage,
+            MinimumCompletionPercent = Math.Clamp(request.MinimumCompletionPercent <= 0 ? 100 : request.MinimumCompletionPercent, 1, 100),
             ProductIds = request.ProductIds ?? new List<string>(),
             ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions),
             TeamMemberIdsJson = JsonSerializer.Serialize(request.TeamMemberIds ?? new List<string>(), JsonOptions)
@@ -261,6 +262,7 @@ public class ProjectsController : ControllerBase
         project.ProjectManager = request.ProjectManager;
         project.ContractValue = request.ContractValue;
         project.ProbabilityStage = request.ProbabilityStage;
+        project.MinimumCompletionPercent = Math.Clamp(request.MinimumCompletionPercent <= 0 ? 100 : request.MinimumCompletionPercent, 1, 100);
         project.ProductIds = request.ProductIds ?? new List<string>();
         project.ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions);
         project.TeamMemberIdsJson = JsonSerializer.Serialize(request.TeamMemberIds ?? new List<string>(), JsonOptions);
@@ -552,6 +554,7 @@ public class ProjectsController : ControllerBase
             project.ProjectManager,
             project.ContractValue,
             project.ProbabilityStage,
+            project.MinimumCompletionPercent,
             project.ProductIds,
             string.IsNullOrWhiteSpace(project.ProductFeatureValuesJson)
                 ? new Dictionary<string, string>()

@@ -447,6 +447,7 @@ const Settings = () => {
     productId: string;
     productName: string;
     loading: boolean;
+    error: string | null;
     features: Array<{ id: string; name: string; valueType: string; alsoUsedIn: string[] }>;
     projects: Array<{ id: string; name: string; jobNumber?: string }>;
     assets: Array<{ id: string; assetName: string; projectName?: string }>;
@@ -455,7 +456,7 @@ const Settings = () => {
     selectedDeleteAssetIds: string[];
     selectedDeleteWorkflowIds: string[];
   }>({
-    open: false, productId: "", productName: "", loading: false,
+    open: false, productId: "", productName: "", loading: false, error: null,
     features: [], projects: [], assets: [], workflows: [],
     selectedDeleteFeatureIds: [], selectedDeleteAssetIds: [], selectedDeleteWorkflowIds: [],
   });
@@ -519,9 +520,15 @@ const Settings = () => {
   }
 
   async function removeProduct(id: string) {
+    if (!isAdmin) {
+      setProductsError("Only Admins can delete products.");
+      return;
+    }
+
+    setProductsError(null);
     const product = products.find((p) => p.id === id);
     setDeleteImpactDialog({
-      open: true, productId: id, productName: product?.name ?? "", loading: true,
+      open: true, productId: id, productName: product?.name ?? "", loading: true, error: null,
       features: [], projects: [], assets: [], workflows: [],
       selectedDeleteFeatureIds: [], selectedDeleteAssetIds: [], selectedDeleteWorkflowIds: [],
     });
@@ -545,15 +552,24 @@ const Settings = () => {
         selectedDeleteAssetIds: (res.data.assets ?? []).map((a) => a.id),
         selectedDeleteWorkflowIds: (res.data.workflows ?? []).map((w) => w.id),
         loading: false,
+        error: null,
       }));
-    } catch {
-      setDeleteImpactDialog((prev) => ({ ...prev, loading: false }));
+    } catch (err: unknown) {
+      const response = (err as { response?: { status?: number; data?: { message?: string; error?: string } } })?.response;
+      const message = response?.status === 403
+        ? "Only Admins can review product deletion impact."
+        : response?.data?.message
+          ?? response?.data?.error
+          ?? (response?.status ? `Failed to load product impact (HTTP ${response.status}).` : "Failed to load product impact. Check server connection.");
+      setDeleteImpactDialog((prev) => ({ ...prev, loading: false, error: message }));
+      setProductsError(message);
     }
   }
 
   async function confirmDeleteProduct() {
     const { productId, selectedDeleteFeatureIds, selectedDeleteAssetIds, selectedDeleteWorkflowIds } = deleteImpactDialog;
-    setDeleteImpactDialog((prev) => ({ ...prev, loading: true }));
+    setProductsError(null);
+    setDeleteImpactDialog((prev) => ({ ...prev, loading: true, error: null }));
     try {
       await api.delete(`/products/${productId}`, {
         data: {
@@ -565,13 +581,21 @@ const Settings = () => {
       setProducts((prev) => prev.filter((p) => p.id !== productId));
       if (expandedProductId === productId) setExpandedProductId(null);
       setDeleteImpactDialog({
-        open: false, productId: "", productName: "", loading: false,
+        open: false, productId: "", productName: "", loading: false, error: null,
         features: [], projects: [], assets: [], workflows: [],
         selectedDeleteFeatureIds: [], selectedDeleteAssetIds: [], selectedDeleteWorkflowIds: [],
       });
-    } catch {
-      alert("Failed to delete product.");
-      setDeleteImpactDialog((prev) => ({ ...prev, loading: false }));
+    } catch (err: unknown) {
+      const response = (err as { response?: { status?: number; data?: { message?: string; error?: string } } })?.response;
+      const message = response?.status === 403
+        ? "Only Admins can delete products."
+        : response?.status === 404
+          ? "This product no longer exists. Refresh and try again."
+          : response?.data?.message
+            ?? response?.data?.error
+            ?? (response?.status ? `Failed to delete product (HTTP ${response.status}).` : "Failed to delete product. Check server connection.");
+      setProductsError(message);
+      setDeleteImpactDialog((prev) => ({ ...prev, loading: false, error: message }));
     }
   }
 
@@ -2194,10 +2218,12 @@ const Settings = () => {
                                   <EditOutlined fontSize="small" />
                                 </IconButton>
                               </Tooltip>
-                              <Tooltip title="Delete">
-                                <IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); removeProduct(p.id); }}>
-                                  <DeleteOutline fontSize="small" />
-                                </IconButton>
+                              <Tooltip title={isAdmin ? "Delete" : "Only Admins can delete products"}>
+                                <span>
+                                  <IconButton size="small" color="error" disabled={!isAdmin} onClick={(e) => { e.stopPropagation(); removeProduct(p.id); }}>
+                                    <DeleteOutline fontSize="small" />
+                                  </IconButton>
+                                </span>
                               </Tooltip>
                             </Stack>
                           </TableCell>
@@ -3303,7 +3329,7 @@ const Settings = () => {
         const allAssetsSelected = di.assets.length > 0 && di.assets.every((a) => di.selectedDeleteAssetIds.includes(a.id));
         const allWorkflowsSelected = di.workflows.length > 0 && di.workflows.every((w) => di.selectedDeleteWorkflowIds.includes(w.id));
         const emptyState = {
-          open: false, productId: "", productName: "", loading: false,
+          open: false, productId: "", productName: "", loading: false, error: null,
           features: [], projects: [], assets: [], workflows: [],
           selectedDeleteFeatureIds: [], selectedDeleteAssetIds: [], selectedDeleteWorkflowIds: [],
         } as typeof di;
@@ -3322,6 +3348,7 @@ const Settings = () => {
                 </Box>
               ) : (
                 <Stack spacing={2}>
+                  {di.error && <Alert severity="error">{di.error}</Alert>}
                   {!hasImpact && (
                     <Typography variant="body2" color="text.secondary">No linked data — only the product record will be removed.</Typography>
                   )}

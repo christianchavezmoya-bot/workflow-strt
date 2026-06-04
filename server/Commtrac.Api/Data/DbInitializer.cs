@@ -28,6 +28,7 @@ public static class DbInitializer
         EnsureRunTimeTrackingColumns(db);
         EnsureMarch15Columns(db);
         EnsureFeatureProcurementColumns(db);
+        EnsureProjectMinimumCompletionPercentColumn(db);
         EnsureLinkableKeyFieldDefinitions(db);
 
         if (!db.Users.Any())
@@ -392,8 +393,6 @@ public static class DbInitializer
         ("Hazard Avert",          "Hazard detection and avoidance",         DivSafetyId),
         ("Hazard Avert - Gen 2",  "Hazard Avert second generation",         DivSafetyId),
         ("Ping Alert",            "Personnel alerting system",              DivSafetyId),
-        ("New Ice Cream",         null,                                     null),
-        ("Coffee",                null,                                     null),
     ];
 
     private static void SeedProducts(AppDbContext db)
@@ -652,6 +651,26 @@ public static class DbInitializer
                     FieldsJson TEXT NOT NULL DEFAULT '[]'
                 )";
             cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureProjectMinimumCompletionPercentColumn(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Projects') WHERE name='MinimumCompletionPercent'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Projects ADD COLUMN MinimumCompletionPercent INTEGER NOT NULL DEFAULT 100";
+                cmd.ExecuteNonQuery();
+            }
         }
         finally
         {

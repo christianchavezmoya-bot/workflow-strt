@@ -32,7 +32,7 @@ import {
 } from "@mui/material";
 import { ArrowDropDown, CalendarTodayOutlined, DeleteOutline, EditOutlined, ExpandLess, ExpandMore, PersonOutlined } from "@mui/icons-material";
 import ProjectChevronPanel from "./ProjectChevronPanel";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import TableConfigDialog from "../../components/TableConfigDialog";
@@ -243,6 +243,7 @@ const applyAutoFilter = <T,>(
 };
 
 const ProjectList = () => {
+  const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const { user } = useAuth();
@@ -305,7 +306,13 @@ const ProjectList = () => {
   const canDeleteProjects = can.modifyData;
 
   // Block-complete dialog — shown when assets are not all done
-  const [blockComplete, setBlockComplete] = useState<{ open: boolean; incomplete: number; total: number }>({ open: false, incomplete: 0, total: 0 });
+  const [blockComplete, setBlockComplete] = useState<{ open: boolean; incomplete: number; total: number; threshold: number; completionPercent: number }>({
+    open: false,
+    incomplete: 0,
+    total: 0,
+    threshold: 100,
+    completionPercent: 0,
+  });
   const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
 
   // Clear column filters when active office changes
@@ -488,6 +495,7 @@ const ProjectList = () => {
 
     if (label === "Start Work") {
       dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } }));
+      navigate(`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`);
     }
 
     if (label === "Mark Completed") {
@@ -497,15 +505,24 @@ const ProjectList = () => {
       try {
         const assets = await projectAssetService.listByProject(project.id);
         const total = assets.length;
-        const incomplete = assets.filter((a) => a.status !== "Complete").length;
-        if (incomplete > 0) {
-          setBlockComplete({ open: true, incomplete, total });
+        const completed = assets.filter((a) => a.status === "Complete").length;
+        const incomplete = total - completed;
+        const completionPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
+        const threshold = Math.min(100, Math.max(1, project.minimumCompletionPercent ?? 100));
+        if (completionPercent < threshold) {
+          setBlockComplete({ open: true, incomplete, total, threshold, completionPercent });
           return;
         }
         dispatch(updateProjectStatus({ id: project.id, payload: { status: "Completed" } }));
       } catch {
         // If we can't verify assets, block the action to be safe
-        setBlockComplete({ open: true, incomplete: -1, total: 0 });
+        setBlockComplete({
+          open: true,
+          incomplete: -1,
+          total: 0,
+          threshold: Math.min(100, Math.max(1, project.minimumCompletionPercent ?? 100)),
+          completionPercent: 0,
+        });
       } finally {
         setCompletingProjectId(null);
       }
@@ -698,7 +715,7 @@ const ProjectList = () => {
                       to={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`}
                       sx={{ fontSize: "0.7rem", py: 0.25, px: 1, height: 26, flexShrink: 0 }}
                     >
-                      Asset Installs
+                      Project Assets
                     </Button>
                     {mobileActions.map((label) => (
                       <Button key={label} size="small" variant="outlined" color="primary"
@@ -999,20 +1016,20 @@ const ProjectList = () => {
       />
 
       {/* Block-complete dialog — shown when not all assets are done */}
-      <Dialog open={blockComplete.open} onClose={() => setBlockComplete({ open: false, incomplete: 0, total: 0 })} maxWidth="xs" fullWidth>
+      <Dialog open={blockComplete.open} onClose={() => setBlockComplete({ open: false, incomplete: 0, total: 0, threshold: 100, completionPercent: 0 })} maxWidth="xs" fullWidth>
         <DialogTitle>Cannot Complete Project</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 1 }}>
             {blockComplete.incomplete === -1
-              ? "Unable to verify installation asset status. Please try again or contact support."
-              : `${blockComplete.incomplete} of ${blockComplete.total} installation asset${blockComplete.incomplete !== 1 ? "s are" : " is"} not yet completed.`}
+              ? "Unable to verify project progress. Please try again or contact support."
+              : `Project progress is ${blockComplete.completionPercent}% and requires ${blockComplete.threshold}% before completion is allowed. ${blockComplete.incomplete} of ${blockComplete.total} installation asset${blockComplete.incomplete !== 1 ? "s are" : " is"} not yet completed.`}
           </Alert>
           <Typography variant="body2" color="text.secondary">
-            A project can only be marked as Completed once <strong>all installation assets</strong> have a "Complete" status. Please finish the remaining assets first.
+            Mark Completed is enabled only when project progress reaches the configured threshold for that project.
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setBlockComplete({ open: false, incomplete: 0, total: 0 })} variant="contained">
+          <Button onClick={() => setBlockComplete({ open: false, incomplete: 0, total: 0, threshold: 100, completionPercent: 0 })} variant="contained">
             OK
           </Button>
         </DialogActions>

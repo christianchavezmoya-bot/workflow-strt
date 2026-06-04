@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { demoProducts } from "../../data/demo";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
+import { projectAssetService } from "../../services/projectAssetService";
 import { projectService } from "../../services/projectService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { updateProjectStatus } from "../../store/projectSlice";
@@ -29,6 +30,7 @@ const ProjectDetail = () => {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [tab, setTab] = useState(0);
 
   const localProject = useMemo(() => items.find((item) => item.id === id), [id, items]);
@@ -88,8 +90,9 @@ const ProjectDetail = () => {
     return list;
   }, [project, user, can]);
 
-  const handleAction = (label: string) => {
+  const handleAction = async (label: string) => {
     if (!project || !project.id) return;
+    setActionError(null);
 
     const dispatchAndSet = (status: ProjectStatus, extra: Partial<Project> = {}) => {
       dispatch(updateProjectStatus({ id: project.id, payload: { status } }));
@@ -114,9 +117,28 @@ const ProjectDetail = () => {
         break;
       case "Start Work":
         dispatchAndSet("In Progress");
+        navigate(
+          `/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`
+        );
         break;
       case "Mark Completed":
-        dispatchAndSet("Completed");
+        try {
+          const assets = await projectAssetService.listByProject(project.id);
+          const total = assets.length;
+          const completed = assets.filter((a) => a.status === "Complete").length;
+          const completionPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
+          const threshold = Math.min(100, Math.max(1, project.minimumCompletionPercent ?? 100));
+          if (completionPercent < threshold) {
+            const incomplete = total - completed;
+            setActionError(
+              `Project progress is ${completionPercent}% and requires ${threshold}% before completion is allowed. ${incomplete} of ${total} installation asset${incomplete !== 1 ? "s are" : " is"} not yet completed.`
+            );
+            return;
+          }
+          dispatchAndSet("Completed");
+        } catch {
+          setActionError("Unable to verify project progress. Please try again or contact support.");
+        }
         break;
     }
   };
@@ -190,6 +212,7 @@ const ProjectDetail = () => {
           <Box className="glass-card" sx={{ padding: 3 }}>
             <Stack spacing={1}>
               <Typography variant="subtitle1">Workflow actions</Typography>
+              {actionError && <Alert severity="warning">{actionError}</Alert>}
               {actions.length ? (
                 <Stack direction="row" spacing={1} flexWrap="wrap">
                   {actions.map((label) => (
@@ -216,6 +239,9 @@ const ProjectDetail = () => {
               <Typography variant="body2">Type: {project.projectType}</Typography>
               <Typography variant="body2">
                 Workflow mode: {mode.replace(/_/g, " ")}
+              </Typography>
+              <Typography variant="body2">
+                Minimum completion to allow Mark Completed: {project.minimumCompletionPercent ?? 100}%
               </Typography>
               <Typography variant="body2">
                 Products:{" "}
@@ -245,7 +271,7 @@ const ProjectDetail = () => {
                 )
               }
             >
-              Open installations
+              Open project assets
             </Button>
           </Stack>
         </Box>

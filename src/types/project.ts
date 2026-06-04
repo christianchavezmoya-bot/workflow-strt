@@ -44,6 +44,7 @@ export interface Project {
   projectManager?: string;
   contractValue?: number;
   probabilityStage?: string;
+  minimumCompletionPercent?: number;
   productIds?: string[];
   productFeatureValues?: Record<string, string>;
   assetCount?: number;

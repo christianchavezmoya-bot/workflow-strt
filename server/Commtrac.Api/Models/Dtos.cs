@@ -390,6 +390,7 @@ public record ProjectDto(
     string? ProjectManager,
     decimal? ContractValue,
     string? ProbabilityStage,
+    int MinimumCompletionPercent,
     List<string>? ProductIds,
     Dictionary<string, string>? ProductFeatureValues,
     string? OfficeId = null,
