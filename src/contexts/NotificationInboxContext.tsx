@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useAuth } from "../hooks/useAuth";
 import { notificationService } from "../services/notificationService";
+import { useAuth } from "../hooks/useAuth";
 import type { AppNotification } from "../types/notification";
 
 type NotificationInboxContextValue = {
@@ -43,16 +43,14 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       const next = await notificationService.list(true, 50);
       setNotifications(next);
 
-      const unreadIds = new Set(next.filter((notification) => !notification.isRead).map((notification) => notification.id));
+      const unreadIds = new Set(next.filter((n) => !n.isRead).map((n) => n.id));
       if (!initializedRef.current) {
         initializedRef.current = true;
         seenUnreadIdsRef.current = unreadIds;
         return;
       }
 
-      const newestUnread = next.find(
-        (notification) => !notification.isRead && !seenUnreadIdsRef.current.has(notification.id)
-      );
+      const newestUnread = next.find((n) => !n.isRead && !seenUnreadIdsRef.current.has(n.id));
       seenUnreadIdsRef.current = unreadIds;
       if (newestUnread) {
         setBannerNotification(newestUnread);
@@ -88,7 +86,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
 
   const value = useMemo<NotificationInboxContextValue>(() => ({
     notifications,
-    unreadNotifications: notifications.filter((notification) => !notification.isRead),
+    unreadNotifications: notifications.filter((n) => !n.isRead),
     bannerNotification,
     loading,
     acknowledge,
