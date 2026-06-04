@@ -1,5 +1,6 @@
 import api from "./api";
 import type { Workflow } from "../types/workflow";
+import offlineStore from "./offlineStore";
 
 // Shape returned by the backend
 export interface WorkflowTemplateDto {
@@ -15,6 +16,8 @@ export interface WorkflowTemplateDto {
 
 const LS_KEY = (productId: string) => `wf_builder_v2_${productId}`;
 const LS_LIST_KEY = (productId: string) => `wf_list_v1_${productId}`;
+const CACHE_PRODUCT_KEY = (productId: string) => `workflow-templates:product:${productId}`;
+const CACHE_ID_KEY = (id: string) => `workflow-templates:id:${id}`;
 
 // ------------------------------------------------------------------
 // Helpers
@@ -56,6 +59,15 @@ function lsWrite(wf: Workflow) {
 // Service
 // ------------------------------------------------------------------
 
+async function cacheWorkflow(workflow: Workflow): Promise<void> {
+  await offlineStore.saveCache(CACHE_ID_KEY(workflow.id), workflow);
+}
+
+async function cacheWorkflows(productId: string, workflows: Workflow[]): Promise<void> {
+  await offlineStore.saveCache(CACHE_PRODUCT_KEY(productId), workflows);
+  await Promise.all(workflows.map((workflow) => cacheWorkflow(workflow)));
+}
+
 export const workflowTemplateService = {
   /**
    * Loads all workflow templates for a product (returns array).
@@ -68,14 +80,16 @@ export const workflowTemplateService = {
       try { localStorage.setItem(LS_LIST_KEY(productId), JSON.stringify(res.data)); } catch {}
       // Keep LS cache for the most-recently-updated template for backward compat
       if (workflows.length > 0) lsWrite(workflows[0]);
+      await cacheWorkflows(productId, workflows);
       return workflows;
     } catch (err: unknown) {
       console.warn("[workflowTemplateService] API unavailable, falling back to localStorage", err);
+      const cached = await offlineStore.getCache<Workflow[]>(CACHE_PRODUCT_KEY(productId));
+      if (cached && cached.length > 0) return cached;
       try {
         const raw = localStorage.getItem(LS_LIST_KEY(productId));
         if (raw) return (JSON.parse(raw) as WorkflowTemplateDto[]).map(toWorkflow);
       } catch {}
-      // Ultimate fallback: the single template cache
       const single = lsRead(productId);
       return single ? [single] : [];
     }
@@ -91,11 +105,13 @@ export const workflowTemplateService = {
       const res = await api.get<WorkflowTemplateDto>(`/workflow-templates/${id}`);
       const wf = toWorkflow(res.data);
       lsWrite(wf);
+      await cacheWorkflow(wf);
       return wf;
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) return null;
-      console.warn("[workflowTemplateService] API unavailable, falling back to localStorage for id", id, err);
+      const cached = await offlineStore.getCache<Workflow>(CACHE_ID_KEY(id));
+      if (cached) return cached;
       try {
         const raw = localStorage.getItem(`wf_builder_v2_${id}`);
         if (raw) return JSON.parse(raw) as Workflow;
@@ -114,11 +130,13 @@ export const workflowTemplateService = {
       if (res.data.length === 0) return null;
       const wf = toWorkflow(res.data[0]);
       lsWrite(wf);
+      await cacheWorkflows(productId, res.data.map(toWorkflow));
       return wf;
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) return null;
-      console.warn("[workflowTemplateService] API unavailable, falling back to localStorage", err);
+      const cached = await offlineStore.getCache<Workflow[]>(CACHE_PRODUCT_KEY(productId));
+      if (cached && cached.length > 0) return cached[0] ?? null;
       return lsRead(productId);
     }
   },

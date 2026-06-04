@@ -343,6 +343,13 @@ export async function entityPutAsset(record: { id: string; productId: string; pr
   } catch { /* ignore */ }
 }
 
+export async function entityGetAsset(id: string): Promise<{ id: string; productId: string; projectId: string; data: unknown } | null> {
+  try {
+    const db = await getDB();
+    return (await db.get("assets", id) as { id: string; productId: string; projectId: string; data: unknown } | undefined) ?? null;
+  } catch { return null; }
+}
+
 export async function entityPutAssets(records: Array<{ id: string; productId: string; projectId: string; data: unknown }>): Promise<void> {
   try {
     const db = await getDB();
