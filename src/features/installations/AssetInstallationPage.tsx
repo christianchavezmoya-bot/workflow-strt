@@ -18,6 +18,7 @@ import {
   HistoryOutlined,
   HourglassEmptyOutlined,
   DragIndicatorOutlined,
+  InfoOutlined,
   PlayArrowOutlined,
   PrintOutlined,
   RefreshOutlined,
@@ -70,7 +71,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
@@ -85,6 +86,7 @@ import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { workflowTypeService } from "../../services/workflowTypeService";
+import offlineStore from "../../services/offlineStore";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
@@ -167,6 +169,10 @@ const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   Complete: "Complete",
   Issue: "Issue",
 };
+
+function projectHasInspection(workflowMode?: string | null) {
+  return workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED";
+}
 
 // ------------------------------------------------------------------
 // Health tracking
@@ -255,6 +261,7 @@ const AssetInstallationPage = () => {
   const projects = useAppSelector((s) => s.projects.items);
   const users = useAppSelector((s) => s.users.items);
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   // Stale-load guard: incremented every time activeProduct changes so that
   // results from a superseded fetch (triggered before the tab restoration
@@ -473,6 +480,11 @@ const AssetInstallationPage = () => {
 
   const activeProduct = products[tab];
   const activeFeatures = useMemo(() => (activeProduct?.features ?? []) as FeatureDef[], [activeProduct]);
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  );
+  const selectedProjectHasInspection = projectHasInspection(selectedProject?.workflowMode);
   const requestedWorkflowType = searchParams.get("workflowType");
   const resolveRequestedWorkflowTypeId = useCallback((types: WorkflowType[]) => {
     if (!requestedWorkflowType) return "";
@@ -1027,6 +1039,9 @@ const AssetInstallationPage = () => {
             }
           }
           if (activeRun) existingRunId = activeRun.id;
+        }
+        if (!existingRunId) {
+          existingRunId = await offlineStore.getPreviousRunRef(asset.id, wfConfig.id) ?? undefined;
         }
 
         setRunnerExistingRunId(existingRunId);
@@ -1683,6 +1698,8 @@ const AssetInstallationPage = () => {
                     label="Attach Photo / Video"
                     qrDocType="issue-photo"
                     qrLinkedTo={issue.id}
+                    linkedToType="issue-report"
+                    linkedToId={issue.id}
                   />
                 </Box>
               )}
@@ -1777,6 +1794,8 @@ const AssetInstallationPage = () => {
                       label="Resolution Evidence"
                       qrDocType="issue-photo"
                       qrLinkedTo={issue.id}
+                      linkedToType="issue-resolution"
+                      linkedToId={issue.id}
                     />
                   </Box>
                   <Button
@@ -2482,12 +2501,26 @@ const AssetInstallationPage = () => {
     <Stack spacing={3}>
       {/* Header */}
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
-        <Box>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Project Assets</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Track assets across projects — start work orders, record status, and monitor progress.
-          </Typography>
-        </Box>
+          {activeProduct?.name && <Chip size="small" color="primary" variant="outlined" label={activeProduct.name} />}
+          <Tooltip
+            title={
+              selectedProject
+                ? selectedProjectHasInspection
+                  ? `Track project assets for ${selectedProject.jobNumber} — manage installation and inspection workflows from one workspace.`
+                  : `Track assets for ${selectedProject.jobNumber} — start work orders, record status, and monitor progress.`
+                : "Track assets across all projects — start work orders, record status, and monitor progress."
+            }
+          >
+            <InfoOutlined sx={{ fontSize: 16, color: "text.secondary", cursor: "pointer" }} />
+          </Tooltip>
+          <Tooltip title="Refresh">
+            <IconButton size="small" onClick={refreshAssets}>
+              <RefreshOutlined sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
+        </Stack>
         <Stack direction="row" spacing={1} alignItems="center">
           {lastRefreshedAt && (() => {
             const secs = Math.floor((Date.now() - lastRefreshedAt.getTime()) / 1000);
@@ -2498,7 +2531,15 @@ const AssetInstallationPage = () => {
               </Typography>
             );
           })()}
-          <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={refreshAssets}>Refresh</Button>
+          {selectedProjectHasInspection && selectedProject && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => navigate(`/projects/${selectedProject.id}`)}
+            >
+              Inspection Assets
+            </Button>
+          )}
           {can.modifyData && (
             <Button
               size="small"
@@ -3301,6 +3342,8 @@ const AssetInstallationPage = () => {
               label="Attach Photo / Video (optional)"
               qrDocType="issue-photo"
               qrLinkedTo={issueDialogAsset?.id ?? ""}
+              linkedToType="issue-report"
+              linkedToId={issueDialogAsset?.id ?? "asset-issue"}
             />
           </Stack>
         </DialogContent>
