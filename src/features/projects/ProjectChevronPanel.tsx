@@ -768,7 +768,7 @@ export default function ProjectChevronPanel({
         <Tab value="contacts" icon={<EmailOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
           label={`Contacts${contacts.length ? ` (${contacts.length})` : ""}`} />
         <Tab value="installations" icon={<BuildOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
-          label={`Installations${installAssets.length ? ` (${installAssets.length})` : ""}`} />
+          label={`Assets${installAssets.length ? ` (${installAssets.length})` : ""}`} />
         <Tab value="goodsMovements" icon={<LocalShippingOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
           label={`Dispatched${despatched.length ? ` (${despatched.length})` : ""}`} />
         <Tab value="inbound" icon={<MoveToInboxOutlined sx={{ fontSize: 15 }} />} iconPosition="start"
