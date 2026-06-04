@@ -584,6 +584,42 @@ public class NotificationSettingsEntity
     public string SmsSender { get; set; } = "";
 }
 
+public class NotificationInboxEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(80)]
+    public string? RecipientUserId { get; set; }
+    [MaxLength(80)]
+    public string? RecipientRole { get; set; }
+    [MaxLength(80)]
+    public string EventType { get; set; } = string.Empty;
+    [MaxLength(20)]
+    public string Severity { get; set; } = "info";
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+    [MaxLength(2000)]
+    public string Message { get; set; } = string.Empty;
+    [MaxLength(80)]
+    public string? ProjectId { get; set; }
+    [MaxLength(80)]
+    public string? AssetId { get; set; }
+    [MaxLength(100)]
+    public string? RunId { get; set; }
+    [MaxLength(120)]
+    public string? EntityType { get; set; }
+    [MaxLength(120)]
+    public string? EntityId { get; set; }
+    [MaxLength(80)]
+    public string? TriggeredByUserId { get; set; }
+    [MaxLength(200)]
+    public string? TriggeredByName { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? ReadAtUtc { get; set; }
+    [MaxLength(80)]
+    public string? ReadByUserId { get; set; }
+}
+
 public class OfficeEntity
 {
     [Key]

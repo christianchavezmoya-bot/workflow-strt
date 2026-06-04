@@ -1,0 +1,112 @@
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useAuth } from "../hooks/useAuth";
+import { notificationService } from "../services/notificationService";
+import type { AppNotification } from "../types/notification";
+
+type NotificationInboxContextValue = {
+  notifications: AppNotification[];
+  unreadNotifications: AppNotification[];
+  bannerNotification: AppNotification | null;
+  loading: boolean;
+  acknowledge: (notificationIds?: string[]) => Promise<void>;
+  dismissBanner: () => void;
+  refresh: () => Promise<void>;
+};
+
+const NotificationInboxContext = createContext<NotificationInboxContextValue | undefined>(undefined);
+
+export function NotificationInboxProvider({ children }: { children: ReactNode }) {
+  const { user, isAuthenticated } = useAuth();
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [bannerNotification, setBannerNotification] = useState<AppNotification | null>(null);
+  const seenUnreadIdsRef = useRef<Set<string>>(new Set());
+  const initializedRef = useRef(false);
+
+  const refresh = async () => {
+    const path = window.location.pathname;
+    const isPublicRoute =
+      path === "/login" ||
+      path === "/reset-password" ||
+      path.startsWith("/sign/") ||
+      path === "/mobile-upload";
+
+    if (!isAuthenticated || !user?.id || isPublicRoute) {
+      setNotifications([]);
+      initializedRef.current = false;
+      seenUnreadIdsRef.current = new Set();
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const next = await notificationService.list(true, 50);
+      setNotifications(next);
+
+      const unreadIds = new Set(next.filter((notification) => !notification.isRead).map((notification) => notification.id));
+      if (!initializedRef.current) {
+        initializedRef.current = true;
+        seenUnreadIdsRef.current = unreadIds;
+        return;
+      }
+
+      const newestUnread = next.find(
+        (notification) => !notification.isRead && !seenUnreadIdsRef.current.has(notification.id)
+      );
+      seenUnreadIdsRef.current = unreadIds;
+      if (newestUnread) {
+        setBannerNotification(newestUnread);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [isAuthenticated, user?.id]);
+
+  useEffect(() => {
+    if (!bannerNotification) return;
+    const timer = window.setTimeout(() => setBannerNotification(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [bannerNotification]);
+
+  const acknowledge = async (notificationIds?: string[]) => {
+    await notificationService.acknowledge(notificationIds);
+    if (!notificationIds?.length) {
+      setBannerNotification(null);
+    } else if (bannerNotification && notificationIds.includes(bannerNotification.id)) {
+      setBannerNotification(null);
+    }
+    await refresh();
+  };
+
+  const value = useMemo<NotificationInboxContextValue>(() => ({
+    notifications,
+    unreadNotifications: notifications.filter((notification) => !notification.isRead),
+    bannerNotification,
+    loading,
+    acknowledge,
+    dismissBanner: () => setBannerNotification(null),
+    refresh,
+  }), [notifications, bannerNotification, loading]);
+
+  return (
+    <NotificationInboxContext.Provider value={value}>
+      {children}
+    </NotificationInboxContext.Provider>
+  );
+}
+
+export function useNotificationInbox() {
+  const context = useContext(NotificationInboxContext);
+  if (!context) {
+    throw new Error("useNotificationInbox must be used within NotificationInboxProvider");
+  }
+  return context;
+}

@@ -38,6 +38,42 @@ public record PublicAppSettingsDto(
     string FrontendBaseUrl
 );
 
+public record NotificationInboxDto(
+    string Id,
+    string EventType,
+    string Severity,
+    string Title,
+    string Message,
+    string? ProjectId,
+    string? AssetId,
+    string? RunId,
+    string? EntityType,
+    string? EntityId,
+    string? TriggeredByUserId,
+    string? TriggeredByName,
+    DateTime CreatedAtUtc,
+    DateTime? ReadAtUtc,
+    bool IsRead
+);
+
+public record CreateNotificationRequest(
+    string EventType,
+    string Severity,
+    string Title,
+    string Message,
+    List<string>? RecipientUserIds,
+    List<string>? RecipientRoles,
+    string? ProjectId,
+    string? AssetId,
+    string? RunId,
+    string? EntityType,
+    string? EntityId,
+    string? TriggeredByUserId,
+    string? TriggeredByName
+);
+
+public record AcknowledgeNotificationsRequest(List<string>? NotificationIds);
+
 public record UserDto(
     string Id,
     string Email,

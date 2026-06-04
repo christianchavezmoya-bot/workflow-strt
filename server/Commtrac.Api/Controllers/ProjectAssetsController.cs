@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,11 +14,13 @@ namespace Commtrac.Api.Controllers;
 public class ProjectAssetsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly NotificationFeedService _feed;
     private static readonly JsonSerializerOptions _json = new() { PropertyNameCaseInsensitive = true };
 
-    public ProjectAssetsController(AppDbContext db)
+    public ProjectAssetsController(AppDbContext db, NotificationFeedService feed)
     {
         _db = db;
+        _feed = feed;
     }
 
     // GET api/project-assets/my-project-ids
@@ -276,6 +279,7 @@ public class ProjectAssetsController : ControllerBase
         };
         _db.ProjectAssets.Add(asset);
         await _db.SaveChangesAsync();
+        await NotifyAssetAssignmentChangeAsync(asset, null, asset.AssignedUserId, "asset-created");
         return CreatedAtAction(nameof(GetById), new { id = asset.Id }, await ToDtoAsync(asset));
     }
 
@@ -307,6 +311,10 @@ public class ProjectAssetsController : ControllerBase
             _db.ProjectAssets.Add(asset);
         }
         await _db.SaveChangesAsync();
+        foreach (var asset in created.Where(a => !string.IsNullOrWhiteSpace(a.AssignedUserId)))
+        {
+            await NotifyAssetAssignmentChangeAsync(asset, null, asset.AssignedUserId, "asset-created");
+        }
         return Ok(await MapAssetsToDtosAsync(created));
     }
 
@@ -317,6 +325,7 @@ public class ProjectAssetsController : ControllerBase
     {
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
         if (asset is null) return NotFound();
+        var previousAssignedUserId = asset.AssignedUserId;
 
         if (!string.IsNullOrWhiteSpace(request.AssetTag))   asset.AssetTag        = request.AssetTag.Trim();
         if (request.AssetName is not null)                  asset.AssetName        = string.IsNullOrWhiteSpace(request.AssetName) ? null : request.AssetName.Trim();
@@ -336,6 +345,10 @@ public class ProjectAssetsController : ControllerBase
         asset.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+        if (!string.Equals(previousAssignedUserId, asset.AssignedUserId, StringComparison.OrdinalIgnoreCase))
+        {
+            await NotifyAssetAssignmentChangeAsync(asset, previousAssignedUserId, asset.AssignedUserId, "asset-assignment-updated");
+        }
         return Ok(await ToDtoAsync(asset));
     }
 
@@ -425,6 +438,116 @@ public class ProjectAssetsController : ControllerBase
     {
         var summaries = await BuildWorkflowSummariesAsync([asset]);
         return ToDto(asset, summaries.GetValueOrDefault(asset.Id));
+    }
+
+    private async Task NotifyAssetAssignmentChangeAsync(
+        ProjectAssetEntity asset,
+        string? previousAssignedUserId,
+        string? nextAssignedUserId,
+        string eventType)
+    {
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+        var actorName = User.Identity?.Name ?? User.FindFirst("email")?.Value;
+        var actorUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var actorRole = User.FindFirst("role")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        var nextUser = !string.IsNullOrWhiteSpace(nextAssignedUserId)
+            ? await _db.Users.FirstOrDefaultAsync(u => u.Id == nextAssignedUserId)
+            : null;
+        var previousUser = !string.IsNullOrWhiteSpace(previousAssignedUserId)
+            ? await _db.Users.FirstOrDefaultAsync(u => u.Id == previousAssignedUserId)
+            : null;
+
+        var managerDriven = string.Equals(actorRole, "Admin", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(actorRole, "Project Manager", StringComparison.OrdinalIgnoreCase);
+        var isSelfAssign = !string.IsNullOrWhiteSpace(nextAssignedUserId)
+            && string.Equals(actorUserId, nextAssignedUserId, StringComparison.OrdinalIgnoreCase);
+        var isTakeover = isSelfAssign && !string.IsNullOrWhiteSpace(previousAssignedUserId)
+            && !string.Equals(previousAssignedUserId, nextAssignedUserId, StringComparison.OrdinalIgnoreCase);
+
+        var roleEventType = eventType;
+        var roleTitle = $"Asset assignment updated: {asset.AssetTag}";
+        var roleMessage = $"Asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"} is now assigned to {(nextUser?.FullName ?? nextAssignedUserId ?? "no installer")}.";
+
+        if (managerDriven && nextUser is not null)
+        {
+            roleEventType = "manager-assigned";
+            roleTitle = $"Asset assigned by PM/Admin: {asset.AssetTag}";
+            roleMessage = $"{actorName ?? "PM/Admin"} assigned asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"} to {nextUser.FullName}.";
+            if (!string.IsNullOrWhiteSpace(previousUser?.FullName))
+            {
+                roleMessage += $" Previous assignee: {previousUser.FullName}.";
+            }
+        }
+        else if (isTakeover && nextUser is not null)
+        {
+            roleEventType = "asset-takeover";
+            roleTitle = $"Asset taken over: {asset.AssetTag}";
+            roleMessage = $"{nextUser.FullName} took over asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"}";
+            if (!string.IsNullOrWhiteSpace(previousUser?.FullName))
+            {
+                roleMessage += $" from {previousUser.FullName}";
+            }
+            roleMessage += ".";
+        }
+        else if (isSelfAssign && nextUser is not null)
+        {
+            roleEventType = "asset-self-assigned";
+            roleTitle = $"Asset self-assigned: {asset.AssetTag}";
+            roleMessage = $"{nextUser.FullName} self-assigned asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"}.";
+        }
+
+        await _feed.NotifyRolesAsync(
+            roleEventType,
+            "info",
+            roleTitle,
+            roleMessage,
+            ["Admin", "Project Manager"],
+            asset.ProjectId,
+            asset.Id,
+            null,
+            "project-asset",
+            asset.Id,
+            actorUserId,
+            actorName
+        );
+
+        if (!string.IsNullOrWhiteSpace(nextAssignedUserId))
+        {
+            await _feed.NotifyUsersAsync(
+                "asset-assigned",
+                "info",
+                $"Asset assigned: {asset.AssetTag}",
+                $"You were assigned asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"}.",
+                [nextAssignedUserId],
+                asset.ProjectId,
+                asset.Id,
+                null,
+                "project-asset",
+                asset.Id,
+                null,
+                actorName
+            );
+        }
+
+        if (!string.IsNullOrWhiteSpace(previousAssignedUserId) &&
+            !string.Equals(previousAssignedUserId, nextAssignedUserId, StringComparison.OrdinalIgnoreCase))
+        {
+            await _feed.NotifyUsersAsync(
+                "asset-unassigned",
+                "warning",
+                $"Asset reassigned: {asset.AssetTag}",
+                $"Asset {asset.AssetTag} on job {project?.JobNumber ?? "unknown"} is no longer assigned to you.",
+                [previousAssignedUserId],
+                asset.ProjectId,
+                asset.Id,
+                null,
+                "project-asset",
+                asset.Id,
+                null,
+                actorName
+            );
+        }
     }
 
     private async Task<Dictionary<string, ProjectAssetWorkflowSummaryDto>> BuildWorkflowSummariesAsync(IEnumerable<ProjectAssetEntity> assets)

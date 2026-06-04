@@ -28,6 +28,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddScoped<IInspectionImportAdapterService, InspectionImportAdapterService>();
 builder.Services.AddScoped<IInspectionImportValidatorService, InspectionImportValidatorService>();
 builder.Services.AddScoped<NotificationSettingsService>();
+builder.Services.AddScoped<NotificationFeedService>();
 builder.Services.AddSingleton<SqliteBackupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());
 builder.Services.AddScoped<RecoveryService>();

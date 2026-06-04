@@ -31,6 +31,7 @@ public class AppDbContext : DbContext
     public DbSet<DocumentConfigEntity> DocumentConfigs => Set<DocumentConfigEntity>();
     public DbSet<QuickbaseSettingsEntity> QuickbaseSettings => Set<QuickbaseSettingsEntity>();
     public DbSet<NotificationSettingsEntity> NotificationSettings => Set<NotificationSettingsEntity>();
+    public DbSet<NotificationInboxEntity> NotificationInbox => Set<NotificationInboxEntity>();
     public DbSet<FieldDefinitionEntity> FieldDefinitions => Set<FieldDefinitionEntity>();
     public DbSet<FieldValueEntity> FieldValues => Set<FieldValueEntity>();
     public DbSet<AdminTabEntity> AdminTabs => Set<AdminTabEntity>();
@@ -179,6 +180,15 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<TableConfigEntity>()
             .Property(t => t.BaseFieldMetaJson)
             .HasDefaultValue("{}");
+
+        modelBuilder.Entity<NotificationInboxEntity>()
+            .HasIndex(n => n.RecipientUserId);
+
+        modelBuilder.Entity<NotificationInboxEntity>()
+            .HasIndex(n => n.RecipientRole);
+
+        modelBuilder.Entity<NotificationInboxEntity>()
+            .HasIndex(n => n.CreatedAtUtc);
 
         modelBuilder.Entity<MobileUploadTokenEntity>()
             .HasIndex(t => t.Status);
