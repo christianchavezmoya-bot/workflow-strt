@@ -12,13 +12,17 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
   FormControlLabel,
   IconButton,
+  InputLabel,
   ListItemText,
   Menu,
   MenuItem,
   Paper,
+  Select,
   Stack,
+  TextField,
   Table,
   TableBody,
   TableCell,
@@ -304,6 +308,9 @@ const ProjectList = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const canDeleteProjects = can.modifyData;
+  const isPmUser = user?.role === "Project Manager";
+  const [projectViewFilter, setProjectViewFilter] = useState<"all" | "mine">("all");
+  const [projectSearch, setProjectSearch] = useState("");
 
   // Block-complete dialog — shown when assets are not all done
   const [blockComplete, setBlockComplete] = useState<{ open: boolean; incomplete: number; total: number; threshold: number; completionPercent: number }>({
@@ -322,6 +329,10 @@ const ProjectList = () => {
   }, [activeOffice]);
 
   useEffect(() => {
+    setPage(0);
+  }, [projectViewFilter, projectSearch]);
+
+  useEffect(() => {
     dispatch(
       fetchProjects({
         // Filter by country on the server so pagination doesn't hide matching projects.
@@ -329,9 +340,10 @@ const ProjectList = () => {
         page: page + 1,
         pageSize: rowsPerPage,
         includeDeleted: showArchived,
+        search: projectSearch.trim() || undefined,
       })
     );
-  }, [dispatch, activeOffice, page, rowsPerPage, showArchived]);
+  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, projectSearch]);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -399,9 +411,21 @@ const ProjectList = () => {
       }
     }
 
+    if (!isMyWork && role === "Project Manager" && projectViewFilter === "mine") {
+      scopeFiltered = scopeFiltered.filter((p) => p.projectManager === user?.fullName);
+    }
+
+    const searchNeedle = projectSearch.trim().toLowerCase();
+    if (searchNeedle) {
+      scopeFiltered = scopeFiltered.filter((project) =>
+        [project.jobNumber, project.customerName, project.siteName, project.projectManager]
+          .some((value) => value?.toLowerCase().includes(searchNeedle))
+      );
+    }
+
     const filtered = applyAutoFilter(scopeFiltered, autoFilters, projectAccessors);
     return applyAutoSort(filtered, autoSort, projectAccessors);
-  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName]);
+  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName, projectSearch, projectViewFilter]);
 
   const numberedProjects = useMemo(
     () => filteredProjects.map((project, index) => ({ ...project, seq: index + 1 })),
@@ -606,6 +630,44 @@ const ProjectList = () => {
           )}
         </Stack>
       </Stack>
+
+      <Paper className="glass-card" sx={{ p: 1.5 }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ md: "center" }}>
+          {isPmUser && (
+            <FormControl size="small" sx={{ minWidth: { xs: "100%", md: 180 } }}>
+              <InputLabel id="project-view-filter-label">Project View</InputLabel>
+              <Select
+                labelId="project-view-filter-label"
+                label="Project View"
+                value={projectViewFilter}
+                onChange={(event) => setProjectViewFilter(event.target.value as "all" | "mine")}
+              >
+                <MenuItem value="all">All projects</MenuItem>
+                <MenuItem value="mine">My projects</MenuItem>
+              </Select>
+            </FormControl>
+          )}
+          <TextField
+            size="small"
+            label="Project number"
+            placeholder="Search job, customer, site, or PM"
+            value={projectSearch}
+            onChange={(event) => setProjectSearch(event.target.value)}
+            sx={{ minWidth: { xs: "100%", md: 320 }, flex: 1 }}
+          />
+          <Button
+            variant="text"
+            onClick={() => {
+              setProjectSearch("");
+              setProjectViewFilter("all");
+              setAutoFilters({});
+              setAutoSort({ key: "", dir: "asc" });
+            }}
+          >
+            Clear
+          </Button>
+        </Stack>
+      </Paper>
 
       {error && (
         <Typography variant="body2" color="warning.main">
