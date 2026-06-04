@@ -64,6 +64,7 @@ import { featureDependencyService } from "../../services/featureDependencyServic
 import type { FeatureDependency } from "../../types/featureDependency";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
+import { Capacitor } from "@capacitor/core";
 import type { WorkflowType } from "../../types/workflowType";
 import WorkOrderRunner from "./WorkOrderRunner";
 
@@ -231,6 +232,61 @@ interface WorkflowBuilderProps {
   onNewConfig?: () => void;
 }
 
+// ─── MobileStepStrip ───────────────────────────────────────────────────────
+
+interface MobileStepStripProps {
+  stepsSorted: WorkflowStep[];
+  selectedStepId: string | null;
+  onSelect: (id: string) => void;
+  onAdd: () => void;
+}
+
+function MobileStepStrip({ stepsSorted, selectedStepId, onSelect, onAdd }: MobileStepStripProps) {
+  return (
+    <Paper className="glass-card" sx={{ p: 1.5 }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ overflowX: "auto", pb: 0.25 }}>
+        {stepsSorted.map((step) => {
+          const isSelected = step.id === selectedStepId;
+          return (
+            <Box
+              key={step.id}
+              onClick={() => onSelect(step.id)}
+              sx={{
+                width: 38, height: 38, borderRadius: "50%",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                bgcolor: isSelected ? "primary.main" : "action.selected",
+                color: isSelected ? "primary.contrastText" : "text.primary",
+                cursor: "pointer", fontWeight: 700, fontSize: 13, flexShrink: 0,
+                border: "2px solid",
+                borderColor: isSelected ? "primary.main" : "divider",
+                transition: "background-color 0.15s",
+                userSelect: "none",
+              }}
+            >
+              {step.order}
+            </Box>
+          );
+        })}
+        <Tooltip title="Add step">
+          <IconButton
+            size="small"
+            onClick={onAdd}
+            sx={{
+              width: 38, height: 38,
+              border: "2px dashed", borderColor: "primary.main",
+              color: "primary.main", borderRadius: "50%", flexShrink: 0,
+            }}
+          >
+            <AddOutlined sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+    </Paper>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+
 const WorkflowBuilder = ({ productId, productName, productFeatures = [], initialConfigId, configName, onConfigSaved, onConfigPublished, onNewConfig }: WorkflowBuilderProps) => {
   const [workflow, setWorkflow] = useState<Workflow>(() => createDefaultWorkflow(productId, productName));
   const [runnerOpen, setRunnerOpen] = useState(false);
@@ -351,6 +407,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
     [workflow.steps]
   );
+  const isMobile = Capacitor.isNativePlatform();
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(() => stepsSorted[0]?.id || null);
 
@@ -1101,6 +1158,16 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             onMove={moveStep}
           />
         </Grid>
+        {isMobile && (
+          <Grid item xs={12}>
+            <MobileStepStrip
+              stepsSorted={stepsSorted}
+              selectedStepId={selectedStepId}
+              onSelect={setSelectedStepId}
+              onAdd={addStep}
+            />
+          </Grid>
+        )}
 
         {/* Middle: step editor */}
         <Grid item xs={12} md={5}>
