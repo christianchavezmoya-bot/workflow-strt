@@ -38,6 +38,7 @@ import {
   Divider,
   FormControlLabel,
   IconButton,
+  Paper,
   Stack,
   Table,
   TableBody,
@@ -173,6 +174,35 @@ function buildPrefillValues(run: AssetWorkflowRun): Record<string, Record<string
   return prefill;
 }
 
+function countStoredMediaItems(value: string): number {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter(Boolean).length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function formatStepResultValue(input?: StepInput, captureLabel?: string, inputId?: string, value?: string): string {
+  if (!value) return "No";
+  if (inputId === "pass") return value === "true" ? "Pass" : "Fail";
+  if (input?.type === "checkbox") return value === "true" ? "Yes" : "No";
+  if (input?.type === "photo" || input?.type === "video") {
+    return countStoredMediaItems(value) > 0 ? "Yes" : "No";
+  }
+  if (input?.type === "signature") return "Yes";
+  if (input?.type === "component") {
+    try {
+      const parsed = JSON.parse(value) as Record<string, string>;
+      return Object.values(parsed ?? {}).some(Boolean) ? "Yes" : "No";
+    } catch {
+      return "Yes";
+    }
+  }
+  if (captureLabel) return value.trim() ? "Yes" : "No";
+  return value;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function WorkflowRunHistoryDialog({
@@ -204,6 +234,7 @@ export default function WorkflowRunHistoryDialog({
   const [autoContact, setAutoContact] = useState<ProjectContact | null>(null);
   const [tokenEditMode, setTokenEditMode] = useState(false);
   const [tokenSaveAsNew, setTokenSaveAsNew] = useState(false);
+  const [expandedStepResultIds, setExpandedStepResultIds] = useState<Record<string, boolean>>({});
 
   const DEFAULT_MESSAGE = "We are pleased to inform you that the installation work has been completed. Please use the link below to review the completed workflow documentation and provide your sign-off.";
 
@@ -304,6 +335,7 @@ export default function WorkflowRunHistoryDialog({
     if (!open) return;
     setLoading(true);
     setExpandedRunId(null);
+    setExpandedStepResultIds({});
     assetWorkflowRunService
       .listByAsset(asset.id)
       .then((all) => {
@@ -320,6 +352,7 @@ export default function WorkflowRunHistoryDialog({
       .finally(() => setLoading(false));
   }, [open, asset.id, workflowConfigId]);
 
+  const latestRunNumber = runs.reduce((max, run) => Math.max(max, run.runNumber ?? 0), 0);
   const latestLockedRun = runs.find((r) => r.isLocked) ?? null;
   const latestInProgressRun = runs.find((r) => !r.isLocked && r.status === "InProgress") ?? null;
 
@@ -366,7 +399,13 @@ export default function WorkflowRunHistoryDialog({
   return (
     <>
       {/* ── Main dialog ── */}
-      <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{ sx: { maxHeight: "90vh" } }}
+      >
         <DialogTitle sx={{ pb: 1 }}>
           <Stack direction="row" alignItems="flex-start" spacing={1.5}>
             <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -421,7 +460,7 @@ export default function WorkflowRunHistoryDialog({
           </Stack>
         </DialogTitle>
 
-        <DialogContent sx={{ px: 0, pb: 2 }}>
+        <DialogContent dividers sx={{ px: 0, pb: 2, overflowX: "hidden" }}>
           {loading ? (
             <Stack alignItems="center" sx={{ p: 4 }}>
               <CircularProgress size={28} />
@@ -443,6 +482,10 @@ export default function WorkflowRunHistoryDialog({
                   ? buildStepMap(run.workflowSnapshotJson)
                   : {};
                 const missingMedia = countMissingWorkflowItems(run);
+                const isSuperseded = (run.runNumber ?? 0) < latestRunNumber;
+                const isPendingSignature =
+                  run.signatureStatus === "PendingInstaller" || run.signatureStatus === "PendingCustomer";
+                const signatureActionBlocked = run.isLocked && isPendingSignature && isSuperseded;
 
                 return (
                   <Box key={run.id}>
@@ -492,6 +535,15 @@ export default function WorkflowRunHistoryDialog({
                             <Typography variant="caption" color="text.secondary">
                               · Completed by {run.completedByName}
                             </Typography>
+                          )}
+                          {signatureActionBlocked && (
+                            <Chip
+                              size="small"
+                              label={`Superseded by Run #${latestRunNumber}`}
+                              color="default"
+                              variant="outlined"
+                              sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.6 } }}
+                            />
                           )}
                         </Stack>
                         <Stack direction="row" alignItems="center" spacing={0.75} mt={0.25}>
@@ -589,34 +641,40 @@ export default function WorkflowRunHistoryDialog({
                           <SignatureBadge status={run.signatureStatus ?? "None"} />
                         )}
                         {run.isLocked && run.signatureStatus === "PendingInstaller" && (
-                          <Tooltip title="Sign as installer">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="primary"
-                              startIcon={<DrawOutlined />}
-                              onClick={(e) => { e.stopPropagation(); setSignDialogRun(run); }}
-                              sx={{ py: 0, minHeight: 26 }}
-                            >
-                              Sign
-                            </Button>
+                          <Tooltip title={signatureActionBlocked ? `Run superseded by Run #${latestRunNumber}` : "Sign as installer"}>
+                            <span>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="primary"
+                                startIcon={<DrawOutlined />}
+                                disabled={signatureActionBlocked}
+                                onClick={(e) => { e.stopPropagation(); setSignDialogRun(run); }}
+                                sx={{ py: 0, minHeight: 26 }}
+                              >
+                                Sign
+                              </Button>
+                            </span>
                           </Tooltip>
                         )}
                         {run.isLocked && run.signatureStatus === "PendingCustomer" && (
-                          <Tooltip title="Generate secure link for customer signature">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="info"
-                              startIcon={<LinkOutlined />}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void openTokenDialog(run);
-                              }}
-                              sx={{ py: 0, minHeight: 26 }}
-                            >
-                              Send to customer
-                            </Button>
+                          <Tooltip title={signatureActionBlocked ? `Run superseded by Run #${latestRunNumber}` : "Generate secure link for customer signature"}>
+                            <span>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="info"
+                                startIcon={<LinkOutlined />}
+                                disabled={signatureActionBlocked}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void openTokenDialog(run);
+                                }}
+                                sx={{ py: 0, minHeight: 26 }}
+                              >
+                                Send to customer
+                              </Button>
+                            </span>
                           </Tooltip>
                         )}
                         {!run.isLocked && run.status === "InProgress" && onContinue && (
@@ -650,6 +708,11 @@ export default function WorkflowRunHistoryDialog({
                     {/* ── Expanded details ── */}
                     <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                       <Box sx={{ px: 4, pb: 2, bgcolor: "rgba(255,255,255,0.02)" }}>
+                        {signatureActionBlocked && (
+                          <Alert severity="info" sx={{ mt: 1.25, mb: 1.5 }}>
+                            This run has been superseded by Run #{latestRunNumber}. Signature actions are disabled for this older run.
+                          </Alert>
+                        )}
                         {/* Download report CTA inside expanded section */}
                         {run.isLocked && (
                           <Stack direction="row" spacing={1} sx={{ mt: 1.25, mb: 1.5 }} flexWrap="wrap" useFlexGap>
@@ -734,184 +797,206 @@ export default function WorkflowRunHistoryDialog({
                         {/* Step results */}
                         {stepResults.length > 0 ? (
                           <>
-                            <Typography
-                              variant="caption"
-                              fontWeight={700}
-                              color="text.secondary"
-                              sx={{
-                                textTransform: "uppercase",
-                                letterSpacing: 0.5,
-                                display: "block",
-                                mb: 1,
-                                mt: run.isLocked ? 0 : 1,
-                              }}
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() =>
+                                setExpandedStepResultIds((prev) => ({
+                                  ...prev,
+                                  [`run:${run.id}`]: !prev[`run:${run.id}`],
+                                }))
+                              }
+                              endIcon={
+                                expandedStepResultIds[`run:${run.id}`]
+                                  ? <ExpandLessOutlined fontSize="small" />
+                                  : <ExpandMoreOutlined fontSize="small" />
+                              }
+                              sx={{ alignSelf: "flex-start", mt: run.isLocked ? 0 : 1, mb: 1 }}
                             >
-                              Step Results
-                            </Typography>
-                            <Table size="small" sx={{ mb: 1.5 }}>
-                              <TableHead>
-                                <TableRow sx={{ bgcolor: "rgba(255,255,255,0.04)" }}>
-                                  <TableCell
-                                    sx={{ fontSize: 11, py: 0.5, fontWeight: 700, width: "35%" }}
-                                  >
-                                    Step
-                                  </TableCell>
-                                  <TableCell sx={{ fontSize: 11, py: 0.5, fontWeight: 700 }}>
-                                    Captured Values
-                                  </TableCell>
-                                  <TableCell
-                                    sx={{
-                                      fontSize: 11,
-                                      py: 0.5,
-                                      fontWeight: 700,
-                                      width: 80,
-                                    }}
-                                  >
-                                    Time
-                                  </TableCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
+                              {expandedStepResultIds[`run:${run.id}`]
+                                ? "Hide step results"
+                                : `Show step results (${stepResults.length})`}
+                            </Button>
+                            <Collapse in={Boolean(expandedStepResultIds[`run:${run.id}`])} timeout="auto" unmountOnExit>
+                              <Stack spacing={1.25} sx={{ mb: 1.5 }}>
                                 {stepResults.map((sr) => {
                                   const step: WorkflowStep | undefined = stepMap[sr.stepId];
                                   const stepTitle =
-                                    step?.title ?? (sr.values as Record<string,string>)?.["label"] ?? sr.stepId.slice(0, 8) + "…";
+                                    step?.title ?? (sr.values as Record<string, string>)?.label ?? `${sr.stepId.slice(0, 8)}...`;
                                   const inputDefs: StepInput[] = step?.inputs ?? [];
                                   const missingInputs = getMissingWorkflowItems(step, sr.values);
-                                  const entries = Object.entries(sr.values ?? {}).filter(
-                                    ([k, v]) => v && k !== "label"
-                                  );
+                                  const entries = Object.entries(sr.values ?? {}).filter(([k, v]) => v && k !== "label");
+                                  const stepKey = `run:${run.id}:step:${sr.stepId}`;
+                                  const isStepExpanded = Boolean(expandedStepResultIds[stepKey]);
+
                                   return (
-                                    <TableRow key={sr.stepId}>
-                                      <TableCell
-                                        sx={{ fontSize: 12, py: 0.75, fontWeight: 500 }}
-                                      >
-                                        <Stack spacing={0.5}>
-                                          <Typography variant="body2" sx={{ fontSize: 12, fontWeight: 500 }}>
-                                            {stepTitle}
-                                          </Typography>
-                                          {missingInputs.length > 0 && (
-                                            <Chip
-                                              size="small"
-                                              color="warning"
-                                              variant="outlined"
-                                              icon={<WarningAmberOutlined sx={{ fontSize: "0.75rem !important" }} />}
-                                              label={missingInputs.length === 1 ? "Missing data" : `${missingInputs.length} missing items`}
-                                              sx={{ width: "fit-content", height: 18, fontSize: 10 }}
-                                            />
-                                          )}
+                                    <Paper key={sr.stepId} variant="outlined" sx={{ p: 1.25, overflow: "hidden" }}>
+                                      <Stack spacing={0.75}>
+                                        <Stack
+                                          direction="row"
+                                          spacing={1}
+                                          alignItems="flex-start"
+                                          justifyContent="space-between"
+                                          useFlexGap
+                                          flexWrap="wrap"
+                                        >
+                                          <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
+                                            <Typography variant="body2" sx={{ fontSize: 12, fontWeight: 600 }}>
+                                              {stepTitle}
+                                            </Typography>
+                                            <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                                              <Chip
+                                                size="small"
+                                                variant="outlined"
+                                                label={`${entries.length} item${entries.length === 1 ? "" : "s"} captured`}
+                                                sx={{ height: 18, fontSize: 10 }}
+                                              />
+                                              {missingInputs.length > 0 && (
+                                                <Chip
+                                                  size="small"
+                                                  color="warning"
+                                                  variant="outlined"
+                                                  icon={<WarningAmberOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                                                  label={missingInputs.length === 1 ? "1 missing item" : `${missingInputs.length} missing items`}
+                                                  sx={{ height: 18, fontSize: 10 }}
+                                                />
+                                              )}
+                                              <Chip
+                                                size="small"
+                                                variant="outlined"
+                                                label={
+                                                  sr.completedAt
+                                                    ? new Date(sr.completedAt).toLocaleTimeString(undefined, {
+                                                        hour: "2-digit",
+                                                        minute: "2-digit",
+                                                      })
+                                                    : "No time"
+                                                }
+                                                sx={{ height: 18, fontSize: 10 }}
+                                              />
+                                            </Stack>
+                                          </Stack>
+                                          <Button
+                                            size="small"
+                                            variant="text"
+                                            onClick={() =>
+                                              setExpandedStepResultIds((prev) => ({
+                                                ...prev,
+                                                [stepKey]: !prev[stepKey],
+                                              }))
+                                            }
+                                            endIcon={
+                                              isStepExpanded
+                                                ? <ExpandLessOutlined fontSize="small" />
+                                                : <ExpandMoreOutlined fontSize="small" />
+                                            }
+                                            sx={{ flexShrink: 0 }}
+                                          >
+                                            {isStepExpanded ? "Hide details" : "Show details"}
+                                          </Button>
                                         </Stack>
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: 12, py: 0.75 }}>
-                                        {entries.length > 0 || missingInputs.length > 0 ? (
-                                          <Stack spacing={0.25}>
+
+                                        <Collapse in={isStepExpanded} timeout="auto" unmountOnExit>
+                                          <Stack spacing={0.75} sx={{ pt: 0.25 }}>
                                             {missingInputs.map((input) => (
-                                              <Stack key={`missing-${input.id}`} direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                                <Typography variant="caption" color="warning.main" sx={{ minWidth: 80, flexShrink: 0 }}>
+                                              <Stack
+                                                key={`missing-${input.id}`}
+                                                direction="row"
+                                                spacing={1}
+                                                alignItems="center"
+                                                flexWrap="wrap"
+                                                useFlexGap
+                                              >
+                                                <Typography variant="caption" color="warning.main">
                                                   {input.label}:
                                                 </Typography>
                                                 <Chip
                                                   size="small"
                                                   color="warning"
-                                                  icon={input.kind === "video"
-                                                    ? <VideocamOutlined sx={{ fontSize: "0.75rem !important" }} />
-                                                    : <PhotoCameraOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                                                  icon={
+                                                    input.kind === "video" ? (
+                                                      <VideocamOutlined sx={{ fontSize: "0.75rem !important" }} />
+                                                    ) : (
+                                                      <PhotoCameraOutlined sx={{ fontSize: "0.75rem !important" }} />
+                                                    )
+                                                  }
                                                   label={
-                                                    input.kind === "video" ? "Video missing"
-                                                      : input.kind === "photo" ? "Photo missing"
-                                                      : input.kind === "capture" ? "Capture missing"
-                                                      : "Required field missing"
+                                                    input.kind === "video"
+                                                      ? "Video missing"
+                                                      : input.kind === "photo"
+                                                        ? "Photo missing"
+                                                        : input.kind === "capture"
+                                                          ? "Capture missing"
+                                                          : "Required field missing"
                                                   }
                                                   sx={{ height: 18, fontSize: 10 }}
                                                 />
                                               </Stack>
                                             ))}
-                                            {entries.map(([inputId, val]) => {
-                                              const inputDef = inputDefs.find(
-                                                (inp) => inp.id === inputId
-                                              );
-                                              const captureDef = !inputDef
-                                                ? (step?.captureFields ?? []).find((f) => f.id === inputId)
-                                                : undefined;
-                                              const IMPORT_LABELS: Record<string, string> = { value: "Measured Value", unit: "Unit", pass: "Result", notes: "Notes" };
-                                              const label = inputDef?.label ?? captureDef?.label ?? IMPORT_LABELS[inputId] ?? inputId;
-                                              const display = inputId === "pass" ? (val === "true" ? "✓ Pass" : "✗ Fail") : val;
+                                            {entries.length > 0 ? (
+                                              <Stack spacing={0.5}>
+                                                {entries.map(([inputId, val]) => {
+                                                  const inputDef = inputDefs.find((inp) => inp.id === inputId);
+                                                  const captureDef = !inputDef
+                                                    ? (step?.captureFields ?? []).find((f) => f.id === inputId)
+                                                    : undefined;
+                                                  const importLabels: Record<string, string> = {
+                                                    value: "Measured Value",
+                                                    unit: "Unit",
+                                                    pass: "Result",
+                                                    notes: "Notes",
+                                                  };
+                                                  const label =
+                                                    inputDef?.label ??
+                                                    captureDef?.label ??
+                                                    importLabels[inputId] ??
+                                                    inputId;
+                                                  const displayValue = formatStepResultValue(
+                                                    inputDef,
+                                                    captureDef?.label,
+                                                    inputId,
+                                                    val,
+                                                  );
 
-                                              // Component inputs: decode JSON sub-fields
-                                              if (inputDef?.type === "component" && inputDef.subFields?.length && val) {
-                                                try {
-                                                  const sub: Record<string, string> = JSON.parse(val);
-                                                  const parts = inputDef.subFields
-                                                    .filter((sf) => sub[sf.id])
-                                                    .map((sf) => ({ name: sf.name, value: sub[sf.id] }));
-                                                  if (parts.length > 0) {
-                                                    return (
-                                                      <Box key={inputId}>
-                                                        <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                                                          {label}:
-                                                        </Typography>
-                                                        <Stack spacing={0} sx={{ pl: 1.5 }}>
-                                                          {parts.map((p) => (
-                                                            <Box key={p.name}>
-                                                              <Typography component="span" variant="caption" color="text.secondary">↳ {p.name}: </Typography>
-                                                              <Typography component="span" variant="caption">{p.value}</Typography>
-                                                            </Box>
-                                                          ))}
-                                                        </Stack>
-                                                      </Box>
-                                                    );
-                                                  }
-                                                } catch { /* fall through */ }
-                                              }
-
-                                              return (
-                                                <Box key={inputId}>
-                                                  <Typography
-                                                    component="span"
-                                                    variant="caption"
-                                                    color="text.secondary"
-                                                  >
-                                                    {label}:{" "}
-                                                  </Typography>
-                                                  <Typography
-                                                    component="span"
-                                                    variant="caption"
-                                                  >
-                                                    {display}
-                                                  </Typography>
-                                                </Box>
-                                              );
-                                            })}
+                                                  return (
+                                                    <Stack
+                                                      key={inputId}
+                                                      direction="row"
+                                                      spacing={1}
+                                                      justifyContent="space-between"
+                                                      alignItems="flex-start"
+                                                      sx={{ gap: 1, minWidth: 0 }}
+                                                    >
+                                                      <Typography
+                                                        variant="caption"
+                                                        color="text.secondary"
+                                                        sx={{ minWidth: 0, flex: 1 }}
+                                                      >
+                                                        {label}
+                                                      </Typography>
+                                                      <Typography
+                                                        variant="caption"
+                                                        sx={{ flexShrink: 0, fontWeight: 600, textAlign: "right" }}
+                                                      >
+                                                        {displayValue}
+                                                      </Typography>
+                                                    </Stack>
+                                                  );
+                                                })}
+                                              </Stack>
+                                            ) : missingInputs.length === 0 ? (
+                                              <Typography variant="caption" color="text.disabled">
+                                                No captured values.
+                                              </Typography>
+                                            ) : null}
                                           </Stack>
-                                        ) : (
-                                          <Typography
-                                            variant="caption"
-                                            color="text.disabled"
-                                          >
-                                            —
-                                          </Typography>
-                                        )}
-                                      </TableCell>
-                                      <TableCell
-                                        sx={{
-                                          fontSize: 11,
-                                          py: 0.75,
-                                          color: "text.secondary",
-                                          whiteSpace: "nowrap",
-                                        }}
-                                      >
-                                        {sr.completedAt
-                                          ? new Date(sr.completedAt).toLocaleTimeString(
-                                              undefined,
-                                              { hour: "2-digit", minute: "2-digit" }
-                                            )
-                                          : "—"}
-                                      </TableCell>
-                                    </TableRow>
+                                        </Collapse>
+                                      </Stack>
+                                    </Paper>
                                   );
                                 })}
-                              </TableBody>
-                            </Table>
+                              </Stack>
+                            </Collapse>
                           </>
                         ) : (
                           <Typography
