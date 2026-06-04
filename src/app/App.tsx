@@ -2,7 +2,7 @@
 import { Box, CircularProgress, Typography } from "@mui/material";
 import AppRoutes from "./routes";
 import { brandSettingsService } from "../services/brandSettingsService";
-import { getLaunchAuthMode, BiometricCheckResult } from "../services/biometricAuth";
+import { getLaunchAuthModeAsync, BiometricCheckResult } from "../services/biometricAuth";
 import { initSecureStorage, secureGet, secureRemove } from "../services/secureStorage";
 import BiometricLockScreen from "../components/BiometricLockScreen";
 import Login from "../features/auth/Login";
@@ -14,18 +14,16 @@ const App = () => {
   const [justAuthenticated, setJustAuthenticated] = useState(false);
 
   // Function to re-check auth state (called after login success)
-  const refreshAuthState = useCallback(() => {
-    // Check if user just authenticated (skip biometric screen)
+  const refreshAuthState = useCallback(async () => {
     const justAuth = secureGet("just_authenticated");
     if (justAuth === "true") {
       console.log("[App] User just authenticated, skipping biometric screen");
       setJustAuthenticated(true);
-      // Clear the flag so it doesn't persist
       secureRemove("just_authenticated");
       return;
     }
-    
-    const mode = getLaunchAuthMode();
+
+    const mode = await getLaunchAuthModeAsync();
     console.log("[App] Refreshed auth mode:", mode);
     setAuthState(mode);
   }, []);
@@ -70,13 +68,12 @@ const App = () => {
           lastLogin: lastLogin ? new Date(parseInt(lastLogin)).toISOString() : null 
         });
         
-        const mode = getLaunchAuthMode();
+        const mode = await getLaunchAuthModeAsync();
         console.log("[App] Auth mode:", mode);
         setAuthState(mode);
       } catch (error) {
         console.error("[App] Auth init error:", error);
-        // Still try to check auth mode - cache might have data
-        const mode = getLaunchAuthMode();
+        const mode = await getLaunchAuthModeAsync();
         console.log("[App] Fallback auth mode:", mode);
         setAuthState(mode);
       } finally {
