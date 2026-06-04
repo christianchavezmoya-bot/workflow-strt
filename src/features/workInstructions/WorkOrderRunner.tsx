@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessTimeOutlined,
   AttachMoneyOutlined,
@@ -63,8 +63,9 @@ import QRUploadButton from "../../components/QRUploadButton";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
+import { getMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// Types
 
 interface StepCapture {
   stepId: string;
@@ -89,7 +90,7 @@ interface WorkOrderRunnerProps {
   productName: string;
   /** Links this run to a specific project asset. Required for real run tracking. */
   projectAssetId?: string;
-  /** The WorkflowConfig id — used to call startRun() if no runId. */
+  /** The WorkflowConfig id â€” used to call startRun() if no runId. */
   workflowConfigId?: string;
   /** Provide to continue an existing run (skips startRun call). */
   existingRunId?: string;
@@ -97,27 +98,31 @@ interface WorkOrderRunnerProps {
   prefillValues?: Record<string, Record<string, string>>;
   /** Called after run is locked. */
   onComplete?: (capturedFeatureValues: Record<string, string>) => void;
-  /** Called when user pauses — receives progress, step titles, and any feature values captured so far. */
+  /** Called when user pauses â€” receives progress, step titles, and any feature values captured so far. */
   onPause?: (progress: { done: number; total: number; completedTitles: string[]; partialFeatureValues: Record<string, string> }) => void;
   /** Full name of the currently logged-in user, stored on each issue. */
   currentUserName?: string;
-  /** ID of the currently logged-in user — used for missing-media flag ownership. */
+  /** ID of the currently logged-in user â€” used for missing-media flag ownership. */
   currentUserId?: string;
   /** Asset tag shown in dashboard flags. */
   assetTag?: string;
   /** Job number shown in dashboard flags. */
   jobNumber?: string;
-  /** Product feature definitions — used to look up feature names for repeatFeatureId steps. */
+  /** Product feature definitions â€” used to look up feature names for repeatFeatureId steps. */
   productFeatures?: ProductFeatureDefinition[];
-  /** Feature selections from the workflow config — provides expected qty per feature. */
+  /** Feature selections from the workflow config â€” provides expected qty per feature. */
   featureSelections?: FeatureSelection[];
   /** Project team members for user-select inputs. Falls back to allUsers when empty. */
   teamMembers?: { id: string; fullName: string }[];
-  /** All active users — fallback when no team is assigned to the project. */
+  /** All active users â€” fallback when no team is assigned to the project. */
   allUsers?: { id: string; fullName: string }[];
 }
 
 type Stage = "setup" | "running" | "summary" | "bom" | "consumables" | "installer-sign" | "customer-sign";
+type ValidationDialogMode = "blocking" | "warning";
+type PendingStepAction =
+  | { type: "next" }
+  | { type: "decision"; targetId: string | null };
 
 interface UnlistedConsumable {
   id: string;
@@ -188,7 +193,10 @@ export default function WorkOrderRunner({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [requiredWarning, setRequiredWarning] = useState(false);
+  const [validationDialogOpen, setValidationDialogOpen] = useState(false);
+  const [validationDialogMode, setValidationDialogMode] = useState<ValidationDialogMode>("blocking");
+  const [validationDialogItems, setValidationDialogItems] = useState<MissingWorkflowItem[]>([]);
+  const [pendingStepAction, setPendingStepAction] = useState<PendingStepAction | null>(null);
 
   // Issue tracking
   const [issues, setIssues] = useState<RunIssue[]>([]);
@@ -210,11 +218,11 @@ export default function WorkOrderRunner({
   // Right-click context menu anchor for the issues chip
   const [issueMenuAnchor, setIssueMenuAnchor] = useState<Element | null>(null);
 
-  // Repeatable steps — how many iterations per step, current iteration, picker input value
+  // Repeatable steps â€” how many iterations per step, current iteration, picker input value
   const [repeatCounts, setRepeatCounts] = useState<Record<string, number>>({});
   const [repeatIter, setRepeatIter] = useState<Record<string, number>>({});
   const [repeatPickerCount, setRepeatPickerCount] = useState(1);
-  // Feature-linked repeatable steps — qty modifications made by installer
+  // Feature-linked repeatable steps â€” qty modifications made by installer
   interface QtyModification { stepId: string; featureId: string; featureName: string; expectedQty: number; actualQty: number; reason: string; modifiedAt: string; }
   const [qtyModifications, setQtyModifications] = useState<Record<string, QtyModification>>({});
   const [modifyQtyOpen, setModifyQtyOpen] = useState(false);
@@ -226,7 +234,7 @@ export default function WorkOrderRunner({
   const [bomActual, setBomActual] = useState<BomActualItem[]>([]);
   const [unlistedConsumables, setUnlistedConsumables] = useState<UnlistedConsumable[]>([]);
 
-  // Consumable features from the product library — drives the end-of-run survey
+  // Consumable features from the product library â€” drives the end-of-run survey
   const [libConsumableFeatures, setLibConsumableFeatures] = useState<Feature[]>([]);
   useEffect(() => {
     if (!open || !productId) return;
@@ -244,7 +252,7 @@ export default function WorkOrderRunner({
   const [startError, setStartError] = useState<string | null>(null);
   const [blockingError, setBlockingError] = useState<string | null>(null);
 
-  // ── Installer sign-off ────────────────────────────────────────────────────
+  // â”€â”€ Installer sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [instPadData,   setInstPadData]   = useState<string | null>(null);
   const [instName,      setInstName]      = useState("");
   const [instOutcome,   setInstOutcome]   = useState<"Completed" | "Conditional">("Completed");
@@ -254,7 +262,7 @@ export default function WorkOrderRunner({
   // stable ref so canvas onChange doesn't re-add listeners on every render
   const instPadOnChange = useRef((d: string | null) => setInstPadData(d));
 
-  // ── Customer sign-off ─────────────────────────────────────────────────────
+  // â”€â”€ Customer sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   type CustSignMode = "options" | "sign-now" | "send-link";
   const [custMode,      setCustMode]      = useState<CustSignMode>("options");
   const [custPadData,   setCustPadData]   = useState<string | null>(null);
@@ -285,7 +293,7 @@ export default function WorkOrderRunner({
 
   const isRealRun = Boolean(projectAssetId && workflowConfigId);
 
-  // Stable callback ref — avoids stale closures inside the hook
+  // Stable callback ref â€” avoids stale closures inside the hook
   const syncRunTimeStateRef = useCallback((run: AssetWorkflowRun) => {
     setActiveRun(run);
     syncRunTimeState(run);
@@ -299,6 +307,41 @@ export default function WorkOrderRunner({
   const currentStep = stepsSorted.find((s) => s.id === currentStepId) ?? null;
   const currentIndex = stepsSorted.findIndex((s) => s.id === currentStepId);
   const isLastStep = currentStep?.nextStepId === null && !currentStep?.decisionsEnabled;
+
+  function getFeatureLinkContext(step: WorkflowStep) {
+    for (const inp of step.inputs ?? []) {
+      if (inp.featureId) {
+        const sel = (featureSelections ?? []).find((s) => s.featureId === inp.featureId && s.activeCount > 0);
+        const feat = (productFeatures ?? []).find((f) => f.id === inp.featureId);
+        if (sel && feat) return { feature: feat, sel };
+      }
+    }
+    for (const cf of step.captureFields ?? []) {
+      if (cf.featureId) {
+        const sel = (featureSelections ?? []).find((s) => s.featureId === cf.featureId && s.activeCount > 0);
+        const feat = (productFeatures ?? []).find((f) => f.id === cf.featureId);
+        if (sel && feat) return { feature: feat, sel };
+      }
+    }
+    return null;
+  }
+
+  function getEffectiveStepId(step: WorkflowStep): string {
+    const linkedFeatureContext = getFeatureLinkContext(step);
+    const isFeatureRepeatable = !!linkedFeatureContext?.feature;
+    const isLegacyRepeatable = !isFeatureRepeatable && !!step.repeatable;
+    const repeatCount = (isFeatureRepeatable || isLegacyRepeatable) ? (repeatCounts[step.id] ?? 0) : 0;
+    const repeatIdx = (isFeatureRepeatable || isLegacyRepeatable) ? (repeatIter[step.id] ?? 0) : 0;
+    return (isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0
+      ? `${step.id}__iter__${repeatIdx}`
+      : step.id;
+  }
+
+  function getStepMissingItems(step: WorkflowStep | null): MissingWorkflowItem[] {
+    if (!step) return [];
+    const effectiveStepId = getEffectiveStepId(step);
+    return getMissingWorkflowItems(step, values[effectiveStepId]);
+  }
 
   const liveElapsedSeconds = useMemo(() => {
     if (!trackingStartedAt || !trackingCategory) return 0;
@@ -315,7 +358,7 @@ export default function WorkOrderRunner({
     if (!open) reset();
   }, [open, existingRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Tick every second while the dialog is open — drives productiveSecondsLive
+  // Tick every second while the dialog is open â€” drives productiveSecondsLive
   // and downtimeSecondsLive in real time. Running unconditionally (not gated
   // on stage or trackingCategory) means the clock never stops due to a stage
   // transition and always restarts cleanly when tracking switches categories.
@@ -334,7 +377,9 @@ export default function WorkOrderRunner({
     setSaved(false);
     setSaveError(null);
     setBlockingError(null);
-    setRequiredWarning(false);
+    setValidationDialogOpen(false);
+    setValidationDialogItems([]);
+    setPendingStepAction(null);
     setFlagOpen(false);
     setFlagDescription("");
     setFlagSeverity("medium");
@@ -390,11 +435,11 @@ export default function WorkOrderRunner({
     try {
       const updated = await queueOrSend(action, reason);
       if (updated) {
-        // Online — sync from authoritative server response
+        // Online â€” sync from authoritative server response
         setActiveRun(updated);
         syncRunTimeState(updated);
       } else {
-        // Queued (offline) — apply optimistic UI state immediately
+        // Queued (offline) â€” apply optimistic UI state immediately
         const nowIso = new Date().toISOString();
         if (action === "StartDowntime") {
           setProductiveSecondsBase(productiveSecondsLive);
@@ -487,13 +532,13 @@ export default function WorkOrderRunner({
   async function handlePause() {
     if (activeRunId && isRealRun) {
       try {
-        // Call directly (not via the offline queue) — pause is a fire-once
+        // Call directly (not via the offline queue) â€” pause is a fire-once
         // action tied to closing the dialog; queuing it causes a stale "sync
         // pending" chip when the user reopens the run.
         const updated = await assetWorkflowRunService.trackTimeEntry(activeRunId, "StopAll");
         if (updated) syncRunTimeState(updated);
       } catch {
-        // non-fatal — idle state will be restored on next open
+        // non-fatal â€” idle state will be restored on next open
       }
     }
     await autosaveProgress(undefined, undefined, "Paused");
@@ -529,7 +574,7 @@ export default function WorkOrderRunner({
       setActiveRun(run);
       syncRunTimeState(run);
 
-      // If the run has no open time entry (was paused → idle), automatically
+      // If the run has no open time entry (was paused â†’ idle), automatically
       // resume productive so the clock starts the moment the tech continues.
       const timeEntries = parseRunTimeEntries(run.timeTrackingJson ?? "[]");
       const hasOpenEntry = timeEntries.some((e) => !e.endedAtUtc);
@@ -537,7 +582,7 @@ export default function WorkOrderRunner({
         try {
           const resumed = await assetWorkflowRunService.trackTimeEntry(run.id, "ResumeProductive", "Continued");
           if (resumed) syncRunTimeState(resumed);
-        } catch { /* non-fatal — tracking will still work manually */ }
+        } catch { /* non-fatal â€” tracking will still work manually */ }
       }
 
       // Restore step values and issues from saved progress
@@ -603,28 +648,49 @@ export default function WorkOrderRunner({
     return values[stepId]?.[inputId] ?? "";
   }
 
-  function checkRequired(step: WorkflowStep): boolean {
-    for (const inp of step.inputs ?? []) {
-      if (inp.required && !getInputValue(step.id, inp.id).trim()) return false;
-    }
-    return true;
-  }
-
   function goBack() {
     if (!history.length) return;
     const prev = history[history.length - 1];
     setHistory((h) => h.slice(0, -1));
     setCurrentStepId(prev);
-    setRequiredWarning(false);
   }
 
-  function handleNext() {
-    if (!currentStep) return;
-    setRequiredWarning(!checkRequired(currentStep));
-    setFlagOpen(false);
-    setFlagSubmitted(false);
+  function splitMissingItems(items: MissingWorkflowItem[]) {
+    return {
+      blocking: items.filter((item) => item.kind === "input"),
+      warning: items.filter((item) => item.kind === "capture" || item.kind === "photo" || item.kind === "video"),
+    };
+  }
 
-    // Repeatable step: advance iteration before leaving the step
+  function openValidationDialog(mode: ValidationDialogMode, items: MissingWorkflowItem[], pendingAction: PendingStepAction | null) {
+    setValidationDialogMode(mode);
+    setValidationDialogItems(items);
+    setPendingStepAction(pendingAction);
+    setValidationDialogOpen(true);
+  }
+
+  function closeValidationDialog() {
+    setValidationDialogOpen(false);
+    setValidationDialogItems([]);
+    setPendingStepAction(null);
+  }
+
+  function getMissingItemMessage(item: MissingWorkflowItem): string {
+    switch (item.kind) {
+      case "video":
+        return "Video missing";
+      case "photo":
+        return "Photo missing";
+      case "capture":
+        return "Required capture missing";
+      default:
+        return "Required field missing";
+    }
+  }
+
+  function proceedToNextStep() {
+    if (!currentStep) return;
+
     const stepHasFeatureLink = (currentStep.inputs ?? []).some((i) => i.featureId && (featureSelections ?? []).some((s) => s.featureId === i.featureId && s.activeCount > 0))
       || (currentStep.captureFields ?? []).some((cf) => cf.featureId && (featureSelections ?? []).some((s) => s.featureId === cf.featureId && s.activeCount > 0));
     if ((stepHasFeatureLink || currentStep.repeatable) && repeatCounts[currentStep.id]) {
@@ -644,17 +710,13 @@ export default function WorkOrderRunner({
       const nextHistory = [...history, currentStep.id];
       setHistory(nextHistory);
       setCurrentStepId(nextStepId);
-      // Reset iteration for the next step if it's repeatable
       setRepeatIter((prev) => ({ ...prev, [nextStepId]: 0 }));
       autosaveProgress(nextStepId, nextHistory);
     }
   }
 
-  function handleDecision(targetId: string | null) {
+  function proceedWithDecision(targetId: string | null) {
     if (!currentStep) return;
-    setRequiredWarning(!checkRequired(currentStep));
-    setFlagOpen(false);
-    setFlagSubmitted(false);
     if (targetId) {
       const nextHistory = [...history, currentStep.id];
       setHistory(nextHistory);
@@ -664,6 +726,51 @@ export default function WorkOrderRunner({
       autosaveProgress();
       setStage("summary");
     }
+  }
+
+  function confirmValidationWarning() {
+    const action = pendingStepAction;
+    closeValidationDialog();
+    if (!action) return;
+    if (action.type === "next") {
+      proceedToNextStep();
+      return;
+    }
+    proceedWithDecision(action.targetId);
+  }
+
+  function handleNext() {
+    if (!currentStep) return;
+    setFlagOpen(false);
+    setFlagSubmitted(false);
+    const missingItems = getStepMissingItems(currentStep);
+    const { blocking, warning } = splitMissingItems(missingItems);
+    if (blocking.length > 0) {
+      openValidationDialog("blocking", blocking, null);
+      return;
+    }
+    if (warning.length > 0) {
+      openValidationDialog("warning", warning, { type: "next" });
+      return;
+    }
+    proceedToNextStep();
+  }
+
+  function handleDecision(targetId: string | null) {
+    if (!currentStep) return;
+    setFlagOpen(false);
+    setFlagSubmitted(false);
+    const missingItems = getStepMissingItems(currentStep);
+    const { blocking, warning } = splitMissingItems(missingItems);
+    if (blocking.length > 0) {
+      openValidationDialog("blocking", blocking, null);
+      return;
+    }
+    if (warning.length > 0) {
+      openValidationDialog("warning", warning, { type: "decision", targetId });
+      return;
+    }
+    proceedWithDecision(targetId);
   }
 
   function buildStepsData(navStepId?: string, navHistory?: string[]): StepCapture[] {
@@ -686,7 +793,7 @@ export default function WorkOrderRunner({
       }
     }
 
-    // Navigation marker — always saved so exact step + history can be restored on resume.
+    // Navigation marker â€” always saved so exact step + history can be restored on resume.
     // When navigating forward we pass the NEXT step explicitly (state updates are async,
     // so reading currentStepId/history from closure would give the previous step).
     const navEntry: StepCapture = {
@@ -723,7 +830,7 @@ export default function WorkOrderRunner({
         status,
       );
     } catch {
-      // silent — not critical
+      // silent â€” not critical
     }
   }
 
@@ -751,12 +858,12 @@ export default function WorkOrderRunner({
       const bomJson = bomToSave.length > 0 ? JSON.stringify(bomToSave) : undefined;
 
       if (activeRunId) {
-        // Flush any queued time-tracking actions before locking — run rejects changes once locked.
+        // Flush any queued time-tracking actions before locking â€” run rejects changes once locked.
         await flushTimeQueue();
         const lockedRun = await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName, bomJson);
         setActiveRun(lockedRun);
 
-        // Check if any photo/video steps exist but have no captures — flag for PM + installer
+        // Check if any photo/video steps exist but have no captures â€” flag for PM + installer
         function countCaptured(stepId: string, inputId: string): number {
           try {
             const arr = JSON.parse(values[stepId]?.[inputId] ?? "[]");
@@ -794,7 +901,7 @@ export default function WorkOrderRunner({
             totalCaptured,
           };
           const existing = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
-          // Deduplicate by runId — remove any prior flag for this run then push new one
+          // Deduplicate by runId â€” remove any prior flag for this run then push new one
           const deduped = existing.filter((e: { runId: string }) => e.runId !== activeRunId);
           localStorage.setItem("pm_missing_media_flags", JSON.stringify([...deduped, flag]));
           window.dispatchEvent(new Event("missing-media-flags-changed"));
@@ -814,7 +921,7 @@ export default function WorkOrderRunner({
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number; data?: { message?: string; blockingCount?: number } } };
       if (axiosErr?.response?.status === 422) {
-        const msg = axiosErr.response?.data?.message ?? "Cannot complete — unresolved blocking issues must be resolved first.";
+        const msg = axiosErr.response?.data?.message ?? "Cannot complete - unresolved blocking issues must be resolved first.";
         setBlockingError(msg);
       } else {
         setSaveError("Save failed. Check your connection and try again.");
@@ -897,7 +1004,7 @@ export default function WorkOrderRunner({
     if (!activeRunId) { handleClose(); return; }
     try {
       await assetWorkflowRunService.waiveCustomerSignature(activeRunId);
-    } catch { /* non-critical — close anyway */ }
+    } catch { /* non-critical â€” close anyway */ }
     handleClose();
   }
 
@@ -940,7 +1047,7 @@ export default function WorkOrderRunner({
     if (inp.type === "note") {
       return (
         <TextField size="small" fullWidth multiline rows={3} error={isReq}
-          placeholder="Enter notes…" value={val} onChange={(e) => onChange(e.target.value)} />
+          placeholder="Enter notes..." value={val} onChange={(e) => onChange(e.target.value)} />
       );
     }
     if (inp.type === "number") {
@@ -1169,7 +1276,7 @@ export default function WorkOrderRunner({
               label="Job reference (optional)"
               size="small"
               fullWidth
-              placeholder="e.g. serial number, job ID, batch…"
+              placeholder="e.g. serial number, job ID, batch..."
               value={jobReference}
               onChange={(e) => setJobReference(e.target.value)}
               InputLabelProps={{ shrink: true }}
@@ -1185,7 +1292,7 @@ export default function WorkOrderRunner({
             disabled={stepsSorted.length === 0 || startingRun}
             startIcon={startingRun ? <CircularProgress size={14} /> : undefined}
           >
-            {startingRun ? "Loading…" : resumingRun ? "Continue →" : "Start →"}
+            {startingRun ? "Loading..." : resumingRun ? "Continue ->" : "Start ->"}
           </Button>
         </DialogActions>
       </>
@@ -1204,26 +1311,8 @@ export default function WorkOrderRunner({
     const isLast = !hasDecisions && !currentStep.nextStepId;
     const blockingCount = issues.filter((i) => i.isBlocking && !i.resolved).length;
 
-    // Feature-linked repeatable step — derived from inputs or capture fields with featureId
-    const derivedFeatureLink = (() => {
-      // Check inputs first
-      for (const inp of currentStep.inputs ?? []) {
-        if (inp.featureId) {
-          const sel = (featureSelections ?? []).find((s) => s.featureId === inp.featureId && s.activeCount > 0);
-          const feat = (productFeatures ?? []).find((f) => f.id === inp.featureId);
-          if (sel && feat) return { feature: feat, sel };
-        }
-      }
-      // Then capture fields
-      for (const cf of currentStep.captureFields ?? []) {
-        if (cf.featureId) {
-          const sel = (featureSelections ?? []).find((s) => s.featureId === cf.featureId && s.activeCount > 0);
-          const feat = (productFeatures ?? []).find((f) => f.id === cf.featureId);
-          if (sel && feat) return { feature: feat, sel };
-        }
-      }
-      return null;
-    })();
+    // Feature-linked repeatable step â€” derived from inputs or capture fields with featureId
+    const derivedFeatureLink = getFeatureLinkContext(currentStep);
     const linkedFeature = derivedFeatureLink?.feature ?? null;
     const linkedFeatureSel = derivedFeatureLink?.sel ?? null;
     const expectedQty = linkedFeatureSel?.activeCount ?? 1;
@@ -1274,7 +1363,7 @@ export default function WorkOrderRunner({
                 PaperProps={{ sx: { minWidth: 280, maxWidth: 360 } }}
               >
                 <Typography variant="caption" fontWeight={700} sx={{ px: 2, py: 0.75, display: "block", textTransform: "uppercase", letterSpacing: 0.8, color: "text.secondary" }}>
-                  Issues — click to jump to step
+                  Issues - click to jump to step
                 </Typography>
                 {issues.map((issue) => (
                   <MenuItem
@@ -1292,7 +1381,7 @@ export default function WorkOrderRunner({
                         {issue.stepTitle ?? "No step"}
                       </Typography>
                       <Typography variant="caption" noWrap sx={{ textDecoration: issue.resolved ? "line-through" : "none" }}>
-                        {issue.description.length > 60 ? issue.description.slice(0, 60) + "…" : issue.description}
+                        {issue.description.length > 60 ? issue.description.slice(0, 60) + "..." : issue.description}
                       </Typography>
                     </Box>
                   </MenuItem>
@@ -1303,7 +1392,7 @@ export default function WorkOrderRunner({
           <LinearProgress variant="determinate" value={progress} sx={{ mt: 1, borderRadius: 1 }} />
 {isRealRun && activeRunId && (
             <Stack spacing={1} sx={{ mt: 1.25 }}>
-              {/* Time tracking bar — colour-coded, always visible */}
+              {/* Time tracking bar â€” colour-coded, always visible */}
               <Box sx={{
                 display: "flex", alignItems: "center", gap: 1.5,
                 px: 1.5, py: 0.75, borderRadius: 1.5,
@@ -1344,7 +1433,7 @@ export default function WorkOrderRunner({
                     color="info"
                     variant="outlined"
                     icon={<SyncOutlined sx={{ fontSize: "0.85rem !important", animation: "spin 1s linear infinite", "@keyframes spin": { from: { transform: "rotate(0deg)" }, to: { transform: "rotate(360deg)" } } }} />}
-                    label="Syncing…"
+                    label="Syncing..."
                   />
                 ) : !isOnline ? (
                   <Chip
@@ -1352,7 +1441,7 @@ export default function WorkOrderRunner({
                     color="warning"
                     variant="filled"
                     icon={<CloudOffOutlined sx={{ fontSize: "0.85rem !important" }} />}
-                    label={pendingCount > 0 ? `Offline · ${pendingCount} queued` : "Offline"}
+                    label={pendingCount > 0 ? `Offline - ${pendingCount} queued` : "Offline"}
                     sx={{ fontWeight: 600 }}
                   />
                 ) : pendingCount > 0 ? (
@@ -1365,7 +1454,7 @@ export default function WorkOrderRunner({
                   />
                 ) : null}
               </Stack>
-              {/* Controls row — single toggle button */}
+              {/* Controls row â€” single toggle button */}
               <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap>
                 <Button
                   size="small"
@@ -1376,7 +1465,7 @@ export default function WorkOrderRunner({
                 >
                   Edit Times
                 </Button>
-                {/* Single toggle: downtime ↔ productive */}
+                {/* Single toggle: downtime â†” productive */}
                 {trackingCategory === "downtime" ? (
                   <Button
                     size="small"
@@ -1420,7 +1509,7 @@ export default function WorkOrderRunner({
                       size="small"
                       fullWidth
                       label="Reason"
-                      placeholder="Waiting for parts / access / permit…"
+                      placeholder="Waiting for parts / access / permit..."
                       InputLabelProps={{ shrink: true }}
                       value={downtimeReason}
                       onChange={(e) => setDowntimeReason(e.target.value)}
@@ -1461,7 +1550,7 @@ export default function WorkOrderRunner({
         <DialogContent>
           <Stack spacing={2.5} sx={{ mt: 1 }}>
 
-            {/* Feature-linked repeatable step — qty confirmation panel */}
+            {/* Feature-linked repeatable step â€” qty confirmation panel */}
             {needsConfirmation && (
               <Paper variant="outlined" sx={{ p: 2, borderColor: "primary.light" }}>
                 <Stack spacing={1.5}>
@@ -1516,7 +1605,7 @@ export default function WorkOrderRunner({
               </Paper>
             )}
 
-            {/* Legacy repeatable step — count picker */}
+            {/* Legacy repeatable step â€” count picker */}
             {needsCountPicker && (
               <Paper variant="outlined" sx={{ p: 2, borderColor: "primary.light" }}>
                 <Stack spacing={1.5}>
@@ -1551,7 +1640,7 @@ export default function WorkOrderRunner({
               </Paper>
             )}
 
-            {/* Repeatable step — iteration header */}
+            {/* Repeatable step â€” iteration header */}
             {(isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0 && (
               <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "primary.50", borderColor: "primary.light" }}>
                 <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
@@ -1572,7 +1661,7 @@ export default function WorkOrderRunner({
               </Paper>
             )}
 
-            {/* Step content — hidden until count is confirmed for repeatable steps */}
+            {/* Step content â€” hidden until count is confirmed for repeatable steps */}
             {!needsConfirmation && !needsCountPicker && (
               <>
                 <Box>
@@ -1605,7 +1694,7 @@ export default function WorkOrderRunner({
                           {m.type === "image" ? (
                             <img src={m.url} alt={m.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                           ) : (
-                            <Typography variant="caption" color="text.secondary">🎥</Typography>
+                            <Typography variant="caption" color="text.secondary">ðŸŽ¥</Typography>
                           )}
                         </Box>
                       </Tooltip>
@@ -1632,7 +1721,7 @@ export default function WorkOrderRunner({
                   </Stack>
                 )}
 
-                {/* Capture fields — structured data for the as-built document */}
+                {/* Capture fields â€” structured data for the as-built document */}
                 {hasCaptureFields && (
                   <Stack spacing={1}>
                     <Stack direction="row" alignItems="center" spacing={0.75}>
@@ -1664,11 +1753,6 @@ export default function WorkOrderRunner({
                   </Stack>
                 )}
 
-                {requiredWarning && (
-                  <Alert severity="warning" sx={{ fontSize: 12 }}>
-                    Some required fields are empty — you can still proceed and save.
-                  </Alert>
-                )}
               </>
             )}
           </Stack>
@@ -1681,8 +1765,8 @@ export default function WorkOrderRunner({
                 Flag issue on this step
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                <strong>High</strong> severity = <strong>blocking</strong> — workflow cannot be completed until resolved.{" "}
-                <strong>Medium</strong> or <strong>Low</strong> = observation — noted but does not block completion.
+                <strong>High</strong> severity = <strong>blocking</strong> - workflow cannot be completed until resolved.{" "}
+                <strong>Medium</strong> or <strong>Low</strong> = observation - noted but does not block completion.
               </Typography>
             </Stack>
           </DialogTitle>
@@ -1697,9 +1781,9 @@ export default function WorkOrderRunner({
                     value={flagSeverity}
                     onChange={(e) => setFlagSeverity(e.target.value as "low" | "medium" | "high")}
                   >
-                    <MenuItem value="low">Low — observation, non-blocking</MenuItem>
-                    <MenuItem value="medium">Medium — attention needed, non-blocking</MenuItem>
-                    <MenuItem value="high">High — blocks completion</MenuItem>
+                    <MenuItem value="low">Low - observation, non-blocking</MenuItem>
+                    <MenuItem value="medium">Medium - attention needed, non-blocking</MenuItem>
+                    <MenuItem value="high">High - blocks completion</MenuItem>
                   </Select>
                 </FormControl>
                 <FormControlLabel
@@ -1741,9 +1825,9 @@ export default function WorkOrderRunner({
                             <InputLabel shrink>Severity</InputLabel>
                             <Select label="Severity" value={editIssueSeverity}
                               onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
-                              <MenuItem value="low">Low — observation only</MenuItem>
-                              <MenuItem value="medium">Medium — attention needed</MenuItem>
-                              <MenuItem value="high">High — blocks completion</MenuItem>
+                              <MenuItem value="low">Low - observation only</MenuItem>
+                              <MenuItem value="medium">Medium - attention needed</MenuItem>
+                              <MenuItem value="high">High - blocks completion</MenuItem>
                             </Select>
                           </FormControl>
                           <Stack direction="row" spacing={0.75}>
@@ -1776,7 +1860,7 @@ export default function WorkOrderRunner({
                           </Stack>
                           <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
                           <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
-                            {issue.createdBy ? `${issue.createdBy} · ` : ""}{new Date(issue.reportedAt).toLocaleString()}
+                            {issue.createdBy ? `${issue.createdBy} - ` : ""}{new Date(issue.reportedAt).toLocaleString()}
                           </Typography>
                         </Stack>
                       )}
@@ -1790,7 +1874,7 @@ export default function WorkOrderRunner({
                 multiline
                 rows={2}
                 label={flagIssueType === "scope-deviation" ? "Describe the scope variation" : "Describe/Add issue here"}
-                placeholder={flagIssueType === "scope-deviation" ? "e.g. Additional conduit run required due to obstructed original route…" : "Describe what you observed…"}
+                placeholder={flagIssueType === "scope-deviation" ? "e.g. Additional conduit run required due to obstructed original route..." : "Describe what you observed..."}
                 InputLabelProps={{ shrink: true }}
                 value={flagDescription}
                 onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
@@ -1809,7 +1893,7 @@ export default function WorkOrderRunner({
                   <TextField
                     size="small"
                     label="Cost impact (optional)"
-                    placeholder="e.g. £250 materials"
+                    placeholder="e.g. GBP 250 materials"
                     InputLabelProps={{ shrink: true }}
                     value={flagCostImpact}
                     onChange={(e) => setFlagCostImpact(e.target.value)}
@@ -1827,7 +1911,7 @@ export default function WorkOrderRunner({
           <DialogActions sx={{ justifyContent: "space-between", gap: 1, px: 3, py: 1.5 }}>
             {flagSubmitted ? (
               <Typography variant="caption" color="success.main" sx={{ fontWeight: 600, mr: "auto" }}>
-                ✓ Issue added — type another or close
+                Issue added - type another or close
               </Typography>
             ) : (
               <Box />
@@ -1849,10 +1933,42 @@ export default function WorkOrderRunner({
           </DialogActions>
         </Dialog>
 
+        <Dialog open={validationDialogOpen} onClose={closeValidationDialog} maxWidth="xs" fullWidth>
+          <DialogTitle>
+            {validationDialogMode === "blocking" ? "Required fields missing" : "Capture missing"}
+          </DialogTitle>
+          <DialogContent>
+            <Stack spacing={1.25} sx={{ mt: 0.5 }}>
+              <Alert severity={validationDialogMode === "blocking" ? "error" : "warning"} sx={{ fontSize: 12 }}>
+                {validationDialogMode === "blocking"
+                  ? "You cannot proceed until all required fields on this step are completed."
+                  : "Some captures are still missing on this step. You can still proceed if you want."}
+              </Alert>
+              <Stack spacing={0.5}>
+                {validationDialogItems.map((item) => (
+                  <Typography key={item.id} variant="body2">
+                    {item.label}: {getMissingItemMessage(item)}
+                  </Typography>
+                ))}
+              </Stack>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={closeValidationDialog}>
+              {validationDialogMode === "blocking" ? "Back to step" : "Stay on step"}
+            </Button>
+            {validationDialogMode === "warning" && (
+              <Button variant="contained" onClick={confirmValidationWarning}>
+                Proceed anyway
+              </Button>
+            )}
+          </DialogActions>
+        </Dialog>
+
         <DialogActions sx={{ flexWrap: "wrap", gap: 0.75, justifyContent: "space-between" }}>
           <Stack direction="row" spacing={0.75} alignItems="center">
             <Button onClick={goBack} disabled={history.length === 0} variant="outlined" size="small">
-              ← Back
+              {"<- Back"}
             </Button>
             {!flagOpen && (() => {
               const stepIssueCount = issues.filter((i) => i.stepId === currentStep?.id).length;
@@ -1872,7 +1988,7 @@ export default function WorkOrderRunner({
             })()}
           </Stack>
           <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
-            <Tooltip title="Save progress and close — resume later from where you left off">
+            <Tooltip title="Save progress and close - resume later from where you left off">
               <Button
                 size="small"
                 variant="outlined"
@@ -1907,8 +2023,8 @@ export default function WorkOrderRunner({
                 onClick={handleNext}
               >
                 {(isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0 && repeatIdx + 1 < repeatCount
-                  ? `Next ${unitLabel} →`
-                  : isLast ? "Complete ✓" : "Next step →"}
+                  ? `Next ${unitLabel} ->`
+                  : isLast ? "Complete" : "Next step ->"}
               </Button>
             ))}
           </Stack>
@@ -1954,7 +2070,7 @@ export default function WorkOrderRunner({
               </Stack>
             )}
             <Typography variant="body2" color="text.secondary">
-              {stepsSorted.length} step{stepsSorted.length === 1 ? "" : "s"} completed · {totalCaptured} value{totalCaptured === 1 ? "" : "s"} captured
+              {stepsSorted.length} step{stepsSorted.length === 1 ? "" : "s"} completed - {totalCaptured} value{totalCaptured === 1 ? "" : "s"} captured
             </Typography>
             {isRealRun && (
               <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
@@ -1978,12 +2094,12 @@ export default function WorkOrderRunner({
                   Issues flagged ({issues.length})
                   {hasBlockingIssues && (
                     <Typography component="span" variant="caption" color="error.main" sx={{ ml: 1 }}>
-                      · {blockingIssues.length} blocking
+                      - {blockingIssues.length} blocking
                     </Typography>
                   )}
                   {issues.filter((i) => i.issueType === "scope-deviation").length > 0 && (
                     <Typography component="span" variant="caption" color="warning.main" sx={{ ml: 1 }}>
-                      · {issues.filter((i) => i.issueType === "scope-deviation").length} scope variation{issues.filter((i) => i.issueType === "scope-deviation").length !== 1 ? "s" : ""}
+                      - {issues.filter((i) => i.issueType === "scope-deviation").length} scope variation{issues.filter((i) => i.issueType === "scope-deviation").length !== 1 ? "s" : ""}
                     </Typography>
                   )}
                 </Typography>
@@ -1997,9 +2113,9 @@ export default function WorkOrderRunner({
                           <InputLabel shrink>Severity</InputLabel>
                           <Select label="Severity" value={editIssueSeverity}
                             onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
-                            <MenuItem value="low">Low — observation only</MenuItem>
-                            <MenuItem value="medium">Medium — attention needed</MenuItem>
-                            <MenuItem value="high">High — blocks completion</MenuItem>
+                            <MenuItem value="low">Low - observation only</MenuItem>
+                            <MenuItem value="medium">Medium - attention needed</MenuItem>
+                            <MenuItem value="high">High - blocks completion</MenuItem>
                           </Select>
                         </FormControl>
                         <Stack direction="row" spacing={0.75}>
@@ -2023,7 +2139,7 @@ export default function WorkOrderRunner({
                             )}
                             {issue.issueType === "scope-deviation" && (issue.extraHours != null || issue.costImpact) && (
                               <Chip size="small" variant="outlined" color="warning"
-                                label={[issue.extraHours != null ? `+${issue.extraHours}h` : null, issue.costImpact].filter(Boolean).join(" · ")}
+                                label={[issue.extraHours != null ? `+${issue.extraHours}h` : null, issue.costImpact].filter(Boolean).join(" - ")}
                                 sx={{ flexShrink: 0 }} />
                             )}
                             {issue.stepTitle && <Chip size="small" label={issue.stepTitle} variant="outlined" sx={{ flexShrink: 0 }} />}
@@ -2040,7 +2156,7 @@ export default function WorkOrderRunner({
                         </Stack>
                         <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
                         <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
-                          {issue.createdBy ? `${issue.createdBy} · ` : ""}{new Date(issue.reportedAt).toLocaleString()}
+                          {issue.createdBy ? `${issue.createdBy} - ` : ""}{new Date(issue.reportedAt).toLocaleString()}
                         </Typography>
                       </Stack>
                     )}
@@ -2064,7 +2180,7 @@ export default function WorkOrderRunner({
                         <Typography variant="caption" fontWeight={600}>{mod.featureName}</Typography>
                       </Stack>
                       <Typography variant="caption">
-                        Expected: <strong>{mod.expectedQty}</strong> → Installed: <strong>{mod.actualQty}</strong>
+                        Expected: <strong>{mod.expectedQty}</strong>{" -> "}Installed: <strong>{mod.actualQty}</strong>
                       </Typography>
                       <Typography variant="caption" color="text.secondary">Reason: {mod.reason}</Typography>
                     </Stack>
@@ -2092,7 +2208,7 @@ export default function WorkOrderRunner({
                   return (
                     <Paper key={sc.stepId} variant="outlined" sx={{ p: 1.5 }}>
                       <Typography variant="caption" fontWeight={600} display="block" mb={0.75}>
-                        {String(step.order).padStart(2, "0")} · {step.title || "(Untitled step)"}
+                        {String(step.order).padStart(2, "0")} - {step.title || "(Untitled step)"}
                       </Typography>
                       <Stack spacing={0.5}>
                         {(step.inputs ?? []).map((inp) => {
@@ -2101,7 +2217,7 @@ export default function WorkOrderRunner({
                           return (
                             <Stack key={inp.id} direction="row" spacing={1}>
                               <Typography variant="caption" color="text.secondary" sx={{ minWidth: 120 }}>{inp.label}:</Typography>
-                              <Typography variant="caption">{val === "true" ? "✓ Yes" : val}</Typography>
+                              <Typography variant="caption">{val === "true" ? "Yes" : val}</Typography>
                             </Stack>
                           );
                         })}
@@ -2200,7 +2316,7 @@ export default function WorkOrderRunner({
                 disabled={saving || (hasBlockingIssues && Boolean(activeRunId))}
                 startIcon={saving ? <CircularProgress size={14} /> : undefined}
               >
-                {saving ? "Saving…" : activeRunId ? "Lock run ✓" : "Done (preview)"}
+                {saving ? "Saving..." : activeRunId ? "Lock run" : "Done (preview)"}
               </Button>
             </Stack>
           )}
@@ -2209,7 +2325,7 @@ export default function WorkOrderRunner({
     );
   }
 
-  // ── Stage: BOM confirmation (inventory items only — serial number capture) ──
+  // â”€â”€ Stage: BOM confirmation (inventory items only â€” serial number capture) â”€â”€
   function renderBom() {
     // Only show inventory items here; consumables handled in the next stage
     const inventoryItems = (workflow.bomItems ?? []).filter(i => i.isInventory);
@@ -2238,7 +2354,7 @@ export default function WorkOrderRunner({
                       <Chip label="Inventory" size="small" color="primary" variant="outlined" />
                       <Typography variant="body2" fontWeight={600}>{item.description}</Typography>
                       {item.partNumber && (
-                        <Typography variant="caption" color="text.secondary">· {item.partNumber}</Typography>
+                        <Typography variant="caption" color="text.secondary">- {item.partNumber}</Typography>
                       )}
                     </Stack>
                     <Stack direction="row" spacing={1.5} alignItems="center">
@@ -2305,14 +2421,14 @@ export default function WorkOrderRunner({
             disabled={saving}
             startIcon={saving ? <CircularProgress size={14} /> : undefined}
           >
-            {saving ? "Saving…" : hasConsumables ? "Next: Consumables →" : "Complete & sign"}
+            {saving ? "Saving..." : hasConsumables ? "Next: Consumables ->" : "Complete & sign"}
           </Button>
         </DialogActions>
       </>
     );
   }
 
-  // ── Stage: Consumables confirm / adjust ───────────────────────────────────
+  // â”€â”€ Stage: Consumables confirm / adjust â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function renderConsumables() {
     const consumableItems = (workflow.bomItems ?? []).filter(i => !i.isInventory);
     const hasInventory = (workflow.bomItems ?? []).some(i => i.isInventory);
@@ -2383,7 +2499,7 @@ export default function WorkOrderRunner({
                       label={<Typography variant="caption">N/A</Typography>}
                       sx={{ m: 0 }}
                     />
-                    {/* Qty field — hidden when N/A */}
+                    {/* Qty field â€” hidden when N/A */}
                     {!actual.isNA && (
                       <Stack direction="row" spacing={0.5} alignItems="center">
                         <TextField
@@ -2465,7 +2581,7 @@ export default function WorkOrderRunner({
             {/* Deviation summary */}
             {hasDeviations && (
               <Alert severity="warning" sx={{ mt: 1 }}>
-                Deviations noted — PM will be notified on completion.
+                Deviations noted - PM will be notified on completion.
               </Alert>
             )}
           </Stack>
@@ -2496,14 +2612,14 @@ export default function WorkOrderRunner({
             disabled={saving}
             startIcon={saving ? <CircularProgress size={14} /> : undefined}
           >
-            {saving ? "Saving…" : "Complete & sign"}
+            {saving ? "Saving..." : "Complete & sign"}
           </Button>
         </DialogActions>
       </>
     );
   }
 
-  // ── Stage: installer sign-off ────────────────────────────────────────────
+  // â”€â”€ Stage: installer sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function renderInstallerSign() {
     return (
       <>
@@ -2513,7 +2629,7 @@ export default function WorkOrderRunner({
             <Typography variant="subtitle1" fontWeight={600}>Installer sign-off</Typography>
           </Stack>
           <Typography variant="caption" color="text.secondary">
-            Step {stepsSorted.length + 1} of {stepsSorted.length + 2} — sign to confirm workflow completion
+            Step {stepsSorted.length + 1} of {stepsSorted.length + 2} - sign to confirm workflow completion
           </Typography>
         </DialogTitle>
         <DialogContent>
@@ -2529,7 +2645,7 @@ export default function WorkOrderRunner({
                         color={item.isInventory ? "primary" : "default"} variant="outlined" />
                       <Typography variant="body2" fontWeight={600}>{item.description}</Typography>
                       <Typography variant="caption" color="text.secondary">
-                        · {item.actualQty} {item.unitOfMeasure}
+                        - {item.actualQty} {item.unitOfMeasure}
                       </Typography>
                     </Stack>
                     {item.isInventory && (item.unitCaptures ?? []).map((fields, i) => (
@@ -2556,8 +2672,8 @@ export default function WorkOrderRunner({
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>Outcome</Typography>
                 <Select size="small" fullWidth value={instOutcome}
                   onChange={e => setInstOutcome(e.target.value as typeof instOutcome)}>
-                  <MenuItem value="Completed">Completed — work done as specified</MenuItem>
-                  <MenuItem value="Conditional">Conditional — completed with conditions</MenuItem>
+                  <MenuItem value="Completed">Completed - work done as specified</MenuItem>
+                  <MenuItem value="Conditional">Conditional - completed with conditions</MenuItem>
                 </Select>
               </Box>
             </Stack>
@@ -2576,14 +2692,14 @@ export default function WorkOrderRunner({
           <Button variant="contained" onClick={handleInstallerSign}
             disabled={instSaving || !instName.trim()}
             startIcon={instSaving ? <CircularProgress size={14} /> : undefined}>
-            {instSaving ? "Signing…" : "Sign &amp; continue"}
+            {instSaving ? "Signing..." : "Sign &amp; continue"}
           </Button>
         </DialogActions>
       </>
     );
   }
 
-  // ── Stage: customer sign-off ──────────────────────────────────────────────
+  // â”€â”€ Stage: customer sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function renderCustomerSign() {
     return (
       <>
@@ -2593,7 +2709,7 @@ export default function WorkOrderRunner({
             <Typography variant="subtitle1" fontWeight={600}>Customer sign-off</Typography>
           </Stack>
           <Typography variant="caption" color="text.secondary">
-            Step {stepsSorted.length + 2} of {stepsSorted.length + 2} — customer approval
+            Step {stepsSorted.length + 2} of {stepsSorted.length + 2} - customer approval
           </Typography>
         </DialogTitle>
         <DialogContent>
@@ -2609,7 +2725,7 @@ export default function WorkOrderRunner({
                   <Box sx={{ textAlign: "left" }}>
                     <Typography variant="body2" fontWeight={600}>Sign here now</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Customer is present — hand them the device to sign
+                      Customer is present - hand them the device to sign
                     </Typography>
                   </Box>
                 </Button>
@@ -2620,7 +2736,7 @@ export default function WorkOrderRunner({
                   <Box sx={{ textAlign: "left" }}>
                     <Typography variant="body2" fontWeight={600}>Send signature link</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Email a secure link — run stays pending until customer signs
+                      Email a secure link - run stays pending until customer signs
                     </Typography>
                   </Box>
                 </Button>
@@ -2628,7 +2744,7 @@ export default function WorkOrderRunner({
                   onClick={handleWaiveCustomerSignature}
                   sx={{ justifyContent: "flex-start", textTransform: "none", color: "text.secondary" }}>
                   <Box sx={{ textAlign: "left" }}>
-                    <Typography variant="body2">Skip — no customer signature required</Typography>
+                    <Typography variant="body2">Skip - no customer signature required</Typography>
                     <Typography variant="caption" color="text.disabled">
                       Run completes without customer approval
                     </Typography>
@@ -2650,9 +2766,9 @@ export default function WorkOrderRunner({
                   value={custEmail} onChange={e => setCustEmail(e.target.value)} />
                 <Select size="small" fullWidth value={custOutcome}
                   onChange={e => setCustOutcome(e.target.value as typeof custOutcome)}>
-                  <MenuItem value="Completed">Completed — work accepted</MenuItem>
-                  <MenuItem value="Conditional">Conditional — accepted with conditions</MenuItem>
-                  <MenuItem value="Declined">Declined — work not accepted</MenuItem>
+                  <MenuItem value="Completed">Completed - work accepted</MenuItem>
+                  <MenuItem value="Conditional">Conditional - accepted with conditions</MenuItem>
+                  <MenuItem value="Declined">Declined - work not accepted</MenuItem>
                 </Select>
                 <SignaturePad
                   label="Customer signature (optional)"
@@ -2701,14 +2817,14 @@ export default function WorkOrderRunner({
             <Button variant="contained" onClick={handleCustomerSignNow}
               disabled={custSaving || !custName.trim()}
               startIcon={custSaving ? <CircularProgress size={14} /> : undefined}>
-              {custSaving ? "Signing…" : "Confirm signature"}
+              {custSaving ? "Signing..." : "Confirm signature"}
             </Button>
           )}
           {custMode === "send-link" && !linkSent && (
             <Button variant="contained" onClick={handleSendLink}
               disabled={linkSending || !linkEmail.trim()}
               startIcon={linkSending ? <CircularProgress size={14} /> : <EmailOutlined />}>
-              {linkSending ? "Sending…" : "Send link"}
+              {linkSending ? "Sending..." : "Send link"}
             </Button>
           )}
         </DialogActions>
@@ -2728,7 +2844,7 @@ export default function WorkOrderRunner({
         {stage === "consumables"    && renderConsumables()}
         {stage === "installer-sign" && renderInstallerSign()}
         {stage === "customer-sign"  && renderCustomerSign()}
-        {/* ── Persistent offline / sync bar ── */}
+        {/* â”€â”€ Persistent offline / sync bar â”€â”€ */}
         {isRealRun && (!isOnline || pendingCount > 0 || syncing) && (
           <Box sx={{
             px: 2, py: 0.75,
@@ -2743,9 +2859,9 @@ export default function WorkOrderRunner({
             }
             <Typography variant="caption" fontWeight={600} color={!isOnline ? "warning.main" : "info.main"} sx={{ flex: 1 }}>
               {syncing
-                ? `Syncing ${pendingCount} queued action${pendingCount !== 1 ? "s" : ""}…`
+                ? `Syncing ${pendingCount} queued action${pendingCount !== 1 ? "s" : ""}...`
                 : !isOnline
-                  ? `Offline${pendingCount > 0 ? ` — ${pendingCount} action${pendingCount !== 1 ? "s" : ""} queued` : ""}`
+                  ? `Offline${pendingCount > 0 ? ` - ${pendingCount} action${pendingCount !== 1 ? "s" : ""} queued` : ""}`
                   : `${pendingCount} action${pendingCount !== 1 ? "s" : ""} pending sync`}
             </Typography>
             <Typography variant="caption" color="text.disabled">
@@ -2775,7 +2891,7 @@ export default function WorkOrderRunner({
         />
       )}
 
-      {/* Modify qty dialog — for feature-linked repeatable steps */}
+      {/* Modify qty dialog â€” for feature-linked repeatable steps */}
       <Dialog open={modifyQtyOpen} onClose={() => setModifyQtyOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Modify installed quantity</DialogTitle>
         <DialogContent>
@@ -2797,7 +2913,7 @@ export default function WorkOrderRunner({
               label="Reason for modification"
               value={modifyQtyReason}
               onChange={(e) => setModifyQtyReason(e.target.value)}
-              placeholder="e.g. Only 3 cameras were delivered on site…"
+              placeholder="e.g. Only 3 cameras were delivered on site..."
               InputLabelProps={{ shrink: true }}
               multiline
               rows={2}
