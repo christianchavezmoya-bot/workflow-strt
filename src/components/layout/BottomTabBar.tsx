@@ -26,7 +26,7 @@ import { NavLink } from "react-router-dom";
 const PRIMARY_TABS = [
   { label: "Home",      icon: <HomeOutlinedIcon />,           path: "/" },
   { label: "Projects",  icon: <AssignmentOutlinedIcon />,     path: "/projects" },
-  { label: "Installs",  icon: <TableChartOutlinedIcon />,     path: "/installations/assets" },
+  { label: "Assets",    icon: <TableChartOutlinedIcon />,     path: "/installations/assets" },
   { label: "Issues",    icon: <ErrorOutlineOutlinedIcon />,   path: "/issues" },
   { label: "More",      icon: <MenuOutlinedIcon />,           path: "__more__" },
 ];

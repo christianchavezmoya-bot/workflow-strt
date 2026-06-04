@@ -2483,7 +2483,7 @@ const AssetInstallationPage = () => {
       {/* Header */}
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
         <Box>
-          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Installation Assets</Typography>
+          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Project Assets</Typography>
           <Typography variant="body2" color="text.secondary">
             Track assets across projects — start work orders, record status, and monitor progress.
           </Typography>

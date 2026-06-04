@@ -41,7 +41,7 @@ function setDevRoleOverride(role: string | null) {
 const ROUTE_LABELS: Record<string, string> = {
   "/": "Dashboard",
   "/projects": "Projects",
-  "/installations/assets": "Installations",
+  "/installations/assets": "Assets",
   "/work-instructions": "Work Instructions",
   "/documents": "Documents",
   "/admin": "Admin",

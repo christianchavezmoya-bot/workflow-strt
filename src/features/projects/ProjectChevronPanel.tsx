@@ -803,7 +803,7 @@ export default function ProjectChevronPanel({
                 onClick={() => navigate(`/installations/assets?project=${encodeURIComponent(projectId)}${productId ? `&product=${encodeURIComponent(productId)}` : ""}`)}
                 sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}
               >
-                Go to Asset Installations
+                Go to Project Assets
               </Button>
             </Stack>
           ) : (

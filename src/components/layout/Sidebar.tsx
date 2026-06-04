@@ -38,7 +38,7 @@ const navItems = [
   { label: "Dashboard",         icon: <DashboardOutlinedIcon />,          to: "/",                      end: true,  tourKey: "nav-dashboard" },
   { label: "Projects",          icon: <AssignmentOutlinedIcon />,         to: "/projects",                          tourKey: "nav-projects" },
   { label: "Issues Board",      icon: <ErrorOutlineOutlinedIcon />,       to: "/issues",                            tourKey: "nav-issues" },
-  { label: "Installations",     icon: <TableChartOutlinedIcon />,         to: "/installations/assets",              tourKey: "nav-installations" },
+  { label: "Assets",            icon: <TableChartOutlinedIcon />,         to: "/installations/assets",              tourKey: "nav-installations" },
   { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions",                 tourKey: "nav-work-instructions" },
   { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents",                         tourKey: "nav-documents" },
   { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,          to: "/tips",                              tourKey: "nav-tips" },
