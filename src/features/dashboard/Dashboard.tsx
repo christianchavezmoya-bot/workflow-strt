@@ -511,8 +511,8 @@ const Dashboard = () => {
             return user.role === "Admin";
           };
 
-          setInspectionImportsWaiting(waitingImports.filter((item) => canSeeImport(item.projectId)).length);
-          setInspectionImportsFailed(failedImports.filter((item) => canSeeImport(item.projectId)).length);
+          setInspectionImportsWaiting(waitingImports.filter((item) => canSeeImport(item.projectId || undefined)).length);
+          setInspectionImportsFailed(failedImports.filter((item) => canSeeImport(item.projectId || undefined)).length);
         } else {
           setInspectionImportsWaiting(0);
           setInspectionImportsFailed(0);

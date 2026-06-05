@@ -66,11 +66,19 @@ export interface InspectionImport {
   receivedAt: string;
   fileName?: string;
   contentHash?: string;
+  hash?: string;
   rawJson?: string;
-  projectId?: string;
-  assetId?: string;
+  projectId?: string | null;
+  assetId?: string | null;
+  projectAssetId?: string | null;
   status: InspectionImportStatus;
-  errorText?: string;
-  mappedRunId?: string;
+  errorText?: string | null;
+  error?: string | null;
+  mappedRunId?: string | null;
   uploadedBy?: string;
+  isArchived?: boolean;
+  archivedAt?: string | null;
+  archivedBy?: string | null;
+  archiveReason?: string | null;
+  archiveRef?: string | null;
 }

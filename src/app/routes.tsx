@@ -1,6 +1,6 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { Box, CircularProgress } from "@mui/material";
-import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 import { usePermissions } from "../hooks/usePermissions";
 import { BOM_MODULE_ENABLED } from "../modules/bom-project";
@@ -9,6 +9,7 @@ const Dashboard = lazy(() => import("../features/dashboard/Dashboard"));
 const ProjectsPage = lazy(() => import("../features/projects/ProjectsPage"));
 const ProjectForm = lazy(() => import("../features/projects/ProjectForm"));
 const ProjectDetail = lazy(() => import("../features/projects/ProjectDetail"));
+const ProjectAssetInspectionPage = lazy(() => import("../features/projects/ProjectAssetInspectionPage"));
 const AssetInstallationPage = lazy(() => import("../features/installations/AssetInstallationPage"));
 const WorkInstructions = lazy(() => import("../features/workInstructions/WorkInstructions"));
 const UserManagement = lazy(() => import("../features/admin/UserManagement"));
@@ -59,6 +60,11 @@ const SettingsRoute = () => {
   return can.viewOnly ? <Navigate to="/" replace /> : <Settings />;
 };
 
+const ProjectInspectionsRedirect = () => {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/projects/${id}`} replace />;
+};
+
 const AppRoutes = () => {
   return (
     <Routes>
@@ -72,6 +78,8 @@ const AppRoutes = () => {
         <Route path="/projects/new" element={<LazyRoute><ProjectForm /></LazyRoute>} />
         <Route path="/projects/:id" element={<LazyRoute><ProjectDetail /></LazyRoute>} />
         <Route path="/projects/:id/edit" element={<LazyRoute><ProjectForm /></LazyRoute>} />
+        <Route path="/projects/:id/inspections" element={<ProjectInspectionsRedirect />} />
+        <Route path="/projects/:id/assets/:assetId/inspections" element={<LazyRoute><ProjectAssetInspectionPage /></LazyRoute>} />
         <Route path="/installations/assets" element={<LazyRoute><AssetInstallationPage /></LazyRoute>} />
         <Route path="/work-instructions" element={<LazyRoute><WorkInstructions /></LazyRoute>} />
         <Route path="/documents" element={<LazyRoute><DocumentsPage /></LazyRoute>} />

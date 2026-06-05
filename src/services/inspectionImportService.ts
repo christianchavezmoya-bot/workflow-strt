@@ -45,6 +45,17 @@ export const inspectionImportService = {
     await api.delete(`/inspection-imports/${id}`);
   },
 
+  async update(id: string, patch: { source?: string; rawJson?: string }) {
+    const existing = await inspectionImportService.getById(id);
+    await inspectionImportService.remove(id);
+    return inspectionImportService.create({
+      source: patch.source ?? existing.source,
+      rawJson: patch.rawJson ?? existing.rawJson,
+      projectId: existing.projectId ?? undefined,
+      assetId: existing.assetId ?? undefined,
+    });
+  },
+
   async uploadFile(file: File, projectId?: string, uploadedBy?: string) {
     return new Promise<InspectionImport>((resolve, reject) => {
       const reader = new FileReader();
