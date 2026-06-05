@@ -25,6 +25,7 @@ import {
   RefreshOutlined,
   ReportProblemOutlined,
   RestoreOutlined,
+  SearchOutlined,
   ViewColumnOutlined,
 } from "@mui/icons-material";
 import {
@@ -46,8 +47,12 @@ import {
   FormGroup,
   FormLabel,
   IconButton,
+  InputAdornment,
   InputLabel,
   LinearProgress,
+  List,
+  ListItem,
+  ListItemButton,
   ListItemIcon,
   ListItemText,
   Menu,
@@ -73,6 +78,8 @@ import {
   Typography,
 } from "@mui/material";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
+import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
@@ -304,6 +311,8 @@ const AssetInstallationPage = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const can = usePermissions();
+  const { complexViewActive } = useComplexView();
+  const showComplexControls = complexViewActive && Capacitor.isNativePlatform();
   const productsState = useAppSelector((s) => s.products);
   const projects = useAppSelector((s) => s.projects.items);
   const users = useAppSelector((s) => s.users.items);
@@ -320,6 +329,11 @@ const AssetInstallationPage = () => {
   );
   const [statusFilter, setStatusFilter] = useState<ProjectAssetStatus | "All">("All");
   const [search, setSearch] = useState("");
+  const [healthExpanded, setHealthExpanded] = useState(true);
+  const [assetSearchOpen, setAssetSearchOpen] = useState(false);
+  const [assetSearchQuery, setAssetSearchQuery] = useState("");
+  const [statusMenuAnchor, setStatusMenuAnchor] = useState<HTMLElement | null>(null);
+  const [statusMenuAsset, setStatusMenuAsset] = useState<ProjectAsset | null>(null);
 
   const [sites, setSites] = useState<Site[]>([]);
   const [assets, setAssets] = useState<ProjectAsset[]>([]);
@@ -2585,19 +2599,24 @@ const AssetInstallationPage = () => {
     <Stack spacing={3}>
       {/* Header */}
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
-        <Box>
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Project Assets</Typography>
-            {activeProduct?.name && <Chip size="small" color="primary" variant="outlined" label={activeProduct.name} />}
-          </Stack>
-          <Typography variant="body2" color="text.secondary">
-            {selectedProject
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Project Assets</Typography>
+          {activeProduct?.name && <Chip size="small" color="primary" variant="outlined" label={activeProduct.name} />}
+          <Tooltip title={
+            selectedProject
               ? selectedProjectHasInspection
                 ? `Track project assets for ${selectedProject.jobNumber} - manage installation and inspection workflows from one workspace.`
                 : `Track assets for ${selectedProject.jobNumber} - start work orders, record status, and monitor progress.`
-              : "Track assets across all projects - start work orders, record status, and monitor progress."}
-          </Typography>
-        </Box>
+              : "Track assets across all projects - start work orders, record status, and monitor progress."
+          }>
+            <InfoOutlined sx={{ fontSize: 16, color: "text.secondary", cursor: "pointer" }} />
+          </Tooltip>
+          <Tooltip title="Refresh">
+            <IconButton size="small" onClick={refreshAssets}>
+              <RefreshOutlined sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
+        </Stack>
         <Stack direction="row" spacing={1} alignItems="center">
           {selectedProjectHasInspection && selectedProject && (
             <Button
@@ -2608,7 +2627,7 @@ const AssetInstallationPage = () => {
               Inspection Assets
             </Button>
           )}
-          {can.modifyData && (
+          {showComplexControls && can.modifyData && (
             <Tooltip title={activeProduct?.id ? `Open the workflow builder for ${activeProduct.name}` : "Select a project with a product to create a workflow"}>
               <span>
                 <Button
@@ -2623,22 +2642,7 @@ const AssetInstallationPage = () => {
               </span>
             </Tooltip>
           )}
-          <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={refreshAssets}>Refresh</Button>
-          {can.modifyData && (
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<FileUploadOutlined />}
-              disabled={!activeProduct}
-              onClick={() => {
-                if (activeProduct) workflowConfigService.listByProduct(activeProduct.id, "Published").then(setWorkflowConfigs);
-                setCsvImportOpen(true);
-              }}
-            >
-              Import CSV
-            </Button>
-          )}
-          {can.modifyData && (
+          {showComplexControls && can.modifyData && (
             <Button variant="contained" startIcon={<AddOutlined />} onClick={openAdd} disabled={!activeProduct}>Add asset</Button>
           )}
         </Stack>
@@ -2647,72 +2651,95 @@ const AssetInstallationPage = () => {
       {/* Health summary bar */}
       {!loadingAssets && activeHealth && activeHealth.total > 0 && (
         <Paper className="glass-card" sx={{ px: 2.5, py: 1.5 }}>
-          <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} spacing={1.5} flexWrap="wrap" useFlexGap>
+          {/* Header row — always visible */}
+          <Stack direction="row" alignItems="center" spacing={1.5} flexWrap="wrap" useFlexGap>
             <Typography variant="caption" color="text.secondary" fontWeight={700}
               sx={{ textTransform: "uppercase", letterSpacing: 0.5, flexShrink: 0 }}>
               {activeProduct?.name ?? "All projects"} health
             </Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              {activeHealth.notStarted > 0 && (
-                <Chip size="small" label={`${activeHealth.notStarted} Not Started`} />
-              )}
-              {activeHealth.inProgress > 0 && (
-                <Chip size="small" label={`${activeHealth.inProgress} In Progress`} color="primary" />
-              )}
-              {activeHealth.complete > 0 && (
-                <Chip size="small" label={`${activeHealth.complete} Complete`} color="success" />
-              )}
-              {activeHealth.issue > 0 && (
-                <Chip size="small" label={`${activeHealth.issue} Issue`} color="error" />
-              )}
-              {activeHealth.noWorkflow > 0 && (
-                <Tooltip title="These assets have no workflow linked and cannot be worked on.">
-                  <Chip size="small" label={`${activeHealth.noWorkflow} No Workflow`} color="warning" variant="outlined" />
-                </Tooltip>
-              )}
-            </Stack>
-            <Box sx={{ flex: 1, minWidth: 100 }}>
-              <LinearProgress
-                variant="determinate"
-                value={activeHealth.total > 0 ? (activeHealth.complete / activeHealth.total) * 100 : 0}
-                color={activeHealth.issue > 0 ? "error" : "success"}
-                sx={{ height: 6, borderRadius: 1 }}
-              />
-            </Box>
-            <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-              {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}% complete
-            </Typography>
-            {(activeTimeRollup.productive > 0 || activeTimeRollup.downtime > 0) && (
-              <>
-                <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-                <Tooltip title="Total productive time across all visible assets">
-                  <Chip size="small" color="success" variant="outlined"
-                    label={`Productive ${formatRunDur(activeTimeRollup.productive)}`}
-                    sx={{ fontSize: 10, height: 20 }} />
-                </Tooltip>
-                {activeTimeRollup.downtime > 0 && (
-                  <Tooltip title={`${activeTimeRollup.downtimeEvents} downtime event${activeTimeRollup.downtimeEvents !== 1 ? "s" : ""} across all visible assets`}>
-                    <Chip size="small" color="warning" variant="outlined"
-                      label={`Downtime ${formatRunDur(activeTimeRollup.downtime)}`}
-                      sx={{ fontSize: 10, height: 20 }} />
+            {/* Collapsed summary chips */}
+            {!healthExpanded && (
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                {activeHealth.complete > 0 && <Chip size="small" label={`${activeHealth.complete} Complete`} color="success" sx={{ height: 18, fontSize: 10 }} />}
+                {activeHealth.inProgress > 0 && <Chip size="small" label={`${activeHealth.inProgress} In Progress`} color="primary" sx={{ height: 18, fontSize: 10 }} />}
+                {activeHealth.issue > 0 && <Chip size="small" label={`${activeHealth.issue} Issue`} color="error" sx={{ height: 18, fontSize: 10 }} />}
+                <Typography variant="caption" color="text.secondary" sx={{ alignSelf: "center" }}>
+                  {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}%
+                </Typography>
+              </Stack>
+            )}
+            <Box sx={{ flex: 1 }} />
+            <Tooltip title={healthExpanded ? "Minimize health panel" : "Expand health panel"}>
+              <IconButton size="small" onClick={() => setHealthExpanded(v => !v)} sx={{ p: 0.25 }}>
+                {healthExpanded ? <ExpandLessOutlined sx={{ fontSize: 18 }} /> : <ExpandMoreOutlined sx={{ fontSize: 18 }} />}
+              </IconButton>
+            </Tooltip>
+          </Stack>
+          {/* Collapsible content */}
+          <Collapse in={healthExpanded}>
+            <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} spacing={1.5} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                {activeHealth.notStarted > 0 && (
+                  <Chip size="small" label={`${activeHealth.notStarted} Not Started`} />
+                )}
+                {activeHealth.inProgress > 0 && (
+                  <Chip size="small" label={`${activeHealth.inProgress} In Progress`} color="primary" />
+                )}
+                {activeHealth.complete > 0 && (
+                  <Chip size="small" label={`${activeHealth.complete} Complete`} color="success" />
+                )}
+                {activeHealth.issue > 0 && (
+                  <Chip size="small" label={`${activeHealth.issue} Issue`} color="error" />
+                )}
+                {activeHealth.noWorkflow > 0 && (
+                  <Tooltip title="These assets have no workflow linked and cannot be worked on.">
+                    <Chip size="small" label={`${activeHealth.noWorkflow} No Workflow`} color="warning" variant="outlined" />
                   </Tooltip>
                 )}
-              </>
-            )}
-          </Stack>
+              </Stack>
+              <Box sx={{ flex: 1, minWidth: 100 }}>
+                <LinearProgress
+                  variant="determinate"
+                  value={activeHealth.total > 0 ? (activeHealth.complete / activeHealth.total) * 100 : 0}
+                  color={activeHealth.issue > 0 ? "error" : "success"}
+                  sx={{ height: 6, borderRadius: 1 }}
+                />
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}% complete
+              </Typography>
+              {(activeTimeRollup.productive > 0 || activeTimeRollup.downtime > 0) && (
+                <>
+                  <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+                  <Tooltip title="Total productive time across all visible assets">
+                    <Chip size="small" color="success" variant="outlined"
+                      label={`Productive ${formatRunDur(activeTimeRollup.productive)}`}
+                      sx={{ fontSize: 10, height: 20 }} />
+                  </Tooltip>
+                  {activeTimeRollup.downtime > 0 && (
+                    <Tooltip title={`${activeTimeRollup.downtimeEvents} downtime event${activeTimeRollup.downtimeEvents !== 1 ? "s" : ""} across all visible assets`}>
+                      <Chip size="small" color="warning" variant="outlined"
+                        label={`Downtime ${formatRunDur(activeTimeRollup.downtime)}`}
+                        sx={{ fontSize: 10, height: 20 }} />
+                    </Tooltip>
+                  )}
+                </>
+              )}
+            </Stack>
+          </Collapse>
         </Paper>
       )}
 
       {/* Filters */}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} flexWrap="wrap" useFlexGap>
-        <FormControl size="small" sx={{ minWidth: 220 }}>
+      <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
+        <FormControl size="small" sx={{ flex: 1, minWidth: 150 }}>
           <InputLabel shrink>Project</InputLabel>
           <Select label="Project" value={selectedProjectId} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
             <MenuItem value="">All projects</MenuItem>
             {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} - {p.customerName}</MenuItem>)}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 160 }}>
+        <FormControl size="small" sx={{ minWidth: 140 }}>
           <InputLabel shrink>Status</InputLabel>
           <Select label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as ProjectAssetStatus | "All")}>
             <MenuItem value="All">All statuses</MenuItem>
@@ -2722,8 +2749,21 @@ const AssetInstallationPage = () => {
             <MenuItem value="Issue">Issue</MenuItem>
           </Select>
         </FormControl>
-        <TextField size="small" label="Search asset tag / serial / location"
-          value={search} onChange={(e) => setSearch(e.target.value)} sx={{ minWidth: 260 }} />
+        <Tooltip title="Search by asset tag, serial number, or installer">
+          <IconButton
+            size="small"
+            onClick={() => { setAssetSearchQuery(""); setAssetSearchOpen(true); }}
+            sx={{
+              border: "1px solid",
+              borderColor: search ? "primary.main" : "divider",
+              borderRadius: 1,
+              color: search ? "primary.main" : "text.secondary",
+              p: 0.75,
+            }}
+          >
+            <SearchOutlined sx={{ fontSize: 20 }} />
+          </IconButton>
+        </Tooltip>
       </Stack>
 
       {/* Bulk actions toolbar â€" visible when â‰¥1 asset is selected */}
@@ -2855,282 +2895,239 @@ const AssetInstallationPage = () => {
       )}
 
       {/* Table toolbar */}
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <Stack direction="row" spacing={1} alignItems="center">
-          <Tooltip title={archiveMode ? "Exit archive view" : "Show completed assets archive"}>
-            <Button
-              size="small"
-              variant={archiveMode ? "contained" : "outlined"}
-              color={archiveMode ? "success" : "inherit"}
-              startIcon={<ArchiveOutlined fontSize="small" />}
-              onClick={() => setArchiveMode((v) => !v)}
-              sx={{ fontSize: 12 }}
-            >
-              {archiveMode ? "Archive View - Exit" : "Archive"}
-            </Button>
-          </Tooltip>
-          <Tooltip title="Print / Save PDF">
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<PrintOutlined fontSize="small" />}
-              onClick={() => {
-                // Pre-scope to selection if any are selected
-                setPrintScope(selectedAssetIds.size > 0 ? "selection" : "visible");
-                setPrintOpen(true);
-              }}
-              sx={{ fontSize: 12 }}
-            >
-              Print / PDF
-            </Button>
-          </Tooltip>
-        </Stack>
-        <Stack direction="row" spacing={1} alignItems="center">
-          {selectedProjectHasInspection && selectedProject && !archiveMode && (
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => navigate(`/projects/${selectedProject.id}/inspections/inbox`)}
-              sx={{ fontSize: 12 }}
-            >
-              Inspection Inbox
-            </Button>
+      {(showComplexControls || (selectedProjectHasInspection && selectedProject && !archiveMode) || archiveMode) && (
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
+          {showComplexControls && (
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Tooltip title={archiveMode ? "Exit archive view" : "Show completed assets archive"}>
+                <Button
+                  size="small"
+                  variant={archiveMode ? "contained" : "outlined"}
+                  color={archiveMode ? "success" : "inherit"}
+                  startIcon={<ArchiveOutlined fontSize="small" />}
+                  onClick={() => setArchiveMode((v) => !v)}
+                  sx={{ fontSize: 12 }}
+                >
+                  {archiveMode ? "Archive View - Exit" : "Archive"}
+                </Button>
+              </Tooltip>
+              <Tooltip title="Print / Save PDF">
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<PrintOutlined fontSize="small" />}
+                  onClick={() => {
+                    setPrintScope(selectedAssetIds.size > 0 ? "selection" : "visible");
+                    setPrintOpen(true);
+                  }}
+                  sx={{ fontSize: 12 }}
+                >
+                  Print / PDF
+                </Button>
+              </Tooltip>
+            </Stack>
           )}
-          {!archiveMode && can.editFields && (
-            <Tooltip title="Column settings">
-              <IconButton size="small" onClick={openColumnSettings} sx={{ opacity: 0.7, "&:hover": { opacity: 1 } }}>
-                <ViewColumnOutlined fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-        </Stack>
-        {archiveMode && (
-          <Typography variant="caption" color="text.secondary">
-            Showing archived assets from the server
-          </Typography>
-        )}
-      </Box>
-
-      {/* Asset table */}
-      <Paper className="glass-card" sx={{ overflow: "hidden" }}>
-        {loadingAssets ? (
-          <Stack alignItems="center" justifyContent="center" sx={{ p: 6 }}>
-            <CircularProgress size={32} />
+          <Stack direction="row" spacing={1} alignItems="center">
+            {selectedProjectHasInspection && selectedProject && !archiveMode && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => navigate(`/projects/${selectedProject.id}/inspections/inbox`)}
+                sx={{ fontSize: 12 }}
+              >
+                Inspection Inbox
+              </Button>
+            )}
           </Stack>
-        ) : visibleAssets.length === 0 ? (
-          <Box sx={{ p: 3 }}>
-            <Alert severity="info">
-              {assets.length === 0
-                ? archiveMode
-                  ? "No archived assets found for this product."
-                  : `No assets added for ${activeProduct?.name ?? "this product"} yet. Click "Add asset" to get started.`
-                : "No assets match the current filters."}
-            </Alert>
-          </Box>
-        ) : (
-          <Box sx={{ overflowX: "auto" }}>
-          <Table size="small" sx={{ minWidth: 900 }}>
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ width: 28, px: 0.5 }}>
-                  <Checkbox
+          {archiveMode && (
+            <Typography variant="caption" color="text.secondary">
+              Showing archived assets from the server
+            </Typography>
+          )}
+        </Box>
+      )}
+
+      {/* Asset card list */}
+      {loadingAssets ? (
+        <Stack alignItems="center" justifyContent="center" sx={{ p: 6 }}>
+          <CircularProgress size={32} />
+        </Stack>
+      ) : visibleAssets.length === 0 ? (
+        <Alert severity="info">
+          {assets.length === 0
+            ? archiveMode
+              ? "No archived assets found for this product."
+              : `No assets added for ${activeProduct?.name ?? "this product"} yet.`
+            : "No assets match the current filters."}
+        </Alert>
+      ) : (
+        <Stack spacing={0.75}>
+          {visibleAssets.map((asset) => {
+            const proj = projectMap.get(asset.projectId);
+            const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
+            const isExpanded = expandedAssetId === asset.id;
+            const hasIssue = asset.status === "Issue";
+            const healthColor = computeAssetHealth(asset, runsMap[asset.id] ?? []);
+
+            return (
+              <Paper
+                key={asset.id}
+                className="glass-card"
+                sx={{
+                  overflow: "hidden",
+                  borderLeft: hasIssue ? `3px solid` : "3px solid transparent",
+                  borderLeftColor: hasIssue
+                    ? healthColor === "red" ? "error.main" : "warning.main"
+                    : "transparent",
+                }}
+              >
+                {/* Main card row */}
+                <Stack direction="row" alignItems="center" sx={{ px: 1.25, py: 1.25 }} spacing={1}>
+                  {/* Expand chevron */}
+                  <IconButton
                     size="small"
-                    indeterminate={selectedAssetIds.size > 0 && selectedAssetIds.size < visibleAssets.length}
-                    checked={visibleAssets.length > 0 && selectedAssetIds.size === visibleAssets.length}
-                    onChange={(e) => {
-                      if (e.target.checked) setSelectedAssetIds(new Set(visibleAssets.map((a) => a.id)));
-                      else setSelectedAssetIds(new Set());
+                    sx={{ p: 0.25, flexShrink: 0 }}
+                    onClick={() => {
+                      const nextId = isExpanded ? null : asset.id;
+                      setExpandedAssetId(nextId);
+                      if (nextId) loadAssignmentsForAsset(nextId);
                     }}
-                  />
-                </TableCell>
-                <TableCell sx={{ width: 36, px: 1 }} />
-                <TableCell><Typography variant="caption" fontWeight={700}>Asset Tag</Typography></TableCell>
-                {visibleColumns.map((col) => (
-                  <TableCell key={col.id}>
-                    {col.id === "features" ? (
-                      <Stack direction="row" spacing={0.5} alignItems="center">
-                        <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
-                        <Tooltip
-                          title={
-                            <Stack spacing={0.5}>
-                              <Typography variant="caption" sx={{ fontWeight: 700, color: "common.white" }}>
-                                Feature Colors
-                              </Typography>
-                              <Typography variant="caption">Amber: Pending or Paused</Typography>
-                              <Typography variant="caption">Blue: Running</Typography>
-                              <Typography variant="caption">Green: Complete</Typography>
-                              <Typography variant="caption">Red: Missing data</Typography>
-                            </Stack>
-                          }
-                        >
-                          <InfoOutlined sx={{ fontSize: 14, color: "text.disabled", cursor: "help" }} />
-                        </Tooltip>
-                      </Stack>
-                    ) : (
-                      <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
-                    )}
-                  </TableCell>
-                ))}
-                <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {visibleAssets.flatMap((asset) => {
-                const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
-                const proj = projectMap.get(asset.projectId);
-                const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
-                const isExpanded = expandedAssetId === asset.id;
-                const hasIssue = asset.status === "Issue";
-
-                return [
-                  <TableRow
-                    key={asset.id}
-                    hover
-                    sx={{ bgcolor: hasIssue ? "rgba(211,47,47,0.04)" : selectedAssetIds.has(asset.id) ? "rgba(var(--primary-rgb,25,118,210),0.08)" : undefined }}
                   >
-                    <TableCell sx={{ px: 0.5 }}>
-                      <Checkbox
-                        size="small"
-                        checked={selectedAssetIds.has(asset.id)}
-                        onChange={(e) => {
-                          setSelectedAssetIds((prev) => {
-                            const next = new Set(prev);
-                            if (e.target.checked) next.add(asset.id);
-                            else next.delete(asset.id);
-                            return next;
-                          });
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell sx={{ px: 1 }}>
-                      <IconButton size="small" onClick={() => {
-                        const nextId = isExpanded ? null : asset.id;
-                        setExpandedAssetId(nextId);
-                        if (nextId) loadAssignmentsForAsset(nextId);
-                      }}>
-                        {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
-                      </IconButton>
-                    </TableCell>
-                    <TableCell>
-                      <Stack direction="row" alignItems="center" spacing={0.75}>
-                        {hasIssue && <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: computeAssetHealth(asset, runsMap[asset.id] ?? []) === "red" ? "error.main" : "warning.main", flexShrink: 0 }} />}
-                        <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
-                        {issuesBadge(asset)}
-                      </Stack>
-                    </TableCell>
-                    {visibleColumns.map((col) => (
-                      <TableCell key={col.id}>
-                        {renderColumnCell(col.id, asset, cfg, proj, tech ?? undefined)}
-                      </TableCell>
-                    ))}
-                    <TableCell align="right">
-                      <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-                        {(can.modifyData || asset.status === "Complete") && actionButton(asset, proj?.workflowMode)}
-                        {!can.viewOnly && (
-                          <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
-                            <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
-                              <Badge
-                                badgeContent={`${docsCountMap[asset.id] ?? 0}/3`}
-                                color={
-                                  (docsCountMap[asset.id] ?? 0) === 0 ? "default" :
-                                  (docsCountMap[asset.id] ?? 0) === 3 ? "success" : "primary"
-                                }
-                                sx={{ "& .MuiBadge-badge": { fontSize: 9, minWidth: 28, height: 16 } }}
-                              >
-                                <FolderOutlined fontSize="small" />
-                              </Badge>
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                        {!can.viewOnly && (
-                          <Tooltip title="Generate PDF report">
-                            <span>
-                              <IconButton size="small"
-                                disabled={reportGenerating === asset.id}
-                                onClick={() => handleGeneratePdfReport(asset)}>
-                                {reportGenerating === asset.id
-                                  ? <CircularProgress size={16} />
-                                  : <ArticleOutlined fontSize="small" />}
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {can.modifyData && !archiveMode && (
-                          <Tooltip title="Edit asset">
-                            <IconButton size="small" onClick={() => openEditAsset(asset)}>
-                              <EditOutlined fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                        {can.modifyData && !archiveMode && (
-                          <Tooltip title="Archive asset">
-                            <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
-                              <DeleteOutline fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                        {can.modifyData && archiveMode && (
-                          <Tooltip title="Restore asset">
-                            <span>
-                              <IconButton size="small" disabled={deletingAsset} onClick={() => confirmRestoreAsset(asset)}>
-                                <RestoreOutlined fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {can.modifyData && archiveMode && (
-                          <Tooltip title="Delete asset permanently">
-                            <span>
-                              <IconButton size="small" color="error" disabled={purgingAsset} onClick={() => setPurgeAsset(asset)}>
-                                <DeleteForeverOutlined fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
-                      </Stack>
-                    </TableCell>
-                  </TableRow>,
+                    {isExpanded
+                      ? <ExpandLessOutlined sx={{ fontSize: 18 }} />
+                      : <ExpandMoreOutlined sx={{ fontSize: 18 }} />}
+                  </IconButton>
 
-                  // Expandable feature detail row
-                  <TableRow key={`${asset.id}-detail`}>
-                    <TableCell colSpan={3 + visibleColumns.length} sx={{ py: 0 }}>
-                      <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                        <Box sx={{ px: 3, py: 2, bgcolor: "rgba(45,212,191,0.05)", borderBottom: "1px solid", borderColor: "divider" }}>
-                          <Typography variant="caption" fontWeight={700} color="text.secondary"
-                            sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1.5 }}>
-                            Feature Values &amp; Sub-Dependencies
-                          </Typography>
-                          {renderFeatureExpandedRow(asset)}
-                          {asset.notes && (
-                            <Box sx={{ mt: 1.5 }}>
-                              <Typography variant="caption" color="text.secondary" fontWeight={600}>Notes: </Typography>
-                              <Typography variant="caption">{asset.notes}</Typography>
-                            </Box>
-                          )}
+                  {/* Asset tag + tech */}
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                      <Typography variant="body2" fontWeight={700} noWrap>{asset.assetTag}</Typography>
+                      {issuesBadge(asset)}
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary" noWrap>
+                      {tech?.fullName ?? "Unassigned"}
+                    </Typography>
+                  </Box>
+
+                  {/* Status chip — tappable to open action menu */}
+                  <Chip
+                    size="small"
+                    label={STATUS_LABELS[asset.status as ProjectAssetStatus]}
+                    color={STATUS_COLORS[asset.status as ProjectAssetStatus]}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setStatusMenuAnchor(e.currentTarget as HTMLElement);
+                      setStatusMenuAsset(asset);
+                      loadAssignmentsForAsset(asset.id);
+                    }}
+                    sx={{ cursor: "pointer", flexShrink: 0, fontWeight: 600, fontSize: "0.7rem" }}
+                  />
+                </Stack>
+
+                {/* Expandable detail panel */}
+                <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                  <Box sx={{ px: 2, py: 2, bgcolor: "rgba(45,212,191,0.05)", borderTop: "1px solid", borderColor: "divider" }}>
+                    <Typography variant="caption" fontWeight={700} color="text.secondary"
+                      sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1.5 }}>
+                      Feature Values &amp; Sub-Dependencies
+                    </Typography>
+                    {renderFeatureExpandedRow(asset)}
+                    {asset.notes && (
+                      <Box sx={{ mt: 1.5 }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={600}>Notes: </Typography>
+                        <Typography variant="caption">{asset.notes}</Typography>
+                      </Box>
+                    )}
+                    <Divider sx={{ my: 1.5 }} />
+                    {renderIssuesPanel(asset)}
+                    {(() => {
+                      const timePanel = renderTimeTrackingPanel(asset);
+                      return timePanel ? (
+                        <>
                           <Divider sx={{ my: 1.5 }} />
-                          {renderIssuesPanel(asset)}
-                          {(() => {
-                            const timePanel = renderTimeTrackingPanel(asset);
-                            return timePanel ? (
-                              <>
-                                <Divider sx={{ my: 1.5 }} />
-                                {timePanel}
-                              </>
-                            ) : null;
-                          })()}
-                          <Divider sx={{ my: 1.5 }} />
-                          {renderWorkflowAssignmentsPanel(asset)}
-                        </Box>
-                      </Collapse>
-                    </TableCell>
-                  </TableRow>,
-                ];
-              })}
-            </TableBody>
-          </Table>
-          </Box>
-        )}
-      </Paper>
+                          {timePanel}
+                        </>
+                      ) : null;
+                    })()}
+                    <Divider sx={{ my: 1.5 }} />
+                    {renderWorkflowAssignmentsPanel(asset)}
+                  </Box>
+                </Collapse>
+              </Paper>
+            );
+          })}
+        </Stack>
+      )}
+
+      {/* Status action popover */}
+      <Popover
+        open={Boolean(statusMenuAnchor)}
+        anchorEl={statusMenuAnchor}
+        onClose={() => { setStatusMenuAnchor(null); setStatusMenuAsset(null); }}
+        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+        transformOrigin={{ vertical: "top", horizontal: "right" }}
+        PaperProps={{ sx: { borderRadius: 2, minWidth: 220, p: 1.5 } }}
+      >
+        {statusMenuAsset && (() => {
+          const a = statusMenuAsset;
+          const proj = projectMap.get(a.projectId);
+          const docsCount = docsCountMap[a.id] ?? 0;
+          return (
+            <Stack spacing={1}>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Typography variant="body2" fontWeight={700} sx={{ flex: 1 }}>{a.assetTag}</Typography>
+                <Chip size="small" label={STATUS_LABELS[a.status as ProjectAssetStatus]} color={STATUS_COLORS[a.status as ProjectAssetStatus]} sx={{ fontSize: "0.7rem" }} />
+              </Stack>
+              <Divider />
+              {(can.modifyData || a.status === "Complete") && (
+                <Box>{actionButton(a, proj?.workflowMode)}</Box>
+              )}
+              {!can.viewOnly && (
+                <Button size="small" fullWidth variant="outlined" startIcon={<FolderOutlined fontSize="small" />}
+                  onClick={() => { setDocsAsset(a); setDocsOpen(true); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
+                  Documents ({docsCount}/3)
+                </Button>
+              )}
+              {!can.viewOnly && (
+                <Button size="small" fullWidth variant="outlined"
+                  startIcon={reportGenerating === a.id ? <CircularProgress size={14} /> : <ArticleOutlined fontSize="small" />}
+                  disabled={reportGenerating === a.id}
+                  onClick={() => { handleGeneratePdfReport(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
+                  PDF Report
+                </Button>
+              )}
+              {can.modifyData && !archiveMode && (
+                <Button size="small" fullWidth variant="outlined" startIcon={<EditOutlined fontSize="small" />}
+                  onClick={() => { openEditAsset(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
+                  Edit Asset
+                </Button>
+              )}
+              {can.modifyData && !archiveMode && showComplexControls && (
+                <Button size="small" fullWidth variant="outlined" color="error" startIcon={<DeleteOutline fontSize="small" />}
+                  onClick={() => { setDeleteAsset(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
+                  Archive
+                </Button>
+              )}
+              {can.modifyData && archiveMode && (
+                <Button size="small" fullWidth variant="outlined"
+                  startIcon={<RestoreOutlined fontSize="small" />}
+                  disabled={deletingAsset}
+                  onClick={() => { confirmRestoreAsset(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
+                  Restore
+                </Button>
+              )}
+              {can.modifyData && archiveMode && (
+                <Button size="small" fullWidth variant="outlined" color="error"
+                  startIcon={<DeleteForeverOutlined fontSize="small" />}
+                  disabled={purgingAsset}
+                  onClick={() => { setPurgeAsset(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
+                  Delete Permanently
+                </Button>
+              )}
+            </Stack>
+          );
+        })()}
+      </Popover>
 
       {/* Add asset dialog */}
       <Dialog open={addOpen} onClose={() => !addSaving && setAddOpen(false)} maxWidth="sm" fullWidth>
@@ -3605,6 +3602,121 @@ const AssetInstallationPage = () => {
           >
             {assignSaving ? "Saving..." : "Assign"}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Asset search dialog */}
+      <Dialog
+        open={assetSearchOpen}
+        onClose={() => setAssetSearchOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 2 } }}
+      >
+        <DialogTitle sx={{ pb: 1 }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <SearchOutlined fontSize="small" />
+            <span>Search Assets</span>
+          </Stack>
+        </DialogTitle>
+        <DialogContent sx={{ pt: "8px !important" }}>
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            placeholder="Asset tag, serial number, or installer name…"
+            value={assetSearchQuery}
+            onChange={(e) => setAssetSearchQuery(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchOutlined sx={{ fontSize: 18, color: "text.secondary" }} />
+                </InputAdornment>
+              ),
+            }}
+            sx={{ mb: 1.5 }}
+          />
+          {(() => {
+            const q = assetSearchQuery.trim().toLowerCase();
+            if (q.length < 2) {
+              return (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
+                  Type at least 2 characters to search
+                </Typography>
+              );
+            }
+            const results = assets
+              .filter((a) => !a.isDeleted)
+              .filter((a) => {
+                const installerName = (a.installedBy ?? users.find((u) => u.id === a.assignedUserId)?.fullName ?? "").toLowerCase();
+                return (
+                  a.assetTag?.toLowerCase().includes(q) ||
+                  a.serialNumber?.toLowerCase().includes(q) ||
+                  installerName.includes(q)
+                );
+              })
+              .slice(0, 50);
+            if (results.length === 0) {
+              return (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
+                  No assets match "{assetSearchQuery}"
+                </Typography>
+              );
+            }
+            return (
+              <List dense disablePadding sx={{ maxHeight: 360, overflowY: "auto" }}>
+                {results.map((a) => {
+                  const proj = projects.find((p) => p.id === a.projectId);
+                  const installer = a.installedBy ?? users.find((u) => u.id === a.assignedUserId)?.fullName;
+                  const statusColor: Record<string, "default" | "primary" | "success" | "error"> = {
+                    NotStarted: "default",
+                    InProgress: "primary",
+                    Complete: "success",
+                    Issue: "error",
+                  };
+                  return (
+                    <ListItem key={a.id} disablePadding divider>
+                      <ListItemButton
+                        onClick={() => {
+                          setSearch(a.assetTag);
+                          if (a.projectId) setSelectedProjectId(a.projectId);
+                          setAssetSearchOpen(false);
+                        }}
+                        sx={{ py: 1, gap: 1 }}
+                      >
+                        <ListItemText
+                          primary={
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Typography variant="body2" fontWeight={600}>{a.assetTag}</Typography>
+                              {a.serialNumber && (
+                                <Typography variant="caption" color="text.secondary">S/N: {a.serialNumber}</Typography>
+                              )}
+                              <Chip size="small" label={a.status} color={statusColor[a.status] ?? "default"} sx={{ height: 18, fontSize: 10 }} />
+                            </Stack>
+                          }
+                          secondary={
+                            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                              {proj && <Typography variant="caption" color="text.secondary">{proj.jobNumber}</Typography>}
+                              {installer && <Typography variant="caption" color="text.secondary">· {installer}</Typography>}
+                            </Stack>
+                          }
+                        />
+                      </ListItemButton>
+                    </ListItem>
+                  );
+                })}
+              </List>
+            );
+          })()}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          {search && (
+            <Button size="small" color="inherit" onClick={() => { setSearch(""); setAssetSearchOpen(false); }}>
+              Clear filter
+            </Button>
+          )}
+          <Box sx={{ flex: 1 }} />
+          <Button size="small" onClick={() => setAssetSearchOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
 

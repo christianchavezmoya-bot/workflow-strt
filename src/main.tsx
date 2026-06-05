@@ -10,6 +10,7 @@ import { FieldNotificationProvider } from "./contexts/FieldNotificationContext";
 import { ViewModeProvider } from "./contexts/ViewModeContext";
 import { AccessModeProvider } from "./contexts/AccessModeContext";
 import { NotificationInboxProvider } from "./contexts/NotificationInboxContext";
+import { ComplexViewProvider } from "./contexts/ComplexViewContext";
 import "./index.css";
 import { defineCustomElements } from "@ionic/pwa-elements/loader";
 
@@ -24,15 +25,17 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <BrowserRouter>
-          <AccessModeProvider>
-            <NotificationInboxProvider>
-              <ViewModeProvider>
-                <FieldNotificationProvider>
-                  <App />
-                </FieldNotificationProvider>
-              </ViewModeProvider>
-            </NotificationInboxProvider>
-          </AccessModeProvider>
+          <ComplexViewProvider>
+            <AccessModeProvider>
+              <NotificationInboxProvider>
+                <ViewModeProvider>
+                  <FieldNotificationProvider>
+                    <App />
+                  </FieldNotificationProvider>
+                </ViewModeProvider>
+              </NotificationInboxProvider>
+            </AccessModeProvider>
+          </ComplexViewProvider>
         </BrowserRouter>
       </ThemeProvider>
     </Provider>

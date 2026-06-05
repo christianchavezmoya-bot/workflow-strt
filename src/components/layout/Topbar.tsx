@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { useAuth } from "../../hooks/useAuth";
 import { useNotificationInbox } from "../../contexts/NotificationInboxContext";
+import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useViewMode } from "../../contexts/ViewModeContext";
 import { useFavoritesContext } from "../../contexts/FavoritesContext";
 import { useAppSelector } from "../../store/hooks";
@@ -90,6 +91,7 @@ const Topbar = () => {
   const location = useLocation();
   const { user } = useAuth();
   const { notifications, unreadNotifications, loading: notificationsLoading, acknowledge } = useNotificationInbox();
+  const { complexViewActive, recordLogoTap } = useComplexView();
   const { viewMode, toggleViewMode } = useViewMode();
   const { isFavorited, getFavorite, add, remove } = useFavoritesContext();
   const products = useAppSelector((s) => s.products.items);
@@ -369,7 +371,14 @@ const Topbar = () => {
             component="img"
             src={strataLogo}
             alt="Business Logo"
-            sx={{ height: 52, maxWidth: 180, objectFit: "contain", userSelect: "none" }}
+            onClick={() => recordLogoTap(user?.role ?? "")}
+            sx={{
+              height: 52, maxWidth: 180, objectFit: "contain", userSelect: "none",
+              cursor: "pointer",
+              outline: complexViewActive ? "2px solid rgba(45,212,191,0.7)" : "2px solid transparent",
+              borderRadius: 1,
+              transition: "outline 0.2s",
+            }}
           />
         ) : (
           <>

@@ -51,6 +51,8 @@ import { projectService } from "../../services/projectService";
 import { customerService } from "../../services/customerService";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
+import { useComplexView } from "../../contexts/ComplexViewContext";
+import { Capacitor } from "@capacitor/core";
 
 // ------------------------------------------------------------------
 // Types
@@ -195,6 +197,8 @@ export default function DocumentsPage() {
   const can = usePermissions();
   const canUploadDocuments = can.documents.upload;
   const canDeleteDocuments = can.documents.delete;
+  const { complexViewActive } = useComplexView();
+  const showComplexControls = complexViewActive && Capacitor.isNativePlatform();
   // ---- data -------------------------------------------------------
   const [docs, setDocs]       = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -702,7 +706,7 @@ export default function DocumentsPage() {
             </>
           )}
 
-          {canUploadDocuments && (
+          {canUploadDocuments && showComplexControls && (
             <>
               <QRUploadButton
                 docType={activeCategoryId !== "all" ? activeCategoryId : "technical"}
@@ -873,14 +877,14 @@ export default function DocumentsPage() {
                             </IconButton>
                           </Tooltip>
                         )}
-                        {canUploadDocuments && (
+                        {canUploadDocuments && showComplexControls && (
                           <Tooltip title="Edit">
                             <IconButton size="small" onClick={() => openEdit(doc)}>
                               <EditOutlined fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
-                        {canDeleteDocuments && (
+                        {canDeleteDocuments && showComplexControls && (
                           <Tooltip title="Delete">
                             <IconButton size="small" color="error" onClick={() => setDeleteDoc(doc)}>
                               <DeleteOutline fontSize="small" />
