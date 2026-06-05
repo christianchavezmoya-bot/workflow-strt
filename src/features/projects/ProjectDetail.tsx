@@ -289,7 +289,7 @@ const ProjectDetail = () => {
                 variant="contained"
                 sx={{ alignSelf: "flex-start", mt: 1 }}
               >
-                Open installation assets
+                Assets
               </Button>
             </Stack>
           </Box>

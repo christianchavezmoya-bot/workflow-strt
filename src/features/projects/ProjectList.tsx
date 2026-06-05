@@ -767,17 +767,17 @@ const ProjectList = () => {
                     </IconButton>
                   </Stack>
 
-                  {/* Bottom row: Asset Installs button + Edit/Delete + workflow actions */}
+                  {/* Bottom row: Assets button + Edit/Delete + workflow actions */}
                   <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mt: 1 }}
                     onClick={(e) => e.stopPropagation()}>
                     <Button
                       size="small"
                       variant="outlined"
-                      component="a"
-                      href={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`}
+                      component={Link}
+                      to={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`}
                       sx={{ fontSize: "0.7rem", py: 0.25, px: 1, height: 26, flexShrink: 0 }}
                     >
-                      Asset Installs
+                      Assets
                     </Button>
                     {mobileActions.map((label) => (
                       <Button key={label} size="small" variant="outlined" color="primary"
