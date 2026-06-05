@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import ReactDOM from "react-dom/client";
 import { CssBaseline, ThemeProvider } from "@mui/material";
 import { Provider } from "react-redux";
@@ -7,8 +7,9 @@ import App from "./app/App";
 import { store } from "./store";
 import theme from "./theme/theme";
 import { FieldNotificationProvider } from "./contexts/FieldNotificationContext";
-import { NotificationInboxProvider } from "./contexts/NotificationInboxContext";
 import { ViewModeProvider } from "./contexts/ViewModeContext";
+import { AccessModeProvider } from "./contexts/AccessModeContext";
+import { NotificationInboxProvider } from "./contexts/NotificationInboxContext";
 import "./index.css";
 import { defineCustomElements } from "@ionic/pwa-elements/loader";
 
@@ -23,13 +24,15 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <BrowserRouter>
-          <ViewModeProvider>
+          <AccessModeProvider>
             <NotificationInboxProvider>
-              <FieldNotificationProvider>
-                <App />
-              </FieldNotificationProvider>
+              <ViewModeProvider>
+                <FieldNotificationProvider>
+                  <App />
+                </FieldNotificationProvider>
+              </ViewModeProvider>
             </NotificationInboxProvider>
-          </ViewModeProvider>
+          </AccessModeProvider>
         </BrowserRouter>
       </ThemeProvider>
     </Provider>

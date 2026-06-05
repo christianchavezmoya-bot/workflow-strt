@@ -1,6 +1,6 @@
-import CloseIcon from "@mui/icons-material/Close";
-import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import { Box, Button, Collapse, IconButton, Stack, Typography } from "@mui/material";
+import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
+import CloseIcon from "@mui/icons-material/Close";
 import { useNotificationInbox } from "../../contexts/NotificationInboxContext";
 
 export default function NotificationBanner() {

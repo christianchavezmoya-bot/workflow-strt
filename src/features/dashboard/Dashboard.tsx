@@ -11,6 +11,7 @@ import {
 } from "@mui/icons-material";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
@@ -106,6 +107,8 @@ const Dashboard = () => {
   const isEngineer   = user.role === "Engineer" || user.role === "QA Inspector";
   const isInstaller  = user.role === "Installer" || user.role === "Technician";
   const isViewer     = user.role === "Viewer" || user.role === "Client";
+  const isNativePlatform = Capacitor.isNativePlatform();
+  const showNativeManagerHome = isManager && isNativePlatform;
 
   const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch      = useAppDispatch();
@@ -146,6 +149,8 @@ const Dashboard = () => {
   const [autoAssignFlags, setAutoAssignFlags] = useState<AutoAssignFlag[]>(() =>
     JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]")
   );
+
+  const [mobileManagerTab, setMobileManagerTab] = useState<"projects" | "inspections" | "installs">("projects");
 
   // Missing media flags - runs completed without photos/videos.
   type MissingMediaFlag = PhotoMissingMediaFlag;
@@ -297,6 +302,27 @@ const Dashboard = () => {
   const visibleOpenAssets = useMemo(
     () => openAssets.filter((asset) => visibleProjectIds.has(asset.projectId)),
     [openAssets, visibleProjectIds],
+  );
+
+  const managedProjects = useMemo(() => {
+    if (user.role === "Admin") return filteredProjects;
+    return filteredProjects.filter((project) => project.projectManager === user.fullName);
+  }, [filteredProjects, user.fullName, user.role]);
+  const managedProjectIds = useMemo(() => new Set(managedProjects.map((project) => project.id)), [managedProjects]);
+  const managedOpenAssets = useMemo(() => {
+    if (user.role === "Admin") return openAssets;
+    return openAssets.filter((asset) => managedProjectIds.has(asset.projectId));
+  }, [openAssets, managedProjectIds, user.role]);
+  const managedOverdueProjects = useMemo(
+    () => managedProjects.filter((project) => {
+      if (!project.finishDate || project.status === "Completed" || project.status === "Cancelled") return false;
+      return new Date(project.finishDate) < new Date();
+    }),
+    [managedProjects],
+  );
+  const managedInspectionProjects = useMemo(
+    () => managedProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
+    [managedProjects],
   );
   const visibleOpenIssues = useMemo(
     () => openIssues.filter((issue) => visibleProjectIds.has(issue.projectId)),
@@ -1154,11 +1180,155 @@ const Dashboard = () => {
     </Box>
   );
 
+  const ManagerMobileHome = (
+    <Stack spacing={2}>
+      <Box className="glass-card" sx={{ p: 2 }}>
+        <Stack spacing={1.5}>
+          <Box>
+            <Typography variant="h6" sx={{ fontFamily: "Sora", lineHeight: 1.1 }}>{user.fullName}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {user.role} · {activeOffice === "All" ? "All offices" : activeOffice}
+            </Typography>
+          </Box>
+          <Grid container spacing={1}>
+            <Grid item xs={6}>
+              <Paper className="glass-card" sx={{ p: 1.25 }}>
+                <Typography variant="caption" color="text.secondary">My Projects</Typography>
+                <Typography variant="h5" fontWeight={700}>{managedProjects.length}</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={6}>
+              <Paper className="glass-card" sx={{ p: 1.25 }}>
+                <Typography variant="caption" color="text.secondary">Overdue</Typography>
+                <Typography variant="h5" fontWeight={700} color={managedOverdueProjects.length > 0 ? "error.main" : "inherit"}>{managedOverdueProjects.length}</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={6}>
+              <Paper className="glass-card" sx={{ p: 1.25 }}>
+                <Typography variant="caption" color="text.secondary">Inspections</Typography>
+                <Typography variant="h5" fontWeight={700}>{managedInspectionProjects.length}</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={6}>
+              <Paper className="glass-card" sx={{ p: 1.25 }}>
+                <Typography variant="caption" color="text.secondary">Open Installs</Typography>
+                <Typography variant="h5" fontWeight={700}>{managedOpenAssets.length}</Typography>
+              </Paper>
+            </Grid>
+          </Grid>
+        </Stack>
+      </Box>
+
+      <Stack direction="row" spacing={1}>
+        {([
+          { key: "projects" as const, label: "My Projects" },
+          { key: "inspections" as const, label: "My Inspections" },
+          { key: "installs" as const, label: "My Installs" },
+        ]).map((tab) => (
+          <Chip
+            key={tab.key}
+            label={tab.label}
+            clickable
+            color={mobileManagerTab === tab.key ? "primary" : "default"}
+            variant={mobileManagerTab === tab.key ? "filled" : "outlined"}
+            onClick={() => setMobileManagerTab(tab.key)}
+            sx={{ flex: 1, height: 34 }}
+          />
+        ))}
+      </Stack>
+
+      {mobileManagerTab === "projects" && (
+        <Box className="glass-card" sx={{ p: 2 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>My Projects</Typography>
+            <Button size="small" variant="text" onClick={() => navigate("/projects")}>View all</Button>
+          </Stack>
+          {managedProjects.length === 0
+            ? <Typography variant="caption" color="text.secondary">No projects in scope.</Typography>
+            : <Stack spacing={1}>
+                {managedProjects.slice(0, 6).map((project) => (
+                  <Paper key={project.id} elevation={0} onClick={() => navigate(`/projects/${project.id}`)}
+                    sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                          "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                    <Typography variant="body2" fontWeight={700} noWrap>{project.jobNumber}</Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap display="block">
+                      {project.customerName || "No customer"} · {project.status}
+                    </Typography>
+                  </Paper>
+                ))}
+              </Stack>
+          }
+        </Box>
+      )}
+
+      {mobileManagerTab === "inspections" && (
+        <Box className="glass-card" sx={{ p: 2 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>My Inspections</Typography>
+            <Button size="small" variant="text" onClick={() => navigate("/projects")}>View all</Button>
+          </Stack>
+          {managedInspectionProjects.length === 0
+            ? <Typography variant="caption" color="text.secondary">No inspection projects in scope.</Typography>
+            : <Stack spacing={1}>
+                {managedInspectionProjects.slice(0, 6).map((project) => (
+                  <Paper key={project.id} elevation={0} onClick={() => navigate(`/projects/${project.id}`)}
+                    sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                          "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                    <Typography variant="body2" fontWeight={700} noWrap>{project.jobNumber}</Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap display="block">
+                      {project.customerName || "No customer"} · {project.workflowMode ?? "Inspection"}
+                    </Typography>
+                  </Paper>
+                ))}
+              </Stack>
+          }
+        </Box>
+      )}
+
+      {mobileManagerTab === "installs" && (
+        <Box className="glass-card" sx={{ p: 2 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>My Installs</Typography>
+            <Button size="small" variant="text" onClick={() => navigate("/installations/assets")}>View all</Button>
+          </Stack>
+          {managedOpenAssets.length === 0
+            ? <Typography variant="caption" color="text.secondary">No installation assets in scope.</Typography>
+            : <Stack spacing={1}>
+                {managedOpenAssets.slice(0, 6).map((asset) => (
+                  <Paper key={asset.id} elevation={0} onClick={() => navigate("/installations/assets")}
+                    sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                          "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="body2" fontWeight={700} noWrap>{asset.assetTag || asset.assetName || asset.id}</Typography>
+                        <Typography variant="caption" color="text.secondary" noWrap display="block">
+                          {asset.jobNumber} · {asset.assignedUserId ? "Assigned" : "Unassigned"}
+                        </Typography>
+                      </Box>
+                      <Chip
+                        label={displayRunState(asset)}
+                        size="small"
+                        color={isPausedAsset(asset.runStatus) ? "warning" : isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status) ? "primary" : "default"}
+                        variant="outlined"
+                        sx={{ height: 18, fontSize: "0.62rem" }}
+                      />
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+          }
+        </Box>
+      )}
+    </Stack>
+  );
+
   return (
     <Stack spacing={3}>
 
+      {showNativeManagerHome && ManagerMobileHome}
+
       {/* PERSONAL WORKSPACE STRIP - all except Viewer */}
-      {!isViewer && (
+      {!isViewer && !showNativeManagerHome && (
         <Box className="glass-card" sx={{ p: 2.5 }}>
           {isManager && !viewingOwnDashboard && viewedDashboardUser && (
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, p: 1, borderRadius: 1, background: "rgba(2,136,209,0.1)", border: "1px solid rgba(2,136,209,0.3)" }}>
@@ -1645,7 +1815,7 @@ const Dashboard = () => {
       )}
 
       {/* PROJECT MANAGER / ADMIN VIEW */}
-      {isManager && (
+      {isManager && !showNativeManagerHome && (
         <>
           {pmDashboardTab === "pm-projects" && ProjectStatusGrid}
 

@@ -20,6 +20,9 @@ interface Props {
   /** When provided, a "Upload from Phone" QR button is shown */
   qrDocType?: string;
   qrLinkedTo?: string;
+  /** Context tags for document linking (e.g. issue-report, issue-resolution) */
+  linkedToType?: string;
+  linkedToId?: string;
 }
 
 function isVideo(dataUrl: string) {

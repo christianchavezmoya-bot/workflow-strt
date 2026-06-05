@@ -35,6 +35,9 @@ export interface PendingAction {
   retries: number;
   lastError?: string;
   status: "pending" | "uploading" | "failed";
+  opType?: string;
+  serverEntityId?: string;
+  dependsOnOpId?: string;
   nextRetryAt?: string;  // ISO timestamp — when to next attempt this action
 }
 
@@ -340,6 +343,13 @@ export async function entityPutAsset(record: { id: string; productId: string; pr
   } catch { /* ignore */ }
 }
 
+export async function entityGetAsset(id: string): Promise<{ id: string; productId: string; projectId: string; data: unknown } | null> {
+  try {
+    const db = await getDB();
+    return (await db.get("assets", id) as { id: string; productId: string; projectId: string; data: unknown } | undefined) ?? null;
+  } catch { return null; }
+}
+
 export async function entityPutAssets(records: Array<{ id: string; productId: string; projectId: string; data: unknown }>): Promise<void> {
   try {
     const db = await getDB();
@@ -547,4 +557,25 @@ export async function entityGetWorkflowRunsByProject(projectId: string): Promise
     const records = await db.getAllFromIndex("workflow_runs", "by_project", projectId);
     return records.map((r) => r.data);
   } catch { return []; }
+}
+
+export async function entityGetIssue(id: string): Promise<{ data: unknown } | null> {
+  try {
+    const db = await getDB();
+    return (await db.get("issues", id) as { data: unknown } | undefined) ?? null;
+  } catch { return null; }
+}
+
+export async function entityGetWorkflowRun(id: string): Promise<{ data: unknown } | null> {
+  try {
+    const db = await getDB();
+    return (await db.get("workflow_runs", id) as { data: unknown } | undefined) ?? null;
+  } catch { return null; }
+}
+
+export async function entityDeleteWorkflowRun(id: string): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.delete("workflow_runs", id);
+  } catch { /* ignore */ }
 }

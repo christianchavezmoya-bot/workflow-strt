@@ -35,6 +35,7 @@ export type BiometricCheckResult =
  */
 export async function isBiometricAvailable(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return false;
+  if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return false;
   try {
     const { NativeBiometric } = await import("capacitor-native-biometric");
     const { isAvailable } = await NativeBiometric.isAvailable();
@@ -113,6 +114,7 @@ export async function getLaunchAuthModeAsync(): Promise<BiometricCheckResult> {
  */
 export function getLaunchAuthMode(): BiometricCheckResult {
   if (!Capacitor.isNativePlatform()) return "not-native";
+  if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return "not-native";
 
   const token = secureGet("auth_token");
   if (!token) return "no-session";

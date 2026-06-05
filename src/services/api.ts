@@ -1,6 +1,7 @@
 import axios from "axios";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
+import { getApiBaseUrl } from "./apiBase";
 
 export const API_BASE_URL: string = (() => {
   if (import.meta.env.VITE_API_BASE) return import.meta.env.VITE_API_BASE as string;
@@ -119,6 +120,7 @@ api.interceptors.request.use(async (config) => {
     config.timeout = 0;
   }
 
+  config.baseURL = getApiBaseUrl();
   (config as typeof config & { metadata?: { start: number } }).metadata = { start: Date.now() };
   return config;
 });
