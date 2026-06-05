@@ -442,6 +442,14 @@ const Dashboard = () => {
     () => myAssets.filter((a) => !inspectionProjectIds.has(a.projectId)),
     [myAssets, inspectionProjectIds]
   );
+  const myInstallBlocking = useMemo(
+    () => openIssues.filter((issue) => issue.isBlocking && myInstallAssets.some((asset) => asset.id === issue.assetId)),
+    [openIssues, myInstallAssets]
+  );
+  const myInstallPendingSigs = useMemo(
+    () => pendingSigs.filter((sig) => myInstallAssets.some((asset) => asset.id === sig.assetId || asset.jobNumber === sig.jobNumber)),
+    [pendingSigs, myInstallAssets]
+  );
 
   // Show My Inspections tab for managers always; for others only if assigned to inspection assets
   const hasInspectionsTab = isManager || myInspectionAssets.length > 0 || inspectionRunsDue > 0;
@@ -1486,12 +1494,12 @@ const Dashboard = () => {
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
               Sorted by activity {"\u2014"} tap to open
             </Typography>
-            {myAssets.length === 0 ? (
+            {myInstallAssets.length === 0 ? (
               <Typography variant="caption" color="text.disabled">No jobs assigned to you.</Typography>
             ) : (
               <>
                 <Grid container spacing={1.5}>
-                  {myAssets.slice(0, 6).map((a) => {
+                  {myInstallAssets.slice(0, 6).map((a) => {
                     const isActive = isInProgressAsset(a.runStatus) || isInProgressAsset(a.status);
                     const isPaused = isPausedAsset(a.runStatus);
                     return (
@@ -1533,9 +1541,9 @@ const Dashboard = () => {
                     );
                   })}
                 </Grid>
-                {myAssets.length > 6 && (
+                {myInstallAssets.length > 6 && (
                   <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
-                    +{myAssets.length - 6} more {"\u2014"}{" "}
+                    +{myInstallAssets.length - 6} more {"\u2014"}{" "}
                     <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }}
                       onClick={() => navigate("/installations/assets")}>
                       view all
@@ -1619,17 +1627,17 @@ const Dashboard = () => {
             <Grid item xs={12} md={6}>
               <Box className="glass-card" sx={{ p: 2.5 }}>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-                  <ErrorOutlineOutlined sx={{ fontSize: 18, color: myBlocking.length > 0 ? "error.main" : "text.disabled" }} />
+                  <ErrorOutlineOutlined sx={{ fontSize: 18, color: myInstallBlocking.length > 0 ? "error.main" : "text.disabled" }} />
                   <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>My Blocking Issues</Typography>
-                  <Chip label={myBlocking.length} size="small"
-                    color={myBlocking.length > 0 ? "error" : "default"} variant="outlined"
+                  <Chip label={myInstallBlocking.length} size="small"
+                    color={myInstallBlocking.length > 0 ? "error" : "default"} variant="outlined"
                     sx={{ height: 20, fontSize: "0.7rem" }} />
                 </Stack>
-                {myBlocking.length === 0 ? (
+                {myInstallBlocking.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">No blocking issues on your jobs</Typography>
                 ) : (
                   <Stack spacing={0.25}>
-                    {myBlocking.map((iss) => (
+                    {myInstallBlocking.map((iss) => (
                       <ItemRow key={iss.issueId}
                         label={`${iss.jobNumber}: ${iss.assetTag}`}
                         sub={iss.description.slice(0, 60) + (iss.description.length > 60 ? "..." : "")}
@@ -1642,17 +1650,17 @@ const Dashboard = () => {
             <Grid item xs={12} md={6}>
               <Box className="glass-card" sx={{ p: 2.5 }}>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-                  <PendingActionsOutlined sx={{ fontSize: 18, color: myPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
+                  <PendingActionsOutlined sx={{ fontSize: 18, color: myInstallPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
                   <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>My Pending Signatures</Typography>
-                  <Chip label={myPendingSigs.length} size="small"
-                    color={myPendingSigs.length > 0 ? "warning" : "default"} variant="outlined"
+                  <Chip label={myInstallPendingSigs.length} size="small"
+                    color={myInstallPendingSigs.length > 0 ? "warning" : "default"} variant="outlined"
                     sx={{ height: 20, fontSize: "0.7rem" }} />
                 </Stack>
-                {myPendingSigs.length === 0 ? (
+                {myInstallPendingSigs.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">No signatures waiting</Typography>
                 ) : (
                   <Stack spacing={0.25}>
-                    {myPendingSigs.map((s) => (
+                    {myInstallPendingSigs.map((s) => (
                       <ItemRow key={s.runId}
                         label={`${s.jobNumber}: ${s.assetTag}`}
                         sub={`Completed ${fmtDate(s.completedAt)}`}
@@ -1754,25 +1762,25 @@ const Dashboard = () => {
             <Grid item xs={12} md={6}>
               <Box className="glass-card" sx={{ p: 2.5 }}>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-                  <PendingActionsOutlined sx={{ fontSize: 18, color: pendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
+                  <PendingActionsOutlined sx={{ fontSize: 18, color: myInstallPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
                   <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Sign-offs Waiting on Me</Typography>
-                  <Chip label={pendingSigs.length} size="small"
-                    color={pendingSigs.length > 0 ? "warning" : "default"} variant="outlined"
+                  <Chip label={myInstallPendingSigs.length} size="small"
+                    color={myInstallPendingSigs.length > 0 ? "warning" : "default"} variant="outlined"
                     sx={{ height: 20, fontSize: "0.7rem" }} />
                 </Stack>
-                {pendingSigs.length === 0 ? (
+                {myInstallPendingSigs.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">No pending sign-offs</Typography>
                 ) : (
                   <Stack spacing={0.25}>
-                    {pendingSigs.slice(0, 5).map((s) => (
+                    {myInstallPendingSigs.slice(0, 5).map((s) => (
                       <ItemRow key={s.runId}
                         label={`${s.jobNumber}: ${s.assetTag}`}
                         sub={`Completed ${fmtDate(s.completedAt)}`}
                         onClick={() => navigate(`/projects/${s.projectId}`)} />
                     ))}
-                    {pendingSigs.length > 5 && (
+                    {myInstallPendingSigs.length > 5 && (
                       <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                        +{pendingSigs.length - 5} more
+                        +{myInstallPendingSigs.length - 5} more
                       </Typography>
                     )}
                   </Stack>
@@ -2095,12 +2103,12 @@ const Dashboard = () => {
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
                 Installation assets currently assigned to you as a technician.
               </Typography>
-              {myAssets.length === 0 ? (
+              {myInstallAssets.length === 0 ? (
                 <Typography variant="caption" color="text.disabled">No installation assets currently assigned to you.</Typography>
               ) : (
                 <>
                   <Grid container spacing={1.5}>
-                    {myAssets.slice(0, 6).map((a) => (
+                    {myInstallAssets.slice(0, 6).map((a) => (
                       <Grid item xs={12} sm={6} md={4} key={a.id}>
                         <Paper elevation={0} onClick={() => navigate("/installations/assets")}
                           sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
@@ -2121,10 +2129,10 @@ const Dashboard = () => {
                       </Grid>
                     ))}
                   </Grid>
-                  {myAssets.length > 6 && (
+                  {myInstallAssets.length > 6 && (
                     <Button size="small" variant="text" sx={{ mt: 1 }}
                       onClick={() => navigate("/installations/assets")}>
-                      View all {myAssets.length} assets
+                      View all {myInstallAssets.length} assets
                     </Button>
                   )}
                 </>

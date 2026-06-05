@@ -59,8 +59,30 @@ public class ProjectAssetsController : ControllerBase
     [HttpGet("open")]
     public async Task<ActionResult<IEnumerable<OpenAssetDto>>> GetOpen()
     {
-        var assets = await _db.ProjectAssets
-            .Where(a => a.Status == "NotStarted" || a.Status == "InProgress")
+        var userId = User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst("role")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+            ?? string.Empty;
+
+        var canViewAllOpenAssets =
+            string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "Project Manager", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "Supervisor", StringComparison.OrdinalIgnoreCase);
+
+        var assetsQuery = _db.ProjectAssets
+            .Where(a => a.Status == "NotStarted" || a.Status == "InProgress");
+
+        if (!canViewAllOpenAssets)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+                return Ok(Array.Empty<OpenAssetDto>());
+
+            assetsQuery = assetsQuery.Where(a => a.AssignedUserId == userId);
+        }
+
+        var assets = await assetsQuery
             .OrderBy(a => a.ProjectId).ThenBy(a => a.AssetTag)
             .ToListAsync();
 
