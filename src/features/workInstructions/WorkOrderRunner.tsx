@@ -64,6 +64,7 @@ import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
 import { getMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
+import { mediaStore } from "../../services/mediaStore";
 
 // Types
 
@@ -195,6 +196,48 @@ function renderAssetIdentifier(assetTag?: string) {
       Asset ID: {assetTag}
     </Typography>
   );
+}
+
+function ResolvedStoredMedia({
+  value,
+  isVideo,
+  imageSx,
+  videoSx,
+}: {
+  value: string;
+  isVideo: boolean;
+  imageSx?: object;
+  videoSx?: object;
+}) {
+  const [resolvedValue, setResolvedValue] = useState(value);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolveValue() {
+      try {
+        const resolved = await mediaStore.resolveMediaValue(value);
+        if (!cancelled) {
+          setResolvedValue(resolved);
+        }
+      } catch {
+        if (!cancelled) {
+          setResolvedValue(value);
+        }
+      }
+    }
+
+    void resolveValue();
+    return () => {
+      cancelled = true;
+    };
+  }, [value]);
+
+  if (isVideo) {
+    return <Box component="video" src={resolvedValue} controls sx={videoSx} />;
+  }
+
+  return <Box component="img" src={resolvedValue} sx={imageSx} />;
 }
 
 export default function WorkOrderRunner({
@@ -692,6 +735,22 @@ export default function WorkOrderRunner({
 
   function getInputValue(stepId: string, inputId: string): string {
     return values[stepId]?.[inputId] ?? "";
+  }
+
+  async function persistRunMediaItem(
+    source: string,
+    kind: "photo" | "video" | "signature",
+    stepId: string,
+    inputId: string,
+  ): Promise<string> {
+    const runRef = activeRunId ?? projectAssetId ?? workflowConfigId ?? "pending-run";
+    const linkedToType = kind === "signature" ? "signature" : "run-step";
+    return await mediaStore.persistMediaValue(
+      source,
+      kind,
+      linkedToType,
+      `${runRef}:${stepId}:${inputId}`,
+    );
   }
 
   function goBack() {
@@ -1197,7 +1256,17 @@ export default function WorkOrderRunner({
                 const file = e.target.files?.[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = () => { onChange(JSON.stringify([...media, reader.result as string])); };
+                reader.onload = () => {
+                  void (async () => {
+                    const persisted = await persistRunMediaItem(
+                      reader.result as string,
+                      isVideo ? "video" : "photo",
+                      sid,
+                      inp.id,
+                    );
+                    onChange(JSON.stringify([...media, persisted]));
+                  })();
+                };
                 reader.readAsDataURL(file);
                 e.target.value = "";
               }}
@@ -1209,7 +1278,15 @@ export default function WorkOrderRunner({
             label="Upload from Phone"
             onUploaded={() => { /* handled by onUploadedWithData */ }}
             onUploadedWithData={(_, dataUrl) => {
-              onChange(JSON.stringify([...media, dataUrl]));
+              void (async () => {
+                const persisted = await persistRunMediaItem(
+                  dataUrl,
+                  isVideo ? "video" : "photo",
+                  sid,
+                  inp.id,
+                );
+                onChange(JSON.stringify([...media, persisted]));
+              })();
             }}
           />
           </Stack>
@@ -1218,8 +1295,8 @@ export default function WorkOrderRunner({
               {media.map((src, idx) => (
                 <Box key={idx} sx={{ position: "relative" }}>
                   {isVideo
-                    ? <Box component="video" src={src} controls sx={{ width: 160, height: 90, borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)" }} />
-                    : <Box component="img" src={src} sx={{ width: 80, height: 60, objectFit: "cover", borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)" }} />
+                    ? <ResolvedStoredMedia value={src} isVideo imageSx={{}} videoSx={{ width: 160, height: 90, borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)" }} />
+                    : <ResolvedStoredMedia value={src} isVideo={false} imageSx={{ width: 80, height: 60, objectFit: "cover", borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)" }} />
                   }
                   <IconButton
                     size="small"
@@ -1260,11 +1337,26 @@ export default function WorkOrderRunner({
         <Box>
           {val ? (
             <Box>
-              <Box component="img" src={val} sx={{ maxWidth: "100%", height: 100, borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)", display: "block", mb: 1 }} />
+              <ResolvedStoredMedia
+                value={val}
+                isVideo={false}
+                imageSx={{ maxWidth: "100%", height: 100, borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)", display: "block", mb: 1 }}
+              />
               <Button size="small" variant="outlined" onClick={() => onChange("")}>Clear signature</Button>
             </Box>
           ) : (
-            <SignaturePad onChange={(dataUrl) => onChange(dataUrl ?? "")} height={120} label="Sign here" />
+            <SignaturePad
+              onChange={(dataUrl) => {
+                void (async () => {
+                  const persisted = dataUrl
+                    ? await persistRunMediaItem(dataUrl, "signature", sid, inp.id)
+                    : "";
+                  onChange(persisted);
+                })();
+              }}
+              height={120}
+              label="Sign here"
+            />
           )}
         </Box>
       );
@@ -1988,6 +2080,8 @@ export default function WorkOrderRunner({
                 media={flagMedia}
                 onChange={setFlagMedia}
                 label="Attach Photo / Video (optional)"
+                linkedToType="issue-report"
+                linkedToId={`${activeRunId ?? projectAssetId ?? workflowConfigId ?? "draft-run"}:${currentStep?.id ?? "step"}`}
               />
             </Stack>
           </DialogContent>

@@ -4,13 +4,15 @@
  * Renders "Add Photo" / "Add Video" buttons backed by hidden file inputs.
  * Captured items are stored as base64 data URLs and shown as thumbnails.
  */
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Box, Button, IconButton, Stack, Tooltip, Typography } from "@mui/material";
 import PhotoCameraOutlinedIcon from "@mui/icons-material/PhotoCameraOutlined";
 import VideocamOutlinedIcon from "@mui/icons-material/VideocamOutlined";
 import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import PlayCircleOutlineOutlinedIcon from "@mui/icons-material/PlayCircleOutlineOutlined";
 import QRUploadButton from "../QRUploadButton";
+import { mediaStore } from "../../services/mediaStore";
+import type { OfflineMediaRef } from "../../services/offlineStore";
 
 interface Props {
   media: string[];
@@ -21,12 +23,14 @@ interface Props {
   qrDocType?: string;
   qrLinkedTo?: string;
   /** Context tags for document linking (e.g. issue-report, issue-resolution) */
-  linkedToType?: string;
+  linkedToType?: OfflineMediaRef["linkedToType"];
   linkedToId?: string;
 }
 
 function isVideo(dataUrl: string) {
-  return dataUrl.startsWith("data:video");
+  return mediaStore.isStoredMediaValue(dataUrl)
+    ? mediaStore.getMediaKind(dataUrl) === "video"
+    : dataUrl.startsWith("data:video");
 }
 
 function toBase64(file: File): Promise<string> {
@@ -38,16 +42,56 @@ function toBase64(file: File): Promise<string> {
   });
 }
 
-export default function MediaCapture({ media, onChange, label, disabled = false, qrDocType, qrLinkedTo }: Props) {
+export default function MediaCapture({
+  media,
+  onChange,
+  label,
+  disabled = false,
+  qrDocType,
+  qrLinkedTo,
+  linkedToType,
+  linkedToId,
+}: Props) {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const [previewMedia, setPreviewMedia] = useState<string[]>(media);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPreviews() {
+      const resolved = await Promise.all(
+        media.map(async (item) => {
+          try {
+            return await mediaStore.resolveMediaValue(item);
+          } catch {
+            return item;
+          }
+        }),
+      );
+      if (!cancelled) {
+        setPreviewMedia(resolved);
+      }
+    }
+
+    void loadPreviews();
+    return () => {
+      cancelled = true;
+    };
+  }, [media]);
+
+  async function persistIfNeeded(raw: string, kind: "photo" | "video", fileName?: string): Promise<string> {
+    if (!linkedToType || !linkedToId) return raw;
+    return await mediaStore.persistMediaValue(raw, kind, linkedToType, linkedToId, fileName);
+  }
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     const results: string[] = [];
     for (const file of Array.from(files)) {
       try {
-        results.push(await toBase64(file));
+        const base64 = await toBase64(file);
+        results.push(await persistIfNeeded(base64, file.type.startsWith("video/") ? "video" : "photo", file.name));
       } catch {
         // skip unreadable files
       }
@@ -96,7 +140,12 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
             linkedTo={qrLinkedTo}
             label="Phone"
             onUploaded={() => {}}
-            onUploadedWithData={(_docId, dataUrl) => onChange([...media, dataUrl])}
+            onUploadedWithData={(_docId, dataUrl) => {
+              void (async () => {
+                const persisted = await persistIfNeeded(dataUrl, "photo");
+                onChange([...media, persisted]);
+              })();
+            }}
           />
         )}
 
@@ -163,7 +212,7 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
               ) : (
                 <Box
                   component="img"
-                  src={src}
+                  src={previewMedia[idx] ?? src}
                   alt={`capture-${idx}`}
                   sx={{
                     position: "absolute",
