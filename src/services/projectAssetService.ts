@@ -136,6 +136,16 @@ export const projectAssetService = {
       return [];
     }
   },
+
+  async restore(id: string): Promise<ProjectAsset> {
+    const res = await api.post<ProjectAsset>(`/project-assets/${id}/restore`);
+    return fromDto(res.data);
+  },
+
+  async purge(id: string): Promise<void> {
+    await api.delete(`/project-assets/${id}/purge`);
+    await entityDeleteAsset(id);
+  },
 };
 
 export interface OpenAssetItem {

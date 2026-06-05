@@ -79,6 +79,8 @@ export interface ProjectAssetWorkflowSummary {
   hasOpenIssues: boolean;
   latestRunStartedAt?: string;
   latestRunCompletedAt?: string;
+  totalInventoryFeatures?: number;
+  completedInventoryFeatures?: number;
 }
 
 export interface CreateProjectAssetInput {

@@ -171,6 +171,8 @@ export interface GenerateReportParams {
   includeAllSteps?: boolean;
   /** Installer and/or customer signature events — used to render the sign-off block. */
   signatureEvents?: SignatureEvent[];
+  /** Optional document type tag (e.g. "inspection") for report labelling. */
+  documentType?: string;
 }
 
 export async function generateWorkflowReport(params: GenerateReportParams): Promise<void> {

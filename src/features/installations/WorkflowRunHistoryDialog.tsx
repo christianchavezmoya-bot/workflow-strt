@@ -75,6 +75,8 @@ interface Props {
   project?: { customerName: string; jobNumber: string; siteName?: string };
   customerLogoBase64?: string | null;
   assignedTechnician?: string;
+  allowRerun?: boolean;
+  allowContinue?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
