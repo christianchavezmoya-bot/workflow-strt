@@ -1383,6 +1383,39 @@ public record OpenAssetDto(
     string? Location
 );
 
+public record DashboardWorkspaceAssetDto(
+    string Id,
+    string ProjectId,
+    string JobNumber,
+    string? AssetTag,
+    string? AssetName,
+    string? AssetModel,
+    string? Location,
+    string Status,
+    string? RunStatus,
+    string HistoryStatus,
+    int CompletedSteps,
+    int TotalSteps,
+    int MissingItems,
+    string? EvidenceStatus,
+    string? AssignedUserId,
+    string WorkflowMode,
+    bool IsDeleted,
+    DateTime? DeletedAtUtc,
+    string? DeleteReason,
+    DateTime? LatestActivityAt,
+    DateTime? CompletedAt,
+    bool HasOpenIssues,
+    string? SignatureStatus
+);
+
+public record DashboardWorkspaceDto(
+    List<DashboardWorkspaceAssetDto> CurrentInstalls,
+    List<DashboardWorkspaceAssetDto> CurrentInspections,
+    List<DashboardWorkspaceAssetDto> InstallHistory,
+    List<DashboardWorkspaceAssetDto> InspectionHistory
+);
+
 // ── Dashboard: Evidence Completeness ──────────────────────────────────────
 
 public record EvidenceCompletenessDto(

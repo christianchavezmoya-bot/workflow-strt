@@ -19,7 +19,13 @@ import { fetchProjects } from "../../store/projectSlice";
 import { fetchProducts } from "../../store/productsSlice";
 import { officesService } from "../../services/officesService";
 import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
-import { projectAssetService, type OpenAssetItem, type ProjectAssetSummaryItem, type WorkloadSummaryItem } from "../../services/projectAssetService";
+import {
+  projectAssetService,
+  type DashboardWorkspace,
+  type OpenAssetItem,
+  type ProjectAssetSummaryItem,
+  type WorkloadSummaryItem,
+} from "../../services/projectAssetService";
 import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import api from "../../services/api";
@@ -28,7 +34,6 @@ import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag, type PhotoUpdateNotification } from "./PhotoUploadDialog";
-import type { InspectionImport } from "../../types/project";
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -54,11 +59,19 @@ function isOpenInspectionStatus(status?: string | null) {
   return value === "notstarted" || value === "inprogress" || value === "paused" || value === "onhold";
 }
 
-function displayRunState(asset: OpenAssetItem) {
+function displayRunState(asset: { runStatus?: string | null; status?: string | null }) {
   if (isPausedAsset(asset.runStatus)) return "Paused";
   if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) return "In Progress";
   if (isNotStartedAsset(asset.status)) return "Not Started";
   return asset.runStatus || asset.status || "Unknown";
+}
+
+function historyChipColor(status?: string | null): "default" | "success" | "warning" | "error" | "info" {
+  const value = (status ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  if (value === "completed" || value === "finished" || value === "closed") return "success";
+  if (value === "deleted") return "error";
+  if (value === "cancelled") return "warning";
+  return "default";
 }
 
 function GaugeCircle({ value, size = 80, color = "primary.main" }: { value: number; size?: number; color?: string }) {
@@ -176,9 +189,13 @@ const Dashboard = () => {
   const [pmDashboardTab, setPmDashboardTab] = useState<PmDashboardTab>(
     isManager ? "pm-projects" : "my-installs"
   );
-  const [inspectionAssets, setInspectionAssets] = useState<OpenAssetItem[]>([]);
-  const [inspectionImports, setInspectionImports] = useState<InspectionImport[]>([]);
-  const [inspectionLoading, setInspectionLoading] = useState(false);
+  const [dashboardWorkspace, setDashboardWorkspace] = useState<DashboardWorkspace>({
+    currentInstalls: [],
+    currentInspections: [],
+    installHistory: [],
+    inspectionHistory: [],
+  });
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
 
   // Admin: view another user's dashboard
   type DashboardUserEntry = { id: string; fullName: string; role: string; office: string };
@@ -233,6 +250,33 @@ const Dashboard = () => {
       }).catch(() => {});
     }
   }, [dispatch, loadAttention, isEngineer]);
+
+  useEffect(() => {
+    if (isViewer) {
+      setDashboardWorkspace({
+        currentInstalls: [],
+        currentInspections: [],
+        installHistory: [],
+        inspectionHistory: [],
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setWorkspaceLoading(true);
+    projectAssetService
+      .dashboardWorkspace(isManager ? selectedDashboardId : undefined)
+      .then((data) => {
+        if (!cancelled) setDashboardWorkspace(data);
+      })
+      .finally(() => {
+        if (!cancelled) setWorkspaceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isManager, isViewer, selectedDashboardId]);
 
   // PM: listen for new auto-assign flags written by AssetInstallationPage
   useEffect(() => {
@@ -352,8 +396,8 @@ const Dashboard = () => {
 
   // Phase 1 - personal workspace
   const myAssets   = useMemo(
-    () => openAssets.filter((a) => a.assignedUserId === (viewedDashboardUserId ?? user.id)),
-    [openAssets, viewedDashboardUserId, user.id],
+    () => [...dashboardWorkspace.currentInstalls, ...dashboardWorkspace.currentInspections],
+    [dashboardWorkspace],
   );
   const myBlocking = useMemo(() => openIssues.filter((i) => i.isBlocking && myAssets.some((a) => a.id === i.assetId)), [openIssues, myAssets]);
   const myActive   = useMemo(() => myAssets.filter((a) => isInProgressAsset(a.runStatus) || isInProgressAsset(a.status)), [myAssets]);
@@ -429,18 +473,22 @@ const Dashboard = () => {
     [inspectionProjects]
   );
   const myInspectionAssets = useMemo(
-    () => inspectionAssets.filter((a) => inspectionProjectIds.has(a.projectId) && a.assignedUserId === (viewedDashboardUserId ?? user.id)),
-    [inspectionAssets, inspectionProjectIds, viewedDashboardUserId, user.id]
+    () => dashboardWorkspace.currentInspections,
+    [dashboardWorkspace]
   );
-  const myInspectionImports = useMemo(() => {
-    const assignedAssetIds = new Set(myInspectionAssets.map((a) => a.id));
-    return inspectionImports.filter((item) => !item.assetId || assignedAssetIds.has(item.assetId));
-  }, [inspectionImports, myInspectionAssets]);
+  const myInspectionHistory = useMemo(
+    () => dashboardWorkspace.inspectionHistory,
+    [dashboardWorkspace]
+  );
 
   // Install assets = assigned assets that are NOT in an inspection project
   const myInstallAssets = useMemo(
-    () => myAssets.filter((a) => !inspectionProjectIds.has(a.projectId)),
-    [myAssets, inspectionProjectIds]
+    () => dashboardWorkspace.currentInstalls,
+    [dashboardWorkspace]
+  );
+  const myInstallHistory = useMemo(
+    () => dashboardWorkspace.installHistory,
+    [dashboardWorkspace]
   );
   const myInstallBlocking = useMemo(
     () => openIssues.filter((issue) => issue.isBlocking && myInstallAssets.some((asset) => asset.id === issue.assetId)),
@@ -452,22 +500,7 @@ const Dashboard = () => {
   );
 
   // Show My Inspections tab for managers always; for others only if assigned to inspection assets
-  const hasInspectionsTab = isManager || myInspectionAssets.length > 0 || inspectionRunsDue > 0;
-
-  useEffect(() => {
-    if (isViewer || inspectionProjects.length === 0) return;
-    let cancelled = false;
-    setInspectionLoading(true);
-    Promise.all([
-      Promise.all(inspectionProjects.map((p) => projectAssetService.listByProject(p.id).catch(() => []))),
-      Promise.all(inspectionProjects.map((p) => inspectionImportService.list({ projectId: p.id }).catch(() => []))),
-    ]).then(([assetGroups, importGroups]) => {
-      if (cancelled) return;
-      setInspectionAssets((assetGroups as OpenAssetItem[][]).flat());
-      setInspectionImports((importGroups as InspectionImport[][]).flat());
-    }).finally(() => { if (!cancelled) setInspectionLoading(false); });
-    return () => { cancelled = true; };
-  }, [isViewer, inspectionProjects]);
+  const hasInspectionsTab = isManager || myInspectionAssets.length > 0 || myInspectionHistory.length > 0 || inspectionRunsDue > 0;
 
   // Redirect to a valid tab when the current selection isn't available for this user
   useEffect(() => {
@@ -556,37 +589,62 @@ const Dashboard = () => {
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
         <AssessmentOutlined sx={{ color: "primary.main", fontSize: 20 }} />
         <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Inspections</Typography>
-        {inspectionLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
+        {workspaceLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-        Inspection assets assigned to you across inspection-only and mixed projects.
+        Current inspection work plus your recent inspection history.
       </Typography>
-      {myInspectionAssets.length === 0 && !inspectionLoading ? (
+      <Grid container spacing={1.5} sx={{ mb: 2 }}>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+            <Typography variant="caption" color="text.secondary">Assigned</Typography>
+            <Typography variant="h5" fontWeight={700}>{myInspectionAssets.length}</Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+            <Typography variant="caption" color="text.secondary">Not Started</Typography>
+            <Typography variant="h5" fontWeight={700}>{myInspectionAssets.filter((a) => isNotStartedAsset(a.status)).length}</Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+            <Typography variant="caption" color="text.secondary">In Progress</Typography>
+            <Typography variant="h5" fontWeight={700}>{myInspectionAssets.filter((a) => isInProgressAsset(a.runStatus) || isInProgressAsset(a.status)).length}</Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+            <Typography variant="caption" color="text.secondary">History</Typography>
+            <Typography variant="h5" fontWeight={700}>{myInspectionHistory.length}</Typography>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      {myInspectionAssets.length === 0 && !workspaceLoading ? (
         <Typography variant="caption" color="text.disabled">No inspection assets currently assigned to you.</Typography>
       ) : (
         <Grid container spacing={1.5}>
-          {myInspectionAssets.slice(0, 6).map((asset) => {
-            const project = inspectionProjects.find((p) => p.id === asset.projectId);
-            return (
-              <Grid item xs={12} sm={6} md={4} key={asset.id}>
-                <Paper elevation={0}
-                  onClick={() => navigate(`/projects/${asset.projectId}`)}
-                  sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                    transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                  <Stack spacing={0.75}>
-                    <Typography variant="caption" fontWeight={600} noWrap display="block">
-                      {asset.assetTag || asset.assetName || asset.id}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                      {project?.jobNumber ?? asset.projectId}
-                    </Typography>
-                    <Chip label={asset.status || "Not Started"} size="small" variant="outlined"
-                      sx={{ alignSelf: "flex-start", height: 16, fontSize: "0.58rem" }} />
-                  </Stack>
-                </Paper>
-              </Grid>
-            );
-          })}
+          {myInspectionAssets.slice(0, 6).map((asset) => (
+            <Grid item xs={12} sm={6} md={4} key={asset.id}>
+              <Paper elevation={0}
+                onClick={() => navigate("/installations/assets?workflowType=Inspection")}
+                sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                  transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                <Stack spacing={0.75}>
+                  <Typography variant="caption" fontWeight={600} noWrap display="block">
+                    {asset.assetTag || asset.assetName || asset.id}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
+                    {asset.jobNumber}
+                  </Typography>
+                  <Chip label={displayRunState(asset)} size="small" variant="outlined"
+                    color={isPausedAsset(asset.runStatus) ? "warning" : isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status) ? "primary" : "default"}
+                    sx={{ alignSelf: "flex-start", height: 16, fontSize: "0.58rem" }} />
+                </Stack>
+              </Paper>
+            </Grid>
+          ))}
         </Grid>
       )}
       {myInspectionAssets.length > 6 && (
@@ -598,11 +656,41 @@ const Dashboard = () => {
           </Box>
         </Typography>
       )}
-      {myInspectionImports.length > 0 && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
-          {myInspectionImports.length} inspection inbox item{myInspectionImports.length === 1 ? "" : "s"} pending in this workspace.
-        </Typography>
-      )}
+      <Box sx={{ mt: 2 }}>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+          <CheckCircleOutlineOutlined sx={{ fontSize: 18, color: myInspectionHistory.length > 0 ? "success.main" : "text.disabled" }} />
+          <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+            Inspection History
+          </Typography>
+          <Chip label={myInspectionHistory.length} size="small" color={myInspectionHistory.length > 0 ? "success" : "default"} variant="outlined"
+            sx={{ height: 20, fontSize: "0.7rem" }} />
+        </Stack>
+        {myInspectionHistory.length === 0 ? (
+          <Typography variant="caption" color="text.secondary">No inspection history yet</Typography>
+        ) : (
+          <Stack spacing={0.75}>
+            {myInspectionHistory.slice(0, 5).map((asset) => (
+              <Paper key={asset.id} elevation={0}
+                onClick={() => navigate("/installations/assets?workflowType=Inspection")}
+                sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                  "&:hover": { borderColor: "success.main", background: "rgba(45,212,191,0.04)" } }}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="caption" fontWeight={600} noWrap display="block">
+                      {asset.assetTag || asset.assetName || asset.id}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
+                      {asset.jobNumber}{" · "}{asset.completedAt ? `Completed ${fmtDate(asset.completedAt)}` : `Updated ${fmtDate(asset.latestActivityAt)}`}
+                    </Typography>
+                  </Box>
+                  <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
+                    sx={{ height: 18, fontSize: "0.62rem" }} />
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        )}
+      </Box>
     </Box>
   );
 
@@ -1400,7 +1488,13 @@ const Dashboard = () => {
           <Collapse in={workspaceExpanded || isEngineer}>
             <Box sx={{ mt: 1.5 }}>
               {myAssets.length === 0 ? (
-                <Typography variant="caption" color="text.disabled">No assets currently assigned to you.</Typography>
+                <Typography variant="caption" color="text.disabled">
+                  {workspaceLoading
+                    ? "Loading your assigned assets..."
+                    : myInstallHistory.length > 0 || myInspectionHistory.length > 0
+                      ? "No active assets right now. Use the history cards below to review completed or closed work."
+                      : "No assets currently assigned to you."}
+                </Typography>
               ) : (
                 <Grid container spacing={1.5}>
                   {myAssets.slice(0, 6).map((a) => (
@@ -1671,6 +1765,45 @@ const Dashboard = () => {
               </Box>
             </Grid>
           </Grid>
+
+          <Box className="glass-card" sx={{ p: 2.5 }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+              <CheckCircleOutlineOutlined sx={{ fontSize: 18, color: myInstallHistory.length > 0 ? "success.main" : "text.disabled" }} />
+              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                Job History
+              </Typography>
+              <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
+                sx={{ height: 20, fontSize: "0.7rem" }} />
+            </Stack>
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+              Finished, completed, closed, cancelled, or deleted installation work that was assigned to you.
+            </Typography>
+            {myInstallHistory.length === 0 ? (
+              <Typography variant="caption" color="text.secondary">No install history yet</Typography>
+            ) : (
+              <Stack spacing={0.75}>
+                {myInstallHistory.slice(0, 6).map((asset) => (
+                  <Paper key={asset.id} elevation={0}
+                    onClick={() => navigate("/installations/assets")}
+                    sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                      "&:hover": { borderColor: "success.main", background: "rgba(45,212,191,0.04)" } }}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="caption" fontWeight={600} noWrap display="block">
+                          {asset.assetTag || asset.assetName || asset.id}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
+                          {asset.jobNumber}{" · "}{asset.completedAt ? `Completed ${fmtDate(asset.completedAt)}` : `Updated ${fmtDate(asset.latestActivityAt)}`}
+                        </Typography>
+                      </Box>
+                      <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
+                        sx={{ height: 18, fontSize: "0.62rem" }} />
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+          </Box>
         </>
       )}
 
@@ -1748,6 +1881,42 @@ const Dashboard = () => {
               </Box>
             </Grid>
           </Grid>
+
+          <Box className="glass-card" sx={{ p: 2.5 }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+              <CheckCircleOutlineOutlined sx={{ fontSize: 18, color: myInstallHistory.length > 0 ? "success.main" : "text.disabled" }} />
+              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                Install History
+              </Typography>
+              <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
+                sx={{ height: 20, fontSize: "0.7rem" }} />
+            </Stack>
+            {myInstallHistory.length === 0 ? (
+              <Typography variant="caption" color="text.secondary">No install history yet</Typography>
+            ) : (
+              <Stack spacing={0.75}>
+                {myInstallHistory.slice(0, 6).map((asset) => (
+                  <Paper key={asset.id} elevation={0}
+                    onClick={() => navigate("/installations/assets")}
+                    sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                      "&:hover": { borderColor: "success.main", background: "rgba(45,212,191,0.04)" } }}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="caption" fontWeight={600} noWrap display="block">
+                          {asset.assetTag || asset.assetName || asset.id}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
+                          {asset.jobNumber}{" · "}{asset.completedAt ? `Completed ${fmtDate(asset.completedAt)}` : `Updated ${fmtDate(asset.latestActivityAt)}`}
+                        </Typography>
+                      </Box>
+                      <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
+                        sx={{ height: 18, fontSize: "0.62rem" }} />
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+          </Box>
         </>
       )}
 
@@ -2095,49 +2264,87 @@ const Dashboard = () => {
 
           {/* My Installs workspace */}
           {pmDashboardTab === "my-installs" && (
-            <Box className="glass-card" sx={{ p: 2.5 }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <WorkOutlineOutlined sx={{ color: "primary.main", fontSize: 20 }} />
-                <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Installs</Typography>
-              </Stack>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-                Installation assets currently assigned to you as a technician.
-              </Typography>
-              {myInstallAssets.length === 0 ? (
-                <Typography variant="caption" color="text.disabled">No installation assets currently assigned to you.</Typography>
-              ) : (
-                <>
-                  <Grid container spacing={1.5}>
-                    {myInstallAssets.slice(0, 6).map((a) => (
-                      <Grid item xs={12} sm={6} md={4} key={a.id}>
-                        <Paper elevation={0} onClick={() => navigate("/installations/assets")}
-                          sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                            transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                          <Stack spacing={0.75}>
+            <Stack spacing={2}>
+              <Box className="glass-card" sx={{ p: 2.5 }}>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                  <WorkOutlineOutlined sx={{ color: "primary.main", fontSize: 20 }} />
+                  <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Installs</Typography>
+                </Stack>
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+                  Installation assets currently assigned to you as a technician.
+                </Typography>
+                {myInstallAssets.length === 0 ? (
+                  <Typography variant="caption" color="text.disabled">No installation assets currently assigned to you.</Typography>
+                ) : (
+                  <>
+                    <Grid container spacing={1.5}>
+                      {myInstallAssets.slice(0, 6).map((a) => (
+                        <Grid item xs={12} sm={6} md={4} key={a.id}>
+                          <Paper elevation={0} onClick={() => navigate("/installations/assets")}
+                            sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                              transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                            <Stack spacing={0.75}>
+                              <Typography variant="caption" fontWeight={600} noWrap display="block">
+                                {a.assetTag || a.assetName}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
+                                {a.jobNumber}
+                              </Typography>
+                              <Chip label={displayRunState(a)}
+                                size="small" variant="outlined"
+                                color={isInProgressAsset(a.runStatus) ? "primary" : isPausedAsset(a.runStatus) ? "warning" : "default"}
+                                sx={{ alignSelf: "flex-start", height: 16, fontSize: "0.58rem" }} />
+                            </Stack>
+                          </Paper>
+                        </Grid>
+                      ))}
+                    </Grid>
+                    {myInstallAssets.length > 6 && (
+                      <Button size="small" variant="text" sx={{ mt: 1 }}
+                        onClick={() => navigate("/installations/assets")}>
+                        View all {myInstallAssets.length} assets
+                      </Button>
+                    )}
+                  </>
+                )}
+              </Box>
+
+              <Box className="glass-card" sx={{ p: 2.5 }}>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                  <CheckCircleOutlineOutlined sx={{ fontSize: 18, color: myInstallHistory.length > 0 ? "success.main" : "text.disabled" }} />
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
+                    Install History
+                  </Typography>
+                  <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
+                    sx={{ height: 20, fontSize: "0.7rem" }} />
+                </Stack>
+                {myInstallHistory.length === 0 ? (
+                  <Typography variant="caption" color="text.secondary">No install history yet</Typography>
+                ) : (
+                  <Stack spacing={0.75}>
+                    {myInstallHistory.slice(0, 6).map((asset) => (
+                      <Paper key={asset.id} elevation={0}
+                        onClick={() => navigate("/installations/assets")}
+                        sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                          "&:hover": { borderColor: "success.main", background: "rgba(45,212,191,0.04)" } }}>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
                             <Typography variant="caption" fontWeight={600} noWrap display="block">
-                              {a.assetTag || a.assetName}
+                              {asset.assetTag || asset.assetName || asset.id}
                             </Typography>
                             <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                              {a.jobNumber}
+                              {asset.jobNumber}{" · "}{asset.completedAt ? `Completed ${fmtDate(asset.completedAt)}` : `Updated ${fmtDate(asset.latestActivityAt)}`}
                             </Typography>
-                            <Chip label={isInProgressAsset(a.runStatus) ? "Active" : isPausedAsset(a.runStatus) ? "Paused" : "Queued"}
-                              size="small" variant="outlined"
-                              color={isInProgressAsset(a.runStatus) ? "primary" : isPausedAsset(a.runStatus) ? "warning" : "default"}
-                              sx={{ alignSelf: "flex-start", height: 16, fontSize: "0.58rem" }} />
-                          </Stack>
-                        </Paper>
-                      </Grid>
+                          </Box>
+                          <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
+                            sx={{ height: 18, fontSize: "0.62rem" }} />
+                        </Stack>
+                      </Paper>
                     ))}
-                  </Grid>
-                  {myInstallAssets.length > 6 && (
-                    <Button size="small" variant="text" sx={{ mt: 1 }}
-                      onClick={() => navigate("/installations/assets")}>
-                      View all {myInstallAssets.length} assets
-                    </Button>
-                  )}
-                </>
-              )}
-            </Box>
+                  </Stack>
+                )}
+              </Box>
+            </Stack>
           )}
         </>
       )}

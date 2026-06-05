@@ -129,6 +129,175 @@ public class ProjectAssetsController : ControllerBase
         return Ok(result);
     }
 
+    // GET api/project-assets/dashboard-workspace?userId={id}
+    [HttpGet("dashboard-workspace")]
+    public async Task<ActionResult<DashboardWorkspaceDto>> GetDashboardWorkspace([FromQuery] string? userId = null)
+    {
+        var currentUserId = User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst("role")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+            ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(currentUserId))
+            return Ok(EmptyDashboardWorkspace());
+
+        var canViewOtherUsers =
+            string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "Project Manager", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "Supervisor", StringComparison.OrdinalIgnoreCase);
+
+        var effectiveUserId = !string.IsNullOrWhiteSpace(userId) && canViewOtherUsers
+            ? userId!
+            : currentUserId;
+
+        var assets = await _db.ProjectAssets
+            .IgnoreQueryFilters()
+            .Where(a => a.AssignedUserId == effectiveUserId)
+            .OrderByDescending(a => a.UpdatedAt)
+            .ToListAsync();
+
+        if (assets.Count == 0)
+            return Ok(EmptyDashboardWorkspace());
+
+        var assetIds = assets.Select(a => a.Id).Distinct().ToList();
+        var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
+
+        var latestRuns = await _db.AssetWorkflowRuns
+            .Where(r => assetIds.Contains(r.AssetId))
+            .OrderByDescending(r => r.StartedAt)
+            .ThenByDescending(r => r.UpdatedAt)
+            .ToListAsync();
+        var latestRunByAsset = latestRuns
+            .GroupBy(r => r.AssetId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var assignments = await _db.AssetWorkflowAssignments
+            .Where(a => assetIds.Contains(a.AssetId))
+            .OrderByDescending(a => a.Active)
+            .ThenByDescending(a => a.AssignedAt)
+            .ToListAsync();
+        var assignmentByAsset = assignments
+            .GroupBy(a => a.AssetId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var workflowConfigIds = latestRuns
+            .Select(r => r.WorkflowConfigId)
+            .Concat(assignments.Select(a => a.WorkflowConfigId))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct()
+            .ToList();
+
+        var workflowConfigTypesById = await _db.WorkflowConfigs
+            .Where(c => workflowConfigIds.Contains(c.Id))
+            .Select(c => new { c.Id, c.WorkflowTypeId, c.ConfigType })
+            .ToDictionaryAsync(
+                c => c.Id,
+                c => c.WorkflowTypeId ?? c.ConfigType ?? string.Empty);
+
+        var projects = await _db.Projects
+            .IgnoreQueryFilters()
+            .Where(p => projectIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.JobNumber, p.WorkflowMode, p.Status })
+            .ToDictionaryAsync(p => p.Id);
+
+        var importAssetIds = await _db.InspectionImports
+            .Where(i => i.AssetId != null && assetIds.Contains(i.AssetId))
+            .Select(i => i.AssetId!)
+            .Distinct()
+            .ToListAsync();
+        var importAssetIdSet = new HashSet<string>(importAssetIds);
+
+        var currentInstalls = new List<DashboardWorkspaceAssetDto>();
+        var currentInspections = new List<DashboardWorkspaceAssetDto>();
+        var installHistory = new List<DashboardWorkspaceAssetDto>();
+        var inspectionHistory = new List<DashboardWorkspaceAssetDto>();
+
+        foreach (var asset in assets)
+        {
+            latestRunByAsset.TryGetValue(asset.Id, out var latestRun);
+            assignmentByAsset.TryGetValue(asset.Id, out var latestAssignment);
+            projects.TryGetValue(asset.ProjectId, out var project);
+
+            var counts = latestRun is null
+                ? (RequiredItems: 0, CompletedItems: 0, MissingItems: 0)
+                : CountWorkflowEvidence(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
+            var workflowSummary = BuildWorkflowSummary(asset, latestRun);
+
+            var runWorkflowType = latestRun is not null && workflowConfigTypesById.TryGetValue(latestRun.WorkflowConfigId, out var latestRunWorkflowType)
+                ? latestRunWorkflowType
+                : string.Empty;
+            var assignmentWorkflowType = latestAssignment is not null && workflowConfigTypesById.TryGetValue(latestAssignment.WorkflowConfigId, out var latestAssignmentWorkflowType)
+                ? latestAssignmentWorkflowType
+                : latestAssignment?.WorkflowTypeId ?? string.Empty;
+
+            var isInspection = IsInspectionWorkspaceAsset(
+                project?.WorkflowMode,
+                assignmentWorkflowType,
+                runWorkflowType,
+                importAssetIdSet.Contains(asset.Id));
+
+            var latestActivityAt = new[]
+            {
+                asset.UpdatedAt,
+                asset.DeletedAtUtc,
+                latestRun?.UpdatedAt,
+                latestRun?.CompletedAt,
+                latestAssignment?.AssignedAt
+            }
+            .Where(d => d.HasValue)
+            .Select(d => d!.Value)
+            .DefaultIfEmpty(asset.CreatedAt)
+            .Max();
+
+            var item = new DashboardWorkspaceAssetDto(
+                asset.Id,
+                asset.ProjectId,
+                project?.JobNumber ?? string.Empty,
+                asset.AssetTag,
+                asset.AssetName,
+                asset.AssetModel,
+                asset.Location,
+                asset.Status,
+                latestRun?.Status,
+                BuildHistoryStatus(asset, project?.Status, latestRun),
+                counts.CompletedItems,
+                counts.RequiredItems,
+                counts.MissingItems,
+                workflowSummary.EvidenceStatus,
+                asset.AssignedUserId,
+                project?.WorkflowMode ?? string.Empty,
+                asset.IsDeleted,
+                asset.DeletedAtUtc,
+                asset.DeleteReason,
+                latestActivityAt,
+                latestRun?.CompletedAt,
+                workflowSummary.HasOpenIssues,
+                workflowSummary.SignatureStatus
+            );
+
+            var isCurrent = IsCurrentWorkspaceAsset(asset, latestRun);
+            if (isInspection)
+            {
+                if (isCurrent) currentInspections.Add(item);
+                else inspectionHistory.Add(item);
+            }
+            else
+            {
+                if (isCurrent) currentInstalls.Add(item);
+                else installHistory.Add(item);
+            }
+        }
+
+        return Ok(new DashboardWorkspaceDto(
+            OrderCurrentWorkspaceItems(currentInstalls),
+            OrderCurrentWorkspaceItems(currentInspections),
+            OrderHistoryWorkspaceItems(installHistory),
+            OrderHistoryWorkspaceItems(inspectionHistory)
+        ));
+    }
+
     // GET api/project-assets/workload-summary
     [HttpGet("workload-summary")]
     public async Task<ActionResult<IEnumerable<WorkloadSummaryDto>>> WorkloadSummary()
@@ -596,6 +765,83 @@ public class ProjectAssetsController : ControllerBase
         }
 
         return summaries;
+    }
+
+    private static DashboardWorkspaceDto EmptyDashboardWorkspace() =>
+        new([], [], [], []);
+
+    private static bool IsCurrentWorkspaceAsset(ProjectAssetEntity asset, AssetWorkflowRunEntity? latestRun)
+    {
+        if (asset.IsDeleted) return false;
+
+        var assetStatus = (asset.Status ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
+        var runStatus = (latestRun?.Status ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
+
+        if (runStatus is "paused" or "inprogress") return true;
+        return assetStatus is "notstarted" or "inprogress" or "onhold";
+    }
+
+    private static string BuildHistoryStatus(ProjectAssetEntity asset, string? projectStatus, AssetWorkflowRunEntity? latestRun)
+    {
+        if (asset.IsDeleted) return "Deleted";
+
+        var assetStatus = (asset.Status ?? string.Empty).Trim();
+        var normalizedAssetStatus = assetStatus.ToLowerInvariant().Replace(" ", string.Empty);
+        var normalizedProjectStatus = (projectStatus ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
+
+        if (normalizedAssetStatus is "complete" or "completed") return "Completed";
+        if (normalizedAssetStatus == "cancelled" || normalizedProjectStatus == "cancelled") return "Cancelled";
+        if (latestRun?.CompletedAt is not null || latestRun?.IsLocked == true) return "Finished";
+        if (normalizedProjectStatus == "completed") return "Closed";
+        if (normalizedAssetStatus == "onhold") return "On Hold";
+        return string.IsNullOrWhiteSpace(assetStatus) ? "Closed" : assetStatus;
+    }
+
+    private static bool IsInspectionWorkspaceAsset(
+        string? projectWorkflowMode,
+        string? assignmentWorkflowType,
+        string? runWorkflowType,
+        bool hasInspectionImport)
+    {
+        if (string.Equals(projectWorkflowMode, "INSPECTION_ONLY", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (IsInspectionWorkflowType(assignmentWorkflowType) || IsInspectionWorkflowType(runWorkflowType))
+            return true;
+
+        return hasInspectionImport;
+    }
+
+    private static bool IsInspectionWorkflowType(string? workflowType)
+    {
+        var normalized = (workflowType ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized == "wftype-inspection" || normalized == "inspection";
+    }
+
+    private static List<DashboardWorkspaceAssetDto> OrderCurrentWorkspaceItems(IEnumerable<DashboardWorkspaceAssetDto> items) =>
+        items
+            .OrderByDescending(i => NormalizeCurrentPriority(i.Status, i.RunStatus))
+            .ThenByDescending(i => i.LatestActivityAt ?? DateTime.MinValue)
+            .ThenBy(i => i.JobNumber)
+            .ThenBy(i => i.AssetTag)
+            .ToList();
+
+    private static List<DashboardWorkspaceAssetDto> OrderHistoryWorkspaceItems(IEnumerable<DashboardWorkspaceAssetDto> items) =>
+        items
+            .OrderByDescending(i => i.CompletedAt ?? i.LatestActivityAt ?? i.DeletedAtUtc ?? DateTime.MinValue)
+            .ThenBy(i => i.JobNumber)
+            .ThenBy(i => i.AssetTag)
+            .ToList();
+
+    private static int NormalizeCurrentPriority(string status, string? runStatus)
+    {
+        var normalizedRun = (runStatus ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
+        var normalizedStatus = (status ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
+        if (normalizedRun == "inprogress" || normalizedStatus == "inprogress") return 3;
+        if (normalizedRun == "paused") return 2;
+        if (normalizedStatus == "notstarted") return 1;
+        if (normalizedStatus == "onhold") return 0;
+        return -1;
     }
 
     private static ProjectAssetWorkflowSummaryDto BuildWorkflowSummary(ProjectAssetEntity asset, AssetWorkflowRunEntity? latestRun)

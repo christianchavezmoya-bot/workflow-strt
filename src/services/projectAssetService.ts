@@ -137,6 +137,22 @@ export const projectAssetService = {
     }
   },
 
+  async dashboardWorkspace(userId?: string): Promise<DashboardWorkspace> {
+    try {
+      const res = await api.get<DashboardWorkspace>("/project-assets/dashboard-workspace", {
+        params: userId ? { userId } : undefined,
+      });
+      return res.data;
+    } catch {
+      return {
+        currentInstalls: [],
+        currentInspections: [],
+        installHistory: [],
+        inspectionHistory: [],
+      };
+    }
+  },
+
   async restore(id: string): Promise<ProjectAsset> {
     const res = await api.post<ProjectAsset>(`/project-assets/${id}/restore`);
     return fromDto(res.data);
@@ -188,4 +204,37 @@ export interface ProjectAssetSummaryItem {
   inProgress: number;
   complete: number;
   total: number;
+}
+
+export interface DashboardWorkspaceAssetItem {
+  id: string;
+  projectId: string;
+  jobNumber: string;
+  assetTag?: string;
+  assetName?: string;
+  assetModel?: string;
+  location?: string;
+  status: string;
+  runStatus?: string;
+  historyStatus: string;
+  completedSteps: number;
+  totalSteps: number;
+  missingItems: number;
+  evidenceStatus?: string;
+  assignedUserId?: string;
+  workflowMode: string;
+  isDeleted: boolean;
+  deletedAtUtc?: string;
+  deleteReason?: string;
+  latestActivityAt?: string;
+  completedAt?: string;
+  hasOpenIssues: boolean;
+  signatureStatus?: string;
+}
+
+export interface DashboardWorkspace {
+  currentInstalls: DashboardWorkspaceAssetItem[];
+  currentInspections: DashboardWorkspaceAssetItem[];
+  installHistory: DashboardWorkspaceAssetItem[];
+  inspectionHistory: DashboardWorkspaceAssetItem[];
 }
