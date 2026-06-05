@@ -19,22 +19,22 @@ import {
   ListItemText,
   Menu,
   MenuItem,
-  Paper,
   Select,
   Stack,
-  TextField,
+  Switch,
   Table,
+  TextField,
   TableBody,
   TableCell,
   TableHead,
   TablePagination,
   TableRow,
-  Switch,
+  Tooltip,
   Typography,
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { ArrowDropDown, CalendarTodayOutlined, DeleteOutline, EditOutlined, ExpandLess, ExpandMore, PersonOutlined } from "@mui/icons-material";
+import { ArrowDropDown, CalendarTodayOutlined, DeleteForeverOutlined, DeleteOutline, EditOutlined, ExpandLess, ExpandMore, FilterAltOffOutlined, PersonOutlined, RestoreOutlined } from "@mui/icons-material";
 import ProjectChevronPanel from "./ProjectChevronPanel";
 import { Link, useNavigate } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
@@ -56,7 +56,11 @@ import { createCountryResolver } from "../../utils/officeCountry";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { deleteProject, fetchProjects, updateProjectStatus } from "../../store/projectSlice";
+import { projectService } from "../../services/projectService";
 import { Project } from "../../types/project";
+import ProjectForm from "./ProjectForm";
+import { useComplexView } from "../../contexts/ComplexViewContext";
+import { Capacitor } from "@capacitor/core";
 
 // Style for field definition labels (yellow bold)
 const fieldLabelStyle = {
@@ -247,13 +251,13 @@ const applyAutoFilter = <T,>(
 };
 
 const ProjectList = () => {
-  const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const { user } = useAuth();
   const can = usePermissions();
   const { activeOffice } = useActiveOffice();
   const { isMyWork, canUseOfficeView } = useWorkScope();
+  const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { items, total, loading, error } = useAppSelector((state) => state.projects);
   const productsState = useAppSelector((state) => state.products);
@@ -302,24 +306,30 @@ const ProjectList = () => {
     key: ""
   });
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<Project | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [purgeTarget, setPurgeTarget] = useState<Project | null>(null);
   const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const canDeleteProjects = can.modifyData;
-  const isPmUser = user?.role === "Project Manager";
   const [projectViewFilter, setProjectViewFilter] = useState<"all" | "mine">("all");
-  const [projectSearch, setProjectSearch] = useState("");
+  const [projectNumberFilter, setProjectNumberFilter] = useState("");
+  const isAdminUser = user?.role === "Admin";
+  const isPmUser = user?.role === "Project Manager";
+  const canCreateProjects = isAdminUser || isPmUser;
+  const canManageProjectTable = isAdminUser || isPmUser;
+  const { complexViewActive } = useComplexView();
+  const showComplexControls = complexViewActive && Capacitor.isNativePlatform();
+
+  const canEditProject = useMemo(() => (project: Project) => {
+    if (isAdminUser) return true;
+    if (!isPmUser) return false;
+    return project.assignedPmUserId === user?.id;
+  }, [isAdminUser, isPmUser, user?.id]);
 
   // Block-complete dialog — shown when assets are not all done
-  const [blockComplete, setBlockComplete] = useState<{ open: boolean; incomplete: number; total: number; threshold: number; completionPercent: number }>({
-    open: false,
-    incomplete: 0,
-    total: 0,
-    threshold: 100,
-    completionPercent: 0,
-  });
+  const [blockComplete, setBlockComplete] = useState<{ open: boolean; incomplete: number; total: number }>({ open: false, incomplete: 0, total: 0 });
   const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
 
   // Clear column filters when active office changes
@@ -329,21 +339,23 @@ const ProjectList = () => {
   }, [activeOffice]);
 
   useEffect(() => {
-    setPage(0);
-  }, [projectViewFilter, projectSearch]);
-
-  useEffect(() => {
     dispatch(
       fetchProjects({
         // Filter by country on the server so pagination doesn't hide matching projects.
         country: activeOffice !== "All" ? activeOffice : undefined,
+        scope: "browse",
+        ownershipScope: isPmUser ? projectViewFilter : "all",
+        projectNumber: projectNumberFilter.trim() || undefined,
         page: page + 1,
         pageSize: rowsPerPage,
-        includeDeleted: showArchived,
-        search: projectSearch.trim() || undefined,
+        includeDeleted: showArchived
       })
     );
-  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, projectSearch]);
+  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, isPmUser, projectViewFilter, projectNumberFilter]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [showArchived, projectViewFilter, projectNumberFilter]);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -411,21 +423,9 @@ const ProjectList = () => {
       }
     }
 
-    if (!isMyWork && role === "Project Manager" && projectViewFilter === "mine") {
-      scopeFiltered = scopeFiltered.filter((p) => p.projectManager === user?.fullName);
-    }
-
-    const searchNeedle = projectSearch.trim().toLowerCase();
-    if (searchNeedle) {
-      scopeFiltered = scopeFiltered.filter((project) =>
-        [project.jobNumber, project.customerName, project.siteName, project.projectManager]
-          .some((value) => value?.toLowerCase().includes(searchNeedle))
-      );
-    }
-
     const filtered = applyAutoFilter(scopeFiltered, autoFilters, projectAccessors);
     return applyAutoSort(filtered, autoSort, projectAccessors);
-  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName, projectSearch, projectViewFilter]);
+  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName]);
 
   const numberedProjects = useMemo(
     () => filteredProjects.map((project, index) => ({ ...project, seq: index + 1 })),
@@ -499,10 +499,8 @@ const ProjectList = () => {
   }, [projectsTableConfig.config.order, projectsTableConfig.config.hidden, projectDynamicColumns, projectsDynamic.valuesByEntity]);
 
   const handleAction = async (project: Project, label: string) => {
-    if (!project.id) return;
-
-    if (label === "Submit for Approval") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Pending Approval" } }));
+    if (!project.id) {
+      return;
     }
 
     if (label === "Approve") {
@@ -518,8 +516,10 @@ const ProjectList = () => {
     }
 
     if (label === "Start Work") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } }));
-      navigate(`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`);
+      const updated = await dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } })).unwrap();
+      navigate(
+        `/installations/assets?product=${encodeURIComponent(updated.productIds?.[0] ?? project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`
+      );
     }
 
     if (label === "Mark Completed") {
@@ -529,24 +529,15 @@ const ProjectList = () => {
       try {
         const assets = await projectAssetService.listByProject(project.id);
         const total = assets.length;
-        const completed = assets.filter((a) => a.status === "Complete").length;
-        const incomplete = total - completed;
-        const completionPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
-        const threshold = Math.min(100, Math.max(1, project.minimumCompletionPercent ?? 100));
-        if (completionPercent < threshold) {
-          setBlockComplete({ open: true, incomplete, total, threshold, completionPercent });
+        const incomplete = assets.filter((a) => a.status !== "Complete").length;
+        if (incomplete > 0) {
+          setBlockComplete({ open: true, incomplete, total });
           return;
         }
         dispatch(updateProjectStatus({ id: project.id, payload: { status: "Completed" } }));
       } catch {
         // If we can't verify assets, block the action to be safe
-        setBlockComplete({
-          open: true,
-          incomplete: -1,
-          total: 0,
-          threshold: Math.min(100, Math.max(1, project.minimumCompletionPercent ?? 100)),
-          completionPercent: 0,
-        });
+        setBlockComplete({ open: true, incomplete: -1, total: 0 });
       } finally {
         setCompletingProjectId(null);
       }
@@ -556,23 +547,19 @@ const ProjectList = () => {
   const renderActions = (project: Project) => {
     const actions: string[] = [];
 
-    if (project.status === "Draft" && user?.role === "Project Manager") {
-      actions.push("Submit for Approval");
+    if (project.status === "Pending Approval" && isAdminUser) {
+      actions.push("Approve", "Reject");
     }
 
-    if (project.status === "Pending Approval" && user?.role === "Admin") {
-      actions.push("Approve", "Request Info", "Reject");
-    }
-
-    if (project.status === "Approved" && can.modifyData) {
+    if (project.status === "Approved" && canEditProject(project)) {
       actions.push("Start Work");
     }
 
-    if (project.status === "In Progress" && can.modifyData) {
+    if (project.status === "In Progress" && canEditProject(project)) {
       actions.push("Mark Completed");
     }
 
-    if (project.isDeleted || actions.length === 0) {
+    if (actions.length === 0) {
       return null;
     }
 
@@ -609,32 +596,33 @@ const ProjectList = () => {
             )}
           </Stack>
           <Typography variant="body2" color="text.secondary">
-            Showing {activeOffice === "All" ? "all offices" : activeOffice} projects.
+            Showing {activeOffice === "All" ? "all offices" : activeOffice} {showArchived ? "projects including archived records." : "projects."}
           </Typography>
         </Box>
-        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-          <FormControlLabel
-            control={<Switch size="small" checked={showArchived} onChange={(e) => { setShowArchived(e.target.checked); setPage(0); }} />}
-            label="Show archived"
-            sx={{ mr: 0 }}
-          />
-          {can.modifyData && (
-            <Button variant="contained" component={Link} to="/projects/new">
-              Create project
-            </Button>
-          )}
-          {can.editFields && !isMobile && (
-            <Button variant="outlined" onClick={() => setTableConfigOpen(true)}>
-              Table configuration
-            </Button>
-          )}
-        </Stack>
+        {showComplexControls && (
+          <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+            <FormControlLabel
+              control={<Switch size="small" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />}
+              label="Show archived"
+            />
+            {canCreateProjects && (
+              <Button variant="contained" component={Link} to="/projects/new">
+                Create project
+              </Button>
+            )}
+            {canManageProjectTable && (
+              <Button variant="outlined" onClick={() => setTableConfigOpen(true)}>
+                Table configuration
+              </Button>
+            )}
+          </Stack>
+        )}
       </Stack>
 
-      <Paper className="glass-card" sx={{ p: 1.5 }}>
-        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ md: "center" }}>
+      <Box className="glass-card" sx={{ p: 2 }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
           {isPmUser && (
-            <FormControl size="small" sx={{ minWidth: { xs: "100%", md: 180 } }}>
+            <FormControl size="small" sx={{ minWidth: 220 }}>
               <InputLabel id="project-view-filter-label">Project View</InputLabel>
               <Select
                 labelId="project-view-filter-label"
@@ -643,35 +631,48 @@ const ProjectList = () => {
                 onChange={(event) => setProjectViewFilter(event.target.value as "all" | "mine")}
               >
                 <MenuItem value="all">All projects</MenuItem>
-                <MenuItem value="mine">My projects</MenuItem>
+                <MenuItem value="mine">My PM projects</MenuItem>
               </Select>
             </FormControl>
           )}
           <TextField
             size="small"
             label="Project number"
-            placeholder="Search job, customer, site, or PM"
-            value={projectSearch}
-            onChange={(event) => setProjectSearch(event.target.value)}
-            sx={{ minWidth: { xs: "100%", md: 320 }, flex: 1 }}
+            placeholder="Search job / project number"
+            value={projectNumberFilter}
+            onChange={(event) => setProjectNumberFilter(event.target.value)}
+            sx={{ minWidth: { xs: "100%", md: 280 } }}
           />
-          <Button
-            variant="text"
-            onClick={() => {
-              setProjectSearch("");
-              setProjectViewFilter("all");
-              setAutoFilters({});
-              setAutoSort({ key: "", dir: "asc" });
-            }}
-          >
-            Clear
-          </Button>
+          <Tooltip title="Reset filters">
+            <span>
+              <IconButton
+                size="small"
+                onClick={() => {
+                  setProjectViewFilter("all");
+                  setProjectNumberFilter("");
+                  setAutoFilters({});
+                }}
+                sx={{
+                  border: "1px solid",
+                  borderColor: (projectViewFilter !== "all" || projectNumberFilter || Object.keys(autoFilters ?? {}).length > 0)
+                    ? "primary.main" : "divider",
+                  color: (projectViewFilter !== "all" || projectNumberFilter || Object.keys(autoFilters ?? {}).length > 0)
+                    ? "primary.main" : "text.disabled",
+                  borderRadius: 1.5,
+                  p: 0.75,
+                  flexShrink: 0,
+                }}
+              >
+                <FilterAltOffOutlined sx={{ fontSize: 18 }} />
+              </IconButton>
+            </span>
+          </Tooltip>
         </Stack>
-      </Paper>
+      </Box>
 
       {error && (
         <Typography variant="body2" color="warning.main">
-          API unavailable. Showing demo data for local testing.
+          Unable to load the latest server project data.
         </Typography>
       )}
 
@@ -700,7 +701,7 @@ const ProjectList = () => {
             })();
 
             return (
-              <Paper key={project.id} className="glass-card" sx={{
+              <Box key={project.id} className="glass-card" sx={{
                 overflow: "hidden",
                 transition: "all 0.2s ease",
                 "&:hover": {
@@ -726,7 +727,6 @@ const ProjectList = () => {
                         }}>
                           {project.assetCount ?? 0}
                         </Box>
-                        {project.isDeleted && <Chip label="Archived" size="small" color="warning" />}
                         <Box sx={{ ml: "auto", flexShrink: 0 }}><StatusChip status={project.status} /></Box>
                       </Stack>
 
@@ -773,11 +773,11 @@ const ProjectList = () => {
                     <Button
                       size="small"
                       variant="outlined"
-                      component={Link}
-                      to={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`}
+                      component="a"
+                      href={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`}
                       sx={{ fontSize: "0.7rem", py: 0.25, px: 1, height: 26, flexShrink: 0 }}
                     >
-                      Project Assets
+                      Asset Installs
                     </Button>
                     {mobileActions.map((label) => (
                       <Button key={label} size="small" variant="outlined" color="primary"
@@ -788,11 +788,11 @@ const ProjectList = () => {
                     ))}
                     <Box sx={{ ml: "auto" }}>
                       {can.modifyData && (
-                        <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`} disabled={project.isDeleted}>
+                        <IconButton size="small" component="a" href={`/projects/${project.id}/edit`}>
                           <EditOutlined fontSize="small" />
                         </IconButton>
                       )}
-                      {canDeleteProjects && !project.isDeleted && (
+                      {canEditProject(project) && (
                         <IconButton size="small" color="error" disabled={deleteSavingId === project.id}
                           onClick={() => setDeleteTarget(project)}>
                           <DeleteOutline fontSize="small" />
@@ -816,7 +816,7 @@ const ProjectList = () => {
                     />
                   </Box>
                 </Collapse>
-              </Paper>
+              </Box>
             );
           })}
 
@@ -913,14 +913,13 @@ const ProjectList = () => {
                     ))}
                     <TableCell sx={{ padding: '8px 12px' }}>
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
-                        {project.isDeleted && <Chip label="Archived" size="small" color="warning" />}
-                        {renderActions(project)}
-                        {can.modifyData && (
-                          <IconButton size="small" component={Link} to={`/projects/${project.id}/edit`} disabled={project.isDeleted}>
+                        {!project.isDeleted && renderActions(project)}
+                        {canEditProject(project) && !project.isDeleted && (
+                          <IconButton size="small" onClick={() => setEditTarget(project)}>
                             <EditOutlined fontSize="small" />
                           </IconButton>
                         )}
-                        {canDeleteProjects && !project.isDeleted && (
+                        {canEditProject(project) && !project.isDeleted && (
                           <IconButton
                             size="small"
                             disabled={deleteSavingId === project.id}
@@ -928,6 +927,42 @@ const ProjectList = () => {
                           >
                             <DeleteOutline fontSize="small" />
                           </IconButton>
+                        )}
+                        {canEditProject(project) && project.isDeleted && (
+                          <>
+                            <IconButton
+                              size="small"
+                              disabled={deleteSavingId === project.id}
+                              onClick={async () => {
+                                try {
+                                  setDeleteSavingId(project.id);
+                                  await projectService.restoreProject(project.id);
+                                  await dispatch(
+                                    fetchProjects({
+                                      country: activeOffice !== "All" ? activeOffice : undefined,
+                                      scope: "browse",
+                                      ownershipScope: isPmUser ? projectViewFilter : "all",
+                                      projectNumber: projectNumberFilter.trim() || undefined,
+                                      page: page + 1,
+                                      pageSize: rowsPerPage,
+                                      includeDeleted: showArchived
+                                    })
+                                  );
+                                } finally {
+                                  setDeleteSavingId(null);
+                                }
+                              }}
+                            >
+                              <RestoreOutlined fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              disabled={deleteSavingId === project.id}
+                              onClick={() => setPurgeTarget(project)}
+                            >
+                              <DeleteForeverOutlined fontSize="small" />
+                            </IconButton>
+                          </>
                         )}
                       </Stack>
                     </TableCell>
@@ -1047,6 +1082,9 @@ const ProjectList = () => {
         open={!!deleteTarget}
         entityType="project"
         entityLabel={deleteTarget?.jobNumber || deleteTarget?.id}
+        title="Archive Project"
+        message={`Archive project ${(deleteTarget?.jobNumber || deleteTarget?.id) ? `(${deleteTarget?.jobNumber || deleteTarget?.id})` : ""}? It will be removed from active lists for all users and can be restored later.`}
+        confirmLabel="Archive"
         loading={!!deleteTarget && deleteSavingId === deleteTarget.id}
         onClose={() => {
           if (deleteSavingId) return;
@@ -1057,20 +1095,48 @@ const ProjectList = () => {
           try {
             setDeleteSavingId(deleteTarget.id);
             await dispatch(deleteProject(deleteTarget.id)).unwrap();
-            if (showArchived) {
-              await dispatch(
-                fetchProjects({
-                  country: activeOffice !== "All" ? activeOffice : undefined,
-                  page: page + 1,
-                  pageSize: rowsPerPage,
-                  includeDeleted: true,
-                })
-              ).unwrap();
-            }
             setDeleteTarget(null);
           } catch (e) {
-            console.error("Delete project failed:", e);
-            alert("Unable to delete project. Check your permissions and API availability.");
+            console.error("Archive project failed:", e);
+            alert("Unable to archive project. Check your permissions and API availability.");
+          } finally {
+            setDeleteSavingId(null);
+          }
+        }}
+      />
+
+      <DeleteConfirmDialog
+        open={!!purgeTarget}
+        entityType="project"
+        entityLabel={purgeTarget?.jobNumber || purgeTarget?.id}
+        title="Delete Project Permanently"
+        message={`Permanently delete project ${(purgeTarget?.jobNumber || purgeTarget?.id) ? `(${purgeTarget?.jobNumber || purgeTarget?.id})` : ""}? This cannot be undone.`}
+        confirmLabel="Delete permanently"
+        loading={!!purgeTarget && deleteSavingId === purgeTarget.id}
+        onClose={() => {
+          if (deleteSavingId) return;
+          setPurgeTarget(null);
+        }}
+        onConfirm={async () => {
+          if (!purgeTarget) return;
+          try {
+            setDeleteSavingId(purgeTarget.id);
+            await projectService.purgeProject(purgeTarget.id);
+            setPurgeTarget(null);
+            await dispatch(
+              fetchProjects({
+                country: activeOffice !== "All" ? activeOffice : undefined,
+                scope: "browse",
+                ownershipScope: isPmUser ? projectViewFilter : "all",
+                projectNumber: projectNumberFilter.trim() || undefined,
+                page: page + 1,
+                pageSize: rowsPerPage,
+                includeDeleted: showArchived
+              })
+            );
+          } catch (e) {
+            console.error("Purge project failed:", e);
+            alert("Unable to permanently delete project. Check your permissions and API availability.");
           } finally {
             setDeleteSavingId(null);
           }
@@ -1078,20 +1144,20 @@ const ProjectList = () => {
       />
 
       {/* Block-complete dialog — shown when not all assets are done */}
-      <Dialog open={blockComplete.open} onClose={() => setBlockComplete({ open: false, incomplete: 0, total: 0, threshold: 100, completionPercent: 0 })} maxWidth="xs" fullWidth>
+      <Dialog open={blockComplete.open} onClose={() => setBlockComplete({ open: false, incomplete: 0, total: 0 })} maxWidth="xs" fullWidth>
         <DialogTitle>Cannot Complete Project</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 1 }}>
             {blockComplete.incomplete === -1
-              ? "Unable to verify project progress. Please try again or contact support."
-              : `Project progress is ${blockComplete.completionPercent}% and requires ${blockComplete.threshold}% before completion is allowed. ${blockComplete.incomplete} of ${blockComplete.total} installation asset${blockComplete.incomplete !== 1 ? "s are" : " is"} not yet completed.`}
+              ? "Unable to verify installation asset status. Please try again or contact support."
+              : `${blockComplete.incomplete} of ${blockComplete.total} installation asset${blockComplete.incomplete !== 1 ? "s are" : " is"} not yet completed.`}
           </Alert>
           <Typography variant="body2" color="text.secondary">
-            Mark Completed is enabled only when project progress reaches the configured threshold for that project.
+            A project can only be marked as Completed once <strong>all installation assets</strong> have a "Complete" status. Please finish the remaining assets first.
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setBlockComplete({ open: false, incomplete: 0, total: 0, threshold: 100, completionPercent: 0 })} variant="contained">
+          <Button onClick={() => setBlockComplete({ open: false, incomplete: 0, total: 0 })} variant="contained">
             OK
           </Button>
         </DialogActions>
@@ -1177,10 +1243,46 @@ const ProjectList = () => {
           await projectsDynamic.reload();
         }}
       />
+
+      <Dialog
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{
+          className: "glass-card",
+          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)", minHeight: "80vh" }
+        }}
+      >
+        <DialogTitle>Edit project</DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {editTarget && (
+            <Box sx={{ p: 3 }}>
+              <ProjectForm
+                embedded
+                projectId={editTarget.id}
+                onClose={() => setEditTarget(null)}
+                onSaved={async () => {
+                  setEditTarget(null);
+                  await dispatch(
+                    fetchProjects({
+                      country: activeOffice !== "All" ? activeOffice : undefined,
+                      scope: "browse",
+                      ownershipScope: isPmUser ? projectViewFilter : "all",
+                      projectNumber: projectNumberFilter.trim() || undefined,
+                      page: page + 1,
+                      pageSize: rowsPerPage,
+                      includeDeleted: showArchived
+                    })
+                  );
+                }}
+              />
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
     </Stack>
   );
 };
 
 export default ProjectList;
-
-

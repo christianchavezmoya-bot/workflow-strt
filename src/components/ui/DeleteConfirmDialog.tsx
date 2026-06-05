@@ -4,6 +4,9 @@ type DeleteConfirmDialogProps = {
   open: boolean;
   entityType: string;
   entityLabel?: string | null;
+  title?: string;
+  message?: string;
+  confirmLabel?: string;
   loading?: boolean;
   onClose: () => void;
   onConfirm: () => void | Promise<void>;
@@ -13,12 +16,17 @@ const DeleteConfirmDialog = ({
   open,
   entityType,
   entityLabel,
+  title,
+  message,
+  confirmLabel,
   loading = false,
   onClose,
   onConfirm
 }: DeleteConfirmDialogProps) => {
   const labelPart = entityLabel?.trim() ? ` (${entityLabel.trim()})` : "";
-  const message = `Delete ${entityType}${labelPart}? This operation can not be undone.`;
+  const displayMessage = message ?? `Delete ${entityType}${labelPart}? This operation can not be undone.`;
+  const displayTitle = title ?? "Confirm Delete";
+  const displayConfirm = confirmLabel ?? "Delete";
 
   return (
     <Dialog
@@ -35,16 +43,16 @@ const DeleteConfirmDialog = ({
         }
       }}
     >
-      <DialogTitle>Confirm Delete</DialogTitle>
+      <DialogTitle>{displayTitle}</DialogTitle>
       <DialogContent>
-        <Typography variant="body2">{message}</Typography>
+        <Typography variant="body2">{displayMessage}</Typography>
       </DialogContent>
       <DialogActions>
         <Button variant="outlined" onClick={onClose} disabled={loading}>
           Cancel
         </Button>
         <Button variant="contained" color="error" onClick={onConfirm} disabled={loading}>
-          {loading ? "Deleting..." : "Delete"}
+          {loading ? `${displayConfirm}ing...` : displayConfirm}
         </Button>
       </DialogActions>
     </Dialog>

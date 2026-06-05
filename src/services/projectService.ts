@@ -14,6 +14,9 @@ export interface ProjectFilters {
   page?: number;
   pageSize?: number;
   includeDeleted?: boolean;
+  scope?: "browse" | "assigned";
+  ownershipScope?: "all" | "mine";
+  projectNumber?: string;
 }
 
 export interface UpdateProjectStatusRequest {
@@ -51,6 +54,17 @@ export const projectService = {
   },
   async deleteProject(id: string) {
     await api.delete(`/projects/${id}`);
+    await entityDeleteProject(id);
+    return id;
+  },
+
+  async restoreProject(id: string) {
+    const res = await api.post<Project>(`/projects/${id}/restore`);
+    return res.data;
+  },
+
+  async purgeProject(id: string) {
+    await api.delete(`/projects/${id}/purge`);
     await entityDeleteProject(id);
     return id;
   },

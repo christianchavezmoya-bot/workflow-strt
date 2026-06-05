@@ -42,6 +42,7 @@ export interface Project {
   /** INSTALLATION_ONLY | INSPECTION_ONLY | MIXED. Derived server-side for legacy rows. */
   workflowMode?: WorkflowMode;
   projectManager?: string;
+  assignedPmUserId?: string | null;
   contractValue?: number;
   probabilityStage?: string;
   minimumCompletionPercent?: number;
