@@ -2032,9 +2032,12 @@ const Dashboard = () => {
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
                 <AssignmentLateOutlined sx={{ fontSize: 18, color: "info.main" }} />
                 <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-                  Inspections
+                  Inspection Inbox
                 </Typography>
               </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.25 }}>
+                Open inspection runs and JSON imports across projects in your current dashboard scope.
+              </Typography>
               <Stack direction="row" spacing={2} flexWrap="wrap">
                 {inspectionRunsDue > 0 && (
                   <Chip
