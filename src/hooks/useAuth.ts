@@ -4,12 +4,12 @@ import { secureGet, secureSet } from "../services/secureStorage";
 import { User } from "../types/user";
 
 const defaultUser: User = {
-  id: "u-100",
-  email: "chris.chavez@commtrac.io",
-  fullName: "Chris Chavez",
-  role: "Project Manager",
-  office: "USA",
-  isActive: true,
+  id: "",
+  email: "",
+  fullName: "",
+  role: "Viewer",
+  office: "",
+  isActive: false,
   isFirstLogin: false
 };
 
@@ -70,14 +70,10 @@ export const useAuth = () => {
         return true;
       }
 
-      const storedRole = localStorage.getItem("mock_role");
-      const storedOffice = localStorage.getItem("mock_office");
-      setUser({
-        ...defaultUser,
-        role: (storedRole as User["role"]) || defaultUser.role,
-        office: (storedOffice as User["office"]) || defaultUser.office
-      });
-      setIsAuthenticated(true);
+      // Without a persisted session, stay logged out instead of booting into
+      // the old demo Project Manager identity (`u-100`).
+      setUser(defaultUser);
+      setIsAuthenticated(false);
       return true;
     };
 
