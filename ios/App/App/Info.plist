@@ -51,6 +51,8 @@
 	<string>Use Face ID to unlock your secure session when offline.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is required to photograph inspection evidence and assets.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is required when recording video evidence for workflow runs.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Photo library access is required to attach existing photos to inspection runs.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
