@@ -312,7 +312,8 @@ const AssetInstallationPage = () => {
   const { user: currentUser } = useAuth();
   const can = usePermissions();
   const { complexViewActive } = useComplexView();
-  const showComplexControls = complexViewActive && Capacitor.isNativePlatform();
+  const isNativePlatform = Capacitor.isNativePlatform();
+  const showComplexControls = complexViewActive && isNativePlatform;
   const productsState = useAppSelector((s) => s.products);
   const projects = useAppSelector((s) => s.projects.items);
   const users = useAppSelector((s) => s.users.items);
@@ -2947,7 +2948,7 @@ const AssetInstallationPage = () => {
         </Box>
       )}
 
-      {/* Asset card list */}
+      {/* Web keeps the original table workspace; native keeps the mobile card list. */}
       {loadingAssets ? (
         <Stack alignItems="center" justifyContent="center" sx={{ p: 6 }}>
           <CircularProgress size={32} />
@@ -2960,7 +2961,7 @@ const AssetInstallationPage = () => {
               : `No assets added for ${activeProduct?.name ?? "this product"} yet.`
             : "No assets match the current filters."}
         </Alert>
-      ) : (
+      ) : isNativePlatform ? (
         <Stack spacing={0.75}>
           {visibleAssets.map((asset) => {
             const proj = projectMap.get(asset.projectId);
@@ -3057,6 +3058,231 @@ const AssetInstallationPage = () => {
             );
           })}
         </Stack>
+      ) : (
+        <Paper className="glass-card" sx={{ overflow: "hidden" }}>
+          <Box sx={{ overflowX: "auto" }}>
+            <Table size="small" sx={{ minWidth: 900 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: 28, px: 0.5 }}>
+                    <Checkbox
+                      size="small"
+                      indeterminate={selectedAssetIds.size > 0 && selectedAssetIds.size < visibleAssets.length}
+                      checked={visibleAssets.length > 0 && selectedAssetIds.size === visibleAssets.length}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedAssetIds(new Set(visibleAssets.map((a) => a.id)));
+                        else setSelectedAssetIds(new Set());
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell sx={{ width: 36, px: 1 }} />
+                  <TableCell><Typography variant="caption" fontWeight={700}>Asset Tag</Typography></TableCell>
+                  {visibleColumns.map((col) => (
+                    <TableCell key={col.id}>
+                      {col.id === "features" ? (
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
+                          <Tooltip
+                            title={
+                              <Stack spacing={0.5}>
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: "common.white" }}>
+                                  Feature Colors
+                                </Typography>
+                                <Typography variant="caption">Amber: Pending or Paused</Typography>
+                                <Typography variant="caption">Blue: Running</Typography>
+                                <Typography variant="caption">Green: Complete</Typography>
+                                <Typography variant="caption">Red: Missing data</Typography>
+                              </Stack>
+                            }
+                          >
+                            <InfoOutlined sx={{ fontSize: 14, color: "text.disabled", cursor: "help" }} />
+                          </Tooltip>
+                        </Stack>
+                      ) : (
+                        <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
+                      )}
+                    </TableCell>
+                  ))}
+                  <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {visibleAssets.flatMap((asset) => {
+                  const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
+                  const proj = projectMap.get(asset.projectId);
+                  const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
+                  const isExpanded = expandedAssetId === asset.id;
+                  const hasIssue = asset.status === "Issue";
+
+                  return [
+                    <TableRow
+                      key={asset.id}
+                      hover
+                      sx={{
+                        bgcolor: hasIssue
+                          ? "rgba(211,47,47,0.04)"
+                          : selectedAssetIds.has(asset.id)
+                            ? "rgba(var(--primary-rgb,25,118,210),0.08)"
+                            : undefined
+                      }}
+                    >
+                      <TableCell sx={{ px: 0.5 }}>
+                        <Checkbox
+                          size="small"
+                          checked={selectedAssetIds.has(asset.id)}
+                          onChange={(e) => {
+                            setSelectedAssetIds((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(asset.id);
+                              else next.delete(asset.id);
+                              return next;
+                            });
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ px: 1 }}>
+                        <IconButton size="small" onClick={() => {
+                          const nextId = isExpanded ? null : asset.id;
+                          setExpandedAssetId(nextId);
+                          if (nextId) loadAssignmentsForAsset(nextId);
+                        }}>
+                          {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
+                        </IconButton>
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" alignItems="center" spacing={0.75}>
+                          {hasIssue && (
+                            <Box
+                              sx={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: "50%",
+                                bgcolor: computeAssetHealth(asset, runsMap[asset.id] ?? []) === "red" ? "error.main" : "warning.main",
+                                flexShrink: 0
+                              }}
+                            />
+                          )}
+                          <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
+                          {issuesBadge(asset)}
+                        </Stack>
+                      </TableCell>
+                      {visibleColumns.map((col) => (
+                        <TableCell key={col.id}>
+                          {renderColumnCell(col.id, asset, cfg, proj, tech ?? undefined)}
+                        </TableCell>
+                      ))}
+                      <TableCell align="right">
+                        <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
+                          {(can.modifyData || asset.status === "Complete") && actionButton(asset, proj?.workflowMode)}
+                          {!can.viewOnly && (
+                            <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
+                              <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
+                                <Badge
+                                  badgeContent={`${docsCountMap[asset.id] ?? 0}/3`}
+                                  color={
+                                    (docsCountMap[asset.id] ?? 0) === 0 ? "default" :
+                                    (docsCountMap[asset.id] ?? 0) === 3 ? "success" : "primary"
+                                  }
+                                  sx={{ "& .MuiBadge-badge": { fontSize: 9, minWidth: 28, height: 16 } }}
+                                >
+                                  <FolderOutlined fontSize="small" />
+                                </Badge>
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                          {!can.viewOnly && (
+                            <Tooltip title="Generate PDF report">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  disabled={reportGenerating === asset.id}
+                                  onClick={() => handleGeneratePdfReport(asset)}
+                                >
+                                  {reportGenerating === asset.id
+                                    ? <CircularProgress size={16} />
+                                    : <ArticleOutlined fontSize="small" />}
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
+                          {can.modifyData && !archiveMode && (
+                            <Tooltip title="Edit asset">
+                              <IconButton size="small" onClick={() => openEditAsset(asset)}>
+                                <EditOutlined fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                          {can.modifyData && !archiveMode && (
+                            <Tooltip title="Archive asset">
+                              <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
+                                <DeleteOutline fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                          {can.modifyData && archiveMode && (
+                            <Tooltip title="Restore asset">
+                              <span>
+                                <IconButton size="small" disabled={deletingAsset} onClick={() => confirmRestoreAsset(asset)}>
+                                  <RestoreOutlined fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
+                          {can.modifyData && archiveMode && (
+                            <Tooltip title="Delete asset permanently">
+                              <span>
+                                <IconButton size="small" color="error" disabled={purgingAsset} onClick={() => setPurgeAsset(asset)}>
+                                  <DeleteForeverOutlined fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      </TableCell>
+                    </TableRow>,
+
+                    <TableRow key={`${asset.id}-detail`}>
+                      <TableCell colSpan={3 + visibleColumns.length} sx={{ py: 0 }}>
+                        <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                          <Box sx={{ px: 3, py: 2, bgcolor: "rgba(45,212,191,0.05)", borderBottom: "1px solid", borderColor: "divider" }}>
+                            <Typography
+                              variant="caption"
+                              fontWeight={700}
+                              color="text.secondary"
+                              sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1.5 }}
+                            >
+                              Feature Values &amp; Sub-Dependencies
+                            </Typography>
+                            {renderFeatureExpandedRow(asset)}
+                            {asset.notes && (
+                              <Box sx={{ mt: 1.5 }}>
+                                <Typography variant="caption" color="text.secondary" fontWeight={600}>Notes: </Typography>
+                                <Typography variant="caption">{asset.notes}</Typography>
+                              </Box>
+                            )}
+                            <Divider sx={{ my: 1.5 }} />
+                            {renderIssuesPanel(asset)}
+                            {(() => {
+                              const timePanel = renderTimeTrackingPanel(asset);
+                              return timePanel ? (
+                                <>
+                                  <Divider sx={{ my: 1.5 }} />
+                                  {timePanel}
+                                </>
+                              ) : null;
+                            })()}
+                            <Divider sx={{ my: 1.5 }} />
+                            {renderWorkflowAssignmentsPanel(asset)}
+                          </Box>
+                        </Collapse>
+                      </TableCell>
+                    </TableRow>,
+                  ];
+                })}
+              </TableBody>
+            </Table>
+          </Box>
+        </Paper>
       )}
 
       {/* Status action popover */}
