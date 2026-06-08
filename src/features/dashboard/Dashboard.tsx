@@ -1,6 +1,6 @@
 ﻿import {
-  Alert, Box, Button, Chip, CircularProgress, Collapse, Divider, FormControl, Grid,
-  IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Tab, Tabs, Tooltip, Typography,
+  Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogContent, DialogTitle, Divider, FormControl, Grid,
+  IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from "@mui/material";
 import {
   AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined, CloseOutlined,
@@ -124,9 +124,12 @@ type InspectionRunSignal = {
   status: string;
 };
 
+type AdminInstallFilter = "all" | "in-progress" | "unassigned";
+
 const Dashboard = () => {
   const navigate   = useNavigate();
   const { user }   = useAuth();
+  const isAdmin      = user.role === "Admin";
   const isManager    = user.role === "Admin" || user.role === "Project Manager";
   const isSupervisor = user.role === "Supervisor";
   const isEngineer   = user.role === "Engineer" || user.role === "QA Inspector";
@@ -197,6 +200,10 @@ const Dashboard = () => {
   const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
   const [inspectionImportsWaiting, setInspectionImportsWaiting] = useState(0);
   const [inspectionImportsFailed, setInspectionImportsFailed] = useState(0);
+  const [adminInstallFilter, setAdminInstallFilter] = useState<AdminInstallFilter>("all");
+  const [adminInstallProjectsOpen, setAdminInstallProjectsOpen] = useState(false);
+  const [adminInstallPmFilter, setAdminInstallPmFilter] = useState("");
+  const [adminInstallProjectFilter, setAdminInstallProjectFilter] = useState("");
   const [pmDashboardTab, setPmDashboardTab] = useState<PmDashboardTab>(
     isManager ? "pm-projects" : "my-installs"
   );
@@ -211,7 +218,7 @@ const Dashboard = () => {
   // Admin: view another user's dashboard
   type DashboardUserEntry = { id: string; fullName: string; role: string; office: string };
   const [dashboardUsers, setDashboardUsers] = useState<DashboardUserEntry[]>([]);
-  const [selectedDashboardId, setSelectedDashboardId] = useState<string>(user.id);
+  const [selectedDashboardId, setSelectedDashboardId] = useState<string>(isAdmin ? ALL_DASHBOARDS_VALUE : user.id);
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
@@ -276,7 +283,7 @@ const Dashboard = () => {
     let cancelled = false;
     setWorkspaceLoading(true);
     projectAssetService
-      .dashboardWorkspace(isManager ? selectedDashboardId : undefined)
+      .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
       .then((data) => {
         if (!cancelled) setDashboardWorkspace(data);
       })
@@ -407,6 +414,7 @@ const Dashboard = () => {
   // Admin: dashboard scope derived from user picker
   const viewedDashboardUserId = selectedDashboardId === ALL_DASHBOARDS_VALUE ? null : selectedDashboardId;
   const viewingOwnDashboard = !viewedDashboardUserId || viewedDashboardUserId === user.id;
+  const showAdminOverviewStrip = isAdmin && !viewedDashboardUserId;
   const viewedDashboardUser = useMemo(
     () => dashboardUsers.find((u) => u.id === viewedDashboardUserId) ?? null,
     [dashboardUsers, viewedDashboardUserId],
@@ -471,9 +479,32 @@ const Dashboard = () => {
     [projectAssetSummary]
   );
 
+  const projectById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project])),
+    [projects]
+  );
+
   const productNameById = useMemo(
     () => new Map(products.map((product) => [product.id, product.name])),
     [products]
+  );
+
+  const projectPmLabel = useCallback(
+    (projectId?: string | null) => {
+      const project = projectId ? projectById.get(projectId) : undefined;
+      return project?.projectManager?.trim() || "No PM assigned";
+    },
+    [projectById]
+  );
+  const projectAttentionLabel = useCallback(
+    (projectId?: string | null, fallbackJobNumber?: string | null, fallbackCustomer?: string | null) => {
+      const project = projectId ? projectById.get(projectId) : undefined;
+      const jobNumber = project?.jobNumber || fallbackJobNumber || "No job number";
+      const customer = project?.customerName || fallbackCustomer || "No customer";
+      const pmName = project?.projectManager?.trim() || "No PM assigned";
+      return `${jobNumber} - ${customer} - ${pmName}`;
+    },
+    [projectById]
   );
 
   // Tab bar is shown for all non-viewers.
@@ -517,6 +548,59 @@ const Dashboard = () => {
     [pendingSigs, myInstallAssets]
   );
 
+  const inspectionScopeProjects = useMemo(
+    () => scopedProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
+    [scopedProjects]
+  );
+  const inspectionScopeProjectIds = useMemo(
+    () => new Set(inspectionScopeProjects.map((project) => project.id)),
+    [inspectionScopeProjects]
+  );
+  const inspectionScopeAssets = useMemo(
+    () => visibleOpenAssets.filter((asset) => inspectionScopeProjectIds.has(asset.projectId)),
+    [visibleOpenAssets, inspectionScopeProjectIds]
+  );
+  const installScopeAssets = useMemo(
+    () => visibleOpenAssets.filter((asset) => !inspectionScopeProjectIds.has(asset.projectId)),
+    [visibleOpenAssets, inspectionScopeProjectIds]
+  );
+  const installScopeProjectIds = useMemo(
+    () => new Set(installScopeAssets.map((asset) => asset.projectId)),
+    [installScopeAssets]
+  );
+  const installScopeProjects = useMemo(
+    () => scopedProjects.filter((project) => installScopeProjectIds.has(project.id)),
+    [scopedProjects, installScopeProjectIds]
+  );
+  const installProjectsWithOpenAssets = useMemo(
+    () => installScopeProjects.filter((project) => installScopeAssets.some((asset) => asset.projectId === project.id)),
+    [installScopeAssets, installScopeProjects]
+  );
+  const filteredAdminInstallAssets = useMemo(() => {
+    switch (adminInstallFilter) {
+      case "in-progress":
+        return installScopeAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status));
+      case "unassigned":
+        return installScopeAssets.filter((asset) => !asset.assignedUserId);
+      default:
+        return installScopeAssets;
+    }
+  }, [adminInstallFilter, installScopeAssets]);
+  const filteredAdminInstallProjects = useMemo(() => {
+    const pmFilter = adminInstallPmFilter.trim().toLowerCase();
+    const jobFilter = adminInstallProjectFilter.trim().toLowerCase();
+    return installProjectsWithOpenAssets.filter((project) => {
+      const pmMatches = !pmFilter || String(project.projectManager ?? "").toLowerCase().includes(pmFilter);
+      const jobMatches = !jobFilter || String(project.jobNumber ?? "").toLowerCase().includes(jobFilter);
+      return pmMatches && jobMatches;
+    });
+  }, [adminInstallPmFilter, adminInstallProjectFilter, installProjectsWithOpenAssets]);
+  const totalInstallAssetCount = installScopeAssets.length;
+  const projectsMissingPm = useMemo(
+    () => scopedProjects.filter((project) => !project.projectManager?.trim()),
+    [scopedProjects]
+  );
+
   // Show My Inspections tab for managers always; for others only if assigned to inspection assets
   const hasInspectionsTab = isManager || myInspectionAssets.length > 0 || myInspectionHistory.length > 0 || inspectionRunsDue > 0;
   const showInspectionInbox = inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || inspectionImportsFailed > 0;
@@ -535,6 +619,19 @@ const Dashboard = () => {
   const myPendingSigs = useMemo(() =>
     pendingSigs.filter(s => myAssets.some(a => a.id === s.assetId || a.jobNumber === s.jobNumber)),
     [pendingSigs, myAssets]);
+
+  const overviewActiveCount = showAdminOverviewStrip
+    ? visibleOpenAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length
+    : myActive.length;
+  const overviewPausedCount = showAdminOverviewStrip
+    ? visibleOpenAssets.filter((asset) => isPausedAsset(asset.runStatus)).length
+    : myPaused.length;
+  const overviewQueuedCount = showAdminOverviewStrip
+    ? visibleOpenAssets.filter((asset) => isNotStartedAsset(asset.status)).length
+    : myQueued.length;
+  const overviewBlockingCount = showAdminOverviewStrip
+    ? blockingIssues.length
+    : myBlocking.length;
 
   // Load inspection signals for PM/Admin and installers
   useEffect(() => {
@@ -607,11 +704,11 @@ const Dashboard = () => {
     <Box className="glass-card" sx={{ p: 2.5 }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
         <AssessmentOutlined sx={{ color: "primary.main", fontSize: 20 }} />
-        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Inspections</Typography>
+        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>{isAdmin ? "Inspections" : "My Inspections"}</Typography>
         {workspaceLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-        Current inspection work plus your recent inspection history.
+        {isAdmin ? "Inspection activity across the current dashboard scope, grouped with PM ownership." : "Current inspection work plus your recent inspection history."}
       </Typography>
       <Grid container spacing={1.5} sx={{ mb: 2 }}>
         <Grid item xs={6} md={3}>
@@ -773,7 +870,9 @@ const Dashboard = () => {
               <Stack spacing={0.25} sx={{ mt: 1 }}>
                 {blockingIssues.slice(0, 4).map((iss) => (
                   <ItemRow key={iss.issueId}
-                    label={`${iss.jobNumber}: ${iss.assetTag}`}
+                    label={isAdmin
+                      ? projectAttentionLabel(iss.projectId, iss.jobNumber, undefined)
+                      : `${iss.jobNumber}: ${iss.assetTag}`}
                     sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "..." : "")}
                     onClick={() => navigate("/issues")} />
                 ))}
@@ -808,7 +907,9 @@ const Dashboard = () => {
               <Stack spacing={0.25} sx={{ mt: 1 }}>
                 {overdueProjects.slice(0, 4).map((p) => (
                   <ItemRow key={p.id}
-                    label={`${p.jobNumber} - ${p.customerName || ""}`}
+                    label={isAdmin
+                      ? projectAttentionLabel(p.id, p.jobNumber, p.customerName)
+                      : `${p.jobNumber} - ${p.customerName || ""}`}
                     sub={`Due ${fmtDate(p.finishDate)}`}
                     onClick={() => navigate(`/projects/${p.id}`)} />
                 ))}
@@ -843,7 +944,9 @@ const Dashboard = () => {
               <Stack spacing={0.25} sx={{ mt: 1 }}>
                 {visiblePendingSigs.slice(0, 4).map((s) => (
                   <ItemRow key={s.runId}
-                    label={`${s.jobNumber}: ${s.assetTag}`}
+                    label={isAdmin
+                      ? projectAttentionLabel(s.projectId, s.jobNumber, undefined)
+                      : `${s.jobNumber}: ${s.assetTag}`}
                     sub={`Completed ${fmtDate(s.completedAt)}`}
                     onClick={() => navigate(`/projects/${s.projectId}`)} />
                 ))}
@@ -878,7 +981,9 @@ const Dashboard = () => {
               <Stack spacing={0.25} sx={{ mt: 1 }}>
                 {highIssues.slice(0, 4).map((iss) => (
                   <ItemRow key={iss.issueId}
-                    label={`${iss.jobNumber}: ${iss.assetTag}`}
+                    label={isAdmin
+                      ? projectAttentionLabel(iss.projectId, iss.jobNumber, undefined)
+                      : `${iss.jobNumber}: ${iss.assetTag}`}
                     sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "..." : "")}
                     onClick={() => navigate("/issues")} />
                 ))}
@@ -941,7 +1046,7 @@ const Dashboard = () => {
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
         <TrendingUpOutlined sx={{ fontSize: 18, color: "primary.main" }} />
         <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem", flex: 1 }}>
-          Project Status
+          {isAdmin ? "Projects" : "Project Status"}
         </Typography>
         <Chip
           label={scopedProjects.length}
@@ -950,11 +1055,22 @@ const Dashboard = () => {
           variant="outlined"
           sx={{ height: 20, fontSize: "0.7rem" }}
         />
+        {isAdmin && projectsMissingPm.length > 0 && (
+          <Chip
+            label={`${projectsMissingPm.length} missing PM`}
+            size="small"
+            color="warning"
+            variant="outlined"
+            sx={{ height: 20, fontSize: "0.7rem" }}
+          />
+        )}
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
         {viewedDashboardUserId
           ? `Projects assigned to ${viewingOwnDashboard ? "you" : viewedDashboardUser?.fullName ?? "this user"}`
-          : "Projects across the current dashboard scope"}
+          : isAdmin
+            ? "All projects in the current dashboard scope with PM ownership."
+            : "Projects across the current dashboard scope"}
       </Typography>
 
       {scopedProjects.length === 0 ? (
@@ -1039,12 +1155,292 @@ const Dashboard = () => {
                   <Typography variant="caption" color="text.secondary" noWrap>
                     {[project.customerName, project.siteName, productNames || "No products linked"].filter(Boolean).join(" - ")}
                   </Typography>
+                  <Typography variant="caption" color={project.projectManager?.trim() ? "text.secondary" : "warning.main"} noWrap>
+                    PM: {project.projectManager?.trim() || "No PM assigned"}
+                  </Typography>
                 </Stack>
               </Box>
             );
           })}
         </Stack>
       )}
+    </Box>
+  );
+
+  const AdminInspectionWorkspace = (
+    <Box className="glass-card" sx={{ p: 2.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+        <AssessmentOutlined sx={{ color: "primary.main", fontSize: 20 }} />
+        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Inspections</Typography>
+      </Stack>
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+        Inspection projects and open inspection assets across the current dashboard scope.
+      </Typography>
+      <Grid container spacing={1.5} sx={{ mb: 2 }}>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+            <Typography variant="caption" color="text.secondary">Projects</Typography>
+            <Typography variant="h5" fontWeight={700}>{inspectionScopeProjects.length}</Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+            <Typography variant="caption" color="text.secondary">Open Assets</Typography>
+            <Typography variant="h5" fontWeight={700}>{inspectionScopeAssets.length}</Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+            <Typography variant="caption" color="text.secondary">In Progress</Typography>
+            <Typography variant="h5" fontWeight={700}>{inspectionScopeAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length}</Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+            <Typography variant="caption" color="text.secondary">Imports Waiting</Typography>
+            <Typography variant="h5" fontWeight={700}>{inspectionImportsWaiting}</Typography>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      {inspectionScopeProjects.length === 0 ? (
+        <Typography variant="caption" color="text.disabled">No inspection projects in this scope.</Typography>
+      ) : (
+        <Grid container spacing={1.5}>
+          {inspectionScopeProjects.slice(0, 8).map((project) => {
+            const projectAssets = inspectionScopeAssets.filter((asset) => asset.projectId === project.id);
+            const activeAssets = projectAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length;
+            return (
+              <Grid item xs={12} sm={6} md={4} key={project.id}>
+                <Paper elevation={0}
+                  onClick={() => navigate(`/projects/${project.id}`)}
+                  sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                    transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                  <Stack spacing={0.75}>
+                    <Typography variant="caption" fontWeight={700} noWrap display="block">
+                      {project.jobNumber}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap display="block">
+                      {project.customerName || "No customer"} - {project.status}
+                    </Typography>
+                    <Typography variant="caption" color={project.projectManager?.trim() ? "text.secondary" : "warning.main"} noWrap display="block">
+                      PM: {project.projectManager?.trim() || "No PM assigned"}
+                    </Typography>
+                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                      <Chip label={`${projectAssets.length} open assets`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.62rem" }} />
+                      {activeAssets > 0 && <Chip label={`${activeAssets} in progress`} size="small" color="primary" variant="outlined" sx={{ height: 18, fontSize: "0.62rem" }} />}
+                    </Stack>
+                  </Stack>
+                </Paper>
+              </Grid>
+            );
+          })}
+        </Grid>
+      )}
+    </Box>
+  );
+
+  const AdminInstallWorkspace = (
+    <Box className="glass-card" sx={{ p: 2.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+        <WorkOutlineOutlined sx={{ color: "primary.main", fontSize: 20 }} />
+        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Installs</Typography>
+      </Stack>
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+        Open installation assets across the current dashboard scope with PM ownership.
+      </Typography>
+      <Grid container spacing={1.5} sx={{ mb: 2 }}>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0}
+            onClick={() => setAdminInstallProjectsOpen(true)}
+            sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+              transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+            <Typography variant="caption" color="text.secondary">Projects</Typography>
+            <Typography variant="h5" fontWeight={700}>{installProjectsWithOpenAssets.length}</Typography>
+            <Typography variant="caption" color="text.secondary" display="block">
+              {totalInstallAssetCount} total assets
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0}
+            onClick={() => setAdminInstallFilter("all")}
+            sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+              transition: "all 0.15s",
+              borderColor: adminInstallFilter === "all" ? "primary.main" : "var(--stroke)",
+              background: adminInstallFilter === "all" ? "rgba(45,212,191,0.08)" : undefined,
+              "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+            <Typography variant="caption" color="text.secondary">Open Assets</Typography>
+            <Typography variant="h5" fontWeight={700}>{totalInstallAssetCount}</Typography>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Showing all live installs
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0}
+            onClick={() => setAdminInstallFilter("in-progress")}
+            sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+              transition: "all 0.15s",
+              borderColor: adminInstallFilter === "in-progress" ? "primary.main" : "var(--stroke)",
+              background: adminInstallFilter === "in-progress" ? "rgba(45,212,191,0.08)" : undefined,
+              "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+            <Typography variant="caption" color="text.secondary">In Progress</Typography>
+            <Typography variant="h5" fontWeight={700}>{installScopeAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length}</Typography>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Click to filter the list
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper elevation={0}
+            onClick={() => setAdminInstallFilter("unassigned")}
+            sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+              transition: "all 0.15s",
+              borderColor: adminInstallFilter === "unassigned" ? "warning.main" : "var(--stroke)",
+              background: adminInstallFilter === "unassigned" ? "rgba(237,108,2,0.08)" : undefined,
+              "&:hover": { borderColor: "warning.main", background: "rgba(237,108,2,0.04)" } }}>
+            <Typography variant="caption" color="text.secondary">Unassigned</Typography>
+            <Typography variant="h5" fontWeight={700}>{installScopeAssets.filter((asset) => !asset.assignedUserId).length}</Typography>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Click to filter the list
+            </Typography>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+        <Typography variant="caption" color="text.secondary">
+          {adminInstallFilter === "all"
+            ? "Showing all open install assets"
+            : adminInstallFilter === "in-progress"
+              ? "Showing in-progress install assets"
+              : "Showing unassigned install assets"}
+        </Typography>
+        {adminInstallFilter !== "all" && (
+          <Button size="small" variant="text" onClick={() => setAdminInstallFilter("all")} sx={{ minWidth: 0, px: 0.5 }}>
+            Clear filter
+          </Button>
+        )}
+      </Stack>
+
+      {filteredAdminInstallAssets.length === 0 ? (
+        <Typography variant="caption" color="text.disabled">No installation assets in this scope.</Typography>
+      ) : (
+        <Grid container spacing={1.5}>
+          {filteredAdminInstallAssets.slice(0, 8).map((asset) => (
+            <Grid item xs={12} sm={6} md={4} key={asset.id}>
+              <Paper elevation={0}
+                onClick={() => navigate("/installations/assets")}
+                sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                  transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                <Stack spacing={0.75}>
+                  <Typography variant="caption" fontWeight={700} noWrap display="block">
+                    {asset.assetTag || asset.assetName || asset.id}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap display="block">
+                    {asset.jobNumber} - {displayRunState(asset)}
+                  </Typography>
+                  <Typography variant="caption" color={projectPmLabel(asset.projectId) === "No PM assigned" ? "warning.main" : "text.secondary"} noWrap display="block">
+                    PM: {projectPmLabel(asset.projectId)}
+                  </Typography>
+                  <Chip
+                    label={asset.assignedUserId ? "Assigned" : "Unassigned"}
+                    size="small"
+                    color={asset.assignedUserId ? "default" : "warning"}
+                    variant="outlined"
+                    sx={{ alignSelf: "flex-start", height: 18, fontSize: "0.62rem" }}
+                  />
+                </Stack>
+              </Paper>
+            </Grid>
+          ))}
+        </Grid>
+      )}
+      {filteredAdminInstallAssets.length > 8 && (
+        <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
+          +{filteredAdminInstallAssets.length - 8} more assets - <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }} onClick={() => navigate("/installations/assets")}>view all</Box>
+        </Typography>
+      )}
+
+      <Dialog open={adminInstallProjectsOpen} onClose={() => setAdminInstallProjectsOpen(false)} fullWidth maxWidth="md">
+        <DialogTitle>Install Projects</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              Open install projects in the current dashboard scope. Filter by PM name or project number.
+            </Typography>
+            <Grid container spacing={1.5}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="Filter by PM"
+                  value={adminInstallPmFilter}
+                  onChange={(e) => setAdminInstallPmFilter(e.target.value)}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="Filter by Project Number"
+                  value={adminInstallProjectFilter}
+                  onChange={(e) => setAdminInstallProjectFilter(e.target.value)}
+                />
+              </Grid>
+            </Grid>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Chip label={`${filteredAdminInstallProjects.length} open projects`} size="small" color="info" variant="outlined" />
+              <Chip label={`${totalInstallAssetCount} total assets`} size="small" variant="outlined" />
+              {(adminInstallPmFilter || adminInstallProjectFilter) && (
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={() => {
+                    setAdminInstallPmFilter("");
+                    setAdminInstallProjectFilter("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              )}
+            </Stack>
+            {filteredAdminInstallProjects.length === 0 ? (
+              <Typography variant="caption" color="text.disabled">No install projects match the current filters.</Typography>
+            ) : (
+              <Stack spacing={1}>
+                {filteredAdminInstallProjects.map((project) => {
+                  const projectAssets = installScopeAssets.filter((asset) => asset.projectId === project.id);
+                  return (
+                    <Paper key={project.id} elevation={0}
+                      onClick={() => {
+                        setAdminInstallProjectsOpen(false);
+                        navigate(`/projects/${project.id}`);
+                      }}
+                      sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                        transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                      <Stack spacing={0.75}>
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                          <Typography variant="subtitle2" fontWeight={700}>{project.jobNumber}</Typography>
+                          <Chip label={project.status} size="small" variant="outlined" sx={{ height: 20, fontSize: "0.68rem" }} />
+                          <Chip label={`${projectAssets.length} open assets`} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.68rem" }} />
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary" noWrap display="block">
+                          {project.customerName || "No customer"}
+                        </Typography>
+                        <Typography variant="caption" color={project.projectManager?.trim() ? "text.secondary" : "warning.main"} noWrap display="block">
+                          PM: {project.projectManager?.trim() || "No PM assigned"}
+                        </Typography>
+                      </Stack>
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            )}
+          </Stack>
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 
@@ -1549,13 +1945,13 @@ const Dashboard = () => {
             </Box>
           )}
           <Stack direction="row" alignItems="center" spacing={1.5}>
-            <PersonOutlined sx={{ color: viewingOwnDashboard ? "primary.main" : "info.main", fontSize: 20 }} />
+            <PersonOutlined sx={{ color: showAdminOverviewStrip ? "info.main" : viewingOwnDashboard ? "primary.main" : "info.main", fontSize: 20 }} />
             <Box sx={{ flex: 1 }}>
               <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", lineHeight: 1.2 }}>
-                {viewingOwnDashboard ? user.fullName : viewedDashboardUser?.fullName ?? user.fullName}
+                {showAdminOverviewStrip ? "Admin Oversight" : viewingOwnDashboard ? user.fullName : viewedDashboardUser?.fullName ?? user.fullName}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                {viewingOwnDashboard ? user.role : viewedDashboardUser?.role ?? ""}
+                {showAdminOverviewStrip ? "All projects and assets in the current dashboard scope" : viewingOwnDashboard ? user.role : viewedDashboardUser?.role ?? ""}
               </Typography>
             </Box>
             {isManager && (dashboardUsers.length > 0 || selectedDashboardId !== user.id) && (
@@ -1566,6 +1962,7 @@ const Dashboard = () => {
                   value={selectedDashboardId}
                   onChange={(e) => setSelectedDashboardId(e.target.value)}
                 >
+                  {isAdmin && <MenuItem value={ALL_DASHBOARDS_VALUE}><em>All Dashboards</em></MenuItem>}
                   <MenuItem value={user.id}><em>My Dashboard</em></MenuItem>
                   {dashboardUsers.map((u) => (
                     <MenuItem key={u.id} value={u.id}>{u.fullName} ({u.role})</MenuItem>
@@ -1575,17 +1972,17 @@ const Dashboard = () => {
             )}
             <Stack direction="row" spacing={0.75}>
               <Chip icon={<WorkOutlineOutlined sx={{ fontSize: 13 }} />}
-                label={`${myActive.length} active`} size="small"
-                color={myActive.length > 0 ? "primary" : "default"} variant="outlined"
+                label={`${overviewActiveCount} active`} size="small"
+                color={overviewActiveCount > 0 ? "primary" : "default"} variant="outlined"
                 sx={{ height: 22, fontSize: "0.7rem" }} />
-              <Chip label={`${myPaused.length} paused`} size="small"
-                color={myPaused.length > 0 ? "warning" : "default"} variant="outlined"
+              <Chip label={`${overviewPausedCount} paused`} size="small"
+                color={overviewPausedCount > 0 ? "warning" : "default"} variant="outlined"
                 sx={{ height: 22, fontSize: "0.7rem" }} />
-              <Chip label={`${myQueued.length} queued`} size="small"
+              <Chip label={`${overviewQueuedCount} queued`} size="small"
                 color="default" variant="outlined" sx={{ height: 22, fontSize: "0.7rem" }} />
-              {myBlocking.length > 0 && (
+              {overviewBlockingCount > 0 && (
                 <Chip icon={<ErrorOutlineOutlined sx={{ fontSize: 13 }} />}
-                  label={`${myBlocking.length} blocking`} size="small"
+                  label={`${overviewBlockingCount} blocking`} size="small"
                   color="error" variant="outlined" sx={{ height: 22, fontSize: "0.7rem" }} />
               )}
             </Stack>
@@ -1598,7 +1995,11 @@ const Dashboard = () => {
 
           <Collapse in={workspaceExpanded || isEngineer}>
             <Box sx={{ mt: 1.5 }}>
-              {myAssets.length === 0 ? (
+              {showAdminOverviewStrip ? (
+                <Typography variant="caption" color="text.secondary">
+                  Use the tabs below to review project ownership, inspection activity, and install activity across the current scope.
+                </Typography>
+              ) : myAssets.length === 0 ? (
                 <Typography variant="caption" color="text.disabled">
                   {workspaceLoading
                     ? "Loading your assigned assets..."
@@ -1653,9 +2054,9 @@ const Dashboard = () => {
         <Box className="glass-card" sx={{ p: 1.5 }}>
           <Tabs value={pmDashboardTab} onChange={(_, v: PmDashboardTab) => setPmDashboardTab(v)}
             sx={{ minHeight: 36, "& .MuiTab-root": { minHeight: 36, py: 0.5, fontSize: "0.8rem" } }}>
-            {showPmProjectsTab && <Tab value="pm-projects" label="My PM Projects" />}
-            {hasInspectionsTab && <Tab value="my-inspections" label="My Inspections" />}
-            <Tab value="my-installs" label="My Installs" />
+            {showPmProjectsTab && <Tab value="pm-projects" label={isAdmin ? "Projects" : "My PM Projects"} />}
+            {hasInspectionsTab && <Tab value="my-inspections" label={isAdmin ? "Inspections" : "My Inspections"} />}
+            <Tab value="my-installs" label={isAdmin ? "Installs" : "My Installs"} />
           </Tabs>
         </Box>
       )}
@@ -2110,8 +2511,8 @@ const Dashboard = () => {
           {/* Needs Attention - company-wide */}
           {pmDashboardTab === "pm-projects" && NeedsAttentionSection}
 
-          {/* My Inspections workspace */}
-          {pmDashboardTab === "my-inspections" && MyInspectionWorkspace}
+          {/* Inspection workspace */}
+          {pmDashboardTab === "my-inspections" && (isAdmin ? AdminInspectionWorkspace : MyInspectionWorkspace)}
 
           {/* Pending Approvals strip - if any */}
           {pmDashboardTab === "pm-projects" && pendingApprovals.length > 0 && (
@@ -2336,8 +2737,8 @@ const Dashboard = () => {
           {/* Workload */}
           {pmDashboardTab === "pm-projects" && WorkloadPanel}
 
-          {/* My Installs workspace */}
-          {pmDashboardTab === "my-installs" && (
+          {/* Install workspace */}
+          {pmDashboardTab === "my-installs" && (isAdmin ? AdminInstallWorkspace : (
             <Stack spacing={2}>
               <Box className="glass-card" sx={{ p: 2.5 }}>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -2419,7 +2820,7 @@ const Dashboard = () => {
                 )}
               </Box>
             </Stack>
-          )}
+          ))}
         </>
       )}
 
