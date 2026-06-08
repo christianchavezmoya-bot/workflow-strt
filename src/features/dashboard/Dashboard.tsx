@@ -66,6 +66,18 @@ function displayRunState(asset: { runStatus?: string | null; status?: string | n
   return asset.runStatus || asset.status || "Unknown";
 }
 
+function workflowModeLabel(workflowMode?: string | null) {
+  if (workflowMode === "INSPECTION_ONLY") return "Inspection";
+  if (workflowMode === "MIXED") return "Mixed";
+  return "Installation";
+}
+
+function workflowModeChipColor(workflowMode?: string | null): "success" | "info" | "warning" {
+  if (workflowMode === "INSPECTION_ONLY") return "info";
+  if (workflowMode === "MIXED") return "warning";
+  return "success";
+}
+
 function historyChipColor(status?: string | null): "default" | "success" | "warning" | "error" | "info" {
   const value = (status ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
   if (value === "completed" || value === "finished" || value === "closed") return "success";
@@ -367,6 +379,13 @@ const Dashboard = () => {
     () => managedProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
     [managedProjects],
   );
+  const projectAssetsPath = useCallback((project: { id: string; productIds?: string[] | null }) => {
+    const params = new URLSearchParams({ project: project.id });
+    if ((project.productIds ?? []).length === 1 && project.productIds?.[0]) {
+      params.set("product", project.productIds[0]);
+    }
+    return `/installations/assets?${params.toString()}`;
+  }, []);
   const visibleOpenIssues = useMemo(
     () => openIssues.filter((issue) => visibleProjectIds.has(issue.projectId)),
     [openIssues, visibleProjectIds],
@@ -1328,32 +1347,24 @@ const Dashboard = () => {
               {user.role} · {activeOffice === "All" ? "All offices" : activeOffice}
             </Typography>
           </Box>
-          <Grid container spacing={1}>
-            <Grid item xs={6}>
-              <Paper className="glass-card" sx={{ p: 1.25 }}>
-                <Typography variant="caption" color="text.secondary">My Projects</Typography>
-                <Typography variant="h5" fontWeight={700}>{managedProjects.length}</Typography>
-              </Paper>
-            </Grid>
-            <Grid item xs={6}>
-              <Paper className="glass-card" sx={{ p: 1.25 }}>
-                <Typography variant="caption" color="text.secondary">Overdue</Typography>
-                <Typography variant="h5" fontWeight={700} color={managedOverdueProjects.length > 0 ? "error.main" : "inherit"}>{managedOverdueProjects.length}</Typography>
-              </Paper>
-            </Grid>
-            <Grid item xs={6}>
-              <Paper className="glass-card" sx={{ p: 1.25 }}>
-                <Typography variant="caption" color="text.secondary">Inspections</Typography>
-                <Typography variant="h5" fontWeight={700}>{managedInspectionProjects.length}</Typography>
-              </Paper>
-            </Grid>
-            <Grid item xs={6}>
-              <Paper className="glass-card" sx={{ p: 1.25 }}>
-                <Typography variant="caption" color="text.secondary">Open Installs</Typography>
-                <Typography variant="h5" fontWeight={700}>{managedOpenAssets.length}</Typography>
-              </Paper>
-            </Grid>
-          </Grid>
+          <Stack direction="row" spacing={1}>
+            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>My Projects</Typography>
+              <Typography variant="h6" fontWeight={700}>{managedProjects.length}</Typography>
+            </Paper>
+            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>Overdue</Typography>
+              <Typography variant="h6" fontWeight={700} color={managedOverdueProjects.length > 0 ? "error.main" : "inherit"}>{managedOverdueProjects.length}</Typography>
+            </Paper>
+            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>Inspections</Typography>
+              <Typography variant="h6" fontWeight={700}>{managedInspectionProjects.length}</Typography>
+            </Paper>
+            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>Open Installs</Typography>
+              <Typography variant="h6" fontWeight={700}>{managedOpenAssets.length}</Typography>
+            </Paper>
+          </Stack>
         </Stack>
       </Box>
 
@@ -1387,16 +1398,57 @@ const Dashboard = () => {
             {managedProjects.length === 0
               ? <Typography variant="caption" color="text.secondary">No projects in scope.</Typography>
               : <Stack spacing={1}>
-                  {managedProjects.slice(0, 6).map((project) => (
-                    <Paper key={project.id} elevation={0} onClick={() => navigate(`/projects/${project.id}`)}
-                      sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                            "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                      <Typography variant="body2" fontWeight={700} noWrap>{project.jobNumber}</Typography>
-                      <Typography variant="caption" color="text.secondary" noWrap display="block">
-                        {project.customerName || "No customer"} · {project.status}
-                      </Typography>
-                    </Paper>
-                  ))}
+                  {managedProjects.slice(0, 6).map((project) => {
+                    const summary = projectSummaryById.get(project.id);
+                    const projectAssets = openAssets.filter((asset) => asset.projectId === project.id);
+                    const issueCount = projectAssets.filter((asset) => String(asset.status ?? "").toLowerCase() === "issue").length;
+                    const totalAssets = summary?.total ?? project.assetCount ?? projectAssets.length;
+                    const notStarted = summary?.notStarted ?? projectAssets.filter((asset) => isNotStartedAsset(asset.status)).length;
+                    const inProgress = summary?.inProgress ?? projectAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length;
+                    const complete = summary?.complete ?? Math.max(0, totalAssets - notStarted - inProgress - issueCount);
+                    const completionPct = totalAssets > 0 ? Math.round((complete / totalAssets) * 100) : 0;
+
+                    return (
+                      <Paper key={project.id} elevation={0} onClick={() => navigate(projectAssetsPath(project))}
+                        sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                              "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                          <Typography variant="body2" fontWeight={700} noWrap sx={{ flex: 1 }}>
+                            {project.jobNumber}
+                          </Typography>
+                          <Chip
+                            label={workflowModeLabel(project.workflowMode)}
+                            color={workflowModeChipColor(project.workflowMode)}
+                            size="small"
+                            variant="outlined"
+                            sx={{ height: 22, fontSize: 11 }}
+                          />
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ mb: 1 }}>
+                          {project.customerName || "No customer"} · {project.status}
+                        </Typography>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                            {totalAssets} assets
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                            {complete} done
+                          </Typography>
+                          <Box sx={{ flex: 1, minWidth: 80 }}>
+                            <LinearProgress
+                              variant="determinate"
+                              value={completionPct}
+                              color={issueCount > 0 ? "error" : "success"}
+                              sx={{ height: 6, borderRadius: 1 }}
+                            />
+                          </Box>
+                          <Typography variant="caption" color="text.secondary" sx={{ minWidth: 34, textAlign: "right", flexShrink: 0 }}>
+                            {completionPct}%
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    );
+                  })}
                 </Stack>
             }
           </Box>

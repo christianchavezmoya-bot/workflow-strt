@@ -481,13 +481,15 @@ const Topbar = () => {
             </Popover>
           </>
         )}
-        <Tooltip title={alreadyFavorited ? "Remove from Favorites" : "Add to Favorites"}>
-          <IconButton color="inherit" onClick={handleStarClick}>
-            {alreadyFavorited
-              ? <StarOutlinedIcon sx={{ color: "#f59e0b" }} />
-              : <StarBorderOutlinedIcon />}
-          </IconButton>
-        </Tooltip>
+        {!isNativePlatform && (
+          <Tooltip title={alreadyFavorited ? "Remove from Favorites" : "Add to Favorites"}>
+            <IconButton color="inherit" onClick={handleStarClick}>
+              {alreadyFavorited
+                ? <StarOutlinedIcon sx={{ color: "#f59e0b" }} />
+                : <StarBorderOutlinedIcon />}
+            </IconButton>
+          </Tooltip>
+        )}
         <Tooltip title="Help & tours">
           <IconButton color="inherit" onClick={() => window.dispatchEvent(new CustomEvent("open-help-drawer"))}>
             <HelpOutlineOutlinedIcon />
@@ -495,33 +497,35 @@ const Topbar = () => {
         </Tooltip>
 
         {/* Add-favorite popover */}
-        <Popover
-          open={Boolean(starAnchor)}
-          anchorEl={starAnchor}
-          onClose={() => setStarAnchor(null)}
-          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-          transformOrigin={{ vertical: "top", horizontal: "right" }}
-          slotProps={{ paper: { sx: { p: 2, width: 300 } } }}
-        >
-          <Stack spacing={1.5}>
-            <Typography variant="subtitle2" fontWeight={700}>
-              Add to Favorites
-            </Typography>
-            <TextField
-              label="Name"
-              size="small"
-              fullWidth
-              autoFocus
-              value={favLabel}
-              onChange={(e) => setFavLabel(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleFavSave(); }}
-            />
-            <Stack direction="row" spacing={1} justifyContent="flex-end">
-              <Button size="small" onClick={() => setStarAnchor(null)}>Cancel</Button>
-              <Button size="small" variant="contained" onClick={handleFavSave}>Save</Button>
+        {!isNativePlatform && (
+          <Popover
+            open={Boolean(starAnchor)}
+            anchorEl={starAnchor}
+            onClose={() => setStarAnchor(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+            transformOrigin={{ vertical: "top", horizontal: "right" }}
+            slotProps={{ paper: { sx: { p: 2, width: 300 } } }}
+          >
+            <Stack spacing={1.5}>
+              <Typography variant="subtitle2" fontWeight={700}>
+                Add to Favorites
+              </Typography>
+              <TextField
+                label="Name"
+                size="small"
+                fullWidth
+                autoFocus
+                value={favLabel}
+                onChange={(e) => setFavLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleFavSave(); }}
+              />
+              <Stack direction="row" spacing={1} justifyContent="flex-end">
+                <Button size="small" onClick={() => setStarAnchor(null)}>Cancel</Button>
+                <Button size="small" variant="contained" onClick={handleFavSave}>Save</Button>
+              </Stack>
             </Stack>
-          </Stack>
-        </Popover>
+          </Popover>
+        )}
 
         <IconButton color="inherit" onClick={() => setSearchOpen(true)}>
           <SearchOutlinedIcon />
