@@ -444,6 +444,21 @@ const ProjectList = () => {
     return applyAutoSort(filtered, autoSort, projectAccessors);
   }, [activeOffice, canViewAllProjects, globalOffices, projectViewFilter, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName]);
 
+  // Auto-fallback: if PM's "My projects" filter returns nothing once data is loaded,
+  // switch to "all" so they don't land on a blank page.
+  useEffect(() => {
+    if (
+      user?.role === "Project Manager" &&
+      projectViewFilter === "mine" &&
+      !loading &&
+      globalOffices.length > 0 &&   // offices loaded — avoids false trigger during race
+      sourceProjects.length > 0 &&   // data is actually loaded
+      filteredProjects.length === 0
+    ) {
+      setProjectViewFilter("all");
+    }
+  }, [filteredProjects.length, globalOffices.length, loading, projectViewFilter, sourceProjects.length, user?.role]);
+
   const numberedProjects = useMemo(
     () => filteredProjects.map((project, index) => ({ ...project, seq: index + 1 })),
     [filteredProjects]
