@@ -68,7 +68,6 @@ public class AssetWorkflowAssignmentsController : ControllerBase
 
     // POST api/asset-workflow-assignments
     [HttpPost]
-    [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Create([FromBody] CreateAssignmentRequest req)
     {
         var config = await _db.WorkflowConfigs.FirstOrDefaultAsync(c => c.Id == req.WorkflowConfigId);
@@ -76,6 +75,10 @@ public class AssetWorkflowAssignmentsController : ControllerBase
         if (config.Status != "Published")
             return BadRequest(new { message = "Only Published configurations can be assigned." });
 
+        var currentUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var currentUserRole = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "";
+        var isManager = currentUserRole == "Admin" || currentUserRole == "Project Manager";
+        
         var assignedBy = User.Identity?.Name ?? User.FindFirst("email")?.Value;
         var entity = new AssetWorkflowAssignmentEntity
         {
@@ -88,13 +91,24 @@ public class AssetWorkflowAssignmentsController : ControllerBase
             AssignedAt       = DateTime.UtcNow,
         };
         _db.AssetWorkflowAssignments.Add(entity);
+        
+        // Get asset and project info
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == req.AssetId);
+        var project = asset is null ? null : await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+        
+        // For non-managers, auto-assign the asset to themselves if not already assigned
+        if (!isManager && asset is not null && string.IsNullOrWhiteSpace(asset.AssignedUserId))
+        {
+            asset.AssignedUserId = currentUserId;
+            _logger.LogInformation("Self-assignment: Asset {AssetId} auto-assigned to user {UserId}", asset.Id, currentUserId);
+        }
+        
         await _db.SaveChangesAsync();
 
         var typeName   = (await _db.WorkflowTypes.FirstOrDefaultAsync(t => t.Id == req.WorkflowTypeId))?.Name ?? req.WorkflowTypeId;
         var configName = config.Name;
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == req.AssetId);
-        var project = asset is null ? null : await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
 
+        // Notify Admins and PMs about the workflow assignment
         await _feed.NotifyRolesAsync(
             "workflow-assigned",
             "info",
@@ -110,6 +124,7 @@ public class AssetWorkflowAssignmentsController : ControllerBase
             assignedBy
         );
 
+        // Notify the assigned user (if different from the assigner, or if self-assigned)
         if (!string.IsNullOrWhiteSpace(asset?.AssignedUserId))
         {
             await _feed.NotifyUsersAsync(
@@ -126,6 +141,30 @@ public class AssetWorkflowAssignmentsController : ControllerBase
                 null,
                 assignedBy
             );
+        }
+        
+        // If this was a self-assignment by a non-manager, also notify the project's PM
+        if (!isManager && project is not null && !string.IsNullOrWhiteSpace(project.ProjectManager))
+        {
+            var pmUser = await _db.Users.FirstOrDefaultAsync(u => u.FullName == project.ProjectManager);
+            if (pmUser is not null)
+            {
+                var selfAssignerName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "A technician";
+                await _feed.NotifyUsersAsync(
+                    "workflow-self-assigned",
+                    "info",
+                    $"{selfAssignerName} self-assigned a workflow",
+                    $"{selfAssignerName} assigned {typeName} / {configName} to asset {asset?.AssetTag ?? req.AssetId} on job {project.JobNumber}.",
+                    [pmUser.Id],
+                    project.Id,
+                    asset?.Id,
+                    null,
+                    "asset-workflow-assignment",
+                    entity.Id,
+                    null,
+                    currentUserId
+                );
+            }
         }
 
         return Ok(new AssetWorkflowAssignmentDto(

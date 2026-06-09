@@ -4,9 +4,9 @@
 } from "@mui/material";
 import {
   AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined, CloseOutlined,
-  ErrorOutlineOutlined, ExpandLessOutlined, ExpandMoreOutlined,
-  FactCheckOutlined, OpenInNewOutlined, PendingActionsOutlined, PersonOutlined,
-  PhotoCameraOutlined, PrintOutlined, ReportOutlined, SwitchAccountOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
+  EditOutlined, ErrorOutlineOutlined, ExpandLessOutlined, ExpandMoreOutlined,
+  FactCheckOutlined, FolderOutlined, OpenInNewOutlined, PendingActionsOutlined, PersonOutlined,
+  PhotoCameraOutlined, PlayArrowOutlined, PrintOutlined, ReportOutlined, SwitchAccountOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
   WarningAmberOutlined, WorkOutlineOutlined,
 } from "@mui/icons-material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -34,7 +34,14 @@ import { generateTechnicianReport, type TechnicianReportData } from "../../utils
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
+import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
+import { workflowTypeService } from "../../services/workflowTypeService";
 import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag, type PhotoUpdateNotification } from "./PhotoUploadDialog";
+import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
+import AssetDocumentsDialog from "../installations/AssetDocumentsDialog";
+import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
+import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
+import type { Workflow } from "../../types/workflow";
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -219,6 +226,8 @@ const Dashboard = () => {
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
   const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
+
+  // Quick action dialog for "My Jobs Today" assets (state declared after myInstallAssets is defined)
   const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
   const [inspectionImportsWaiting, setInspectionImportsWaiting] = useState(0);
   const [inspectionImportsFailed, setInspectionImportsFailed] = useState(0);
@@ -648,6 +657,192 @@ const Dashboard = () => {
     () => dashboardWorkspace.installHistory,
     [dashboardWorkspace]
   );
+
+  // Quick action dialog for "My Jobs Today" assets
+  type QuickActionAsset = typeof myInstallAssets[0];
+  const [quickActionAsset, setQuickActionAsset] = useState<QuickActionAsset | null>(null);
+  const [quickActionOpen, setQuickActionOpen] = useState(false);
+  const [quickActionAssignments, setQuickActionAssignments] = useState<WorkflowAssignment[]>([]);
+  const [quickActionRuns, setQuickActionRuns] = useState<AssetWorkflowRun[]>([]);
+  const [quickActionLoading, setQuickActionLoading] = useState(false);
+  const [autoAssignConfirm, setAutoAssignConfirm] = useState<{
+    asset: QuickActionAsset;
+    assignment?: WorkflowAssignment;
+    reason: "unassigned" | "other";
+    otherName?: string;
+  } | null>(null);
+  // WorkOrderRunner integration
+  const [runnerOpen, setRunnerOpen] = useState(false);
+  const [runnerAsset, setRunnerAsset] = useState<QuickActionAsset | null>(null);
+  const [runnerWorkflow, setRunnerWorkflow] = useState<Workflow | null>(null);
+  const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>();
+  const [runnerExistingRunId, setRunnerExistingRunId] = useState<string | undefined>();
+  const [runnerLoading, setRunnerLoading] = useState<string | null>(null);
+  // Inspection import dialog
+  const [importDialogAsset, setImportDialogAsset] = useState<{ id: string; assetTag?: string; assetName?: string; projectId: string } | null>(null);
+  // Inspection import dialog open state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  // Documents dialog for quick action
+  const [docsDialogOpen, setDocsDialogOpen] = useState(false);
+  const [docsDialogAsset, setDocsDialogAsset] = useState<QuickActionAsset | null>(null);
+  const [docsCount, setDocsCount] = useState(0);
+  const [docsLoading, setDocsLoading] = useState(false);
+
+  // Assign workflow dialog (for assets without workflow assignment)
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [assignForm, setAssignForm] = useState({ workflowTypeId: "", workflowConfigId: "" });
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
+  const [workflowConfigs, setWorkflowConfigs] = useState<{ id: string; name: string; workflowTypeId: string }[]>([]);
+  // Product-based workflow for assets without explicit assignment
+  const [productWorkflow, setProductWorkflow] = useState<{ configId: string; configName: string; workflowTypeId?: string } | null>(null);
+
+  // Quick action dialog handlers
+  async function openQuickActionDialog(asset: QuickActionAsset) {
+    setQuickActionAsset(asset);
+    setQuickActionOpen(true);
+    setQuickActionLoading(true);
+    setDocsLoading(true);
+    setProductWorkflow(null);
+    try {
+      const [assignments, runs, docs, fullAsset] = await Promise.all([
+        assetWorkflowAssignmentService.listByAsset(asset.id),
+        assetWorkflowRunService.listByAsset(asset.id),
+        api.get(`/asset-documents/by-asset/${asset.id}`).then(res => res.data).catch(() => []),
+        projectAssetService.getById(asset.id).catch(() => null),
+      ]);
+      setQuickActionAssignments(assignments);
+      setQuickActionRuns(runs);
+      setDocsCount(Array.isArray(docs) ? docs.length : 0);
+      
+      // If no explicit assignment but asset has productConfigId, get the workflow config
+      if (assignments.length === 0 && fullAsset?.productConfigId) {
+        try {
+          const cfg = await workflowConfigService.getById(fullAsset.productConfigId);
+          if (cfg) {
+            setProductWorkflow({
+              configId: cfg.id,
+              configName: cfg.name,
+              workflowTypeId: cfg.workflowTypeId,
+            });
+          }
+        } catch {
+          // Ignore if config not found
+        }
+      }
+    } catch {
+      setQuickActionAssignments([]);
+      setQuickActionRuns([]);
+      setDocsCount(0);
+    } finally {
+      setQuickActionLoading(false);
+      setDocsLoading(false);
+    }
+  }
+
+  function closeQuickActionDialog() {
+    setQuickActionOpen(false);
+    setQuickActionAsset(null);
+    setQuickActionAssignments([]);
+    setQuickActionRuns([]);
+  }
+
+  function checkAssignmentThenStartFromDashboard(asset: QuickActionAsset, assignment?: WorkflowAssignment) {
+    if (!asset.assignedUserId) {
+      setAutoAssignConfirm({ asset, assignment, reason: "unassigned" });
+      return;
+    }
+    if (asset.assignedUserId !== user.id) {
+      const otherName = "another user";
+      setAutoAssignConfirm({ asset, assignment, reason: "other", otherName });
+      return;
+    }
+    if (assignment) {
+      void startWorkflowFromDashboard(asset, assignment);
+    }
+  }
+
+  async function startWorkflowFromDashboard(asset: QuickActionAsset, assignment: WorkflowAssignment) {
+    setRunnerLoading(asset.id);
+    try {
+      const cfg = await workflowConfigService.getById(assignment.workflowConfigId);
+      if (!cfg) { alert("Workflow config not found."); return; }
+      let wf: Workflow | null = null;
+      try {
+        const parsed = JSON.parse(cfg.stepsJson);
+        if (parsed?.steps) wf = parsed as Workflow;
+        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
+      } catch {}
+      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
+
+      let existingRunId: string | undefined;
+      const activeRun = quickActionRuns.find((r) => r.workflowConfigId === assignment.workflowConfigId && !r.isLocked);
+      if (activeRun) existingRunId = activeRun.id;
+
+      setRunnerExistingRunId(existingRunId);
+      setRunnerAsset(asset);
+      setRunnerWorkflow(wf);
+      setRunnerWorkflowConfigId(assignment.workflowConfigId);
+      setRunnerOpen(true);
+      closeQuickActionDialog();
+    } catch { alert("Failed to load workflow."); } finally {
+      setRunnerLoading(null);
+    }
+  }
+
+  async function confirmAutoAssignAndStartFromDashboard() {
+    if (!autoAssignConfirm) return;
+    const { asset, assignment } = autoAssignConfirm;
+    setAutoAssignConfirm(null);
+    if (assignment) {
+      void startWorkflowFromDashboard(asset, assignment);
+    }
+  }
+
+  function isInspectionWorkflowType(workflowTypeId?: string): boolean {
+    if (!workflowTypeId) return false;
+    const typeName = String(workflowTypeId).toLowerCase();
+    return typeName.includes("inspection") || typeName === "insp";
+  }
+
+  // Load workflow types and configs when assign dialog opens
+  useEffect(() => {
+    if (assignDialogOpen && workflowTypes.length === 0) {
+      workflowTypeService.list().then(setWorkflowTypes).catch(() => setWorkflowTypes([]));
+    }
+  }, [assignDialogOpen, workflowTypes.length]);
+
+  useEffect(() => {
+    if (assignDialogOpen && quickActionAsset) {
+      // Load all configs and filter by product if available
+      workflowConfigService.getAll().then((configs) => {
+        setWorkflowConfigs(configs.map((c: any) => ({ id: c.id, name: c.name, workflowTypeId: c.workflowTypeId })));
+      }).catch(() => setWorkflowConfigs([]));
+    }
+  }, [assignDialogOpen, quickActionAsset]);
+
+  async function saveAssignmentFromDashboard() {
+    if (!quickActionAsset || !assignForm.workflowTypeId || !assignForm.workflowConfigId) return;
+    setAssignSaving(true);
+    try {
+      await assetWorkflowAssignmentService.create(quickActionAsset.id, assignForm.workflowConfigId, assignForm.workflowTypeId);
+      // Reload assignments
+      const [assignments, runs] = await Promise.all([
+        assetWorkflowAssignmentService.listByAsset(quickActionAsset.id),
+        assetWorkflowRunService.listByAsset(quickActionAsset.id),
+      ]);
+      setQuickActionAssignments(assignments);
+      setQuickActionRuns(runs);
+      setAssignDialogOpen(false);
+      setAssignForm({ workflowTypeId: "", workflowConfigId: "" });
+    } catch (err) {
+      console.error("[Dashboard] Failed to save assignment", err);
+      alert("Failed to assign workflow. Please try again.");
+    } finally {
+      setAssignSaving(false);
+    }
+  }
+
   const myInstallBlocking = useMemo(
     () => openIssues.filter((issue) => issue.isBlocking && myInstallAssets.some((asset) => asset.id === issue.assetId)),
     [openIssues, myInstallAssets]
@@ -2308,7 +2503,7 @@ const Dashboard = () => {
               <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Jobs Today</Typography>
             </Stack>
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-              Sorted by activity {"\u2014"} tap to open
+              Sorted by activity {"\u2014"} tap to open quick actions
             </Typography>
             {myInstallAssets.length === 0 ? (
               <Typography variant="caption" color="text.disabled">No jobs assigned to you.</Typography>
@@ -2320,7 +2515,7 @@ const Dashboard = () => {
                     const isPaused = isPausedAsset(a.runStatus);
                     return (
                       <Grid item xs={12} sm={6} md={4} key={a.id}>
-                        <Paper elevation={0} onClick={() => navigate("/installations/assets")}
+                        <Paper elevation={0} onClick={() => openQuickActionDialog(a)}
                           sx={{
                             p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5,
                             cursor: "pointer", transition: "all 0.15s",
@@ -2347,7 +2542,7 @@ const Dashboard = () => {
                             </Stack>
                             <Button size="small" variant="outlined"
                               color={isActive ? "primary" : "inherit"}
-                              onClick={(e) => { e.stopPropagation(); navigate("/installations/assets"); }}
+                              onClick={(e) => { e.stopPropagation(); openQuickActionDialog(a); }}
                               sx={{ alignSelf: "flex-start", height: 22, fontSize: "0.68rem", py: 0 }}>
                               {isActive ? "Resume" : "Start"}
                             </Button>
@@ -3265,6 +3460,440 @@ const Dashboard = () => {
             const raw: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
             setMissingMediaFlags(raw.map((f) => ({ ...f, missingSteps: f.missingSteps ?? [], totalExpected: f.totalExpected ?? 0, totalCaptured: f.totalCaptured ?? 0 })));
           }}
+        />
+      )}
+
+      {/* Quick Action Dialog for "My Jobs Today" */}
+      <Dialog open={quickActionOpen} onClose={closeQuickActionDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <WorkOutlineOutlined sx={{ color: "primary.main" }} />
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="subtitle1" fontWeight={700}>
+                {quickActionAsset?.assetTag || quickActionAsset?.assetName || "Asset"}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {quickActionAsset?.jobNumber}
+              </Typography>
+            </Box>
+            <Chip
+              label={quickActionAsset ? displayRunState(quickActionAsset) : ""}
+              size="small"
+              color={quickActionAsset && (isInProgressAsset(quickActionAsset.runStatus) || isInProgressAsset(quickActionAsset.status)) ? "primary" : quickActionAsset && isPausedAsset(quickActionAsset.runStatus) ? "warning" : "default"}
+              variant="outlined"
+            />
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          {quickActionLoading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : (
+            <Stack spacing={2}>
+              {/* Asset details */}
+              {quickActionAsset && (
+                <Box>
+                  {quickActionAsset.totalSteps > 0 && (
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Progress: {quickActionAsset.completedSteps}/{quickActionAsset.totalSteps} steps
+                      {quickActionAsset.missingItems > 0 && ` \u2022 ${quickActionAsset.missingItems} missing`}
+                    </Typography>
+                  )}
+                </Box>
+              )}
+
+              {/* Quick Actions */}
+              <Divider sx={{ my: 1.5 }} />
+              <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
+                Quick Actions
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={docsLoading ? <CircularProgress size={14} /> : <FolderOutlined fontSize="small" />}
+                  onClick={() => {
+                    if (quickActionAsset) {
+                      setDocsDialogAsset(quickActionAsset);
+                      setDocsDialogOpen(true);
+                      closeQuickActionDialog();
+                    }
+                  }}
+                  disabled={docsLoading}
+                >
+                  Documents ({docsCount})
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<EditOutlined fontSize="small" />}
+                  onClick={() => {
+                    closeQuickActionDialog();
+                    navigate("/installations/assets");
+                  }}
+                >
+                  Edit Asset
+                </Button>
+              </Stack>
+
+              {/* Workflow assignments */}
+              {quickActionAssignments.length === 0 && quickActionRuns.length === 0 && !productWorkflow ? (
+                <Stack spacing={1.5}>
+                  <Alert severity="info">
+                    No workflow assigned to this asset yet.
+                  </Alert>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    startIcon={<PlayArrowOutlined />}
+                    onClick={() => setAssignDialogOpen(true)}
+                  >
+                    Assign Workflow
+                  </Button>
+                </Stack>
+              ) : quickActionAssignments.length === 0 && quickActionRuns.length === 0 && productWorkflow ? (
+                // Product-linked workflow (no explicit assignment)
+                <Box>
+                  <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
+                    Linked Workflow (from product)
+                  </Typography>
+                  <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="body2" fontWeight={600}>
+                          {productWorkflow.configName}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {isInspectionWorkflowType(productWorkflow.workflowTypeId) ? "Inspection" : "Installation"} workflow
+                        </Typography>
+                      </Box>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="success"
+                        startIcon={runnerLoading === quickActionAsset?.id ? <CircularProgress size={14} /> : <PlayArrowOutlined />}
+                        disabled={runnerLoading === quickActionAsset?.id}
+                        onClick={() => {
+                          if (quickActionAsset && productWorkflow) {
+                            void (async () => {
+                              setRunnerLoading(quickActionAsset.id);
+                              try {
+                                const cfg = await workflowConfigService.getById(productWorkflow.configId);
+                                if (!cfg) { alert("Workflow config not found."); return; }
+                                let wf: Workflow | null = null;
+                                try {
+                                  const parsed = JSON.parse(cfg.stepsJson);
+                                  if (parsed?.steps) wf = parsed as Workflow;
+                                  else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
+                                } catch {}
+                                if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
+                                setRunnerExistingRunId(undefined);
+                                setRunnerAsset(quickActionAsset);
+                                setRunnerWorkflow(wf);
+                                setRunnerWorkflowConfigId(productWorkflow.configId);
+                                setRunnerOpen(true);
+                                closeQuickActionDialog();
+                              } catch { alert("Failed to load workflow."); } finally {
+                                setRunnerLoading(null);
+                              }
+                            })();
+                          }
+                        }}
+                      >
+                        Start
+                      </Button>
+                    </Stack>
+                  </Paper>
+                </Box>
+              ) : quickActionAssignments.length === 0 && quickActionRuns.length > 0 ? (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
+                    Previous Workflow Runs
+                  </Typography>
+                  <Alert severity="info" sx={{ mb: 1.5 }}>
+                    This asset has previous workflow runs but no current assignment. Assign a new workflow to start fresh.
+                  </Alert>
+                  <Stack spacing={1}>
+                    {quickActionRuns.slice(0, 3).map((run) => (
+                      <Paper key={run.id} elevation={0} sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Box sx={{ flex: 1 }}>
+                            <Typography variant="caption" fontWeight={600}>
+                              Run #{run.runNumber ?? 1}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              {run.status} · {run.completedAt ? `Completed ${new Date(run.completedAt).toLocaleDateString()}` : run.startedAt ? `Started ${new Date(run.startedAt).toLocaleDateString()}` : "In progress"}
+                            </Typography>
+                          </Box>
+                          <Chip
+                            label={run.status}
+                            size="small"
+                            color={run.status === "Complete" ? "success" : run.status === "Issue" ? "error" : "primary"}
+                            variant="outlined"
+                            sx={{ height: 18, fontSize: "0.65rem" }}
+                          />
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Stack>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    startIcon={<PlayArrowOutlined />}
+                    onClick={() => setAssignDialogOpen(true)}
+                    sx={{ mt: 1.5 }}
+                  >
+                    Assign New Workflow
+                  </Button>
+                </Box>
+              ) : (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
+                    Assigned Workflows
+                  </Typography>
+                  <Stack spacing={1}>
+                    {quickActionAssignments.map((asgn) => {
+                      const isActive = quickActionRuns.some((r) => r.workflowConfigId === asgn.workflowConfigId && !r.isLocked);
+                      const isInspection = isInspectionWorkflowType(asgn.workflowTypeId);
+                      return (
+                        <Paper key={asgn.id} elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="body2" fontWeight={600}>
+                                {asgn.workflowConfigName || asgn.workflowConfigId}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {isInspection ? "Inspection" : "Installation"} workflow
+                              </Typography>
+                            </Box>
+                            <Stack direction="row" spacing={0.5}>
+                              {isInspection && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="info"
+                                  onClick={() => {
+                                    if (quickActionAsset) {
+                                      setImportDialogAsset({
+                                        id: quickActionAsset.id,
+                                        assetTag: quickActionAsset.assetTag,
+                                        assetName: quickActionAsset.assetName,
+                                        projectId: quickActionAsset.projectId,
+                                      });
+                                      setImportDialogOpen(true);
+                                      closeQuickActionDialog();
+                                    }
+                                  }}
+                                >
+                                  Upload JSON
+                                </Button>
+                              )}
+                              <Button
+                                size="small"
+                                variant="contained"
+                                color={isActive ? "primary" : "success"}
+                                startIcon={runnerLoading === quickActionAsset?.id ? <CircularProgress size={14} /> : <PlayArrowOutlined />}
+                                disabled={runnerLoading === quickActionAsset?.id}
+                                onClick={() => checkAssignmentThenStartFromDashboard(quickActionAsset!, asgn)}
+                              >
+                                {isActive ? "Resume" : "Start"}
+                              </Button>
+                            </Stack>
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+                </Box>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 2.5, py: 1.5 }}>
+          <Button
+            variant="outlined"
+            startIcon={<OpenInNewOutlined />}
+            onClick={() => {
+              closeQuickActionDialog();
+              navigate("/installations/assets");
+            }}
+          >
+            Go to Project Assets
+          </Button>
+          <Button onClick={closeQuickActionDialog}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Auto-assign confirmation dialog */}
+      <Dialog open={!!autoAssignConfirm} onClose={() => setAutoAssignConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {autoAssignConfirm?.reason === "unassigned" ? "Unassigned Asset" : "Asset Assigned to Another User"}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            {autoAssignConfirm?.reason === "unassigned" ? (
+              <>
+                <strong>{autoAssignConfirm?.asset.assetTag || autoAssignConfirm?.asset.assetName}</strong> has no installer assigned.
+                Starting this workflow will assign it to <strong>you ({user.fullName})</strong>.
+              </>
+            ) : (
+              <>
+                <strong>{autoAssignConfirm?.asset.assetTag || autoAssignConfirm?.asset.assetName}</strong> is currently assigned to <strong>{autoAssignConfirm?.otherName}</strong>.
+                Starting this workflow will reassign it to <strong>you ({user.fullName})</strong>.
+              </>
+            )}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAutoAssignConfirm(null)}>Cancel</Button>
+          <Button variant="contained" onClick={confirmAutoAssignAndStartFromDashboard}>
+            Continue
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Inspection Import Dialog */}
+      {importDialogAsset && (
+        <Dialog open={importDialogOpen} onClose={() => { setImportDialogOpen(false); setImportDialogAsset(null); }} maxWidth="md" fullWidth>
+          <DialogTitle>Upload Inspection JSON</DialogTitle>
+          <DialogContent>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Upload an inspection JSON file for <strong>{importDialogAsset.assetTag || importDialogAsset.assetName}</strong>.
+              This is the same functionality available on the Project Assets page.
+            </Alert>
+            <Typography variant="body2" color="text.secondary">
+              Navigate to Project Assets to use the full inspection import dialog with file upload and JSON paste functionality.
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => { setImportDialogOpen(false); setImportDialogAsset(null); }}>Close</Button>
+            <Button
+              variant="contained"
+              startIcon={<OpenInNewOutlined />}
+              onClick={() => {
+                setImportDialogOpen(false);
+                setImportDialogAsset(null);
+                navigate("/installations/assets");
+              }}
+            >
+              Go to Project Assets
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
+      {/* Assign Workflow Dialog */}
+      <Dialog open={assignDialogOpen} onClose={() => !assignSaving && setAssignDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <PlayArrowOutlined fontSize="small" />
+            <span>Assign Workflow - {quickActionAsset?.assetTag || quickActionAsset?.assetName}</span>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Workflow Type</InputLabel>
+              <Select
+                value={assignForm.workflowTypeId}
+                label="Workflow Type"
+                onChange={(e) => setAssignForm((f) => ({ ...f, workflowTypeId: e.target.value, workflowConfigId: "" }))}
+              >
+                {workflowTypes.map((wt) => (
+                  <MenuItem key={wt.id} value={wt.id}>{wt.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth size="small" disabled={!assignForm.workflowTypeId}>
+              <InputLabel>Workflow Config</InputLabel>
+              <Select
+                value={assignForm.workflowConfigId}
+                label="Workflow Config"
+                onChange={(e) => setAssignForm((f) => ({ ...f, workflowConfigId: e.target.value }))}
+              >
+                {workflowConfigs
+                  .filter((c) => c.workflowTypeId === assignForm.workflowTypeId)
+                  .map((c) => (
+                    <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+                  ))}
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAssignDialogOpen(false)} disabled={assignSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={saveAssignmentFromDashboard}
+            disabled={!assignForm.workflowTypeId || !assignForm.workflowConfigId || assignSaving}
+            startIcon={assignSaving ? <CircularProgress size={16} /> : undefined}
+          >
+            {assignSaving ? "Saving..." : "Assign"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* WorkOrderRunner - Run workflow popup */}
+      {runnerOpen && runnerWorkflow && runnerAsset && (
+        <WorkOrderRunner
+          open={runnerOpen}
+          onClose={() => {
+            setRunnerOpen(false);
+            setRunnerWorkflow(null);
+            setRunnerAsset(null);
+            setRunnerWorkflowConfigId(undefined);
+            setRunnerExistingRunId(undefined);
+          }}
+          workflow={runnerWorkflow}
+          productId={""}
+          productName={runnerAsset.assetName ?? ""}
+          projectAssetId={runnerAsset.id}
+          workflowConfigId={runnerWorkflowConfigId}
+          existingRunId={runnerExistingRunId}
+          currentUserName={user.fullName ?? ""}
+          currentUserId={user.id}
+          assetTag={runnerAsset.assetTag}
+          jobNumber={runnerAsset.jobNumber}
+          onComplete={() => {
+            // Refresh the workspace after workflow completion
+            setWorkspaceLoading(true);
+            projectAssetService
+              .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
+              .then((data) => setDashboardWorkspace(data))
+              .finally(() => setWorkspaceLoading(false));
+          }}
+          onPause={() => {
+            // Refresh the workspace after workflow pause
+            setWorkspaceLoading(true);
+            projectAssetService
+              .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
+              .then((data) => setDashboardWorkspace(data))
+              .finally(() => setWorkspaceLoading(false));
+          }}
+        />
+      )}
+
+      {/* Documents Dialog for Quick Action */}
+      {docsDialogOpen && docsDialogAsset && (
+        <AssetDocumentsDialog
+          open={docsDialogOpen}
+          onClose={() => setDocsDialogOpen(false)}
+          asset={{
+            id: docsDialogAsset.id,
+            assetTag: docsDialogAsset.assetTag ?? "",
+            assetName: docsDialogAsset.assetName,
+            projectId: docsDialogAsset.projectId ?? "",
+            productId: "",
+            status: "NotStarted",
+            featureValuesJson: "{}",
+            issuesJson: "[]",
+          } as any}
+          currentUserName={user.fullName ?? ""}
+          onDocsChanged={(assetId: string, count: number) => {
+            setDocsCount(count);
+          }}
+          products={products}
         />
       )}
 

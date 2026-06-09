@@ -14,7 +14,7 @@ namespace Commtrac.Api.Controllers;
 
 [ApiController]
 [Route("api/users")]
-[Authorize(Roles = "Admin,Project Manager")]
+[Authorize]
 public class UsersController : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
