@@ -35,11 +35,10 @@ export const ProjectRepository = {
       if (filters?.status && filters.status !== "All") {
         items = items.filter((p) => p.status === filters.status);
       }
-      if (filters?.country && filters.country !== "All") {
-        items = items.filter(
-          (p: Project & { country?: string }) => p.country === filters.country
-        );
-      }
+      // Country filter is intentionally omitted from the IndexedDB path: Project
+      // objects have no `country` field (they carry `office` city name + `officeId`).
+      // The server handles country filtering; the client-side filteredProjects in
+      // ProjectList uses countryForOffice() to filter the display after offices load.
       return { items, total: items.length };
     }
 
