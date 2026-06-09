@@ -468,6 +468,50 @@ const Dashboard = () => {
     () => openAssets.filter((asset) => visibleProjectIds.has(asset.projectId)),
     [openAssets, visibleProjectIds],
   );
+
+  // Workload derived from visibleOpenAssets so it respects the My/All scope filter.
+  // Cross-references the full workload API data for step counts, issue flags, and fullName.
+  const scopedWorkload = useMemo(() => {
+    type PBEntry = { projectId: string; jobNumber: string; notStarted: number; inProgress: number; paused: number; total: number };
+    const byUser = new Map<string, { assets: OpenAssetItem[]; breakdown: Map<string, PBEntry> }>();
+
+    for (const asset of visibleOpenAssets) {
+      if (!asset.assignedUserId) continue;
+      if (!byUser.has(asset.assignedUserId))
+        byUser.set(asset.assignedUserId, { assets: [], breakdown: new Map() });
+      const entry = byUser.get(asset.assignedUserId)!;
+      entry.assets.push(asset);
+      if (!entry.breakdown.has(asset.projectId))
+        entry.breakdown.set(asset.projectId, { projectId: asset.projectId, jobNumber: asset.jobNumber ?? "", notStarted: 0, inProgress: 0, paused: 0, total: 0 });
+      const pb = entry.breakdown.get(asset.projectId)!;
+      pb.total++;
+      if (isNotStartedAsset(asset.status)) pb.notStarted++;
+      else if (isPausedAsset(asset.runStatus)) pb.paused++;
+      else if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) pb.inProgress++;
+    }
+
+    return [...byUser.entries()]
+      .map(([userId, data]) => {
+        const api = workload.find((w) => w.userId === userId);
+        const assets = data.assets;
+        return {
+          userId,
+          fullName: api?.fullName ?? userId,
+          notStarted:    assets.filter((a) => isNotStartedAsset(a.status)).length,
+          inProgress:    assets.filter((a) => isInProgressAsset(a.runStatus) || isInProgressAsset(a.status)).length,
+          paused:        assets.filter((a) => isPausedAsset(a.runStatus)).length,
+          totalAssigned: assets.length,
+          jobNumbers:    [...new Set(assets.map((a) => a.jobNumber).filter(Boolean))] as string[],
+          hasIssues:     api?.hasIssues ?? false,
+          completedSteps: api?.completedSteps ?? 0,
+          totalSteps:     api?.totalSteps ?? 0,
+          startedAt:      api?.startedAt,
+          projectBreakdown: [...data.breakdown.values()],
+        };
+      })
+      .filter((w) => w.totalAssigned > 0)
+      .sort((a, b) => b.totalAssigned - a.totalAssigned);
+  }, [visibleOpenAssets, workload]);
   const unassignedAssets = useMemo(
     () => visibleOpenAssets.filter((asset) => !asset.assignedUserId && asset.status !== "Complete" && asset.status !== "Completed"),
     [visibleOpenAssets]
@@ -1658,11 +1702,11 @@ const Dashboard = () => {
           </Stack>
         </Stack>
       </Stack>
-      {workloadLoading ? <LinearProgress /> : workload.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">No open assets currently assigned to technicians.</Typography>
+      {workloadLoading ? <LinearProgress /> : scopedWorkload.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">No open assets currently assigned to technicians in this scope.</Typography>
       ) : (
         <Stack spacing={1.5}>
-          {workload.map((w) => {
+          {scopedWorkload.map((w) => {
             const inPct    = w.totalAssigned > 0 ? (w.inProgress / w.totalAssigned) * 100 : 0;
             const pausedPct = w.totalAssigned > 0 ? (w.paused / w.totalAssigned) * 100 : 0;
             const notPct   = w.totalAssigned > 0 ? (w.notStarted / w.totalAssigned) * 100 : 0;
@@ -1736,11 +1780,19 @@ const Dashboard = () => {
                       </span>
                     </Tooltip>
                   </Stack>
-                  {w.jobNumbers && w.jobNumbers.length > 0 && (
+                  {w.projectBreakdown.length > 0 && (
                     <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      {w.jobNumbers.map((jn) => (
-                        <Chip key={jn} label={jn} size="small" variant="outlined"
-                          sx={{ height: 16, fontSize: "0.6rem", color: "text.secondary", borderColor: "divider" }} />
+                      {w.projectBreakdown.map((pb) => (
+                        <Tooltip key={pb.projectId} title={`${pb.inProgress} in progress · ${pb.paused} paused · ${pb.notStarted} queued`} arrow>
+                          <Chip
+                            label={`${pb.jobNumber}: ${pb.total}`}
+                            size="small"
+                            variant="outlined"
+                            color={pb.inProgress > 0 ? "primary" : pb.paused > 0 ? "warning" : "default"}
+                            onClick={(e) => { e.stopPropagation(); navigate(`/projects/${pb.projectId}`); }}
+                            sx={{ height: 16, fontSize: "0.6rem", cursor: "pointer" }}
+                          />
+                        </Tooltip>
                       ))}
                     </Stack>
                   )}
