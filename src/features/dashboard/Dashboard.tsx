@@ -9,7 +9,7 @@ import {
   PhotoCameraOutlined, ReportOutlined, SwitchAccountOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
   WarningAmberOutlined, WorkOutlineOutlined,
 } from "@mui/icons-material";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
@@ -216,9 +216,13 @@ const Dashboard = () => {
   const [adminInstallPmFilter, setAdminInstallPmFilter] = useState("");
   const [adminInstallProjectFilter, setAdminInstallProjectFilter] = useState("");
   // Always open on the Projects tab for managers; others open on their first relevant tab.
+  // Note: useAuth starts with role="Viewer" and updates async from secure storage, so
+  // isManager is false on the very first render. We use a one-shot ref to correct the
+  // tab to "pm-projects" once the real role resolves, without overriding later user navigation.
   const [pmDashboardTab, setPmDashboardTab] = useState<PmDashboardTab>(
     isManager ? "pm-projects" : "my-installs"
   );
+  const tabRoleCorrected = useRef(false);
   // If the role's viewScope is "own", always lock to "mine" — no dropdown shown.
   const canViewAllProjects = (can.projects?.viewScope ?? "own") === "all";
   // Admin defaults to "all" (oversight view); every other role defaults to "mine".
@@ -699,15 +703,23 @@ const Dashboard = () => {
   const hasInspectionsTab = isManager || myInspectionAssets.length > 0 || myInspectionHistory.length > 0 || inspectionRunsDue > 0;
   const showInspectionInbox = inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || inspectionImportsFailed > 0;
 
-  // Redirect to a valid tab when the current selection isn't available for this user
+  // Redirect to a valid tab when the current selection isn't available for this user.
+  // Also corrects the initial tab for managers: useAuth starts with role="Viewer" so
+  // the useState initializer picks "my-installs"; once the real role resolves we
+  // correct once to "pm-projects" using a one-shot ref (doesn't override later clicks).
   useEffect(() => {
+    if (isManager && showPmProjectsTab && !tabRoleCorrected.current && pmDashboardTab === "my-installs") {
+      setPmDashboardTab("pm-projects");
+      tabRoleCorrected.current = true;
+      return;
+    }
     if (pmDashboardTab === "pm-projects" && !showPmProjectsTab) {
       setPmDashboardTab(hasInspectionsTab ? "my-inspections" : "my-installs");
     }
     if (pmDashboardTab === "my-inspections" && !hasInspectionsTab) {
       setPmDashboardTab("my-installs");
     }
-  }, [pmDashboardTab, showPmProjectsTab, hasInspectionsTab]);
+  }, [isManager, pmDashboardTab, showPmProjectsTab, hasInspectionsTab]);
 
   // Installer: my pending sigs
   const myPendingSigs = useMemo(() =>
