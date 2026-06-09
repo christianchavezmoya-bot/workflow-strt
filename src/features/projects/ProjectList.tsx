@@ -313,7 +313,11 @@ const ProjectList = () => {
   const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const [projectViewFilter, setProjectViewFilter] = useState<"all" | "mine">("all");
+  // PM defaults to "mine" (consistent with dashboard My Projects default).
+  // Admin and all other roles default to "all".
+  const [projectViewFilter, setProjectViewFilter] = useState<"all" | "mine">(
+    user?.role === "Project Manager" ? "mine" : "all"
+  );
   const [projectNumberFilter, setProjectNumberFilter] = useState("");
   const isAdminUser = user?.role === "Admin";
   const isPmUser = user?.role === "Project Manager";

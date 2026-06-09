@@ -215,12 +215,16 @@ const Dashboard = () => {
   const [adminInstallProjectsOpen, setAdminInstallProjectsOpen] = useState(false);
   const [adminInstallPmFilter, setAdminInstallPmFilter] = useState("");
   const [adminInstallProjectFilter, setAdminInstallProjectFilter] = useState("");
+  // Always open on the Projects tab for managers; others open on their first relevant tab.
   const [pmDashboardTab, setPmDashboardTab] = useState<PmDashboardTab>(
     isManager ? "pm-projects" : "my-installs"
   );
   // If the role's viewScope is "own", always lock to "mine" — no dropdown shown.
   const canViewAllProjects = (can.projects?.viewScope ?? "own") === "all";
-  const [dashboardProjectScope, setDashboardProjectScope] = useState<DashboardProjectScope>("mine");
+  // Admin defaults to "all" (oversight view); every other role defaults to "mine".
+  const [dashboardProjectScope, setDashboardProjectScope] = useState<DashboardProjectScope>(
+    isAdmin ? "all" : "mine"
+  );
   const [dashboardWorkspace, setDashboardWorkspace] = useState<DashboardWorkspace>({
     currentInstalls: [],
     currentInspections: [],
