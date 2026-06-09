@@ -404,22 +404,33 @@ const ProjectList = () => {
     const isAdmin = role === "Admin";
     const isCustomer = role === "Customer";
 
-    // Customers see nothing here (redirected elsewhere)
     if (isCustomer) return [];
 
-    // Office-based filter (Admin always global, officeView uses activeOffice)
+    // Office-based filter. Guard: skip until globalOffices have loaded so
+    // countryForOffice("Newcastle") resolves to "Australia" rather than falling
+    // back to the raw string and incorrectly excluding all projects.
     const officeFiltered = sourceProjects.filter((project) => {
       if (isAdmin || activeOffice === "All") return true;
+      if (globalOffices.length === 0) return true; // offices not yet loaded — don't filter
       const projectCountry = countryForOffice(project.office);
       return projectCountry === activeOffice || project.office === activeOffice;
     });
 
-    // Scope-aware filtering
+    // Scope-aware filtering.
+    // PM: driven by the canViewAllProjects permission + projectViewFilter dropdown.
+    //     Replaces the old isMyWork check so the two systems don't conflict.
+    // Installer/Engineer/Supervisor: keep the isMyWork toggle (scoped to assigned assets).
     let scopeFiltered = officeFiltered;
-    if (isMyWork && !isAdmin) {
+    if (!isAdmin) {
       if (role === "Project Manager") {
-        scopeFiltered = officeFiltered.filter((p) => p.projectManager === user?.fullName);
-      } else if (["Installer", "Engineer", "Supervisor"].includes(role)) {
+        if (!canViewAllProjects || projectViewFilter === "mine") {
+          const myName = String(user?.fullName ?? "").trim().toLowerCase();
+          scopeFiltered = officeFiltered.filter(
+            (p) => String(p.projectManager ?? "").trim().toLowerCase() === myName
+          );
+        }
+        // projectViewFilter === "all" && canViewAllProjects → no extra filter
+      } else if (isMyWork && ["Installer", "Engineer", "Supervisor"].includes(role)) {
         const idSet = new Set(myProjectIds);
         scopeFiltered = officeFiltered.filter((p) => idSet.has(p.id));
       }
@@ -427,7 +438,7 @@ const ProjectList = () => {
 
     const filtered = applyAutoFilter(scopeFiltered, autoFilters, projectAccessors);
     return applyAutoSort(filtered, autoSort, projectAccessors);
-  }, [activeOffice, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName]);
+  }, [activeOffice, canViewAllProjects, globalOffices, projectViewFilter, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName]);
 
   const numberedProjects = useMemo(
     () => filteredProjects.map((project, index) => ({ ...project, seq: index + 1 })),
