@@ -14,6 +14,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProjects, setProjects } from "../../store/projectSlice";
 import { fetchProducts } from "../../store/productsSlice";
@@ -138,6 +139,7 @@ function isDashboardVisibleProjectStatus(status?: string | null) {
 const Dashboard = () => {
   const navigate   = useNavigate();
   const { user }   = useAuth();
+  const can        = usePermissions();
   const isAdmin      = user.role === "Admin";
   const isManager    = user.role === "Admin" || user.role === "Project Manager";
   const isSupervisor = user.role === "Supervisor";
@@ -216,6 +218,8 @@ const Dashboard = () => {
   const [pmDashboardTab, setPmDashboardTab] = useState<PmDashboardTab>(
     isManager ? "pm-projects" : "my-installs"
   );
+  // If the role's viewScope is "own", always lock to "mine" — no dropdown shown.
+  const canViewAllProjects = (can.projects?.viewScope ?? "own") === "all";
   const [dashboardProjectScope, setDashboardProjectScope] = useState<DashboardProjectScope>("mine");
   const [dashboardWorkspace, setDashboardWorkspace] = useState<DashboardWorkspace>({
     currentInstalls: [],
@@ -445,11 +449,12 @@ const Dashboard = () => {
 
   const dashboardProjects = useMemo(() => {
     const baseProjects = viewedDashboardUserId ? scopedProjects : activeDashboardProjects;
-    if (!isManager || dashboardProjectScope === "all") return baseProjects;
+    // Show all projects when: scope is "all", role can view all, or not a manager role
+    if (!isManager || (!canViewAllProjects) || dashboardProjectScope === "all") return baseProjects;
     return baseProjects.filter((project) =>
       String(project.projectManager ?? "").trim().toLowerCase() === dashboardProjectOwnerName
     );
-  }, [activeDashboardProjects, dashboardProjectOwnerName, dashboardProjectScope, isManager, scopedProjects, viewedDashboardUserId]);
+  }, [activeDashboardProjects, canViewAllProjects, dashboardProjectOwnerName, dashboardProjectScope, isManager, scopedProjects, viewedDashboardUserId]);
 
   const visibleProjectIds = useMemo(
     () => new Set(dashboardProjects.map((project) => project.id)),
@@ -1105,16 +1110,18 @@ const Dashboard = () => {
             sx={{ height: 20, fontSize: "0.7rem" }}
           />
         )}
-        <FormControl size="small" sx={{ minWidth: 130 }}>
-          <Select
-            value={dashboardProjectScope}
-            onChange={(e) => setDashboardProjectScope(e.target.value as DashboardProjectScope)}
-            sx={{ fontSize: "0.75rem", height: 26 }}
-          >
-            <MenuItem value="mine"><em>My Projects</em></MenuItem>
-            <MenuItem value="all">All Projects</MenuItem>
-          </Select>
-        </FormControl>
+        {canViewAllProjects && (
+          <FormControl size="small" sx={{ minWidth: 130 }}>
+            <Select
+              value={dashboardProjectScope}
+              onChange={(e) => setDashboardProjectScope(e.target.value as DashboardProjectScope)}
+              sx={{ fontSize: "0.75rem", height: 26 }}
+            >
+              <MenuItem value="mine"><em>My Projects</em></MenuItem>
+              <MenuItem value="all">All Projects</MenuItem>
+            </Select>
+          </FormControl>
+        )}
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
         {viewedDashboardUserId

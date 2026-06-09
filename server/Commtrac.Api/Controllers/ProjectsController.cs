@@ -604,19 +604,9 @@ public class ProjectsController : ControllerBase
             return assignedProjectIds.ToHashSet();
         }
 
-        if (role == "Project Manager")
-        {
-            var fullName = User.FindFirstValue(ClaimTypes.Name);
-            var email = User.FindFirstValue(ClaimTypes.Email);
-
-            var managedProjectIds = await _db.Projects
-                .Where(p =>
-                    (!string.IsNullOrWhiteSpace(fullName) && p.ProjectManager == fullName) ||
-                    (!string.IsNullOrWhiteSpace(email) && p.ProjectManager == email))
-                .Select(p => p.Id)
-                .ToListAsync();
-            return managedProjectIds.ToHashSet();
-        }
+        // Project Manager sees all projects — "My Projects" vs "All Projects"
+        // scoping is handled client-side via the role permissions viewScope config.
+        if (role == "Project Manager") return null;
 
         return null;
     }

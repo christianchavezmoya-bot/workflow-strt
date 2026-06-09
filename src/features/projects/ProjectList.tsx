@@ -319,6 +319,8 @@ const ProjectList = () => {
   const isPmUser = user?.role === "Project Manager";
   const canCreateProjects = isAdminUser || isPmUser;
   const canManageProjectTable = isAdminUser || isPmUser;
+  // Scope dropdown visible only when the role's viewScope permits seeing all projects
+  const canViewAllProjects = (can.projects?.viewScope ?? "own") === "all";
   const { complexViewActive } = useComplexView();
   const showComplexControls = complexViewActive && Capacitor.isNativePlatform();
 
@@ -344,14 +346,14 @@ const ProjectList = () => {
         // Filter by country on the server so pagination doesn't hide matching projects.
         country: activeOffice !== "All" ? activeOffice : undefined,
         scope: "browse",
-        ownershipScope: isPmUser ? projectViewFilter : "all",
+        ownershipScope: canViewAllProjects ? projectViewFilter : "mine",
         projectNumber: projectNumberFilter.trim() || undefined,
         page: page + 1,
         pageSize: rowsPerPage,
         includeDeleted: showArchived
       })
     );
-  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, isPmUser, projectViewFilter, projectNumberFilter]);
+  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, canViewAllProjects, projectViewFilter, projectNumberFilter]);
 
   useEffect(() => {
     setPage(0);
@@ -621,7 +623,7 @@ const ProjectList = () => {
 
       <Box className="glass-card" sx={{ p: 2 }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
-          {isPmUser && (
+          {canViewAllProjects && (
             <FormControl size="small" sx={{ minWidth: 220 }}>
               <InputLabel id="project-view-filter-label">Project View</InputLabel>
               <Select
@@ -631,7 +633,7 @@ const ProjectList = () => {
                 onChange={(event) => setProjectViewFilter(event.target.value as "all" | "mine")}
               >
                 <MenuItem value="all">All projects</MenuItem>
-                <MenuItem value="mine">My PM projects</MenuItem>
+                <MenuItem value="mine">My projects</MenuItem>
               </Select>
             </FormControl>
           )}
