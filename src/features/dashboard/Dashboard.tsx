@@ -1,12 +1,12 @@
 ﻿import {
-  Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogContent, DialogTitle, Divider, FormControl, Grid,
+  Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, Grid,
   IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from "@mui/material";
 import {
   AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined, CloseOutlined,
   ErrorOutlineOutlined, ExpandLessOutlined, ExpandMoreOutlined,
   FactCheckOutlined, OpenInNewOutlined, PendingActionsOutlined, PersonOutlined,
-  PhotoCameraOutlined, ReportOutlined, SwitchAccountOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
+  PhotoCameraOutlined, PrintOutlined, ReportOutlined, SwitchAccountOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
   WarningAmberOutlined, WorkOutlineOutlined,
 } from "@mui/icons-material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -128,6 +128,14 @@ type InspectionRunSignal = {
 
 type AdminInstallFilter = "all" | "in-progress" | "unassigned";
 
+type WorkloadProjectBreakdown = { projectId: string; jobNumber: string; notStarted: number; inProgress: number; paused: number; total: number };
+type ScopedWorkloadItem = {
+  userId: string; fullName: string;
+  notStarted: number; inProgress: number; paused: number; totalAssigned: number;
+  jobNumbers: string[]; hasIssues: boolean; completedSteps: number; totalSteps: number;
+  startedAt?: string; projectBreakdown: WorkloadProjectBreakdown[];
+};
+
 function isDashboardVisibleProjectStatus(status?: string | null) {
   const normalized = String(status ?? "").trim().toLowerCase().replace(/\s+/g, "");
   return normalized !== "completed"
@@ -164,6 +172,9 @@ const Dashboard = () => {
   const [workload,           setWorkload]           = useState<WorkloadSummaryItem[]>([]);
   const [workloadLoading,    setWorkloadLoading]    = useState(false);
   const [reportingTechId,    setReportingTechId]    = useState<string | null>(null);
+  const [expandedWorkloadId, setExpandedWorkloadId] = useState<string | null>(null);
+  const [workloadReportTarget, setWorkloadReportTarget] = useState<ScopedWorkloadItem | null>(null);
+  const [workloadReportAllOpen, setWorkloadReportAllOpen] = useState(false);
 
   // Phase 1 workspace
   const [workspaceExpanded, setWorkspaceExpanded] = useState(!isEngineer ? false : true);
@@ -1697,7 +1708,7 @@ const Dashboard = () => {
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
         <Box>
           <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Technician Workload</Typography>
-          <Typography variant="caption" color="text.secondary">Open assets - click to view in installations</Typography>
+          <Typography variant="caption" color="text.secondary">Click a card to expand · report icon for detail print/download</Typography>
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Stack direction="row" spacing={0.5} alignItems="center">
@@ -1712,6 +1723,13 @@ const Dashboard = () => {
             <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "action.disabled" }} />
             <Typography variant="caption" color="text.secondary">Queued</Typography>
           </Stack>
+          {scopedWorkload.length > 0 && (
+            <Tooltip title="Print / download full workload report">
+              <IconButton size="small" onClick={() => setWorkloadReportAllOpen(true)} sx={{ color: "text.secondary" }}>
+                <PrintOutlined sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+          )}
         </Stack>
       </Stack>
       {workloadLoading ? <LinearProgress /> : scopedWorkload.length === 0 ? (
@@ -1719,24 +1737,30 @@ const Dashboard = () => {
       ) : (
         <Stack spacing={1.5}>
           {scopedWorkload.map((w) => {
-            const inPct    = w.totalAssigned > 0 ? (w.inProgress / w.totalAssigned) * 100 : 0;
-            const pausedPct = w.totalAssigned > 0 ? (w.paused / w.totalAssigned) * 100 : 0;
-            const notPct   = w.totalAssigned > 0 ? (w.notStarted / w.totalAssigned) * 100 : 0;
-            const stepPct  = w.totalSteps > 0 ? Math.min(100, (w.completedSteps / w.totalSteps) * 100) : 0;
-            const load     = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
+            const isExpanded = expandedWorkloadId === w.userId;
+            const inPct     = w.totalAssigned > 0 ? (w.inProgress / w.totalAssigned) * 100 : 0;
+            const pausedPct = w.totalAssigned > 0 ? (w.paused   / w.totalAssigned) * 100 : 0;
+            const notPct    = w.totalAssigned > 0 ? (w.notStarted / w.totalAssigned) * 100 : 0;
+            const stepPct   = w.totalSteps > 0 ? Math.min(100, (w.completedSteps / w.totalSteps) * 100) : 0;
+            const load      = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
             const loadLabel = w.totalAssigned >= 10 ? "Heavy" : w.totalAssigned >= 5 ? "Moderate" : "Light";
-            const barColor = w.hasIssues ? "warning.main" : "primary.main";
+            const barColor  = w.hasIssues ? "warning.main" : "primary.main";
             const startLabel = w.startedAt
               ? new Date(w.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
               : null;
+            const techAssets = visibleOpenAssets.filter((a) => a.assignedUserId === w.userId);
             return (
-              <Paper key={w.userId} elevation={0} onClick={() => navigate("/installations/assets")}
+              <Paper key={w.userId} elevation={0}
+                onClick={() => setExpandedWorkloadId(isExpanded ? null : w.userId)}
                 sx={{
-                  p: 1.5, border: "1px solid", borderColor: w.hasIssues ? "warning.dark" : "var(--stroke)",
+                  p: 1.5, border: "1px solid",
+                  borderColor: isExpanded ? "primary.main" : w.hasIssues ? "warning.dark" : "var(--stroke)",
                   borderRadius: 1.5, cursor: "pointer", transition: "all 0.15s",
+                  background: isExpanded ? "rgba(45,212,191,0.04)" : undefined,
                   "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
                 }}>
                 <Stack spacing={0.75}>
+                  {/* ── Summary row ── */}
                   <Stack direction="row" alignItems="center" spacing={2}>
                     <Box sx={{ flex: "0 0 160px", minWidth: 0 }}>
                       <Stack direction="row" spacing={0.75} alignItems="center">
@@ -1746,11 +1770,11 @@ const Dashboard = () => {
                       </Stack>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <Typography variant="caption" color="text.secondary">
-                          {w.inProgress} active - {w.paused} paused - {w.notStarted} queued
+                          {w.inProgress} active · {w.paused} paused · {w.notStarted} queued
                         </Typography>
                         {startLabel && (
                           <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.65rem" }}>
-                            - since {startLabel}
+                            · since {startLabel}
                           </Typography>
                         )}
                       </Stack>
@@ -1758,15 +1782,13 @@ const Dashboard = () => {
                     <Box sx={{ flex: 1 }}>
                       <Tooltip title={
                         w.totalSteps > 0
-                          ? `${w.completedSteps} / ${w.totalSteps} steps - ${w.inProgress} in-progress - ${w.paused} paused - ${w.notStarted} queued`
-                          : `${w.inProgress} in progress - ${w.paused} paused - ${w.notStarted} not started`
+                          ? `${w.completedSteps}/${w.totalSteps} steps · ${w.inProgress} in-progress · ${w.paused} paused · ${w.notStarted} queued`
+                          : `${w.inProgress} in progress · ${w.paused} paused · ${w.notStarted} not started`
                       } arrow>
                         <Box sx={{ position: "relative", height: 10, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.08)", display: "flex" }}>
                           {w.totalSteps > 0 ? (
-                            // Step-based progress bar
                             <Box sx={{ width: `${stepPct}%`, bgcolor: barColor, transition: "width 0.4s" }} />
                           ) : (
-                            // Asset-based progress bar
                             <>
                               {inPct > 0 && <Box sx={{ width: `${inPct}%`, bgcolor: barColor, transition: "width 0.4s" }} />}
                               {pausedPct > 0 && <Box sx={{ width: `${pausedPct}%`, bgcolor: "warning.main", transition: "width 0.4s" }} />}
@@ -1782,24 +1804,29 @@ const Dashboard = () => {
                       )}
                     </Box>
                     <Chip label={w.totalAssigned} size="small" color={load} sx={{ fontWeight: 700, minWidth: 40 }} />
-                    <Tooltip title="Generate technician report">
+                    <Tooltip title="View detail / print / download report">
                       <span>
-                        <IconButton size="small" disabled={reportingTechId === w.userId}
-                          onClick={(e) => { e.stopPropagation(); void handleGenerateTechReport(w); }}
+                        <IconButton size="small"
+                          onClick={(e) => { e.stopPropagation(); setWorkloadReportTarget(w as ScopedWorkloadItem); }}
                           sx={{ color: "text.secondary", flexShrink: 0 }}>
-                          {reportingTechId === w.userId ? <CircularProgress size={14} /> : <AssessmentOutlined sx={{ fontSize: 16 }} />}
+                          <AssessmentOutlined sx={{ fontSize: 16 }} />
                         </IconButton>
                       </span>
                     </Tooltip>
+                    <IconButton size="small" sx={{ color: "text.secondary", flexShrink: 0 }}
+                      onClick={(e) => { e.stopPropagation(); setExpandedWorkloadId(isExpanded ? null : w.userId); }}>
+                      {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
+                    </IconButton>
                   </Stack>
+
+                  {/* ── Project chips ── */}
                   {w.projectBreakdown.length > 0 && (
                     <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                       {w.projectBreakdown.map((pb) => (
                         <Tooltip key={pb.projectId} title={`${pb.inProgress} in progress · ${pb.paused} paused · ${pb.notStarted} queued`} arrow>
                           <Chip
                             label={`${pb.jobNumber}: ${pb.total}`}
-                            size="small"
-                            variant="outlined"
+                            size="small" variant="outlined"
                             color={pb.inProgress > 0 ? "primary" : pb.paused > 0 ? "warning" : "default"}
                             onClick={(e) => { e.stopPropagation(); navigate(`/projects/${pb.projectId}`); }}
                             sx={{ height: 16, fontSize: "0.6rem", cursor: "pointer" }}
@@ -1808,6 +1835,61 @@ const Dashboard = () => {
                       ))}
                     </Stack>
                   )}
+
+                  {/* ── Expanded chevron detail ── */}
+                  <Collapse in={isExpanded} unmountOnExit>
+                    <Box sx={{ mt: 1, pt: 1, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                      {w.projectBreakdown.map((pb) => {
+                        const pbAssets = techAssets.filter((a) => a.projectId === pb.projectId);
+                        const proj = projectById.get(pb.projectId);
+                        return (
+                          <Box key={pb.projectId} sx={{ mb: 1.5 }}>
+                            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                              <Typography variant="caption" fontWeight={700} color="primary.main">
+                                {pb.jobNumber}
+                              </Typography>
+                              {proj?.customerName && (
+                                <Typography variant="caption" color="text.secondary" noWrap>— {proj.customerName}</Typography>
+                              )}
+                              {proj?.projectManager && (
+                                <Chip label={`PM: ${proj.projectManager}`} size="small" variant="outlined"
+                                  sx={{ height: 16, fontSize: "0.58rem", ml: "auto" }} />
+                              )}
+                            </Stack>
+                            <Stack spacing={0.4}>
+                              {pbAssets.map((a) => {
+                                const state = isPausedAsset(a.runStatus) ? "Paused"
+                                  : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "In Progress"
+                                  : isNotStartedAsset(a.status) ? "Not Started" : a.status;
+                                const stateColor = state === "In Progress" ? "primary" : state === "Paused" ? "warning" : "default";
+                                return (
+                                  <Stack key={a.id} direction="row" alignItems="center" spacing={1}
+                                    sx={{ px: 1, py: 0.25, borderRadius: 1, background: "rgba(255,255,255,0.03)" }}>
+                                    <Typography variant="caption" fontWeight={600} noWrap sx={{ flex: "0 0 100px", fontSize: "0.68rem" }}>
+                                      {a.assetTag || a.assetName || a.id}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary" noWrap sx={{ flex: 1, fontSize: "0.65rem" }}>
+                                      {a.assetName || a.assetModel || ""}
+                                    </Typography>
+                                    {a.totalSteps > 0 && (
+                                      <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.62rem", flexShrink: 0 }}>
+                                        {a.completedSteps}/{a.totalSteps} steps
+                                      </Typography>
+                                    )}
+                                    <Chip label={state} size="small" color={stateColor as "primary"|"warning"|"default"} variant="outlined"
+                                      sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0 }} />
+                                  </Stack>
+                                );
+                              })}
+                              {pbAssets.length === 0 && (
+                                <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>No open assets</Typography>
+                              )}
+                            </Stack>
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
                 </Stack>
               </Paper>
             );
@@ -3002,6 +3084,173 @@ const Dashboard = () => {
           </Grid>
         </>
       )}
+
+      {/* ── Per-installer workload report dialog ── */}
+      {workloadReportTarget && (() => {
+        const w = workloadReportTarget;
+        const techAssets = visibleOpenAssets.filter((a) => a.assignedUserId === w.userId);
+        const load = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
+        return (
+          <Dialog open onClose={() => setWorkloadReportTarget(null)} fullWidth maxWidth="md" id="workload-report-dialog">
+            <DialogTitle>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <AssessmentOutlined sx={{ color: "primary.main" }} />
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="h6" sx={{ fontFamily: "Sora" }}>{w.fullName} — Workload Report</Typography>
+                  <Typography variant="caption" color="text.secondary">{new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</Typography>
+                </Box>
+                <IconButton size="small" onClick={() => setWorkloadReportTarget(null)}><CloseOutlined fontSize="small" /></IconButton>
+              </Stack>
+            </DialogTitle>
+            <DialogContent dividers>
+              <Stack spacing={2}>
+                {/* Summary */}
+                <Stack direction="row" spacing={2} flexWrap="wrap">
+                  {[
+                    { label: "Total Assets", value: w.totalAssigned, color: load },
+                    { label: "In Progress", value: w.inProgress, color: "primary" },
+                    { label: "Paused", value: w.paused, color: "warning" },
+                    { label: "Queued", value: w.notStarted, color: "default" },
+                  ].map(({ label, value, color }) => (
+                    <Paper key={label} elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, minWidth: 90 }}>
+                      <Typography variant="caption" color="text.secondary" display="block">{label}</Typography>
+                      <Typography variant="h5" fontWeight={700} color={`${color}.main`}>{value}</Typography>
+                    </Paper>
+                  ))}
+                  {w.totalSteps > 0 && (
+                    <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, minWidth: 120 }}>
+                      <Typography variant="caption" color="text.secondary" display="block">Steps</Typography>
+                      <Typography variant="h5" fontWeight={700}>{w.completedSteps}/{w.totalSteps}</Typography>
+                    </Paper>
+                  )}
+                </Stack>
+                <Divider />
+                {/* Per-project asset detail */}
+                {w.projectBreakdown.map((pb) => {
+                  const proj = projectById.get(pb.projectId);
+                  const pbAssets = techAssets.filter((a) => a.projectId === pb.projectId);
+                  return (
+                    <Box key={pb.projectId}>
+                      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.75 }}>
+                        <Typography variant="subtitle2" fontWeight={700} color="primary.main">{pb.jobNumber}</Typography>
+                        {proj?.customerName && <Typography variant="body2" color="text.secondary">— {proj.customerName}</Typography>}
+                        {proj?.projectManager && (
+                          <Chip label={`PM: ${proj.projectManager}`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.65rem", ml: "auto" }} />
+                        )}
+                        <Chip label={`${pb.inProgress} active · ${pb.paused} paused · ${pb.notStarted} queued`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.62rem" }} />
+                      </Stack>
+                      <Stack spacing={0.4}>
+                        {pbAssets.map((a) => {
+                          const state = isPausedAsset(a.runStatus) ? "Paused"
+                            : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "In Progress"
+                            : isNotStartedAsset(a.status) ? "Not Started" : a.status;
+                          const stateColor = state === "In Progress" ? "primary" : state === "Paused" ? "warning" : "default";
+                          return (
+                            <Stack key={a.id} direction="row" alignItems="center" spacing={1}
+                              sx={{ px: 1.5, py: 0.5, borderRadius: 1, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                              <Typography variant="caption" fontWeight={700} sx={{ flex: "0 0 110px" }}>{a.assetTag || a.id}</Typography>
+                              <Typography variant="caption" color="text.secondary" noWrap sx={{ flex: 1 }}>{a.assetName || a.assetModel || "—"}</Typography>
+                              <Typography variant="caption" color="text.disabled" sx={{ flexShrink: 0 }}>{a.location || ""}</Typography>
+                              {a.totalSteps > 0 && (
+                                <Typography variant="caption" color="text.disabled" sx={{ flexShrink: 0 }}>{a.completedSteps}/{a.totalSteps} steps</Typography>
+                              )}
+                              <Chip label={state} size="small" color={stateColor as "primary"|"warning"|"default"} variant="outlined"
+                                sx={{ height: 18, fontSize: "0.62rem", flexShrink: 0 }} />
+                            </Stack>
+                          );
+                        })}
+                        {pbAssets.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ pl: 1.5 }}>No individual asset data available</Typography>}
+                      </Stack>
+                    </Box>
+                  );
+                })}
+              </Stack>
+            </DialogContent>
+            <DialogActions sx={{ px: 3, py: 1.5 }}>
+              <Button startIcon={<PrintOutlined />} onClick={() => window.print()}>Print</Button>
+              <Button variant="contained" startIcon={<AssessmentOutlined />}
+                disabled={reportingTechId === w.userId}
+                onClick={() => void handleGenerateTechReport(w as WorkloadSummaryItem)}>
+                Download PDF
+              </Button>
+              <Button onClick={() => setWorkloadReportTarget(null)}>Close</Button>
+            </DialogActions>
+          </Dialog>
+        );
+      })()}
+
+      {/* ── All-installers workload report dialog ── */}
+      <Dialog open={workloadReportAllOpen} onClose={() => setWorkloadReportAllOpen(false)} fullWidth maxWidth="lg" id="workload-report-all-dialog">
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <PrintOutlined sx={{ color: "primary.main" }} />
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Technician Workload — Full Report</Typography>
+              <Typography variant="caption" color="text.secondary">
+                {scopedWorkload.length} technician{scopedWorkload.length !== 1 ? "s" : ""} · {new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
+              </Typography>
+            </Box>
+            <IconButton size="small" onClick={() => setWorkloadReportAllOpen(false)}><CloseOutlined fontSize="small" /></IconButton>
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={3}>
+            {scopedWorkload.map((w) => {
+              const techAssets = visibleOpenAssets.filter((a) => a.assignedUserId === w.userId);
+              const load = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
+              return (
+                <Box key={w.userId}>
+                  <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1 }}>
+                    <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>{w.fullName}</Typography>
+                    <Chip label={w.totalAssigned >= 10 ? "Heavy" : w.totalAssigned >= 5 ? "Moderate" : "Light"}
+                      size="small" color={load} variant="outlined" sx={{ height: 18, fontSize: "0.65rem" }} />
+                    {w.hasIssues && <Chip label="Issues" size="small" color="warning" sx={{ height: 18, fontSize: "0.65rem" }} />}
+                    <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
+                      {w.inProgress} active · {w.paused} paused · {w.notStarted} queued · {w.totalAssigned} total
+                    </Typography>
+                  </Stack>
+                  {w.projectBreakdown.map((pb) => {
+                    const proj = projectById.get(pb.projectId);
+                    const pbAssets = techAssets.filter((a) => a.projectId === pb.projectId);
+                    return (
+                      <Box key={pb.projectId} sx={{ mb: 1, pl: 1 }}>
+                        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                          <Typography variant="caption" fontWeight={700} color="primary.main">{pb.jobNumber}</Typography>
+                          {proj?.customerName && <Typography variant="caption" color="text.secondary">— {proj.customerName}</Typography>}
+                          {proj?.projectManager && <Typography variant="caption" color="text.disabled">· PM: {proj.projectManager}</Typography>}
+                        </Stack>
+                        <Stack spacing={0.3}>
+                          {pbAssets.map((a) => {
+                            const state = isPausedAsset(a.runStatus) ? "Paused"
+                              : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "In Progress"
+                              : isNotStartedAsset(a.status) ? "Not Started" : a.status;
+                            const stateColor = state === "In Progress" ? "primary" : state === "Paused" ? "warning" : "default";
+                            return (
+                              <Stack key={a.id} direction="row" alignItems="center" spacing={1}
+                                sx={{ px: 1, py: 0.25, borderRadius: 1, background: "rgba(255,255,255,0.03)" }}>
+                                <Typography variant="caption" fontWeight={600} sx={{ flex: "0 0 100px", fontSize: "0.68rem" }}>{a.assetTag || a.id}</Typography>
+                                <Typography variant="caption" color="text.secondary" noWrap sx={{ flex: 1, fontSize: "0.65rem" }}>{a.assetName || a.assetModel || "—"}</Typography>
+                                {a.totalSteps > 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.62rem", flexShrink: 0 }}>{a.completedSteps}/{a.totalSteps} steps</Typography>}
+                                <Chip label={state} size="small" color={stateColor as "primary"|"warning"|"default"} variant="outlined"
+                                  sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0 }} />
+                              </Stack>
+                            );
+                          })}
+                        </Stack>
+                      </Box>
+                    );
+                  })}
+                  <Divider sx={{ mt: 1 }} />
+                </Box>
+              );
+            })}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 1.5 }}>
+          <Button startIcon={<PrintOutlined />} onClick={() => window.print()}>Print All</Button>
+          <Button onClick={() => setWorkloadReportAllOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Photo upload dialog - installer adds missing photos to a completed run */}
       {photoUploadTarget && (
