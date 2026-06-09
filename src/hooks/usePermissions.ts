@@ -33,7 +33,18 @@ const FALLBACK_PERMISSIONS: Record<string, RolePermissions> = {
 
 const resolveDomains = (roleName: string | undefined, permissions: RolePermissions) => {
   if (permissions.domains) {
-    return permissions.domains;
+    // Merge computed defaults underneath the saved values so that fields added
+    // after a config was saved (e.g. viewScope, editScope) are filled in correctly
+    // rather than falling back to the hardcoded "own" missing-field default.
+    const defaults = defaultDomains(permissions);
+    const saved = permissions.domains;
+    return {
+      projects:                { ...defaults.projects,                ...saved.projects },
+      installationAssets:      { ...defaults.installationAssets,      ...saved.installationAssets },
+      workInstructionsBuilder: { ...defaults.workInstructionsBuilder, ...saved.workInstructionsBuilder },
+      documents:               { ...defaults.documents,               ...saved.documents },
+      settings:                { ...defaults.settings,                ...saved.settings },
+    };
   }
 
   const fallback = roleName ? FALLBACK_PERMISSIONS[roleName] : undefined;

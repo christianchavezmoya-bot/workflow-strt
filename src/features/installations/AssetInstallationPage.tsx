@@ -668,6 +668,14 @@ const AssetInstallationPage = () => {
     });
   }, [selectedAddConfig?.workflowTemplateId]);
 
+  // Scope: roles with viewScope="own" see only projects/assets they manage.
+  const canViewAllAssets = (can.installationAssets?.viewScope ?? "own") === "all";
+  const ownedProjectIds = useMemo(() => {
+    if (canViewAllAssets) return null; // null = no restriction
+    const myName = (currentUser.fullName ?? "").trim().toLowerCase();
+    return new Set(projects.filter((p) => String(p.projectManager ?? "").trim().toLowerCase() === myName).map((p) => p.id));
+  }, [canViewAllAssets, currentUser.fullName, projects]);
+
   const visibleAssets = useMemo(() => {
     const q = search.trim().toLowerCase();
     return assets.filter((a) => {
@@ -676,19 +684,25 @@ const AssetInstallationPage = () => {
       } else {
         if (a.isDeleted) return false;
         if (selectedProjectId && a.projectId !== selectedProjectId) return false;
+        // When no specific project is selected and role is scoped to own projects, restrict by ownership
+        if (!selectedProjectId && ownedProjectIds && !ownedProjectIds.has(a.projectId)) return false;
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
       }
       if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q)))) return false;
       return true;
     });
-  }, [assets, selectedProjectId, statusFilter, search, archiveMode]);
+  }, [assets, ownedProjectIds, selectedProjectId, statusFilter, search, archiveMode]);
 
-  // Projects filtered to those linked to the active product (used in add/edit dialogs)
+  // Projects filtered to those linked to the active product (used in add/edit dialogs and the project selector).
+  // Also filtered to owned projects when the role's viewScope is "own".
   const productProjects = useMemo(
-    () => activeProduct?.id
-      ? projects.filter((p) => p.productIds?.includes(activeProduct.id))
-      : projects,
-    [projects, activeProduct?.id],
+    () => {
+      const byProduct = activeProduct?.id
+        ? projects.filter((p) => p.productIds?.includes(activeProduct.id))
+        : projects;
+      return ownedProjectIds ? byProduct.filter((p) => ownedProjectIds.has(p.id)) : byProduct;
+    },
+    [projects, activeProduct?.id, ownedProjectIds],
   );
 
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);

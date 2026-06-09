@@ -592,9 +592,13 @@ const WorkInstructions = () => {
     [configs, selectedConfigId],
   );
 
+  // Roles with viewScope="own" see only Published configs (Option B).
+  const canViewAllWI = (can.workInstructionsBuilder?.viewScope ?? "own") === "all";
+
   const filteredConfigs = useMemo(() => {
     const q = configSearch.trim().toLowerCase();
-    const filtered = !q ? configs : configs.filter(
+    const scopeFiltered = canViewAllWI ? configs : configs.filter((c) => c.status === "Published");
+    const filtered = !q ? scopeFiltered : scopeFiltered.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         (c.configType ?? "").toLowerCase().includes(q) ||
@@ -622,7 +626,7 @@ const WorkInstructions = () => {
       if (aVal > bVal) return 1 * multiplier;
       return 0;
     });
-  }, [configs, configSearch, sortBy, sortDir]);
+  }, [canViewAllWI, configs, configSearch, sortBy, sortDir]);
 
   // â”€â”€â”€ Config CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 

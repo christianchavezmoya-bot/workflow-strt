@@ -1040,7 +1040,20 @@ export const UserManagement: React.FC = () => {
           createUsers: r.createUsers, editFields: r.editFields,
           modifyData: r.modifyData, editForms: r.editForms,
         },
-        domains: r.domains ?? defaultDomains(r),
+        // Merge computed defaults into saved domains so new fields (viewScope, editScope)
+        // show their effective values rather than the undefined/fallback display.
+        domains: (() => {
+          const computed = defaultDomains(r);
+          const saved = r.domains;
+          if (!saved) return computed;
+          return {
+            projects:                { ...computed.projects,                ...saved.projects },
+            installationAssets:      { ...computed.installationAssets,      ...saved.installationAssets },
+            workInstructionsBuilder: { ...computed.workInstructionsBuilder, ...saved.workInstructionsBuilder },
+            documents:               { ...computed.documents,               ...saved.documents },
+            settings:                { ...computed.settings,                ...saved.settings },
+          };
+        })(),
       });
     } else {
       setRoleForm({
