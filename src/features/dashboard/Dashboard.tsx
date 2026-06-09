@@ -15,7 +15,7 @@ import { Capacitor } from "@capacitor/core";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
-import { fetchProjects } from "../../store/projectSlice";
+import { fetchProjects, setProjects } from "../../store/projectSlice";
 import { fetchProducts } from "../../store/productsSlice";
 import { officesService } from "../../services/officesService";
 import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
@@ -116,6 +116,7 @@ const WINDOW_OPTIONS = [30, 60, 90, 180];
 const ALL_DASHBOARDS_VALUE = "__all__";
 
 type PmDashboardTab = "pm-projects" | "my-inspections" | "my-installs";
+type DashboardProjectScope = "mine" | "all";
 
 type InspectionRunSignal = {
   id: string;
@@ -125,6 +126,14 @@ type InspectionRunSignal = {
 };
 
 type AdminInstallFilter = "all" | "in-progress" | "unassigned";
+
+function isDashboardVisibleProjectStatus(status?: string | null) {
+  const normalized = String(status ?? "").trim().toLowerCase().replace(/\s+/g, "");
+  return normalized !== "completed"
+    && normalized !== "cancelled"
+    && normalized !== "closed"
+    && normalized !== "archived";
+}
 
 const Dashboard = () => {
   const navigate   = useNavigate();
@@ -207,6 +216,7 @@ const Dashboard = () => {
   const [pmDashboardTab, setPmDashboardTab] = useState<PmDashboardTab>(
     isManager ? "pm-projects" : "my-installs"
   );
+  const [dashboardProjectScope, setDashboardProjectScope] = useState<DashboardProjectScope>("mine");
   const [dashboardWorkspace, setDashboardWorkspace] = useState<DashboardWorkspace>({
     currentInstalls: [],
     currentInspections: [],
@@ -268,6 +278,17 @@ const Dashboard = () => {
       }).catch(() => {});
     }
   }, [dispatch, loadAttention, isEngineer]);
+
+  // When the background project refresh completes, apply the authoritative list directly to
+  // Redux state — avoids a second API round-trip while still evicting any ghost projects.
+  useEffect(() => {
+    const handleUpdated = (e: Event) => {
+      const { items } = (e as CustomEvent<{ items: import("../../types/project").Project[] }>).detail;
+      dispatch(setProjects({ items, total: items.length }));
+    };
+    window.addEventListener("repo:projects:updated", handleUpdated);
+    return () => window.removeEventListener("repo:projects:updated", handleUpdated);
+  }, [dispatch]);
 
   useEffect(() => {
     if (isViewer) {
@@ -357,35 +378,11 @@ const Dashboard = () => {
     });
   }, [activeOffice, projects, officeIdsForRegion, countryForOffice]);
 
-  const visibleProjectIds = useMemo(
-    () => new Set(filteredProjects.map((project) => project.id)),
-    [filteredProjects],
-  );
-  const visibleOpenAssets = useMemo(
-    () => openAssets.filter((asset) => visibleProjectIds.has(asset.projectId)),
-    [openAssets, visibleProjectIds],
+  const activeDashboardProjects = useMemo(
+    () => filteredProjects.filter((project) => !project.isDeleted && isDashboardVisibleProjectStatus(project.status)),
+    [filteredProjects]
   );
 
-  const managedProjects = useMemo(() => {
-    if (user.role === "Admin") return filteredProjects;
-    return filteredProjects.filter((project) => project.projectManager === user.fullName);
-  }, [filteredProjects, user.fullName, user.role]);
-  const managedProjectIds = useMemo(() => new Set(managedProjects.map((project) => project.id)), [managedProjects]);
-  const managedOpenAssets = useMemo(() => {
-    if (user.role === "Admin") return openAssets;
-    return openAssets.filter((asset) => managedProjectIds.has(asset.projectId));
-  }, [openAssets, managedProjectIds, user.role]);
-  const managedOverdueProjects = useMemo(
-    () => managedProjects.filter((project) => {
-      if (!project.finishDate || project.status === "Completed" || project.status === "Cancelled") return false;
-      return new Date(project.finishDate) < new Date();
-    }),
-    [managedProjects],
-  );
-  const managedInspectionProjects = useMemo(
-    () => managedProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
-    [managedProjects],
-  );
   const projectAssetsPath = useCallback((project: { id: string; productIds?: string[] | null }) => {
     const params = new URLSearchParams({ project: project.id });
     if ((project.productIds ?? []).length === 1 && project.productIds?.[0]) {
@@ -393,24 +390,6 @@ const Dashboard = () => {
     }
     return `/installations/assets?${params.toString()}`;
   }, []);
-  const visibleOpenIssues = useMemo(
-    () => openIssues.filter((issue) => visibleProjectIds.has(issue.projectId)),
-    [openIssues, visibleProjectIds],
-  );
-  const visiblePendingSigs = useMemo(
-    () => pendingSigs.filter((sig) => visibleProjectIds.has(sig.projectId)),
-    [pendingSigs, visibleProjectIds],
-  );
-
-  const projectCount    = filteredProjects.length;
-  const blockingIssues  = visibleOpenIssues.filter((i) => i.isBlocking);
-  const highIssues      = visibleOpenIssues.filter((i) => !i.isBlocking && i.severity === "high");
-  const overdueProjects = filteredProjects.filter((p) => {
-    if (!p.finishDate || p.status === "Completed" || p.status === "Cancelled") return false;
-    return new Date(p.finishDate) < new Date();
-  });
-  const attentionCount = blockingIssues.length + visiblePendingSigs.length + overdueProjects.length + highIssues.length;
-
   // Admin: dashboard scope derived from user picker
   const viewedDashboardUserId = selectedDashboardId === ALL_DASHBOARDS_VALUE ? null : selectedDashboardId;
   const viewingOwnDashboard = !viewedDashboardUserId || viewedDashboardUserId === user.id;
@@ -430,23 +409,8 @@ const Dashboard = () => {
   const myPaused   = useMemo(() => myAssets.filter((a) => isPausedAsset(a.runStatus)), [myAssets]);
   const myQueued   = useMemo(() => myAssets.filter((a) => isNotStartedAsset(a.status)), [myAssets]);
 
-  // Supervisor: unassigned open assets
-  const unassignedAssets = useMemo(() =>
-    visibleOpenAssets.filter(a => !a.assignedUserId && a.status !== "Complete" && a.status !== "Completed"),
-    [visibleOpenAssets]);
-
-  // Supervisor: not-started assets
-  const notStartedAssets = useMemo(() =>
-    visibleOpenAssets.filter(a => isNotStartedAsset(a.status)),
-    [visibleOpenAssets]);
-
-  // PM: pending approval projects
-  const pendingApprovals = useMemo(() =>
-    filteredProjects.filter(p => p.status === "Pending Approval"),
-    [filteredProjects]);
-
   const scopedProjectIdsForUser = useMemo(() => {
-    if (!viewedDashboardUserId) return new Set(filteredProjects.map((project) => project.id));
+    if (!viewedDashboardUserId) return new Set(activeDashboardProjects.map((project) => project.id));
 
     const viewedName = (viewedDashboardUser?.fullName ?? user.fullName ?? "").trim().toLowerCase();
     const assignedAssetProjectIds = new Set(
@@ -456,7 +420,7 @@ const Dashboard = () => {
     );
 
     return new Set(
-      filteredProjects
+      activeDashboardProjects
         .filter((project) => {
           const managerMatch = viewedName
             ? String(project.projectManager ?? "").trim().toLowerCase() === viewedName
@@ -467,12 +431,89 @@ const Dashboard = () => {
         })
         .map((project) => project.id)
     );
-  }, [filteredProjects, openAssets, viewedDashboardUser?.fullName, viewedDashboardUserId, user.fullName]);
+  }, [activeDashboardProjects, openAssets, viewedDashboardUser?.fullName, viewedDashboardUserId, user.fullName]);
 
   const scopedProjects = useMemo(() => {
-    if (!viewedDashboardUserId) return filteredProjects;
-    return filteredProjects.filter((project) => scopedProjectIdsForUser.has(project.id));
-  }, [filteredProjects, scopedProjectIdsForUser, viewedDashboardUserId]);
+    if (!viewedDashboardUserId) return activeDashboardProjects;
+    return activeDashboardProjects.filter((project) => scopedProjectIdsForUser.has(project.id));
+  }, [activeDashboardProjects, scopedProjectIdsForUser, viewedDashboardUserId]);
+
+  const dashboardProjectOwnerName = useMemo(
+    () => (viewedDashboardUser?.fullName ?? user.fullName ?? "").trim().toLowerCase(),
+    [viewedDashboardUser?.fullName, user.fullName]
+  );
+
+  const dashboardProjects = useMemo(() => {
+    const baseProjects = viewedDashboardUserId ? scopedProjects : activeDashboardProjects;
+    if (!isManager || dashboardProjectScope === "all") return baseProjects;
+    return baseProjects.filter((project) =>
+      String(project.projectManager ?? "").trim().toLowerCase() === dashboardProjectOwnerName
+    );
+  }, [activeDashboardProjects, dashboardProjectOwnerName, dashboardProjectScope, isManager, scopedProjects, viewedDashboardUserId]);
+
+  const visibleProjectIds = useMemo(
+    () => new Set(dashboardProjects.map((project) => project.id)),
+    [dashboardProjects],
+  );
+  const visibleOpenAssets = useMemo(
+    () => openAssets.filter((asset) => visibleProjectIds.has(asset.projectId)),
+    [openAssets, visibleProjectIds],
+  );
+  const unassignedAssets = useMemo(
+    () => visibleOpenAssets.filter((asset) => !asset.assignedUserId && asset.status !== "Complete" && asset.status !== "Completed"),
+    [visibleOpenAssets]
+  );
+  const notStartedAssets = useMemo(
+    () => visibleOpenAssets.filter((asset) => isNotStartedAsset(asset.status)),
+    [visibleOpenAssets]
+  );
+  const visibleOpenIssues = useMemo(
+    () => openIssues.filter((issue) => visibleProjectIds.has(issue.projectId)),
+    [openIssues, visibleProjectIds],
+  );
+  const visiblePendingSigs = useMemo(
+    () => pendingSigs.filter((sig) => visibleProjectIds.has(sig.projectId)),
+    [pendingSigs, visibleProjectIds],
+  );
+  const projectCount = dashboardProjects.length;
+  const blockingIssues = visibleOpenIssues.filter((i) => i.isBlocking);
+  const highIssues = visibleOpenIssues.filter((i) => !i.isBlocking && i.severity === "high");
+  const overdueProjects = dashboardProjects.filter((p) => {
+    if (!p.finishDate) return false;
+    return new Date(p.finishDate) < new Date();
+  });
+  const attentionCount = blockingIssues.length + visiblePendingSigs.length + overdueProjects.length + highIssues.length;
+  const pendingApprovals = useMemo(
+    () => dashboardProjects.filter((project) => project.status === "Pending Approval"),
+    [dashboardProjects]
+  );
+
+  const managedProjects = useMemo(() => {
+    if (viewedDashboardUserId) {
+      return scopedProjects.filter((project) =>
+        String(project.projectManager ?? "").trim().toLowerCase() === dashboardProjectOwnerName
+      );
+    }
+    return activeDashboardProjects.filter((project) =>
+      String(project.projectManager ?? "").trim().toLowerCase() === String(user.fullName ?? "").trim().toLowerCase()
+    );
+  }, [activeDashboardProjects, dashboardProjectOwnerName, scopedProjects, user.fullName, viewedDashboardUserId]);
+  const managedProjectIds = useMemo(() => new Set(managedProjects.map((project) => project.id)), [managedProjects]);
+  const managedOpenAssets = useMemo(
+    () => openAssets.filter((asset) => managedProjectIds.has(asset.projectId)),
+    [openAssets, managedProjectIds]
+  );
+  const managedOverdueProjects = useMemo(
+    () => managedProjects.filter((project) => {
+      if (!project.finishDate) return false;
+      return new Date(project.finishDate) < new Date();
+    }),
+    [managedProjects],
+  );
+  const managedInspectionProjects = useMemo(
+    () => managedProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
+    [managedProjects],
+  );
 
   const projectSummaryById = useMemo(
     () => new Map(projectAssetSummary.map((summary) => [summary.projectId, summary])),
@@ -514,8 +555,8 @@ const Dashboard = () => {
   const showPmProjectsTab = isManager;
 
   const inspectionProjects = useMemo(
-    () => filteredProjects.filter((p) => p.workflowMode === "INSPECTION_ONLY" || p.workflowMode === "MIXED"),
-    [filteredProjects]
+    () => dashboardProjects.filter((p) => p.workflowMode === "INSPECTION_ONLY" || p.workflowMode === "MIXED"),
+    [dashboardProjects]
   );
   const inspectionProjectIds = useMemo(
     () => new Set(inspectionProjects.map((p) => p.id)),
@@ -549,8 +590,8 @@ const Dashboard = () => {
   );
 
   const inspectionScopeProjects = useMemo(
-    () => scopedProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
-    [scopedProjects]
+    () => dashboardProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
+    [dashboardProjects]
   );
   const inspectionScopeProjectIds = useMemo(
     () => new Set(inspectionScopeProjects.map((project) => project.id)),
@@ -569,8 +610,8 @@ const Dashboard = () => {
     [installScopeAssets]
   );
   const installScopeProjects = useMemo(
-    () => scopedProjects.filter((project) => installScopeProjectIds.has(project.id)),
-    [scopedProjects, installScopeProjectIds]
+    () => dashboardProjects.filter((project) => installScopeProjectIds.has(project.id)),
+    [dashboardProjects, installScopeProjectIds]
   );
   const installProjectsWithOpenAssets = useMemo(
     () => installScopeProjects.filter((project) => installScopeAssets.some((asset) => asset.projectId === project.id)),
@@ -597,8 +638,8 @@ const Dashboard = () => {
   }, [adminInstallPmFilter, adminInstallProjectFilter, installProjectsWithOpenAssets]);
   const totalInstallAssetCount = installScopeAssets.length;
   const projectsMissingPm = useMemo(
-    () => scopedProjects.filter((project) => !project.projectManager?.trim()),
-    [scopedProjects]
+    () => dashboardProjects.filter((project) => !project.projectManager?.trim()),
+    [dashboardProjects]
   );
 
   // Show My Inspections tab for managers always; for others only if assigned to inspection assets
@@ -691,9 +732,9 @@ const Dashboard = () => {
   // Project status chart
   const statusGroups = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const p of filteredProjects) counts[p.status] = (counts[p.status] ?? 0) + 1;
+    for (const p of dashboardProjects) counts[p.status] = (counts[p.status] ?? 0) + 1;
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  }, [filteredProjects]);
+  }, [dashboardProjects]);
 
   const statusColor: Record<string, string> = {
     "In Progress": "primary", "Completed": "success", "Pending Approval": "warning",
@@ -1049,7 +1090,7 @@ const Dashboard = () => {
           {isAdmin ? "Projects" : "Project Status"}
         </Typography>
         <Chip
-          label={scopedProjects.length}
+          label={dashboardProjects.length}
           size="small"
           color="info"
           variant="outlined"
@@ -1064,20 +1105,30 @@ const Dashboard = () => {
             sx={{ height: 20, fontSize: "0.7rem" }}
           />
         )}
+        <FormControl size="small" sx={{ minWidth: 130 }}>
+          <Select
+            value={dashboardProjectScope}
+            onChange={(e) => setDashboardProjectScope(e.target.value as DashboardProjectScope)}
+            sx={{ fontSize: "0.75rem", height: 26 }}
+          >
+            <MenuItem value="mine"><em>My Projects</em></MenuItem>
+            <MenuItem value="all">All Projects</MenuItem>
+          </Select>
+        </FormControl>
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
         {viewedDashboardUserId
-          ? `Projects assigned to ${viewingOwnDashboard ? "you" : viewedDashboardUser?.fullName ?? "this user"}`
+          ? `${dashboardProjectScope === "mine" ? "My" : "All"} active projects for ${viewingOwnDashboard ? "you" : viewedDashboardUser?.fullName ?? "this user"}`
           : isAdmin
-            ? "All projects in the current dashboard scope with PM ownership."
-            : "Projects across the current dashboard scope"}
+            ? `${dashboardProjectScope === "mine" ? "Your" : "All"} active projects in the current dashboard scope.`
+            : `${dashboardProjectScope === "mine" ? "Your" : "All"} active projects in the current dashboard scope.`}
       </Typography>
 
-      {scopedProjects.length === 0 ? (
+      {dashboardProjects.length === 0 ? (
         <Typography variant="caption" color="text.disabled">No assigned projects in this scope.</Typography>
       ) : (
         <Stack spacing={1.25}>
-          {scopedProjects.map((project) => {
+          {dashboardProjects.map((project) => {
             const summary = projectSummaryById.get(project.id);
             const projectAssets = openAssets.filter((asset) => asset.projectId === project.id);
             const issueCount = projectAssets.filter((asset) => String(asset.status ?? "").toLowerCase() === "issue").length;
@@ -1951,7 +2002,9 @@ const Dashboard = () => {
                 {showAdminOverviewStrip ? "Admin Oversight" : viewingOwnDashboard ? user.fullName : viewedDashboardUser?.fullName ?? user.fullName}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                {showAdminOverviewStrip ? "All projects and assets in the current dashboard scope" : viewingOwnDashboard ? user.role : viewedDashboardUser?.role ?? ""}
+                {showAdminOverviewStrip
+                  ? "Active projects and assets in the current dashboard scope"
+                  : viewingOwnDashboard ? user.role : viewedDashboardUser?.role ?? ""}
               </Typography>
             </Box>
             {isManager && (dashboardUsers.length > 0 || selectedDashboardId !== user.id) && (
@@ -2866,7 +2919,7 @@ const Dashboard = () => {
                 <Stack direction="row" spacing={1}>
                   <CheckCircleOutlineOutlined sx={{ fontSize: 14, color: "success.main", mt: 0.25 }} />
                   <Typography variant="caption" color="text.secondary">
-                    {filteredProjects.filter(p => p.status === "Completed").length} of {projectCount} completed
+                    Dashboard totals include active, open, in-progress, pending, and overdue projects only.
                   </Typography>
                 </Stack>
               </Box>

@@ -1,6 +1,6 @@
 import api from "../services/api";
 import type { Project } from "../types/project";
-import { entityGetAllProjects, entityPutProjects } from "../services/localDB";
+import { entityGetAllProjects, entityPutProjects, reconcileProjects } from "../services/localDB";
 import type { ProjectFilters, ProjectListResponse } from "../services/projectService";
 
 export const ProjectRepository = {
@@ -13,7 +13,8 @@ export const ProjectRepository = {
       .then(async (res) => {
         const items = Array.isArray(res.data) ? res.data : res.data.items;
         await entityPutProjects(items.map((p) => ({ id: p.id, data: p })));
-        window.dispatchEvent(new Event("repo:projects:updated"));
+        await reconcileProjects(items.map((p) => p.id));
+        window.dispatchEvent(new CustomEvent<{ items: Project[] }>("repo:projects:updated", { detail: { items } }));
       })
       .catch(() => {});
 

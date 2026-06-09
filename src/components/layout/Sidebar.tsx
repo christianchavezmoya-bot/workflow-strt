@@ -18,12 +18,16 @@ import ErrorOutlineOutlinedIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
 import LightbulbOutlinedIcon from "@mui/icons-material/LightbulbOutlined";
 import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
+import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
+import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
 import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
 import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
 import { NavLink } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import { officesService } from "../../services/officesService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import type { Office } from "../../components/GlobalOfficeMap";
@@ -31,21 +35,35 @@ import strataLogo from "../../assets/strata_transparent.png";
 import FavoritesSection from "./FavoritesSection";
 import { BOM_MODULE_ENABLED } from "../../modules/bom-project";
 
+const isNative = Capacitor.isNativePlatform();
+
 const navItems = [
-  { label: "Dashboard",         icon: <DashboardOutlinedIcon />,          to: "/",                      end: true,  tourKey: "nav-dashboard" },
-  { label: "Projects",          icon: <AssignmentOutlinedIcon />,         to: "/projects",                          tourKey: "nav-projects" },
-  { label: "Issues Board",      icon: <ErrorOutlineOutlinedIcon />,       to: "/issues",                            tourKey: "nav-issues" },
-  { label: "Assets",            icon: <TableChartOutlinedIcon />,         to: "/installations/assets",              tourKey: "nav-installations" },
-  { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions",                 tourKey: "nav-work-instructions" },
-  { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents",                         tourKey: "nav-documents" },
-  { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,          to: "/tips",                              tourKey: "nav-tips" },
+  { label: "Dashboard",         icon: <DashboardOutlinedIcon />,                  to: "/",                      end: true,  tourKey: "nav-dashboard" },
+  { label: "Projects",          icon: <AssignmentOutlinedIcon />,                 to: "/projects",                          tourKey: "nav-projects" },
+  { label: "Issues Board",      icon: <ErrorOutlineOutlinedIcon />,               to: "/issues",                            tourKey: "nav-issues" },
+  { label: "Assets",            icon: <TableChartOutlinedIcon />,                 to: "/installations/assets",              tourKey: "nav-installations" },
+  { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,                   to: "/work-instructions",                 tourKey: "nav-work-instructions" },
+  { label: "Documents",         icon: <FolderOutlinedIcon />,                     to: "/documents",                         tourKey: "nav-documents" },
+  { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,                  to: "/tips",                              tourKey: "nav-tips" },
   ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project", tourKey: "nav-bom" }] : []),
-  { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,      to: "/profile",                           tourKey: "nav-profile" },
+  // Admin and Settings are web/desktop only — hidden on native mobile app
+  ...(!isNative ? [
+    { label: "Admin",    icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin",    end: true,  tourKey: "nav-admin",     requiresFullAccess: false },
+    { label: "Settings", icon: <SettingsOutlinedIcon />,           to: "/settings",            tourKey: "nav-settings",  requiresFullAccess: true  },
+  ] : []),
+  { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,              to: "/profile",                           tourKey: "nav-profile" },
 ];
 
 const Sidebar = () => {
   const { user } = useAuth();
+  const can = usePermissions();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
+
+  const visibleNavItems = navItems.filter((item) => {
+    // Hide Settings from view-only users (same rule as before the accidental removal)
+    if ("requiresFullAccess" in item && item.requiresFullAccess && can.viewOnly) return false;
+    return true;
+  });
   const [officeOptions, setOfficeOptions] = useState<string[]>(["All"]);
   const [appName, setAppName] = useState("Field Operations");
 
@@ -102,7 +120,7 @@ const Sidebar = () => {
       </Stack>
       <FavoritesSection />
       <List sx={{ display: "flex", flexDirection: "column", gap: 0.5 }} data-tour="nav-sidebar">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <ListItemButton
             key={item.label}
             component={NavLink}

@@ -319,6 +319,22 @@ export async function entityDeleteProject(id: string): Promise<void> {
   } catch { /* ignore */ }
 }
 
+/** Remove cached project records whose IDs are not in serverIds, preserving dirty (offline-created) records. */
+export async function reconcileProjects(serverIds: string[]): Promise<void> {
+  try {
+    const db = await getDB();
+    const all = await db.getAll("projects");
+    const serverSet = new Set(serverIds);
+    const tx = db.transaction("projects", "readwrite");
+    await Promise.all([
+      ...all
+        .filter((r) => !serverSet.has(r.id) && !r.dirty)
+        .map((r) => tx.store.delete(r.id)),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
 export async function entityGetAllProjects(): Promise<unknown[]> {
   try {
     const db = await getDB();

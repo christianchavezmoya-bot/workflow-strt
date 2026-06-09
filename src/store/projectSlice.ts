@@ -1,4 +1,4 @@
-﻿import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
+﻿import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import { Project } from "../types/project";
 import { projectService, ProjectFilters, UpdateProjectStatusRequest } from "../services/projectService";
 
@@ -47,7 +47,12 @@ export const deleteProject = createAsyncThunk("projects/delete", async (id: stri
 const projectSlice = createSlice({
   name: "projects",
   initialState,
-  reducers: {},
+  reducers: {
+    setProjects(state, action: PayloadAction<{ items: Project[]; total: number }>) {
+      state.items = action.payload.items;
+      state.total = action.payload.total;
+    },
+  },
   extraReducers: (builder) => {
     builder
       .addCase(fetchProjects.pending, (state) => {
@@ -84,4 +89,5 @@ const projectSlice = createSlice({
   }
 });
 
+export const { setProjects } = projectSlice.actions;
 export default projectSlice.reducer;
