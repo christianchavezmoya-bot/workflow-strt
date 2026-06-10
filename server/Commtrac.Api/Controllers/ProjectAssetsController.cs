@@ -72,7 +72,7 @@ public class ProjectAssetsController : ControllerBase
             string.Equals(role, "Supervisor", StringComparison.OrdinalIgnoreCase);
 
         var assetsQuery = _db.ProjectAssets
-            .Where(a => a.Status == "NotStarted" || a.Status == "InProgress");
+            .Where(a => a.Status == "NotStarted" || a.Status == "InProgress" || a.Status == "OnHold");
 
         if (!canViewAllOpenAssets)
         {
@@ -304,7 +304,7 @@ public class ProjectAssetsController : ControllerBase
     {
         var assets = await _db.ProjectAssets
             .Where(a => a.AssignedUserId != null && a.AssignedUserId != ""
-                     && (a.Status == "NotStarted" || a.Status == "InProgress"))
+                     && (a.Status == "NotStarted" || a.Status == "InProgress" || a.Status == "OnHold"))
             .ToListAsync();
 
         var userIds   = assets.Select(a => a.AssignedUserId!).Distinct().ToList();
@@ -417,7 +417,7 @@ public class ProjectAssetsController : ControllerBase
         // Get all assets with assigned users that are not complete
         var assets = await _db.ProjectAssets
             .Where(a => a.AssignedUserId != null && a.AssignedUserId != ""
-                     && (a.Status == "NotStarted" || a.Status == "InProgress"))
+                     && (a.Status == "NotStarted" || a.Status == "InProgress" || a.Status == "OnHold"))
             .ToListAsync();
 
         if (assets.Count == 0) return Ok(Array.Empty<TechnicianWorkloadSummaryDto>());
@@ -438,9 +438,9 @@ public class ProjectAssetsController : ControllerBase
             .Select(p => new { p.Id, p.JobNumber })
             .ToDictionaryAsync(p => p.Id, p => p.JobNumber);
 
-        // Get latest workflow run per asset (unlocked runs only, same as dashboard-workspace)
+        // Get latest workflow run per asset (all runs, including completed/locked)
         var runs = await _db.AssetWorkflowRuns
-            .Where(r => assetIds.Contains(r.AssetId) && !r.IsLocked)
+            .Where(r => assetIds.Contains(r.AssetId))
             .OrderByDescending(r => r.StartedAt)
             .ThenByDescending(r => r.UpdatedAt)
             .ToListAsync();
@@ -466,7 +466,6 @@ public class ProjectAssetsController : ControllerBase
                 bool hasIssues = false;
                 int completedSteps = 0, totalSteps = 0;
                 DateTime? startedAt = null;
-                DateTime? runStartedAt = null;
 
                 foreach (var asset in userAssets)
                 {
@@ -509,8 +508,8 @@ public class ProjectAssetsController : ControllerBase
                         notStarted++;
                     }
 
-                    // Step progress from in-progress workflow runs
-                    if (run != null && (runStatus == "inprogress" || runStatus == "paused"))
+                    // Step progress from the latest run (any status — includes completed/locked runs)
+                    if (run != null)
                     {
                         try
                         {

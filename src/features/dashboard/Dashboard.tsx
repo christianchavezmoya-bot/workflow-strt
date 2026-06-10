@@ -25,7 +25,6 @@ import {
   type DashboardWorkspace,
   type OpenAssetItem,
   type ProjectAssetSummaryItem,
-  type WorkloadSummaryItem,
   type TechnicianWorkloadSummaryItem,
 } from "../../services/projectAssetService";
 import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
@@ -177,8 +176,7 @@ const Dashboard = () => {
   const [attentionLoading,   setAttentionLoading]   = useState(false);
   const [openAssets,         setOpenAssets]         = useState<OpenAssetItem[]>([]);
   const [projectAssetSummary, setProjectAssetSummary] = useState<ProjectAssetSummaryItem[]>([]);
-  const [workload,           setWorkload]           = useState<WorkloadSummaryItem[]>([]);
-  const [technicianWorkload, setTechnicianWorkload] = useState<TechnicianWorkloadSummaryItem[]>([]);
+  const [workload,           setWorkload]           = useState<TechnicianWorkloadSummaryItem[]>([]);
   const [workloadLoading,    setWorkloadLoading]    = useState(false);
   const [reportingTechId,    setReportingTechId]    = useState<string | null>(null);
   const [expandedWorkloadId, setExpandedWorkloadId] = useState<string | null>(null);
@@ -303,7 +301,7 @@ const Dashboard = () => {
     dispatch(fetchProducts());
     loadAttention();
     setWorkloadLoading(true);
-    projectAssetService.workloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
+    projectAssetService.technicianWorkloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
     projectAssetService.listOpen().then(setOpenAssets);
     projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
     if (isEngineer) {
@@ -387,7 +385,7 @@ const Dashboard = () => {
   useEffect(() => {
     const refresh = () => {
       setWorkloadLoading(true);
-      projectAssetService.workloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
+      projectAssetService.technicianWorkloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
       projectAssetService.listOpen().then(setOpenAssets);
       setWorkspaceLoading(true);
       projectAssetService
@@ -471,9 +469,9 @@ const Dashboard = () => {
     [dashboardWorkspace],
   );
   const myBlocking = useMemo(() => openIssues.filter((i) => i.isBlocking && myAssets.some((a) => a.id === i.assetId)), [openIssues, myAssets]);
-  const myActive   = useMemo(() => myAssets.filter((a) => isInProgressAsset(a.runStatus) || isInProgressAsset(a.status)), [myAssets]);
   const myPaused   = useMemo(() => myAssets.filter((a) => isPausedAsset(a.runStatus)), [myAssets]);
-  const myQueued   = useMemo(() => myAssets.filter((a) => isNotStartedAsset(a.status)), [myAssets]);
+  const myActive   = useMemo(() => myAssets.filter((a) => !isPausedAsset(a.runStatus) && (isInProgressAsset(a.runStatus) || isInProgressAsset(a.status))), [myAssets]);
+  const myQueued   = useMemo(() => myAssets.filter((a) => !isPausedAsset(a.runStatus) && !isInProgressAsset(a.runStatus) && !isInProgressAsset(a.status) && isNotStartedAsset(a.status)), [myAssets]);
 
   const scopedProjectIdsForUser = useMemo(() => {
     if (!viewedDashboardUserId) return new Set(activeDashboardProjects.map((project) => project.id));
@@ -979,14 +977,14 @@ const Dashboard = () => {
     pendingSigs.filter(s => myAssets.some(a => a.id === s.assetId || a.jobNumber === s.jobNumber)),
     [pendingSigs, myAssets]);
 
-  const overviewActiveCount = showAdminOverviewStrip
-    ? visibleOpenAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length
-    : myActive.length;
   const overviewPausedCount = showAdminOverviewStrip
     ? visibleOpenAssets.filter((asset) => isPausedAsset(asset.runStatus)).length
     : myPaused.length;
+  const overviewActiveCount = showAdminOverviewStrip
+    ? visibleOpenAssets.filter((asset) => !isPausedAsset(asset.runStatus) && (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status))).length
+    : myActive.length;
   const overviewQueuedCount = showAdminOverviewStrip
-    ? visibleOpenAssets.filter((asset) => isNotStartedAsset(asset.status)).length
+    ? visibleOpenAssets.filter((asset) => !isPausedAsset(asset.runStatus) && !isInProgressAsset(asset.runStatus) && !isInProgressAsset(asset.status) && isNotStartedAsset(asset.status)).length
     : myQueued.length;
   const overviewBlockingCount = showAdminOverviewStrip
     ? blockingIssues.length
@@ -1169,7 +1167,7 @@ const Dashboard = () => {
     </Box>
   );
 
-  async function handleGenerateTechReport(w: WorkloadSummaryItem) {
+  async function handleGenerateTechReport(w: TechnicianWorkloadSummaryItem) {
     setReportingTechId(w.userId);
     try {
       const exportDate = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -3488,7 +3486,7 @@ const Dashboard = () => {
               <Button startIcon={<PrintOutlined />} onClick={() => window.print()}>Print</Button>
               <Button variant="contained" startIcon={<AssessmentOutlined />}
                 disabled={reportingTechId === w.userId}
-                onClick={() => void handleGenerateTechReport(w as WorkloadSummaryItem)}>
+                onClick={() => void handleGenerateTechReport(w as TechnicianWorkloadSummaryItem)}>
                 Download PDF
               </Button>
               <Button onClick={() => setWorkloadReportTarget(null)}>Close</Button>
