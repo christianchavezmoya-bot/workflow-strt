@@ -409,6 +409,149 @@ public class ProjectAssetsController : ControllerBase
         return Ok(summary);
     }
 
+    // GET api/project-assets/technician-workload-summary
+    // Returns workload breakdown for all technicians using the same logic as dashboard-workspace
+    [HttpGet("technician-workload-summary")]
+    public async Task<ActionResult<IEnumerable<TechnicianWorkloadSummaryDto>>> GetTechnicianWorkloadSummary()
+    {
+        // Get all assets with assigned users that are not complete
+        var assets = await _db.ProjectAssets
+            .Where(a => a.AssignedUserId != null && a.AssignedUserId != ""
+                     && (a.Status == "NotStarted" || a.Status == "InProgress"))
+            .ToListAsync();
+
+        if (assets.Count == 0) return Ok(Array.Empty<TechnicianWorkloadSummaryDto>());
+
+        var userIds = assets.Select(a => a.AssignedUserId!).Distinct().ToList();
+        var assetIds = assets.Select(a => a.Id).Distinct().ToList();
+        var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
+
+        // Get user names
+        var users = await _db.Users
+            .Where(u => userIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.FullName })
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        // Get project info
+        var projects = await _db.Projects
+            .Where(p => projectIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.JobNumber })
+            .ToDictionaryAsync(p => p.Id, p => p.JobNumber);
+
+        // Get latest workflow run per asset (unlocked runs only, same as dashboard-workspace)
+        var runs = await _db.AssetWorkflowRuns
+            .Where(r => assetIds.Contains(r.AssetId) && !r.IsLocked)
+            .OrderByDescending(r => r.StartedAt)
+            .ThenByDescending(r => r.UpdatedAt)
+            .ToListAsync();
+
+        var latestRunByAsset = runs
+            .GroupBy(r => r.AssetId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+        // Group by user and calculate counts using same logic as dashboard-workspace
+        var summary = assets
+            .GroupBy(a => a.AssignedUserId!)
+            .Select(g =>
+            {
+                var userId = g.Key;
+                var fullName = users.TryGetValue(userId, out var n) ? n : "Unknown";
+                var userAssets = g.ToList();
+
+                // Count using same logic as frontend's isPausedAsset/isInProgressAsset/isNotStartedAsset
+                int paused = 0, inProgress = 0, notStarted = 0;
+                var jobNumbers = new HashSet<string>();
+                bool hasIssues = false;
+                int completedSteps = 0, totalSteps = 0;
+                DateTime? startedAt = null;
+                DateTime? runStartedAt = null;
+
+                foreach (var asset in userAssets)
+                {
+                    latestRunByAsset.TryGetValue(asset.Id, out var run);
+                    var runStatus = (run?.Status ?? "").Trim().ToLowerInvariant().Replace(" ", "");
+                    var assetStatus = (asset.Status ?? "").Trim().ToLowerInvariant().Replace(" ", "");
+
+                    // Get job number
+                    if (projects.TryGetValue(asset.ProjectId, out var jn))
+                        jobNumbers.Add(jn);
+
+                    // Check for issues
+                    if (!string.IsNullOrEmpty(asset.IssuesJson) && asset.IssuesJson != "[]")
+                    {
+                        try
+                        {
+                            var issues = JsonSerializer.Deserialize<List<JsonElement>>(asset.IssuesJson, opts) ?? [];
+                            if (issues.Any(i =>
+                            {
+                                i.TryGetProperty("resolved", out var r);
+                                return r.ValueKind != JsonValueKind.True;
+                            }))
+                                hasIssues = true;
+                        }
+                        catch { }
+                    }
+
+                    // Same counting logic as dashboard-workspace IsCurrentWorkspaceAsset
+                    // Priority: Paused → In Progress → Not Started
+                    if (runStatus == "paused")
+                    {
+                        paused++;
+                    }
+                    else if (runStatus == "inprogress" || assetStatus == "inprogress")
+                    {
+                        inProgress++;
+                    }
+                    else if (assetStatus == "notstarted")
+                    {
+                        notStarted++;
+                    }
+
+                    // Step progress from in-progress workflow runs
+                    if (run != null && (runStatus == "inprogress" || runStatus == "paused"))
+                    {
+                        try
+                        {
+                            var results = JsonSerializer.Deserialize<JsonElement[]>(run.StepResultsJson ?? "[]", opts);
+                            completedSteps += results?.Length ?? 0;
+                        }
+                        catch { }
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(run.WorkflowSnapshotJson ?? "{}");
+                            if (doc.RootElement.TryGetProperty("steps", out var steps))
+                                totalSteps += steps.GetArrayLength();
+                        }
+                        catch { }
+
+                        // Track earliest start time
+                        if (startedAt == null || run.StartedAt < startedAt)
+                            startedAt = run.StartedAt;
+                    }
+                }
+
+                return new TechnicianWorkloadSummaryDto(
+                    userId,
+                    fullName,
+                    paused,
+                    inProgress,
+                    notStarted,
+                    userAssets.Count,
+                    jobNumbers.ToList(),
+                    hasIssues,
+                    completedSteps,
+                    totalSteps,
+                    startedAt?.ToString("o")
+                );
+            })
+            .OrderByDescending(w => w.TotalAssigned)
+            .ToList();
+
+        return Ok(summary);
+    }
+
     // GET api/project-assets/by-project/{projectId}
     [HttpGet("by-project/{projectId}")]
     public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProject(string projectId, [FromQuery] bool includeDeleted = false)

@@ -480,17 +480,19 @@ export const assetWorkflowRunService = {
     return res.data;
   },
 
-  async listPendingSignatures(): Promise<PendingSignatureRecord[]> {
+  async listPendingSignatures(userId?: string): Promise<PendingSignatureRecord[]> {
     try {
-      const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures");
+      const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures", {
+        params: userId ? { userId } : undefined,
+      });
       return res.data;
     } catch {
       return [];
     }
   },
 
-  async listOpenIssues(): Promise<OpenIssueRecord[]> {
-    try { return await IssueRepository.getAll(); }
+  async listOpenIssues(userId?: string): Promise<OpenIssueRecord[]> {
+    try { return await IssueRepository.getAll(userId); }
     catch { return []; }
   },
 };

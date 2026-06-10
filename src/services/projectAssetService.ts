@@ -110,6 +110,15 @@ export const projectAssetService = {
     }
   },
 
+  async technicianWorkloadSummary(): Promise<TechnicianWorkloadSummaryItem[]> {
+    try {
+      const res = await api.get<TechnicianWorkloadSummaryItem[]>("/project-assets/technician-workload-summary");
+      return res.data;
+    } catch {
+      return [];
+    }
+  },
+
   async activeSummary(): Promise<ProjectAssetSummaryItem[]> {
     try {
       const res = await api.get<ProjectAssetSummaryItem[]>("/project-assets/active-summary");
@@ -190,6 +199,20 @@ export interface WorkloadSummaryItem {
   notStarted: number;
   inProgress: number;
   paused: number;
+  totalAssigned: number;
+  jobNumbers: string[];
+  hasIssues: boolean;
+  completedSteps: number;
+  totalSteps: number;
+  startedAt?: string;
+}
+
+export interface TechnicianWorkloadSummaryItem {
+  userId: string;
+  fullName: string;
+  paused: number;
+  inProgress: number;
+  notStarted: number;
   totalAssigned: number;
   jobNumbers: string[];
   hasIssues: boolean;

@@ -26,6 +26,7 @@ import {
   type OpenAssetItem,
   type ProjectAssetSummaryItem,
   type WorkloadSummaryItem,
+  type TechnicianWorkloadSummaryItem,
 } from "../../services/projectAssetService";
 import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
 import { inspectionImportService } from "../../services/inspectionImportService";
@@ -177,6 +178,7 @@ const Dashboard = () => {
   const [openAssets,         setOpenAssets]         = useState<OpenAssetItem[]>([]);
   const [projectAssetSummary, setProjectAssetSummary] = useState<ProjectAssetSummaryItem[]>([]);
   const [workload,           setWorkload]           = useState<WorkloadSummaryItem[]>([]);
+  const [technicianWorkload, setTechnicianWorkload] = useState<TechnicianWorkloadSummaryItem[]>([]);
   const [workloadLoading,    setWorkloadLoading]    = useState(false);
   const [reportingTechId,    setReportingTechId]    = useState<string | null>(null);
   const [expandedWorkloadId, setExpandedWorkloadId] = useState<string | null>(null);
@@ -286,15 +288,15 @@ const Dashboard = () => {
     setAttentionLoading(true);
     try {
       const [iss, sigs] = await Promise.all([
-        assetWorkflowRunService.listOpenIssues(),
-        assetWorkflowRunService.listPendingSignatures(),
+        assetWorkflowRunService.listOpenIssues(user.id),
+        assetWorkflowRunService.listPendingSignatures(user.id),
       ]);
       setOpenIssues(iss);
       setPendingSigs(sigs);
     } finally {
       setAttentionLoading(false);
     }
-  }, []);
+  }, [user.id]);
 
   useEffect(() => {
     dispatch(fetchProjects());
@@ -509,9 +511,10 @@ const Dashboard = () => {
         entry.breakdown.set(asset.projectId, { projectId: asset.projectId, jobNumber: asset.jobNumber ?? "", notStarted: 0, inProgress: 0, paused: 0, total: 0 });
       const pb = entry.breakdown.get(asset.projectId)!;
       pb.total++;
-      if (isNotStartedAsset(asset.status)) pb.notStarted++;
-      else if (isPausedAsset(asset.runStatus)) pb.paused++;
+      // Priority: Paused → In Progress → Queued (matches "My Jobs Today" display logic)
+      if (isPausedAsset(asset.runStatus)) pb.paused++;
       else if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) pb.inProgress++;
+      else if (isNotStartedAsset(asset.status)) pb.notStarted++;
     }
 
     return [...byUser.entries()]
@@ -521,9 +524,10 @@ const Dashboard = () => {
         return {
           userId,
           fullName: api?.fullName ?? userId,
-          notStarted:    assets.filter((a) => isNotStartedAsset(a.status)).length,
-          inProgress:    assets.filter((a) => isInProgressAsset(a.runStatus) || isInProgressAsset(a.status)).length,
+          // Priority: Paused → In Progress → Queued (matches "My Jobs Today" display logic)
           paused:        assets.filter((a) => isPausedAsset(a.runStatus)).length,
+          inProgress:    assets.filter((a) => !isPausedAsset(a.runStatus) && (isInProgressAsset(a.runStatus) || isInProgressAsset(a.status))).length,
+          notStarted:    assets.filter((a) => !isPausedAsset(a.runStatus) && !isInProgressAsset(a.runStatus) && !isInProgressAsset(a.status) && isNotStartedAsset(a.status)).length,
           totalAssigned: assets.length,
           jobNumbers:    [...new Set(assets.map((a) => a.jobNumber).filter(Boolean))] as string[],
           hasIssues:     api?.hasIssues ?? false,
@@ -851,6 +855,17 @@ const Dashboard = () => {
     () => pendingSigs.filter((sig) => myInstallAssets.some((asset) => asset.id === sig.assetId || asset.jobNumber === sig.jobNumber)),
     [pendingSigs, myInstallAssets]
   );
+  // High-severity observations on user's assigned assets (created by the current user)
+  const myInstallHighObservations = useMemo(
+    () => openIssues.filter((issue) =>
+      !issue.isBlocking &&
+      issue.severity === "high" &&
+      issue.issueType === "observation" &&
+      myInstallAssets.some((asset) => asset.id === issue.assetId)
+    ),
+    [openIssues, myInstallAssets]
+  );
+  const myInstallAttentionCount = myInstallBlocking.length + myInstallPendingSigs.length + myInstallHighObservations.length;
 
   const inspectionScopeProjects = useMemo(
     () => dashboardProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
@@ -1907,15 +1922,15 @@ const Dashboard = () => {
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Stack direction="row" spacing={0.5} alignItems="center">
-            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "primary.main" }} />
-            <Typography variant="caption" color="text.secondary">In progress</Typography>
+            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "success.main" }} />
+            <Typography variant="caption" color="text.secondary">Active</Typography>
           </Stack>
           <Stack direction="row" spacing={0.5} alignItems="center">
             <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "warning.main" }} />
             <Typography variant="caption" color="text.secondary">Paused</Typography>
           </Stack>
           <Stack direction="row" spacing={0.5} alignItems="center">
-            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "action.disabled" }} />
+            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "text.secondary" }} />
             <Typography variant="caption" color="text.secondary">Queued</Typography>
           </Stack>
           {scopedWorkload.length > 0 && (
@@ -1985,9 +2000,9 @@ const Dashboard = () => {
                             <Box sx={{ width: `${stepPct}%`, bgcolor: barColor, transition: "width 0.4s" }} />
                           ) : (
                             <>
-                              {inPct > 0 && <Box sx={{ width: `${inPct}%`, bgcolor: barColor, transition: "width 0.4s" }} />}
+                              {inPct > 0 && <Box sx={{ width: `${inPct}%`, bgcolor: "success.main", transition: "width 0.4s" }} />}
                               {pausedPct > 0 && <Box sx={{ width: `${pausedPct}%`, bgcolor: "warning.main", transition: "width 0.4s" }} />}
-                              {notPct > 0 && <Box sx={{ width: `${notPct}%`, bgcolor: "action.disabled", transition: "width 0.4s" }} />}
+                              {notPct > 0 && <Box sx={{ width: `${notPct}%`, bgcolor: "text.secondary", transition: "width 0.4s" }} />}
                             </>
                           )}
                         </Box>
@@ -2633,55 +2648,131 @@ const Dashboard = () => {
             </Box>
           )}
 
-          {/* My Blocking Issues + My Pending Signatures */}
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <Box className="glass-card" sx={{ p: 2.5 }}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-                  <ErrorOutlineOutlined sx={{ fontSize: 18, color: myInstallBlocking.length > 0 ? "error.main" : "text.disabled" }} />
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>My Blocking Issues</Typography>
-                  <Chip label={myInstallBlocking.length} size="small"
-                    color={myInstallBlocking.length > 0 ? "error" : "default"} variant="outlined"
-                    sx={{ height: 20, fontSize: "0.7rem" }} />
-                </Stack>
-                {myInstallBlocking.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">No blocking issues on your jobs</Typography>
-                ) : (
-                  <Stack spacing={0.25}>
-                    {myInstallBlocking.map((iss) => (
-                      <ItemRow key={iss.issueId}
-                        label={`${iss.jobNumber}: ${iss.assetTag}`}
-                        sub={iss.description.slice(0, 60) + (iss.description.length > 60 ? "..." : "")}
-                        onClick={() => navigate("/issues")} />
-                    ))}
+          {/* Needs Attention - Installer view */}
+          <Box className="glass-card" sx={{ p: 2.5 }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+              <WarningAmberOutlined sx={{ color: myInstallAttentionCount > 0 ? "warning.main" : "success.main", fontSize: 20 }} />
+              <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Needs Attention</Typography>
+              {attentionLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
+              {myInstallAttentionCount === 0 && !attentionLoading && (
+                <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ ml: 1, height: 20, fontSize: "0.7rem" }} />
+              )}
+              <Box sx={{ flex: 1 }} />
+              <Button size="small" variant="text" component={Link} to="/issues"
+                endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />} sx={{ fontSize: "0.72rem" }}>
+                Issues Board
+              </Button>
+            </Stack>
+
+            <Grid container spacing={2}>
+
+              {/* My Blocking Issues */}
+              <Grid item xs={12} sm={6} md={4}>
+                <Box sx={{
+                  p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
+                  border: "1px solid", transition: "all 0.2s",
+                  borderColor: myInstallBlocking.length > 0 ? "error.main" : "rgba(255,255,255,0.08)",
+                  background:  myInstallBlocking.length > 0 ? "rgba(211,47,47,0.07)" : "rgba(255,255,255,0.03)",
+                }}>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                    <ErrorOutlineOutlined sx={{ fontSize: 18, color: myInstallBlocking.length > 0 ? "error.main" : "text.disabled" }} />
+                    <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Blocking Issues</Typography>
                   </Stack>
-                )}
-              </Box>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Box className="glass-card" sx={{ p: 2.5 }}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-                  <PendingActionsOutlined sx={{ fontSize: 18, color: myInstallPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>My Pending Signatures</Typography>
-                  <Chip label={myInstallPendingSigs.length} size="small"
-                    color={myInstallPendingSigs.length > 0 ? "warning" : "default"} variant="outlined"
-                    sx={{ height: 20, fontSize: "0.7rem" }} />
-                </Stack>
-                {myInstallPendingSigs.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">No signatures waiting</Typography>
-                ) : (
-                  <Stack spacing={0.25}>
-                    {myInstallPendingSigs.map((s) => (
-                      <ItemRow key={s.runId}
-                        label={`${s.jobNumber}: ${s.assetTag}`}
-                        sub={`Completed ${fmtDate(s.completedAt)}`}
-                        onClick={() => navigate(`/projects/${s.projectId}`)} />
-                    ))}
+                  <Typography variant="h5" fontWeight={700} color={myInstallBlocking.length > 0 ? "error.main" : "text.secondary"}>
+                    {myInstallBlocking.length}
+                  </Typography>
+                  {myInstallBlocking.length > 0 ? (
+                    <Stack spacing={0.25} sx={{ mt: 1 }}>
+                      {myInstallBlocking.slice(0, 3).map((iss) => (
+                        <ItemRow key={iss.issueId}
+                          label={`${iss.jobNumber}: ${iss.assetTag}`}
+                          sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
+                          onClick={() => navigate("/issues")} />
+                      ))}
+                      {myInstallBlocking.length > 3 && (
+                        <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
+                          +{myInstallBlocking.length - 3} more
+                        </Typography>
+                      )}
+                    </Stack>
+                  ) : (
+                    <Typography variant="caption" color="success.main">No blocking issues</Typography>
+                  )}
+                </Box>
+              </Grid>
+
+              {/* My Pending Signatures */}
+              <Grid item xs={12} sm={6} md={4}>
+                <Box sx={{
+                  p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
+                  border: "1px solid", transition: "all 0.2s",
+                  borderColor: myInstallPendingSigs.length > 0 ? "warning.main" : "rgba(255,255,255,0.08)",
+                  background:  myInstallPendingSigs.length > 0 ? "rgba(230,119,0,0.07)" : "rgba(255,255,255,0.03)",
+                }}>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                    <PendingActionsOutlined sx={{ fontSize: 18, color: myInstallPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
+                    <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Pending Signatures</Typography>
                   </Stack>
-                )}
-              </Box>
+                  <Typography variant="h5" fontWeight={700} color={myInstallPendingSigs.length > 0 ? "warning.main" : "text.secondary"}>
+                    {myInstallPendingSigs.length}
+                  </Typography>
+                  {myInstallPendingSigs.length > 0 ? (
+                    <Stack spacing={0.25} sx={{ mt: 1 }}>
+                      {myInstallPendingSigs.slice(0, 3).map((s) => (
+                        <ItemRow key={s.runId}
+                          label={`${s.jobNumber}: ${s.assetTag}`}
+                          sub={`Completed ${fmtDate(s.completedAt)}`}
+                          onClick={() => navigate(`/projects/${s.projectId}`)} />
+                      ))}
+                      {myInstallPendingSigs.length > 3 && (
+                        <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
+                          +{myInstallPendingSigs.length - 3} more
+                        </Typography>
+                      )}
+                    </Stack>
+                  ) : (
+                    <Typography variant="caption" color="success.main">All signatures collected</Typography>
+                  )}
+                </Box>
+              </Grid>
+
+              {/* My High Observations */}
+              <Grid item xs={12} sm={6} md={4}>
+                <Box sx={{
+                  p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
+                  border: "1px solid", transition: "all 0.2s",
+                  borderColor: myInstallHighObservations.length > 0 ? "warning.dark" : "rgba(255,255,255,0.08)",
+                  background:  myInstallHighObservations.length > 0 ? "rgba(249,168,37,0.07)" : "rgba(255,255,255,0.03)",
+                }}>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                    <ReportOutlined sx={{ fontSize: 18, color: myInstallHighObservations.length > 0 ? "warning.main" : "text.disabled" }} />
+                    <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My High Observations</Typography>
+                  </Stack>
+                  <Typography variant="h5" fontWeight={700} color={myInstallHighObservations.length > 0 ? "warning.main" : "text.secondary"}>
+                    {myInstallHighObservations.length}
+                  </Typography>
+                  {myInstallHighObservations.length > 0 ? (
+                    <Stack spacing={0.25} sx={{ mt: 1 }}>
+                      {myInstallHighObservations.slice(0, 3).map((iss) => (
+                        <ItemRow key={iss.issueId}
+                          label={`${iss.jobNumber}: ${iss.assetTag}`}
+                          sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
+                          onClick={() => navigate("/issues")} />
+                      ))}
+                      {myInstallHighObservations.length > 3 && (
+                        <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
+                          +{myInstallHighObservations.length - 3} more
+                        </Typography>
+                      )}
+                    </Stack>
+                  ) : (
+                    <Typography variant="caption" color="success.main">No high-severity observations</Typography>
+                  )}
+                </Box>
+              </Grid>
+
             </Grid>
-          </Grid>
+          </Box>
 
           <Box className="glass-card" sx={{ p: 2.5 }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>

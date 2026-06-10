@@ -1359,6 +1359,20 @@ public record WorkloadSummaryDto(
     int CompletedSteps, int TotalSteps,
     string? StartedAt);
 
+/// <summary>Per-technician workload summary using the same counting logic as dashboard-workspace (Paused → In Progress → Not Started).</summary>
+public record TechnicianWorkloadSummaryDto(
+    string UserId,
+    string FullName,
+    int Paused,
+    int InProgress,
+    int NotStarted,
+    int TotalAssigned,
+    List<string> JobNumbers,
+    bool HasIssues,
+    int CompletedSteps,
+    int TotalSteps,
+    string? StartedAt);
+
 /// <summary>Per-project asset status counts for the Dashboard regional snapshot.</summary>
 public record ProjectAssetSummaryDto(string ProjectId, int NotStarted, int InProgress, int Complete, int Total);
 

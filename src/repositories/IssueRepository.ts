@@ -7,11 +7,11 @@ function toRecord(i: OpenIssueRecord) {
 }
 
 export const IssueRepository = {
-  async getAll(): Promise<OpenIssueRecord[]> {
+  async getAll(userId?: string): Promise<OpenIssueRecord[]> {
     const local = await entityGetAllIssues();
 
     // Background refresh — reconciles deleted rows via replace-all
-    api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues")
+    api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", { params: userId ? { userId } : undefined })
       .then(async (res) => {
         await entityReplaceAllIssues(res.data.map(toRecord));
         window.dispatchEvent(new Event("repo:issues:updated"));
@@ -21,7 +21,7 @@ export const IssueRepository = {
     if (local.length > 0) return local as OpenIssueRecord[];
 
     // No local data — wait for network
-    const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues");
+    const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", { params: userId ? { userId } : undefined });
     await entityReplaceAllIssues(res.data.map(toRecord));
     return res.data;
   },

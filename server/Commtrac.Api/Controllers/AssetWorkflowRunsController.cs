@@ -213,16 +213,33 @@ public class AssetWorkflowRunsController : ControllerBase
     }
 
     // GET api/asset-workflow-runs/open-issues — all unresolved issues across every run, with project context
+    // Optional ?userId={id} filters to issues on assets assigned to that user
     [HttpGet("open-issues")]
-    public async Task<IActionResult> GetOpenIssues()
+    public async Task<IActionResult> GetOpenIssues([FromQuery] string? userId = null)
     {
         try
         {
+            // If userId is provided, only consider assets assigned to that user
+            var assignedAssetIds = !string.IsNullOrWhiteSpace(userId)
+                ? await _db.ProjectAssets
+                    .Where(a => a.AssignedUserId == userId)
+                    .Select(a => a.Id)
+                    .ToListAsync()
+                : null;
+
             var runs = await _db.AssetWorkflowRuns
                 .Where(r => r.IssuesJson != null && r.IssuesJson != "[]" && r.IssuesJson != "")
                 .ToListAsync();
 
             var assetIds = runs.Select(r => r.AssetId).Distinct().ToList();
+            
+            // Filter runs to only those on user's assigned assets if userId provided
+            if (assignedAssetIds is not null)
+            {
+                assetIds = assetIds.Intersect(assignedAssetIds).ToList();
+                runs = runs.Where(r => assetIds.Contains(r.AssetId)).ToList();
+            }
+
             var assets   = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
 
             var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
@@ -272,9 +289,16 @@ public class AssetWorkflowRunsController : ControllerBase
             }
 
             // ── 2. Manually-added asset-level issues ──────────────────────
-            var assetsWithIssues = await _db.ProjectAssets
-                .Where(a => a.IssuesJson != null && a.IssuesJson != "[]" && a.IssuesJson != "")
-                .ToListAsync();
+            var assetsWithIssuesQuery = _db.ProjectAssets
+                .Where(a => a.IssuesJson != null && a.IssuesJson != "[]" && a.IssuesJson != "");
+
+            // Filter to user's assigned assets if userId provided
+            if (assignedAssetIds is not null)
+            {
+                assetsWithIssuesQuery = assetsWithIssuesQuery.Where(a => assignedAssetIds.Contains(a.Id));
+            }
+
+            var assetsWithIssues = await assetsWithIssuesQuery.ToListAsync();
 
             var assetProjectIds2 = assetsWithIssues.Select(a => a.ProjectId).Distinct().ToList();
             var projects2 = await _db.Projects.Where(p => assetProjectIds2.Contains(p.Id)).ToListAsync();
@@ -1147,8 +1171,9 @@ public class AssetWorkflowRunsController : ControllerBase
     }
 
     // GET api/asset-workflow-runs/pending-signatures — locked runs awaiting customer sign-off, with project context
+    // Optional ?userId={id} filters to signatures on assets assigned to that user
     [HttpGet("pending-signatures")]
-    public async Task<IActionResult> GetPendingSignatures()
+    public async Task<IActionResult> GetPendingSignatures([FromQuery] string? userId = null)
     {
         try
         {
@@ -1159,6 +1184,18 @@ public class AssetWorkflowRunsController : ControllerBase
 
             var assetIds  = runs.Select(r => r.AssetId).Distinct().ToList();
             var assets    = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
+
+            // Filter to user's assigned assets if userId provided
+            if (!string.IsNullOrWhiteSpace(userId))
+            {
+                var assignedAssetIds = assets
+                    .Where(a => a.AssignedUserId == userId)
+                    .Select(a => a.Id)
+                    .ToHashSet();
+                runs = runs.Where(r => assignedAssetIds.Contains(r.AssetId)).ToList();
+                assets = assets.Where(a => assignedAssetIds.Contains(a.Id)).ToList();
+            }
+
             var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
             var projects  = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
 
