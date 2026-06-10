@@ -616,6 +616,14 @@ export default function WorkOrderRunner({
         setStartError("Could not load run. Please try again.");
         return;
       }
+
+      // Stale-cache guard: if the resolved run is already locked (e.g. completed in another
+      // session), the existingRunId was pointing at outdated data. Start a fresh run instead
+      // so the user isn't silently working on a locked record that will 400 on complete.
+      if (run.isLocked && projectAssetId && workflowConfigId) {
+        run = await assetWorkflowRunService.startRun(projectAssetId, workflowConfigId);
+      }
+
       setActiveRunId(run.id);
       setActiveRun(run);
       syncRunTimeState(run);

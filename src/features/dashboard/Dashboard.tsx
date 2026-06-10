@@ -383,6 +383,38 @@ const Dashboard = () => {
     return () => window.removeEventListener("installer-photo-reminders-changed", reload);
   }, []);
 
+  // Notification-driven refresh: assignment events → workload + workspace + open assets
+  useEffect(() => {
+    const refresh = () => {
+      setWorkloadLoading(true);
+      projectAssetService.workloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
+      projectAssetService.listOpen().then(setOpenAssets);
+      setWorkspaceLoading(true);
+      projectAssetService
+        .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
+        .then((data) => setDashboardWorkspace(data))
+        .finally(() => setWorkspaceLoading(false));
+    };
+    window.addEventListener("notifications:assignments-changed", refresh);
+    return () => window.removeEventListener("notifications:assignments-changed", refresh);
+  }, [isManager, selectedDashboardId]);
+
+  // Notification-driven refresh: run state events → workspace + open assets + attention items
+  useEffect(() => {
+    const refresh = () => {
+      projectAssetService.listOpen().then(setOpenAssets);
+      projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
+      setWorkspaceLoading(true);
+      projectAssetService
+        .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
+        .then((data) => setDashboardWorkspace(data))
+        .finally(() => setWorkspaceLoading(false));
+      loadAttention();
+    };
+    window.addEventListener("notifications:run-state-changed", refresh);
+    return () => window.removeEventListener("notifications:run-state-changed", refresh);
+  }, [isManager, selectedDashboardId, loadAttention]);
+
   // Phase 4 - evidence completeness
   useEffect(() => {
     if (!isManager) return;
@@ -711,7 +743,7 @@ const Dashboard = () => {
     try {
       const [assignments, runs, docs, fullAsset] = await Promise.all([
         assetWorkflowAssignmentService.listByAsset(asset.id),
-        assetWorkflowRunService.listByAsset(asset.id),
+        api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${asset.id}`).then(r => r.data).catch(() => []),
         api.get(`/asset-documents/by-asset/${asset.id}`).then(res => res.data).catch(() => []),
         projectAssetService.getById(asset.id).catch(() => null),
       ]);

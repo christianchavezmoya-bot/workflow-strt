@@ -3,6 +3,18 @@ import { notificationService } from "../services/notificationService";
 import { useAuth } from "../hooks/useAuth";
 import type { AppNotification } from "../types/notification";
 
+const ASSIGNMENT_EVENT_TYPES = new Set([
+  "workflow-assigned", "workflow-assigned-to-installer", "workflow-self-assigned",
+  "workflow-unassigned", "asset-created", "asset-assignment-updated",
+  "asset-assigned", "asset-unassigned", "asset-takeover", "asset-self-assigned",
+]);
+
+const RUN_STATE_EVENT_TYPES = new Set([
+  "workflow-started", "workflow-paused", "workflow-resumed", "workflow-completed",
+  "asset-completed", "workflow-issue", "workflow-issues-updated", "workflow-reopened",
+  "workflow-updated",
+]);
+
 type NotificationInboxContextValue = {
   notifications: AppNotification[];
   unreadNotifications: AppNotification[];
@@ -54,6 +66,12 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       seenUnreadIdsRef.current = unreadIds;
       if (newestUnread) {
         setBannerNotification(newestUnread);
+        if (ASSIGNMENT_EVENT_TYPES.has(newestUnread.eventType)) {
+          window.dispatchEvent(new Event("notifications:assignments-changed"));
+        }
+        if (RUN_STATE_EVENT_TYPES.has(newestUnread.eventType)) {
+          window.dispatchEvent(new Event("notifications:run-state-changed"));
+        }
       }
     } finally {
       setLoading(false);

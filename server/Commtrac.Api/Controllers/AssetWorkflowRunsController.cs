@@ -519,7 +519,7 @@ public class AssetWorkflowRunsController : ControllerBase
                 severity,
                 title,
                 $"{ResolveActorName()} changed workflow status to {run.Status} for asset {{asset}} on job {{job}}.",
-                notifyInstaller: string.Equals(run.Status, "Issue", StringComparison.OrdinalIgnoreCase));
+                notifyInstaller: run.Status is "Issue" or "Paused");
         }
 
         if (req.IssuesJson is not null && CountOpenIssues(req.IssuesJson) > CountOpenIssues(previousIssuesJson))
@@ -805,7 +805,7 @@ public class AssetWorkflowRunsController : ControllerBase
                 "warning",
                 "Workflow paused",
                 $"{ResolveActorName()} paused workflow for asset {{asset}} on job {{job}}.",
-                notifyInstaller: false);
+                notifyInstaller: true);
         }
         else if (action is "resumeproductive" or "startproductive")
         {

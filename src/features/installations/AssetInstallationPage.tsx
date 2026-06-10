@@ -508,11 +508,11 @@ const AssetInstallationPage = () => {
   const [docsCountMap, setDocsCountMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    dispatch(fetchProducts());
-    dispatch(fetchProjects());
-    dispatch(fetchUsers());
+    if (!productsState.items.length) dispatch(fetchProducts());
+    if (!projects.length) dispatch(fetchProjects());
+    if (!users.length) dispatch(fetchUsers());
     siteService.getSites().then(setSites).catch(() => {});
-  }, [dispatch]);
+  }, [dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const products = useMemo(
     () => (productsState.items.length ? productsState.items : demoProducts),
@@ -2749,7 +2749,7 @@ const AssetInstallationPage = () => {
       <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
         <FormControl size="small" sx={{ flex: 1, minWidth: 150 }}>
           <InputLabel shrink>Project</InputLabel>
-          <Select label="Project" value={selectedProjectId} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
+          <Select label="Project" value={productProjects.length > 0 ? selectedProjectId : ""} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
             <MenuItem value="">All projects</MenuItem>
             {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} - {p.customerName}</MenuItem>)}
           </Select>

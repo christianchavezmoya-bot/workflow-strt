@@ -114,14 +114,17 @@ const Topbar = () => {
     return () => window.removeEventListener("brand-name-changed", handler);
   }, []);
 
+  const isAdminUser = useMemo(() => /admin/i.test(user?.role ?? ""), [user?.role]);
+
   useEffect(() => {
+    if (!isAdminUser) return;
     import("../../services/settingsService").then(({ settingsService }) => {
       settingsService.getQuickbaseSettings().then((s) => {
         setQbEnabled(!!s?.enabled);
         setQbHost(s?.realmHostname ?? "");
       }).catch(() => {});
     });
-  }, []);
+  }, [isAdminUser]);
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [notificationsAnchor, setNotificationsAnchor] = useState<null | HTMLElement>(null);
@@ -133,7 +136,6 @@ const Topbar = () => {
   const [indexStatus, setIndexStatus] = useState<SearchIndexStatus | null>(null);
   const [indexLoading, setIndexLoading] = useState(false);
   const [indexPopoverAnchor, setIndexPopoverAnchor] = useState<null | HTMLElement>(null);
-  const isAdminUser = useMemo(() => /admin/i.test(user?.role ?? ""), [user?.role]);
   const isNotificationsOpen = Boolean(notificationsAnchor);
 
   // ── Favorites star ───────────────────────────────────────────────────────────
