@@ -662,9 +662,11 @@ const AssetInstallationPage = () => {
     }
   };
 
-  // Fix 1 — Listen for background refresh event from AssetRepository
+  // Fix 1 — Listen for background refresh event from AssetRepository.
+  // IMPORTANT: must read from local IndexedDB only here — calling refreshAssets() would
+  // trigger another network fetch, which fires repo:assets:updated again → infinite loop.
   useEffect(() => {
-    const handler = (e: Event) => {
+    const handler = async (e: Event) => {
       const { productId, projectId } = (e as CustomEvent<{ productId?: string; projectId?: string }>).detail;
       const productIds = new Set(products.map((p) => p.id));
       if (
@@ -672,11 +674,15 @@ const AssetInstallationPage = () => {
         (projectId && projectId === selectedProjectId) ||
         (!productId && !projectId)
       ) {
-        void refreshAssets();
+        const a = selectedProjectId
+          ? await projectAssetService.listLocalByProject(selectedProjectId)
+          : (await Promise.all(products.map((p) => projectAssetService.listLocalByProduct(p.id)))).flat();
+        setAssets(a);
+        setLastFetchedAt(new Date());
       }
     };
-    window.addEventListener("repo:assets:updated", handler);
-    return () => window.removeEventListener("repo:assets:updated", handler);
+    window.addEventListener("repo:assets:updated", handler as EventListener);
+    return () => window.removeEventListener("repo:assets:updated", handler as EventListener);
   }, [products, selectedProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fix 6 — Background poll every 90s while page is visible (mobile only)

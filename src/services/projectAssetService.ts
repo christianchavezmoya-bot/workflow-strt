@@ -40,6 +40,11 @@ export const projectAssetService = {
     catch { return []; }
   },
 
+  async listLocalByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    try { return await AssetRepository.getLocalByProject(projectId, includeDeleted); }
+    catch { return []; }
+  },
+
   async create(input: CreateProjectAssetInput): Promise<ProjectAsset> {
     const res = await api.post<ProjectAsset>("/project-assets", input);
     const asset = fromDto(res.data);
