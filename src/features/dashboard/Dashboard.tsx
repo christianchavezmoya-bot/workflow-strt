@@ -2264,6 +2264,60 @@ const Dashboard = () => {
               <Typography variant="h6" fontWeight={700}>{managedOpenAssets.length}</Typography>
             </Paper>
           </Stack>
+          <Stack direction="row" spacing={0.75} sx={{ flexWrap: "wrap", gap: 0.5 }}>
+            <Tooltip title="Workflow run is currently active" arrow>
+              <Chip icon={<PlayArrowOutlined sx={{ fontSize: 13 }} />}
+                label={`${overviewActiveCount} active`} size="small"
+                color={overviewActiveCount > 0 ? "primary" : "default"} variant="outlined"
+                sx={{ height: 22, fontSize: "0.7rem" }} />
+            </Tooltip>
+            <Tooltip title="Workflow run is currently paused" arrow>
+              <Chip label={`${overviewPausedCount} paused`} size="small"
+                color={overviewPausedCount > 0 ? "warning" : "default"} variant="outlined"
+                sx={{ height: 22, fontSize: "0.7rem" }} />
+            </Tooltip>
+            <Tooltip title="Assigned, no workflow run started yet" arrow>
+              <Chip label={`${overviewQueuedCount} queued`} size="small"
+                color="default" variant="outlined"
+                sx={{ height: 22, fontSize: "0.7rem" }} />
+            </Tooltip>
+            {overviewPendingCount > 0 && (
+              <Tooltip title="Asset acknowledged but workflow hasn't started" arrow>
+                <Chip label={`${overviewPendingCount} pending`} size="small"
+                  color="info" variant="outlined"
+                  sx={{ height: 22, fontSize: "0.7rem" }} />
+              </Tooltip>
+            )}
+          </Stack>
+          {isAdmin && dashboardUsers.length > 0 && (
+            <Box>
+              {!viewingOwnDashboard && viewedDashboardUser && (
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1, p: 0.75, borderRadius: 1, background: "rgba(2,136,209,0.1)", border: "1px solid rgba(2,136,209,0.3)" }}>
+                  <SwitchAccountOutlined sx={{ fontSize: 14, color: "info.main", flexShrink: 0 }} />
+                  <Typography variant="caption" sx={{ flex: 1, color: "info.main", fontSize: "0.7rem" }}>
+                    Viewing {viewedDashboardUser.fullName} ({viewedDashboardUser.role})
+                  </Typography>
+                  <IconButton size="small" onClick={() => setSelectedDashboardId(user.id)} sx={{ p: 0.25 }}>
+                    <CloseOutlined sx={{ fontSize: 14 }} />
+                  </IconButton>
+                </Box>
+              )}
+              <FormControl size="small" fullWidth>
+                <InputLabel shrink sx={{ fontSize: "0.75rem" }}>View as</InputLabel>
+                <Select
+                  label="View as"
+                  value={selectedDashboardId === ALL_DASHBOARDS_VALUE ? user.id : selectedDashboardId}
+                  onChange={(e) => setSelectedDashboardId(e.target.value)}
+                  sx={{ fontSize: "0.75rem" }}
+                >
+                  <MenuItem value={user.id}><em>My Dashboard</em></MenuItem>
+                  {dashboardUsers.map((u) => (
+                    <MenuItem key={u.id} value={u.id} sx={{ fontSize: "0.8rem" }}>{u.fullName} ({u.role})</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+          )}
         </Stack>
       </Box>
 
@@ -2289,15 +2343,94 @@ const Dashboard = () => {
         <>
           {NeedsAttentionSection}
 
+          {pendingApprovals.length > 0 && (
+            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(230,119,0,0.07)" }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                <AssignmentLateOutlined sx={{ fontSize: 18, color: "warning.main" }} />
+                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Pending Approvals</Typography>
+                <Chip label={pendingApprovals.length} size="small" color="warning" variant="outlined"
+                  sx={{ height: 20, fontSize: "0.7rem" }} />
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                Projects waiting for your approval
+              </Typography>
+              <Stack direction="row" spacing={1} sx={{ overflowX: "auto", pb: 0.5 }} flexWrap="nowrap">
+                {pendingApprovals.map((p) => (
+                  <Chip key={p.id}
+                    label={p.jobNumber || p.id}
+                    onClick={() => navigate(`/projects/${p.id}`)}
+                    color="warning" variant="outlined"
+                    sx={{ flexShrink: 0, cursor: "pointer" }} />
+                ))}
+              </Stack>
+            </Box>
+          )}
+
+          {autoAssignFlags.length > 0 && (
+            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                <PersonOutlined sx={{ fontSize: 18, color: "info.main" }} />
+                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>New Auto-assignments</Typography>
+                <Chip label={autoAssignFlags.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
+                  onClick={() => {
+                    localStorage.removeItem("pm_auto_assign_flags");
+                    setAutoAssignFlags([]);
+                  }}>
+                  Dismiss all
+                </Button>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                Assets auto-assigned when an installer started a workflow
+              </Typography>
+              <Stack spacing={0.25}>
+                {autoAssignFlags.map((f) => (
+                  <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
+                    <Box sx={{ flex: 1 }}>
+                      <ItemRow
+                        label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
+                        sub={`Assigned by ${f.assignedBy} · ${fmtDate(f.assignedAt)}`}
+                        onClick={() => navigate("/installations/assets")}
+                      />
+                    </Box>
+                    <Button size="small" variant="text" color="inherit"
+                      sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
+                      onClick={() => {
+                        const updated = autoAssignFlags.filter((x) => x.id !== f.id);
+                        localStorage.setItem("pm_auto_assign_flags", JSON.stringify(updated));
+                        setAutoAssignFlags(updated);
+                      }}>
+                      ×
+                    </Button>
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
+          )}
+
           <Box className="glass-card" sx={{ p: 2 }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
-              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>My Projects</Typography>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: canViewAllProjects ? 1 : 1.5 }}>
+              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>Projects</Typography>
               <Button size="small" variant="text" onClick={() => navigate("/projects")}>View all</Button>
             </Stack>
-            {managedProjects.length === 0
+            {canViewAllProjects && (
+              <Stack direction="row" spacing={0.75} sx={{ mb: 1.5 }}>
+                <Chip label="My Projects" clickable size="small"
+                  color={dashboardProjectScope === "mine" ? "primary" : "default"}
+                  variant={dashboardProjectScope === "mine" ? "filled" : "outlined"}
+                  onClick={() => setDashboardProjectScope("mine")}
+                  sx={{ height: 26, fontSize: "0.72rem" }} />
+                <Chip label="All Projects" clickable size="small"
+                  color={dashboardProjectScope === "all" ? "primary" : "default"}
+                  variant={dashboardProjectScope === "all" ? "filled" : "outlined"}
+                  onClick={() => setDashboardProjectScope("all")}
+                  sx={{ height: 26, fontSize: "0.72rem" }} />
+              </Stack>
+            )}
+            {dashboardProjects.length === 0
               ? <Typography variant="caption" color="text.secondary">No projects in scope.</Typography>
               : <Stack spacing={1}>
-                  {managedProjects.slice(0, 6).map((project) => {
+                  {dashboardProjects.slice(0, 6).map((project) => {
                     const summary = projectSummaryById.get(project.id);
                     const projectAssets = openAssets.filter((asset) => asset.projectId === project.id);
                     const issueCount = projectAssets.filter((asset) => String(asset.status ?? "").toLowerCase() === "issue").length;
@@ -2410,7 +2543,7 @@ const Dashboard = () => {
                         <Chip
                           label={displayRunState(asset)}
                           size="small"
-                          color={isPausedAsset(asset.runStatus) ? "warning" : isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status) ? "primary" : "default"}
+                          color={isPausedAsset(asset.runStatus) ? "warning" : isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status) ? "primary" : isIssueAsset(asset.status) ? "error" : isPendingAsset(asset.status) ? "info" : "default"}
                           variant="outlined"
                           sx={{ height: 18, fontSize: "0.62rem" }}
                         />
