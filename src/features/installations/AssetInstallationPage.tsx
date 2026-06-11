@@ -685,6 +685,13 @@ const AssetInstallationPage = () => {
     return () => window.removeEventListener("repo:assets:updated", handler as EventListener);
   }, [products, selectedProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fix 6b — Re-fetch immediately when server comes back online
+  useEffect(() => {
+    const handler = () => void refreshAssets();
+    window.addEventListener("api-server-reachable", handler);
+    return () => window.removeEventListener("api-server-reachable", handler);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fix 6 — Background poll every 90s while page is visible (mobile only)
   useEffect(() => {
     if (!isNativePlatform) return;
