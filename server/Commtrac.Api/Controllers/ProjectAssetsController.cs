@@ -71,8 +71,9 @@ public class ProjectAssetsController : ControllerBase
             string.Equals(role, "Project Manager", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(role, "Supervisor", StringComparison.OrdinalIgnoreCase);
 
+        // Active assets = not complete, not cancelled (includes Issue, Pending, OnHold, InProgress, NotStarted)
         var assetsQuery = _db.ProjectAssets
-            .Where(a => a.Status == "NotStarted" || a.Status == "InProgress" || a.Status == "OnHold");
+            .Where(a => a.Status != "Complete" && a.Status != "Completed" && a.Status != "Cancelled");
 
         if (!canViewAllOpenAssets)
         {
@@ -302,9 +303,10 @@ public class ProjectAssetsController : ControllerBase
     [HttpGet("workload-summary")]
     public async Task<ActionResult<IEnumerable<WorkloadSummaryDto>>> WorkloadSummary()
     {
+        // Active assets = not complete, not cancelled (includes Issue, Pending, OnHold, InProgress, NotStarted)
         var assets = await _db.ProjectAssets
             .Where(a => a.AssignedUserId != null && a.AssignedUserId != ""
-                     && (a.Status == "NotStarted" || a.Status == "InProgress" || a.Status == "OnHold"))
+                     && a.Status != "Complete" && a.Status != "Completed" && a.Status != "Cancelled")
             .ToListAsync();
 
         var userIds   = assets.Select(a => a.AssignedUserId!).Distinct().ToList();
@@ -414,10 +416,10 @@ public class ProjectAssetsController : ControllerBase
     [HttpGet("technician-workload-summary")]
     public async Task<ActionResult<IEnumerable<TechnicianWorkloadSummaryDto>>> GetTechnicianWorkloadSummary()
     {
-        // Get all assets with assigned users that are not complete
+        // Active assets = not complete, not cancelled (includes Issue, Pending, OnHold, InProgress, NotStarted)
         var assets = await _db.ProjectAssets
             .Where(a => a.AssignedUserId != null && a.AssignedUserId != ""
-                     && (a.Status == "NotStarted" || a.Status == "InProgress" || a.Status == "OnHold"))
+                     && a.Status != "Complete" && a.Status != "Completed" && a.Status != "Cancelled")
             .ToListAsync();
 
         if (assets.Count == 0) return Ok(Array.Empty<TechnicianWorkloadSummaryDto>());
@@ -494,7 +496,7 @@ public class ProjectAssetsController : ControllerBase
                     }
 
                     // Same counting logic as dashboard-workspace IsCurrentWorkspaceAsset
-                    // Priority: Paused → In Progress → Not Started
+                    // Priority: Paused → In Progress → Issue → Pending → Not Started
                     if (runStatus == "paused")
                     {
                         paused++;
@@ -502,6 +504,16 @@ public class ProjectAssetsController : ControllerBase
                     else if (runStatus == "inprogress" || assetStatus == "inprogress")
                     {
                         inProgress++;
+                    }
+                    else if (assetStatus == "issue")
+                    {
+                        // Issue assets are active and need attention
+                        inProgress++;
+                    }
+                    else if (assetStatus == "pending")
+                    {
+                        // Pending assets are waiting to be started (queued)
+                        notStarted++;
                     }
                     else if (assetStatus == "notstarted")
                     {
@@ -919,8 +931,12 @@ public class ProjectAssetsController : ControllerBase
         var assetStatus = (asset.Status ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
         var runStatus = (latestRun?.Status ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
 
+        // Completed/cancelled assets are never "current"
+        if (assetStatus is "complete" or "completed" or "cancelled") return false;
+
+        // Active assets that need work are "current" (includes Issue, Pending)
         if (runStatus is "paused" or "inprogress") return true;
-        return assetStatus is "notstarted" or "inprogress" or "onhold";
+        return assetStatus is "notstarted" or "inprogress" or "onhold" or "issue" or "pending";
     }
 
     private static string BuildHistoryStatus(ProjectAssetEntity asset, string? projectStatus, AssetWorkflowRunEntity? latestRun)

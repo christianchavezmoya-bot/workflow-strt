@@ -62,15 +62,39 @@ function isNotStartedAsset(status?: string | null) {
   return value === "notstarted" || value === "not started";
 }
 
+function isIssueAsset(status?: string | null) {
+  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+  return value === "issue" || value === "hasissue";
+}
+
+function isPendingAsset(status?: string | null) {
+  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+  return value === "pending";
+}
+
+function isWaitingForSignature(signatureStatus?: string | null) {
+  const value = (signatureStatus ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+  return value === "pendingcustomer" || value === "pendinginstaller";
+}
+
+function isActiveAsset(status?: string | null) {
+  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+  return value === "notstarted" || value === "inprogress" || value === "onhold" 
+    || value === "issue" || value === "pending";
+}
+
 function isOpenInspectionStatus(status?: string | null) {
   const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
   return value === "notstarted" || value === "inprogress" || value === "paused" || value === "onhold";
 }
 
-function displayRunState(asset: { runStatus?: string | null; status?: string | null }) {
+function displayRunState(asset: { runStatus?: string | null; status?: string | null; signatureStatus?: string | null }) {
+  // Check for Issue status first (highest priority for attention)
+  if (isIssueAsset(asset.status) || isIssueAsset(asset.runStatus)) return "Issue";
   if (isPausedAsset(asset.runStatus)) return "Paused";
   if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) return "In Progress";
   if (isNotStartedAsset(asset.status)) return "Not Started";
+  if (isPendingAsset(asset.status)) return "Pending";
   return asset.runStatus || asset.status || "Unknown";
 }
 
@@ -541,9 +565,11 @@ const Dashboard = () => {
         entry.breakdown.set(asset.projectId, { projectId: asset.projectId, jobNumber: asset.jobNumber ?? "", notStarted: 0, inProgress: 0, paused: 0, total: 0 });
       const pb = entry.breakdown.get(asset.projectId)!;
       pb.total++;
-      // Priority: Paused → In Progress → Queued (matches "My Jobs Today" display logic)
+      // Priority: Paused → In Progress → Issue → Pending → Not Started (matches backend logic)
       if (isPausedAsset(asset.runStatus)) pb.paused++;
       else if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) pb.inProgress++;
+      else if (isIssueAsset(asset.status)) pb.inProgress++; // Issue = active (needs attention)
+      else if (isPendingAsset(asset.status)) pb.notStarted++; // Pending = queued (waiting to start)
       else if (isNotStartedAsset(asset.status)) pb.notStarted++;
     }
 
