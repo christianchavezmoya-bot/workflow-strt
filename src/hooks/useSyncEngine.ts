@@ -263,6 +263,12 @@ export function useSyncEngine(): SyncState {
     let anyError = false;
 
     for (const action of due) {
+      // Skip if the action this depends on hasn't been synced yet
+      if (action.dependsOnOpId) {
+        const all = await pendingGetAll();
+        if (all.some((a) => a.id === action.dependsOnOpId)) continue;
+      }
+
       try {
         await pendingSetStatus(action.id, "uploading");
         if (action.entityType === "workflow-run") {

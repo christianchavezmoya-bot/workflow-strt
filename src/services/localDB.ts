@@ -246,13 +246,22 @@ export async function pendingGetByEntityId(entityId: string): Promise<PendingAct
   } catch { return []; }
 }
 
-/** Increment retries, set lastError, compute nextRetryAt via backoff, mark status = "failed". */
+const MAX_RETRIES = 20;
+
+/** Increment retries, set lastError, compute nextRetryAt via backoff, mark status = "failed".
+ *  Drops the action after MAX_RETRIES to prevent unbounded queue growth. */
 export async function pendingMarkRetry(id: string, error: string): Promise<void> {
   try {
     const db = await getDB();
     const item = await db.get("pending_actions", id);
     if (!item) return;
     const newRetries = item.retries + 1;
+    if (newRetries >= MAX_RETRIES) {
+      await db.delete("pending_actions", id);
+      window.dispatchEvent(new Event("sync-pending-changed"));
+      console.warn(`[sync] Action ${id} (${item.opType ?? item.method} ${item.url}) dropped after ${MAX_RETRIES} retries.`, item);
+      return;
+    }
     await db.put("pending_actions", {
       ...item,
       retries: newRetries,
@@ -260,6 +269,7 @@ export async function pendingMarkRetry(id: string, error: string): Promise<void>
       nextRetryAt: calcNextRetryAt(newRetries),
       status: "failed",
     });
+    window.dispatchEvent(new Event("sync-pending-changed"));
   } catch { /* ignore */ }
 }
 

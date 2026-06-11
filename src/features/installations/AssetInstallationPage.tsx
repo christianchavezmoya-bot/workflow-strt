@@ -650,7 +650,7 @@ const AssetInstallationPage = () => {
     });
   }, [activeProduct?.id, archiveMode, products, selectedProjectId]);
 
-  const refreshAssets = async () => {
+  const refreshAssets = useCallback(async () => {
     const refreshPromise = selectedProjectId
       ? projectAssetService.listByProject(selectedProjectId, archiveMode)
       : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode))).then((groups) => groups.flat());
@@ -660,7 +660,7 @@ const AssetInstallationPage = () => {
     if (activeProduct?.id) {
       setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
     }
-  };
+  }, [selectedProjectId, archiveMode, products, activeProduct?.id]);
 
   // Fix 1 — Listen for background refresh event from AssetRepository.
   // IMPORTANT: must read from local IndexedDB only here — calling refreshAssets() would
@@ -675,22 +675,22 @@ const AssetInstallationPage = () => {
         (!productId && !projectId)
       ) {
         const a = selectedProjectId
-          ? await projectAssetService.listLocalByProject(selectedProjectId)
-          : (await Promise.all(products.map((p) => projectAssetService.listLocalByProduct(p.id)))).flat();
+          ? await projectAssetService.listLocalByProject(selectedProjectId, archiveMode)
+          : (await Promise.all(products.map((p) => projectAssetService.listLocalByProduct(p.id, archiveMode)))).flat();
         setAssets(a);
         setLastFetchedAt(new Date());
       }
     };
     window.addEventListener("repo:assets:updated", handler as EventListener);
     return () => window.removeEventListener("repo:assets:updated", handler as EventListener);
-  }, [products, selectedProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [products, selectedProjectId, archiveMode]);
 
   // Fix 6b — Re-fetch immediately when server comes back online
   useEffect(() => {
     const handler = () => void refreshAssets();
     window.addEventListener("api-server-reachable", handler);
     return () => window.removeEventListener("api-server-reachable", handler);
-  }); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [refreshAssets]);
 
   // Fix 6 — Background poll every 90s while page is visible (mobile only)
   useEffect(() => {
@@ -701,7 +701,7 @@ const AssetInstallationPage = () => {
       }
     }, 90_000);
     return () => window.clearInterval(id);
-  }, [isNativePlatform]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isNativePlatform, refreshAssets]);
 
   const selectedAddConfig = useMemo(
     () => configs.find((c) => c.id === addForm.configId) ?? null,
