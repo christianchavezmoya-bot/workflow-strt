@@ -318,7 +318,7 @@ const AssetInstallationPage = () => {
   const projects = useAppSelector((s) => s.projects.items);
   const users = useAppSelector((s) => s.users.items);
   const [searchParams] = useSearchParams();
-  const isManagerRole = (role?: string | null) => role === "Admin" || role === "Project Manager";
+  const canEditAssetStatus = can.installationAssets?.editScope === "all";
 
   // Stale-load guard: incremented every time activeProduct changes so that
   // results from a superseded fetch (triggered before the tab restoration
@@ -670,11 +670,29 @@ const AssetInstallationPage = () => {
 
   // Scope: roles with viewScope="own" see only projects/assets they manage.
   const canViewAllAssets = (can.installationAssets?.viewScope ?? "own") === "all";
-  const ownedProjectIds = useMemo(() => {
-    if (canViewAllAssets) return null; // null = no restriction
+
+  // Compute project IDs the user can access:
+  //   - Projects where they are the project manager (matched by full name)
+  //   - Projects where they are listed as a team member (matched by user ID)
+  // Returns null when canViewAllAssets=true (no restriction needed) OR when the user
+  // has no matching projects (signals that assignment-based fallback should apply).
+  const ownedProjectIds = useMemo((): Set<string> | null => {
+    if (canViewAllAssets) return null;
     const myName = (currentUser.fullName ?? "").trim().toLowerCase();
-    return new Set(projects.filter((p) => String(p.projectManager ?? "").trim().toLowerCase() === myName).map((p) => p.id));
-  }, [canViewAllAssets, currentUser.fullName, projects]);
+    const owned = new Set(
+      projects.filter((p) =>
+        String(p.projectManager ?? "").trim().toLowerCase() === myName ||
+        (p.teamMemberIds?.includes(currentUser.id) ?? false)
+      ).map((p) => p.id)
+    );
+    // Return null (not an empty Set) so downstream null-checks correctly trigger the assignment fallback.
+    return owned.size > 0 ? owned : null;
+  }, [canViewAllAssets, currentUser.fullName, currentUser.id, projects]);
+
+  // Assignment-scoped: viewScope is "own" AND the user has no owned/team projects.
+  // These users (e.g. Installer, Technician) see only assets directly assigned to them.
+  // No role names are hardcoded — the scope type is derived entirely from permission config + project data.
+  const isAssignmentScoped = !canViewAllAssets && ownedProjectIds === null;
 
   const visibleAssets = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -684,14 +702,15 @@ const AssetInstallationPage = () => {
       } else {
         if (a.isDeleted) return false;
         if (selectedProjectId && a.projectId !== selectedProjectId) return false;
-        // When no specific project is selected and role is scoped to own projects, restrict by ownership
-        if (!selectedProjectId && ownedProjectIds && !ownedProjectIds.has(a.projectId)) return false;
+        // Scope restriction always applies, regardless of whether a project is pre-selected
+        if (isAssignmentScoped && a.assignedUserId !== currentUser.id) return false;
+        if (ownedProjectIds && !ownedProjectIds.has(a.projectId)) return false;
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
       }
       if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q)))) return false;
       return true;
     });
-  }, [assets, ownedProjectIds, selectedProjectId, statusFilter, search, archiveMode]);
+  }, [assets, ownedProjectIds, isAssignmentScoped, currentUser.id, selectedProjectId, statusFilter, search, archiveMode]);
 
   // Projects filtered to those linked to the active product (used in add/edit dialogs and the project selector).
   // Also filtered to owned projects when the role's viewScope is "own".
@@ -944,7 +963,7 @@ const AssetInstallationPage = () => {
         assignedUserId: editForm.assignedUserId || undefined,
         notes: editForm.notes.trim() || undefined,
         productConfigId: editForm.configId,
-        status: currentUser?.role === "Admin" ? editStatus : undefined,
+        status: canEditAssetStatus ? editStatus : undefined,
         featureValuesJson: Object.keys(editForm.featureValues).length
           ? JSON.stringify(editForm.featureValues)
           : undefined,
@@ -2781,7 +2800,16 @@ const AssetInstallationPage = () => {
         </Tooltip>
       </Stack>
 
-      {/* Bulk actions toolbar â€" visible when â‰¥1 asset is selected */}
+      {/* Scope indicator — shown when user sees a filtered subset of assets */}
+      {!canViewAllAssets && !archiveMode && (
+        <Alert severity="info" sx={{ py: 0.5, fontSize: "0.78rem" }}>
+          {isAssignmentScoped
+            ? "Showing only assets assigned to you."
+            : "Showing only assets in your managed projects."}
+        </Alert>
+      )}
+
+      {/* Bulk actions toolbar — visible when ≥1 asset is selected */}
       {selectedAssetIds.size > 0 && (
         <Paper className="glass-card" sx={{ px: 2, py: 1, display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
           <Typography variant="body2" fontWeight={600}>
@@ -2973,7 +3001,11 @@ const AssetInstallationPage = () => {
             ? archiveMode
               ? "No archived assets found for this product."
               : `No assets added for ${activeProduct?.name ?? "this product"} yet.`
-            : "No assets match the current filters."}
+            : !canViewAllAssets && selectedProjectId && assets.some((a) => a.projectId === selectedProjectId && !a.isDeleted)
+              ? isAssignmentScoped
+                ? "You have no assets assigned to you in this project."
+                : "You have no assets in your managed projects matching this selection."
+              : "No assets match the current filters."}
         </Alert>
       ) : isNativePlatform ? (
         <Stack spacing={0.75}>
@@ -3594,7 +3626,7 @@ const AssetInstallationPage = () => {
               <InputLabel shrink>Status</InputLabel>
               <Select label="Status" value={editStatus}
                 onChange={(e) => setEditStatus(e.target.value as ProjectAssetStatus)}
-                disabled={currentUser?.role !== "Admin"}>
+                disabled={!canEditAssetStatus}>
                 <MenuItem value="NotStarted">Not Started</MenuItem>
                 <MenuItem value="InProgress">In Progress</MenuItem>
                 <MenuItem value="Complete">Complete</MenuItem>

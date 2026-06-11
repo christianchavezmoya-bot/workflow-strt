@@ -50,6 +50,7 @@ import { fetchUsers } from "../../store/usersSlice";
 import { createProject, updateProject } from "../../store/projectSlice";
 import { ApprovalDecision, Office, Project, ProjectStatus, WorkflowMode } from "../../types/project";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
@@ -110,6 +111,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   const id = projectId ?? routeId;
   const navigate = useNavigate();
   const { user } = useAuth();
+  const can = usePermissions();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const { items } = useAppSelector((state) => state.projects);
@@ -161,9 +163,10 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   const canEditExistingProject = useMemo(() => {
     if (!id) return true;
     if (!editingProject || !user) return false;
-    if (user.role === "Admin") return true;
-    return user.role === "Project Manager" && editingProject.assignedPmUserId === user.id;
-  }, [editingProject, id, user]);
+    if (can.projects?.editScope === "all") return true;
+    if (can.projects?.editScope === "own") return editingProject.assignedPmUserId === user.id;
+    return false;
+  }, [editingProject, id, user, can.projects?.editScope]);
   const {
     control,
     handleSubmit,

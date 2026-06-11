@@ -159,10 +159,10 @@ type InspectionRunSignal = {
 
 type AdminInstallFilter = "all" | "in-progress" | "unassigned";
 
-type WorkloadProjectBreakdown = { projectId: string; jobNumber: string; notStarted: number; inProgress: number; paused: number; total: number };
+type WorkloadProjectBreakdown = { projectId: string; jobNumber: string; notStarted: number; pending: number; inProgress: number; paused: number; total: number };
 type ScopedWorkloadItem = {
   userId: string; fullName: string;
-  notStarted: number; inProgress: number; paused: number; totalAssigned: number;
+  notStarted: number; pending: number; inProgress: number; paused: number; totalAssigned: number;
   jobNumbers: string[]; hasIssues: boolean; completedSteps: number; totalSteps: number;
   startedAt?: string; projectBreakdown: WorkloadProjectBreakdown[];
 };
@@ -219,6 +219,9 @@ const Dashboard = () => {
   const [healthData,    setHealthData]    = useState<WorkflowHealth | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthWindow,  setHealthWindow]  = useState(90);
+
+  // Incremented by run-state events to trigger analytics re-fetch
+  const [analyticsRefreshTick, setAnalyticsRefreshTick] = useState(0);
 
   // For Engineer: draft workflow configs
   const [draftConfigs, setDraftConfigs] = useState<{id:string; name:string; updatedAt?:string}[]>([]);
@@ -421,7 +424,7 @@ const Dashboard = () => {
     return () => window.removeEventListener("notifications:assignments-changed", refresh);
   }, [isManager, selectedDashboardId]);
 
-  // Notification-driven refresh: run state events → workspace + open assets + attention items
+  // Notification-driven refresh: run state events → workspace + open assets + attention items + analytics
   useEffect(() => {
     const refresh = () => {
       projectAssetService.listOpen().then(setOpenAssets);
@@ -432,6 +435,7 @@ const Dashboard = () => {
         .then((data) => setDashboardWorkspace(data))
         .finally(() => setWorkspaceLoading(false));
       loadAttention();
+      setAnalyticsRefreshTick((t) => t + 1);
     };
     window.addEventListener("notifications:run-state-changed", refresh);
     return () => window.removeEventListener("notifications:run-state-changed", refresh);
@@ -445,7 +449,7 @@ const Dashboard = () => {
       .then(setEvidenceData)
       .catch(() => setEvidenceData(null))
       .finally(() => setEvidenceLoading(false));
-  }, [isManager, evidenceWindow]);
+  }, [isManager, evidenceWindow, analyticsRefreshTick]);
 
   // Phase 5 - workflow health
   useEffect(() => {
@@ -455,7 +459,7 @@ const Dashboard = () => {
       .then(setHealthData)
       .catch(() => setHealthData(null))
       .finally(() => setHealthLoading(false));
-  }, [isManager, healthWindow]);
+  }, [isManager, healthWindow, analyticsRefreshTick]);
   // Derived data
   const filteredProjects = useMemo(() => {
     if (activeOffice === "All" || !officeIdsForRegion) return projects;
@@ -496,6 +500,7 @@ const Dashboard = () => {
   const myPaused   = useMemo(() => myAssets.filter((a) => isPausedAsset(a.runStatus)), [myAssets]);
   const myActive   = useMemo(() => myAssets.filter((a) => !isPausedAsset(a.runStatus) && (isInProgressAsset(a.runStatus) || isInProgressAsset(a.status))), [myAssets]);
   const myQueued   = useMemo(() => myAssets.filter((a) => !isPausedAsset(a.runStatus) && !isInProgressAsset(a.runStatus) && !isInProgressAsset(a.status) && isNotStartedAsset(a.status)), [myAssets]);
+  const myPending  = useMemo(() => myAssets.filter((a) => !isPausedAsset(a.runStatus) && !isInProgressAsset(a.runStatus) && !isInProgressAsset(a.status) && isPendingAsset(a.status)), [myAssets]);
 
   const scopedProjectIdsForUser = useMemo(() => {
     if (!viewedDashboardUserId) return new Set(activeDashboardProjects.map((project) => project.id));
@@ -552,7 +557,7 @@ const Dashboard = () => {
   // Workload derived from visibleOpenAssets so it respects the My/All scope filter.
   // Cross-references the full workload API data for step counts, issue flags, and fullName.
   const scopedWorkload = useMemo(() => {
-    type PBEntry = { projectId: string; jobNumber: string; notStarted: number; inProgress: number; paused: number; total: number };
+    type PBEntry = { projectId: string; jobNumber: string; notStarted: number; pending: number; inProgress: number; paused: number; total: number };
     const byUser = new Map<string, { assets: OpenAssetItem[]; breakdown: Map<string, PBEntry> }>();
 
     for (const asset of visibleOpenAssets) {
@@ -562,14 +567,13 @@ const Dashboard = () => {
       const entry = byUser.get(asset.assignedUserId)!;
       entry.assets.push(asset);
       if (!entry.breakdown.has(asset.projectId))
-        entry.breakdown.set(asset.projectId, { projectId: asset.projectId, jobNumber: asset.jobNumber ?? "", notStarted: 0, inProgress: 0, paused: 0, total: 0 });
+        entry.breakdown.set(asset.projectId, { projectId: asset.projectId, jobNumber: asset.jobNumber ?? "", notStarted: 0, pending: 0, inProgress: 0, paused: 0, total: 0 });
       const pb = entry.breakdown.get(asset.projectId)!;
       pb.total++;
-      // Priority: Paused → In Progress → Issue → Pending → Not Started (matches backend logic)
       if (isPausedAsset(asset.runStatus)) pb.paused++;
       else if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) pb.inProgress++;
-      else if (isIssueAsset(asset.status)) pb.inProgress++; // Issue = active (needs attention)
-      else if (isPendingAsset(asset.status)) pb.notStarted++; // Pending = queued (waiting to start)
+      else if (isIssueAsset(asset.status)) pb.inProgress++;
+      else if (isPendingAsset(asset.status)) pb.pending++;
       else if (isNotStartedAsset(asset.status)) pb.notStarted++;
     }
 
@@ -580,10 +584,10 @@ const Dashboard = () => {
         return {
           userId,
           fullName: api?.fullName ?? userId,
-          // Priority: Paused → In Progress → Queued (matches "My Jobs Today" display logic)
           paused:        assets.filter((a) => isPausedAsset(a.runStatus)).length,
           inProgress:    assets.filter((a) => !isPausedAsset(a.runStatus) && (isInProgressAsset(a.runStatus) || isInProgressAsset(a.status))).length,
           notStarted:    assets.filter((a) => !isPausedAsset(a.runStatus) && !isInProgressAsset(a.runStatus) && !isInProgressAsset(a.status) && isNotStartedAsset(a.status)).length,
+          pending:       assets.filter((a) => !isPausedAsset(a.runStatus) && !isInProgressAsset(a.runStatus) && !isInProgressAsset(a.status) && isPendingAsset(a.status)).length,
           totalAssigned: assets.length,
           jobNumbers:    [...new Set(assets.map((a) => a.jobNumber).filter(Boolean))] as string[],
           hasIssues:     api?.hasIssues ?? false,
@@ -1012,6 +1016,9 @@ const Dashboard = () => {
   const overviewQueuedCount = showAdminOverviewStrip
     ? visibleOpenAssets.filter((asset) => !isPausedAsset(asset.runStatus) && !isInProgressAsset(asset.runStatus) && !isInProgressAsset(asset.status) && isNotStartedAsset(asset.status)).length
     : myQueued.length;
+  const overviewPendingCount = showAdminOverviewStrip
+    ? visibleOpenAssets.filter((asset) => !isPausedAsset(asset.runStatus) && !isInProgressAsset(asset.runStatus) && !isInProgressAsset(asset.status) && isPendingAsset(asset.status)).length
+    : myPending.length;
   const overviewBlockingCount = showAdminOverviewStrip
     ? blockingIssues.length
     : myBlocking.length;
@@ -1977,18 +1984,30 @@ const Dashboard = () => {
           <Typography variant="caption" color="text.secondary">Click a card to expand · report icon for detail print/download</Typography>
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center">
-          <Stack direction="row" spacing={0.5} alignItems="center">
-            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "success.main" }} />
-            <Typography variant="caption" color="text.secondary">Active</Typography>
-          </Stack>
-          <Stack direction="row" spacing={0.5} alignItems="center">
-            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "warning.main" }} />
-            <Typography variant="caption" color="text.secondary">Paused</Typography>
-          </Stack>
-          <Stack direction="row" spacing={0.5} alignItems="center">
-            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "text.secondary" }} />
-            <Typography variant="caption" color="text.secondary">Queued</Typography>
-          </Stack>
+          <Tooltip title="Workflow run is currently active and in progress" arrow>
+            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ cursor: "help" }}>
+              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "success.main" }} />
+              <Typography variant="caption" color="text.secondary">Active</Typography>
+            </Stack>
+          </Tooltip>
+          <Tooltip title="Workflow run is currently paused" arrow>
+            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ cursor: "help" }}>
+              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "warning.main" }} />
+              <Typography variant="caption" color="text.secondary">Paused</Typography>
+            </Stack>
+          </Tooltip>
+          <Tooltip title="No workflow run has been started yet" arrow>
+            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ cursor: "help" }}>
+              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "text.secondary" }} />
+              <Typography variant="caption" color="text.secondary">Queued</Typography>
+            </Stack>
+          </Tooltip>
+          <Tooltip title="Asset is assigned and acknowledged but the workflow hasn't started" arrow>
+            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ cursor: "help" }}>
+              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "info.main", opacity: 0.7 }} />
+              <Typography variant="caption" color="text.secondary">Pending</Typography>
+            </Stack>
+          </Tooltip>
           {scopedWorkload.length > 0 && (
             <Tooltip title="Print / download full workload report">
               <IconButton size="small" onClick={() => setWorkloadReportAllOpen(true)} sx={{ color: "text.secondary" }}>
@@ -2006,7 +2025,7 @@ const Dashboard = () => {
             const isExpanded = expandedWorkloadId === w.userId;
             const inPct     = w.totalAssigned > 0 ? (w.inProgress / w.totalAssigned) * 100 : 0;
             const pausedPct = w.totalAssigned > 0 ? (w.paused   / w.totalAssigned) * 100 : 0;
-            const notPct    = w.totalAssigned > 0 ? (w.notStarted / w.totalAssigned) * 100 : 0;
+            const notPct    = w.totalAssigned > 0 ? ((w.notStarted + w.pending) / w.totalAssigned) * 100 : 0;
             const stepPct   = w.totalSteps > 0 ? Math.min(100, (w.completedSteps / w.totalSteps) * 100) : 0;
             const load      = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
             const loadLabel = w.totalAssigned >= 10 ? "Heavy" : w.totalAssigned >= 5 ? "Moderate" : "Light";
@@ -2025,7 +2044,7 @@ const Dashboard = () => {
                   background: isExpanded ? "rgba(45,212,191,0.04)" : undefined,
                   "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
                 }}>
-                <Stack spacing={0.75}>
+                <Stack spacing={0.5}>
                   {/* ── Summary row ── */}
                   <Stack direction="row" alignItems="center" spacing={2}>
                     <Box sx={{ flex: "0 0 160px", minWidth: 0 }}>
@@ -2034,22 +2053,12 @@ const Dashboard = () => {
                         <Chip label={loadLabel} size="small" color={load} variant="outlined" sx={{ height: 16, fontSize: "0.6rem", flexShrink: 0 }} />
                         {w.hasIssues && <Chip label="Issues" size="small" color="warning" sx={{ height: 16, fontSize: "0.6rem", flexShrink: 0 }} />}
                       </Stack>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Typography variant="caption" color="text.secondary">
-                          {w.inProgress} active · {w.paused} paused · {w.notStarted} queued
-                        </Typography>
-                        {startLabel && (
-                          <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.65rem" }}>
-                            · since {startLabel}
-                          </Typography>
-                        )}
-                      </Stack>
                     </Box>
                     <Box sx={{ flex: 1 }}>
                       <Tooltip title={
                         w.totalSteps > 0
-                          ? `${w.completedSteps}/${w.totalSteps} steps · ${w.inProgress} in-progress · ${w.paused} paused · ${w.notStarted} queued`
-                          : `${w.inProgress} in progress · ${w.paused} paused · ${w.notStarted} not started`
+                          ? `${w.completedSteps}/${w.totalSteps} steps · ${w.inProgress} active · ${w.paused} paused · ${w.notStarted} queued · ${w.pending} pending`
+                          : `${w.inProgress} active · ${w.paused} paused · ${w.notStarted} queued · ${w.pending} pending`
                       } arrow>
                         <Box sx={{ position: "relative", height: 10, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.08)", display: "flex" }}>
                           {w.totalSteps > 0 ? (
@@ -2085,11 +2094,31 @@ const Dashboard = () => {
                     </IconButton>
                   </Stack>
 
+                  {/* ── Status counts row ── */}
+                  <Stack direction="row" spacing={0} alignItems="center" flexWrap="nowrap">
+                    <Typography variant="caption" color="text.secondary" noWrap>
+                      {w.inProgress} active ·{" "}
+                      <Tooltip title="Workflow run is currently paused" arrow>
+                        <span style={{ cursor: "help", textDecoration: "underline dotted" }}>{w.paused} paused</span>
+                      </Tooltip>
+                      {" · "}
+                      <Tooltip title="No workflow run has been started yet" arrow>
+                        <span style={{ cursor: "help", textDecoration: "underline dotted" }}>{w.notStarted} queued</span>
+                      </Tooltip>
+                      {w.pending > 0 && (
+                        <>{" · "}<Tooltip title="Asset is assigned and acknowledged but the workflow hasn't started" arrow>
+                          <span style={{ cursor: "help", textDecoration: "underline dotted" }}>{w.pending} pending</span>
+                        </Tooltip></>
+                      )}
+                      {startLabel && <span style={{ opacity: 0.5 }}>{" · since "}{startLabel}</span>}
+                    </Typography>
+                  </Stack>
+
                   {/* ── Project chips ── */}
                   {w.projectBreakdown.length > 0 && (
                     <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                       {w.projectBreakdown.map((pb) => (
-                        <Tooltip key={pb.projectId} title={`${pb.inProgress} in progress · ${pb.paused} paused · ${pb.notStarted} queued`} arrow>
+                        <Tooltip key={pb.projectId} title={`${pb.inProgress} active · ${pb.paused} paused · ${pb.notStarted} queued · ${pb.pending} pending`} arrow>
                           <Chip
                             label={`${pb.jobNumber}: ${pb.total}`}
                             size="small" variant="outlined"
@@ -2451,11 +2480,21 @@ const Dashboard = () => {
                 label={`${overviewActiveCount} active`} size="small"
                 color={overviewActiveCount > 0 ? "primary" : "default"} variant="outlined"
                 sx={{ height: 22, fontSize: "0.7rem" }} />
-              <Chip label={`${overviewPausedCount} paused`} size="small"
-                color={overviewPausedCount > 0 ? "warning" : "default"} variant="outlined"
-                sx={{ height: 22, fontSize: "0.7rem" }} />
-              <Chip label={`${overviewQueuedCount} queued`} size="small"
-                color="default" variant="outlined" sx={{ height: 22, fontSize: "0.7rem" }} />
+              <Tooltip title="Workflow run is currently paused" arrow>
+                <Chip label={`${overviewPausedCount} paused`} size="small"
+                  color={overviewPausedCount > 0 ? "warning" : "default"} variant="outlined"
+                  sx={{ height: 22, fontSize: "0.7rem", cursor: "help" }} />
+              </Tooltip>
+              <Tooltip title="No workflow run has been started yet" arrow>
+                <Chip label={`${overviewQueuedCount} queued`} size="small"
+                  color="default" variant="outlined" sx={{ height: 22, fontSize: "0.7rem", cursor: "help" }} />
+              </Tooltip>
+              {overviewPendingCount > 0 && (
+                <Tooltip title="Asset is assigned and acknowledged but the workflow hasn't started" arrow>
+                  <Chip label={`${overviewPendingCount} pending`} size="small"
+                    color="info" variant="outlined" sx={{ height: 22, fontSize: "0.7rem", cursor: "help" }} />
+                </Tooltip>
+              )}
               {overviewBlockingCount > 0 && (
                 <Chip icon={<ErrorOutlineOutlined sx={{ fontSize: 13 }} />}
                   label={`${overviewBlockingCount} blocking`} size="small"
@@ -2607,9 +2646,25 @@ const Dashboard = () => {
                                   </Typography>
                                 )}
                               </Box>
-                              <Chip label={isPaused ? "Paused" : isActive ? "Active" : "Queued"} size="small"
-                                color={isPaused ? "warning" : isActive ? "primary" : "default"} variant="outlined"
-                                sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0 }} />
+                              {isPaused ? (
+                                <Tooltip title="Workflow run is currently paused" arrow>
+                                  <Chip label="Paused" size="small" color="warning" variant="outlined"
+                                    sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0, cursor: "help" }} />
+                                </Tooltip>
+                              ) : isActive ? (
+                                <Chip label="Active" size="small" color="primary" variant="outlined"
+                                  sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0 }} />
+                              ) : isPendingAsset(a.status) ? (
+                                <Tooltip title="Asset is assigned and acknowledged but the workflow hasn't started" arrow>
+                                  <Chip label="Pending" size="small" color="info" variant="outlined"
+                                    sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0, cursor: "help" }} />
+                                </Tooltip>
+                              ) : (
+                                <Tooltip title="No workflow run has been started yet" arrow>
+                                  <Chip label="Queued" size="small" color="default" variant="outlined"
+                                    sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0, cursor: "help" }} />
+                                </Tooltip>
+                              )}
                             </Stack>
                             <Button size="small" variant="outlined"
                               color={isActive ? "primary" : "inherit"}

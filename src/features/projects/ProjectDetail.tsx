@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import StatusStepper from "../../components/ui/StatusStepper";
 import { demoProducts } from "../../data/demo";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import { projectAssetService } from "../../services/projectAssetService";
 import { projectService } from "../../services/projectService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
@@ -27,6 +28,7 @@ const ProjectDetail = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const can = usePermissions();
   const dispatch = useAppDispatch();
   const { items } = useAppSelector((state) => state.projects);
   const productsState = useAppSelector((state) => state.products);
@@ -40,9 +42,10 @@ const ProjectDetail = () => {
   const products = productsState.items.length ? productsState.items : demoProducts;
   const canEditProject = useMemo(() => {
     if (!project || !user) return false;
-    if (user.role === "Admin") return true;
-    return user.role === "Project Manager" && project.assignedPmUserId === user.id;
-  }, [project, user]);
+    if (can.projects?.editScope === "all") return true;
+    if (can.projects?.editScope === "own") return project.assignedPmUserId === user.id;
+    return false;
+  }, [project, user, can.projects?.editScope]);
 
   useEffect(() => {
     if (!id) return;
@@ -101,7 +104,7 @@ const ProjectDetail = () => {
   const actions = useMemo(() => {
     if (!project) return [];
     const list: string[] = [];
-    if (project.status === "Pending Approval" && user?.role === "Admin") {
+    if (project.status === "Pending Approval" && can.projects?.editScope === "all") {
       list.push("Approve", "Reject");
     }
     if (project.status === "Approved" && canEditProject && installationEnabled(project.workflowMode)) {
@@ -111,7 +114,7 @@ const ProjectDetail = () => {
       list.push("Mark Completed");
     }
     return list;
-  }, [canEditProject, project, user]);
+  }, [canEditProject, project, can.projects?.editScope]);
 
   const handleTabChange = (_: React.SyntheticEvent, value: DetailTab) => {
     if (!project) return;
