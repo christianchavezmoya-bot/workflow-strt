@@ -12,11 +12,13 @@ import {
   Paper,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
@@ -25,20 +27,23 @@ import {
 } from "@mui/material";
 import {
   CheckCircleOutlineOutlined,
+  CheckCircleOutlined,
   ErrorOutlineOutlined,
   ExpandLessOutlined,
   ExpandMoreOutlined,
   FilterListOutlined,
+  HistoryOutlined,
   OpenInNewOutlined,
   RefreshOutlined,
   WarningAmberOutlined,
 } from "@mui/icons-material";
 import { Link } from "react-router-dom";
-import { assetWorkflowRunService, type OpenIssueRecord } from "../../services/assetWorkflowRunService";
+import { assetWorkflowRunService, type OpenIssueRecord, type ClosedIssueRecord } from "../../services/assetWorkflowRunService";
 import { projectAssetService } from "../../services/projectAssetService";
 import type { RunIssue } from "../../types/assetWorkflowRun";
 import type { AssetIssue } from "../../types/projectAsset";
 import MediaCapture from "../../components/ui/MediaCapture";
+import { useAuth } from "../../hooks/useAuth";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -68,11 +73,16 @@ function typeColor(t: string): "error" | "warning" | "info" {
 // ─── component ────────────────────────────────────────────────────────────────
 
 const IssuesBoard = () => {
-  const theme   = useTheme();
+  const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  const { user } = useAuth();
+  const currentUserName = user?.fullName ?? user?.email ?? "Unknown";
 
-  const [issues,   setIssues]   = useState<OpenIssueRecord[]>([]);
-  const [loading,  setLoading]  = useState(false);
+  const [activeTab,      setActiveTab]      = useState<"open" | "history">("open");
+  const [issues,         setIssues]         = useState<OpenIssueRecord[]>([]);
+  const [closedIssues,   setClosedIssues]   = useState<ClosedIssueRecord[]>([]);
+  const [loading,        setLoading]        = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // ── Filters ────────────────────────────────────────────────────────────────
   const [filterProject,  setFilterProject]  = useState("__all__");
@@ -92,7 +102,18 @@ const IssuesBoard = () => {
     finally { setLoading(false); }
   }, []);
 
+  const loadHistory = useCallback(async () => {
+    setLoadingHistory(true);
+    try { setClosedIssues(await assetWorkflowRunService.listClosedIssues()); }
+    finally { setLoadingHistory(false); }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (activeTab === "history") loadHistory();
+  }, [activeTab, loadHistory]);
+
 
   // ── Derived filter options ─────────────────────────────────────────────────
   const projectOptions = useMemo(() => {
@@ -116,6 +137,27 @@ const IssuesBoard = () => {
     });
   }, [issues, filterProject, filterSeverity, filterType, searchText]);
 
+  // ── History filters ───────────────────────────────────────────────────────
+  const filteredHistory = useMemo(() => {
+    const q = searchText.toLowerCase();
+    return closedIssues.filter(i => {
+      if (filterProject  !== "__all__" && i.projectId  !== filterProject)  return false;
+      if (filterSeverity !== "__all__" && i.severity   !== filterSeverity) return false;
+      if (filterType     !== "__all__" && i.issueType  !== filterType)     return false;
+      if (q && !i.description.toLowerCase().includes(q) &&
+               !i.assetTag.toLowerCase().includes(q) &&
+               !i.jobNumber.toLowerCase().includes(q) &&
+               !i.customerName.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [closedIssues, filterProject, filterSeverity, filterType, searchText]);
+
+  const historyProjectOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const i of closedIssues) if (!seen.has(i.projectId)) seen.set(i.projectId, `${i.jobNumber} — ${i.customerName}`);
+    return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [closedIssues]);
+
   // ── KPIs ──────────────────────────────────────────────────────────────────
   const blockingCount    = issues.filter(i => i.isBlocking).length;
   const mediumCount      = issues.filter(i => i.severity === "medium").length;
@@ -138,7 +180,7 @@ const IssuesBoard = () => {
         try { assetIssues = JSON.parse(asset.issuesJson ?? "[]"); } catch { /* empty */ }
         assetIssues = assetIssues.map(ai =>
           ai.id === iss.issueId
-            ? { ...ai, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: now }
+            ? { ...ai, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: now, resolvedBy: currentUserName }
             : ai
         );
         const anyOpen = assetIssues.some(ai => !ai.resolved);
@@ -155,16 +197,17 @@ const IssuesBoard = () => {
         try { runIssues = JSON.parse(run.issuesJson ?? "[]"); } catch { /* empty */ }
         runIssues = runIssues.map(ri =>
           ri.id === iss.issueId
-            ? { ...ri, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: now }
+            ? { ...ri, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: now, resolvedBy: currentUserName }
             : ri
         );
         await assetWorkflowRunService.patchIssues(iss.runId, JSON.stringify(runIssues));
         // Auto-lock run if this was the last blocking issue and run is still in-progress
         await assetWorkflowRunService.tryAutoComplete(iss.runId).catch(() => {});
       }
-      // Optimistic remove from list
+      // Optimistic remove from list + refresh history
       setIssues(prev => prev.filter(i => !(i.assetId === iss.assetId && i.issueId === iss.issueId)));
       setExpandedKey(null);
+      void loadHistory();
     } catch (e) {
       console.error("Failed to close issue", e);
     } finally {
@@ -193,30 +236,63 @@ const IssuesBoard = () => {
         </Typography>
       </Box>
 
-      {/* ── KPI strip ── */}
-      <Grid container spacing={1}>
-        {[
-          { label: "Blocking",  value: blockingCount,    color: "error.main"   },
-          { label: "Medium",    value: mediumCount,      color: "warning.main" },
-          { label: "Total Open",value: issues.length,    color: "text.primary" },
-          { label: "Projects",  value: projectsAffected, color: "text.primary" },
-        ].map(({ label, value, color }) => (
-          <Grid item xs={3} key={label}>
-            <Box className="glass-card" sx={{ py: { xs: 1, md: 1.5 }, px: { xs: 0.5, md: 2 }, textAlign: "center" }}>
-              <Typography variant="h5" fontWeight={700} color={color} sx={{ fontSize: { xs: "1.2rem", md: "2rem" } }}>
-                {value}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: "0.58rem", md: "0.75rem" }, lineHeight: 1.2, display: "block" }}>
-                {label}
-              </Typography>
-            </Box>
-          </Grid>
-        ))}
-      </Grid>
+      {/* ── Tabs ── */}
+      <Tabs
+        value={activeTab}
+        onChange={(_, v) => setActiveTab(v)}
+        sx={{ borderBottom: 1, borderColor: "divider", minHeight: 36 }}
+        TabIndicatorProps={{ sx: { height: 2 } }}
+      >
+        <Tab
+          value="open"
+          label={
+            <Stack direction="row" spacing={0.75} alignItems="center">
+              <WarningAmberOutlined sx={{ fontSize: 15 }} />
+              <span>Open Issues</span>
+              {issues.length > 0 && (
+                <Chip label={issues.length} size="small" color="error" sx={{ height: 16, fontSize: "0.65rem", "& .MuiChip-label": { px: 0.75 } }} />
+              )}
+            </Stack>
+          }
+          sx={{ minHeight: 36, fontSize: "0.8rem", textTransform: "none" }}
+        />
+        <Tab
+          value="history"
+          label={
+            <Stack direction="row" spacing={0.75} alignItems="center">
+              <HistoryOutlined sx={{ fontSize: 15 }} />
+              <span>History</span>
+            </Stack>
+          }
+          sx={{ minHeight: 36, fontSize: "0.8rem", textTransform: "none" }}
+        />
+      </Tabs>
+
+      {/* ── KPI strip (open only) ── */}
+      {activeTab === "open" && (
+        <Grid container spacing={1}>
+          {[
+            { label: "Blocking",  value: blockingCount,    color: "error.main"   },
+            { label: "Medium",    value: mediumCount,      color: "warning.main" },
+            { label: "Total Open",value: issues.length,    color: "text.primary" },
+            { label: "Projects",  value: projectsAffected, color: "text.primary" },
+          ].map(({ label, value, color }) => (
+            <Grid item xs={3} key={label}>
+              <Box className="glass-card" sx={{ py: { xs: 1, md: 1.5 }, px: { xs: 0.5, md: 2 }, textAlign: "center" }}>
+                <Typography variant="h5" fontWeight={700} color={color} sx={{ fontSize: { xs: "1.2rem", md: "2rem" } }}>
+                  {value}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: "0.58rem", md: "0.75rem" }, lineHeight: 1.2, display: "block" }}>
+                  {label}
+                </Typography>
+              </Box>
+            </Grid>
+          ))}
+        </Grid>
+      )}
 
       {/* ── Filters ── */}
       <Stack spacing={1}>
-        {/* Search — full width */}
         <TextField
           size="small"
           placeholder="Search description, asset, project…"
@@ -224,7 +300,6 @@ const IssuesBoard = () => {
           onChange={e => setSearchText(e.target.value)}
           fullWidth
         />
-        {/* Project + Severity + Type — one row */}
         <Stack direction="row" spacing={1} alignItems="center">
           <FilterListOutlined sx={{ fontSize: 16, color: "text.secondary", flexShrink: 0 }} />
           <Select
@@ -235,29 +310,19 @@ const IssuesBoard = () => {
             sx={{ flex: 1, minWidth: 0, fontSize: { xs: "0.72rem", md: "0.875rem" } }}
           >
             <MenuItem value="__all__">Project</MenuItem>
-            {projectOptions.map(([id, label]) => (
+            {(activeTab === "history" ? historyProjectOptions : projectOptions).map(([id, label]) => (
               <MenuItem key={id} value={id} sx={{ fontSize: "0.8rem" }}>{label}</MenuItem>
             ))}
           </Select>
-          <Select
-            size="small"
-            value={filterSeverity}
-            onChange={e => setFilterSeverity(e.target.value)}
-            displayEmpty
-            sx={{ flex: 1, minWidth: 0, fontSize: { xs: "0.72rem", md: "0.875rem" } }}
-          >
+          <Select size="small" value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)} displayEmpty
+            sx={{ flex: 1, minWidth: 0, fontSize: { xs: "0.72rem", md: "0.875rem" } }}>
             <MenuItem value="__all__">Severity</MenuItem>
             <MenuItem value="high">High</MenuItem>
             <MenuItem value="medium">Medium</MenuItem>
             <MenuItem value="low">Low</MenuItem>
           </Select>
-          <Select
-            size="small"
-            value={filterType}
-            onChange={e => setFilterType(e.target.value)}
-            displayEmpty
-            sx={{ flex: 1, minWidth: 0, fontSize: { xs: "0.72rem", md: "0.875rem" } }}
-          >
+          <Select size="small" value={filterType} onChange={e => setFilterType(e.target.value)} displayEmpty
+            sx={{ flex: 1, minWidth: 0, fontSize: { xs: "0.72rem", md: "0.875rem" } }}>
             <MenuItem value="__all__">Type</MenuItem>
             <MenuItem value="blocking">Blocking</MenuItem>
             <MenuItem value="observation">Observation</MenuItem>
@@ -271,12 +336,212 @@ const IssuesBoard = () => {
           )}
         </Stack>
         <Typography variant="caption" color="text.secondary">
-          {filtered.length} of {issues.length} issues
+          {activeTab === "history"
+            ? `${filteredHistory.length} of ${closedIssues.length} resolved`
+            : `${filtered.length} of ${issues.length} issues`}
         </Typography>
       </Stack>
 
-      {/* ── Empty / loading state (shared) ── */}
-      {(loading && issues.length === 0) ? (
+      {/* ══ HISTORY TAB ══════════════════════════════════════════════════════ */}
+      {activeTab === "history" && (
+        loadingHistory && closedIssues.length === 0 ? (
+          <Stack alignItems="center" py={6}>
+            <CircularProgress size={28} />
+            <Typography variant="caption" color="text.secondary" mt={1}>Loading history…</Typography>
+          </Stack>
+        ) : filteredHistory.length === 0 ? (
+          <Stack alignItems="center" py={6} spacing={1}>
+            <CheckCircleOutlined sx={{ fontSize: 40, color: "success.main" }} />
+            <Typography variant="body2" color="text.secondary">
+              {closedIssues.length === 0 ? "No resolved issues yet." : "No resolved issues match the current filters."}
+            </Typography>
+            <Button size="small" startIcon={loadingHistory ? <CircularProgress size={14} /> : <RefreshOutlined />} onClick={loadHistory} disabled={loadingHistory}>
+              Refresh
+            </Button>
+          </Stack>
+        ) : isMobile ? (
+          /* ── History mobile cards ── */
+          <Stack spacing={1.5}>
+            <Stack direction="row" justifyContent="flex-end">
+              <Tooltip title="Refresh history">
+                <IconButton size="small" onClick={loadHistory} disabled={loadingHistory}>
+                  {loadingHistory ? <CircularProgress size={16} /> : <RefreshOutlined fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+            </Stack>
+            {filteredHistory.map((iss) => (
+              <Paper
+                key={`${iss.runId}-${iss.issueId}`}
+                className="glass-card"
+                sx={{
+                  p: 1.5,
+                  borderLeft: "3px solid",
+                  borderLeftColor: "success.main",
+                }}
+              >
+                {/* Row 1: chips + status + open button */}
+                <Stack direction="row" alignItems="center" spacing={0.75} mb={0.75}>
+                  <Chip label={typeLabel(iss.issueType)} size="small" color={typeColor(iss.issueType)} variant="outlined" sx={{ fontSize: "0.68rem", height: 20 }} />
+                  <Chip label={iss.severity.charAt(0).toUpperCase() + iss.severity.slice(1)} size="small" color={severityColor(iss.severity)} sx={{ fontSize: "0.68rem", height: 20 }} />
+                  <Chip label="Closed" size="small" color="success" icon={<CheckCircleOutlined sx={{ fontSize: "12px !important" }} />} sx={{ fontSize: "0.68rem", height: 20 }} />
+                  <Box sx={{ flex: 1 }} />
+                  <Tooltip title="Go to asset installations">
+                    <IconButton size="small" component={Link} to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`} sx={{ p: 0.5 }}>
+                      <OpenInNewOutlined sx={{ fontSize: 15 }} />
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
+
+                {/* Row 2: description */}
+                <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5, lineHeight: 1.3 }}>
+                  {iss.description}
+                </Typography>
+
+                <Divider sx={{ my: 0.75 }} />
+
+                {/* Row 3: asset + step */}
+                <Stack direction="row" spacing={1} alignItems="flex-start" mb={0.5}>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" color="text.disabled" display="block">Asset</Typography>
+                    <Typography variant="caption" fontWeight={700}>{iss.assetTag}</Typography>
+                    {iss.assetLocation && <Typography variant="caption" color="text.disabled" display="block">{iss.assetLocation}</Typography>}
+                  </Box>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" color="text.disabled" display="block">Step</Typography>
+                    <Typography variant="caption">{iss.stepTitle || "—"}</Typography>
+                  </Box>
+                </Stack>
+
+                {/* Row 4: project + reported date */}
+                <Stack direction="row" spacing={1} alignItems="flex-start" mb={0.75}>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" color="text.disabled" display="block">Project</Typography>
+                    <Button component={Link} to={`/projects?open=${encodeURIComponent(iss.projectId)}`} size="small"
+                      sx={{ p: 0, minWidth: "auto", textAlign: "left", textTransform: "none" }}>
+                      <Stack>
+                        <Typography variant="caption" fontWeight={700}>{iss.jobNumber}</Typography>
+                        <Typography variant="caption" color="text.secondary">{iss.customerName}</Typography>
+                      </Stack>
+                    </Button>
+                  </Box>
+                  <Box sx={{ textAlign: "right" }}>
+                    <Typography variant="caption" color="text.disabled" display="block">Reported</Typography>
+                    <Typography variant="caption">{fmtDate(iss.reportedAt)}</Typography>
+                    {iss.createdBy && <Typography variant="caption" color="text.disabled" display="block">{iss.createdBy}</Typography>}
+                  </Box>
+                </Stack>
+
+                {/* Resolution info */}
+                <Box sx={{ bgcolor: "rgba(76,175,80,0.07)", borderRadius: 1, p: 1, border: "1px solid rgba(76,175,80,0.2)" }}>
+                  <Stack direction="row" spacing={1} alignItems="flex-start" mb={iss.resolutionNote ? 0.5 : 0}>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="caption" color="success.main" fontWeight={700} display="block">Closed by</Typography>
+                      <Typography variant="caption">{iss.resolvedBy || "—"}</Typography>
+                    </Box>
+                    <Box sx={{ textAlign: "right" }}>
+                      <Typography variant="caption" color="text.disabled" display="block">Closed</Typography>
+                      <Typography variant="caption">{fmtDate(iss.resolvedAt)}</Typography>
+                    </Box>
+                  </Stack>
+                  {iss.resolutionNote && (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontStyle: "italic", display: "block", mt: 0.5 }}>
+                      "{iss.resolutionNote}"
+                    </Typography>
+                  )}
+                </Box>
+              </Paper>
+            ))}
+          </Stack>
+        ) : (
+          /* ── History desktop table ── */
+          <Stack spacing={1.5}>
+          <Stack direction="row" justifyContent="flex-end">
+            <Tooltip title="Refresh history">
+              <IconButton size="small" onClick={loadHistory} disabled={loadingHistory}>
+                {loadingHistory ? <CircularProgress size={16} /> : <RefreshOutlined fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+          </Stack>
+          <Box className="glass-card" sx={{ padding: 2, paddingBottom: 0, overflowX: "auto" }}>
+            <Table size="small" sx={{ minWidth: 1000 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Type</TableCell>
+                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Sev.</TableCell>
+                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Description</TableCell>
+                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Step</TableCell>
+                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Asset</TableCell>
+                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Project</TableCell>
+                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Reported</TableCell>
+                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem", color: "success.main" }}>Closed By</TableCell>
+                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem", color: "success.main" }}>Closed</TableCell>
+                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem", color: "success.main" }}>Corrective Action</TableCell>
+                  <TableCell sx={{ py: 1, width: 36 }}></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {filteredHistory.map((iss) => (
+                  <TableRow key={`${iss.runId}-${iss.issueId}`} hover sx={{ borderLeft: "3px solid", borderLeftColor: "success.main" }}>
+                    <TableCell sx={{ py: 0.75 }}>
+                      <Chip label={typeLabel(iss.issueType)} size="small" color={typeColor(iss.issueType)} variant="outlined" sx={{ fontSize: "0.65rem", height: 18 }} />
+                    </TableCell>
+                    <TableCell sx={{ py: 0.75 }}>
+                      <Chip label={iss.severity.charAt(0).toUpperCase() + iss.severity.slice(1)} size="small" color={severityColor(iss.severity)} sx={{ fontSize: "0.65rem", height: 18 }} />
+                    </TableCell>
+                    <TableCell sx={{ py: 0.75, maxWidth: 260 }}>
+                      <Typography variant="body2" sx={{ wordBreak: "break-word" }}>{iss.description}</Typography>
+                      <Chip label={iss.source === "asset" ? "Manual" : "Workflow"} size="small" variant="outlined" sx={{ fontSize: "0.6rem", height: 16, mt: 0.25, opacity: 0.7 }} />
+                    </TableCell>
+                    <TableCell sx={{ py: 0.75 }}>
+                      <Typography variant="caption" color="text.secondary">{iss.stepTitle || "—"}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ py: 0.75 }}>
+                      <Typography variant="body2" fontWeight={600}>{iss.assetTag}</Typography>
+                      {iss.assetLocation && <Typography variant="caption" color="text.disabled" display="block">{iss.assetLocation}</Typography>}
+                    </TableCell>
+                    <TableCell sx={{ py: 0.75 }}>
+                      <Button component={Link} to={`/projects?open=${encodeURIComponent(iss.projectId)}`} size="small"
+                        sx={{ p: 0, minWidth: "auto", textAlign: "left", textTransform: "none" }}>
+                        <Stack>
+                          <Typography variant="caption" fontWeight={700}>{iss.jobNumber}</Typography>
+                          <Typography variant="caption" color="text.secondary">{iss.customerName}</Typography>
+                        </Stack>
+                      </Button>
+                    </TableCell>
+                    <TableCell sx={{ py: 0.75 }}>
+                      <Typography variant="caption">{fmtDate(iss.reportedAt)}</Typography>
+                      {iss.createdBy && <Typography variant="caption" color="text.disabled" display="block">{iss.createdBy}</Typography>}
+                    </TableCell>
+                    <TableCell sx={{ py: 0.75 }}>
+                      <Typography variant="caption" color="success.main" fontWeight={600}>{iss.resolvedBy || "—"}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ py: 0.75 }}>
+                      <Typography variant="caption">{fmtDate(iss.resolvedAt)}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ py: 0.75, maxWidth: 260 }}>
+                      <Typography variant="caption" sx={{ fontStyle: "italic" }}>{iss.resolutionNote || "—"}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ py: 0.75, pr: 1 }}>
+                      <Tooltip title="Go to asset installations">
+                        <IconButton size="small" component={Link} to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`}>
+                          <OpenInNewOutlined sx={{ fontSize: 14 }} />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <Box sx={{ height: 12 }} />
+          </Box>
+          </Stack>
+        )
+      )}
+
+      {/* ══ OPEN TAB ═════════════════════════════════════════════════════════ */}
+      {activeTab === "open" && (
+      /* ── Empty / loading state (shared) ── */
+      (loading && issues.length === 0) ? (
         <Stack alignItems="center" py={6}>
           <CircularProgress size={28} />
           <Typography variant="caption" color="text.secondary" mt={1}>Loading issues…</Typography>
@@ -591,7 +856,7 @@ const IssuesBoard = () => {
             </TableBody>
           </Table>
         </Box>
-      )}
+      ))}
     </Stack>
   );
 };

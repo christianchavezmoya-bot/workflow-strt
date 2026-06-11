@@ -73,6 +73,8 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
           window.dispatchEvent(new Event("notifications:run-state-changed"));
         }
       }
+    } catch {
+      // server unreachable — keep existing notifications, retry on next interval
     } finally {
       setLoading(false);
     }

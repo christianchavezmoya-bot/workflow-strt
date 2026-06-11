@@ -1347,6 +1347,33 @@ public record OpenIssueDto(
     string Source       // "run" | "asset"
 );
 
+/// <summary>
+/// Flat projection of a resolved issue for the Issues History board.
+/// Extends the open-issue context with resolution fields.
+/// </summary>
+public record ClosedIssueDto(
+    string IssueId,
+    string Description,
+    string IssueType,
+    string Severity,
+    bool IsBlocking,
+    string ReportedAt,
+    string? CreatedBy,
+    string? StepTitle,
+    string RunId,
+    string AssetId,
+    string AssetTag,
+    string AssetName,
+    string AssetLocation,
+    string ProjectId,
+    string JobNumber,
+    string CustomerName,
+    string Source,
+    string? ResolvedAt,
+    string? ResolvedBy,
+    string? ResolutionNote
+);
+
 /// <summary>Result returned after cloning assets from one project into another.</summary>
 public record CloneAssetsResult(int AssetsCloned, int AssignmentsCloned);
 

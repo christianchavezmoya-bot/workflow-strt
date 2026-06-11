@@ -359,6 +359,138 @@ public class AssetWorkflowRunsController : ControllerBase
         }
     }
 
+    // GET api/asset-workflow-runs/resolved-issues — all resolved issues across every run/asset, with project context
+    [HttpGet("resolved-issues")]
+    public async Task<IActionResult> GetResolvedIssues([FromQuery] string? userId = null)
+    {
+        try
+        {
+            var assignedAssetIds = !string.IsNullOrWhiteSpace(userId)
+                ? await _db.ProjectAssets.Where(a => a.AssignedUserId == userId).Select(a => a.Id).ToListAsync()
+                : null;
+
+            var runs = await _db.AssetWorkflowRuns
+                .Where(r => r.IssuesJson != null && r.IssuesJson != "[]" && r.IssuesJson != "")
+                .ToListAsync();
+
+            var assetIds = runs.Select(r => r.AssetId).Distinct().ToList();
+            if (assignedAssetIds is not null)
+            {
+                assetIds = assetIds.Intersect(assignedAssetIds).ToList();
+                runs = runs.Where(r => assetIds.Contains(r.AssetId)).ToList();
+            }
+
+            var assets     = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
+            var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
+            var projects   = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
+
+            var result = new List<ClosedIssueDto>();
+            var opts   = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+            // ── 1. Resolved workflow-run issues ──────────────────────────────
+            foreach (var run in runs)
+            {
+                var asset   = assets.FirstOrDefault(a => a.Id == run.AssetId);
+                if (asset is null) continue;
+                var project = projects.FirstOrDefault(p => p.Id == asset.ProjectId);
+
+                List<JsonElement> issues;
+                try { issues = JsonSerializer.Deserialize<List<JsonElement>>(run.IssuesJson, opts) ?? []; }
+                catch { continue; }
+
+                foreach (var iss in issues)
+                {
+                    if (!iss.TryGetProperty("resolved", out var resolvedEl) || !resolvedEl.GetBoolean()) continue;
+
+                    string Get(string key) => iss.TryGetProperty(key, out var el) ? el.GetString() ?? "" : "";
+                    bool   GetBool(string key) => iss.TryGetProperty(key, out var el) && el.GetBoolean();
+
+                    result.Add(new ClosedIssueDto(
+                        IssueId:       Get("id"),
+                        Description:   Get("description"),
+                        IssueType:     Get("issueType"),
+                        Severity:      Get("severity"),
+                        IsBlocking:    GetBool("isBlocking"),
+                        ReportedAt:    Get("reportedAt"),
+                        CreatedBy:     Get("createdBy"),
+                        StepTitle:     Get("stepTitle"),
+                        RunId:         run.Id,
+                        AssetId:       asset.Id,
+                        AssetTag:      asset.AssetTag,
+                        AssetName:     asset.AssetName ?? asset.AssetTag,
+                        AssetLocation: asset.Location ?? "",
+                        ProjectId:     asset.ProjectId,
+                        JobNumber:     project?.JobNumber ?? "",
+                        CustomerName:  project?.CustomerName ?? "",
+                        Source:        "run",
+                        ResolvedAt:    Get("resolvedAt"),
+                        ResolvedBy:    Get("resolvedBy"),
+                        ResolutionNote: Get("resolutionNote")
+                    ));
+                }
+            }
+
+            // ── 2. Resolved asset-level issues ───────────────────────────────
+            var assetsWithIssuesQuery = _db.ProjectAssets
+                .Where(a => a.IssuesJson != null && a.IssuesJson != "[]" && a.IssuesJson != "");
+            if (assignedAssetIds is not null)
+                assetsWithIssuesQuery = assetsWithIssuesQuery.Where(a => assignedAssetIds.Contains(a.Id));
+
+            var assetsWithIssues  = await assetsWithIssuesQuery.ToListAsync();
+            var assetProjectIds2  = assetsWithIssues.Select(a => a.ProjectId).Distinct().ToList();
+            var projects2         = await _db.Projects.Where(p => assetProjectIds2.Contains(p.Id)).ToListAsync();
+
+            foreach (var asset in assetsWithIssues)
+            {
+                var project = projects2.FirstOrDefault(p => p.Id == asset.ProjectId);
+
+                List<JsonElement> issues;
+                try { issues = JsonSerializer.Deserialize<List<JsonElement>>(asset.IssuesJson!, opts) ?? []; }
+                catch { continue; }
+
+                foreach (var iss in issues)
+                {
+                    if (!iss.TryGetProperty("resolved", out var resolvedEl) || !resolvedEl.GetBoolean()) continue;
+
+                    string Get(string key) => iss.TryGetProperty(key, out var el) ? el.GetString() ?? "" : "";
+                    bool   GetBool(string key) => iss.TryGetProperty(key, out var el) && el.GetBoolean();
+
+                    result.Add(new ClosedIssueDto(
+                        IssueId:       Get("id"),
+                        Description:   Get("description"),
+                        IssueType:     Get("issueType"),
+                        Severity:      Get("severity"),
+                        IsBlocking:    GetBool("isBlocking"),
+                        ReportedAt:    Get("reportedAt"),
+                        CreatedBy:     Get("createdBy"),
+                        StepTitle:     null,
+                        RunId:         "",
+                        AssetId:       asset.Id,
+                        AssetTag:      asset.AssetTag,
+                        AssetName:     asset.AssetName ?? asset.AssetTag,
+                        AssetLocation: asset.Location ?? "",
+                        ProjectId:     asset.ProjectId,
+                        JobNumber:     project?.JobNumber ?? "",
+                        CustomerName:  project?.CustomerName ?? "",
+                        Source:        "asset",
+                        ResolvedAt:    Get("resolvedAt"),
+                        ResolvedBy:    Get("resolvedBy"),
+                        ResolutionNote: Get("resolutionNote")
+                    ));
+                }
+            }
+
+            // Sort by most recently closed first
+            result.Sort((a, b) => string.Compare(b.ResolvedAt ?? "", a.ResolvedAt ?? "", StringComparison.Ordinal));
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to aggregate resolved issues");
+            return Ok(Array.Empty<ClosedIssueDto>());
+        }
+    }
+
     // GET api/asset-workflow-runs/by-asset/{assetId}
     [HttpGet("by-asset/{assetId}")]
     public async Task<IActionResult> ListByAsset(string assetId)

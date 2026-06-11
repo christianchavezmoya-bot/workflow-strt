@@ -74,6 +74,7 @@ import {
   TextField,
   ToggleButton,
   ToggleButtonGroup,
+  Snackbar,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -431,6 +432,7 @@ const AssetInstallationPage = () => {
   const [inlineCommentTexts, setInlineCommentTexts] = useState<Record<string, string>>({});
   const [inlineCorrectiveTexts, setInlineCorrectiveTexts] = useState<Record<string, string>>({});
   const [inlineSaving, setInlineSaving] = useState(false);
+  const [inlineSaveError, setInlineSaveError] = useState<string | null>(null);
   const [inlineReportMedia,     setInlineReportMedia]     = useState<Record<string, string[]>>({});
   const [inlineResolutionMedia, setInlineResolutionMedia] = useState<Record<string, string[]>>({});
 
@@ -1782,8 +1784,10 @@ const AssetInstallationPage = () => {
       try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
       const idx = issues.findIndex(i => i.id === updatedIssue.id);
       if (idx >= 0) issues[idx] = updatedIssue;
-      await projectAssetService.patchIssues(asset.id, JSON.stringify(issues)).catch(console.warn);
-      await refreshAssets();
+      await projectAssetService.patchIssues(asset.id, JSON.stringify(issues));
+      await refreshAssets().catch(() => {});
+    } catch {
+      setInlineSaveError("Could not save — server unreachable. Check your connection.");
     } finally { setInlineSaving(false); }
   }
 
@@ -1797,13 +1801,14 @@ const AssetInstallationPage = () => {
       try { issues = JSON.parse(run.issuesJson || "[]"); } catch {}
       const idx = issues.findIndex(i => i.id === updatedIssue.id);
       if (idx >= 0) issues[idx] = updatedIssue;
-      await assetWorkflowRunService.patchIssues(runId, JSON.stringify(issues)).catch(console.warn);
-      // Auto-lock run if this was the last blocking issue and run is still in-progress
+      await assetWorkflowRunService.patchIssues(runId, JSON.stringify(issues));
       await assetWorkflowRunService.tryAutoComplete(runId).catch(() => {});
       await Promise.all([
-        loadAssignmentsForAsset(assetId),
-        refreshAssets(),
+        loadAssignmentsForAsset(assetId).catch(() => {}),
+        refreshAssets().catch(() => {}),
       ]);
+    } catch {
+      setInlineSaveError("Could not save — server unreachable. Check your connection.");
     } finally { setInlineSaving(false); }
   }
 
@@ -4938,6 +4943,17 @@ const AssetInstallationPage = () => {
         open={!!inspectionDialogAsset}
         onClose={() => setInspectionDialogAsset(null)}
       />
+
+      <Snackbar
+        open={!!inlineSaveError}
+        autoHideDuration={5000}
+        onClose={() => setInlineSaveError(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert severity="error" onClose={() => setInlineSaveError(null)} sx={{ width: "100%" }}>
+          {inlineSaveError}
+        </Alert>
+      </Snackbar>
     </Stack>
   );
 };

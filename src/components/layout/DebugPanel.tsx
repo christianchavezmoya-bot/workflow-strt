@@ -3,7 +3,7 @@ import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
 import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import { useEffect, useState } from "react";
 import { secureGet } from "../../services/secureStorage";
-import { API_BASE_URL } from "../../services/api";
+import { getApiBaseUrl } from "../../services/apiBase";
 import { pendingCount, syncMetaGet } from "../../services/localDB";
 
 type DebugLog = {
@@ -31,6 +31,7 @@ const DebugPanel = () => {
   const [serverReachable, setServerReachable] = useState<boolean | null>(null);
   const [pending, setPending] = useState(0);
   const [lastAssetSync, setLastAssetSync] = useState<string | null>(null);
+  const [apiUrl, setApiUrl] = useState(() => getApiBaseUrl());
 
   useEffect(() => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: DebugLog[] };
@@ -55,7 +56,6 @@ const DebugPanel = () => {
     const handleReachable  = () => setServerReachable(true);
     const handleUnreachable = () => setServerReachable(false);
     const handlePending = () => void refreshCounts();
-
     window.addEventListener("api-debug-log", handler);
     window.addEventListener("api-server-reachable", handleReachable);
     window.addEventListener("api-serving-cache", handleUnreachable);
@@ -117,7 +117,7 @@ const DebugPanel = () => {
             <Stack direction="row" alignItems="center" spacing={1}>
               <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>API host</Typography>
               <Typography variant="caption" sx={{ fontFamily: "monospace", wordBreak: "break-all", color: "text.primary" }}>
-                {API_BASE_URL}
+                {apiUrl}
               </Typography>
             </Stack>
             <Stack direction="row" alignItems="center" spacing={1}>

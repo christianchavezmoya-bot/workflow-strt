@@ -41,6 +41,12 @@ export interface OpenIssueRecord {
   source:       "run" | "asset";
 }
 
+export interface ClosedIssueRecord extends OpenIssueRecord {
+  resolvedAt:      string | null;
+  resolvedBy:      string | null;
+  resolutionNote:  string | null;
+}
+
 function isOfflineNetworkError(error: unknown): boolean {
   if (!error || typeof error !== "object") return !navigator.onLine;
   const candidate = error as { code?: string; message?: string; response?: unknown };
@@ -494,5 +500,12 @@ export const assetWorkflowRunService = {
   async listOpenIssues(userId?: string): Promise<OpenIssueRecord[]> {
     try { return await IssueRepository.getAll(userId); }
     catch { return []; }
+  },
+
+  async listClosedIssues(): Promise<ClosedIssueRecord[]> {
+    try {
+      const res = await api.get<ClosedIssueRecord[]>("/asset-workflow-runs/resolved-issues");
+      return res.data;
+    } catch { return []; }
   },
 };

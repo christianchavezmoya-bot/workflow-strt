@@ -1,5 +1,8 @@
 const API_BASE_STORAGE_KEY = "commtrac_api_base";
 
+// Clear any previously stored override — API URL is now controlled by VITE_API_BASE in .env
+try { localStorage.removeItem(API_BASE_STORAGE_KEY); } catch { /* ignore */ }
+
 function normalizeApiBaseUrl(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "";
@@ -30,7 +33,7 @@ export function getDefaultApiBaseUrl(): string {
 }
 
 export function getApiBaseUrl(): string {
-  return getStoredApiBaseUrl() ?? getDefaultApiBaseUrl();
+  return getDefaultApiBaseUrl();
 }
 
 export function setStoredApiBaseUrl(raw: string): string {

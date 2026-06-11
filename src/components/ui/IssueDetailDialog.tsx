@@ -22,6 +22,7 @@ import {
 import type { AssetIssue, IssueComment } from "../../types/projectAsset";
 import type { RunIssue } from "../../types/assetWorkflowRun";
 import MediaCapture from "./MediaCapture";
+import IssueTimeline from "./IssueTimeline";
 
 type AnyIssue = AssetIssue | RunIssue;
 
@@ -334,6 +335,11 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
             </Alert>
           </Box>
         )}
+
+        {/* Activity timeline */}
+        <Box sx={{ px: 2.5, pb: 2.5 }}>
+          <IssueTimeline issue={issue} />
+        </Box>
       </DialogContent>
 
       <DialogActions sx={{ px: 2.5, py: 1.5 }}>
