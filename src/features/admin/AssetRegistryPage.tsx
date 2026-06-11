@@ -38,6 +38,8 @@ type RegistrySortKey = "assetTag" | "product" | "assetModel" | "manufacturer" | 
 const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success" | "error" | "warning"> = {
   NotStarted: "default",
   InProgress: "primary",
+  Paused: "warning",
+  Pending: "warning",
   Complete: "success",
   Issue: "error",
 };
@@ -45,6 +47,8 @@ const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success
 const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   NotStarted: "Not Started",
   InProgress: "In Progress",
+  Paused: "Paused",
+  Pending: "Pending",
   Complete: "Complete",
   Issue: "Issue",
 };
@@ -193,6 +197,8 @@ export default function AssetRegistryPage() {
             <MenuItem value="All">All statuses</MenuItem>
             <MenuItem value="NotStarted">Not Started</MenuItem>
             <MenuItem value="InProgress">In Progress</MenuItem>
+            <MenuItem value="Paused">Paused</MenuItem>
+            <MenuItem value="Pending">Pending</MenuItem>
             <MenuItem value="Complete">Complete</MenuItem>
             <MenuItem value="Issue">Issue</MenuItem>
           </Select>

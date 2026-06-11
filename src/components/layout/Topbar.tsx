@@ -23,6 +23,7 @@ import { searchIndexService, type SearchIndexStatus } from "../../services/searc
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { secureClearAuth } from "../../services/secureStorage";
 import strataLogo from "../../assets/strata_transparent.png";
+import SyncStatusBadge from "../ui/SyncStatusBadge";
 
 function getRolesFromCache(): string[] {
   try {
@@ -408,6 +409,7 @@ const Topbar = () => {
         )}
       </Stack>
       <Stack direction="row" spacing={isNativePlatform ? 0.5 : 2} alignItems="center">
+        {isNativePlatform && <SyncStatusBadge />}
         {!isNativePlatform && qbEnabled && (() => {
           const provider = qbHost.includes("quickbase") ? "Quickbase"
             : qbHost.includes("salesforce") ? "Salesforce"

@@ -166,6 +166,8 @@ function loadColumnConfig(): { order: string[]; hidden: string[] } {
 const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success" | "error" | "warning"> = {
   NotStarted: "default",
   InProgress: "primary",
+  Paused: "warning",
+  Pending: "warning",
   Complete: "success",
   Issue: "error",
 };
@@ -173,9 +175,19 @@ const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success
 const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   NotStarted: "Not Started",
   InProgress: "In Progress",
+  Paused: "Paused",
+  Pending: "Pending",
   Complete: "Complete",
   Issue: "Issue",
 };
+
+/** Time-ago helper for mobile sync timestamp display */
+function timeAgo(date: Date): string {
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (secs < 60) return "just now";
+  if (secs < 3600) return `${Math.floor(secs / 60)} min ago`;
+  return `${Math.floor(secs / 3600)}h ago`;
+}
 
 function projectHasInspection(workflowMode?: string | null) {
   return workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED";
@@ -478,7 +490,7 @@ const AssetInstallationPage = () => {
   const [printScope, setPrintScope]       = useState<"selection" | "visible" | "custom">("visible");
   const [printTechId, setPrintTechId]     = useState("");
   const [printModel, setPrintModel]       = useState("");
-  const [printStatuses, setPrintStatuses] = useState<string[]>(["NotStarted", "InProgress", "Complete", "Issue"]);
+  const [printStatuses, setPrintStatuses] = useState<string[]>(["NotStarted", "InProgress", "Paused", "Pending", "Complete", "Issue"]);
   const [printPendingSig, setPrintPendingSig] = useState(false);
   const [printColumns, setPrintColumns]   = useState<(keyof PrintRow)[]>([
     "assetTag", "assetName", "serialNumber", "assetModel", "location",
@@ -506,6 +518,9 @@ const AssetInstallationPage = () => {
   const [docsOpen, setDocsOpen] = useState(false);
   const [docsAsset, setDocsAsset] = useState<ProjectAsset | null>(null);
   const [docsCountMap, setDocsCountMap] = useState<Record<string, number>>({});
+
+  // Last-fetched timestamp for mobile "Last updated" label (Fix 4)
+  const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
 
   useEffect(() => {
     if (!productsState.items.length) dispatch(fetchProducts());
@@ -595,6 +610,7 @@ const AssetInstallationPage = () => {
     Promise.all([assetPromise, configPromise, workflowPromise]).then(([a, c, wc]) => {
       if (loadId !== assetLoadIdRef.current) return; // Stale — a newer load is in flight
       setAssets(a);
+      setLastFetchedAt(new Date());
       setConfigs(c);
       setPublishedWfConfigs(wc);
       if (activeProduct?.id) {
@@ -640,10 +656,39 @@ const AssetInstallationPage = () => {
       : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode))).then((groups) => groups.flat());
     const a = await refreshPromise;
     setAssets(a);
+    setLastFetchedAt(new Date());
     if (activeProduct?.id) {
       setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
     }
   };
+
+  // Fix 1 — Listen for background refresh event from AssetRepository
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { productId, projectId } = (e as CustomEvent<{ productId?: string; projectId?: string }>).detail;
+      const productIds = new Set(products.map((p) => p.id));
+      if (
+        (productId && productIds.has(productId)) ||
+        (projectId && projectId === selectedProjectId) ||
+        (!productId && !projectId)
+      ) {
+        void refreshAssets();
+      }
+    };
+    window.addEventListener("repo:assets:updated", handler);
+    return () => window.removeEventListener("repo:assets:updated", handler);
+  }, [products, selectedProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fix 6 — Background poll every 90s while page is visible (mobile only)
+  useEffect(() => {
+    if (!isNativePlatform) return;
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshAssets();
+      }
+    }, 90_000);
+    return () => window.clearInterval(id);
+  }, [isNativePlatform]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedAddConfig = useMemo(
     () => configs.find((c) => c.id === addForm.configId) ?? null,
@@ -2988,6 +3033,25 @@ const AssetInstallationPage = () => {
             </Typography>
           )}
         </Box>
+      )}
+
+      {/* Fix 3 — Pull-to-refresh tap target (mobile only) */}
+      {isNativePlatform && !loadingAssets && visibleAssets.length > 0 && (
+        <Stack direction="row" justifyContent="center" alignItems="center" spacing={0.5}
+          onClick={() => void refreshAssets()}
+          sx={{ cursor: "pointer", py: 0.5 }}>
+          <RefreshOutlined sx={{ fontSize: 14, color: "text.secondary" }} />
+          <Typography variant="caption" color="text.secondary" sx={{ userSelect: "none" }}>
+            ↓ Pull to refresh
+          </Typography>
+        </Stack>
+      )}
+
+      {/* Fix 4 — Last synced timestamp (mobile only) */}
+      {isNativePlatform && lastFetchedAt && (
+        <Typography variant="caption" color="text.secondary" sx={{ textAlign: "center", display: "block" }}>
+          Last updated: {timeAgo(lastFetchedAt)}
+        </Typography>
       )}
 
       {/* Web keeps the original table workspace; native keeps the mobile card list. */}

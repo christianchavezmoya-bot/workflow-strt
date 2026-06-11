@@ -11,9 +11,11 @@ import {
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
-  if (value === "inprogress") return "InProgress";
-  if (value === "complete" || value === "completed") return "Complete";
-  if (value === "issue" || value === "issues") return "Issue";
+  if (value === "inprogress" || value === "running") return "InProgress";
+  if (value === "paused") return "Paused";
+  if (value === "pending") return "Pending";
+  if (value === "complete" || value === "completed" || value === "done") return "Complete";
+  if (value === "issue" || value === "issues" || value === "missing") return "Issue";
   return "NotStarted";
 }
 
