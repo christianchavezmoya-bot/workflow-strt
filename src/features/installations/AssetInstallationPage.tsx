@@ -98,6 +98,7 @@ import { workflowTypeService } from "../../services/workflowTypeService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
+import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS } from "../../services/localDB";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { countMissingWorkflowItems } from "../../utils/workflowCompleteness";
 import {
@@ -221,6 +222,8 @@ interface AssetHealth {
   total: number;
   notStarted: number;
   inProgress: number;
+  paused: number;
+  pending: number;
   complete: number;
   issue: number;
   noWorkflow: number;
@@ -231,6 +234,8 @@ function computeHealth(list: ProjectAsset[]): AssetHealth {
     total: list.length,
     notStarted: list.filter((a) => a.status === "NotStarted").length,
     inProgress: list.filter((a) => a.status === "InProgress").length,
+    paused: list.filter((a) => a.status === "Paused").length,
+    pending: list.filter((a) => a.status === "Pending").length,
     complete: list.filter((a) => a.status === "Complete").length,
     issue: list.filter((a) => a.status === "Issue").length,
     noWorkflow: list.filter((a) => !a.productConfigId && !a.workflowTemplateId).length,
@@ -337,6 +342,7 @@ const AssetInstallationPage = () => {
   // results from a superseded fetch (triggered before the tab restoration
   // effect corrects the tab) are silently discarded.
   const assetLoadIdRef = useRef(0);
+  const lastRefreshTsRef = useRef(0);
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     () => { try { return sessionStorage.getItem("installations_selected_project_id") ?? ""; } catch { return ""; } }
@@ -523,6 +529,8 @@ const AssetInstallationPage = () => {
 
   // Last-fetched timestamp for mobile "Last updated" label (Fix 4)
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
+  // Cache age warning: "soft" = data is old, "hard" = data is very old
+  const [cacheStale, setCacheStale] = useState<"soft" | "hard" | null>(null);
 
   useEffect(() => {
     if (!productsState.items.length) dispatch(fetchProducts());
@@ -658,7 +666,7 @@ const AssetInstallationPage = () => {
       : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode))).then((groups) => groups.flat());
     const a = await refreshPromise;
     setAssets(a);
-    setLastFetchedAt(new Date());
+    lastRefreshTsRef.current = Date.now();    setLastFetchedAt(new Date());
     if (activeProduct?.id) {
       setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
     }
@@ -694,6 +702,23 @@ const AssetInstallationPage = () => {
     return () => window.removeEventListener("api-server-reachable", handler);
   }, [refreshAssets]);
 
+  // Fix 9 — Real-time server push: re-fetch when SSE notifies this product/project changed
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { productId, projectId } = (e as CustomEvent<{ productId?: string; projectId?: string }>).detail ?? {};
+      const productIds = new Set(products.map((p) => p.id));
+      if (
+        (productId && productIds.has(productId)) ||
+        (projectId && projectId === selectedProjectId) ||
+        (!productId && !projectId)
+      ) {
+        void refreshAssets();
+      }
+    };
+    window.addEventListener("sse:assets:updated", handler as EventListener);
+    return () => window.removeEventListener("sse:assets:updated", handler as EventListener);
+  }, [refreshAssets, products, selectedProjectId]);
+
   // Fix 6 — Background poll every 90s while page is visible (mobile only)
   useEffect(() => {
     if (!isNativePlatform) return;
@@ -704,6 +729,20 @@ const AssetInstallationPage = () => {
     }, 90_000);
     return () => window.clearInterval(id);
   }, [isNativePlatform, refreshAssets]);
+
+  // Fix 7 — Cache age limit: warn when local data is stale (mobile only)
+  useEffect(() => {
+    if (!isNativePlatform || products.length === 0) return;
+    const check = async () => {
+      const key   = selectedProjectId ?? products[0]?.id;
+      const by    = selectedProjectId ? "by_project" : "by_product";
+      const ageMs = await entityGetAssetCacheAgeMs(key, by);
+      if (ageMs >= CACHE_HARD_LIMIT_MS) setCacheStale("hard");
+      else if (ageMs >= CACHE_SOFT_LIMIT_MS) setCacheStale("soft");
+      else setCacheStale(null);
+    };
+    void check();
+  }, [isNativePlatform, products, selectedProjectId, lastFetchedAt]);
 
   const selectedAddConfig = useMemo(
     () => configs.find((c) => c.id === addForm.configId) ?? null,
@@ -842,7 +881,7 @@ const AssetInstallationPage = () => {
       });
     }
     const statusLabel: Record<string, string> = {
-      NotStarted: "Not Started", InProgress: "In Progress", Complete: "Complete", Issue: "Issue",
+      NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Issue: "Issue",
     };
     return pool.map((a): PrintRow => {
       const tech        = a.assignedUserId ? userMap.get(a.assignedUserId) : undefined;
@@ -2759,6 +2798,8 @@ const AssetInstallationPage = () => {
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                 {activeHealth.complete > 0 && <Chip size="small" label={`${activeHealth.complete} Complete`} color="success" sx={{ height: 18, fontSize: 10 }} />}
                 {activeHealth.inProgress > 0 && <Chip size="small" label={`${activeHealth.inProgress} In Progress`} color="primary" sx={{ height: 18, fontSize: 10 }} />}
+                {activeHealth.paused > 0 && <Chip size="small" label={`${activeHealth.paused} Paused`} color="warning" sx={{ height: 18, fontSize: 10 }} />}
+                {activeHealth.pending > 0 && <Chip size="small" label={`${activeHealth.pending} Pending`} color="warning" sx={{ height: 18, fontSize: 10 }} />}
                 {activeHealth.issue > 0 && <Chip size="small" label={`${activeHealth.issue} Issue`} color="error" sx={{ height: 18, fontSize: 10 }} />}
                 <Typography variant="caption" color="text.secondary" sx={{ alignSelf: "center" }}>
                   {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}%
@@ -2781,6 +2822,12 @@ const AssetInstallationPage = () => {
                 )}
                 {activeHealth.inProgress > 0 && (
                   <Chip size="small" label={`${activeHealth.inProgress} In Progress`} color="primary" />
+                )}
+                {activeHealth.paused > 0 && (
+                  <Chip size="small" label={`${activeHealth.paused} Paused`} color="warning" />
+                )}
+                {activeHealth.pending > 0 && (
+                  <Chip size="small" label={`${activeHealth.pending} Pending`} color="warning" />
                 )}
                 {activeHealth.complete > 0 && (
                   <Chip size="small" label={`${activeHealth.complete} Complete`} color="success" />
@@ -2842,6 +2889,8 @@ const AssetInstallationPage = () => {
             <MenuItem value="All">All statuses</MenuItem>
             <MenuItem value="NotStarted">Not Started</MenuItem>
             <MenuItem value="InProgress">In Progress</MenuItem>
+            <MenuItem value="Paused">Paused</MenuItem>
+            <MenuItem value="Pending">Pending</MenuItem>
             <MenuItem value="Complete">Complete</MenuItem>
             <MenuItem value="Issue">Issue</MenuItem>
           </Select>
@@ -3053,6 +3102,23 @@ const AssetInstallationPage = () => {
         </Box>
       )}
 
+      {/* Fix 7 — Stale cache warning (mobile only) */}
+      {isNativePlatform && cacheStale && (
+        <Alert
+          severity={cacheStale === "hard" ? "error" : "warning"}
+          action={
+            <Button color="inherit" size="small" onClick={() => void refreshAssets()}>
+              Refresh
+            </Button>
+          }
+          sx={{ mx: 0, fontSize: "0.78rem" }}
+        >
+          {cacheStale === "hard"
+            ? "Asset data is over 24 hours old. Refresh to get the latest."
+            : "Asset data may be outdated (over 4 hours). Tap refresh to update."}
+        </Alert>
+      )}
+
       {/* Fix 3 — Pull-to-refresh tap target (mobile only) */}
       {isNativePlatform && !loadingAssets && visibleAssets.length > 0 && (
         <Stack direction="row" justifyContent="center" alignItems="center" spacing={0.5}
@@ -3060,7 +3126,7 @@ const AssetInstallationPage = () => {
           sx={{ cursor: "pointer", py: 0.5 }}>
           <RefreshOutlined sx={{ fontSize: 14, color: "text.secondary" }} />
           <Typography variant="caption" color="text.secondary" sx={{ userSelect: "none" }}>
-            ↓ Pull to refresh
+            ↻ Tap to refresh
           </Typography>
         </Stack>
       )}
@@ -3711,6 +3777,8 @@ const AssetInstallationPage = () => {
                 disabled={!canEditAssetStatus}>
                 <MenuItem value="NotStarted">Not Started</MenuItem>
                 <MenuItem value="InProgress">In Progress</MenuItem>
+                <MenuItem value="Paused">Paused</MenuItem>
+                <MenuItem value="Pending">Pending</MenuItem>
                 <MenuItem value="Complete">Complete</MenuItem>
                 <MenuItem value="Issue">Issue</MenuItem>
               </Select>
@@ -4653,9 +4721,9 @@ const AssetInstallationPage = () => {
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>Statuses to include</Typography>
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      {(["NotStarted", "InProgress", "Complete", "Issue"] as const).map((s) => {
+                      {(["NotStarted", "InProgress", "Paused", "Pending", "Complete", "Issue"] as const).map((s) => {
                         const labels: Record<string, string> = {
-                          NotStarted: "Not Started", InProgress: "In Progress", Complete: "Complete", Issue: "Issue",
+                          NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Issue: "Issue",
                         };
                         const checked = printStatuses.includes(s);
                         return (

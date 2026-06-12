@@ -25,6 +25,9 @@ import {
   pendingGetAll,
   pendingGetDue,
   pendingMarkRetry,
+  pendingMarkConflict,
+  pendingClearConflict,
+  pendingGetConflicted,
   pendingRemove,
   pendingSetStatus,
   syncMetaSet,
@@ -53,10 +56,15 @@ export interface SyncState {
   status: SyncStatus;
   isOnline: boolean;
   pendingCount: number;
+  conflictCount: number;
   lastSyncAt: Date | null;
   syncing: boolean;
   /** Manually trigger a sync flush */
   triggerSync: () => Promise<void>;
+  /** Force-proceed a conflicted action (overwrite server version). */
+  resolveConflictKeep: (actionId: string) => Promise<void>;
+  /** Discard a conflicted action (accept server version). */
+  resolveConflictDiscard: (actionId: string) => Promise<void>;
   /**
    * Queue or send a write operation.
    * If online: sends immediately, returns server response.
@@ -227,17 +235,20 @@ export function useSyncEngine(): SyncState {
   const [connectivity, setConnectivity] = useState<ConnectivityState>(
     typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "online"
   );
-  const [syncing,    setSyncing]    = useState(false);
-  const [pending,    setPending]    = useState(0);
-  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
-  const [hasError,   setHasError]   = useState(false);
+  const [syncing,       setSyncing]       = useState(false);
+  const [pending,       setPending]       = useState(0);
+  const [conflicts,     setConflicts]     = useState(0);
+  const [lastSyncAt,    setLastSyncAt]    = useState<Date | null>(null);
+  const [hasError,      setHasError]      = useState(false);
 
   const connectivityRef = useRef(connectivity);
   connectivityRef.current = connectivity;
 
-  // Refresh badge count from IndexedDB
+  // Refresh badge count and conflict count from IndexedDB
   const refreshPending = useCallback(async () => {
     setPending(await pendingCount());
+    const conflicted = await pendingGetConflicted();
+    setConflicts(conflicted.length);
   }, []);
 
   // ── Schedule retry based on earliest nextRetryAt in queue ─────────────────
@@ -266,7 +277,34 @@ export function useSyncEngine(): SyncState {
       // Skip if the action this depends on hasn't been synced yet
       if (action.dependsOnOpId) {
         const all = await pendingGetAll();
-        if (all.some((a) => a.id === action.dependsOnOpId)) continue;
+        const depStillPending = all.some(
+          (a) => a.id === action.dependsOnOpId && a.status !== "uploading"
+        );
+        if (depStillPending) continue;
+      }
+
+      // ── Conflict detection (PATCH / PUT only) ─────────────────────────────
+      if (
+        (action.method === "PATCH" || action.method === "PUT") &&
+        action.snapshotUpdatedAt &&
+        action.entityType === "asset"
+      ) {
+        const cached = await entityGetAsset(action.entityId);
+        if (cached) {
+          const cachedRecord = cached as { syncedAt?: string };
+          const syncedAt  = cachedRecord.syncedAt ? new Date(cachedRecord.syncedAt).getTime() : 0;
+          const queuedAt  = new Date(action.createdAt).getTime();
+          // If the entity was refreshed from the server MORE THAN 5s after we queued
+          // the action, another device/user has written to it — flag as conflict.
+          if (syncedAt > queuedAt + 5_000) {
+            await pendingMarkConflict(action.id);
+            window.dispatchEvent(new CustomEvent("sync-conflict-detected", {
+              detail: { actionId: action.id, entityId: action.entityId, entityType: action.entityType },
+            }));
+            anyError = true;
+            continue;
+          }
+        }
       }
 
       try {
@@ -291,8 +329,15 @@ export function useSyncEngine(): SyncState {
         await syncMetaSet(action.entityType);
       } catch (e: unknown) {
         const httpStatus = (e as { response?: { status?: number } }).response?.status;
-        if (httpStatus && httpStatus !== 429 && httpStatus >= 400 && httpStatus < 500) {
-          // 4xx (except rate-limit): drop — entity was deleted, modified, or request was malformed
+        if (httpStatus === 409 || httpStatus === 412) {
+          // Server confirmed a conflict — mark and let user resolve
+          await pendingMarkConflict(action.id);
+          window.dispatchEvent(new CustomEvent("sync-conflict-detected", {
+            detail: { actionId: action.id, entityId: action.entityId, entityType: action.entityType },
+          }));
+          anyError = true;
+        } else if (httpStatus && httpStatus !== 429 && httpStatus >= 400 && httpStatus < 500) {
+          // Other 4xx: drop — entity deleted or request malformed
           await pendingRemove(action.id);
         } else {
           const msg = e instanceof Error ? e.message : String(e);
@@ -432,7 +477,12 @@ export function useSyncEngine(): SyncState {
       }
     }
 
-    // Offline path: store in IndexedDB and signal optimistic update
+    // Offline path: store in IndexedDB and signal optimistic update.
+    // Capture snapshotUpdatedAt from body so conflict detection can compare later.
+    const bodyObj = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const snapshotUpdatedAt =
+      typeof bodyObj["updatedAt"] === "string" ? bodyObj["updatedAt"] : undefined;
+
     const action: Omit<PendingAction, "retries" | "status"> = {
       id: crypto.randomUUID(),
       url,
@@ -442,10 +492,25 @@ export function useSyncEngine(): SyncState {
       entityId,
       optimisticPatch,
       createdAt: new Date().toISOString(),
+      snapshotUpdatedAt,
     };
     await pendingAdd(action);
     await refreshPending();
     return null;
+  }, [refreshPending]);
+
+  // ── Conflict resolvers ────────────────────────────────────────────────────
+  const resolveConflictKeep = useCallback(async (actionId: string) => {
+    // Clear the conflict flag — action will be retried and will overwrite server
+    await pendingClearConflict(actionId);
+    await refreshPending();
+    void flush();
+  }, [flush, refreshPending]);
+
+  const resolveConflictDiscard = useCallback(async (actionId: string) => {
+    // Drop the action entirely — accept whatever the server has
+    await pendingRemove(actionId);
+    await refreshPending();
   }, [refreshPending]);
 
   // ── Derived status ────────────────────────────────────────────────────────
@@ -463,9 +528,12 @@ export function useSyncEngine(): SyncState {
     status,
     isOnline,
     pendingCount: pending,
+    conflictCount: conflicts,
     lastSyncAt,
     syncing,
     triggerSync: flush,
+    resolveConflictKeep,
+    resolveConflictDiscard,
     queueOrSend,
   };
 }

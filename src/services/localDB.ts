@@ -39,7 +39,14 @@ export interface PendingAction {
   serverEntityId?: string;
   dependsOnOpId?: string;
   nextRetryAt?: string;  // ISO timestamp — when to next attempt this action
+  // Conflict detection fields
+  snapshotUpdatedAt?: string;  // entity's updatedAt at queue time
+  conflictDetected?: boolean;  // true when server refreshed a newer version after we queued
 }
+
+// ── Cache age thresholds ──────────────────────────────────────────────────────
+export const CACHE_SOFT_LIMIT_MS = 4  * 60 * 60 * 1000;  // 4 h  — show warning
+export const CACHE_HARD_LIMIT_MS = 24 * 60 * 60 * 1000;  // 24 h — force re-fetch banner
 
 export interface SyncMeta {
   entity: string;        // e.g. "projects", "assets"
@@ -604,4 +611,66 @@ export async function entityDeleteWorkflowRun(id: string): Promise<void> {
     const db = await getDB();
     await db.delete("workflow_runs", id);
   } catch { /* ignore */ }
+}
+
+// ── Cache age helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Returns the age in ms of the oldest asset record for the given product or
+ * project. Returns Infinity when there are no cached records (forces fetch).
+ */
+export async function entityGetAssetCacheAgeMs(
+  key: string,
+  by: "by_product" | "by_project"
+): Promise<number> {
+  try {
+    const db = await getDB();
+    const records = await db.getAllFromIndex("assets", by, key);
+    if (records.length === 0) return Infinity;
+    const oldest = records.reduce(
+      (min, r) => (r.syncedAt < min ? r.syncedAt : min),
+      records[0].syncedAt
+    );
+    return Date.now() - new Date(oldest).getTime();
+  } catch { return Infinity; }
+}
+
+// ── Conflict detection helpers ────────────────────────────────────────────────
+
+/** Mark a pending action as having a detected conflict (server has newer data). */
+export async function pendingMarkConflict(id: string): Promise<void> {
+  try {
+    const db = await getDB();
+    const item = await db.get("pending_actions", id);
+    if (item) {
+      await db.put("pending_actions", { ...item, conflictDetected: true, status: "failed" });
+      window.dispatchEvent(new Event("sync-pending-changed"));
+    }
+  } catch { /* ignore */ }
+}
+
+/** Clear the conflict flag so the action will be retried on next flush. */
+export async function pendingClearConflict(id: string): Promise<void> {
+  try {
+    const db = await getDB();
+    const item = await db.get("pending_actions", id);
+    if (item) {
+      await db.put("pending_actions", {
+        ...item,
+        conflictDetected: false,
+        status: "pending",
+        nextRetryAt: undefined,
+        lastError: undefined,
+      });
+      window.dispatchEvent(new Event("sync-pending-changed"));
+    }
+  } catch { /* ignore */ }
+}
+
+/** Return all pending actions that have a detected conflict. */
+export async function pendingGetConflicted(): Promise<PendingAction[]> {
+  try {
+    const all = await pendingGetAll();
+    return all.filter((a) => a.conflictDetected);
+  } catch { return []; }
 }

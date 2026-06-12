@@ -6,6 +6,7 @@ import DebugPanel from "./DebugPanel";
 import FieldNotificationBar from "../FieldNotificationBar";
 import BottomTabBar from "./BottomTabBar";
 import NotificationBanner from "./NotificationBanner";
+import PullToRefresh from "./PullToRefresh";
 import { useViewMode } from "../../contexts/ViewModeContext";
 import { useAccessMode } from "../../contexts/AccessModeContext";
 import { FavoritesProvider } from "../../contexts/FavoritesContext";
@@ -14,6 +15,7 @@ import HelpCenterLauncher from "../../onboarding/components/HelpCenterLauncher";
 import { useOnboarding } from "../../onboarding/hooks/useOnboarding";
 import { useAuth } from "../../hooks/useAuth";
 import { authService } from "../../services/authService";
+import { useSseEvents } from "../../hooks/useSseEvents";
 import { useCallback } from "react";
 
 function OnboardingLayer() {
@@ -48,6 +50,7 @@ function OnboardingLayer() {
 const AppShell = () => {
   const { viewMode } = useViewMode();
   const { isViewOnly } = useAccessMode();
+  useSseEvents(); // real-time push from server
 
   return (
     <FavoritesProvider>
@@ -63,9 +66,11 @@ const AppShell = () => {
           )}
           <Topbar />
           <FieldNotificationBar />
-          <Box component="main" className="app-content">
-            <Outlet />
-          </Box>
+          <PullToRefresh>
+            <Box component="main" className="app-content">
+              <Outlet />
+            </Box>
+          </PullToRefresh>
         </Box>
         {/* Bottom tab bar: mobile only (shown via CSS) */}
         <BottomTabBar />

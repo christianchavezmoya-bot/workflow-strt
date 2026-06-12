@@ -4,6 +4,7 @@
  */
 
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -17,6 +18,7 @@ import {
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useEffect, useState } from "react";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import {
@@ -77,8 +79,8 @@ function connectivityLabel(
 }
 
 export default function SyncCenterPage({ open, onClose }: Props) {
-  const { status, pendingCount, lastSyncAt, syncing, triggerSync } = useSyncEngine();
-  const [queue, setQueue]       = useState<PendingAction[]>([]);
+  const { status, pendingCount, conflictCount, lastSyncAt, syncing, triggerSync, resolveConflictKeep, resolveConflictDiscard } = useSyncEngine();
+  const [queue, setQueue]         = useState<PendingAction[]>([]);
   const [debugOpen, setDebugOpen] = useState(false);
 
   const loadQueue = async () => setQueue(await pendingGetAll());
@@ -91,17 +93,23 @@ export default function SyncCenterPage({ open, onClose }: Props) {
     void loadQueue();
     const h = () => void loadQueue();
     window.addEventListener("sync-pending-changed", h);
-    return () => window.removeEventListener("sync-pending-changed", h);
+    window.addEventListener("sync-conflict-detected", h);
+    return () => {
+      window.removeEventListener("sync-pending-changed", h);
+      window.removeEventListener("sync-conflict-detected", h);
+    };
   }, []);
 
   const handleClearFailed = async () => {
-    const failed = queue.filter(a => a.status === "failed");
+    const failed = queue.filter(a => a.status === "failed" && !a.conflictDetected);
     await Promise.all(failed.map(a => pendingRemove(a.id)));
     await loadQueue();
   };
 
   const { label: connLabel, color: connColor } = connectivityLabel(status, pendingCount);
-  const hasFailed = queue.some(a => a.status === "failed");
+  const conflicted   = queue.filter(a => a.conflictDetected);
+  const nonConflicted = queue.filter(a => !a.conflictDetected);
+  const hasFailed    = nonConflicted.some(a => a.status === "failed");
 
   return (
     <>
@@ -168,17 +176,82 @@ export default function SyncCenterPage({ open, onClose }: Props) {
             )}
           </Stack>
 
+          {/* ── Conflicts ─────────────────────────────────────────────────────── */}
+          {conflictCount > 0 && (
+            <Stack spacing={1} mb={3}>
+              <Stack direction="row" alignItems="center" spacing={0.75}>
+                <WarningAmberIcon sx={{ fontSize: 16, color: "warning.main" }} />
+                <Typography variant="subtitle2" color="warning.main">
+                  {conflictCount} conflict{conflictCount !== 1 ? "s" : ""} detected
+                </Typography>
+              </Stack>
+
+              <Alert severity="warning" sx={{ fontSize: "0.75rem", py: 0.5 }}>
+                Someone else edited these records while you were offline. Choose
+                whether to keep your change or accept the server version.
+              </Alert>
+
+              {conflicted.map(action => (
+                <Box
+                  key={action.id}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "warning.main",
+                    borderRadius: 1,
+                    p: 1.5,
+                    bgcolor: "rgba(237,108,2,0.06)",
+                  }}
+                >
+                  <Stack spacing={0.75}>
+                    <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap">
+                      <Typography variant="caption" sx={{ fontWeight: 700, textTransform: "uppercase", color: "warning.main", fontSize: "0.65rem" }}>
+                        {action.entityType}
+                      </Typography>
+                      <Chip label="conflict" color="warning" size="small" sx={{ height: 16, fontSize: "0.62rem" }} />
+                      <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.65rem" }}>
+                        {action.method} {action.url}
+                      </Typography>
+                    </Stack>
+
+                    <Stack direction="row" spacing={1} pt={0.5}>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="warning"
+                        sx={{ fontSize: "0.7rem", py: 0.25 }}
+                        onClick={() => void resolveConflictKeep(action.id).then(loadQueue)}
+                      >
+                        Keep my change
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="inherit"
+                        sx={{ fontSize: "0.7rem", py: 0.25 }}
+                        onClick={() => void resolveConflictDiscard(action.id).then(loadQueue)}
+                      >
+                        Discard
+                      </Button>
+                    </Stack>
+                  </Stack>
+                </Box>
+              ))}
+
+              <Divider />
+            </Stack>
+          )}
+
           {/* Pending queue */}
-          {queue.length === 0 ? (
+          {nonConflicted.length === 0 && conflictCount === 0 ? (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
               No pending actions — all synced.
             </Typography>
-          ) : (
+          ) : nonConflicted.length === 0 ? null : (
             <Stack spacing={1}>
               <Typography variant="subtitle2" color="text.secondary" mb={0.5}>
                 Pending queue
               </Typography>
-              {queue.map(action => (
+              {nonConflicted.map(action => (
                 <Box
                   key={action.id}
                   sx={{

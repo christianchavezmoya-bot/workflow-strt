@@ -15,11 +15,13 @@ public class AssetWorkflowRunsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly NotificationFeedService _feed;
+    private readonly SseHub _sse;
     private readonly ILogger<AssetWorkflowRunsController> _logger;
-    public AssetWorkflowRunsController(AppDbContext db, NotificationFeedService feed, ILogger<AssetWorkflowRunsController> logger)
+    public AssetWorkflowRunsController(AppDbContext db, NotificationFeedService feed, SseHub sse, ILogger<AssetWorkflowRunsController> logger)
     {
-        _db = db;
-        _feed = feed;
+        _db     = db;
+        _feed   = feed;
+        _sse    = sse;
         _logger = logger;
     }
 
@@ -1042,6 +1044,12 @@ public class AssetWorkflowRunsController : ControllerBase
                 actorUserId,
                 actorName);
         }
+
+        // Real-time push: notify all other connected clients that this asset changed
+        await _sse.BroadcastExceptAsync(
+            actorUserId ?? "",
+            "assets:updated",
+            new { productId = asset.ProductId, projectId = asset.ProjectId });
     }
 
     private static List<JsonElement> ParseIssues(string json)

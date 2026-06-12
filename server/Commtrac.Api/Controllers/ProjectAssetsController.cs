@@ -15,12 +15,14 @@ public class ProjectAssetsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly NotificationFeedService _feed;
+    private readonly SseHub _sse;
     private static readonly JsonSerializerOptions _json = new() { PropertyNameCaseInsensitive = true };
 
-    public ProjectAssetsController(AppDbContext db, NotificationFeedService feed)
+    public ProjectAssetsController(AppDbContext db, NotificationFeedService feed, SseHub sse)
     {
-        _db = db;
+        _db   = db;
         _feed = feed;
+        _sse  = sse;
     }
 
     // GET api/project-assets/my-project-ids
@@ -625,6 +627,9 @@ public class ProjectAssetsController : ControllerBase
         _db.ProjectAssets.Add(asset);
         await _db.SaveChangesAsync();
         await NotifyAssetAssignmentChangeAsync(asset, null, asset.AssignedUserId, "asset-created");
+        var currentUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        await _sse.BroadcastExceptAsync(currentUserId, "assets:updated",
+            new { productId = asset.ProductId, projectId = asset.ProjectId });
         return CreatedAtAction(nameof(GetById), new { id = asset.Id }, await ToDtoAsync(asset));
     }
 
@@ -660,6 +665,12 @@ public class ProjectAssetsController : ControllerBase
         {
             await NotifyAssetAssignmentChangeAsync(asset, null, asset.AssignedUserId, "asset-created");
         }
+        var bulkUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        if (created.Count > 0)
+        {
+            await _sse.BroadcastExceptAsync(bulkUserId, "assets:updated",
+                new { productId = request.ProductId, projectId = request.ProjectId });
+        }
         return Ok(await MapAssetsToDtosAsync(created));
     }
 
@@ -694,6 +705,9 @@ public class ProjectAssetsController : ControllerBase
         {
             await NotifyAssetAssignmentChangeAsync(asset, previousAssignedUserId, asset.AssignedUserId, "asset-assignment-updated");
         }
+        var putUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        await _sse.BroadcastExceptAsync(putUserId, "assets:updated",
+            new { productId = asset.ProductId, projectId = asset.ProjectId });
         return Ok(await ToDtoAsync(asset));
     }
 
@@ -707,6 +721,9 @@ public class ProjectAssetsController : ControllerBase
         asset.IssuesJson = string.IsNullOrWhiteSpace(request.IssuesJson) ? "[]" : request.IssuesJson;
         asset.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
+        var patchUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        await _sse.BroadcastExceptAsync(patchUserId, "assets:updated",
+            new { productId = asset.ProductId, projectId = asset.ProjectId });
         return Ok(await ToDtoAsync(asset));
     }
 
@@ -725,6 +742,9 @@ public class ProjectAssetsController : ControllerBase
         asset.DeletedAtUtc = DateTime.UtcNow;
         asset.DeletedByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
         await _db.SaveChangesAsync();
+        var delUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        await _sse.BroadcastExceptAsync(delUserId, "assets:updated",
+            new { productId = asset.ProductId, projectId = asset.ProjectId });
         return NoContent();
     }
 
