@@ -532,6 +532,7 @@ const AssetInstallationPage = () => {
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   // Cache age warning: "soft" = data is old, "hard" = data is very old
   const [cacheStale, setCacheStale] = useState<"soft" | "hard" | null>(null);
+  const [serverReachable, setServerReachable] = useState<boolean | null>(null); // null = unknown (first load)
 
   useEffect(() => {
     if (!productsState.items.length) dispatch(fetchProducts());
@@ -690,11 +691,19 @@ const AssetInstallationPage = () => {
           : (await Promise.all(products.map((p) => projectAssetService.listLocalByProduct(p.id, archiveMode)))).flat();
         setAssets(a);
         setLastFetchedAt(new Date());
+        setServerReachable(true);
       }
     };
     window.addEventListener("repo:assets:updated", handler as EventListener);
     return () => window.removeEventListener("repo:assets:updated", handler as EventListener);
   }, [products, selectedProjectId, archiveMode]);
+
+  // Mark server as unreachable when background fetch fails
+  useEffect(() => {
+    const handler = () => setServerReachable(false);
+    window.addEventListener("repo:assets:fetch-failed", handler);
+    return () => window.removeEventListener("repo:assets:fetch-failed", handler);
+  }, []);
 
   // Fix 6b — Re-fetch immediately when server comes back online
   useEffect(() => {
@@ -731,9 +740,12 @@ const AssetInstallationPage = () => {
     return () => window.clearInterval(id);
   }, [isNativePlatform, refreshAssets]);
 
-  // Fix 7 — Cache age limit: warn when local data is stale (mobile only)
+  // Fix 7 — Cache age limit: only warn when server is confirmed unreachable AND cache is old (mobile only)
   useEffect(() => {
     if (!isNativePlatform || products.length === 0) return;
+    if (serverReachable === null) return;  // still loading — don't judge yet
+    if (serverReachable === true) { setCacheStale(null); return; }  // server is up — no banner needed
+    // serverReachable === false: server is down — check how old the local data actually is
     const check = async () => {
       const key   = selectedProjectId ?? products[0]?.id;
       const by    = selectedProjectId ? "by_project" : "by_product";
@@ -743,7 +755,7 @@ const AssetInstallationPage = () => {
       else setCacheStale(null);
     };
     void check();
-  }, [isNativePlatform, products, selectedProjectId, lastFetchedAt]);
+  }, [isNativePlatform, products, selectedProjectId, serverReachable]);
 
   const selectedAddConfig = useMemo(
     () => configs.find((c) => c.id === addForm.configId) ?? null,
@@ -3108,7 +3120,7 @@ const AssetInstallationPage = () => {
         <Alert
           severity={cacheStale === "hard" ? "error" : "warning"}
           action={
-            <Button color="inherit" size="small" onClick={() => void refreshAssets()}>
+            <Button color="inherit" size="small" onClick={() => { setCacheStale(null); void refreshAssets(); }}>
               Refresh
             </Button>
           }
@@ -3231,9 +3243,7 @@ const AssetInstallationPage = () => {
               } else {
                 cond = (STATUS_LABELS[st as ProjectAssetStatus] ?? (st as string)).toLowerCase();
               }
-              const prefix = asset.assetName
-                ? `${asset.assetName} · `
-                : tech?.fullName ? `${tech.fullName} · ` : "";
+              const prefix = tech?.fullName ? `${tech.fullName} · ` : "";
               return `${prefix}${cond}`;
             })();
 
@@ -3327,10 +3337,15 @@ const AssetInstallationPage = () => {
                       : <ExpandMoreOutlined sx={{ fontSize: 18 }} />}
                   </IconButton>
 
-                  {/* Asset tag + smart condition description */}
+                  {/* Asset tag + asset name (inline) + smart description + tech */}
                   <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <Typography variant="body2" fontWeight={700} noWrap>{asset.assetTag}</Typography>
+                    <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={700} sx={{ flexShrink: 0 }}>{asset.assetTag}</Typography>
+                      {asset.assetName && (
+                        <Typography variant="body2" color="text.secondary" noWrap sx={{ fontWeight: 400, minWidth: 0 }}>
+                          {asset.assetName}
+                        </Typography>
+                      )}
                       {issuesBadge(asset)}
                     </Stack>
                     <Typography

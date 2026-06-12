@@ -626,7 +626,7 @@ export async function entityGetAssetCacheAgeMs(
   try {
     const db = await getDB();
     const records = await db.getAllFromIndex("assets", by, key);
-    if (records.length === 0) return Infinity;
+    if (records.length === 0) return 0; // no cached data ≠ stale data — first login has nothing to warn about
     const oldest = records.reduce(
       (min, r) => (r.syncedAt < min ? r.syncedAt : min),
       records[0].syncedAt

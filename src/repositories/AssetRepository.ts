@@ -53,7 +53,7 @@ export const AssetRepository = {
         );
         window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { productId } }));
       })
-      .catch(() => {});
+      .catch(() => { window.dispatchEvent(new Event("repo:assets:fetch-failed")); });
 
     if (local.length > 0) return local;
 
@@ -78,7 +78,7 @@ export const AssetRepository = {
         );
         window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { projectId } }));
       })
-      .catch(() => {});
+      .catch(() => { window.dispatchEvent(new Event("repo:assets:fetch-failed")); });
 
     if (local.length > 0) return local;
 
