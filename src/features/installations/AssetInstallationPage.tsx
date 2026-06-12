@@ -9,6 +9,7 @@ import {
   CheckCircleOutlined,
   DeleteForeverOutlined,
   DeleteOutline,
+  DrawOutlined,
   EditOutlined,
   ErrorOutlined,
   ExpandLessOutlined,
@@ -3161,8 +3162,105 @@ const AssetInstallationPage = () => {
             const proj = projectMap.get(asset.projectId);
             const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
             const isExpanded = expandedAssetId === asset.id;
-            const hasIssue = asset.status === "Issue";
-            const healthColor = computeAssetHealth(asset, runsMap[asset.id] ?? []);
+            const runs = runsMap[asset.id] ?? [];
+            const healthColor = computeAssetHealth(asset, runs);
+
+            // Signature check — same logic as web status column
+            const latestLocked = runs.find(r => r.isLocked);
+            const awaitingCustomerSig = asset.status === "Complete"
+              && !!latestLocked
+              && !latestLocked.customerSignedAt
+              && latestLocked.signatureStatus !== "WaivedCustomer";
+
+            // Smart composite status chip (reflects true condition, not raw asset.status)
+            const smartChipColor: "default" | "primary" | "success" | "error" | "warning" =
+              healthColor === "red" ? "error" :
+              healthColor === "amber" ? "warning" :
+              awaitingCustomerSig ? "warning" :
+              healthColor === "green" ? "success" :
+              STATUS_COLORS[asset.status as ProjectAssetStatus];
+            const smartChipLabel = awaitingCustomerSig && healthColor !== "red" && healthColor !== "amber"
+              ? "Awaiting Sig"
+              : STATUS_LABELS[asset.status as ProjectAssetStatus];
+
+            // Evidence/workflow sub-status badge
+            const latestRun = [...runs].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+            const paused = Boolean(pausedProgress[asset.id]);
+            const hasWorkflow = asset.workflowSummary?.hasWorkflow || !!asset.productConfigId || !!asset.workflowTemplateId;
+            let subLabel: string | null = null;
+            let subColor: "warning" | "success" | "error" | "primary" | "default" = "default";
+            if (hasWorkflow || latestRun) {
+              if (paused || latestRun?.status === "Paused" || asset.workflowSummary?.evidenceStatus === "Paused") {
+                subLabel = "Paused"; subColor = "warning";
+              } else if (asset.workflowSummary?.evidenceStatus === "MissingData" || (latestRun?.isLocked && countMissingWorkflowItems(latestRun) > 0)) {
+                subLabel = "Missing"; subColor = "error";
+              } else if (!awaitingCustomerSig && (asset.workflowSummary?.evidenceStatus === "Running" || (latestRun && !latestRun.isLocked))) {
+                subLabel = "Running"; subColor = "primary";
+              }
+            }
+
+            // Left border — reflects urgency for issues, missing data, and awaiting signature
+            const borderLeftColor =
+              healthColor === "red" ? "error.main" :
+              healthColor === "amber" ? "warning.main" :
+              subColor === "error" ? "error.main" :
+              awaitingCustomerSig ? "warning.main" :
+              "transparent";
+
+            // Quick action icon button — most common action without needing to expand
+            const qLoading = runnerLoading === asset.id;
+            const quickAction = (() => {
+              if (!hasWorkflow && !latestRun) return null;
+              if (asset.status === "NotStarted" || asset.status === "InProgress") {
+                return (
+                  <Tooltip title={asset.status === "NotStarted" ? "Start workflow" : "Continue workflow"}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        color="success"
+                        disabled={qLoading}
+                        onClick={(e) => { e.stopPropagation(); checkAssignmentThenStart(asset); }}
+                        sx={{ flexShrink: 0 }}
+                      >
+                        {qLoading ? <CircularProgress size={16} /> : <PlayArrowOutlined sx={{ fontSize: 20 }} />}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                );
+              }
+              if (awaitingCustomerSig) {
+                return (
+                  <Tooltip title="Tap to sign">
+                    <IconButton
+                      size="small"
+                      color="warning"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedAssetId(asset.id);
+                        loadAssignmentsForAsset(asset.id);
+                      }}
+                      sx={{ flexShrink: 0 }}
+                    >
+                      <DrawOutlined sx={{ fontSize: 20 }} />
+                    </IconButton>
+                  </Tooltip>
+                );
+              }
+              if (asset.status === "Complete") {
+                return (
+                  <Tooltip title="View run history">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => { e.stopPropagation(); openRunHistory(asset); }}
+                      sx={{ flexShrink: 0 }}
+                    >
+                      <HistoryOutlined sx={{ fontSize: 20 }} />
+                    </IconButton>
+                  </Tooltip>
+                );
+              }
+              return null;
+            })();
 
             return (
               <Paper
@@ -3170,10 +3268,8 @@ const AssetInstallationPage = () => {
                 className="glass-card"
                 sx={{
                   overflow: "hidden",
-                  borderLeft: hasIssue ? `3px solid` : "3px solid transparent",
-                  borderLeftColor: hasIssue
-                    ? healthColor === "red" ? "error.main" : "warning.main"
-                    : "transparent",
+                  borderLeft: "3px solid",
+                  borderLeftColor,
                 }}
               >
                 {/* Main card row */}
@@ -3193,30 +3289,49 @@ const AssetInstallationPage = () => {
                       : <ExpandMoreOutlined sx={{ fontSize: 18 }} />}
                   </IconButton>
 
-                  {/* Asset tag + tech */}
+                  {/* Asset tag + asset name + tech */}
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <Stack direction="row" alignItems="center" spacing={0.5}>
                       <Typography variant="body2" fontWeight={700} noWrap>{asset.assetTag}</Typography>
                       {issuesBadge(asset)}
                     </Stack>
+                    {asset.assetName && (
+                      <Typography variant="caption" color="text.primary" fontWeight={500} noWrap sx={{ display: "block" }}>
+                        {asset.assetName}
+                      </Typography>
+                    )}
                     <Typography variant="caption" color="text.secondary" noWrap>
                       {tech?.fullName ?? "Unassigned"}
                     </Typography>
                   </Box>
 
-                  {/* Status chip — tappable to open action menu */}
-                  <Chip
-                    size="small"
-                    label={STATUS_LABELS[asset.status as ProjectAssetStatus]}
-                    color={STATUS_COLORS[asset.status as ProjectAssetStatus]}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setStatusMenuAnchor(e.currentTarget as HTMLElement);
-                      setStatusMenuAsset(asset);
-                      loadAssignmentsForAsset(asset.id);
-                    }}
-                    sx={{ cursor: "pointer", flexShrink: 0, fontWeight: 600, fontSize: "0.7rem" }}
-                  />
+                  {/* Status area: sub-status badge + smart main chip */}
+                  <Stack alignItems="flex-end" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    {subLabel && (
+                      <Chip
+                        size="small"
+                        label={subLabel}
+                        color={subColor}
+                        variant="outlined"
+                        sx={{ height: 18, fontSize: "0.65rem", "& .MuiChip-label": { px: 0.75 } }}
+                      />
+                    )}
+                    <Chip
+                      size="small"
+                      label={smartChipLabel}
+                      color={smartChipColor}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setStatusMenuAnchor(e.currentTarget as HTMLElement);
+                        setStatusMenuAsset(asset);
+                        loadAssignmentsForAsset(asset.id);
+                      }}
+                      sx={{ cursor: "pointer", fontWeight: 600, fontSize: "0.7rem" }}
+                    />
+                  </Stack>
+
+                  {/* Quick action icon button */}
+                  {quickAction}
                 </Stack>
 
                 {/* Expandable detail panel */}
