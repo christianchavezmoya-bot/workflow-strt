@@ -16,7 +16,8 @@ import { useOnboarding } from "../../onboarding/hooks/useOnboarding";
 import { useAuth } from "../../hooks/useAuth";
 import { authService } from "../../services/authService";
 import { useSseEvents } from "../../hooks/useSseEvents";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
+import { initTapFeedback } from "../../services/tapFeedback";
 
 function OnboardingLayer() {
   const { user } = useAuth();
@@ -51,6 +52,8 @@ const AppShell = () => {
   const { viewMode } = useViewMode();
   const { isViewOnly } = useAccessMode();
   useSseEvents(); // real-time push from server
+
+  useEffect(() => { initTapFeedback(); }, []);
 
   return (
     <FavoritesProvider>

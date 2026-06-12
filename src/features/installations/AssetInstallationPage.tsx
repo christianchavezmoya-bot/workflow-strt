@@ -3199,6 +3199,44 @@ const AssetInstallationPage = () => {
               }
             }
 
+            // Smart one-liner description of true asset condition
+            const smartDesc = (() => {
+              let issues: AssetIssue[] = [];
+              try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
+              const open = issues.filter(i => !i.resolved);
+              const blockingCount = open.filter(i => i.isBlocking).length;
+              const issueNote =
+                blockingCount > 0
+                  ? `${blockingCount} blocking issue${blockingCount > 1 ? "s" : ""}`
+                  : open.some(i => i.severity === "high") ? "high severity issue"
+                  : open.length > 0 ? `${open.length} open issue${open.length > 1 ? "s" : ""}`
+                  : null;
+              const st = asset.status as ProjectAssetStatus;
+              let cond = "";
+              if (st === "Complete") {
+                if (awaitingCustomerSig) cond = "complete · awaiting signature";
+                else if (subLabel === "Missing") cond = "complete · missing data";
+                else cond = issueNote ? `complete · ${issueNote}` : "complete";
+              } else if (st === "InProgress") {
+                const base = subLabel === "Paused" ? "paused" : "in progress · running";
+                cond = issueNote ? `${base} · ${issueNote}` : base;
+              } else if (st === "NotStarted") {
+                cond = !hasWorkflow && !latestRun ? "no workflow" : issueNote ? `not started · ${issueNote}` : "not started";
+              } else if (st === "Issue") {
+                cond = issueNote ? `issue · ${issueNote}` : "issue";
+              } else if (st === "Paused") {
+                cond = issueNote ? `paused · ${issueNote}` : "paused";
+              } else if (st === "Pending") {
+                cond = issueNote ? `pending · ${issueNote}` : "pending";
+              } else {
+                cond = (STATUS_LABELS[st as ProjectAssetStatus] ?? (st as string)).toLowerCase();
+              }
+              const prefix = asset.assetName
+                ? `${asset.assetName} · `
+                : tech?.fullName ? `${tech.fullName} · ` : "";
+              return `${prefix}${cond}`;
+            })();
+
             // Left border — reflects urgency for issues, missing data, and awaiting signature
             const borderLeftColor =
               healthColor === "red" ? "error.main" :
@@ -3289,19 +3327,17 @@ const AssetInstallationPage = () => {
                       : <ExpandMoreOutlined sx={{ fontSize: 18 }} />}
                   </IconButton>
 
-                  {/* Asset tag + asset name + tech */}
+                  {/* Asset tag + smart condition description */}
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <Stack direction="row" alignItems="center" spacing={0.5}>
                       <Typography variant="body2" fontWeight={700} noWrap>{asset.assetTag}</Typography>
                       {issuesBadge(asset)}
                     </Stack>
-                    {asset.assetName && (
-                      <Typography variant="caption" color="text.primary" fontWeight={500} noWrap sx={{ display: "block" }}>
-                        {asset.assetName}
-                      </Typography>
-                    )}
-                    <Typography variant="caption" color="text.secondary" noWrap>
-                      {tech?.fullName ?? "Unassigned"}
+                    <Typography
+                      noWrap
+                      sx={{ display: "block", fontSize: "0.68rem", color: "text.secondary", lineHeight: 1.3, mt: 0.15 }}
+                    >
+                      {smartDesc}
                     </Typography>
                   </Box>
 
