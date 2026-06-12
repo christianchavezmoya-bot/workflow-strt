@@ -925,6 +925,7 @@ public class ProjectAssetsController : ControllerBase
             .Where(r => assetIds.Contains(r.AssetId))
             .OrderByDescending(r => r.StartedAt)
             .ThenByDescending(r => r.UpdatedAt)
+            .AsNoTracking()
             .ToListAsync();
 
         var latestRunByAsset = latestRuns

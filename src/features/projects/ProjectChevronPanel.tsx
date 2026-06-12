@@ -362,10 +362,26 @@ export default function ProjectChevronPanel({
   const [installAssetsLoading, setInstallAssetsLoading] = useState(false);
   const [latestRuns,           setLatestRuns]           = useState<AssetWorkflowRun[]>([]);
 
-  const runByAsset = useMemo(
-    () => new Map(latestRuns.map(r => [r.assetId, r])),
-    [latestRuns]
-  );
+  const runByAsset = useMemo(() => {
+    // Group all runs by assetId, then pick the most relevant one per asset.
+    // Priority: locked+pending-signature > any locked > first available.
+    // Prevents assets with multiple workflow configs from silently dropping a pending run.
+    const groups = new Map<string, AssetWorkflowRun[]>();
+    for (const r of latestRuns) {
+      const arr = groups.get(r.assetId) ?? [];
+      arr.push(r);
+      groups.set(r.assetId, arr);
+    }
+    const result = new Map<string, AssetWorkflowRun>();
+    groups.forEach((arr, assetId) => {
+      const best =
+        arr.find(r => r.isLocked && !r.customerSignedAt && r.signatureStatus !== "WaivedCustomer") ??
+        arr.find(r => r.isLocked) ??
+        arr[0];
+      if (best) result.set(assetId, best);
+    });
+    return result;
+  }, [latestRuns]);
 
   // Aggregate BOM across all latest runs for this project → BomExportRow[]
   const bomSummary = useMemo((): BomExportRow[] => {

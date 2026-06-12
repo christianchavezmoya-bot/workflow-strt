@@ -22,8 +22,9 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json"
   },
-  // Only used when there is no cache — auth endpoints override this to 0
-  timeout: 5000,
+  // 15 s gives the server headroom for slow queries; auth endpoints override this to 0.
+  // Previously 5 s — too tight and caused cascading timeout floods when the server was busy.
+  timeout: 15000,
 });
 
 type DebugLog = {

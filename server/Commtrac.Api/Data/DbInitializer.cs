@@ -18,6 +18,8 @@ public static class DbInitializer
         FixEnsuredMigrations(db);
 
         db.Database.Migrate();
+        ConfigureSqlitePragmas(db);       // WAL mode + busy timeout — must run first
+        EnsurePerformanceIndexes(db);     // composite indexes for hot read queries
         EnsureAuditLogTable(db);
         EnsureSessionsTable(db);
         EnsurePasswordChangedAtColumn(db);
@@ -194,6 +196,64 @@ public static class DbInitializer
                 SortOrder = 47,
                 IsActive = true
             });
+        }
+    }
+
+    /// <summary>
+    /// Sets SQLite connection-level PRAGMAs for reliability and concurrency.
+    /// WAL mode allows concurrent reads alongside a write (no reader-writer lock).
+    /// busy_timeout makes readers wait up to 5 s instead of immediately failing with SQLITE_BUSY.
+    /// </summary>
+    private static void ConfigureSqlitePragmas(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            // Write-Ahead Logging: readers never block writers and writers never block readers.
+            cmd.CommandText = "PRAGMA journal_mode=WAL";
+            cmd.ExecuteNonQuery();
+            // If the DB is locked, wait up to 5000 ms before returning SQLITE_BUSY.
+            cmd.CommandText = "PRAGMA busy_timeout=5000";
+            cmd.ExecuteNonQuery();
+            // Increase page cache to 8 MB — reduces disk I/O for large JSON blob columns.
+            cmd.CommandText = "PRAGMA cache_size=-8000";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Creates composite indexes that cover the two hottest read queries:
+    ///   1. ListByProject  — groups AssetWorkflowRuns by (AssetId, WorkflowConfigId) ordered by StartedAt DESC.
+    ///   2. BuildWorkflowSummariesAsync — orders AssetWorkflowRuns by (AssetId, StartedAt DESC).
+    /// Without these, SQLite must sort all matched rows on an unindexed column.
+    /// </summary>
+    private static void EnsurePerformanceIndexes(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            // Covers GROUP BY (AssetId, WorkflowConfigId) ORDER BY StartedAt DESC
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_AssetWorkflowRuns_AssetId_ConfigId_StartedAt
+                ON AssetWorkflowRuns (AssetId, WorkflowConfigId, StartedAt DESC)";
+            cmd.ExecuteNonQuery();
+            // Covers the single-latest-run-per-asset lookup in BuildWorkflowSummariesAsync
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_AssetWorkflowRuns_AssetId_StartedAt
+                ON AssetWorkflowRuns (AssetId, StartedAt DESC)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
         }
     }
 

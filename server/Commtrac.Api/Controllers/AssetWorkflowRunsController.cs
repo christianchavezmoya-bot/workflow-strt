@@ -197,6 +197,7 @@ public class AssetWorkflowRunsController : ControllerBase
             var runs = await _db.AssetWorkflowRuns
                 .Where(r => assetIds.Contains(r.AssetId))
                 .OrderByDescending(r => r.StartedAt)
+                .AsNoTracking()
                 .ToListAsync();
 
             // Return only the latest run per asset per workflow config

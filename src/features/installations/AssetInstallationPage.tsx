@@ -344,6 +344,8 @@ const AssetInstallationPage = () => {
   // effect corrects the tab) are silently discarded.
   const assetLoadIdRef = useRef(0);
   const lastRefreshTsRef = useRef(0);
+  const isRefreshingRef = useRef(false);   // in-flight guard — prevents concurrent refreshAssets calls
+  const serverWasOfflineRef = useRef(false); // tracks offline→online transition for api-server-reachable
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     () => { try { return sessionStorage.getItem("installations_selected_project_id") ?? ""; } catch { return ""; } }
@@ -663,14 +665,37 @@ const AssetInstallationPage = () => {
   }, [activeProduct?.id, archiveMode, products, selectedProjectId]);
 
   const refreshAssets = useCallback(async () => {
-    const refreshPromise = selectedProjectId
-      ? projectAssetService.listByProject(selectedProjectId, archiveMode)
-      : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode))).then((groups) => groups.flat());
-    const a = await refreshPromise;
-    setAssets(a);
-    lastRefreshTsRef.current = Date.now();    setLastFetchedAt(new Date());
-    if (activeProduct?.id) {
-      setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+    // Collapse concurrent calls — only one refresh runs at a time.
+    if (isRefreshingRef.current) return;
+    isRefreshingRef.current = true;
+    try {
+      const refreshPromise = selectedProjectId
+        ? projectAssetService.listByProject(selectedProjectId, archiveMode)
+        : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode))).then((groups) => groups.flat());
+      const a = await refreshPromise;
+      setAssets(a);
+      lastRefreshTsRef.current = Date.now();    setLastFetchedAt(new Date());
+      if (activeProduct?.id) {
+        setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+      }
+      // Re-load runs so signature chips stay current — fire-and-forget, non-blocking.
+      const projectIds = [...new Set(a.map((asset) => asset.projectId).filter(Boolean))];
+      void Promise.all(projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
+        .then((results) => {
+          const runMap: Record<string, AssetWorkflowRun[]> = {};
+          results.flat().forEach((run) => {
+            if (!runMap[run.assetId]) runMap[run.assetId] = [];
+            runMap[run.assetId].push(run);
+          });
+          setRunsMap((prev) => {
+            const merged = { ...runMap };
+            Object.keys(prev).forEach((id) => { if (prev[id].length > 1) merged[id] = prev[id]; });
+            return merged;
+          });
+        })
+        .catch(() => {/* non-blocking */});
+    } finally {
+      isRefreshingRef.current = false;
     }
   }, [selectedProjectId, archiveMode, products, activeProduct?.id]);
 
@@ -700,14 +725,34 @@ const AssetInstallationPage = () => {
 
   // Mark server as unreachable when background fetch fails
   useEffect(() => {
-    const handler = () => setServerReachable(false);
+    const handler = () => {
+      setServerReachable(false);
+      serverWasOfflineRef.current = true;
+    };
     window.addEventListener("repo:assets:fetch-failed", handler);
     return () => window.removeEventListener("repo:assets:fetch-failed", handler);
   }, []);
 
-  // Fix 6b — Re-fetch immediately when server comes back online
+  // Track when the server goes offline so api-server-reachable knows it's a recovery event.
+  // Without this gate, api-server-reachable fires on EVERY successful response, creating
+  // a self-sustaining refresh loop that floods the server with requests.
   useEffect(() => {
-    const handler = () => void refreshAssets();
+    const markOffline = () => { serverWasOfflineRef.current = true; };
+    window.addEventListener("api-serving-cache", markOffline);
+    window.addEventListener("offline", markOffline);
+    return () => {
+      window.removeEventListener("api-serving-cache", markOffline);
+      window.removeEventListener("offline", markOffline);
+    };
+  }, []);
+
+  // Fix 6b — Re-fetch ONLY when server comes back after being offline (not on every response).
+  useEffect(() => {
+    const handler = () => {
+      if (!serverWasOfflineRef.current) return;
+      serverWasOfflineRef.current = false;
+      void refreshAssets();
+    };
     window.addEventListener("api-server-reachable", handler);
     return () => window.removeEventListener("api-server-reachable", handler);
   }, [refreshAssets]);
@@ -912,9 +957,11 @@ const AssetInstallationPage = () => {
       let sigStatus = "-";
       if (latestRun) {
         const ss = latestRun.signatureStatus ?? "";
-        if (ss === "PendingCustomer") sigStatus = "Pending Customer";
-        else if (ss === "Signed")     sigStatus = "Signed";
-        else if (ss === "Waived")     sigStatus = "Waived";
+        if (ss === "PendingCustomer")     sigStatus = "Pending Customer";
+        else if (ss === "PendingInstaller") sigStatus = "Pending Installer";
+        else if (ss === "Signed")           sigStatus = "Signed";
+        else if (ss === "WaivedCustomer")   sigStatus = "Waived";
+        else if (ss === "Declined")         sigStatus = "Declined";
       }
       return {
         assetTag:     a.assetTag     ?? "",
@@ -2441,7 +2488,7 @@ const AssetInstallationPage = () => {
         const issueHealth = computeAssetHealth(asset, runsMap[asset.id] ?? []);
         // Check if complete but awaiting customer signature
         const latestRuns = runsMap[asset.id] ?? [];
-        const latestLocked = latestRuns.find(r => r.isLocked);
+        const latestLocked = [...latestRuns].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).find(r => r.isLocked);
         const awaitingCustomerSig = status === "Complete" && !!latestLocked
           && !latestLocked.customerSignedAt
           && latestLocked.signatureStatus !== "WaivedCustomer";
