@@ -1051,7 +1051,11 @@ export const UserManagement: React.FC = () => {
             installationAssets:      { ...computed.installationAssets,      ...saved.installationAssets },
             workInstructionsBuilder: { ...computed.workInstructionsBuilder, ...saved.workInstructionsBuilder },
             documents:               { ...computed.documents,               ...saved.documents },
-            settings:                { ...computed.settings,                ...saved.settings },
+            // OR merge: computed admin access cannot be revoked by a stale saved false.
+            settings: {
+              view: computed.settings.view || (saved.settings?.view ?? false),
+              edit: computed.settings.edit || (saved.settings?.edit ?? false),
+            },
           };
         })(),
       });

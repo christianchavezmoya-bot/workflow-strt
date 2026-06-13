@@ -43,7 +43,12 @@ const resolveDomains = (roleName: string | undefined, permissions: RolePermissio
       installationAssets:      { ...defaults.installationAssets,      ...saved.installationAssets },
       workInstructionsBuilder: { ...defaults.workInstructionsBuilder, ...saved.workInstructionsBuilder },
       documents:               { ...defaults.documents,               ...saved.documents },
-      settings:                { ...defaults.settings,                ...saved.settings },
+      // OR merge: Tier 1 createDeleteTables always guarantees settings access;
+      // saved false cannot revoke access the role's Tier 1 flags already grant.
+      settings: {
+        view: defaults.settings.view || (saved.settings?.view ?? false),
+        edit: defaults.settings.edit || (saved.settings?.edit ?? false),
+      },
     };
   }
 
