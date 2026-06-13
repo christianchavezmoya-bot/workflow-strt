@@ -34,7 +34,6 @@ public class SettingsController : ControllerBase
     }
 
     [HttpGet("quickbase")]
-    [Authorize]
     public async Task<ActionResult<QuickbaseSettingsDto>> GetQuickbase()
     {
         var s = await _db.QuickbaseSettings.FirstOrDefaultAsync(x => x.Id == 1);

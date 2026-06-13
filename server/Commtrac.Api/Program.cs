@@ -85,7 +85,12 @@ builder.Services
             ValidateIssuerSigningKey = true,
             ValidIssuer = jwtIssuer,
             ValidAudience = jwtAudience,
-            IssuerSigningKey = new SymmetricSecurityKey(keyBytes)
+            IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
+            // JwtSecurityTokenHandler serialises ClaimTypes.Role → "role" when writing the token.
+            // Without this, [Authorize(Roles="...")] can't find the claim because it looks for
+            // the long WS-Federation URI (ClaimTypes.Role) not the short "role" key.
+            RoleClaimType = "role",
+            NameClaimType = "unique_name"
         };
     });
 

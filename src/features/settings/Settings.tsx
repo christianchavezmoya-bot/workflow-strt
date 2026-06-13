@@ -37,7 +37,7 @@ import {
 } from "@mui/material";
 import { AddOutlined, DeleteOutline, EditOutlined, Print, Download, SearchOutlined, CheckCircleOutline, BlockOutlined, ExpandMoreOutlined, ExpandLessOutlined, UploadFileOutlined, ArrowUpwardOutlined, ArrowDownwardOutlined, UnfoldMoreOutlined } from "@mui/icons-material";
 import { quickbaseService, type QbFieldInfo } from "../../services/quickbaseService";
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { workflowTypeService } from "../../services/workflowTypeService";
@@ -295,29 +295,49 @@ interface AuditLogEntry {
 
 const SETTINGS_TAB_KEYS = ["quickbase", "sms", "fields", "divisions", "products", "features", "workflow-types", "logo", "recovery", "audit"];
 
+function getVisibleSettingsTabKeys(isAdmin: boolean) {
+  return isAdmin ? SETTINGS_TAB_KEYS : SETTINGS_TAB_KEYS.slice(0, 8);
+}
+
+function resolveSettingsTabKey(isAdmin: boolean, search: string) {
+  const visibleKeys = getVisibleSettingsTabKeys(isAdmin);
+  const urlKey = new URLSearchParams(search).get("tab");
+  if (urlKey && visibleKeys.includes(urlKey)) return urlKey;
+
+  const stored = localStorage.getItem("settings_active_tab");
+  if (stored) {
+    if (visibleKeys.includes(stored)) return stored;
+    const legacyIndex = Number.parseInt(stored, 10);
+    if (!Number.isNaN(legacyIndex)) {
+      const legacyKey = SETTINGS_TAB_KEYS[legacyIndex];
+      if (legacyKey && visibleKeys.includes(legacyKey)) return legacyKey;
+    }
+  }
+
+  return visibleKeys[0] ?? SETTINGS_TAB_KEYS[0];
+}
+
 const Settings = () => {
   const { addNotification } = useFieldNotifications();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isAdmin = user?.role === "Admin" || secureGet("local_auth_user")?.includes('"Admin"');
+  // Read synchronously from secure storage so isAdmin is correct on the first render,
+  // before useAuth has loaded the real user from storage into component state.
+  const isAdmin = Boolean(
+    user?.role === "Admin" ||
+    secureGet("auth_user")?.includes('"Admin"') ||
+    secureGet("local_auth_user")?.includes('"Admin"')
+  );
+  const visibleSettingsTabKeys = useMemo(() => getVisibleSettingsTabKeys(isAdmin), [isAdmin]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
-  const [tab, setTab] = useState(() => {
-    // URL param takes priority over localStorage
-    const urlKey = new URLSearchParams(window.location.search).get("tab");
-    if (urlKey) {
-      const idx = SETTINGS_TAB_KEYS.indexOf(urlKey);
-      if (idx >= 0) return idx;
-    }
-    const stored = localStorage.getItem("settings_active_tab");
-    return stored ? parseInt(stored, 10) : 0;
-  });
+  const [activeTabKey, setActiveTabKey] = useState(() => resolveSettingsTabKey(isAdmin, window.location.search));
+  const tab = Math.max(0, visibleSettingsTabKeys.indexOf(activeTabKey));
 
-  // Push the resolved tab to URL on mount so Favorites always captures the correct sub-page.
   useEffect(() => {
-    const key = SETTINGS_TAB_KEYS[tab];
-    if (key) setSearchParams({ tab: key }, { replace: true });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const resolvedKey = resolveSettingsTabKey(isAdmin, window.location.search);
+    if (resolvedKey !== activeTabKey) setActiveTabKey(resolvedKey);
+  }, [activeTabKey, isAdmin]);
 
   const [settings, setSettings] = useState<QuickbaseSettingsForm>(() => loadSettings());
   const [status, setStatus] = useState<"" | "saved" | "sent" | "error">("");
@@ -425,10 +445,10 @@ const Settings = () => {
   const [products, setProducts] = useState<Product[]>([]);
   // Start as true if landing directly on Products tab so spinner shows immediately, not "No products yet."
   const [productsLoading, setProductsLoading] = useState(() => {
-    const urlKey = new URLSearchParams(window.location.search).get("tab");
-    const stored = localStorage.getItem("settings_active_tab");
-    const activeIdx = urlKey ? SETTINGS_TAB_KEYS.indexOf(urlKey) : stored ? parseInt(stored, 10) : 0;
-    return activeIdx === 4;
+    return resolveSettingsTabKey(
+      Boolean(user?.role === "Admin" || secureGet("local_auth_user")?.includes('"Admin"')),
+      window.location.search
+    ) === "products";
   });
   const [productDialog, setProductDialog] = useState(false);
   const [productEditId, setProductEditId] = useState<string | null>(null);
@@ -477,19 +497,19 @@ const Settings = () => {
     }
   }
 
-  // Load products + divisions when Products tab becomes active (tab === 4).
-  // Load features when Features tab becomes active (tab === 5).
+  // Load products + divisions when Products tab becomes active.
+  // Load features when Features tab becomes active.
   // Always reload — don't guard on length so switching back refreshes data.
   useEffect(() => {
-    if (tab === 4) {
+    if (activeTabKey === "products") {
       loadProducts();
       if (divisions.length === 0) loadDivisions();
     }
-    if (tab === 5) {
+    if (activeTabKey === "features") {
       loadFeatures();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [activeTabKey]);
 
   async function saveProduct() {
     if (!productForm.name.trim()) { setProductError("Name is required."); return; }
@@ -832,12 +852,12 @@ const Settings = () => {
 
   // Load features (and products for the filter dropdown) whenever Features tab becomes active.
   useEffect(() => {
-    if (tab === 5) {
+    if (activeTabKey === "features") {
       loadFeatures();
       if (products.length === 0) loadProducts();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [activeTabKey]);
 
   async function saveFeature() {
     if (!featureForm.name.trim()) { setFeatureError("Name is required."); return; }
@@ -1593,8 +1613,9 @@ const Settings = () => {
 
   // Persist active tab to localStorage
   useEffect(() => {
-    localStorage.setItem("settings_active_tab", String(tab));
-  }, [tab]);
+    localStorage.setItem("settings_active_tab", activeTabKey);
+    if (activeTabKey) setSearchParams({ tab: activeTabKey }, { replace: true });
+  }, [activeTabKey, setSearchParams]);
 
   const checkApiStatus = async () => {
     try {
@@ -1635,6 +1656,7 @@ const Settings = () => {
   }, [isAdmin]);
 
   useEffect(() => {
+    if (!isAdmin) return;
     (async () => {
       try {
         const qb = await settingsService.getQuickbaseSettings();
@@ -1657,7 +1679,7 @@ const Settings = () => {
         // ignore
       }
     })();
-  }, []);
+  }, [isAdmin]);
 
   return (
     <Stack spacing={3}>
@@ -1672,9 +1694,8 @@ const Settings = () => {
 
       <Box className="glass-card" sx={{ padding: 3 }}>
         <Tabs value={tab} onChange={(_, next) => {
-          setTab(next);
-          const key = SETTINGS_TAB_KEYS[next] ?? "";
-          if (key) setSearchParams({ tab: key }, { replace: true });
+          const key = visibleSettingsTabKeys[next] ?? visibleSettingsTabKeys[0] ?? SETTINGS_TAB_KEYS[0];
+          if (key) setActiveTabKey(key);
         }} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
           <Tab label="Integrations" />
           <Tab label="SMS/SMTP" />
@@ -1688,7 +1709,7 @@ const Settings = () => {
           {isAdmin && <Tab label="Audit Log" />}
         </Tabs>
 
-        {tab === 0 && (
+        {activeTabKey === "quickbase" && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Typography variant="h6">External integrations (optional)</Typography>
             <Stack direction="row" spacing={2} alignItems="center">
@@ -1944,7 +1965,7 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 1 && (
+        {activeTabKey === "sms" && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Typography variant="h6">SMS/SMTP settings</Typography>
             <Typography variant="body2" color="text.secondary">
@@ -2027,7 +2048,7 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 3 && (
+        {activeTabKey === "divisions" && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
               <Box>
@@ -2117,7 +2138,7 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 4 && (
+        {activeTabKey === "products" && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
               <Box>
@@ -2175,7 +2196,7 @@ const Settings = () => {
                     const linked = p.features ?? [];
                     const unlinkedFeatures = features.filter((f) => !linked.some((l) => l.id === f.id));
                     return (
-                      <>
+                      <Fragment key={p.id}>
                         <TableRow key={p.id} hover sx={{ cursor: "pointer" }} onClick={() => {
                           if (isExpanded) {
                             setExpandedProductId(null);
@@ -2264,7 +2285,7 @@ const Settings = () => {
                             </TableCell>
                           </TableRow>
                         )}
-                      </>
+                      </Fragment>
                     );
                   })}
                 </TableBody>
@@ -2277,7 +2298,7 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 5 && (
+        {activeTabKey === "features" && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
               <Box>
@@ -2565,7 +2586,7 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 6 && (
+        {activeTabKey === "workflow-types" && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
               <Box>
@@ -2655,11 +2676,11 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 7 && <BusinessLogoTab />}
+        {activeTabKey === "logo" && <BusinessLogoTab />}
 
-        {tab === 8 && isAdmin && <RecoveryCenter />}
+        {activeTabKey === "recovery" && isAdmin && <RecoveryCenter />}
 
-        {tab === 9 && isAdmin && (
+        {activeTabKey === "audit" && isAdmin && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Typography variant="h6">2FA Audit Log</Typography>
             <Typography variant="body2" color="text.secondary">
@@ -2732,7 +2753,7 @@ const Settings = () => {
           </Stack>
         )}
 
-        {tab === 2 && (
+        {activeTabKey === "fields" && (
           <Stack spacing={2} sx={{ marginTop: 2 }}>
             <Typography variant="h6">Fields / Data catalog</Typography>
             <Typography variant="body2" color="text.secondary">
