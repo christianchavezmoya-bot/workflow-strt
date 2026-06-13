@@ -241,6 +241,8 @@ const SmallThumbnail = ({ doc }: { doc: DocumentRecord }) => {
 const TipsPage = () => {
   const { user } = useAuth();
   const can = usePermissions();
+  const canViewTips = can.documents.view;
+  const canDeleteTips = can.documents.delete;
 
   // Data
   const [docs, setDocs] = useState<DocumentRecord[]>([]);
@@ -518,15 +520,22 @@ const TipsPage = () => {
                 </Stack>
               </CardContent>
               <CardActions sx={{ pt: 0 }}>
-                <Button size="small" startIcon={<OpenInNewOutlinedIcon />} onClick={() => handleOpen(doc)}>
-                  Open
-                </Button>
-                {can.modifyData && (
+                {canViewTips && (
+                  <Button size="small" startIcon={<OpenInNewOutlinedIcon />} onClick={() => handleOpen(doc)}>
+                    Open
+                  </Button>
+                )}
+                {canDeleteTips && (
                   <Tooltip title="Delete">
                     <IconButton size="small" color="error" onClick={() => handleDelete(doc.id)}>
                       <DeleteOutlineIcon />
                     </IconButton>
                   </Tooltip>
+                )}
+                {!canViewTips && !canDeleteTips && (
+                  <Typography variant="caption" color="text.disabled">
+                    No actions
+                  </Typography>
                 )}
               </CardActions>
             </Card>
@@ -587,15 +596,22 @@ const TipsPage = () => {
                   </TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.5} alignItems="center">
-                      <Button size="small" startIcon={<OpenInNewOutlinedIcon />} onClick={() => handleOpen(doc)}>
-                        Open
-                      </Button>
-                      {can.modifyData && (
+                      {canViewTips && (
+                        <Button size="small" startIcon={<OpenInNewOutlinedIcon />} onClick={() => handleOpen(doc)}>
+                          Open
+                        </Button>
+                      )}
+                      {canDeleteTips && (
                         <Tooltip title="Delete">
                           <IconButton size="small" color="error" onClick={() => handleDelete(doc.id)}>
                             <DeleteOutlineIcon />
                           </IconButton>
                         </Tooltip>
+                      )}
+                      {!canViewTips && !canDeleteTips && (
+                        <Typography variant="caption" color="text.disabled">
+                          No actions
+                        </Typography>
                       )}
                     </Stack>
                   </TableCell>

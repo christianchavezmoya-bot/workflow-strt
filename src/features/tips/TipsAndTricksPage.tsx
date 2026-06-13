@@ -249,6 +249,7 @@ function DocPreviewDialog({
 export default function TipsAndTricksPage() {
   const { user } = useAuth();
   const can = usePermissions();
+  const canViewTips = can.documents.view;
   const canUploadTips = can.documents.upload;
   const canDeleteTips = can.documents.delete;
 
@@ -685,7 +686,7 @@ export default function TipsAndTricksPage() {
                     </Typography>
                   )}
                   <Stack direction="row" spacing={0.25} sx={{ ml: "auto" }}>
-                    {doc.downloadUrl && (
+                    {doc.downloadUrl && canViewTips && (
                       <IconButton
                         size="small"
                         onClick={(e) => {
@@ -709,6 +710,11 @@ export default function TipsAndTricksPage() {
                       >
                         <DeleteOutline sx={{ fontSize: 16 }} />
                       </IconButton>
+                    )}
+                    {!((doc.downloadUrl && canViewTips) || canDeleteTips) && (
+                      <Typography variant="caption" color="text.disabled">
+                        No actions
+                      </Typography>
                     )}
                   </Stack>
                 </Stack>
@@ -759,10 +765,12 @@ export default function TipsAndTricksPage() {
                 <TableCell>{fmtDate(doc.uploadedAt) || "-"}</TableCell>
                 <TableCell align="right">
                   <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                    <Button size="small" onClick={() => setPreviewDoc(doc)}>
-                      Open
-                    </Button>
-                    {doc.downloadUrl && (
+                    {canViewTips && (
+                      <Button size="small" onClick={() => setPreviewDoc(doc)}>
+                        Open
+                      </Button>
+                    )}
+                    {doc.downloadUrl && canViewTips && (
                       <Button size="small" onClick={() => void documentService.downloadDocument(doc.downloadUrl!, doc.name)}>
                         Download
                       </Button>
@@ -771,6 +779,11 @@ export default function TipsAndTricksPage() {
                       <Button size="small" color="error" onClick={() => void handleDelete(doc.id)}>
                         Delete
                       </Button>
+                    )}
+                    {!((canViewTips) || canDeleteTips) && (
+                      <Typography variant="caption" color="text.disabled">
+                        No actions
+                      </Typography>
                     )}
                   </Stack>
                 </TableCell>

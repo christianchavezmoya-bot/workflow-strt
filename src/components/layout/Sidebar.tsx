@@ -60,8 +60,7 @@ const Sidebar = () => {
   const { activeOffice, updateActiveOffice } = useActiveOffice();
 
   const visibleNavItems = navItems.filter((item) => {
-    // Hide Settings from view-only users (same rule as before the accidental removal)
-    if ("requiresFullAccess" in item && item.requiresFullAccess && can.viewOnly) return false;
+    if (item.to === "/settings" && !can.settings.view) return false;
     return true;
   });
   const [officeOptions, setOfficeOptions] = useState<string[]>(["All"]);

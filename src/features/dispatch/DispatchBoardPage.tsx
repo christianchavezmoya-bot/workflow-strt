@@ -34,6 +34,7 @@ import {
   LocalShippingOutlined,
   RefreshOutlined
 } from "@mui/icons-material";
+import { usePermissions } from "../../hooks/usePermissions";
 import { dispatchService } from "../../services/dispatchService";
 import type {
   AddDeliveryEventRequest,
@@ -158,11 +159,13 @@ function OrderFormDialog({
 function OrderDetailDialog({
   open,
   order,
+  canEdit,
   onClose,
   onUpdated
 }: {
   open: boolean;
   order: DispatchOrder | null;
+  canEdit: boolean;
   onClose: () => void;
   onUpdated: (o: DispatchOrder) => void;
 }) {
@@ -319,28 +322,34 @@ function OrderDetailDialog({
                     <TableCell>{line.unit ?? "—"}</TableCell>
                     <TableCell>{line.notes ?? "—"}</TableCell>
                     <TableCell padding="checkbox">
-                      <IconButton size="small" onClick={() => handleRemoveLine(line.id)}>
-                        <DeleteOutlined fontSize="small" />
-                      </IconButton>
+                      {canEdit ? (
+                        <IconButton size="small" onClick={() => handleRemoveLine(line.id)}>
+                          <DeleteOutlined fontSize="small" />
+                        </IconButton>
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
 
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>Add item</Typography>
-            {lineError && <Alert severity="error" sx={{ mb: 1 }}>{lineError}</Alert>}
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              <TextField label="Part #" value={linePart} onChange={e => setLinePart(e.target.value)} size="small" sx={{ width: 120 }} />
-              <TextField label="Description *" value={lineDesc} onChange={e => setLineDesc(e.target.value)} size="small" sx={{ flex: 1, minWidth: 160 }} />
-              <TextField label="Qty" value={lineQty} onChange={e => setLineQty(e.target.value)} size="small" type="number" sx={{ width: 80 }} />
-              <TextField label="Unit" value={lineUnit} onChange={e => setLineUnit(e.target.value)} size="small" sx={{ width: 80 }} />
-              <TextField label="Notes" value={lineNotes} onChange={e => setLineNotes(e.target.value)} size="small" sx={{ flex: 1, minWidth: 120 }} />
-              <Button variant="outlined" size="small" startIcon={<AddOutlined />} onClick={handleAddLine} disabled={savingLine}>
-                Add
-              </Button>
-            </Stack>
+            {canEdit && (
+              <>
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>Add item</Typography>
+                {lineError && <Alert severity="error" sx={{ mb: 1 }}>{lineError}</Alert>}
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <TextField label="Part #" value={linePart} onChange={e => setLinePart(e.target.value)} size="small" sx={{ width: 120 }} />
+                  <TextField label="Description *" value={lineDesc} onChange={e => setLineDesc(e.target.value)} size="small" sx={{ flex: 1, minWidth: 160 }} />
+                  <TextField label="Qty" value={lineQty} onChange={e => setLineQty(e.target.value)} size="small" type="number" sx={{ width: 80 }} />
+                  <TextField label="Unit" value={lineUnit} onChange={e => setLineUnit(e.target.value)} size="small" sx={{ width: 80 }} />
+                  <TextField label="Notes" value={lineNotes} onChange={e => setLineNotes(e.target.value)} size="small" sx={{ flex: 1, minWidth: 120 }} />
+                  <Button variant="outlined" size="small" startIcon={<AddOutlined />} onClick={handleAddLine} disabled={savingLine}>
+                    Add
+                  </Button>
+                </Stack>
+              </>
+            )}
           </Box>
         )}
 
@@ -377,26 +386,30 @@ function OrderDetailDialog({
               </TableBody>
             </Table>
 
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>Record event</Typography>
-            {evtError && <Alert severity="error" sx={{ mb: 1 }}>{evtError}</Alert>}
-            <Stack direction="row" spacing={1} alignItems="flex-start" flexWrap="wrap" useFlexGap>
-              <FormControl size="small" sx={{ minWidth: 140 }}>
-                <InputLabel shrink>Event type</InputLabel>
-                <Select value={evtType} label="Event type" onChange={e => setEvtType(e.target.value as DeliveryEventType)}>
-                  <MenuItem value="Confirmed">Confirmed</MenuItem>
-                  <MenuItem value="Packed">Packed</MenuItem>
-                  <MenuItem value="Shipped">Shipped</MenuItem>
-                  <MenuItem value="Delivered">Delivered</MenuItem>
-                  <MenuItem value="Exception">Exception</MenuItem>
-                </Select>
-              </FormControl>
-              <TextField label="Location" value={evtLocation} onChange={e => setEvtLocation(e.target.value)} size="small" sx={{ flex: 1, minWidth: 140 }} />
-              <TextField label="Notes" value={evtNotes} onChange={e => setEvtNotes(e.target.value)} size="small" sx={{ flex: 1, minWidth: 160 }} />
-              <Button variant="outlined" size="small" startIcon={<AddOutlined />} onClick={handleAddEvent} disabled={savingEvt}>
-                Record
-              </Button>
-            </Stack>
+            {canEdit && (
+              <>
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>Record event</Typography>
+                {evtError && <Alert severity="error" sx={{ mb: 1 }}>{evtError}</Alert>}
+                <Stack direction="row" spacing={1} alignItems="flex-start" flexWrap="wrap" useFlexGap>
+                  <FormControl size="small" sx={{ minWidth: 140 }}>
+                    <InputLabel shrink>Event type</InputLabel>
+                    <Select value={evtType} label="Event type" onChange={e => setEvtType(e.target.value as DeliveryEventType)}>
+                      <MenuItem value="Confirmed">Confirmed</MenuItem>
+                      <MenuItem value="Packed">Packed</MenuItem>
+                      <MenuItem value="Shipped">Shipped</MenuItem>
+                      <MenuItem value="Delivered">Delivered</MenuItem>
+                      <MenuItem value="Exception">Exception</MenuItem>
+                    </Select>
+                  </FormControl>
+                  <TextField label="Location" value={evtLocation} onChange={e => setEvtLocation(e.target.value)} size="small" sx={{ flex: 1, minWidth: 140 }} />
+                  <TextField label="Notes" value={evtNotes} onChange={e => setEvtNotes(e.target.value)} size="small" sx={{ flex: 1, minWidth: 160 }} />
+                  <Button variant="outlined" size="small" startIcon={<AddOutlined />} onClick={handleAddEvent} disabled={savingEvt}>
+                    Record
+                  </Button>
+                </Stack>
+              </>
+            )}
           </Box>
         )}
       </DialogContent>
@@ -410,6 +423,9 @@ function OrderDetailDialog({
 // ── Board page ────────────────────────────────────────────────────────────────
 
 export default function DispatchBoardPage() {
+  const can = usePermissions();
+  const canEditDispatch = !!can.projects?.edit;
+  const canDeleteDispatch = !!can.projects?.delete;
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -471,9 +487,11 @@ export default function DispatchBoardPage() {
           <Typography variant="h5" fontWeight={700}>Dispatch Board</Typography>
           <Typography variant="body2" color="text.secondary">Manage parts dispatch and delivery tracking</Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddOutlined />} onClick={() => { setEditOrder(undefined); setFormOpen(true); }}>
-          New Order
-        </Button>
+        {canEditDispatch && (
+          <Button variant="contained" startIcon={<AddOutlined />} onClick={() => { setEditOrder(undefined); setFormOpen(true); }}>
+            New Order
+          </Button>
+        )}
         <IconButton onClick={load} disabled={loading}>
           <RefreshOutlined />
         </IconButton>
@@ -544,16 +562,25 @@ export default function DispatchBoardPage() {
                 <TableCell>{order.lines.length}</TableCell>
                 <TableCell><StatusChip status={order.status} /></TableCell>
                 <TableCell align="right" onClick={e => e.stopPropagation()}>
-                  <Tooltip title="Edit">
-                    <IconButton size="small" onClick={() => { setEditOrder(order); setFormOpen(true); }}>
-                      <EditOutlined fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Delete">
-                    <IconButton size="small" onClick={() => handleDelete(order.id)}>
-                      <DeleteOutlined fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
+                  {canEditDispatch && (
+                    <Tooltip title="Edit">
+                      <IconButton size="small" onClick={() => { setEditOrder(order); setFormOpen(true); }}>
+                        <EditOutlined fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {canDeleteDispatch && (
+                    <Tooltip title="Delete">
+                      <IconButton size="small" onClick={() => handleDelete(order.id)}>
+                        <DeleteOutlined fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {!canEditDispatch && !canDeleteDispatch && (
+                    <Typography variant="caption" color="text.disabled">
+                      No actions
+                    </Typography>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -571,6 +598,7 @@ export default function DispatchBoardPage() {
       <OrderDetailDialog
         open={detailOpen}
         order={detailOrder}
+        canEdit={canEditDispatch}
         onClose={() => setDetailOpen(false)}
         onUpdated={handleUpdated}
       />
