@@ -20,6 +20,7 @@ import {
   HistoryOutlined,
   HourglassEmptyOutlined,
   InfoOutlined,
+  PhotoCameraOutlined,
   DragIndicatorOutlined,
   PlayArrowOutlined,
   PrintOutlined,
@@ -101,7 +102,7 @@ import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS } from "../../services/localDB";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
-import { countMissingWorkflowItems } from "../../utils/workflowCompleteness";
+import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import {
   generateAssetListReport,
   ALL_PRINT_COLUMNS,
@@ -122,6 +123,7 @@ import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
 import AssetDocumentsDialog from "./AssetDocumentsDialog";
 import AssetInspectionDialog from "./AssetInspectionDialog";
+import PhotoUploadDialog, { type MissingMediaFlag } from "../dashboard/PhotoUploadDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
@@ -254,6 +256,23 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+type AssetAttentionSummary = {
+  paused: boolean;
+  blockingIssueCount: number;
+  highObservationCount: number;
+  openIssueCount: number;
+  missingMediaCount: number;
+  needsMissingMediaRepair: boolean;
+  awaitingInstallerSig: boolean;
+  awaitingCustomerSig: boolean;
+  latestRun: AssetWorkflowRun | null;
+  latestLockedRun: AssetWorkflowRun | null;
+};
+
+type AssetPrimaryAction =
+  | { label: string; tooltip: string; color: "success" | "warning" | "error" | "info" | "inherit"; icon: React.ReactElement; onClick: () => void; variant?: "contained" | "outlined" | "text" }
+  | null;
+
 function nextDraftConfigNumber(configs: WorkflowConfig[], productName: string) {
   const pattern = new RegExp(`^${escapeRegExp(productName)}\\s+Config\\s+(\\d+)$`, "i");
   const maxMatch = configs.reduce((max, cfg) => {
@@ -333,11 +352,17 @@ const AssetInstallationPage = () => {
   const { complexViewActive } = useComplexView();
   const isNativePlatform = Capacitor.isNativePlatform();
   const showComplexControls = complexViewActive && isNativePlatform;
+  const showAdvancedAssetActions = !isNativePlatform || showComplexControls;
   const productsState = useAppSelector((s) => s.products);
   const projects = useAppSelector((s) => s.projects.items);
   const users = useAppSelector((s) => s.users.items);
   const [searchParams] = useSearchParams();
   const canEditAssetStatus = can.installationAssets?.editScope === "all";
+  const canViewInstallationAssets = !!can.installationAssets?.view;
+  const canEditInstallationAssets = !!can.installationAssets?.edit;
+  const canDeleteInstallationAssets = !!can.installationAssets?.delete;
+  const canRunAssetWorkflow = !!can.installationAssets?.runWorkflow;
+  const deepLinkHandledRef = useRef<string | null>(null);
 
   // Stale-load guard: incremented every time activeProduct changes so that
   // results from a superseded fetch (triggered before the tab restoration
@@ -436,6 +461,7 @@ const AssetInstallationPage = () => {
   // Issue detail dialog (comments / close)
   const [issueDetailAsset, setIssueDetailAsset] = useState<ProjectAsset | null>(null);
   const [issueDetailIssueId, setIssueDetailIssueId] = useState<string | null>(null);
+  const [issueDetailRunId, setIssueDetailRunId] = useState<string | null>(null);
 
   // Inline issue fields in chevron panel â€" keyed by issueId
   const [inlineCommentTexts, setInlineCommentTexts] = useState<Record<string, string>>({});
@@ -464,6 +490,7 @@ const AssetInstallationPage = () => {
   const [runHistoryConfigName, setRunHistoryConfigName] = useState("");
   // False when the run was created synthetically from a JSON import (no point re-running)
   const [runHistoryAllowRerun, setRunHistoryAllowRerun] = useState(true);
+  const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
   // Workflow type mismatch confirmation
   const [wfMismatchConfirm, setWfMismatchConfirm] = useState<{
     asset: ProjectAsset;
@@ -572,6 +599,107 @@ const AssetInstallationPage = () => {
     }
     return undefined;
   }, [products, searchParams, selectedProject]);
+
+  const arrivalBanner = useMemo(() => {
+    const assetIdFromUrl = searchParams.get("asset");
+    const actionFromUrl = searchParams.get("action");
+    if (!assetIdFromUrl || !actionFromUrl) return null;
+    const asset = assets.find((item) => item.id === assetIdFromUrl);
+    const assetLabel = asset?.assetTag || asset?.assetName || "this asset";
+
+    if (actionFromUrl === "issue") {
+      return {
+        severity: "warning" as const,
+        message: `You opened ${assetLabel} from an attention item to review and resolve an issue.`,
+      };
+    }
+    if (actionFromUrl === "signature") {
+      return {
+        severity: "info" as const,
+        message: `You opened ${assetLabel} from an attention item to complete sign-off.`,
+      };
+    }
+    if (actionFromUrl === "photos") {
+      return {
+        severity: "warning" as const,
+        message: `You opened ${assetLabel} from an attention item to add missing photos or videos.`,
+      };
+    }
+    if (actionFromUrl === "history") {
+      return {
+        severity: "info" as const,
+        message: `You opened ${assetLabel} from an attention item to review run details.`,
+      };
+    }
+    return null;
+  }, [assets, searchParams]);
+
+  useEffect(() => {
+    const assetIdFromUrl = searchParams.get("asset");
+    const actionFromUrl = searchParams.get("action");
+    if (!assetIdFromUrl || !actionFromUrl) {
+      deepLinkHandledRef.current = null;
+      return;
+    }
+
+    const issueIdFromUrl = searchParams.get("issue");
+    const issueSourceFromUrl = searchParams.get("issueSource");
+    const runIdFromUrl = searchParams.get("run");
+    const key = `${assetIdFromUrl}|${actionFromUrl}|${runIdFromUrl ?? ""}|${issueIdFromUrl ?? ""}|${issueSourceFromUrl ?? ""}`;
+    if (deepLinkHandledRef.current === key) return;
+
+    const asset = assets.find((item) => item.id === assetIdFromUrl);
+    if (!asset) return;
+
+    setExpandedAssetId(asset.id);
+
+    const runs = runsMap[asset.id];
+    const needsRuns = actionFromUrl === "photos" || actionFromUrl === "signature" || actionFromUrl === "history" || issueSourceFromUrl === "run";
+    if (needsRuns && !runs) {
+      void loadAssignmentsForAsset(asset.id);
+      return;
+    }
+
+    const targetRun = runIdFromUrl
+      ? (runs ?? []).find((run) => run.id === runIdFromUrl) ?? null
+      : (runs ?? []).slice().sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0] ?? null;
+
+    if (actionFromUrl === "issue" && issueIdFromUrl) {
+      if (issueSourceFromUrl === "asset") {
+        setIssueDetailAsset(asset);
+        setIssueDetailIssueId(issueIdFromUrl);
+        setIssueDetailRunId(null);
+        deepLinkHandledRef.current = key;
+        return;
+      }
+
+      if (issueSourceFromUrl === "run" && targetRun) {
+        let runIssues: RunIssue[] = [];
+        try { runIssues = JSON.parse(targetRun.issuesJson || "[]"); } catch {}
+        const matchingIssue = runIssues.find((issue) => issue.id === issueIdFromUrl);
+        if (matchingIssue) {
+          setIssueDetailAsset(asset);
+          setIssueDetailIssueId(issueIdFromUrl);
+          setIssueDetailRunId(targetRun.id);
+          deepLinkHandledRef.current = key;
+          return;
+        }
+      }
+    }
+
+    if (actionFromUrl === "photos") {
+      const photoRun = targetRun ?? (runs ?? []).find((run) => run.isLocked) ?? null;
+      if (!photoRun) return;
+      openMissingMediaDialog(asset, photoRun);
+      deepLinkHandledRef.current = key;
+      return;
+    }
+
+    if (actionFromUrl === "signature" || actionFromUrl === "history" || (actionFromUrl === "issue" && issueSourceFromUrl === "run")) {
+      void openRunHistory(asset, targetRun?.workflowConfigId);
+      deepLinkHandledRef.current = key;
+    }
+  }, [assets, runsMap, searchParams]);
   const selectedProjectHasInspection = projectHasInspection(selectedProject?.workflowMode);
   const canCreateWorkflow = can.modifyData && !!activeProduct?.id;
 
@@ -880,6 +1008,15 @@ const AssetInstallationPage = () => {
     },
     [projects, activeProduct?.id, ownedProjectIds],
   );
+
+  const canEditAssetFromWebTable = useMemo(() => (asset: ProjectAsset) => {
+    if (can.installationAssets?.editScope === "all") return true;
+    if (can.installationAssets?.editScope !== "own") return false;
+    if (ownedProjectIds?.has(asset.projectId)) return true;
+    return isAssignmentScoped && asset.assignedUserId === currentUser.id;
+  }, [can.installationAssets?.editScope, currentUser.id, isAssignmentScoped, ownedProjectIds]);
+
+  const canManageAssetDocuments = can.documents.view || can.documents.upload || can.documents.delete;
 
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const configMap = useMemo(() => new Map(configs.map((c) => [c.id, c])), [configs]);
@@ -1901,7 +2038,6 @@ const AssetInstallationPage = () => {
       const idx = issues.findIndex(i => i.id === updatedIssue.id);
       if (idx >= 0) issues[idx] = updatedIssue;
       await assetWorkflowRunService.patchIssues(runId, JSON.stringify(issues));
-      await assetWorkflowRunService.tryAutoComplete(runId).catch(() => {});
       await Promise.all([
         loadAssignmentsForAsset(assetId).catch(() => {}),
         refreshAssets().catch(() => {}),
@@ -2127,47 +2263,217 @@ const AssetInstallationPage = () => {
     );
   }
 
-  function actionButton(asset: ProjectAsset, projectWorkflowMode?: string | null) {
+  function getSortedRuns(assetId: string): AssetWorkflowRun[] {
+    return [...(runsMap[assetId] ?? [])].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+  }
+
+  function getAssetAttentionSummary(asset: ProjectAsset): AssetAttentionSummary {
+    const sortedRuns = getSortedRuns(asset.id);
+    const latestRun = sortedRuns[0] ?? null;
+    const latestLockedRun = sortedRuns.find((run) => run.isLocked) ?? null;
+    const latestRunMissingMediaCount = latestRun ? countMissingWorkflowItems(latestRun) : 0;
+    const needsMissingMediaRepair = Boolean(
+      latestRun
+      && runHasCompletedAllSteps(latestRun)
+      && latestRunMissingMediaCount > 0
+    );
+    const paused = Boolean(pausedProgress[asset.id])
+      || latestRun?.status === "Paused"
+      || asset.workflowSummary?.evidenceStatus === "Paused";
+
+    let assetIssues: AssetIssue[] = [];
+    try { assetIssues = JSON.parse(asset.issuesJson || "[]"); } catch {}
+    const runIssues = sortedRuns.flatMap((run) => {
+      try { return JSON.parse(run.issuesJson || "[]") as RunIssue[]; } catch { return []; }
+    });
+    const openIssues = [...assetIssues, ...runIssues].filter((issue) => !issue.resolved);
+    const blockingIssueCount = openIssues.filter((issue) => issue.isBlocking).length;
+    const highObservationCount = openIssues.filter((issue) => !issue.isBlocking && issue.issueType === "observation" && issue.severity === "high").length;
+
+    return {
+      paused,
+      blockingIssueCount,
+      highObservationCount,
+      openIssueCount: openIssues.length,
+      missingMediaCount: latestRunMissingMediaCount,
+      needsMissingMediaRepair,
+      awaitingInstallerSig: Boolean(latestLockedRun?.isLocked && latestLockedRun.signatureStatus === "PendingInstaller"),
+      awaitingCustomerSig: Boolean(
+        latestLockedRun?.isLocked
+        && latestLockedRun.signatureStatus === "PendingCustomer"
+        && !latestLockedRun.customerSignedAt
+      ),
+      latestRun,
+      latestLockedRun,
+    };
+  }
+
+  function getWorkflowNameForRun(run: AssetWorkflowRun | null, asset: ProjectAsset): string {
+    if (!run) return asset.assetTag || asset.assetName || "Workflow";
+    try {
+      const snapshot = JSON.parse(run.workflowSnapshotJson ?? "{}");
+      if (typeof snapshot?.name === "string" && snapshot.name.trim()) return snapshot.name;
+    } catch { /* ignore */ }
+    const assignment = (assignmentsMap[asset.id] ?? []).find((item) => item.workflowConfigId === run.workflowConfigId);
+    return assignment?.workflowConfigName || asset.assetTag || asset.assetName || "Workflow";
+  }
+
+  function openMissingMediaDialog(asset: ProjectAsset, run: AssetWorkflowRun | null) {
+    if (!run) return;
+    setPhotoUploadTarget({
+      id: `asset-${asset.id}-${run.id}`,
+      runId: run.id,
+      assetId: asset.id,
+      assetTag: asset.assetTag || asset.assetName || asset.id,
+      jobNumber: projectMap.get(asset.projectId)?.jobNumber ?? "",
+      workflowName: getWorkflowNameForRun(run, asset),
+      technicianUserId: asset.assignedUserId ?? "",
+      technicianName: users.find((user) => user.id === asset.assignedUserId)?.fullName ?? "",
+      completedAt: run.completedAt ?? run.updatedAt ?? run.startedAt,
+      missingSteps: [],
+      totalExpected: 0,
+      totalCaptured: 0,
+    });
+  }
+
+  function getPrimaryAction(asset: ProjectAsset, projectWorkflowMode?: string | null): AssetPrimaryAction {
     const loading = runnerLoading === asset.id;
     const assignments = assignmentsMap[asset.id];
-    const latestRun = [...(runsMap[asset.id] ?? [])]
-      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+    const summary = getAssetAttentionSummary(asset);
+    const latestRun = summary.latestRun;
     const inspectionEnabled = projectHasInspection(projectWorkflowMode);
-    // If assignments have been loaded and are empty, no workflow is assigned
     const hasAssignments = assignments !== undefined
       ? (assignments.length > 0 || !!asset.productConfigId || !!asset.workflowTemplateId || !!latestRun || !!asset.workflowSummary?.hasWorkflow)
       : (asset.workflowSummary?.hasWorkflow ?? (!!asset.productConfigId || !!asset.workflowTemplateId));
     const canViewCompletedRun = asset.status === "Complete"
       || (asset.workflowSummary?.latestRunStatus === "Complete" && !asset.workflowSummary?.hasOpenIssues);
     const openImportDialog = () => setImportDialogAsset(asset);
+
     if (inspectionEnabled && asset.status === "Complete" && !latestRun && !hasAssignments) {
-      return (
-        <Tooltip title="View or edit linked external inspection JSON">
-          <Button size="small" variant="text" color="inherit" startIcon={<HistoryOutlined />}
-            onClick={openImportDialog}>
-            View/Edit
-          </Button>
-        </Tooltip>
-      );
+      return {
+        label: "Run Details",
+        tooltip: "View or edit linked external inspection JSON",
+        color: "inherit",
+        icon: <HistoryOutlined />,
+        onClick: openImportDialog,
+        variant: "text",
+      };
     }
     if (!hasAssignments) {
       if (inspectionEnabled) {
-        return (
-          <Tooltip title="Upload external inspection JSON for this asset">
-            <Button
-              size="small"
-              variant="outlined"
-              color="info"
-              startIcon={<FileUploadOutlined />}
-              onClick={openImportDialog}
-            >
-              Upload JSON
-            </Button>
-          </Tooltip>
-        );
+        return {
+          label: "Upload JSON",
+          tooltip: "Upload external inspection JSON for this asset",
+          color: "info",
+          icon: <FileUploadOutlined />,
+          onClick: openImportDialog,
+          variant: "outlined",
+        };
       }
-      return <Typography variant="caption" color="text.secondary">No workflow</Typography>;
+      return null;
     }
+    if (summary.paused) {
+      return {
+        label: "Resume Run",
+        tooltip: "Resume the paused workflow run",
+        color: "success",
+        icon: loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />,
+        onClick: () => checkAssignmentThenStart(asset),
+        variant: "outlined",
+      };
+    }
+    if (summary.needsMissingMediaRepair && summary.latestRun) {
+      return {
+        label: "Add Missing Photos",
+        tooltip: "Open the missing media repair flow for this run",
+        color: "warning",
+        icon: <PhotoCameraOutlined />,
+        onClick: () => openMissingMediaDialog(asset, summary.latestRun),
+        variant: "outlined",
+      };
+    }
+    if (asset.status === "InProgress") {
+      return {
+        label: "Continue Run",
+        tooltip: "Continue workflow",
+        color: "success",
+        icon: loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />,
+        onClick: () => checkAssignmentThenStart(asset),
+        variant: "outlined",
+      };
+    }
+    if (summary.blockingIssueCount > 0) {
+      return {
+        label: summary.blockingIssueCount === 1 ? "Resolve Blocking Issue" : `Resolve ${summary.blockingIssueCount} Blocking Issues`,
+        tooltip: "Open this asset to review and close blocking issues",
+        color: "error",
+        icon: <ReportProblemOutlined />,
+        onClick: () => summary.latestRun ? openRunHistory(asset) : handleStartWorkOrder(asset),
+        variant: "outlined",
+      };
+    }
+    if (summary.missingMediaCount > 0 && summary.latestRun) {
+      return {
+        label: "Add Missing Photos",
+        tooltip: "Open the missing media repair flow for this run",
+        color: "warning",
+        icon: <PhotoCameraOutlined />,
+        onClick: () => openMissingMediaDialog(asset, summary.latestRun),
+        variant: "outlined",
+      };
+    }
+    if (summary.awaitingInstallerSig || summary.awaitingCustomerSig) {
+      return {
+        label: "Complete Sign-off",
+        tooltip: "Open run history to complete installer or customer signatures",
+        color: "warning",
+        icon: <DrawOutlined />,
+        onClick: () => openRunHistory(asset),
+        variant: "outlined",
+      };
+    }
+    if (summary.highObservationCount > 0) {
+      return {
+        label: summary.highObservationCount === 1 ? "Review High Observation" : `Review ${summary.highObservationCount} High Observations`,
+        tooltip: "Review high-severity observation issues for this asset",
+        color: "warning",
+        icon: <InfoOutlined />,
+        onClick: () => summary.latestRun ? openRunHistory(asset) : handleStartWorkOrder(asset),
+        variant: "outlined",
+      };
+    }
+    if (asset.status === "NotStarted") {
+      return {
+        label: "Start Run",
+        tooltip: "Start workflow",
+        color: "success",
+        icon: loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />,
+        onClick: () => checkAssignmentThenStart(asset),
+        variant: "outlined",
+      };
+    }
+    if (canViewCompletedRun) {
+      return {
+        label: "Run Details",
+        tooltip: "View run history, download report, or re-run workflow",
+        color: "inherit",
+        icon: <HistoryOutlined />,
+        onClick: () => openRunHistory(asset),
+        variant: "text",
+      };
+    }
+    return {
+      label: summary.openIssueCount > 0 ? "Review Issues" : "Review Run",
+      tooltip: "Open run details to review this asset",
+      color: "error",
+      icon: <ErrorOutlined />,
+      onClick: () => handleStartWorkOrder(asset),
+      variant: "outlined",
+    };
+  }
+
+  function actionButton(asset: ProjectAsset, projectWorkflowMode?: string | null) {
+    const primaryAction = getPrimaryAction(asset, projectWorkflowMode);
     const progress = pausedProgress[asset.id];
     const progressBadge = progress ? (
       <Tooltip title="Click to see completed steps">
@@ -2186,45 +2492,22 @@ const AssetInstallationPage = () => {
         />
       </Tooltip>
     ) : null;
-    if (asset.status === "NotStarted") {
-      return (
-        <Stack direction="row" spacing={0.5} alignItems="center">
-          {progressBadge}
-          <Button size="small" variant="outlined" color="success"
-            startIcon={loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />}
-            disabled={loading} onClick={() => checkAssignmentThenStart(asset)}>
-            Start
-          </Button>
-        </Stack>
-      );
-    }
-    if (asset.status === "InProgress") {
-      return (
-        <Stack direction="row" spacing={0.5} alignItems="center">
-          {progressBadge}
-          <Button size="small" variant="outlined" color="success"
-            startIcon={loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />}
-            disabled={loading} onClick={() => checkAssignmentThenStart(asset)}>
-            Continue
-          </Button>
-        </Stack>
-      );
-    }
-    if (canViewCompletedRun) {
-      return (
-        <Tooltip title="View run history, download report, or re-run workflow">
-          <Button size="small" variant="text" color="inherit" startIcon={<HistoryOutlined />}
-            onClick={() => openRunHistory(asset)}>
-            View/Edit
+    if (!primaryAction) return <Typography variant="caption" color="text.secondary">No workflow</Typography>;
+    return (
+      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+        {progressBadge}
+        <Tooltip title={primaryAction.tooltip}>
+          <Button
+            size="small"
+            variant={primaryAction.variant ?? "outlined"}
+            color={primaryAction.color}
+            startIcon={primaryAction.icon}
+            onClick={primaryAction.onClick}
+          >
+            {primaryAction.label}
           </Button>
         </Tooltip>
-      );
-    }
-    return (
-      <Button size="small" variant="outlined" color="error" startIcon={<ErrorOutlined />}
-        onClick={() => handleStartWorkOrder(asset)}>
-        Review
-      </Button>
+      </Stack>
     );
   }
 
@@ -2823,7 +3106,7 @@ const AssetInstallationPage = () => {
               Inspection Assets
             </Button>
           )}
-          {showComplexControls && can.modifyData && (
+          {showAdvancedAssetActions && can.modifyData && (
             <Tooltip title={activeProduct?.id ? `Open the workflow builder for ${activeProduct.name}` : "Select a project with a product to create a workflow"}>
               <span>
                 <Button
@@ -2838,11 +3121,31 @@ const AssetInstallationPage = () => {
               </span>
             </Tooltip>
           )}
-          {showComplexControls && can.modifyData && (
+          {showAdvancedAssetActions && can.modifyData && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<FileUploadOutlined />}
+              disabled={!activeProduct}
+              onClick={() => {
+                if (activeProduct) workflowConfigService.listByProduct(activeProduct.id, "Published").then(setWorkflowConfigs);
+                setCsvImportOpen(true);
+              }}
+            >
+              Import CSV
+            </Button>
+          )}
+          {showAdvancedAssetActions && can.modifyData && (
             <Button variant="contained" startIcon={<AddOutlined />} onClick={openAdd} disabled={!activeProduct}>Add asset</Button>
           )}
         </Stack>
       </Stack>
+
+      {arrivalBanner && (
+        <Alert severity={arrivalBanner.severity} sx={{ mt: 0.5 }}>
+          {arrivalBanner.message}
+        </Alert>
+      )}
 
       {/* Health summary bar */}
       {!loadingAssets && activeHealth && activeHealth.total > 0 && (
@@ -3110,9 +3413,9 @@ const AssetInstallationPage = () => {
       )}
 
       {/* Table toolbar */}
-      {(showComplexControls || (selectedProjectHasInspection && selectedProject && !archiveMode) || archiveMode) && (
+      {(showAdvancedAssetActions || (selectedProjectHasInspection && selectedProject && !archiveMode) || archiveMode) && (
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
-          {showComplexControls && (
+          {showAdvancedAssetActions && (
             <Stack direction="row" spacing={1} alignItems="center">
               <Tooltip title={archiveMode ? "Exit archive view" : "Show completed assets archive"}>
                 <Button
@@ -3251,7 +3554,7 @@ const AssetInstallationPage = () => {
             if (hasWorkflow || latestRun) {
               if (paused || latestRun?.status === "Paused" || asset.workflowSummary?.evidenceStatus === "Paused") {
                 subLabel = "Paused"; subColor = "warning";
-              } else if (asset.workflowSummary?.evidenceStatus === "MissingData" || (latestRun?.isLocked && countMissingWorkflowItems(latestRun) > 0)) {
+              } else if (asset.workflowSummary?.evidenceStatus === "MissingData" || (latestRun && runHasCompletedAllSteps(latestRun) && countMissingWorkflowItems(latestRun) > 0)) {
                 subLabel = "Missing"; subColor = "error";
               } else if (!awaitingCustomerSig && (asset.workflowSummary?.evidenceStatus === "Running" || (latestRun && !latestRun.isLocked))) {
                 subLabel = "Running"; subColor = "primary";
@@ -3302,60 +3605,25 @@ const AssetInstallationPage = () => {
               awaitingCustomerSig ? "warning.main" :
               "transparent";
 
-            // Quick action icon button — most common action without needing to expand
-            const qLoading = runnerLoading === asset.id;
-            const quickAction = (() => {
-              if (!hasWorkflow && !latestRun) return null;
-              if (asset.status === "NotStarted" || asset.status === "InProgress") {
-                return (
-                  <Tooltip title={asset.status === "NotStarted" ? "Start workflow" : "Continue workflow"}>
-                    <span>
-                      <IconButton
-                        size="small"
-                        color="success"
-                        disabled={qLoading}
-                        onClick={(e) => { e.stopPropagation(); checkAssignmentThenStart(asset); }}
-                        sx={{ flexShrink: 0 }}
-                      >
-                        {qLoading ? <CircularProgress size={16} /> : <PlayArrowOutlined sx={{ fontSize: 20 }} />}
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                );
-              }
-              if (awaitingCustomerSig) {
-                return (
-                  <Tooltip title="Tap to sign">
-                    <IconButton
-                      size="small"
-                      color="warning"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setExpandedAssetId(asset.id);
-                        loadAssignmentsForAsset(asset.id);
-                      }}
-                      sx={{ flexShrink: 0 }}
-                    >
-                      <DrawOutlined sx={{ fontSize: 20 }} />
-                    </IconButton>
-                  </Tooltip>
-                );
-              }
-              if (asset.status === "Complete") {
-                return (
-                  <Tooltip title="View run history">
-                    <IconButton
-                      size="small"
-                      onClick={(e) => { e.stopPropagation(); openRunHistory(asset); }}
-                      sx={{ flexShrink: 0 }}
-                    >
-                      <HistoryOutlined sx={{ fontSize: 20 }} />
-                    </IconButton>
-                  </Tooltip>
-                );
-              }
-              return null;
-            })();
+            // Quick action button — most common next action without needing to expand
+            const primaryAction = getPrimaryAction(asset, proj?.workflowMode);
+            const quickAction = primaryAction ? (
+              <Tooltip title={primaryAction.tooltip}>
+                <Button
+                  size="small"
+                  variant={primaryAction.variant === "text" ? "outlined" : primaryAction.variant ?? "outlined"}
+                  color={primaryAction.color === "inherit" ? "inherit" : primaryAction.color}
+                  startIcon={primaryAction.icon}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    primaryAction.onClick();
+                  }}
+                  sx={{ flexShrink: 0, whiteSpace: "nowrap", minWidth: 0 }}
+                >
+                  {primaryAction.label}
+                </Button>
+              </Tooltip>
+            ) : null;
 
             return (
               <Paper
@@ -3580,8 +3848,8 @@ const AssetInstallationPage = () => {
                       ))}
                       <TableCell align="right">
                         <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-                          {(can.modifyData || asset.status === "Complete") && actionButton(asset, proj?.workflowMode)}
-                          {!can.viewOnly && (
+                          {(canRunAssetWorkflow || asset.status === "Complete") && actionButton(asset, proj?.workflowMode)}
+                          {canManageAssetDocuments && (
                             <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
                               <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
                                 <Badge
@@ -3597,7 +3865,7 @@ const AssetInstallationPage = () => {
                               </IconButton>
                             </Tooltip>
                           )}
-                          {!can.viewOnly && (
+                          {canViewInstallationAssets && (
                             <Tooltip title="Generate PDF report">
                               <span>
                                 <IconButton
@@ -3612,21 +3880,21 @@ const AssetInstallationPage = () => {
                               </span>
                             </Tooltip>
                           )}
-                          {can.modifyData && !archiveMode && (
+                          {canEditInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode && (
                             <Tooltip title="Edit asset">
                               <IconButton size="small" onClick={() => openEditAsset(asset)}>
                                 <EditOutlined fontSize="small" />
                               </IconButton>
                             </Tooltip>
                           )}
-                          {can.modifyData && !archiveMode && (
+                          {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode && (
                             <Tooltip title="Archive asset">
                               <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
                                 <DeleteOutline fontSize="small" />
                               </IconButton>
                             </Tooltip>
                           )}
-                          {can.modifyData && archiveMode && (
+                          {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && archiveMode && (
                             <Tooltip title="Restore asset">
                               <span>
                                 <IconButton size="small" disabled={deletingAsset} onClick={() => confirmRestoreAsset(asset)}>
@@ -3635,7 +3903,7 @@ const AssetInstallationPage = () => {
                               </span>
                             </Tooltip>
                           )}
-                          {can.modifyData && archiveMode && (
+                          {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && archiveMode && (
                             <Tooltip title="Delete asset permanently">
                               <span>
                                 <IconButton size="small" color="error" disabled={purgingAsset} onClick={() => setPurgeAsset(asset)}>
@@ -3643,6 +3911,15 @@ const AssetInstallationPage = () => {
                                 </IconButton>
                               </span>
                             </Tooltip>
+                          )}
+                          {!((canRunAssetWorkflow || asset.status === "Complete")
+                            || canManageAssetDocuments
+                            || canViewInstallationAssets
+                            || (canEditInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode)
+                            || (canDeleteInstallationAssets && canEditAssetFromWebTable(asset))) && (
+                            <Typography variant="caption" color="text.disabled">
+                              No actions
+                            </Typography>
                           )}
                         </Stack>
                       </TableCell>
@@ -3712,16 +3989,16 @@ const AssetInstallationPage = () => {
                 <Chip size="small" label={STATUS_LABELS[a.status as ProjectAssetStatus]} color={STATUS_COLORS[a.status as ProjectAssetStatus]} sx={{ fontSize: "0.7rem" }} />
               </Stack>
               <Divider />
-              {(can.modifyData || a.status === "Complete") && (
+              {(canRunAssetWorkflow || a.status === "Complete") && (
                 <Box>{actionButton(a, proj?.workflowMode)}</Box>
               )}
-              {!can.viewOnly && (
+              {canManageAssetDocuments && (
                 <Button size="small" fullWidth variant="outlined" startIcon={<FolderOutlined fontSize="small" />}
                   onClick={() => { setDocsAsset(a); setDocsOpen(true); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
                   Documents ({docsCount}/3)
                 </Button>
               )}
-              {!can.viewOnly && (
+              {canViewInstallationAssets && (
                 <Button size="small" fullWidth variant="outlined"
                   startIcon={reportGenerating === a.id ? <CircularProgress size={14} /> : <ArticleOutlined fontSize="small" />}
                   disabled={reportGenerating === a.id}
@@ -3729,19 +4006,19 @@ const AssetInstallationPage = () => {
                   PDF Report
                 </Button>
               )}
-              {can.modifyData && !archiveMode && (
+              {canEditInstallationAssets && canEditAssetFromWebTable(a) && !archiveMode && (
                 <Button size="small" fullWidth variant="outlined" startIcon={<EditOutlined fontSize="small" />}
                   onClick={() => { openEditAsset(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
                   Edit Asset
                 </Button>
               )}
-              {can.modifyData && !archiveMode && showComplexControls && (
+              {canDeleteInstallationAssets && canEditAssetFromWebTable(a) && !archiveMode && showAdvancedAssetActions && (
                 <Button size="small" fullWidth variant="outlined" color="error" startIcon={<DeleteOutline fontSize="small" />}
                   onClick={() => { setDeleteAsset(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
                   Archive
                 </Button>
               )}
-              {can.modifyData && archiveMode && (
+              {canDeleteInstallationAssets && canEditAssetFromWebTable(a) && archiveMode && (
                 <Button size="small" fullWidth variant="outlined"
                   startIcon={<RestoreOutlined fontSize="small" />}
                   disabled={deletingAsset}
@@ -3749,7 +4026,7 @@ const AssetInstallationPage = () => {
                   Restore
                 </Button>
               )}
-              {can.modifyData && archiveMode && (
+              {canDeleteInstallationAssets && canEditAssetFromWebTable(a) && archiveMode && (
                 <Button size="small" fullWidth variant="outlined" color="error"
                   startIcon={<DeleteForeverOutlined fontSize="small" />}
                   disabled={purgingAsset}
@@ -4519,6 +4796,7 @@ const AssetInstallationPage = () => {
           currentUserName={currentUser?.fullName ?? ""}
           onRerun={handleRerun}
           onContinue={handleContinueRun}
+          onAddMissingMedia={(run) => openMissingMediaDialog(runHistoryAsset, run)}
           allowRerun={runHistoryAllowRerun}
           allowContinue={runHistoryAllowRerun}
           project={runHistoryProject ?? undefined}
@@ -4693,8 +4971,43 @@ const AssetInstallationPage = () => {
         />
       )}
 
+      {photoUploadTarget && (
+        <PhotoUploadDialog
+          open={Boolean(photoUploadTarget)}
+          flag={photoUploadTarget}
+          currentUserName={currentUser.fullName ?? currentUser.email ?? "User"}
+          mode="installer"
+          onClose={() => setPhotoUploadTarget(null)}
+          onUpdated={async () => {
+            const assetId = photoUploadTarget.assetId;
+            setPhotoUploadTarget(null);
+            await Promise.all([
+              refreshAssets().catch(() => {}),
+              loadAssignmentsForAsset(assetId).catch(() => {}),
+            ]);
+          }}
+        />
+      )}
+
       {/* Issue detail dialog (comments / close) */}
       {issueDetailAsset && issueDetailIssueId && (() => {
+        if (issueDetailRunId) {
+          const run = (runsMap[issueDetailAsset.id] ?? []).find((item) => item.id === issueDetailRunId);
+          if (!run) return null;
+          let issues: RunIssue[] = [];
+          try { issues = JSON.parse(run.issuesJson || "[]"); } catch {}
+          const issue = issues.find((i) => i.id === issueDetailIssueId);
+          return issue ? (
+            <IssueDetailDialog
+              open={Boolean(issueDetailIssueId)}
+              issue={issue}
+              currentUser={currentUser?.fullName ?? currentUser?.email ?? "User"}
+              onClose={() => { setIssueDetailIssueId(null); setIssueDetailAsset(null); setIssueDetailRunId(null); }}
+              onSave={(updated) => saveInlineRunIssue(issueDetailRunId, issueDetailAsset.id, updated as RunIssue)}
+            />
+          ) : null;
+        }
+
         let issues: AssetIssue[] = [];
         try { issues = JSON.parse(issueDetailAsset.issuesJson || "[]"); } catch {}
         const issue = issues.find((i) => i.id === issueDetailIssueId);
@@ -4703,7 +5016,7 @@ const AssetInstallationPage = () => {
             open={Boolean(issueDetailIssueId)}
             issue={issue}
             currentUser={currentUser?.fullName ?? currentUser?.email ?? "User"}
-            onClose={() => { setIssueDetailIssueId(null); setIssueDetailAsset(null); }}
+            onClose={() => { setIssueDetailIssueId(null); setIssueDetailAsset(null); setIssueDetailRunId(null); }}
             onSave={(updated) => handleIssueDetailSave(updated as AssetIssue)}
           />
         ) : null;

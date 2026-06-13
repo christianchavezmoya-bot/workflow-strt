@@ -198,7 +198,8 @@ export default function DocumentsPage() {
   const canUploadDocuments = can.documents.upload;
   const canDeleteDocuments = can.documents.delete;
   const { complexViewActive } = useComplexView();
-  const showComplexControls = complexViewActive && Capacitor.isNativePlatform();
+  // Web always shows full document controls; native keeps them behind Complex View.
+  const showComplexControls = !Capacitor.isNativePlatform() || complexViewActive;
   // ---- data -------------------------------------------------------
   const [docs, setDocs]       = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -870,7 +871,7 @@ export default function DocumentsPage() {
                     })}
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.25} justifyContent="flex-end">
-                        {doc.downloadUrl && !can.viewOnly && (
+                        {doc.downloadUrl && can.documents.view && (
                           <Tooltip title="Preview / open">
                             <IconButton size="small" onClick={() => openPreview(doc)}>
                               <DownloadOutlined fontSize="small" />
@@ -890,6 +891,11 @@ export default function DocumentsPage() {
                               <DeleteOutline fontSize="small" />
                             </IconButton>
                           </Tooltip>
+                        )}
+                        {!((doc.downloadUrl && can.documents.view) || (canUploadDocuments && showComplexControls) || (canDeleteDocuments && showComplexControls)) && (
+                          <Typography variant="caption" color="text.disabled">
+                            No actions
+                          </Typography>
                         )}
                       </Stack>
                     </TableCell>

@@ -133,3 +133,14 @@ export function countMissingWorkflowItems(run: AssetWorkflowRun): number {
     return count + getMissingWorkflowItems(step, result.values).length;
   }, 0);
 }
+
+export function getWorkflowStepCompletion(run: AssetWorkflowRun): { completedSteps: number; totalSteps: number } {
+  const totalSteps = parseWorkflowStepsFromSnapshot(run.workflowSnapshotJson).length;
+  const completedSteps = new Set(parseWorkflowStepResults(run.stepResultsJson).map((result) => result.stepId)).size;
+  return { completedSteps, totalSteps };
+}
+
+export function runHasCompletedAllSteps(run: AssetWorkflowRun): boolean {
+  const { completedSteps, totalSteps } = getWorkflowStepCompletion(run);
+  return totalSteps > 0 && completedSteps >= totalSteps;
+}

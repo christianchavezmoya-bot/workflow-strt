@@ -20,14 +20,21 @@ import {
 } from "@mui/material";
 import {
   CheckCircleOutlined,
+  DeleteOutline,
   ExpandMoreOutlined,
   PhotoCameraOutlined,
+  QrCode2Outlined,
+  SmartphoneOutlined,
+  VideocamOutlined,
   VisibilityOutlined,
   WarningAmberOutlined,
 } from "@mui/icons-material";
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { Capacitor } from "@capacitor/core";
+import { settingsService } from "../../services/settingsService";
+import api from "../../services/api";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -71,6 +78,22 @@ export type PhotoUpdateNotification = {
   wasComplete: boolean;
 };
 
+type StoredStepCapture = {
+  stepId: string;
+  values: Record<string, string>;
+  completedAt: string;
+  iterationIndex?: number;
+};
+
+type TokenResponse = {
+  token: string;
+  expiresAt: string;
+};
+
+type TokenStatus = {
+  status: "pending" | "complete" | "expired" | "not_found";
+};
+
 // ── Props ──────────────────────────────────────────────────────────────────────
 
 interface PhotoUploadDialogProps {
@@ -99,11 +122,61 @@ async function readFilesAsBase64(files: FileList): Promise<string[]> {
   );
 }
 
+function acceptForInputType(inputType: "photo" | "video"): string {
+  return inputType === "video" ? "video/*" : "image/*";
+}
+
 function parseCaptures(raw: string | undefined): string[] {
   try {
     const arr = JSON.parse(raw ?? "[]");
     return Array.isArray(arr) ? arr : [];
   } catch { return []; }
+}
+
+function parseSnapshotSteps(workflowSnapshotJson: string): Array<{
+  id: string;
+  order?: number;
+  title?: string;
+  description?: string;
+  inputs?: { id: string; label?: string; type?: string }[];
+}> {
+  try {
+    const snapshot = JSON.parse(workflowSnapshotJson ?? "{}");
+    if (Array.isArray(snapshot?.steps)) return snapshot.steps;
+    if (typeof snapshot?.stepsJson === "string") {
+      const parsed = JSON.parse(snapshot.stepsJson);
+      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed?.steps)) return parsed.steps;
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+function parseStepValues(stepResultsJson: string): Record<string, Record<string, string>> {
+  try {
+    const parsed = JSON.parse(stepResultsJson ?? "[]");
+    if (Array.isArray(parsed)) {
+      return parsed.reduce<Record<string, Record<string, string>>>((acc, item) => {
+        if (!item || typeof item !== "object" || item.stepId === "__nav__") return acc;
+        const stepId = typeof item.stepId === "string" ? item.stepId : "";
+        const values = item.values && typeof item.values === "object" ? item.values as Record<string, string> : null;
+        if (!stepId || !values) return acc;
+        acc[stepId] = values;
+        return acc;
+      }, {});
+    }
+    if (parsed && typeof parsed === "object") return parsed as Record<string, Record<string, string>>;
+  } catch { /* ignore */ }
+  return {};
+}
+
+function parseStepCaptures(stepResultsJson: string): StoredStepCapture[] {
+  try {
+    const parsed = JSON.parse(stepResultsJson ?? "[]");
+    return Array.isArray(parsed) ? parsed as StoredStepCapture[] : [];
+  } catch {
+    return [];
+  }
 }
 
 // Derive all photo/video steps from the workflow snapshot + current step results.
@@ -113,12 +186,8 @@ function derivePhotoSteps(
   stepResultsJson: string
 ): { allSteps: MissingStep[]; missingSteps: MissingStep[] } {
   try {
-    const snapshot = JSON.parse(workflowSnapshotJson ?? "{}");
-    const steps: {
-      id: string; order?: number; title?: string; description?: string;
-      inputs?: { id: string; label?: string; type?: string }[];
-    }[] = snapshot.steps ?? [];
-    const values: Record<string, Record<string, string>> = JSON.parse(stepResultsJson ?? "{}");
+    const steps = parseSnapshotSteps(workflowSnapshotJson);
+    const values = parseStepValues(stepResultsJson);
 
     const allSteps: MissingStep[] = [];
     let stepIndex = 0;
@@ -168,37 +237,172 @@ export default function PhotoUploadDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reminderSent, setReminderSent] = useState(false);
+  const [publicFrontendBaseUrl, setPublicFrontendBaseUrl] = useState("");
+  const [phoneQrToken, setPhoneQrToken] = useState<string | null>(null);
+  const [phoneQrExpiresAt, setPhoneQrExpiresAt] = useState<Date | null>(null);
+  const [phoneQrDone, setPhoneQrDone] = useState(false);
+  const [phoneQrLoading, setPhoneQrLoading] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Derived from live run data — overrides stale flag data
   const [runValues, setRunValues] = useState<Record<string, Record<string, string>>>({});
+  const [stepCaptures, setStepCaptures] = useState<StoredStepCapture[]>([]);
   const [allPhotoSteps, setAllPhotoSteps] = useState<MissingStep[]>([]);
   const [effectiveMissingSteps, setEffectiveMissingSteps] = useState<MissingStep[]>([]);
 
-  // Files added this session, keyed by `${stepId}-${inputId}`
-  const [localCaptures, setLocalCaptures] = useState<Record<string, string[]>>({});
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  // Editable captures keyed by `${stepId}-${inputId}`
+  const [editedCaptures, setEditedCaptures] = useState<Record<string, string[]>>({});
+  const photoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const videoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const isNativePlatform = Capacitor.isNativePlatform();
+  const isWebBrowser = !isNativePlatform;
+  const isPM = mode === "pm";
+
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  async function refreshRunState() {
+    setLoading(true);
+    setError(null);
+    const run = await assetWorkflowRunService.getById(flag.runId);
+    if (!run) {
+      setError("Could not load run data.");
+      setLoading(false);
+      return null;
+    }
+    const { allSteps, missingSteps } = derivePhotoSteps(
+      run.workflowSnapshotJson ?? "{}",
+      run.stepResultsJson ?? "[]"
+    );
+    const values = parseStepValues(run.stepResultsJson ?? "[]");
+    const captures = parseStepCaptures(run.stepResultsJson ?? "[]");
+    const seededCaptures = allSteps.reduce<Record<string, string[]>>((acc, step) => {
+      acc[`${step.stepId}-${step.inputId}`] = parseCaptures(values[step.stepId]?.[step.inputId]);
+      return acc;
+    }, {});
+    setRunValues(values);
+    setStepCaptures(captures);
+    setAllPhotoSteps(allSteps);
+    setEffectiveMissingSteps(missingSteps);
+    setEditedCaptures(seededCaptures);
+    setLoading(false);
+    return { allSteps, missingSteps };
+  }
+
+  function syncMissingMediaFlags(allSteps: MissingStep[], missingSteps: MissingStep[]) {
+    const allDone = missingSteps.length === 0;
+    const totalExpectedCount = allSteps.length;
+    const newTotalCaptured = totalExpectedCount - missingSteps.length;
+    const existingFlags: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
+
+    if (allDone) {
+      localStorage.setItem("pm_missing_media_flags", JSON.stringify(existingFlags.filter((f) => f.runId !== flag.runId)));
+      window.dispatchEvent(new Event("missing-media-flags-changed"));
+      onUpdated(null);
+      return;
+    }
+
+    const updatedFlag: MissingMediaFlag = {
+      ...flag,
+      missingSteps,
+      totalExpected: totalExpectedCount,
+      totalCaptured: newTotalCaptured,
+      lastUpdatedAt: new Date().toISOString(),
+      lastUpdatedBy: currentUserName,
+    };
+    const nextFlags = existingFlags.some((f) => f.runId === flag.runId)
+      ? existingFlags.map((f) => (f.runId === flag.runId ? updatedFlag : f))
+      : [...existingFlags, updatedFlag];
+    localStorage.setItem("pm_missing_media_flags", JSON.stringify(nextFlags));
+    window.dispatchEvent(new Event("missing-media-flags-changed"));
+    onUpdated(updatedFlag);
+  }
+
+  async function generatePhoneQrToken() {
+    setPhoneQrLoading(true);
+    try {
+      const res = await api.post<TokenResponse>("/mobile-upload/missing-media-token", {
+        runId: flag.runId,
+        workflowName: flag.workflowName,
+      });
+      setPhoneQrToken(res.data.token);
+      setPhoneQrExpiresAt(new Date(res.data.expiresAt));
+      setPhoneQrDone(false);
+    } catch {
+      setError("Could not generate phone upload QR code.");
+    } finally {
+      setPhoneQrLoading(false);
+    }
+  }
 
   // Load run on open — derive photo steps from live data
   useEffect(() => {
     if (!open) return;
-    setLoading(true);
-    setError(null);
-    setLocalCaptures({});
-    assetWorkflowRunService.getById(flag.runId).then((run) => {
-      if (!run) { setError("Could not load run data."); setLoading(false); return; }
-      const { allSteps, missingSteps } = derivePhotoSteps(
-        run.workflowSnapshotJson ?? "{}",
-        run.stepResultsJson ?? "[]"
-      );
-      const values: Record<string, Record<string, string>> = (() => {
-        try { return JSON.parse(run.stepResultsJson ?? "{}"); } catch { return {}; }
-      })();
-      setRunValues(values);
-      setAllPhotoSteps(allSteps);
-      setEffectiveMissingSteps(missingSteps);
-      setLoading(false);
-    });
+    void refreshRunState();
   }, [open, flag.runId]);
+
+  useEffect(() => {
+    if (!open || isPM || !isWebBrowser) return;
+    void generatePhoneQrToken();
+    return stopPolling;
+  }, [open, isPM, isWebBrowser, flag.runId]);
+
+  useEffect(() => {
+    if (!open || isPM || !isWebBrowser) return;
+    const frontendPort = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
+
+    settingsService
+      .getRuntimeFrontendBase(frontendPort)
+      .then((runtime) => {
+        const runtimeBase = (runtime.frontendBaseUrl || "").trim().replace(/\/+$/, "");
+        if (runtimeBase) {
+          setPublicFrontendBaseUrl(runtimeBase);
+          return;
+        }
+        return settingsService.getPublicAppSettings().then((settings) => {
+          setPublicFrontendBaseUrl((settings.frontendBaseUrl || "").trim().replace(/\/+$/, ""));
+        });
+      })
+      .catch(() => {
+        settingsService
+          .getPublicAppSettings()
+          .then((settings) => {
+            setPublicFrontendBaseUrl((settings.frontendBaseUrl || "").trim().replace(/\/+$/, ""));
+          })
+          .catch(() => {
+            setPublicFrontendBaseUrl(window.location.origin.replace(/\/+$/, ""));
+          });
+      });
+  }, [open, isPM, isWebBrowser]);
+
+  useEffect(() => {
+    if (!open || !phoneQrToken || phoneQrDone) return;
+    stopPolling();
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await api.get<TokenStatus>(`/mobile-upload/token/${phoneQrToken}`);
+        if (res.data.status === "complete") {
+          stopPolling();
+          setPhoneQrDone(true);
+          const refreshed = await refreshRunState();
+          if (refreshed) {
+            syncMissingMediaFlags(refreshed.allSteps, refreshed.missingSteps);
+          }
+          return;
+        }
+        if (res.data.status === "expired" || res.data.status === "not_found") {
+          stopPolling();
+        }
+      } catch {
+        // Keep polling on transient errors.
+      }
+    }, 3000);
+    return stopPolling;
+  }, [open, phoneQrToken, phoneQrDone]);
 
   function getExistingCaptures(stepId: string, inputId: string): string[] {
     return parseCaptures(runValues[stepId]?.[inputId]);
@@ -206,14 +410,26 @@ export default function PhotoUploadDialog({
 
   function getCurrentCaptures(stepId: string, inputId: string): string[] {
     const key = `${stepId}-${inputId}`;
-    return [...getExistingCaptures(stepId, inputId), ...(localCaptures[key] ?? [])];
+    return editedCaptures[key] ?? getExistingCaptures(stepId, inputId);
   }
 
-  async function handleFilesSelected(stepId: string, inputId: string, files: FileList | null) {
+  async function handleFilesSelected(
+    stepId: string,
+    inputId: string,
+    files: FileList | null,
+  ) {
     if (!files || files.length === 0) return;
     const base64s = await readFilesAsBase64(files);
     const key = `${stepId}-${inputId}`;
-    setLocalCaptures((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), ...base64s] }));
+    setEditedCaptures((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), ...base64s] }));
+  }
+
+  function handleRemoveCapture(stepId: string, inputId: string, index: number) {
+    const key = `${stepId}-${inputId}`;
+    setEditedCaptures((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? []).filter((_, itemIndex) => itemIndex !== index),
+    }));
   }
 
   async function handleSave() {
@@ -221,22 +437,31 @@ export default function PhotoUploadDialog({
     setError(null);
     try {
       const merged: Record<string, Record<string, string>> = { ...runValues };
-      for (const [key, newFiles] of Object.entries(localCaptures)) {
+      for (const [key, captures] of Object.entries(editedCaptures)) {
         const dashIdx = key.indexOf("-");
         const stepId = key.slice(0, dashIdx);
         const inputId = key.slice(dashIdx + 1);
-        const existing = getExistingCaptures(stepId, inputId);
         if (!merged[stepId]) merged[stepId] = {};
-        merged[stepId][inputId] = JSON.stringify([...existing, ...newFiles]);
+        merged[stepId][inputId] = JSON.stringify(captures);
       }
 
-      const newStepResultsJson = JSON.stringify(merged);
+      const navEntries = stepCaptures.filter((capture) => capture.stepId === "__nav__");
+      const preservedEntries = stepCaptures.filter((capture) => capture.stepId !== "__nav__");
+      const updatedCaptures = Object.entries(merged).map(([stepId, values]) => {
+        const existingCapture = preservedEntries.find((capture) => capture.stepId === stepId);
+        return {
+          stepId,
+          values,
+          completedAt: existingCapture?.completedAt ?? new Date().toISOString(),
+          ...(existingCapture?.iterationIndex !== undefined ? { iterationIndex: existingCapture.iterationIndex } : {}),
+        };
+      });
+      const newStepResultsJson = JSON.stringify([...updatedCaptures, ...navEntries]);
       await assetWorkflowRunService.patchStepResults(flag.runId, newStepResultsJson, currentUserName);
 
       // Re-derive which steps are still missing after save
       const stillMissing = effectiveMissingSteps.filter(({ stepId, inputId }) => {
-        const key = `${stepId}-${inputId}`;
-        return getExistingCaptures(stepId, inputId).length + (localCaptures[key]?.length ?? 0) === 0;
+        return getCurrentCaptures(stepId, inputId).length === 0;
       });
       const allDone = stillMissing.length === 0;
       const newTotalCaptured = allPhotoSteps.length - stillMissing.length;
@@ -258,24 +483,7 @@ export default function PhotoUploadDialog({
       window.dispatchEvent(new Event("photo-update-notifications-changed"));
 
       // Update/remove flag
-      const existingFlags: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
-      if (allDone) {
-        localStorage.setItem("pm_missing_media_flags", JSON.stringify(existingFlags.filter((f) => f.runId !== flag.runId)));
-        window.dispatchEvent(new Event("missing-media-flags-changed"));
-        onUpdated(null);
-      } else {
-        const updatedFlag: MissingMediaFlag = {
-          ...flag,
-          missingSteps: stillMissing,
-          totalExpected: allPhotoSteps.length,
-          totalCaptured: newTotalCaptured,
-          lastUpdatedAt: new Date().toISOString(),
-          lastUpdatedBy: currentUserName,
-        };
-        localStorage.setItem("pm_missing_media_flags", JSON.stringify(existingFlags.map((f) => f.runId === flag.runId ? updatedFlag : f)));
-        window.dispatchEvent(new Event("missing-media-flags-changed"));
-        onUpdated(updatedFlag);
-      }
+      syncMissingMediaFlags(allPhotoSteps, stillMissing);
     } catch (err) {
       console.error(err);
       setError("Failed to save photos. Please try again.");
@@ -302,14 +510,14 @@ export default function PhotoUploadDialog({
 
   // Live counts based on what's been added this session
   const liveMissingCount = effectiveMissingSteps.filter(({ stepId, inputId }) => {
-    const key = `${stepId}-${inputId}`;
-    return getExistingCaptures(stepId, inputId).length + (localCaptures[key]?.length ?? 0) === 0;
+    return getCurrentCaptures(stepId, inputId).length === 0;
   }).length;
   const liveCaptured = allPhotoSteps.length - liveMissingCount;
   const totalExpected = allPhotoSteps.length;
   const progress = totalExpected > 0 ? Math.round((liveCaptured / totalExpected) * 100) : 0;
-  const qrUrl = window.location.origin + window.location.pathname;
-  const isPM = mode === "pm";
+  const frontendBaseUrl = (publicFrontendBaseUrl || window.location.origin).replace(/\/+$/, "");
+  const qrUrl = phoneQrToken ? `${frontendBaseUrl}/mobile-upload?token=${phoneQrToken}` : "";
+  const installerSteps = isWebBrowser ? allPhotoSteps : effectiveMissingSteps;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -363,18 +571,46 @@ export default function PhotoUploadDialog({
               </Box>
             )}
 
-            {/* QR code — installer mode only */}
-            {!isPM && (
-              <Accordion disableGutters elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+            {/* Add from phone — web browser only */}
+            {!isPM && isWebBrowser && (
+              <Accordion defaultExpanded disableGutters elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
                 <AccordionSummary expandIcon={<ExpandMoreOutlined />}>
-                  <Typography variant="body2" fontWeight={600}>QR Code — open on phone</Typography>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <SmartphoneOutlined sx={{ fontSize: 18, color: "info.main" }} />
+                    <Box>
+                      <Typography variant="body2" fontWeight={700}>Add from phone</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Scan this QR code to open the same asset flow on a phone
+                      </Typography>
+                    </Box>
+                  </Stack>
                 </AccordionSummary>
                 <AccordionDetails>
                   <Stack alignItems="center" spacing={1}>
-                    <QRCodeSVG value={qrUrl} size={180} />
+                    {phoneQrLoading && <CircularProgress size={20} />}
+                    <Chip
+                      icon={<QrCode2Outlined />}
+                      label={phoneQrDone ? "Phone upload completed" : "Phone upload handoff"}
+                      size="small"
+                      color={phoneQrDone ? "success" : "info"}
+                      variant="outlined"
+                    />
+                    {!!qrUrl && <QRCodeSVG value={qrUrl} size={180} />}
                     <Typography variant="caption" color="text.secondary">
-                      Scan to open this app on another device
+                      {phoneQrDone
+                        ? "Desktop updated automatically after the phone upload completed."
+                        : "Scan on a phone to open a dedicated missing-media upload page."}
                     </Typography>
+                    {phoneQrExpiresAt && !phoneQrDone && (
+                      <Typography variant="caption" color="text.disabled">
+                        Expires at {phoneQrExpiresAt.toLocaleTimeString()}
+                      </Typography>
+                    )}
+                    {!phoneQrDone && (
+                      <Button size="small" variant="text" onClick={() => void generatePhoneQrToken()} disabled={phoneQrLoading}>
+                        Regenerate QR
+                      </Button>
+                    )}
                   </Stack>
                 </AccordionDetails>
               </Accordion>
@@ -433,14 +669,14 @@ export default function PhotoUploadDialog({
             )}
 
             {/* Installer mode: show only missing steps with upload */}
-            {!isPM && effectiveMissingSteps.map(({ stepId, stepOrder, stepTitle, stepDescription, inputId, inputLabel, inputType }) => {
+            {!isPM && installerSteps.map(({ stepId, stepOrder, stepTitle, stepDescription, inputId, inputLabel, inputType }) => {
               const key = `${stepId}-${inputId}`;
               const currentCount = getCurrentCaptures(stepId, inputId).length;
-              const isDone = currentCount > 0;
+              const isMissing = currentCount === 0;
               const isVideo = inputType === "video";
               const mediaLabel = isVideo ? "video" : "photo";
               return (
-                <Card key={key} variant="outlined" sx={{ borderColor: isDone ? "success.main" : "warning.main" }}>
+                <Card key={key} variant="outlined" sx={{ borderColor: isMissing ? "warning.main" : "success.main" }}>
                   <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
                     {/* Step header */}
                     <Stack direction="row" alignItems="center" spacing={1} mb={0.5}>
@@ -458,11 +694,13 @@ export default function PhotoUploadDialog({
                     {/* Input label + status + action */}
                     <Stack direction="row" alignItems="center" spacing={1} mt={0.5}>
                       <Box sx={{ flex: 1 }}>
-                        <Typography variant="caption" fontWeight={600} color={isDone ? "success.main" : "warning.main"}>
+                        <Typography variant="caption" fontWeight={600} color={isMissing ? "warning.main" : "success.main"}>
                           {inputLabel}
                         </Typography>
                         <Box mt={0.25}>
-                          {isDone ? (
+                          {isMissing ? (
+                            <Chip label={`No ${mediaLabel}s yet`} size="small" color="warning" variant="outlined" />
+                          ) : (
                             <Chip
                               icon={<CheckCircleOutlined />}
                               label={`${currentCount} ${mediaLabel}${currentCount !== 1 ? "s" : ""} added`}
@@ -470,32 +708,94 @@ export default function PhotoUploadDialog({
                               color="success"
                               variant="outlined"
                             />
-                          ) : (
-                            <Chip label={`No ${mediaLabel}s yet`} size="small" color="warning" variant="outlined" />
                           )}
                         </Box>
                       </Box>
-                      <Box>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                         <input
                           type="file"
-                          accept="image/*,video/*"
+                          accept={acceptForInputType("photo")}
                           multiple
                           capture="environment"
                           style={{ display: "none" }}
-                          ref={(el) => { fileInputRefs.current[key] = el; }}
+                          ref={(el) => { photoInputRefs.current[key] = el; }}
                           onChange={(e) => handleFilesSelected(stepId, inputId, e.target.files)}
                         />
-                        <Button
-                          variant="contained"
-                          size="small"
-                          color={isDone ? "success" : "warning"}
-                          startIcon={<PhotoCameraOutlined sx={{ fontSize: 16 }} />}
-                          onClick={() => fileInputRefs.current[key]?.click()}
-                        >
-                          {isDone ? `Add more` : `Add ${mediaLabel}`}
-                        </Button>
-                      </Box>
+                        {isWebBrowser && (
+                          <input
+                            type="file"
+                            accept={acceptForInputType("video")}
+                            multiple
+                            capture="environment"
+                            style={{ display: "none" }}
+                            ref={(el) => { videoInputRefs.current[key] = el; }}
+                            onChange={(e) => handleFilesSelected(stepId, inputId, e.target.files)}
+                          />
+                        )}
+                        {!isVideo && (
+                          <Button
+                            variant="contained"
+                            size="small"
+                            color={isMissing ? "warning" : "success"}
+                            startIcon={<PhotoCameraOutlined sx={{ fontSize: 16 }} />}
+                            onClick={() => photoInputRefs.current[key]?.click()}
+                          >
+                            {currentCount > 0 ? "Add photo" : "Add photo"}
+                          </Button>
+                        )}
+                        {(isVideo || isWebBrowser) && (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            color={isMissing ? "warning" : "success"}
+                            startIcon={<VideocamOutlined sx={{ fontSize: 16 }} />}
+                            onClick={() => videoInputRefs.current[key]?.click()}
+                          >
+                            {currentCount > 0 ? "Add video" : (isVideo ? "Add video" : "Capture video")}
+                          </Button>
+                        )}
+                      </Stack>
                     </Stack>
+
+                    {currentCount > 0 && isWebBrowser && (
+                      <Stack spacing={1} mt={1.25}>
+                        {getCurrentCaptures(stepId, inputId).map((capture, captureIndex) => {
+                          const looksLikeVideo = capture.startsWith("data:video/");
+                          return (
+                            <Card key={`${key}-capture-${captureIndex}`} variant="outlined" sx={{ borderColor: "divider", bgcolor: "background.default" }}>
+                              <CardContent sx={{ py: 1, "&:last-child": { pb: 1 } }}>
+                                <Stack direction="row" spacing={1.5} alignItems="flex-start">
+                                  <Box sx={{ width: 92, height: 68, borderRadius: 1, overflow: "hidden", bgcolor: "common.black", flexShrink: 0 }}>
+                                    {looksLikeVideo ? (
+                                      <video src={capture} controls style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                    ) : (
+                                      <img src={capture} alt={`${inputLabel} ${captureIndex + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                    )}
+                                  </Box>
+                                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                                    <Typography variant="body2" fontWeight={600}>
+                                      {looksLikeVideo ? `Video ${captureIndex + 1}` : `Photo ${captureIndex + 1}`}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                      Remove this item if the user wants to replace it, then add a new one.
+                                    </Typography>
+                                  </Box>
+                                  <Button
+                                    size="small"
+                                    color="error"
+                                    variant="outlined"
+                                    startIcon={<DeleteOutline />}
+                                    onClick={() => handleRemoveCapture(stepId, inputId, captureIndex)}
+                                  >
+                                    Delete
+                                  </Button>
+                                </Stack>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </Stack>
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -525,14 +825,14 @@ export default function PhotoUploadDialog({
             onClick={handleRemindInstaller}
             disabled={reminderSent || effectiveMissingSteps.length === 0}
           >
-            {reminderSent ? "Reminder Sent ✓" : "Remind Installer"}
+            {reminderSent ? "Reminder Sent ✓" : "Notify Field User"}
           </Button>
         )}
         {!isPM && (
           <Button
             variant="contained"
             onClick={handleSave}
-            disabled={saving || loading || Object.keys(localCaptures).length === 0}
+            disabled={saving || loading}
             startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
           >
             {saving ? "Saving…" : "Save Photos"}

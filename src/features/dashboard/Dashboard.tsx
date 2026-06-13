@@ -23,6 +23,7 @@ import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRec
 import {
   projectAssetService,
   type DashboardWorkspace,
+  type DashboardWorkspaceAssetItem,
   type OpenAssetItem,
   type ProjectAssetSummaryItem,
   type TechnicianWorkloadSummaryItem,
@@ -31,6 +32,7 @@ import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from
 import { inspectionImportService } from "../../services/inspectionImportService";
 import api from "../../services/api";
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
+import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
@@ -39,9 +41,13 @@ import { workflowTypeService } from "../../services/workflowTypeService";
 import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag, type PhotoUpdateNotification } from "./PhotoUploadDialog";
 import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import AssetDocumentsDialog from "../installations/AssetDocumentsDialog";
+import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
-import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
+import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
+import type { AssetIssue } from "../../types/projectAsset";
+import { brandSettingsService } from "../../services/brandSettingsService";
+import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -88,9 +94,10 @@ function isOpenInspectionStatus(status?: string | null) {
   return value === "notstarted" || value === "inprogress" || value === "paused" || value === "onhold";
 }
 
-function displayRunState(asset: { runStatus?: string | null; status?: string | null; signatureStatus?: string | null }) {
+function displayRunState(asset: { runStatus?: string | null; status?: string | null; signatureStatus?: string | null; evidenceStatus?: string | null }) {
   // Check for Issue status first (highest priority for attention)
   if (isIssueAsset(asset.status) || isIssueAsset(asset.runStatus)) return "Issue";
+  if ((asset.evidenceStatus ?? "").toLowerCase() === "missingdata") return "Missing";
   if (isPausedAsset(asset.runStatus)) return "Paused";
   if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) return "In Progress";
   if (isNotStartedAsset(asset.status)) return "Not Started";
@@ -183,8 +190,8 @@ const Dashboard = () => {
   const isManager    = user.role === "Admin" || user.role === "Project Manager";
   const isSupervisor = user.role === "Supervisor";
   const isEngineer   = user.role === "Engineer" || user.role === "QA Inspector";
-  const isInstaller  = user.role === "Installer" || user.role === "Technician";
   const isViewer     = user.role === "Viewer" || user.role === "Client";
+  const canActAsFieldTechnician = !!can.installationAssets?.runWorkflow && !isViewer;
   const isNativePlatform = Capacitor.isNativePlatform();
   const showNativeManagerHome = isManager && isNativePlatform;
 
@@ -253,6 +260,14 @@ const Dashboard = () => {
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
   const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
+  const [issueDetailLoading, setIssueDetailLoading] = useState(false);
+  const [issueDetailTarget, setIssueDetailTarget] = useState<{
+    issue: AssetIssue | RunIssue;
+    assetId: string;
+    runId?: string;
+    source: "asset" | "run";
+  } | null>(null);
+  const [historyDialogLoading, setHistoryDialogLoading] = useState(false);
 
   // Quick action dialog for "My Jobs Today" assets (state declared after myInstallAssets is defined)
   const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
@@ -689,6 +704,212 @@ const Dashboard = () => {
     [projectById]
   );
 
+  const buildAssetRepairPath = useCallback((params: {
+    projectId: string;
+    assetId: string;
+    action: "issue" | "signature" | "photos" | "history";
+    runId?: string;
+    issueId?: string;
+    issueSource?: "run" | "asset";
+  }) => {
+    const query = new URLSearchParams({
+      project: params.projectId,
+      asset: params.assetId,
+      action: params.action,
+    });
+    if (params.runId) query.set("run", params.runId);
+    if (params.issueId) query.set("issue", params.issueId);
+    if (params.issueSource) query.set("issueSource", params.issueSource);
+    return `/installations/assets?${query.toString()}`;
+  }, []);
+
+  const refreshDashboardAfterIssueUpdate = useCallback(async () => {
+    await Promise.all([
+      loadAttention(),
+      projectAssetService.listOpen().then(setOpenAssets),
+      projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([])),
+      projectAssetService
+        .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
+        .then((data) => setDashboardWorkspace(data))
+        .catch(() => {}),
+    ]);
+    setAnalyticsRefreshTick((t) => t + 1);
+  }, [isManager, loadAttention, selectedDashboardId]);
+
+  const openHistoryReport = useCallback(async (assetItem: DashboardWorkspaceAssetItem) => {
+    setHistoryDialogLoading(true);
+    try {
+      const [asset, runs] = await Promise.all([
+        projectAssetService.getById(assetItem.id),
+        assetWorkflowRunService.listByAsset(assetItem.id),
+      ]);
+      if (!asset || runs.length === 0) {
+        navigate("/installations/assets");
+        return;
+      }
+
+      const sortedRuns = runs
+        .slice()
+        .sort((a, b) => {
+          const bTime = new Date(b.completedAt ?? b.updatedAt ?? b.startedAt).getTime();
+          const aTime = new Date(a.completedAt ?? a.updatedAt ?? a.startedAt).getTime();
+          return bTime - aTime;
+        });
+      const latestRun = sortedRuns[0];
+      let configName = `Run #${latestRun.runNumber ?? 1}`;
+      try {
+        const cfg = await workflowConfigService.getById(latestRun.workflowConfigId);
+        if (cfg) {
+          configName = cfg.displayName || cfg.name || configName;
+        }
+      } catch {
+        // Fall back to run label if config lookup fails.
+      }
+      const [brandSettings, signatureEvents] = await Promise.all([
+        brandSettingsService.get(),
+        latestRun.isLocked ? import("../../services/signatureService").then(({ signatureService }) => signatureService.listEvents(latestRun.id)) : Promise.resolve([]),
+      ]);
+      const bizLogoResolved = brandSettings.logoBase64
+        ? await resolveImageToDataUrl(brandSettings.logoBase64)
+        : null;
+      await generateWorkflowReport({
+        run: latestRun,
+        asset,
+        workflowConfigName: configName,
+        businessLogoBase64: bizLogoResolved,
+        customerName: projects.find((project) => project.id === asset.projectId)?.customerName,
+        jobNumber: projects.find((project) => project.id === asset.projectId)?.jobNumber,
+        siteName: projects.find((project) => project.id === asset.projectId)?.siteName,
+        siteLocation: asset.location ?? undefined,
+        assignedTechnician: user.fullName ?? undefined,
+        signatureEvents,
+        outputMode: "open",
+      });
+    } finally {
+      setHistoryDialogLoading(false);
+    }
+  }, [navigate, projects, user.fullName]);
+
+  const openIssueRepair = useCallback(async (issue: OpenIssueRecord) => {
+    setIssueDetailLoading(true);
+    try {
+      setQuickActionOpen(false);
+
+      if (issue.source === "asset") {
+        const asset = await projectAssetService.getById(issue.assetId);
+        if (asset) {
+          let issues: AssetIssue[] = [];
+          try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
+          const matchedIssue = issues.find((item) => item.id === issue.issueId);
+          if (matchedIssue) {
+            setIssueDetailTarget({
+              issue: matchedIssue,
+              assetId: asset.id,
+              source: "asset",
+            });
+            return;
+          }
+        }
+      }
+
+      if (issue.source === "run") {
+        const run = await assetWorkflowRunService.getById(issue.runId);
+        if (run) {
+          let issues: RunIssue[] = [];
+          try { issues = JSON.parse(run.issuesJson || "[]"); } catch {}
+          const matchedIssue = issues.find((item) => item.id === issue.issueId);
+          if (matchedIssue) {
+            setIssueDetailTarget({
+              issue: matchedIssue,
+              assetId: issue.assetId,
+              runId: run.id,
+              source: "run",
+            });
+            return;
+          }
+        }
+      }
+
+      navigate(buildAssetRepairPath({
+        projectId: issue.projectId,
+        assetId: issue.assetId,
+        action: "issue",
+        runId: issue.runId,
+        issueId: issue.issueId,
+        issueSource: issue.source,
+      }));
+    } finally {
+      setIssueDetailLoading(false);
+    }
+  }, [buildAssetRepairPath, navigate]);
+
+  const handleDashboardIssueSave = useCallback(async (updatedIssue: AssetIssue | RunIssue) => {
+    if (!issueDetailTarget) return;
+
+    if (issueDetailTarget.source === "asset") {
+      const asset = await projectAssetService.getById(issueDetailTarget.assetId);
+      if (!asset) return;
+      let issues: AssetIssue[] = [];
+      try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
+      issues = issues.map((item) => item.id === updatedIssue.id ? updatedIssue as AssetIssue : item);
+      const refreshedAsset = await projectAssetService.patchIssues(asset.id, JSON.stringify(issues));
+      let refreshedIssues: AssetIssue[] = [];
+      try { refreshedIssues = JSON.parse(refreshedAsset.issuesJson || "[]"); } catch {}
+      const refreshedIssue = refreshedIssues.find((item) => item.id === updatedIssue.id);
+      if (refreshedIssue) {
+        setIssueDetailTarget({
+          issue: refreshedIssue,
+          assetId: refreshedAsset.id,
+          source: "asset",
+        });
+      }
+    } else if (issueDetailTarget.runId) {
+      const run = await assetWorkflowRunService.getById(issueDetailTarget.runId);
+      if (!run) return;
+      let issues: RunIssue[] = [];
+      try { issues = JSON.parse(run.issuesJson || "[]"); } catch {}
+      issues = issues.map((item) => item.id === updatedIssue.id ? updatedIssue as RunIssue : item);
+      const refreshedRun = await assetWorkflowRunService.patchIssues(issueDetailTarget.runId, JSON.stringify(issues));
+      let refreshedIssues: RunIssue[] = [];
+      try { refreshedIssues = JSON.parse(refreshedRun.issuesJson || "[]"); } catch {}
+      const refreshedIssue = refreshedIssues.find((item) => item.id === updatedIssue.id);
+      if (refreshedIssue) {
+        setIssueDetailTarget({
+          issue: refreshedIssue,
+          assetId: issueDetailTarget.assetId,
+          runId: refreshedRun.id,
+          source: "run",
+        });
+      }
+    }
+
+    await refreshDashboardAfterIssueUpdate();
+  }, [issueDetailTarget, refreshDashboardAfterIssueUpdate]);
+
+  const openSignatureRepair = useCallback((sig: PendingSignatureRecord) => {
+    navigate(buildAssetRepairPath({
+      projectId: sig.projectId,
+      assetId: sig.assetId,
+      action: "signature",
+      runId: sig.runId,
+    }));
+  }, [buildAssetRepairPath, navigate]);
+
+  const openMissingMediaRepair = useCallback((flag: MissingMediaFlag) => {
+    const projectId = openAssets.find((asset) => asset.id === flag.assetId)?.projectId;
+    if (!projectId) {
+      setPhotoUploadMode("pm");
+      setPhotoUploadTarget(flag);
+      return;
+    }
+    navigate(buildAssetRepairPath({
+      projectId,
+      assetId: flag.assetId,
+      action: "photos",
+      runId: flag.runId,
+    }));
+  }, [buildAssetRepairPath, navigate, openAssets]);
+
   // Tab bar is shown for all non-viewers.
   // Admins and PMs see all 3 tabs; others see My Inspections and/or My Installs
   // depending on which asset types they have assigned.
@@ -721,6 +942,49 @@ const Dashboard = () => {
     () => dashboardWorkspace.installHistory,
     [dashboardWorkspace]
   );
+
+  const renderHistoryCard = useCallback((asset: DashboardWorkspaceAssetItem) => (
+    <Paper
+      key={asset.id}
+      elevation={0}
+      onClick={() => { void openHistoryReport(asset); }}
+      sx={{
+        p: 1.25,
+        border: "1px solid var(--stroke)",
+        borderRadius: 1.5,
+        cursor: "pointer",
+        "&:hover": { borderColor: "success.main", background: "rgba(45,212,191,0.04)" },
+      }}
+    >
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="caption" fontWeight={600} noWrap display="block">
+            {asset.assetTag || asset.assetName || asset.id}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
+            {asset.jobNumber}{" · "}{asset.completedAt ? `Completed ${fmtDate(asset.completedAt)}` : `Updated ${fmtDate(asset.latestActivityAt)}`}
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={0.75} alignItems="center">
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={historyDialogLoading ? <CircularProgress size={12} /> : <OpenInNewOutlined fontSize="small" />}
+            disabled={historyDialogLoading}
+            onClick={(e) => {
+              e.stopPropagation();
+              void openHistoryReport(asset);
+            }}
+            sx={{ minWidth: 0, px: 1.1 }}
+          >
+            View
+          </Button>
+          <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
+            sx={{ height: 18, fontSize: "0.62rem" }} />
+        </Stack>
+      </Stack>
+    </Paper>
+  ), [historyDialogLoading, openHistoryReport]);
 
   // Quick action dialog for "My Jobs Today" assets
   type QuickActionAsset = typeof myInstallAssets[0];
@@ -761,6 +1025,150 @@ const Dashboard = () => {
   // Product-based workflow for assets without explicit assignment
   const [productWorkflow, setProductWorkflow] = useState<{ configId: string; configName: string; workflowTypeId?: string } | null>(null);
 
+  const quickActionAttention = useMemo(() => {
+    if (!quickActionAsset) {
+      return {
+        blockingIssues: [] as OpenIssueRecord[],
+        highObservations: [] as OpenIssueRecord[],
+        pendingSignature: null as PendingSignatureRecord | null,
+        missingMedia: null as MissingMediaFlag | null,
+        activeRun: null as AssetWorkflowRun | null,
+        latestRun: null as AssetWorkflowRun | null,
+      };
+    }
+
+    const sortedRuns = [...quickActionRuns].sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    );
+    const latestRun = sortedRuns[0] ?? null;
+    const fallbackMissingMedia =
+      latestRun && runHasCompletedAllSteps(latestRun) && countMissingWorkflowItems(latestRun) > 0
+        ? {
+            id: `run-missing-${latestRun.id}`,
+            runId: latestRun.id,
+            assetId: quickActionAsset.id,
+            assetTag: quickActionAsset.assetTag || quickActionAsset.assetName || quickActionAsset.id,
+            jobNumber: quickActionAsset.jobNumber,
+            workflowName: "Workflow",
+            technicianUserId: quickActionAsset.assignedUserId ?? "",
+            technicianName: user.fullName ?? "",
+            completedAt: latestRun.completedAt ?? latestRun.updatedAt ?? latestRun.startedAt,
+            missingSteps: [],
+            totalExpected: 0,
+            totalCaptured: 0,
+          }
+        : null;
+    const assetIssues = openIssues.filter((issue) => issue.assetId === quickActionAsset.id);
+
+    return {
+      blockingIssues: assetIssues.filter((issue) => issue.isBlocking),
+      highObservations: assetIssues.filter(
+        (issue) =>
+          !issue.isBlocking &&
+          issue.issueType === "observation" &&
+          issue.severity === "high"
+      ),
+      pendingSignature:
+        pendingSigs.find(
+          (sig) => sig.assetId === quickActionAsset.id
+        ) ?? null,
+      missingMedia:
+        missingMediaFlags.find(
+          (flag) => flag.assetId === quickActionAsset.id || flag.runId === sortedRuns[0]?.id
+        ) ?? fallbackMissingMedia,
+      activeRun: sortedRuns.find((run) => !run.isLocked) ?? null,
+      latestRun,
+    };
+  }, [missingMediaFlags, openIssues, pendingSigs, quickActionAsset, quickActionRuns, user.fullName]);
+
+  type DashboardProductWorkflow = { configId: string; configName: string; workflowTypeId?: string } | null;
+
+  async function resolveProductWorkflowForAsset(
+    fullAsset: Awaited<ReturnType<typeof projectAssetService.getById>>,
+    assignments: WorkflowAssignment[],
+  ): Promise<DashboardProductWorkflow> {
+    if (assignments.length > 0 || !fullAsset?.productConfigId) return null;
+    try {
+      const cfg = await workflowConfigService.getById(fullAsset.productConfigId);
+      if (!cfg) return null;
+      return {
+        configId: cfg.id,
+        configName: cfg.name,
+        workflowTypeId: cfg.workflowTypeId,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function getQuickActionAttentionForAsset(asset: QuickActionAsset, runs: AssetWorkflowRun[]) {
+    const sortedRuns = [...runs].sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    );
+    const latestRun = sortedRuns[0] ?? null;
+    const fallbackMissingMedia =
+      latestRun && runHasCompletedAllSteps(latestRun) && countMissingWorkflowItems(latestRun) > 0
+        ? {
+            id: `run-missing-${latestRun.id}`,
+            runId: latestRun.id,
+            assetId: asset.id,
+            assetTag: asset.assetTag || asset.assetName || asset.id,
+            jobNumber: asset.jobNumber,
+            workflowName: "Workflow",
+            technicianUserId: asset.assignedUserId ?? "",
+            technicianName: user.fullName ?? "",
+            completedAt: latestRun.completedAt ?? latestRun.updatedAt ?? latestRun.startedAt,
+            missingSteps: [],
+            totalExpected: 0,
+            totalCaptured: 0,
+          }
+        : null;
+    const assetIssues = openIssues.filter((issue) => issue.assetId === asset.id);
+
+    return {
+      blockingIssues: assetIssues.filter((issue) => issue.isBlocking),
+      highObservations: assetIssues.filter(
+        (issue) =>
+          !issue.isBlocking &&
+          issue.issueType === "observation" &&
+          issue.severity === "high"
+      ),
+      pendingSignature:
+        pendingSigs.find(
+          (sig) => sig.assetId === asset.id
+        ) ?? null,
+      missingMedia:
+        missingMediaFlags.find(
+          (flag) => flag.assetId === asset.id || flag.runId === sortedRuns[0]?.id
+        ) ?? fallbackMissingMedia,
+      activeRun: sortedRuns.find((run) => !run.isLocked) ?? null,
+      latestRun,
+    };
+  }
+
+  function canStartDirectlyFromDashboard(params: {
+    asset: QuickActionAsset;
+    assignments: WorkflowAssignment[];
+    runs: AssetWorkflowRun[];
+    productWorkflow: DashboardProductWorkflow;
+  }) {
+    const { asset, assignments, runs, productWorkflow } = params;
+    const attention = getQuickActionAttentionForAsset(asset, runs);
+
+    if (asset.assignedUserId !== user.id) return false;
+    if (attention.blockingIssues.length > 0) return false;
+    if (attention.highObservations.length > 0) return false;
+    if (attention.missingMedia) return false;
+    if (attention.pendingSignature) return false;
+    if (attention.activeRun) return false;
+
+    if (assignments.length === 1) return true;
+    if (assignments.length > 1) return false;
+    if (runs.length > 0) return false;
+
+    return Boolean(productWorkflow);
+  }
+
   // Quick action dialog handlers
   async function openQuickActionDialog(asset: QuickActionAsset) {
     setQuickActionAsset(asset);
@@ -779,21 +1187,7 @@ const Dashboard = () => {
       setQuickActionRuns(runs);
       setDocsCount(Array.isArray(docs) ? docs.length : 0);
       
-      // If no explicit assignment but asset has productConfigId, get the workflow config
-      if (assignments.length === 0 && fullAsset?.productConfigId) {
-        try {
-          const cfg = await workflowConfigService.getById(fullAsset.productConfigId);
-          if (cfg) {
-            setProductWorkflow({
-              configId: cfg.id,
-              configName: cfg.name,
-              workflowTypeId: cfg.workflowTypeId,
-            });
-          }
-        } catch {
-          // Ignore if config not found
-        }
-      }
+      setProductWorkflow(await resolveProductWorkflowForAsset(fullAsset, assignments));
     } catch {
       setQuickActionAssignments([]);
       setQuickActionRuns([]);
@@ -811,6 +1205,174 @@ const Dashboard = () => {
     setQuickActionRuns([]);
   }
 
+  async function openQuickActionOrStart(asset: QuickActionAsset) {
+    setQuickActionLoading(true);
+    setRunnerLoading(asset.id);
+    setDocsLoading(true);
+    try {
+      const [assignments, runs, docs, fullAsset] = await Promise.all([
+        assetWorkflowAssignmentService.listByAsset(asset.id),
+        api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${asset.id}`).then((r) => r.data).catch(() => []),
+        api.get(`/asset-documents/by-asset/${asset.id}`).then((res) => res.data).catch(() => []),
+        projectAssetService.getById(asset.id).catch(() => null),
+      ]);
+
+      const resolvedProductWorkflow = await resolveProductWorkflowForAsset(fullAsset, assignments);
+
+      if (canStartDirectlyFromDashboard({
+        asset,
+        assignments,
+        runs,
+        productWorkflow: resolvedProductWorkflow,
+      })) {
+        if (assignments.length === 1) {
+          await startWorkflowFromDashboard(asset, assignments[0], runs);
+          return;
+        }
+        if (resolvedProductWorkflow) {
+          await launchProductWorkflowFromDashboard(asset, resolvedProductWorkflow);
+          return;
+        }
+      }
+
+      setQuickActionAsset(asset);
+      setQuickActionAssignments(assignments);
+      setQuickActionRuns(runs);
+      setDocsCount(Array.isArray(docs) ? docs.length : 0);
+      setProductWorkflow(resolvedProductWorkflow);
+      setQuickActionOpen(true);
+    } catch {
+      setQuickActionAsset(asset);
+      setQuickActionAssignments([]);
+      setQuickActionRuns([]);
+      setDocsCount(0);
+      setProductWorkflow(null);
+      setQuickActionOpen(true);
+    } finally {
+      setRunnerLoading((current) => (current === asset.id ? null : current));
+      setDocsLoading(false);
+      setQuickActionLoading(false);
+    }
+  }
+
+  async function launchProductWorkflowFromDashboard(asset: QuickActionAsset, workflowMeta: { configId: string; configName: string; workflowTypeId?: string }) {
+    setRunnerLoading(asset.id);
+    try {
+      const cfg = await workflowConfigService.getById(workflowMeta.configId);
+      if (!cfg) { alert("Workflow config not found."); return; }
+      let wf: Workflow | null = null;
+      try {
+        const parsed = JSON.parse(cfg.stepsJson);
+        if (parsed?.steps) wf = parsed as Workflow;
+        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
+      } catch {}
+      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
+      setRunnerExistingRunId(undefined);
+      setRunnerAsset(asset);
+      setRunnerWorkflow(wf);
+      setRunnerWorkflowConfigId(workflowMeta.configId);
+      setRunnerOpen(true);
+      closeQuickActionDialog();
+    } catch {
+      alert("Failed to load workflow.");
+    } finally {
+      setRunnerLoading(null);
+    }
+  }
+
+  const quickActionPrimaryAction = useMemo(() => {
+    if (!quickActionAsset) {
+      return null as null | {
+        label: string;
+        color: "primary" | "success" | "warning" | "error" | "info";
+        onClick: () => void;
+      };
+    }
+
+    const assignmentForActiveRun =
+      quickActionAttention.activeRun
+        ? quickActionAssignments.find(
+            (assignment) => assignment.workflowConfigId === quickActionAttention.activeRun?.workflowConfigId
+          ) ?? null
+        : null;
+    const primaryAssignment = quickActionAssignments[0] ?? null;
+    const hasMatchingActiveRun = primaryAssignment
+      ? quickActionRuns.some((run) => !run.isLocked && run.workflowConfigId === primaryAssignment.workflowConfigId)
+      : false;
+
+    if (quickActionAttention.missingMedia) {
+      return {
+        label: "Add Missing Photos",
+        color: "warning" as const,
+        onClick: () => {
+          setPhotoUploadMode("installer");
+          setPhotoUploadTarget(quickActionAttention.missingMedia);
+          closeQuickActionDialog();
+        },
+      };
+    }
+
+    if (quickActionAttention.activeRun && assignmentForActiveRun) {
+      return {
+        label: "Resume Run",
+        color: "primary" as const,
+        onClick: () => checkAssignmentThenStartFromDashboard(quickActionAsset, assignmentForActiveRun),
+      };
+    }
+
+    if (quickActionAttention.blockingIssues.length > 0) {
+      return {
+        label: "Resolve Blocking Issue",
+        color: "error" as const,
+        onClick: () => {
+          closeQuickActionDialog();
+          openIssueRepair(quickActionAttention.blockingIssues[0]);
+        },
+      };
+    }
+
+    if (quickActionAttention.pendingSignature) {
+      const pendingSignature = quickActionAttention.pendingSignature;
+      return {
+        label: "Complete Sign-off",
+        color: "warning" as const,
+        onClick: () => {
+          closeQuickActionDialog();
+          openSignatureRepair(pendingSignature);
+        },
+      };
+    }
+
+    if (quickActionAttention.highObservations.length > 0) {
+      return {
+        label: "Review High Observation",
+        color: "info" as const,
+        onClick: () => {
+          closeQuickActionDialog();
+          openIssueRepair(quickActionAttention.highObservations[0]);
+        },
+      };
+    }
+
+    if (primaryAssignment) {
+      return {
+        label: hasMatchingActiveRun ? "Resume Run" : "Start Run",
+        color: hasMatchingActiveRun ? ("primary" as const) : ("success" as const),
+        onClick: () => checkAssignmentThenStartFromDashboard(quickActionAsset, primaryAssignment),
+      };
+    }
+
+    if (productWorkflow) {
+      return {
+        label: "Start Run",
+        color: "success" as const,
+        onClick: () => launchProductWorkflowFromDashboard(quickActionAsset, productWorkflow),
+      };
+    }
+
+    return null;
+  }, [openIssueRepair, openSignatureRepair, productWorkflow, quickActionAsset, quickActionAssignments, quickActionAttention, quickActionRuns]);
+
   function checkAssignmentThenStartFromDashboard(asset: QuickActionAsset, assignment?: WorkflowAssignment) {
     if (!asset.assignedUserId) {
       setAutoAssignConfirm({ asset, assignment, reason: "unassigned" });
@@ -826,7 +1388,7 @@ const Dashboard = () => {
     }
   }
 
-  async function startWorkflowFromDashboard(asset: QuickActionAsset, assignment: WorkflowAssignment) {
+  async function startWorkflowFromDashboard(asset: QuickActionAsset, assignment: WorkflowAssignment, runsOverride?: AssetWorkflowRun[]) {
     setRunnerLoading(asset.id);
     try {
       const cfg = await workflowConfigService.getById(assignment.workflowConfigId);
@@ -840,7 +1402,8 @@ const Dashboard = () => {
       if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
 
       let existingRunId: string | undefined;
-      const activeRun = quickActionRuns.find((r) => r.workflowConfigId === assignment.workflowConfigId && !r.isLocked);
+      const runs = runsOverride ?? quickActionRuns;
+      const activeRun = runs.find((r) => r.workflowConfigId === assignment.workflowConfigId && !r.isLocked);
       if (activeRun) existingRunId = activeRun.id;
 
       setRunnerExistingRunId(existingRunId);
@@ -912,7 +1475,7 @@ const Dashboard = () => {
     [openIssues, myInstallAssets]
   );
   const myInstallPendingSigs = useMemo(
-    () => pendingSigs.filter((sig) => myInstallAssets.some((asset) => asset.id === sig.assetId || asset.jobNumber === sig.jobNumber)),
+    () => pendingSigs.filter((sig) => myInstallAssets.some((asset) => asset.id === sig.assetId)),
     [pendingSigs, myInstallAssets]
   );
   // High-severity observations on user's assigned assets (created by the current user)
@@ -1025,7 +1588,7 @@ const Dashboard = () => {
 
   // Load inspection signals for PM/Admin and installers
   useEffect(() => {
-    if (!isManager && !isInstaller) {
+    if (!isManager && !canActAsFieldTechnician) {
       setInspectionRunsDue(0);
       setInspectionImportsWaiting(0);
       setInspectionImportsFailed(0);
@@ -1076,7 +1639,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [isInstaller, isManager, user.id, user.role, visibleProjectIds]);
+  }, [canActAsFieldTechnician, isManager, user.id, user.role, visibleProjectIds]);
 
   // Project status chart
   const statusGroups = useMemo(() => {
@@ -1208,18 +1771,44 @@ const Dashboard = () => {
     } finally { setReportingTechId(null); }
   }
   // Reusable: individual clickable item row
-  const ItemRow = ({ label, sub, onClick }: { label: string; sub?: string; onClick: () => void }) => (
-    <Box onClick={(e) => { e.stopPropagation(); onClick(); }}
+  const ItemRow = ({
+    label,
+    sub,
+    onClick,
+    actionLabel,
+  }: {
+    label: string;
+    sub?: string;
+    onClick: () => void;
+    actionLabel?: string;
+  }) => (
+    <Stack
+      direction="row"
+      spacing={1}
+      alignItems="center"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
       sx={{
         px: 1, py: 0.5, borderRadius: 1, cursor: "pointer",
         "&:hover": { background: "rgba(255,255,255,0.07)" },
         transition: "background 0.15s",
-      }}>
-      <Typography variant="caption" color="text.secondary" noWrap display="block">
-        - {label}
-      </Typography>
-      {sub && <Typography variant="caption" color="text.disabled" noWrap display="block" sx={{ pl: 1.5, fontSize: "0.65rem" }}>{sub}</Typography>}
-    </Box>
+      }}
+    >
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography variant="caption" color="text.secondary" noWrap display="block">
+          - {label}
+        </Typography>
+        {sub && <Typography variant="caption" color="text.disabled" noWrap display="block" sx={{ pl: 1.5, fontSize: "0.65rem" }}>{sub}</Typography>}
+      </Box>
+      {actionLabel && (
+        <Chip
+          label={actionLabel}
+          size="small"
+          color="info"
+          variant="outlined"
+          sx={{ height: 18, fontSize: "0.6rem", flexShrink: 0 }}
+        />
+      )}
+    </Stack>
   );
   // Reusable JSX blocks
 
@@ -1264,7 +1853,8 @@ const Dashboard = () => {
                       ? projectAttentionLabel(iss.projectId, iss.jobNumber, undefined)
                       : `${iss.jobNumber}: ${iss.assetTag}`}
                     sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "..." : "")}
-                    onClick={() => navigate("/issues")} />
+                    actionLabel="Resolve"
+                    onClick={() => openIssueRepair(iss)} />
                 ))}
                 {blockingIssues.length > 4 && (
                   <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
@@ -1338,7 +1928,8 @@ const Dashboard = () => {
                       ? projectAttentionLabel(s.projectId, s.jobNumber, undefined)
                       : `${s.jobNumber}: ${s.assetTag}`}
                     sub={`Completed ${fmtDate(s.completedAt)}`}
-                    onClick={() => navigate(`/projects/${s.projectId}`)} />
+                    actionLabel="Sign-off"
+                    onClick={() => openSignatureRepair(s)} />
                 ))}
                 {visiblePendingSigs.length > 4 && (
                   <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
@@ -1375,7 +1966,8 @@ const Dashboard = () => {
                       ? projectAttentionLabel(iss.projectId, iss.jobNumber, undefined)
                       : `${iss.jobNumber}: ${iss.assetTag}`}
                     sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "..." : "")}
-                    onClick={() => navigate("/issues")} />
+                    actionLabel="Review"
+                    onClick={() => openIssueRepair(iss)} />
                 ))}
                 {highIssues.length > 4 && (
                   <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
@@ -1511,7 +2103,7 @@ const Dashboard = () => {
                     transform: "translateY(-1px)",
                   },
                 }}
-                onClick={() => navigate(`/projects/${project.id}`)}
+                onClick={() => navigate(projectAssetsPath(project))}
               >
                 <Stack spacing={0.7}>
                   <Stack direction={{ xs: "column", xl: "row" }} spacing={0.9} alignItems={{ xl: "center" }}>
@@ -1557,9 +2149,23 @@ const Dashboard = () => {
                   <Typography variant="caption" color="text.secondary" noWrap>
                     {[project.customerName, project.siteName, productNames || "No products linked"].filter(Boolean).join(" - ")}
                   </Typography>
-                  <Typography variant="caption" color={project.projectManager?.trim() ? "text.secondary" : "warning.main"} noWrap>
-                    PM: {project.projectManager?.trim() || "No PM assigned"}
-                  </Typography>
+                  <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap>
+                    <Typography variant="caption" color={project.projectManager?.trim() ? "text.secondary" : "warning.main"} noWrap>
+                      PM: {project.projectManager?.trim() || "No PM assigned"}
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(projectAssetsPath(project));
+                      }}
+                      sx={{ fontSize: "0.72rem", minHeight: 26 }}
+                    >
+                      Go to Project Assets
+                    </Button>
+                  </Stack>
                 </Stack>
               </Box>
             );
@@ -2713,8 +3319,8 @@ const Dashboard = () => {
       {showTabBar && !isManager && pmDashboardTab === "my-inspections" && MyInspectionWorkspace}
 
 
-      {/* INSTALLER / TECHNICIAN VIEW */}
-      {isInstaller && pmDashboardTab === "my-installs" && (
+      {/* FIELD USER VIEW */}
+      {canActAsFieldTechnician && pmDashboardTab === "my-installs" && (
         <>
           {inspectionRunsDue > 0 && (
             <Box className="glass-card" sx={{ p: 2 }}>
@@ -2726,7 +3332,7 @@ const Dashboard = () => {
                 <Chip label={inspectionRunsDue} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
               </Stack>
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                Internal inspections currently assigned to you and still open
+                Internal inspections assigned to you and still open
               </Typography>
               <Button
                 size="small"
@@ -2749,16 +3355,20 @@ const Dashboard = () => {
               Sorted by activity {"\u2014"} tap to open quick actions
             </Typography>
             {myInstallAssets.length === 0 ? (
-              <Typography variant="caption" color="text.disabled">No jobs assigned to you.</Typography>
+              <Typography variant="caption" color="text.disabled">No field jobs assigned to you.</Typography>
             ) : (
               <>
                 <Grid container spacing={1.5}>
                   {myInstallAssets.slice(0, 6).map((a) => {
                     const isActive = isInProgressAsset(a.runStatus) || isInProgressAsset(a.status);
                     const isPaused = isPausedAsset(a.runStatus);
+                    const hasCompletedAllSteps = a.totalSteps > 0 && a.completedSteps >= a.totalSteps;
+                    const hasMissingPhotoRepair = a.totalSteps > 0 && a.completedSteps >= a.totalSteps && a.missingItems > 0;
+                    const blockingIssuesForAsset = openIssues.filter((issue) => issue.assetId === a.id && issue.isBlocking);
+                    const shouldResolveBlockingIssue = !isPaused && !hasMissingPhotoRepair && hasCompletedAllSteps && blockingIssuesForAsset.length > 0;
                     return (
                       <Grid item xs={12} sm={6} md={4} key={a.id}>
-                        <Paper elevation={0} onClick={() => openQuickActionDialog(a)}
+                        <Paper elevation={0} onClick={() => { void openQuickActionOrStart(a); }}
                           sx={{
                             p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5,
                             cursor: "pointer", transition: "all 0.15s",
@@ -2779,7 +3389,12 @@ const Dashboard = () => {
                                   </Typography>
                                 )}
                               </Box>
-                              {isPaused ? (
+                              {hasMissingPhotoRepair ? (
+                                <Tooltip title="Workflow steps are complete but required captures are still missing" arrow>
+                                  <Chip label="Missing" size="small" color="error" variant="outlined"
+                                    sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0, cursor: "help" }} />
+                                </Tooltip>
+                              ) : isPaused ? (
                                 <Tooltip title="Workflow run is currently paused" arrow>
                                   <Chip label="Paused" size="small" color="warning" variant="outlined"
                                     sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0, cursor: "help" }} />
@@ -2800,10 +3415,10 @@ const Dashboard = () => {
                               )}
                             </Stack>
                             <Button size="small" variant="outlined"
-                              color={isActive ? "primary" : "inherit"}
-                              onClick={(e) => { e.stopPropagation(); openQuickActionDialog(a); }}
+                              color={hasMissingPhotoRepair ? "warning" : shouldResolveBlockingIssue ? "error" : isActive || isPaused ? "primary" : "inherit"}
+                              onClick={(e) => { e.stopPropagation(); void openQuickActionOrStart(a); }}
                               sx={{ alignSelf: "flex-start", height: 22, fontSize: "0.68rem", py: 0 }}>
-                              {isActive ? "Resume" : "Start"}
+                              {hasMissingPhotoRepair ? "Add Photos" : shouldResolveBlockingIssue ? "Resolve Blocking Issue" : isActive || isPaused ? "Resume" : "Start"}
                             </Button>
                           </Stack>
                         </Paper>
@@ -2876,7 +3491,7 @@ const Dashboard = () => {
                     </Box>
                     <Button size="small" variant="outlined" color="warning" sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
                       onClick={() => { setPhotoUploadMode("installer"); setPhotoUploadTarget(f as MissingMediaFlag); }}>
-                      Upload Media
+                      Add Missing Photos
                     </Button>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
                       onClick={() => {
@@ -2931,7 +3546,8 @@ const Dashboard = () => {
                         <ItemRow key={iss.issueId}
                           label={`${iss.jobNumber}: ${iss.assetTag}`}
                           sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
-                          onClick={() => navigate("/issues")} />
+                          actionLabel="Resolve"
+                          onClick={() => openIssueRepair(iss)} />
                       ))}
                       {myInstallBlocking.length > 3 && (
                         <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
@@ -2966,7 +3582,8 @@ const Dashboard = () => {
                         <ItemRow key={s.runId}
                           label={`${s.jobNumber}: ${s.assetTag}`}
                           sub={`Completed ${fmtDate(s.completedAt)}`}
-                          onClick={() => navigate(`/projects/${s.projectId}`)} />
+                          actionLabel="Sign-off"
+                          onClick={() => openSignatureRepair(s)} />
                       ))}
                       {myInstallPendingSigs.length > 3 && (
                         <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
@@ -3001,7 +3618,8 @@ const Dashboard = () => {
                         <ItemRow key={iss.issueId}
                           label={`${iss.jobNumber}: ${iss.assetTag}`}
                           sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
-                          onClick={() => navigate("/issues")} />
+                          actionLabel="Review"
+                          onClick={() => openIssueRepair(iss)} />
                       ))}
                       {myInstallHighObservations.length > 3 && (
                         <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
@@ -3024,6 +3642,11 @@ const Dashboard = () => {
               <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                 Job History
               </Typography>
+              {myInstallHistory.length > 0 && (
+                <Button size="small" variant="outlined" startIcon={<PrintOutlined fontSize="small" />} onClick={() => window.print()}>
+                  Print All
+                </Button>
+              )}
               <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
                 sx={{ height: 20, fontSize: "0.7rem" }} />
             </Stack>
@@ -3034,25 +3657,7 @@ const Dashboard = () => {
               <Typography variant="caption" color="text.secondary">No install history yet</Typography>
             ) : (
               <Stack spacing={0.75}>
-                {myInstallHistory.slice(0, 6).map((asset) => (
-                  <Paper key={asset.id} elevation={0}
-                    onClick={() => navigate("/installations/assets")}
-                    sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                      "&:hover": { borderColor: "success.main", background: "rgba(45,212,191,0.04)" } }}>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography variant="caption" fontWeight={600} noWrap display="block">
-                          {asset.assetTag || asset.assetName || asset.id}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                          {asset.jobNumber}{" · "}{asset.completedAt ? `Completed ${fmtDate(asset.completedAt)}` : `Updated ${fmtDate(asset.latestActivityAt)}`}
-                        </Typography>
-                      </Box>
-                      <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
-                        sx={{ height: 18, fontSize: "0.62rem" }} />
-                    </Stack>
-                  </Paper>
-                ))}
+                {myInstallHistory.slice(0, 6).map(renderHistoryCard)}
               </Stack>
             )}
           </Box>
@@ -3140,6 +3745,11 @@ const Dashboard = () => {
               <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                 Install History
               </Typography>
+              {myInstallHistory.length > 0 && (
+                <Button size="small" variant="outlined" startIcon={<PrintOutlined fontSize="small" />} onClick={() => window.print()}>
+                  Print All
+                </Button>
+              )}
               <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
                 sx={{ height: 20, fontSize: "0.7rem" }} />
             </Stack>
@@ -3147,25 +3757,7 @@ const Dashboard = () => {
               <Typography variant="caption" color="text.secondary">No install history yet</Typography>
             ) : (
               <Stack spacing={0.75}>
-                {myInstallHistory.slice(0, 6).map((asset) => (
-                  <Paper key={asset.id} elevation={0}
-                    onClick={() => navigate("/installations/assets")}
-                    sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                      "&:hover": { borderColor: "success.main", background: "rgba(45,212,191,0.04)" } }}>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography variant="caption" fontWeight={600} noWrap display="block">
-                          {asset.assetTag || asset.assetName || asset.id}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                          {asset.jobNumber}{" · "}{asset.completedAt ? `Completed ${fmtDate(asset.completedAt)}` : `Updated ${fmtDate(asset.latestActivityAt)}`}
-                        </Typography>
-                      </Box>
-                      <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
-                        sx={{ height: 18, fontSize: "0.62rem" }} />
-                    </Stack>
-                  </Paper>
-                ))}
+                {myInstallHistory.slice(0, 6).map(renderHistoryCard)}
               </Stack>
             )}
           </Box>
@@ -3197,7 +3789,8 @@ const Dashboard = () => {
                       <ItemRow key={s.runId}
                         label={`${s.jobNumber}: ${s.assetTag}`}
                         sub={`Completed ${fmtDate(s.completedAt)}`}
-                        onClick={() => navigate(`/projects/${s.projectId}`)} />
+                        actionLabel="Sign-off"
+                        onClick={() => openSignatureRepair(s)} />
                     ))}
                     {myInstallPendingSigs.length > 5 && (
                       <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
@@ -3281,7 +3874,7 @@ const Dashboard = () => {
           {/* Inspection signals */}
           {(pmDashboardTab === "pm-projects" || pmDashboardTab === "my-inspections") && InspectionInboxSection}
 
-          {/* Auto-assignment flags - installer self-assigned */}
+          {/* Auto-assignment flags - field user self-assigned */}
           {pmDashboardTab === "pm-projects" && autoAssignFlags.length > 0 && (
             <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -3424,9 +4017,9 @@ const Dashboard = () => {
                         variant="outlined"
                         color="info"
                         sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
-                        onClick={() => { setPhotoUploadMode("pm"); setPhotoUploadTarget(f); }}
+                        onClick={() => openMissingMediaRepair(f)}
                       >
-                        Preview
+                        Open Repair
                       </Button>
                       <Button
                         size="small"
@@ -3451,7 +4044,7 @@ const Dashboard = () => {
                           setTimeout(() => setReminderSentId(null), 2000);
                         }}
                       >
-                        {reminderSentId === f.id ? "Sent" : "Remind Installer"}
+                        {reminderSentId === f.id ? "Sent" : "Notify Field User"}
                       </Button>
                       <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
                         onClick={() => {
@@ -3486,10 +4079,10 @@ const Dashboard = () => {
                   <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Installs</Typography>
                 </Stack>
                 <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-                  Installation assets currently assigned to you as a technician.
+                  Installation assets currently assigned to you for field execution.
                 </Typography>
                 {myInstallAssets.length === 0 ? (
-                  <Typography variant="caption" color="text.disabled">No installation assets currently assigned to you.</Typography>
+                  <Typography variant="caption" color="text.disabled">No installation assets currently assigned to you for field execution.</Typography>
                 ) : (
                   <>
                     <Grid container spacing={1.5}>
@@ -3530,6 +4123,11 @@ const Dashboard = () => {
                   <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                     Install History
                   </Typography>
+                  {myInstallHistory.length > 0 && (
+                    <Button size="small" variant="outlined" startIcon={<PrintOutlined fontSize="small" />} onClick={() => window.print()}>
+                      Print All
+                    </Button>
+                  )}
                   <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
                     sx={{ height: 20, fontSize: "0.7rem" }} />
                 </Stack>
@@ -3537,25 +4135,7 @@ const Dashboard = () => {
                   <Typography variant="caption" color="text.secondary">No install history yet</Typography>
                 ) : (
                   <Stack spacing={0.75}>
-                    {myInstallHistory.slice(0, 6).map((asset) => (
-                      <Paper key={asset.id} elevation={0}
-                        onClick={() => navigate("/installations/assets")}
-                        sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                          "&:hover": { borderColor: "success.main", background: "rgba(45,212,191,0.04)" } }}>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Typography variant="caption" fontWeight={600} noWrap display="block">
-                              {asset.assetTag || asset.assetName || asset.id}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                              {asset.jobNumber}{" · "}{asset.completedAt ? `Completed ${fmtDate(asset.completedAt)}` : `Updated ${fmtDate(asset.latestActivityAt)}`}
-                            </Typography>
-                          </Box>
-                          <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
-                            sx={{ height: 18, fontSize: "0.62rem" }} />
-                        </Stack>
-                      </Paper>
-                    ))}
+                    {myInstallHistory.slice(0, 6).map(renderHistoryCard)}
                   </Stack>
                 )}
               </Box>
@@ -3798,6 +4378,16 @@ const Dashboard = () => {
         />
       )}
 
+      {issueDetailTarget && (
+        <IssueDetailDialog
+          open={!!issueDetailTarget}
+          issue={issueDetailTarget.issue}
+          currentUser={user.fullName ?? user.email ?? "User"}
+          onClose={() => setIssueDetailTarget(null)}
+          onSave={(updated) => void handleDashboardIssueSave(updated as AssetIssue | RunIssue)}
+        />
+      )}
+
       {/* Quick Action Dialog for "My Jobs Today" */}
       <Dialog open={quickActionOpen} onClose={closeQuickActionDialog} maxWidth="sm" fullWidth>
         <DialogTitle>
@@ -3835,6 +4425,20 @@ const Dashboard = () => {
                       {quickActionAsset.missingItems > 0 && ` \u2022 ${quickActionAsset.missingItems} missing`}
                     </Typography>
                   )}
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                    {quickActionAttention.blockingIssues.length > 0 && (
+                      <Chip size="small" color="error" variant="outlined" label={`${quickActionAttention.blockingIssues.length} blocking`} />
+                    )}
+                    {quickActionAttention.highObservations.length > 0 && (
+                      <Chip size="small" color="warning" variant="outlined" label={`${quickActionAttention.highObservations.length} high observation`} />
+                    )}
+                    {quickActionAttention.missingMedia && (
+                      <Chip size="small" color="warning" variant="outlined" label="Missing photos" />
+                    )}
+                    {quickActionAttention.pendingSignature && (
+                      <Chip size="small" color="warning" variant="outlined" label="Pending signature" />
+                    )}
+                  </Stack>
                 </Box>
               )}
 
@@ -3870,7 +4474,39 @@ const Dashboard = () => {
                 >
                   Edit Asset
                 </Button>
+                {quickActionPrimaryAction && (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color={quickActionPrimaryAction.color}
+                    startIcon={
+                      quickActionPrimaryAction.label === "Resolve Blocking Issue" ? <WarningAmberOutlined fontSize="small" /> :
+                      quickActionPrimaryAction.label === "Add Missing Photos" ? <PhotoCameraOutlined fontSize="small" /> :
+                      quickActionPrimaryAction.label === "Complete Sign-off" ? <PendingActionsOutlined fontSize="small" /> :
+                      quickActionPrimaryAction.label === "Review High Observation" ? <ReportOutlined fontSize="small" /> :
+                      <PlayArrowOutlined fontSize="small" />
+                    }
+                    onClick={quickActionPrimaryAction.onClick}
+                  >
+                    {quickActionPrimaryAction.label}
+                  </Button>
+                )}
               </Stack>
+
+              {(quickActionAttention.blockingIssues.length > 0 ||
+                quickActionAttention.highObservations.length > 0 ||
+                quickActionAttention.missingMedia ||
+                quickActionAttention.pendingSignature) && (
+                <Alert severity={quickActionAttention.blockingIssues.length > 0 ? "error" : "warning"} sx={{ mt: 0.5 }}>
+                  {quickActionAttention.blockingIssues.length > 0
+                    ? "This asset has an open blocking issue. Resolve it before expecting the workflow to complete normally."
+                    : quickActionAttention.missingMedia
+                      ? "This asset has missing workflow photos. The primary action takes the user directly to photo recovery."
+                      : quickActionAttention.pendingSignature
+                        ? "This asset is waiting for sign-off. Keep signature recovery as a first-class action."
+                        : "This asset has high-severity observations that still need review."}
+                </Alert>
+              )}
 
               {/* Workflow assignments */}
               {quickActionAssignments.length === 0 && quickActionRuns.length === 0 && !productWorkflow ? (
@@ -3911,32 +4547,11 @@ const Dashboard = () => {
                         disabled={runnerLoading === quickActionAsset?.id}
                         onClick={() => {
                           if (quickActionAsset && productWorkflow) {
-                            void (async () => {
-                              setRunnerLoading(quickActionAsset.id);
-                              try {
-                                const cfg = await workflowConfigService.getById(productWorkflow.configId);
-                                if (!cfg) { alert("Workflow config not found."); return; }
-                                let wf: Workflow | null = null;
-                                try {
-                                  const parsed = JSON.parse(cfg.stepsJson);
-                                  if (parsed?.steps) wf = parsed as Workflow;
-                                  else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
-                                } catch {}
-                                if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
-                                setRunnerExistingRunId(undefined);
-                                setRunnerAsset(quickActionAsset);
-                                setRunnerWorkflow(wf);
-                                setRunnerWorkflowConfigId(productWorkflow.configId);
-                                setRunnerOpen(true);
-                                closeQuickActionDialog();
-                              } catch { alert("Failed to load workflow."); } finally {
-                                setRunnerLoading(null);
-                              }
-                            })();
+                            launchProductWorkflowFromDashboard(quickActionAsset, productWorkflow);
                           }
                         }}
                       >
-                        Start
+                        Start Run
                       </Button>
                     </Stack>
                   </Paper>
@@ -4032,7 +4647,7 @@ const Dashboard = () => {
                                 disabled={runnerLoading === quickActionAsset?.id}
                                 onClick={() => checkAssignmentThenStartFromDashboard(quickActionAsset!, asgn)}
                               >
-                                {isActive ? "Resume" : "Start"}
+                                {isActive ? "Resume Run" : "Start Run"}
                               </Button>
                             </Stack>
                           </Stack>

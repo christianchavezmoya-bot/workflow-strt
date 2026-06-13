@@ -184,7 +184,7 @@ export default function SignatureDialog({
     }
   };
 
-  const roleLabel = signerRole === "Installer" ? "Installer Sign-off" : "Customer Sign-off";
+  const roleLabel = signerRole === "Installer" ? "Field Sign-off" : "Customer Sign-off";
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>

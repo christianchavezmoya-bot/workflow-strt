@@ -70,6 +70,18 @@ function typeColor(t: string): "error" | "warning" | "info" {
   return "info";
 }
 
+function buildIssueRepairPath(issue: Pick<OpenIssueRecord | ClosedIssueRecord, "projectId" | "assetId" | "runId" | "issueId" | "source">) {
+  const query = new URLSearchParams({
+    project: issue.projectId,
+    asset: issue.assetId,
+    action: "issue",
+    run: issue.runId,
+    issue: issue.issueId,
+    issueSource: issue.source,
+  });
+  return `/installations/assets?${query.toString()}`;
+}
+
 // ─── component ────────────────────────────────────────────────────────────────
 
 const IssuesBoard = () => {
@@ -201,8 +213,6 @@ const IssuesBoard = () => {
             : ri
         );
         await assetWorkflowRunService.patchIssues(iss.runId, JSON.stringify(runIssues));
-        // Auto-lock run if this was the last blocking issue and run is still in-progress
-        await assetWorkflowRunService.tryAutoComplete(iss.runId).catch(() => {});
       }
       // Optimistic remove from list + refresh history
       setIssues(prev => prev.filter(i => !(i.assetId === iss.assetId && i.issueId === iss.issueId)));
@@ -385,11 +395,11 @@ const IssuesBoard = () => {
                   <Chip label={iss.severity.charAt(0).toUpperCase() + iss.severity.slice(1)} size="small" color={severityColor(iss.severity)} sx={{ fontSize: "0.68rem", height: 20 }} />
                   <Chip label="Closed" size="small" color="success" icon={<CheckCircleOutlined sx={{ fontSize: "12px !important" }} />} sx={{ fontSize: "0.68rem", height: 20 }} />
                   <Box sx={{ flex: 1 }} />
-                  <Tooltip title="Go to asset installations">
-                    <IconButton size="small" component={Link} to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`} sx={{ p: 0.5 }}>
-                      <OpenInNewOutlined sx={{ fontSize: 15 }} />
-                    </IconButton>
-                  </Tooltip>
+                      <Tooltip title="Open exact asset issue repair">
+                        <IconButton size="small" component={Link} to={buildIssueRepairPath(iss)} sx={{ p: 0.5 }}>
+                          <OpenInNewOutlined sx={{ fontSize: 15 }} />
+                        </IconButton>
+                      </Tooltip>
                 </Stack>
 
                 {/* Row 2: description */}
@@ -522,8 +532,8 @@ const IssuesBoard = () => {
                       <Typography variant="caption" sx={{ fontStyle: "italic" }}>{iss.resolutionNote || "—"}</Typography>
                     </TableCell>
                     <TableCell sx={{ py: 0.75, pr: 1 }}>
-                      <Tooltip title="Go to asset installations">
-                        <IconButton size="small" component={Link} to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`}>
+                      <Tooltip title="Open exact asset issue repair">
+                        <IconButton size="small" component={Link} to={buildIssueRepairPath(iss)}>
                           <OpenInNewOutlined sx={{ fontSize: 14 }} />
                         </IconButton>
                       </Tooltip>
@@ -593,11 +603,11 @@ const IssuesBoard = () => {
                   <ErrorOutlineOutlined sx={{ fontSize: 15, color: "error.main" }} />
                 )}
                 <Box sx={{ flex: 1 }} />
-                <Tooltip title="Go to asset installations">
+                <Tooltip title="Open exact asset issue repair">
                   <IconButton
                     size="small"
                     component={Link}
-                    to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`}
+                    to={buildIssueRepairPath(iss)}
                     sx={{ p: 0.5 }}
                   >
                     <OpenInNewOutlined sx={{ fontSize: 15 }} />
@@ -767,11 +777,11 @@ const IssuesBoard = () => {
                         <Typography variant="caption" color="text.secondary">{iss.createdBy || "—"}</Typography>
                       </TableCell>
                       <TableCell sx={{ py: 0.75, pr: 1 }}>
-                        <Tooltip title="Go to asset installations">
+                        <Tooltip title="Open exact asset issue repair">
                           <IconButton
                             size="small"
                             component={Link}
-                            to={`/installations/assets?project=${encodeURIComponent(iss.projectId)}`}
+                            to={buildIssueRepairPath(iss)}
                             onClick={e => e.stopPropagation()}
                           >
                             <OpenInNewOutlined sx={{ fontSize: 14 }} />

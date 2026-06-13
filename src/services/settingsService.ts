@@ -1,5 +1,5 @@
 import api from "./api";
-import { NotificationSettingsPayload, PublicAppSettingsPayload, QuickbaseSettingsPayload } from "../types/settings";
+import { NotificationSettingsPayload, PublicAppSettingsPayload, QuickbaseSettingsPayload, RuntimeFrontendBasePayload } from "../types/settings";
 
 let publicAppSettingsPromise: Promise<PublicAppSettingsPayload> | null = null;
 
@@ -38,6 +38,13 @@ export const settingsService = {
       });
 
     return publicAppSettingsPromise;
+  },
+
+  async getRuntimeFrontendBase(frontendPort?: string) {
+    const response = await api.get<RuntimeFrontendBasePayload>("/settings/runtime-frontend-base", {
+      params: frontendPort ? { frontendPort } : undefined,
+    });
+    return response.data;
   }
 };
 

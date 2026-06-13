@@ -10,7 +10,7 @@ import type { SignatureStatus } from "../../types/signature";
 
 const configs: Record<SignatureStatus, { label: string; color: "default" | "warning" | "info" | "success" | "error"; icon: React.ReactElement }> = {
   None:             { label: "Not Signed",         color: "default",  icon: <PendingOutlined />          },
-  PendingInstaller: { label: "Pending Installer",  color: "warning",  icon: <HourglassEmptyOutlined />   },
+  PendingInstaller: { label: "Pending Field Sign-off",  color: "warning",  icon: <HourglassEmptyOutlined />   },
   PendingCustomer:  { label: "Pending Customer",   color: "info",     icon: <HourglassEmptyOutlined />   },
   Signed:           { label: "Signed",             color: "success",  icon: <CheckCircleOutlined />       },
   Declined:         { label: "Declined",           color: "error",    icon: <ErrorOutlined />             },

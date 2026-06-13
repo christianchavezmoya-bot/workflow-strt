@@ -1,3 +1,5 @@
+import { Capacitor } from "@capacitor/core";
+
 const API_BASE_STORAGE_KEY = "commtrac_api_base";
 
 // Clear any previously stored override — API URL is now controlled by VITE_API_BASE in .env
@@ -24,12 +26,20 @@ export function getStoredApiBaseUrl(): string | null {
 }
 
 export function getDefaultApiBaseUrl(): string {
+  const hostname = window.location.hostname;
+  const protocol = window.location.protocol;
+  const localBrowserDefault = `${protocol}//${hostname}:4000/api`;
+
+  // Browser dev on localhost should talk to localhost by default even if
+  // VITE_API_BASE is set to a LAN IP for native phone builds.
+  if (!Capacitor.isNativePlatform() && (hostname === "localhost" || hostname === "127.0.0.1")) {
+    return localBrowserDefault;
+  }
+
   if (import.meta.env.VITE_API_BASE) {
     return normalizeApiBaseUrl(import.meta.env.VITE_API_BASE);
   }
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  return `${protocol}//${hostname}:4000/api`;
+  return localBrowserDefault;
 }
 
 export function getApiBaseUrl(): string {

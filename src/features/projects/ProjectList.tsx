@@ -270,15 +270,6 @@ const ProjectList = () => {
     officesService.getAll().then(setGlobalOffices);
   }, []);
 
-  // Load my project IDs when in my-work scope for non-PM roles
-  useEffect(() => {
-    const role = user?.role ?? "";
-    if (isMyWork && ["Installer", "Engineer", "Supervisor"].includes(role)) {
-      projectAssetService.myProjectIds().then(setMyProjectIds);
-    } else {
-      setMyProjectIds([]);
-    }
-  }, [isMyWork, user?.role]);
   const projectsTableConfig = useTableConfig(
     "projects",
     projectsDynamic.definitions.map((field) => ({
@@ -325,14 +316,33 @@ const ProjectList = () => {
   const canManageProjectTable = isAdminUser || isPmUser;
   // Scope dropdown visible only when the role's viewScope permits seeing all projects
   const canViewAllProjects = (can.projects?.viewScope ?? "own") === "all";
+  const canActAsFieldTechnician = !!can.installationAssets?.runWorkflow && !can.viewOnly;
   const { complexViewActive } = useComplexView();
-  const showComplexControls = complexViewActive && Capacitor.isNativePlatform();
+  // Web always shows full management controls; native keeps them behind Complex View.
+  const showComplexControls = !Capacitor.isNativePlatform() || complexViewActive;
+
+  // Load my project IDs when in my-work scope for non-PM field users
+  useEffect(() => {
+    if (isMyWork && canActAsFieldTechnician && !isPmUser) {
+      projectAssetService.myProjectIds().then(setMyProjectIds);
+    } else {
+      setMyProjectIds([]);
+    }
+  }, [canActAsFieldTechnician, isMyWork, isPmUser]);
 
   const canEditProject = useMemo(() => (project: Project) => {
     if (isAdminUser) return true;
     if (!isPmUser) return false;
     return project.assignedPmUserId === user?.id;
   }, [isAdminUser, isPmUser, user?.id]);
+
+  const canEditProjectFromWebTable = useMemo(() => (project: Project) => {
+    if (can.projects?.editScope === "all") return true;
+    if (can.projects?.editScope !== "own") return false;
+    if (project.assignedPmUserId && project.assignedPmUserId === user?.id) return true;
+    // Fallback for legacy rows where the PM name is visible but the owner id was not populated.
+    return String(project.projectManager ?? "").trim().toLowerCase() === String(user?.fullName ?? "").trim().toLowerCase();
+  }, [can.projects?.editScope, user?.fullName, user?.id]);
 
   // Block-complete dialog — shown when assets are not all done
   const [blockComplete, setBlockComplete] = useState<{ open: boolean; incomplete: number; total: number }>({ open: false, incomplete: 0, total: 0 });
@@ -423,7 +433,7 @@ const ProjectList = () => {
     // Scope-aware filtering.
     // PM: driven by the canViewAllProjects permission + projectViewFilter dropdown.
     //     Replaces the old isMyWork check so the two systems don't conflict.
-    // Installer/Engineer/Supervisor: keep the isMyWork toggle (scoped to assigned assets).
+    // Field-execution users: keep the isMyWork toggle (scoped to assigned assets).
     let scopeFiltered = officeFiltered;
     if (!isAdmin) {
       if (role === "Project Manager") {
@@ -434,7 +444,7 @@ const ProjectList = () => {
           );
         }
         // projectViewFilter === "all" && canViewAllProjects → no extra filter
-      } else if (isMyWork && ["Installer", "Engineer", "Supervisor"].includes(role)) {
+      } else if (isMyWork && canActAsFieldTechnician) {
         const idSet = new Set(myProjectIds);
         scopeFiltered = officeFiltered.filter((p) => idSet.has(p.id));
       }
@@ -442,7 +452,7 @@ const ProjectList = () => {
 
     const filtered = applyAutoFilter(scopeFiltered, autoFilters, projectAccessors);
     return applyAutoSort(filtered, autoSort, projectAccessors);
-  }, [activeOffice, canViewAllProjects, globalOffices, projectViewFilter, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName]);
+  }, [activeOffice, canActAsFieldTechnician, canViewAllProjects, globalOffices, projectViewFilter, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName]);
 
   // Auto-fallback: if PM's "My projects" filter returns nothing once data is loaded,
   // switch to "all" so they don't land on a blank page.
@@ -579,15 +589,15 @@ const ProjectList = () => {
   const renderActions = (project: Project) => {
     const actions: string[] = [];
 
-    if (project.status === "Pending Approval" && isAdminUser) {
-      actions.push("Approve", "Reject");
+    if (project.status === "Pending Approval" && can.projects?.approve) {
+      actions.push("Approve", "Request Info", "Reject");
     }
 
-    if (project.status === "Approved" && canEditProject(project)) {
+    if (project.status === "Approved" && canEditProjectFromWebTable(project)) {
       actions.push("Start Work");
     }
 
-    if (project.status === "In Progress" && canEditProject(project)) {
+    if (project.status === "In Progress" && canEditProjectFromWebTable(project)) {
       actions.push("Mark Completed");
     }
 
@@ -946,12 +956,12 @@ const ProjectList = () => {
                     <TableCell sx={{ padding: '8px 12px' }}>
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
                         {!project.isDeleted && renderActions(project)}
-                        {canEditProject(project) && !project.isDeleted && (
+                        {can.projects?.edit && canEditProjectFromWebTable(project) && !project.isDeleted && (
                           <IconButton size="small" onClick={() => setEditTarget(project)}>
                             <EditOutlined fontSize="small" />
                           </IconButton>
                         )}
-                        {canEditProject(project) && !project.isDeleted && (
+                        {can.projects?.delete && canEditProjectFromWebTable(project) && !project.isDeleted && (
                           <IconButton
                             size="small"
                             disabled={deleteSavingId === project.id}
@@ -960,7 +970,7 @@ const ProjectList = () => {
                             <DeleteOutline fontSize="small" />
                           </IconButton>
                         )}
-                        {canEditProject(project) && project.isDeleted && (
+                        {can.projects?.delete && canEditProjectFromWebTable(project) && project.isDeleted && (
                           <>
                             <IconButton
                               size="small"
@@ -984,18 +994,25 @@ const ProjectList = () => {
                                   setDeleteSavingId(null);
                                 }
                               }}
-                            >
-                              <RestoreOutlined fontSize="small" />
-                            </IconButton>
-                            <IconButton
-                              size="small"
+                              >
+                                <RestoreOutlined fontSize="small" />
+                              </IconButton>
+                              <IconButton
+                                size="small"
                               disabled={deleteSavingId === project.id}
                               onClick={() => setPurgeTarget(project)}
-                            >
-                              <DeleteForeverOutlined fontSize="small" />
-                            </IconButton>
-                          </>
-                        )}
+                              >
+                                <DeleteForeverOutlined fontSize="small" />
+                              </IconButton>
+                            </>
+                          )}
+                        {!renderActions(project) && !(can.projects?.edit && canEditProjectFromWebTable(project) && !project.isDeleted)
+                          && !(can.projects?.delete && canEditProjectFromWebTable(project))
+                          && (
+                            <Typography variant="caption" color="text.disabled">
+                              No actions
+                            </Typography>
+                          )}
                       </Stack>
                     </TableCell>
                   </TableRow>

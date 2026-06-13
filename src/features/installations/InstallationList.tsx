@@ -40,6 +40,7 @@ import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import { useAuth } from "../../hooks/useAuth";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
+import { usePermissions } from "../../hooks/usePermissions";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { fieldService } from "../../services/fieldService";
@@ -108,6 +109,7 @@ const applyAutoFilter = <T,>(
 
 const InstallationList = () => {
   const { user } = useAuth();
+  const can = usePermissions();
   const { activeOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const { items, loading } = useAppSelector((state) => state.installations);
@@ -912,6 +914,10 @@ const InstallationList = () => {
   const activeTab = installationTabsConfig[tab];
   const activeTabType = activeTab?.type ?? "installations";
   const isCustomInstallTab = !!activeTab?.id?.startsWith("install-tab-");
+  const canViewInstallations = !!can.installationAssets?.view;
+  const canEditInstallations = !!can.installationAssets?.edit;
+  const canDeleteInstallations = !!can.installationAssets?.delete;
+  const canManageInstallationSettings = canEditInstallations || canDeleteInstallations;
 
   return (
     <Stack spacing={3}>
@@ -930,28 +936,34 @@ const InstallationList = () => {
             label="Show archived"
             sx={{ mr: 0 }}
           />
-          <Button
-            variant="outlined"
-            onClick={showInstallationsPlaceholder}
-          >
-            Add new installation
-          </Button>
-          <Button variant="outlined" onClick={() => setBulkOpen(true)}>
-            Bulk add
-          </Button>
-          <IconButton
-            size="small"
-            onMouseEnter={(event) => {
-              setInstallationSettingsMenu(event.currentTarget);
-              setInstallationSettingsMenuOpen(true);
-            }}
-            onClick={(event) => {
-              setInstallationSettingsMenu(event.currentTarget);
-              setInstallationSettingsMenuOpen(true);
-            }}
-          >
-            <SettingsOutlined fontSize="small" />
-          </IconButton>
+          {canEditInstallations && (
+            <Button
+              variant="outlined"
+              onClick={showInstallationsPlaceholder}
+            >
+              Add new installation
+            </Button>
+          )}
+          {canEditInstallations && (
+            <Button variant="outlined" onClick={() => setBulkOpen(true)}>
+              Bulk add
+            </Button>
+          )}
+          {canManageInstallationSettings && (
+            <IconButton
+              size="small"
+              onMouseEnter={(event) => {
+                setInstallationSettingsMenu(event.currentTarget);
+                setInstallationSettingsMenuOpen(true);
+              }}
+              onClick={(event) => {
+                setInstallationSettingsMenu(event.currentTarget);
+                setInstallationSettingsMenuOpen(true);
+              }}
+            >
+              <SettingsOutlined fontSize="small" />
+            </IconButton>
+          )}
         </Stack>
       </Stack>
 
@@ -1057,33 +1069,42 @@ const InstallationList = () => {
                       ))}
                       <TableCell>
                         <Stack direction="row" spacing={1}>
-                          <IconButton
-                            size="small"
-                            onClick={() => {
-                              const baseDefaults = createDefaultCustomRow(entry.index + 1);
-                              const nextForm: Record<string, string> = {};
-                              defaultFields.forEach((field) => {
-                                nextForm[field.id] = entry.row[field.name] ?? (baseDefaults as Record<string, string>)[field.name] ?? "";
-                              });
-                              setCustomInstallRowForm(nextForm);
-                              setCustomInstallRowDialogTabId(activeTab.id);
-                              setCustomInstallRowDialogIndex(entry.index);
-                              setCustomInstallRowDialogOpen(true);
-                            }}
-                          >
-                            <EditOutlined fontSize="small" />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            onClick={() =>
-                              setInstallationTabRows((prev) => ({
-                                ...prev,
-                                [activeTab.id]: (prev[activeTab.id] || []).filter((_, index) => index !== entry.index)
-                              }))
-                            }
-                          >
-                            <DeleteOutline fontSize="small" />
-                          </IconButton>
+                          {canEditInstallations && (
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                const baseDefaults = createDefaultCustomRow(entry.index + 1);
+                                const nextForm: Record<string, string> = {};
+                                defaultFields.forEach((field) => {
+                                  nextForm[field.id] = entry.row[field.name] ?? (baseDefaults as Record<string, string>)[field.name] ?? "";
+                                });
+                                setCustomInstallRowForm(nextForm);
+                                setCustomInstallRowDialogTabId(activeTab.id);
+                                setCustomInstallRowDialogIndex(entry.index);
+                                setCustomInstallRowDialogOpen(true);
+                              }}
+                            >
+                              <EditOutlined fontSize="small" />
+                            </IconButton>
+                          )}
+                          {canDeleteInstallations && (
+                            <IconButton
+                              size="small"
+                              onClick={() =>
+                                setInstallationTabRows((prev) => ({
+                                  ...prev,
+                                  [activeTab.id]: (prev[activeTab.id] || []).filter((_, index) => index !== entry.index)
+                                }))
+                              }
+                            >
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          )}
+                          {!canEditInstallations && !canDeleteInstallations && (
+                            <Typography variant="caption" color="text.disabled">
+                              No actions
+                            </Typography>
+                          )}
                         </Stack>
                       </TableCell>
                     </TableRow>
@@ -1159,14 +1180,16 @@ const InstallationList = () => {
                 <MenuItem value="form">Form view</MenuItem>
               </Select>
             </FormControl>
-            <Button variant="outlined">Download report</Button>
-            <Button variant="contained">Create report</Button>
-            <Button
-              variant="outlined"
-              onClick={showInstallationsPlaceholder}
-            >
-              Table configuration
-            </Button>
+            {canViewInstallations && <Button variant="outlined">Download report</Button>}
+            {canEditInstallations && <Button variant="contained">Create report</Button>}
+            {canEditInstallations && (
+              <Button
+                variant="outlined"
+                onClick={showInstallationsPlaceholder}
+              >
+                Table configuration
+              </Button>
+            )}
           </Stack>
 
           {false && viewMode === "table" && (
@@ -1340,23 +1363,32 @@ const InstallationList = () => {
                       ))}
                       <TableCell>
                         <Stack direction="row" spacing={1}>
-                          <IconButton
-                            size="small"
-                            onClick={() => {
-                              setEditForm(row);
-                              setEditOpen(true);
-                            }}
-                            disabled={row.isDeleted}
-                          >
-                            <EditOutlined fontSize="small" />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            onClick={() => setDeleteTarget(row)}
-                            disabled={!!row.isDeleted}
-                          >
-                            <DeleteOutline fontSize="small" />
-                          </IconButton>
+                          {canEditInstallations && (
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setEditForm(row);
+                                setEditOpen(true);
+                              }}
+                              disabled={row.isDeleted}
+                            >
+                              <EditOutlined fontSize="small" />
+                            </IconButton>
+                          )}
+                          {canDeleteInstallations && (
+                            <IconButton
+                              size="small"
+                              onClick={() => setDeleteTarget(row)}
+                              disabled={!!row.isDeleted}
+                            >
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          )}
+                          {!canEditInstallations && !canDeleteInstallations && (
+                            <Typography variant="caption" color="text.disabled">
+                              No actions
+                            </Typography>
+                          )}
                         </Stack>
                       </TableCell>
                     </TableRow>
@@ -2337,11 +2369,13 @@ const InstallationList = () => {
         <MenuItem
           onClick={() => {
             setInstallationSettingsMenuOpen(false);
+            if (!canEditInstallations) return;
             setInstallationTabManagerOpen(true);
           }}
         >
           Installation Tabs Manager
         </MenuItem>
+        {canEditInstallations && (
         <MenuItem
           onClick={() => {
             setInstallationSettingsMenuOpen(false);
@@ -2355,6 +2389,8 @@ const InstallationList = () => {
         >
           Table configuration
         </MenuItem>
+        )}
+        {canEditInstallations && (
         <MenuItem
             onClick={() => {
               setInstallationSettingsMenuOpen(false);
@@ -2377,7 +2413,7 @@ const InstallationList = () => {
         >
           Add/Create/New
         </MenuItem>
-        <MenuItem onClick={() => setInstallationSettingsMenuOpen(false)}>Option 4</MenuItem>
+        )}
       </Menu>
 
       <Dialog open={installationTabManagerOpen} onClose={() => setInstallationTabManagerOpen(false)} maxWidth="sm" fullWidth>
@@ -2445,14 +2481,20 @@ const InstallationList = () => {
                       </FormControl>
                     </TableCell>
                     <TableCell>
-                      <IconButton
-                        size="small"
-                        onClick={() =>
-                          setInstallationTabsConfig((prev) => prev.filter((tabItem) => tabItem.id !== item.id))
-                        }
-                      >
-                        <DeleteOutline fontSize="small" />
-                      </IconButton>
+                      {canDeleteInstallations ? (
+                        <IconButton
+                          size="small"
+                          onClick={() =>
+                            setInstallationTabsConfig((prev) => prev.filter((tabItem) => tabItem.id !== item.id))
+                          }
+                        >
+                          <DeleteOutline fontSize="small" />
+                        </IconButton>
+                      ) : (
+                        <Typography variant="caption" color="text.disabled">
+                          No actions
+                        </Typography>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -2474,25 +2516,27 @@ const InstallationList = () => {
                   <MenuItem value="installations">Installations</MenuItem>
                 </Select>
               </FormControl>
-              <Button
-                variant="contained"
-                onClick={() => {
-                  const label = newInstallationTabName.trim() || "New Tab";
-                    const newTab = {
-                      id: `install-tab-${Date.now()}`,
-                      label,
-                      type: newInstallationTabType
-                    };
-                    setInstallationTabsConfig((prev) => [...prev, { ...newTab, position: prev.length }]);
-                    setInstallationTabRows((prev) => ({
-                      ...prev,
-                      [newTab.id]: [createDefaultCustomRow(1)]
-                    }));
-                    setNewInstallationTabName("");
-                  }}
-                >
-                Create tab
-              </Button>
+              {canEditInstallations && (
+                <Button
+                  variant="contained"
+                  onClick={() => {
+                    const label = newInstallationTabName.trim() || "New Tab";
+                      const newTab = {
+                        id: `install-tab-${Date.now()}`,
+                        label,
+                        type: newInstallationTabType
+                      };
+                      setInstallationTabsConfig((prev) => [...prev, { ...newTab, position: prev.length }]);
+                      setInstallationTabRows((prev) => ({
+                        ...prev,
+                        [newTab.id]: [createDefaultCustomRow(1)]
+                      }));
+                      setNewInstallationTabName("");
+                    }}
+                  >
+                  Create tab
+                </Button>
+              )}
             </Stack>
           </Stack>
         </DialogContent>

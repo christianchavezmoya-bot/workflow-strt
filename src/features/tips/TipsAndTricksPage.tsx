@@ -295,8 +295,9 @@ export default function TipsAndTricksPage() {
   }, []);
 
   useEffect(() => {
-    const role = user?.role ?? "";
-    if (["Installer", "Engineer", "Supervisor", "Project Manager"].includes(role)) {
+    const isPmUser = user?.role === "Project Manager";
+    const canActAsFieldTechnician = !!can.installationAssets?.runWorkflow && !can.viewOnly;
+    if (isPmUser || canActAsFieldTechnician) {
       projectAssetService
         .myProjectIds()
         .then(async (projectIds) => {
@@ -309,7 +310,7 @@ export default function TipsAndTricksPage() {
         })
         .catch(() => {});
     }
-  }, [user?.role]);
+  }, [can.installationAssets?.runWorkflow, can.viewOnly, user?.role]);
 
   const productNameById = useMemo(
     () => new Map(products.map((product) => [product.id, product.name])),

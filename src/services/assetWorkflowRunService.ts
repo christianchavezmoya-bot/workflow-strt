@@ -168,7 +168,8 @@ async function enqueueRunMutation(
 export const assetWorkflowRunService = {
   async listLatestByProject(projectId: string): Promise<AssetWorkflowRun[]> {
     try {
-      const runs = await cachedGet<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
+      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
+      const runs = res.data;
       return await cacheServerRuns(runs);
     } catch {
       return await offlineStore.listRunsByProject(projectId);
@@ -177,7 +178,8 @@ export const assetWorkflowRunService = {
 
   async listByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
     try {
-      const runs = await cachedGet<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
+      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
+      const runs = res.data;
       return await cacheServerRuns(runs);
     } catch {
       return await offlineStore.listRunsByAsset(assetId);

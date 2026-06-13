@@ -173,6 +173,8 @@ export interface GenerateReportParams {
   signatureEvents?: SignatureEvent[];
   /** Optional document type tag (e.g. "inspection") for report labelling. */
   documentType?: string;
+  /** "download" saves the PDF; "open" opens it in a browser viewer/tab. */
+  outputMode?: "download" | "open";
 }
 
 export async function generateWorkflowReport(params: GenerateReportParams): Promise<void> {
@@ -182,6 +184,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     customerName, jobNumber, siteName, siteLocation, assignedTechnician,
     includeAllSteps = false,
     signatureEvents = [],
+    outputMode = "download",
   } = params;
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -924,5 +927,14 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   // â”€â”€ Save â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const safeName = (asset.assetTag ?? "asset").replace(/[^a-zA-Z0-9-_]/g, "_");
   const runNum   = run.runNumber ?? 1;
-  doc.save(`installation-record_${safeName}_run${runNum}.pdf`);
+  const fileName = `installation-record_${safeName}_run${runNum}.pdf`;
+  if (outputMode === "open") {
+    const blobUrl = doc.output("bloburl");
+    const opened = window.open(blobUrl, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      doc.save(fileName);
+    }
+    return;
+  }
+  doc.save(fileName);
 }

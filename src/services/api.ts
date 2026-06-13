@@ -1,16 +1,15 @@
 import axios from "axios";
+import { Capacitor } from "@capacitor/core";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
 
-export const API_BASE_URL: string = (() => {
-  if (import.meta.env.VITE_API_BASE) return import.meta.env.VITE_API_BASE as string;
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  return `${protocol}//${hostname}:4000/api`;
-})();
+export const API_BASE_URL: string = getApiBaseUrl();
 
-if (API_BASE_URL.includes("localhost") || API_BASE_URL.includes("127.0.0.1")) {
+if (
+  Capacitor.isNativePlatform() &&
+  (API_BASE_URL.includes("localhost") || API_BASE_URL.includes("127.0.0.1"))
+) {
   console.warn(
     `[api] API_BASE_URL is "${API_BASE_URL}" — iOS/Android builds cannot reach localhost. ` +
     `Set VITE_API_BASE to a LAN IP before building for device.`
@@ -83,8 +82,9 @@ const silentRefresh = async () => {
 
   refreshPromise = (async () => {
     try {
+      const refreshBaseUrl = getApiBaseUrl();
       const res = await axios.post(
-        `${API_BASE_URL}/auth/refresh`,
+        `${refreshBaseUrl}/auth/refresh`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

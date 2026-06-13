@@ -4179,6 +4179,17 @@ export const UserManagement: React.FC = () => {
               <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
                 Tier 2 — Domain permissions
               </Typography>
+              <Alert severity="info" sx={{ mb: 1.5 }}>
+                <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5 }}>
+                  Assets &gt; Field User Workflow
+                </Typography>
+                <Typography variant="caption" display="block">
+                  Lets assigned users act as field users for workflow execution on their assets. This is a role permission, not a secondary role.
+                </Typography>
+                <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                  Example: an Engineer or Supervisor with this enabled can start runs, resume runs, add missing photos, and complete field sign-off on assigned assets.
+                </Typography>
+              </Alert>
               <Table size="small" sx={{ "& th": { fontWeight: 700, fontSize: "0.72rem", color: "text.secondary" } }}>
                 <TableHead>
                   <TableRow>
@@ -4187,8 +4198,8 @@ export const UserManagement: React.FC = () => {
                     <TableCell align="center" sx={{ minWidth: 80 }}>View scope</TableCell>
                     <TableCell align="center">Edit</TableCell>
                     <TableCell align="center" sx={{ minWidth: 90 }}>Edit scope</TableCell>
-                    <TableCell align="center">Action 3</TableCell>
-                    <TableCell align="center">Action 4</TableCell>
+                    <TableCell align="center">Workflow / approve</TableCell>
+                    <TableCell align="center">Delete</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -4284,7 +4295,7 @@ export const UserManagement: React.FC = () => {
                       <Stack alignItems="center" spacing={0}>
                         <Checkbox size="small" checked={!!roleForm.domains.installationAssets.runWorkflow}
                           onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, installationAssets: { ...prev.domains.installationAssets, runWorkflow: e.target.checked } } }))} />
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>run WF</Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>field user workflow</Typography>
                       </Stack>
                     </TableCell>
                     <TableCell align="center">

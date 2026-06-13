@@ -42,3 +42,8 @@ export interface NotificationSettingsPayload {
 export interface PublicAppSettingsPayload {
   frontendBaseUrl: string;
 }
+
+export interface RuntimeFrontendBasePayload {
+  frontendBaseUrl: string;
+  detectedIp: string;
+}

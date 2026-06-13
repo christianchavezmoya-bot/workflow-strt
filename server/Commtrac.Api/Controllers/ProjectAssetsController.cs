@@ -1050,18 +1050,19 @@ public class ProjectAssetsController : ControllerBase
         var counts = CountWorkflowEvidence(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
         var hasOpenIssues = HasOpenIssues(latestRun.IssuesJson) || HasOpenIssues(asset.IssuesJson);
 
+        var allStepsCompleted = HasCompletedAllWorkflowSteps(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
         var evidenceStatus = "Pending";
         if (string.Equals(latestRun.Status, "Paused", StringComparison.OrdinalIgnoreCase))
         {
             evidenceStatus = "Paused";
         }
+        else if (counts.MissingItems > 0 && allStepsCompleted)
+        {
+            evidenceStatus = "MissingData";
+        }
         else if (!latestRun.IsLocked || string.Equals(latestRun.Status, "InProgress", StringComparison.OrdinalIgnoreCase))
         {
             evidenceStatus = "Running";
-        }
-        else if (counts.MissingItems > 0)
-        {
-            evidenceStatus = "MissingData";
         }
         else
         {
@@ -1170,6 +1171,33 @@ public class ProjectAssetsController : ControllerBase
         catch
         {
             return (0, 0, 0);
+        }
+    }
+
+    private static bool HasCompletedAllWorkflowSteps(string? workflowSnapshotJson, string? stepResultsJson)
+    {
+        var stepsById = ParseWorkflowSteps(workflowSnapshotJson)
+            .Where(step => !string.IsNullOrWhiteSpace(step.Id))
+            .Select(step => step.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (stepsById.Count == 0 || string.IsNullOrWhiteSpace(stepResultsJson))
+            return false;
+
+        try
+        {
+            var results = JsonSerializer.Deserialize<List<WorkflowStepResultSummary>>(stepResultsJson, _json) ?? [];
+            var completedStepIds = results
+                .Where(result => !string.Equals(result.StepId, "__nav__", StringComparison.OrdinalIgnoreCase))
+                .Select(result => result.StepId)
+                .Where(stepId => !string.IsNullOrWhiteSpace(stepId))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            return completedStepIds.Count >= stepsById.Count && stepsById.All(completedStepIds.Contains);
+        }
+        catch
+        {
+            return false;
         }
     }
 

@@ -571,7 +571,6 @@ export default function WorkOrderRunner({
   }
 
   function handleClose() {
-    reset();
     onClose();
   }
 
@@ -2396,10 +2395,8 @@ export default function WorkOrderRunner({
                   onClick={async () => {
                     setSaving(true);
                     try {
-                      const stepsJson = JSON.stringify(buildStepsData());
-                      const issuesJson = JSON.stringify(issues);
-                      await assetWorkflowRunService.saveProgress(activeRunId!, stepsJson, issuesJson, "InProgress");
-                      handleClose();
+                      await autosaveProgress(undefined, undefined, "InProgress");
+                      onClose();
                     } catch { setSaveError("Failed to save progress."); }
                     finally { setSaving(false); }
                   }}
@@ -2772,7 +2769,7 @@ export default function WorkOrderRunner({
         <DialogTitle>
           <Stack direction="row" alignItems="center" spacing={1}>
             <DrawOutlined color="primary" />
-            <Typography variant="subtitle1" fontWeight={600}>Installer sign-off</Typography>
+            <Typography variant="subtitle1" fontWeight={600}>Field sign-off</Typography>
           </Stack>
           {renderAssetIdentifier(assetTag)}
           <Typography variant="caption" color="text.secondary">

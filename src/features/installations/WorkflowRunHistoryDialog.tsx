@@ -71,6 +71,7 @@ interface Props {
     latestRun: AssetWorkflowRun
   ) => void;
   onContinue?: (run: AssetWorkflowRun) => void;
+  onAddMissingMedia?: (run: AssetWorkflowRun) => void;
   /** Customer / project context forwarded from the parent page for the PDF report. */
   project?: { customerName: string; jobNumber: string; siteName?: string };
   customerLogoBase64?: string | null;
@@ -215,6 +216,7 @@ export default function WorkflowRunHistoryDialog({
   workflowConfigName,
   onRerun,
   onContinue,
+  onAddMissingMedia,
   project,
   customerLogoBase64,
   assignedTechnician,
@@ -435,7 +437,7 @@ export default function WorkflowRunHistoryDialog({
                     startIcon={<PlayArrowOutlined />}
                     onClick={() => { onContinue(latestInProgressRun); onClose(); }}
                   >
-                    Continue
+                    Resume Run
                   </Button>
                 </Tooltip>
               )}
@@ -642,6 +644,23 @@ export default function WorkflowRunHistoryDialog({
                         {run.isLocked && (
                           <SignatureBadge status={run.signatureStatus ?? "None"} />
                         )}
+                        {run.isLocked && missingMedia > 0 && onAddMissingMedia && (
+                          <Tooltip title={`Add missing photos or videos (${missingMedia} missing item${missingMedia === 1 ? "" : "s"})`}>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="warning"
+                              startIcon={<PhotoCameraOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onAddMissingMedia(run);
+                              }}
+                              sx={{ py: 0, minHeight: 26 }}
+                            >
+                              Add Missing Photos
+                            </Button>
+                          </Tooltip>
+                        )}
                         {run.isLocked && run.signatureStatus === "PendingInstaller" && (
                           <Tooltip title={signatureActionBlocked ? `Run superseded by Run #${latestRunNumber}` : "Sign as installer"}>
                             <span>
@@ -693,7 +712,7 @@ export default function WorkflowRunHistoryDialog({
                               }}
                               sx={{ ml: 0.5 }}
                             >
-                              Continue
+                              Resume Run
                             </Button>
                           </Tooltip>
                         )}
