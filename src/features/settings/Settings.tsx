@@ -1692,11 +1692,24 @@ const Settings = () => {
         </Typography>
       </Box>
 
-      <Box className="glass-card" sx={{ padding: 3 }}>
+      <Box sx={{ padding: 3 }}>
         <Tabs value={tab} onChange={(_, next) => {
           const key = visibleSettingsTabKeys[next] ?? visibleSettingsTabKeys[0] ?? SETTINGS_TAB_KEYS[0];
           if (key) setActiveTabKey(key);
-        }} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
+        }} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile
+          sx={{
+            '& .MuiTab-root': {
+              borderRadius: '8px',
+              transition: 'transform 0.2s ease-out, box-shadow 0.2s ease-out',
+              willChange: 'transform',
+            },
+            '& .MuiTab-root:hover': {
+              transform: 'translateY(-2px)',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+              background: 'rgba(255,255,255,0.06)',
+            },
+          }}
+        >
           <Tab label="Integrations" />
           <Tab label="SMS/SMTP" />
           <Tab label="Fields/Data" />
@@ -3100,7 +3113,7 @@ const Settings = () => {
 
       </Box>
 
-      <Box className="glass-card" sx={{ padding: 3 }}>
+      <Box sx={{ padding: 3 }}>
         <Stack spacing={2}>
           <Typography variant="h6">API status</Typography>
           <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
