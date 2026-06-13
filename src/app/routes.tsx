@@ -57,7 +57,11 @@ function LazyRoute({ children }: { children: ReactNode }) {
 
 const SettingsRoute = () => {
   const can = usePermissions();
-  return can.viewOnly ? <Navigate to="/" replace /> : <Settings />;
+  // Wait until both the real user identity and role config have loaded before
+  // deciding to redirect — the initial Viewer placeholder causes a false-negative
+  // on first render that permanently redirects away from /settings.
+  if (!can.permissionsReady) return null;
+  return can.settings.view ? <Settings /> : <Navigate to="/" replace />;
 };
 
 const ProjectInspectionsRedirect = () => {

@@ -63,13 +63,15 @@ const resolveDomains = (roleName: string | undefined, permissions: RolePermissio
 export const usePermissions = () => {
   const { user } = useAuth();
   const [roleConfig, setRoleConfig] = useState<Record<string, RolePermissions> | null>(null);
+  // Tracks whether the role-config API call has settled (success or failure).
+  const [configReady, setConfigReady] = useState(false);
 
   const loadRoleConfig = () => {
     roleConfigService.get().then((config) => {
       if (config.roles && Object.keys(config.roles).length > 0) {
         setRoleConfig(config.roles);
       }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setConfigReady(true));
   };
 
   useEffect(() => {
@@ -124,5 +126,10 @@ export const usePermissions = () => {
     };
   }, [user?.role, roleConfig]);
 
-  return can;
+  // True only after both the real user identity and the role-config API call have
+  // settled. Guards like SettingsRoute must wait for this before deciding to redirect,
+  // otherwise the initial Viewer placeholder fires a false-negative redirect.
+  const permissionsReady = configReady && user.id !== "";
+
+  return { ...can, permissionsReady };
 };
