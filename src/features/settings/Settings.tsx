@@ -2478,7 +2478,7 @@ const Settings = () => {
                     const featureDeps = dependencies[f.id] ?? [];
                     const featureDepsLoading = depsLoading[f.id] ?? false;
                     return (
-                      <>
+                      <Fragment key={f.id}>
                         <TableRow key={f.id} hover sx={{ cursor: "pointer" }} onClick={() => {
                           if (isExpanded) {
                             setExpandedFeatureId(null);
@@ -2586,7 +2586,7 @@ const Settings = () => {
                             </TableCell>
                           </TableRow>
                         )}
-                      </>
+                      </Fragment>
                     );
                   })}
                 </TableBody>

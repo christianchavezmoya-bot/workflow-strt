@@ -228,13 +228,22 @@ const Topbar = () => {
     }
 
     let active = true;
+    let stopped = false;
     const load = async () => {
+      if (stopped) return;
       try {
         setIndexLoading(true);
         const next = await searchIndexService.getStatus();
         if (active) setIndexStatus(next);
-      } catch {
-        if (active) setIndexStatus(null);
+      } catch (err: unknown) {
+        if (!active) return;
+        // Stop polling permanently on 403 — role check failed, retrying is pointless.
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        if (status === 403) {
+          stopped = true;
+          window.clearInterval(timer);
+        }
+        setIndexStatus(null);
       } finally {
         if (active) setIndexLoading(false);
       }
