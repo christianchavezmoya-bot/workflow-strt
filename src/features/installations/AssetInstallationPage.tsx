@@ -984,6 +984,15 @@ const AssetInstallationPage = () => {
   // No role names are hardcoded — the scope type is derived entirely from permission config + project data.
   const isAssignmentScoped = !canViewAllAssets && ownedProjectIds === null;
 
+  // Project IDs where this user has a direct asset assignment (only relevant when ownedProjectIds is
+  // non-null, i.e. the user also manages some projects). Lets them see directly-assigned assets that
+  // live outside their managed projects — e.g. an Installer who is a team member on Project A but is
+  // assigned an inspection asset in Project B.
+  const assignedProjectIds = useMemo(
+    () => new Set(assets.filter((a) => !a.isDeleted && a.assignedUserId === currentUser.id).map((a) => a.projectId)),
+    [assets, currentUser.id],
+  );
+
   const visibleAssets = useMemo(() => {
     const q = search.trim().toLowerCase();
     return assets.filter((a) => {
@@ -992,9 +1001,11 @@ const AssetInstallationPage = () => {
       } else {
         if (a.isDeleted) return false;
         if (selectedProjectId && a.projectId !== selectedProjectId) return false;
-        // Scope restriction always applies, regardless of whether a project is pre-selected
+        // Scope restriction always applies, regardless of whether a project is pre-selected.
+        // When ownedProjectIds is set, directly-assigned assets in non-owned projects are still allowed
+        // through so that users who are both team-members and assignees see all their work.
         if (isAssignmentScoped && a.assignedUserId !== currentUser.id) return false;
-        if (ownedProjectIds && !ownedProjectIds.has(a.projectId)) return false;
+        if (ownedProjectIds && !ownedProjectIds.has(a.projectId) && a.assignedUserId !== currentUser.id) return false;
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
         if (showNoWorkflow && assetHasConfiguredWorkflow(a)) return false;
       }
@@ -1004,22 +1015,28 @@ const AssetInstallationPage = () => {
   }, [assets, ownedProjectIds, isAssignmentScoped, currentUser.id, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode]);
 
   // Projects filtered to those linked to the active product (used in add/edit dialogs and the project selector).
-  // Also filtered to owned projects when the role's viewScope is "own".
+  // Also filtered to owned projects when the role's viewScope is "own", but always includes projects where
+  // the user has a direct asset assignment so URL-driven navigation (e.g. from Dashboard) resolves correctly.
   const productProjects = useMemo(
     () => {
       const byProduct = activeProduct?.id
         ? projects.filter((p) => p.productIds?.includes(activeProduct.id))
         : projects;
-      return ownedProjectIds ? byProduct.filter((p) => ownedProjectIds.has(p.id)) : byProduct;
+      return ownedProjectIds
+        ? byProduct.filter((p) => ownedProjectIds.has(p.id) || assignedProjectIds.has(p.id))
+        : byProduct;
     },
-    [projects, activeProduct?.id, ownedProjectIds],
+    [projects, activeProduct?.id, ownedProjectIds, assignedProjectIds],
   );
 
   const canEditAssetFromWebTable = useMemo(() => (asset: ProjectAsset) => {
     if (can.installationAssets?.editScope === "all") return true;
     if (can.installationAssets?.editScope !== "own") return false;
     if (ownedProjectIds?.has(asset.projectId)) return true;
-    return isAssignmentScoped && asset.assignedUserId === currentUser.id;
+    // Allow editing assets directly assigned to this user even when they also have managed projects
+    // (isAssignmentScoped would be false in that hybrid case, but the user still owns their work).
+    if (asset.assignedUserId === currentUser.id) return true;
+    return isAssignmentScoped;
   }, [can.installationAssets?.editScope, currentUser.id, isAssignmentScoped, ownedProjectIds]);
 
   const canManageAssetDocuments = can.documents.view || can.documents.upload || can.documents.delete;
@@ -3305,7 +3322,9 @@ const AssetInstallationPage = () => {
         <Alert severity="info" sx={{ py: 0.5, fontSize: "0.78rem" }}>
           {isAssignmentScoped
             ? "Showing only assets assigned to you."
-            : "Showing only assets in your managed projects."}
+            : assignedProjectIds.size > 0
+              ? "Showing only assets in your managed projects and those directly assigned to you."
+              : "Showing only assets in your managed projects."}
         </Alert>
       )}
 
@@ -3540,7 +3559,9 @@ const AssetInstallationPage = () => {
             : !canViewAllAssets && selectedProjectId && assets.some((a) => a.projectId === selectedProjectId && !a.isDeleted)
               ? isAssignmentScoped
                 ? "You have no assets assigned to you in this project."
-                : "You have no assets in your managed projects matching this selection."
+                : assignedProjectIds.size > 0
+                  ? "You have no assets assigned to you or in your managed projects matching this selection."
+                  : "You have no assets in your managed projects matching this selection."
               : "No assets match the current filters."}
         </Alert>
       ) : isNativePlatform ? (
