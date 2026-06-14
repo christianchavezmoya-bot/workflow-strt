@@ -2008,7 +2008,7 @@ const Dashboard = () => {
                 sx={{
                   p: 2, borderRadius: 2, border: "1px solid rgba(255,255,255,0.08)",
                   background: "rgba(255,255,255,0.04)", cursor: "pointer", transition: "all 0.2s",
-                  "&:hover": { background: "rgba(45,212,191,0.1)", borderColor: "rgba(45,212,191,0.3)", transform: "translateY(-2px)" },
+                  "&:hover": { background: "rgba(45,212,191,0.1)", borderColor: "rgba(45,212,191,0.3)" },
                 }}>
                 <Typography variant="subtitle1" sx={{ fontFamily: "Sora" }}>{region}</Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -2100,7 +2100,6 @@ const Dashboard = () => {
                   "&:hover": {
                     background: "rgba(45,212,191,0.06)",
                     borderColor: "rgba(45,212,191,0.25)",
-                    transform: "translateY(-1px)",
                   },
                 }}
                 onClick={() => navigate(projectAssetsPath(project))}

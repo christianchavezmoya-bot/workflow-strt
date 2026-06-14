@@ -637,11 +637,10 @@ export default function TipsAndTricksPage() {
               background: "linear-gradient(180deg, rgba(10,18,24,0.92), rgba(8,14,19,0.96))",
               borderRadius: 2,
               overflow: "hidden",
-              transition: "all 0.2s",
+              transition: "border-color 0.2s, background 0.2s",
               "&:hover": {
                 borderColor: "rgba(45,212,191,0.4)",
                 background: "rgba(45,212,191,0.06)",
-                transform: "translateY(-2px)",
               },
             }}
           >

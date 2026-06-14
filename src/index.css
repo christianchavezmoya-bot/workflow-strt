@@ -64,19 +64,6 @@ body {
   border: 1px solid var(--stroke);
   border-radius: 16px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
-  transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
-  will-change: transform;
-}
-
-.glass-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45) !important;
-}
-
-.glass-card:active {
-  transform: scale(0.985) !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
-  transition-duration: 0.07s;
 }
 
 .sidebar {

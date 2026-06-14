@@ -397,7 +397,6 @@ export const SitesManagement = () => {
                       transition: 'all 0.3s ease',
                       '&:hover': {
                         boxShadow: 6,
-                        transform: 'translateY(-4px)',
                       },
                     }}
                   >

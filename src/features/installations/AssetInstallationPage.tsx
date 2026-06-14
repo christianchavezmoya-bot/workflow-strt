@@ -376,6 +376,7 @@ const AssetInstallationPage = () => {
     () => { try { return sessionStorage.getItem("installations_selected_project_id") ?? ""; } catch { return ""; } }
   );
   const [statusFilter, setStatusFilter] = useState<ProjectAssetStatus | "All">("All");
+  const [showNoWorkflow, setShowNoWorkflow] = useState(false);
   const [search, setSearch] = useState("");
   const [healthExpanded, setHealthExpanded] = useState(true);
   const [assetSearchOpen, setAssetSearchOpen] = useState(false);
@@ -991,11 +992,12 @@ const AssetInstallationPage = () => {
         if (isAssignmentScoped && a.assignedUserId !== currentUser.id) return false;
         if (ownedProjectIds && !ownedProjectIds.has(a.projectId)) return false;
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
+        if (showNoWorkflow && (a.productConfigId || a.workflowTemplateId)) return false;
       }
       if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q)))) return false;
       return true;
     });
-  }, [assets, ownedProjectIds, isAssignmentScoped, currentUser.id, selectedProjectId, statusFilter, search, archiveMode]);
+  }, [assets, ownedProjectIds, isAssignmentScoped, currentUser.id, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode]);
 
   // Projects filtered to those linked to the active product (used in add/edit dialogs and the project selector).
   // Also filtered to owned projects when the role's viewScope is "own".
@@ -3246,9 +3248,28 @@ const AssetInstallationPage = () => {
             {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} - {p.customerName}</MenuItem>)}
           </Select>
         </FormControl>
+        <Tooltip title={statusFilter !== "All" ? "Reset status filter to use this" : ""}>
+          <span>
+            <Button
+              size="small"
+              variant={showNoWorkflow ? "contained" : "outlined"}
+              color={showNoWorkflow ? "warning" : "inherit"}
+              disabled={statusFilter !== "All"}
+              onClick={() => setShowNoWorkflow((v) => !v)}
+              sx={{ whiteSpace: "nowrap", height: 40 }}
+            >
+              No Workflow
+            </Button>
+          </span>
+        </Tooltip>
         <FormControl size="small" sx={{ minWidth: 140 }}>
           <InputLabel shrink>Status</InputLabel>
-          <Select label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as ProjectAssetStatus | "All")}>
+          <Select
+            label="Status"
+            value={statusFilter}
+            disabled={showNoWorkflow}
+            onChange={(e) => setStatusFilter(e.target.value as ProjectAssetStatus | "All")}
+          >
             <MenuItem value="All">All statuses</MenuItem>
             <MenuItem value="NotStarted">Not Started</MenuItem>
             <MenuItem value="InProgress">In Progress</MenuItem>

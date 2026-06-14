@@ -745,10 +745,8 @@ const ProjectList = () => {
             return (
               <Box key={project.id} className="glass-card" sx={{
                 overflow: "hidden",
-                transition: "all 0.2s ease",
+                transition: "border-color 0.2s, background 0.2s",
                 "&:hover": {
-                  transform: "translateY(-3px)",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
                   borderColor: "rgba(45,212,191,0.35)",
                   background: "rgba(45,212,191,0.04)",
                 },

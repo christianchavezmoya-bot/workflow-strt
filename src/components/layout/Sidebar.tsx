@@ -63,7 +63,10 @@ const Sidebar = () => {
     if (item.to === "/settings" && !can.settings.view) return false;
     return true;
   });
-  const [officeOptions, setOfficeOptions] = useState<string[]>(["All"]);
+  const [officeOptions, setOfficeOptions] = useState<string[]>(() => {
+    const stored = localStorage.getItem("active_office");
+    return stored && stored !== "All" ? [stored, "All"] : ["All"];
+  });
   const [appName, setAppName] = useState("Field Operations");
 
   useEffect(() => {

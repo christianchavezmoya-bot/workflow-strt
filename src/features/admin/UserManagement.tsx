@@ -2885,7 +2885,6 @@ export const UserManagement: React.FC = () => {
                           flexDirection: 'column',
                           '&:hover': {
                             boxShadow: 6,
-                            transform: 'translateY(-8px)',
                           },
                         }}
                       >

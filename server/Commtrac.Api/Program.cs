@@ -77,6 +77,12 @@ builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        // Prevent "role" in the JWT from being remapped to the long ClaimTypes.Role URI.
+        // Without this, JwtSecurityTokenHandler/JsonWebTokenHandler converts "role" → the
+        // long URI, which doesn't match RoleClaimType = "role" → all role-restricted
+        // endpoints return 403 even for valid admins.
+        options.MapInboundClaims = false;
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,

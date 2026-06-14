@@ -334,10 +334,14 @@ const Settings = () => {
   const [activeTabKey, setActiveTabKey] = useState(() => resolveSettingsTabKey(isAdmin, window.location.search));
   const tab = Math.max(0, visibleSettingsTabKeys.indexOf(activeTabKey));
 
+  // Only re-validate when admin status changes (not on every tab click).
+  // Reading window.location.search here is intentional — we want the URL at
+  // the moment isAdmin changes, not a React-batched snapshot.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const resolvedKey = resolveSettingsTabKey(isAdmin, window.location.search);
-    if (resolvedKey !== activeTabKey) setActiveTabKey(resolvedKey);
-  }, [activeTabKey, isAdmin]);
+    const visibleKeys = getVisibleSettingsTabKeys(isAdmin);
+    setActiveTabKey((prev) => (visibleKeys.includes(prev) ? prev : (visibleKeys[0] ?? SETTINGS_TAB_KEYS[0])));
+  }, [isAdmin]);
 
   const [settings, setSettings] = useState<QuickbaseSettingsForm>(() => loadSettings());
   const [status, setStatus] = useState<"" | "saved" | "sent" | "error">("");
@@ -1632,7 +1636,7 @@ const Settings = () => {
   }, []);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (user?.role !== "Admin") return;
     (async () => {
       try {
         const s = await settingsService.getNotificationSettings();
@@ -1653,10 +1657,10 @@ const Settings = () => {
         // ignore
       }
     })();
-  }, [isAdmin]);
+  }, [user]);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (user?.role !== "Admin") return;
     (async () => {
       try {
         const qb = await settingsService.getQuickbaseSettings();
@@ -1679,7 +1683,7 @@ const Settings = () => {
         // ignore
       }
     })();
-  }, [isAdmin]);
+  }, [user]);
 
   return (
     <Stack spacing={3}>
