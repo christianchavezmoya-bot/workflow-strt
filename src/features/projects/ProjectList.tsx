@@ -24,6 +24,8 @@ import {
   Table,
   TextField,
   TableBody,
+  ToggleButton,
+  ToggleButtonGroup,
   TableCell,
   TableHead,
   TablePagination,
@@ -304,10 +306,10 @@ const ProjectList = () => {
   const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  // PM defaults to "mine" (consistent with dashboard My Projects default).
-  // Admin and all other roles default to "all".
+  // Non-admin users default to "mine" so the page loads focused on their work.
+  // Persisted in sessionStorage so it survives in-session navigation.
   const [projectViewFilter, setProjectViewFilter] = useState<"all" | "mine">(
-    user?.role === "Project Manager" ? "mine" : "all"
+    () => (sessionStorage.getItem("projects_scope") as "all" | "mine") ?? "mine"
   );
   const [projectNumberFilter, setProjectNumberFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | "All">("All");
@@ -322,14 +324,14 @@ const ProjectList = () => {
   // Web always shows full management controls; native keeps them behind Complex View.
   const showComplexControls = !Capacitor.isNativePlatform() || complexViewActive;
 
-  // Load my project IDs when in my-work scope for non-PM field users without view-all permission
+  // Load the user's assigned project IDs whenever the "Mine" scope is active for non-PM field users
   useEffect(() => {
-    if (isMyWork && canActAsFieldTechnician && !isPmUser && !canViewAllProjects) {
+    if (projectViewFilter === "mine" && canActAsFieldTechnician && !isPmUser) {
       projectAssetService.myProjectIds().then(setMyProjectIds);
     } else {
       setMyProjectIds([]);
     }
-  }, [canActAsFieldTechnician, canViewAllProjects, isMyWork, isPmUser]);
+  }, [canActAsFieldTechnician, isPmUser, projectViewFilter]);
 
   const canEditProject = useMemo(() => (project: Project) => {
     if (isAdminUser) return true;
@@ -347,6 +349,11 @@ const ProjectList = () => {
 
   // Block-complete dialog — shown when assets are not all done
   const [closingProjectId, setClosingProjectId] = useState<string | null>(null);
+
+  // Persist scope choice so it survives in-session page navigation
+  useEffect(() => {
+    try { sessionStorage.setItem("projects_scope", projectViewFilter); } catch {}
+  }, [projectViewFilter]);
 
   // Clear column filters when active office changes
   useEffect(() => {
@@ -453,9 +460,8 @@ const ProjectList = () => {
     });
 
     // Scope-aware filtering.
-    // PM: driven by the canViewAllProjects permission + projectViewFilter dropdown.
-    //     Replaces the old isMyWork check so the two systems don't conflict.
-    // Field-execution users: keep the isMyWork toggle (scoped to assigned assets).
+    // All non-admin users: "mine" scopes them to projects they own/are-assigned to;
+    // "all" shows everything allowed by their role permissions.
     let scopeFiltered = officeFiltered;
     if (!isAdmin) {
       if (role === "Project Manager") {
@@ -466,7 +472,7 @@ const ProjectList = () => {
           );
         }
         // projectViewFilter === "all" && canViewAllProjects → no extra filter
-      } else if (isMyWork && canActAsFieldTechnician && !canViewAllProjects) {
+      } else if (projectViewFilter === "mine" && canActAsFieldTechnician) {
         const idSet = new Set(myProjectIds);
         scopeFiltered = officeFiltered.filter((p) => idSet.has(p.id));
       }
@@ -474,13 +480,13 @@ const ProjectList = () => {
 
     const filtered = applyAutoFilter(scopeFiltered, autoFilters, projectAccessors);
     return applyAutoSort(filtered, autoSort, projectAccessors);
-  }, [activeOffice, canActAsFieldTechnician, canViewAllProjects, globalOffices, projectViewFilter, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, isMyWork, myProjectIds, user?.role, user?.fullName]);
+  }, [activeOffice, canActAsFieldTechnician, canViewAllProjects, globalOffices, projectViewFilter, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, myProjectIds, user?.role, user?.fullName]);
 
-  // Auto-fallback: if PM's "My projects" filter returns nothing once data is loaded,
-  // switch to "all" so they don't land on a blank page.
+  // Auto-fallback: if "My Projects" returns nothing once data is loaded, switch to "All"
+  // so non-admin users don't land on a blank page (e.g. new user with no assignments yet).
   useEffect(() => {
     if (
-      user?.role === "Project Manager" &&
+      !isAdminUser &&
       projectViewFilter === "mine" &&
       !loading &&
       globalOffices.length > 0 &&   // offices loaded — avoids false trigger during race
@@ -489,7 +495,7 @@ const ProjectList = () => {
     ) {
       setProjectViewFilter("all");
     }
-  }, [filteredProjects.length, globalOffices.length, loading, projectViewFilter, sourceProjects.length, user?.role]);
+  }, [filteredProjects.length, globalOffices.length, isAdminUser, loading, projectViewFilter, sourceProjects.length]);
 
   const numberedProjects = useMemo(
     () => filteredProjects.map((project, index) => ({ ...project, seq: index + 1 })),
@@ -678,19 +684,17 @@ const ProjectList = () => {
 
       <Box className="glass-card" sx={{ p: 2 }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
-          {canViewAllProjects && (
-            <FormControl size="small" sx={{ minWidth: 220 }}>
-              <InputLabel id="project-view-filter-label">Project View</InputLabel>
-              <Select
-                labelId="project-view-filter-label"
-                label="Project View"
-                value={projectViewFilter}
-                onChange={(event) => setProjectViewFilter(event.target.value as "all" | "mine")}
-              >
-                <MenuItem value="all">All projects</MenuItem>
-                <MenuItem value="mine">My projects</MenuItem>
-              </Select>
-            </FormControl>
+          {canViewAllProjects && !isAdminUser && (
+            <ToggleButtonGroup
+              value={projectViewFilter}
+              exclusive
+              size="small"
+              onChange={(_, v) => { if (v) setProjectViewFilter(v as "all" | "mine"); }}
+              sx={{ flexShrink: 0 }}
+            >
+              <ToggleButton value="mine">My Projects</ToggleButton>
+              <ToggleButton value="all">All Projects</ToggleButton>
+            </ToggleButtonGroup>
           )}
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel id="project-status-filter-label">Status</InputLabel>
@@ -719,16 +723,15 @@ const ProjectList = () => {
               <IconButton
                 size="small"
                 onClick={() => {
-                  setProjectViewFilter("all");
                   setStatusFilter("All");
                   setProjectNumberFilter("");
                   setAutoFilters({});
                 }}
                 sx={{
                   border: "1px solid",
-                  borderColor: (projectViewFilter !== "all" || statusFilter !== "All" || projectNumberFilter || Object.keys(autoFilters ?? {}).length > 0)
+                  borderColor: (statusFilter !== "All" || !!projectNumberFilter || Object.keys(autoFilters ?? {}).length > 0)
                     ? "primary.main" : "divider",
-                  color: (projectViewFilter !== "all" || statusFilter !== "All" || projectNumberFilter || Object.keys(autoFilters ?? {}).length > 0)
+                  color: (statusFilter !== "All" || !!projectNumberFilter || Object.keys(autoFilters ?? {}).length > 0)
                     ? "primary.main" : "text.disabled",
                   borderRadius: 1.5,
                   p: 0.75,
@@ -1011,7 +1014,7 @@ const ProjectList = () => {
                                     fetchProjects({
                                       country: activeOffice !== "All" ? activeOffice : undefined,
                                       scope: "browse",
-                                      ownershipScope: isPmUser ? projectViewFilter : "all",
+                                      ownershipScope: projectViewFilter,
                                       projectNumber: projectNumberFilter.trim() || undefined,
                                       page: page + 1,
                                       pageSize: rowsPerPage,
@@ -1204,7 +1207,7 @@ const ProjectList = () => {
               fetchProjects({
                 country: activeOffice !== "All" ? activeOffice : undefined,
                 scope: "browse",
-                ownershipScope: isPmUser ? projectViewFilter : "all",
+                ownershipScope: projectViewFilter,
                 projectNumber: projectNumberFilter.trim() || undefined,
                 page: page + 1,
                 pageSize: rowsPerPage,
@@ -1327,7 +1330,7 @@ const ProjectList = () => {
                     fetchProjects({
                       country: activeOffice !== "All" ? activeOffice : undefined,
                       scope: "browse",
-                      ownershipScope: isPmUser ? projectViewFilter : "all",
+                      ownershipScope: projectViewFilter,
                       projectNumber: projectNumberFilter.trim() || undefined,
                       page: page + 1,
                       pageSize: rowsPerPage,

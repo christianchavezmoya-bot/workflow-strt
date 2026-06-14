@@ -960,14 +960,27 @@ const AssetInstallationPage = () => {
 
   // Scope: roles with viewScope="own" see only projects/assets they manage.
   const canViewAllAssets = (can.installationAssets?.viewScope ?? "own") === "all";
+  const isAdminUser = currentUser.role === "Admin";
+
+  // Per-session user preference: "mine" = focused on their work, "all" = big picture.
+  // Only meaningful (and visible) when canViewAllAssets is true.
+  const [assetsScope, setAssetsScope] = useState<"mine" | "all">(
+    () => (sessionStorage.getItem("assets_scope") as "mine" | "all") ?? "mine"
+  );
+  useEffect(() => {
+    try { sessionStorage.setItem("assets_scope", assetsScope); } catch {}
+  }, [assetsScope]);
+
+  // Active scope: user chose "all" AND has permission to see all; admins always see all.
+  const showAllAssets = canViewAllAssets && (assetsScope === "all" || isAdminUser);
 
   // Compute project IDs the user can access:
   //   - Projects where they are the project manager (matched by full name)
   //   - Projects where they are listed as a team member (matched by user ID)
-  // Returns null when canViewAllAssets=true (no restriction needed) OR when the user
+  // Returns null when showAllAssets=true (no restriction needed) OR when the user
   // has no matching projects (signals that assignment-based fallback should apply).
   const ownedProjectIds = useMemo((): Set<string> | null => {
-    if (canViewAllAssets) return null;
+    if (showAllAssets) return null;
     const myName = (currentUser.fullName ?? "").trim().toLowerCase();
     const owned = new Set(
       projects.filter((p) =>
@@ -977,12 +990,12 @@ const AssetInstallationPage = () => {
     );
     // Return null (not an empty Set) so downstream null-checks correctly trigger the assignment fallback.
     return owned.size > 0 ? owned : null;
-  }, [canViewAllAssets, currentUser.fullName, currentUser.id, projects]);
+  }, [showAllAssets, currentUser.fullName, currentUser.id, projects]);
 
-  // Assignment-scoped: viewScope is "own" AND the user has no owned/team projects.
+  // Assignment-scoped: showAllAssets is false AND the user has no owned/team projects.
   // These users (e.g. Installer, Technician) see only assets directly assigned to them.
   // No role names are hardcoded — the scope type is derived entirely from permission config + project data.
-  const isAssignmentScoped = !canViewAllAssets && ownedProjectIds === null;
+  const isAssignmentScoped = !showAllAssets && ownedProjectIds === null;
 
   // Project IDs where this user has a direct asset assignment (only relevant when ownedProjectIds is
   // non-null, i.e. the user also manages some projects). Lets them see directly-assigned assets that
@@ -3262,6 +3275,18 @@ const AssetInstallationPage = () => {
 
       {/* Filters */}
       <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
+        {canViewAllAssets && !isAdminUser && (
+          <ToggleButtonGroup
+            value={assetsScope}
+            exclusive
+            size="small"
+            onChange={(_, v) => { if (v) setAssetsScope(v as "mine" | "all"); }}
+            sx={{ flexShrink: 0 }}
+          >
+            <ToggleButton value="mine">My Assets</ToggleButton>
+            <ToggleButton value="all">All Assets</ToggleButton>
+          </ToggleButtonGroup>
+        )}
         <FormControl size="small" sx={{ flex: 1, minWidth: 150 }}>
           <InputLabel shrink>Project</InputLabel>
           <Select label="Project" value={productProjects.length > 0 ? selectedProjectId : ""} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
@@ -3556,7 +3581,7 @@ const AssetInstallationPage = () => {
             ? archiveMode
               ? "No archived assets found for this product."
               : `No assets added for ${activeProduct?.name ?? "this product"} yet.`
-            : !canViewAllAssets && selectedProjectId && assets.some((a) => a.projectId === selectedProjectId && !a.isDeleted)
+            : !showAllAssets && selectedProjectId && assets.some((a) => a.projectId === selectedProjectId && !a.isDeleted)
               ? isAssignmentScoped
                 ? "You have no assets assigned to you in this project."
                 : assignedProjectIds.size > 0
