@@ -670,6 +670,26 @@ public class ProjectsController : ControllerBase
 
         if (role is "Installer" or "Technician")
         {
+            // Check if admin has granted viewScope:"all" for this role in the role config.
+            // If so, remove the server-side restriction so the user sees all projects.
+            var roleConfig = await _db.RoleConfigs.FirstOrDefaultAsync();
+            if (roleConfig != null && !string.IsNullOrWhiteSpace(roleConfig.ConfigJson))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(roleConfig.ConfigJson);
+                    if (doc.RootElement.TryGetProperty(role, out var roleEl) &&
+                        roleEl.TryGetProperty("domains", out var domains) &&
+                        domains.TryGetProperty("projects", out var projects) &&
+                        projects.TryGetProperty("viewScope", out var viewScope) &&
+                        viewScope.GetString() == "all")
+                    {
+                        return null; // Unrestricted — admin granted view-all for this role
+                    }
+                }
+                catch { /* malformed config — fall through to default scoping */ }
+            }
+
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (string.IsNullOrWhiteSpace(userId)) return new HashSet<string>();
 

@@ -322,14 +322,14 @@ const ProjectList = () => {
   // Web always shows full management controls; native keeps them behind Complex View.
   const showComplexControls = !Capacitor.isNativePlatform() || complexViewActive;
 
-  // Load my project IDs when in my-work scope for non-PM field users
+  // Load my project IDs when in my-work scope for non-PM field users without view-all permission
   useEffect(() => {
-    if (isMyWork && canActAsFieldTechnician && !isPmUser) {
+    if (isMyWork && canActAsFieldTechnician && !isPmUser && !canViewAllProjects) {
       projectAssetService.myProjectIds().then(setMyProjectIds);
     } else {
       setMyProjectIds([]);
     }
-  }, [canActAsFieldTechnician, isMyWork, isPmUser]);
+  }, [canActAsFieldTechnician, canViewAllProjects, isMyWork, isPmUser]);
 
   const canEditProject = useMemo(() => (project: Project) => {
     if (isAdminUser) return true;
@@ -466,7 +466,7 @@ const ProjectList = () => {
           );
         }
         // projectViewFilter === "all" && canViewAllProjects → no extra filter
-      } else if (isMyWork && canActAsFieldTechnician) {
+      } else if (isMyWork && canActAsFieldTechnician && !canViewAllProjects) {
         const idSet = new Set(myProjectIds);
         scopeFiltered = officeFiltered.filter((p) => idSet.has(p.id));
       }
