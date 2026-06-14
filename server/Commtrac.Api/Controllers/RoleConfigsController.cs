@@ -13,7 +13,6 @@ namespace Commtrac.Api.Controllers;
 public class RoleConfigsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public RoleConfigsController(AppDbContext db)
     {
@@ -21,23 +20,21 @@ public class RoleConfigsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<RoleConfigDto>> Get()
+    public async Task<ActionResult> Get()
     {
         var config = await _db.RoleConfigs.FirstOrDefaultAsync();
-        if (config == null)
-        {
-            return Ok(new RoleConfigDto(new Dictionary<string, RolePermissions>()));
-        }
+        if (config == null || string.IsNullOrWhiteSpace(config.ConfigJson) || config.ConfigJson == "{}")
+            return Ok(new { roles = new Dictionary<string, object>() });
 
-        var roles = JsonSerializer.Deserialize<Dictionary<string, RolePermissions>>(config.ConfigJson, JsonOptions)
-            ?? new Dictionary<string, RolePermissions>();
-
-        return Ok(new RoleConfigDto(roles));
+        // Return the roles dict verbatim — the raw JSON preserves every field the frontend
+        // wrote (viewScope, editScope, etc.) without any lossy C# model round-trip.
+        using var doc = JsonDocument.Parse(config.ConfigJson);
+        return Ok(new { roles = doc.RootElement });
     }
 
     [HttpPut]
     [Authorize(Roles = "Admin")]
-    public async Task<ActionResult<RoleConfigDto>> Update([FromBody] RoleConfigDto dto)
+    public async Task<ActionResult> Update([FromBody] JsonElement body)
     {
         var config = await _db.RoleConfigs.FirstOrDefaultAsync();
         if (config == null)
@@ -46,9 +43,15 @@ public class RoleConfigsController : ControllerBase
             _db.RoleConfigs.Add(config);
         }
 
-        config.ConfigJson = JsonSerializer.Serialize(dto.Roles, JsonOptions);
+        // Store only the roles dictionary so the GET envelope reconstruction is simple.
+        // Unknown fields (viewScope, editScope, future additions) are preserved verbatim.
+        config.ConfigJson = body.TryGetProperty("roles", out var roles)
+            ? roles.GetRawText()
+            : body.GetRawText();
+
         await _db.SaveChangesAsync();
 
-        return Ok(dto);
+        // Echo the full request body back so the frontend service can update its cache.
+        return Ok(body);
     }
 }
