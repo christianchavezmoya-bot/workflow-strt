@@ -155,6 +155,12 @@ const WINDOW_OPTIONS = [30, 60, 90, 180];
 const ALL_DASHBOARDS_VALUE = "__all__";
 
 type PmDashboardTab = "pm-projects" | "my-inspections" | "my-installs";
+
+type DashboardTabSignal = {
+  count: number;
+  hasAttention: boolean;
+  tone: "default" | "primary" | "warning" | "error" | "info" | "success";
+};
 type DashboardProjectScope = "mine" | "all";
 
 type InspectionRunSignal = {
@@ -285,6 +291,7 @@ const Dashboard = () => {
     isManager ? "pm-projects" : "my-installs"
   );
   const tabRoleCorrected = useRef(false);
+  const fieldTabCorrected = useRef(false);
   // If the role's viewScope is "own", always lock to "mine" — no dropdown shown.
   const canViewAllProjects = (can.projects?.viewScope ?? "own") === "all";
   // Admin defaults to "all" (oversight view); every other role defaults to "mine".
@@ -1522,6 +1529,10 @@ const Dashboard = () => {
     [openIssues, myInstallAssets]
   );
   const myInstallAttentionCount = myInstallBlocking.length + myInstallPendingSigs.length + myInstallHighObservations.length;
+  const myInstallMissingMediaCount = useMemo(
+    () => missingMediaFlags.filter((flag) => flag.technicianUserId === user.id).length,
+    [missingMediaFlags, user.id]
+  );
 
   const inspectionScopeProjects = useMemo(
     () => dashboardProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
@@ -1579,6 +1590,183 @@ const Dashboard = () => {
   // Show My Inspections tab for managers always; for others only if assigned to inspection assets
   const hasInspectionsTab = isManager || myInspectionAssets.length > 0 || myInspectionHistory.length > 0 || inspectionRunsDue > 0;
   const showInspectionInbox = inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || inspectionImportsFailed > 0;
+  const myInspectionPausedCount = useMemo(
+    () => myInspectionAssets.filter((asset) => isPausedAsset(asset.runStatus)).length,
+    [myInspectionAssets]
+  );
+  const myInspectionActiveCount = useMemo(
+    () => myInspectionAssets.filter((asset) => !isPausedAsset(asset.runStatus) && (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status))).length,
+    [myInspectionAssets]
+  );
+  const myInspectionPendingCount = useMemo(
+    () => myInspectionAssets.filter((asset) => !isPausedAsset(asset.runStatus) && !isInProgressAsset(asset.runStatus) && !isInProgressAsset(asset.status) && isPendingAsset(asset.status)).length,
+    [myInspectionAssets]
+  );
+  const myInspectionQueuedCount = useMemo(
+    () => myInspectionAssets.filter((asset) => !isPausedAsset(asset.runStatus) && !isInProgressAsset(asset.runStatus) && !isInProgressAsset(asset.status) && isNotStartedAsset(asset.status)).length,
+    [myInspectionAssets]
+  );
+
+  const projectTabSignal = useMemo<DashboardTabSignal>(() => ({
+    count: projectCount,
+    hasAttention:
+      projectCount > 0 ||
+      attentionCount > 0 ||
+      pendingApprovals.length > 0 ||
+      autoAssignFlags.length > 0 ||
+      photoUpdateNotifications.length > 0 ||
+      missingMediaFlags.length > 0,
+    tone:
+      blockingIssues.length > 0 || visiblePendingSigs.length > 0 || highIssues.length > 0
+        ? "error"
+        : overdueProjects.length > 0 || pendingApprovals.length > 0 || missingMediaFlags.length > 0
+          ? "warning"
+          : projectCount > 0
+            ? "info"
+            : "default",
+  }), [
+    attentionCount,
+    autoAssignFlags.length,
+    blockingIssues.length,
+    highIssues.length,
+    missingMediaFlags.length,
+    overdueProjects.length,
+    pendingApprovals.length,
+    photoUpdateNotifications.length,
+    projectCount,
+    visiblePendingSigs.length,
+  ]);
+
+  const inspectionTabSignal = useMemo<DashboardTabSignal>(() => ({
+    count: myInspectionAssets.length,
+    hasAttention:
+      myInspectionAssets.length > 0 ||
+      inspectionRunsDue > 0 ||
+      inspectionImportsWaiting > 0 ||
+      inspectionImportsFailed > 0,
+    tone:
+      inspectionImportsFailed > 0
+        ? "error"
+        : inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || myInspectionPausedCount > 0 || myInspectionPendingCount > 0
+          ? "warning"
+          : myInspectionActiveCount > 0
+            ? "primary"
+            : myInspectionQueuedCount > 0 || myInspectionAssets.length > 0
+              ? "info"
+              : "default",
+  }), [
+    inspectionImportsFailed,
+    inspectionImportsWaiting,
+    inspectionRunsDue,
+    myInspectionActiveCount,
+    myInspectionAssets.length,
+    myInspectionPausedCount,
+    myInspectionPendingCount,
+    myInspectionQueuedCount,
+  ]);
+
+  const installTabSignal = useMemo<DashboardTabSignal>(() => ({
+    count: myInstallAssets.length,
+    hasAttention:
+      myInstallAssets.length > 0 ||
+      myInstallAttentionCount > 0 ||
+      myInstallMissingMediaCount > 0 ||
+      myPaused.length > 0 ||
+      myPending.length > 0 ||
+      myQueued.length > 0,
+    tone:
+      myInstallBlocking.length > 0 || myInstallPendingSigs.length > 0 || myInstallHighObservations.length > 0
+        ? "error"
+        : myInstallMissingMediaCount > 0 || myPaused.length > 0 || myPending.length > 0
+          ? "warning"
+          : myActive.length > 0
+            ? "primary"
+            : myQueued.length > 0 || myInstallAssets.length > 0
+              ? "info"
+              : "default",
+  }), [
+    myActive.length,
+    myInstallAssets.length,
+    myInstallAttentionCount,
+    myInstallBlocking.length,
+    myInstallHighObservations.length,
+    myInstallMissingMediaCount,
+    myInstallPendingSigs.length,
+    myPaused.length,
+    myPending.length,
+    myQueued.length,
+  ]);
+
+  const tabSignalGlowMap: Record<DashboardTabSignal["tone"], string> = {
+    default: "rgba(255,255,255,0.12)",
+    primary: "rgba(25,118,210,0.22)",
+    warning: "rgba(237,108,2,0.22)",
+    error: "rgba(211,47,47,0.22)",
+    info: "rgba(2,136,209,0.22)",
+    success: "rgba(46,125,50,0.22)",
+  };
+
+  const renderDashboardTabLabel = useCallback((title: string, signal: DashboardTabSignal, selected: boolean) => (
+    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+      <Box
+        component="span"
+        sx={{
+          color: !selected && signal.hasAttention ? `${signal.tone}.main` : "inherit",
+          fontWeight: !selected && signal.hasAttention ? 700 : 600,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {title}
+      </Box>
+      {signal.count > 0 && (
+        <Chip
+          label={signal.count}
+          size="small"
+          color={signal.tone === "default" ? "default" : signal.tone}
+          variant={selected ? "filled" : "outlined"}
+          sx={{ height: 18, fontSize: "0.62rem", fontWeight: 700 }}
+        />
+      )}
+      {signal.hasAttention && !selected && (
+        <Box
+          component="span"
+          sx={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            bgcolor: `${signal.tone}.main`,
+            boxShadow: `0 0 0 3px ${tabSignalGlowMap[signal.tone]}`,
+            flexShrink: 0,
+          }}
+        />
+      )}
+    </Stack>
+  ), [tabSignalGlowMap]);
+
+  const getDashboardTabSx = useCallback((value: PmDashboardTab, signal: DashboardTabSignal) => {
+    const highlighted = pmDashboardTab !== value && signal.hasAttention;
+    return {
+      minHeight: 36,
+      py: 0.5,
+      px: 0.5,
+      mr: 0.75,
+      fontSize: "0.8rem",
+      borderRadius: 1.25,
+      minWidth: "fit-content",
+      transition: "all 0.2s ease",
+      border: highlighted ? "1px solid" : "1px solid transparent",
+      borderColor: highlighted ? `${signal.tone}.main` : "transparent",
+      background: highlighted ? tabSignalGlowMap[signal.tone] : "transparent",
+      "&.Mui-selected": {
+        color: "primary.main",
+      },
+    };
+  }, [pmDashboardTab, tabSignalGlowMap]);
+
+  const handleDashboardTabChange = useCallback((nextTab: PmDashboardTab) => {
+    fieldTabCorrected.current = true;
+    setPmDashboardTab(nextTab);
+  }, []);
 
   // Redirect to a valid tab when the current selection isn't available for this user.
   // Also corrects the initial tab for managers: useAuth starts with role="Viewer" so
@@ -1590,13 +1778,23 @@ const Dashboard = () => {
       tabRoleCorrected.current = true;
       return;
     }
+    if (!isManager
+      && hasInspectionsTab
+      && !fieldTabCorrected.current
+      && pmDashboardTab === "my-installs"
+      && !installTabSignal.hasAttention
+      && inspectionTabSignal.hasAttention) {
+      setPmDashboardTab("my-inspections");
+      fieldTabCorrected.current = true;
+      return;
+    }
     if (pmDashboardTab === "pm-projects" && !showPmProjectsTab) {
       setPmDashboardTab(hasInspectionsTab ? "my-inspections" : "my-installs");
     }
     if (pmDashboardTab === "my-inspections" && !hasInspectionsTab) {
       setPmDashboardTab("my-installs");
     }
-  }, [isManager, pmDashboardTab, showPmProjectsTab, hasInspectionsTab]);
+  }, [hasInspectionsTab, inspectionTabSignal.hasAttention, installTabSignal.hasAttention, isManager, pmDashboardTab, showPmProjectsTab]);
 
   // Installer: my pending sigs
   const myPendingSigs = useMemo(() =>
@@ -3355,11 +3553,27 @@ const Dashboard = () => {
       {/* UNIVERSAL TAB BAR (all non-viewer users) */}
       {showTabBar && (
         <Box className="glass-card" sx={{ p: 1.5 }}>
-          <Tabs value={pmDashboardTab} onChange={(_, v: PmDashboardTab) => setPmDashboardTab(v)}
-            sx={{ minHeight: 36, "& .MuiTab-root": { minHeight: 36, py: 0.5, fontSize: "0.8rem" } }}>
-            {showPmProjectsTab && <Tab value="pm-projects" label={isAdmin ? "Projects" : "My PM Projects"} />}
-            {hasInspectionsTab && <Tab value="my-inspections" label={isAdmin ? "Inspections" : "My Inspections"} />}
-            <Tab value="my-installs" label={isAdmin ? "Installs" : "My Installs"} />
+          <Tabs value={pmDashboardTab} onChange={(_, v: PmDashboardTab) => handleDashboardTabChange(v)}
+            sx={{ minHeight: 36 }}>
+            {showPmProjectsTab && (
+              <Tab
+                value="pm-projects"
+                label={renderDashboardTabLabel(isAdmin ? "Projects" : "My PM Projects", projectTabSignal, pmDashboardTab === "pm-projects")}
+                sx={getDashboardTabSx("pm-projects", projectTabSignal)}
+              />
+            )}
+            {hasInspectionsTab && (
+              <Tab
+                value="my-inspections"
+                label={renderDashboardTabLabel(isAdmin ? "Inspections" : "My Inspections", inspectionTabSignal, pmDashboardTab === "my-inspections")}
+                sx={getDashboardTabSx("my-inspections", inspectionTabSignal)}
+              />
+            )}
+            <Tab
+              value="my-installs"
+              label={renderDashboardTabLabel(isAdmin ? "Installs" : "My Installs", installTabSignal, pmDashboardTab === "my-installs")}
+              sx={getDashboardTabSx("my-installs", installTabSignal)}
+            />
           </Tabs>
         </Box>
       )}
