@@ -1,4 +1,4 @@
-import api, { cachedGet } from "./api";
+import api from "./api";
 import { IssueRepository } from "../repositories/IssueRepository";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import offlineStore, { type OfflineRun } from "./offlineStore";
@@ -132,6 +132,24 @@ async function cacheServerRuns(runs: AssetWorkflowRun[]): Promise<AssetWorkflowR
   return runs;
 }
 
+function refreshRunsInBackground(
+  scope: { type: "project"; id: string } | { type: "asset"; id: string },
+  endpoint: string,
+): void {
+  api.get<AssetWorkflowRun[]>(endpoint)
+    .then(async (res) => {
+      const runs = await cacheServerRuns(res.data);
+      window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+        detail: scope.type === "project"
+          ? { projectId: scope.id, runs }
+          : { assetId: scope.id, runs },
+      }));
+    })
+    .catch(() => {
+      window.dispatchEvent(new Event("api-serving-cache"));
+    });
+}
+
 async function enqueueRunMutation(
   runId: string,
   input: {
@@ -167,6 +185,12 @@ async function enqueueRunMutation(
 
 export const assetWorkflowRunService = {
   async listLatestByProject(projectId: string): Promise<AssetWorkflowRun[]> {
+    const cachedRuns = await offlineStore.listRunsByProject(projectId);
+    if (cachedRuns.length > 0) {
+      refreshRunsInBackground({ type: "project", id: projectId }, `/asset-workflow-runs/by-project/${projectId}`);
+      return cachedRuns;
+    }
+
     try {
       const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
       const runs = res.data;
@@ -177,6 +201,12 @@ export const assetWorkflowRunService = {
   },
 
   async listByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
+    const cachedRuns = await offlineStore.listRunsByAsset(assetId);
+    if (cachedRuns.length > 0) {
+      refreshRunsInBackground({ type: "asset", id: assetId }, `/asset-workflow-runs/by-asset/${assetId}`);
+      return cachedRuns;
+    }
+
     try {
       const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
       const runs = res.data;
