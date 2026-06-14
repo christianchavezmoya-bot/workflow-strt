@@ -25,7 +25,7 @@ const FALLBACK_PERMISSIONS: Record<string, RolePermissions> = {
   Supervisor:        createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: true,  editForms: true }, { upload: false, delete: false }),
   Engineer:          createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: false }, { upload: false, delete: false }),
   "QA Inspector":    createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: true }, { upload: false, delete: false }),
-  Installer:         createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: true,  editForms: true }, { upload: false, delete: false }),
+  Installer:         createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: false, editForms: true }, { upload: false, delete: false }),
   Technician:        createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: true }, { upload: false, delete: false }),
   Client:            createRolePermissions({ viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false }, { upload: false, delete: false }),
   Viewer:            createRolePermissions({ viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false }, { upload: false, delete: false }),

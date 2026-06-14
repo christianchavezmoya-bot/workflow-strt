@@ -3142,8 +3142,8 @@ const AssetInstallationPage = () => {
               Inspection Assets
             </Button>
           )}
-          {showAdvancedAssetActions && can.modifyData && (
-            <Tooltip title={activeProduct?.id ? `Open the workflow builder for ${activeProduct.name}` : "Select a project with a product to create a workflow"}>
+          {showAdvancedAssetActions && can.modifyData && !!activeProduct && (
+            <Tooltip title={`Open the workflow builder for ${activeProduct.name}`}>
               <span>
                 <Button
                   size="small"
@@ -3157,22 +3157,21 @@ const AssetInstallationPage = () => {
               </span>
             </Tooltip>
           )}
-          {showAdvancedAssetActions && can.modifyData && (
+          {showAdvancedAssetActions && can.modifyData && !!activeProduct && (
             <Button
               size="small"
               variant="outlined"
               startIcon={<FileUploadOutlined />}
-              disabled={!activeProduct}
               onClick={() => {
-                if (activeProduct) workflowConfigService.listByProduct(activeProduct.id, "Published").then(setWorkflowConfigs);
+                workflowConfigService.listByProduct(activeProduct.id, "Published").then(setWorkflowConfigs);
                 setCsvImportOpen(true);
               }}
             >
               Import CSV
             </Button>
           )}
-          {showAdvancedAssetActions && can.modifyData && (
-            <Button variant="contained" startIcon={<AddOutlined />} onClick={openAdd} disabled={!activeProduct}>Add asset</Button>
+          {showAdvancedAssetActions && can.modifyData && !!activeProduct && (
+            <Button variant="contained" startIcon={<AddOutlined />} onClick={openAdd}>Add asset</Button>
           )}
         </Stack>
       </Stack>
