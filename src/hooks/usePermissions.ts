@@ -78,6 +78,17 @@ export const usePermissions = () => {
     loadRoleConfig();
   }, []);
 
+  // When the authenticated user identity changes (login or logout), clear the
+  // module-level role-config cache and re-fetch. Without this, a role config
+  // loaded before the admin saved updated permissions would stay stale for the
+  // entire browser session even after logging out and back in.
+  useEffect(() => {
+    roleConfigService.clearCache();
+    setConfigReady(false);
+    loadRoleConfig();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.id]);
+
   useEffect(() => {
     const reload = () => {
       roleConfigService.clearCache();
