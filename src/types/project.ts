@@ -16,6 +16,7 @@ export type ProjectStatus =
   | "In Progress"
   | "On Hold"
   | "Completed"
+  | "Closed"
   | "Cancelled";
 
 export type WorkflowMode = "INSTALLATION_ONLY" | "INSPECTION_ONLY" | "MIXED";
@@ -50,6 +51,10 @@ export interface Project {
   productFeatureValues?: Record<string, string>;
   assetCount?: number;
   teamMemberIds?: string[];
+  completedAtUtc?: string | null;
+  completedBy?: string | null;
+  closedAtUtc?: string | null;
+  closedBy?: string | null;
   isDeleted?: boolean;
   deletedAtUtc?: string;
   deletedByUserId?: string;

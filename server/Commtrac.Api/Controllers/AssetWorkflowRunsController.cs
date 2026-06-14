@@ -17,12 +17,14 @@ public class AssetWorkflowRunsController : ControllerBase
     private readonly NotificationFeedService _feed;
     private readonly SseHub _sse;
     private readonly ILogger<AssetWorkflowRunsController> _logger;
-    public AssetWorkflowRunsController(AppDbContext db, NotificationFeedService feed, SseHub sse, ILogger<AssetWorkflowRunsController> logger)
+    private readonly ProjectLifecycleService _projectLifecycle;
+    public AssetWorkflowRunsController(AppDbContext db, NotificationFeedService feed, SseHub sse, ILogger<AssetWorkflowRunsController> logger, ProjectLifecycleService projectLifecycle)
     {
         _db     = db;
         _feed   = feed;
         _sse    = sse;
         _logger = logger;
+        _projectLifecycle = projectLifecycle;
     }
 
     private sealed class RunTimeEntry
@@ -736,6 +738,13 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        if (asset is not null)
+        {
+            var actorUserId = User.FindFirst("sub")?.Value
+                ?? User.FindFirst("nameid")?.Value
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId, req.CompletedByName ?? ResolveActorName());
+        }
         await NotifyRunEventAsync(
             run,
             "workflow-completed",
@@ -787,6 +796,13 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        if (asset is not null)
+        {
+            var actorUserId = User.FindFirst("sub")?.Value
+                ?? User.FindFirst("nameid")?.Value
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId, ResolveActorName());
+        }
         if (CountOpenIssues(req.IssuesJson) > 0)
         {
             await NotifyRunEventAsync(

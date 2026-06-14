@@ -247,6 +247,12 @@ public class ProjectEntity
     [MaxLength(120)]
     public string? ProbabilityStage { get; set; }
     public int MinimumCompletionPercent { get; set; } = 100;
+    public DateTime? CompletedAtUtc { get; set; }
+    [MaxLength(200)]
+    public string? CompletedBy { get; set; }
+    public DateTime? ClosedAtUtc { get; set; }
+    [MaxLength(200)]
+    public string? ClosedBy { get; set; }
     public List<string> ProductIds { get; set; } = new();
     public string ProductFeatureValuesJson { get; set; } = "{}";
     public string TeamMemberIdsJson { get; set; } = "[]";

@@ -83,6 +83,7 @@ const schema = z
         "In Progress",
         "On Hold",
         "Completed",
+        "Closed",
         "Cancelled"
       ])
       .optional(),

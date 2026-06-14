@@ -12,7 +12,7 @@ const ASSIGNMENT_EVENT_TYPES = new Set([
 const RUN_STATE_EVENT_TYPES = new Set([
   "workflow-started", "workflow-paused", "workflow-resumed", "workflow-completed",
   "asset-completed", "workflow-issue", "workflow-issues-updated", "workflow-reopened",
-  "workflow-updated",
+  "workflow-updated", "project-completed", "project-closed", "asset-deleted",
 ]);
 
 type NotificationInboxContextValue = {

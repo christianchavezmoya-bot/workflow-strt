@@ -1,4 +1,5 @@
 ﻿import api from "./api";
+import axios from "axios";
 import { Project, ProjectStatus, ProjectType } from "../types/project";
 import { ProjectRepository } from "../repositories/ProjectRepository";
 import { entityDeleteProject, entityPutProject } from "./localDB";
@@ -48,9 +49,19 @@ export const projectService = {
     return response.data;
   },
   async updateProjectStatus(id: string, payload: UpdateProjectStatusRequest) {
-    const response = await api.patch<Project>(`/projects/${id}/status`, payload);
-    await entityPutProject({ id: response.data.id, data: response.data });
-    return response.data;
+    try {
+      const response = await api.patch<Project>(`/projects/${id}/status`, payload);
+      await entityPutProject({ id: response.data.id, data: response.data });
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = typeof error.response?.data?.message === "string"
+          ? error.response.data.message
+          : error.message;
+        throw new Error(message);
+      }
+      throw error;
+    }
   },
   async deleteProject(id: string) {
     await api.delete(`/projects/${id}`);

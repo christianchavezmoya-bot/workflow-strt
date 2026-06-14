@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,11 +15,15 @@ namespace Commtrac.Api.Controllers;
 public class ProjectsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly NotificationFeedService _feed;
+    private readonly ProjectLifecycleService _projectLifecycle;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public ProjectsController(AppDbContext db)
+    public ProjectsController(AppDbContext db, NotificationFeedService feed, ProjectLifecycleService projectLifecycle)
     {
         _db = db;
+        _feed = feed;
+        _projectLifecycle = projectLifecycle;
     }
 
     [HttpGet]
@@ -129,6 +134,10 @@ public class ProjectsController : ControllerBase
         }
 
         var items = await query.ToListAsync();
+        foreach (var item in items)
+        {
+            await _projectLifecycle.SyncFromAssetsAsync(item.Id, null, null, notifyStatusChange: false);
+        }
         var projectIds = items.Select(p => p.Id).ToList();
 
         var siteIds = items.Select(p => p.SiteId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToList();
@@ -170,6 +179,7 @@ public class ProjectsController : ControllerBase
         {
             return NotFound();
         }
+        await _projectLifecycle.SyncFromAssetsAsync(project.Id, null, null, notifyStatusChange: false);
 
         string? siteName = null;
         if (!string.IsNullOrWhiteSpace(project.SiteId))
@@ -290,9 +300,63 @@ public class ProjectsController : ControllerBase
             return NotFound();
         }
 
+        var actorUserId = User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var actorName = ResolveActorName();
+
+        if (string.Equals(request.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+        {
+            var closeResult = await _projectLifecycle.CloseProjectAsync(id, actorUserId, actorName);
+            if (!closeResult.Success)
+            {
+                return BadRequest(new { message = closeResult.Error ?? "Project could not be closed." });
+            }
+
+            string? closedSiteName = null;
+            if (!string.IsNullOrWhiteSpace(closeResult.Project?.SiteId))
+            {
+                closedSiteName = await _db.Sites
+                    .Where(s => s.Id == closeResult.Project.SiteId)
+                    .Select(s => s.Name)
+                    .FirstOrDefaultAsync();
+            }
+
+            return Ok(ToDto(closeResult.Project!, closedSiteName));
+        }
+
         project.Status = request.Status;
         project.ApprovalDecision = request.ApprovalDecision;
+        if (string.Equals(request.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+        {
+            project.CompletedAtUtc ??= DateTime.UtcNow;
+            project.CompletedBy ??= actorName;
+        }
+
+        if (!string.Equals(request.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+        {
+            project.ClosedAtUtc = null;
+            project.ClosedBy = null;
+        }
         await _db.SaveChangesAsync();
+
+        if (string.Equals(request.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+        {
+            var when = project.CompletedAtUtc ?? DateTime.UtcNow;
+            await _feed.NotifyRolesAsync(
+                "project-completed",
+                "success",
+                "Project completed",
+                $"{project.JobNumber} reached 100% completion and moved to Completed at {when:g} UTC.",
+                ["Admin", "Project Manager"],
+                project.Id,
+                null,
+                null,
+                "project",
+                project.Id,
+                actorUserId,
+                actorName);
+        }
 
         string? siteName = null;
         if (!string.IsNullOrWhiteSpace(project.SiteId))
@@ -555,6 +619,10 @@ public class ProjectsController : ControllerBase
             project.ContractValue,
             project.ProbabilityStage,
             project.MinimumCompletionPercent,
+            project.CompletedAtUtc,
+            project.CompletedBy,
+            project.ClosedAtUtc,
+            project.ClosedBy,
             project.ProductIds,
             string.IsNullOrWhiteSpace(project.ProductFeatureValuesJson)
                 ? new Dictionary<string, string>()
@@ -584,6 +652,15 @@ public class ProjectsController : ControllerBase
             return requested;
         }
         return legacyFlag ? "INSTALLATION_ONLY" : "INSPECTION_ONLY";
+    }
+
+    private string ResolveActorName()
+    {
+        return User.Identity?.Name
+            ?? User.FindFirst("email")?.Value
+            ?? User.FindFirst(ClaimTypes.Name)?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? "Unknown user";
     }
 
     private async Task<HashSet<string>?> GetRoleScopedProjectIdsAsync()

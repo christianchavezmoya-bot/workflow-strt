@@ -16,13 +16,15 @@ public class ProjectAssetsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly NotificationFeedService _feed;
     private readonly SseHub _sse;
+    private readonly ProjectLifecycleService _projectLifecycle;
     private static readonly JsonSerializerOptions _json = new() { PropertyNameCaseInsensitive = true };
 
-    public ProjectAssetsController(AppDbContext db, NotificationFeedService feed, SseHub sse)
+    public ProjectAssetsController(AppDbContext db, NotificationFeedService feed, SseHub sse, ProjectLifecycleService projectLifecycle)
     {
         _db   = db;
         _feed = feed;
         _sse  = sse;
+        _projectLifecycle = projectLifecycle;
     }
 
     // GET api/project-assets/my-project-ids
@@ -98,6 +100,12 @@ public class ProjectAssetsController : ControllerBase
         var latestRunByAsset = latestRuns
             .GroupBy(r => r.AssetId)
             .ToDictionary(g => g.Key, g => g.First());
+        var assignedWorkflowAssetIds = await _db.AssetWorkflowAssignments
+            .Where(a => assetIds.Contains(a.AssetId) && a.Active)
+            .Select(a => a.AssetId)
+            .Distinct()
+            .ToListAsync();
+        var assignedWorkflowAssetIdSet = new HashSet<string>(assignedWorkflowAssetIds);
 
         var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
         var projects = await _db.Projects
@@ -112,13 +120,14 @@ public class ProjectAssetsController : ControllerBase
             var counts = latestRun is null
                 ? (RequiredItems: 0, CompletedItems: 0, MissingItems: 0)
                 : CountWorkflowEvidence(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
-            var summary = BuildWorkflowSummary(a, latestRun);
+            var summary = BuildWorkflowSummary(a, latestRun, assignedWorkflowAssetIdSet.Contains(a.Id));
             return new OpenAssetDto(
                 a.Id, a.ProjectId,
                 proj?.JobNumber ?? "",
                 proj?.Office ?? "",
                 proj?.OfficeId,
                 a.AssetTag, a.AssetName, a.AssetModel, a.Manufacturer,
+                summary.HasWorkflow,
                 a.Status,
                 latestRun?.Status,
                 counts.CompletedItems,
@@ -226,7 +235,7 @@ public class ProjectAssetsController : ControllerBase
             var counts = latestRun is null
                 ? (RequiredItems: 0, CompletedItems: 0, MissingItems: 0)
                 : CountWorkflowEvidence(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
-            var workflowSummary = BuildWorkflowSummary(asset, latestRun);
+            var workflowSummary = BuildWorkflowSummary(asset, latestRun, latestAssignment?.Active == true);
 
             var runWorkflowType = latestRun is not null && workflowConfigTypesById.TryGetValue(latestRun.WorkflowConfigId, out var latestRunWorkflowType)
                 ? latestRunWorkflowType
@@ -742,6 +751,46 @@ public class ProjectAssetsController : ControllerBase
         asset.DeletedAtUtc = DateTime.UtcNow;
         asset.DeletedByUserId = User.FindFirst("sub")?.Value ?? User.FindFirst("nameid")?.Value;
         await _db.SaveChangesAsync();
+        var actorUserId = User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var actorName = User.Identity?.Name
+            ?? User.FindFirst("email")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? "Unknown user";
+        var project = await _db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+        var deletedAt = asset.DeletedAtUtc ?? DateTime.UtcNow;
+        var message = $"{asset.AssetTag} on job {project?.JobNumber ?? "unknown"} was deleted at {deletedAt:g} UTC.";
+        await _feed.NotifyRolesAsync(
+            "asset-deleted",
+            "warning",
+            "Asset deleted",
+            message,
+            ["Admin", "Project Manager"],
+            asset.ProjectId,
+            asset.Id,
+            null,
+            "project-asset",
+            asset.Id,
+            actorUserId,
+            actorName);
+        if (!string.IsNullOrWhiteSpace(asset.AssignedUserId))
+        {
+            await _feed.NotifyUsersAsync(
+                "asset-deleted",
+                "warning",
+                "Asset deleted",
+                message,
+                [asset.AssignedUserId],
+                asset.ProjectId,
+                asset.Id,
+                null,
+                "project-asset",
+                asset.Id,
+                actorUserId,
+                actorName);
+        }
+        await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId, actorName);
         var delUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         await _sse.BroadcastExceptAsync(delUserId, "assets:updated",
             new { productId = asset.ProductId, projectId = asset.ProjectId });
@@ -762,6 +811,14 @@ public class ProjectAssetsController : ControllerBase
         asset.DeletedByUserId = null;
         asset.DeleteReason = null;
         await _db.SaveChangesAsync();
+        var restoreActorUserId = User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var restoreActorName = User.Identity?.Name
+            ?? User.FindFirst("email")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? "Unknown user";
+        await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, restoreActorUserId, restoreActorName);
         return NoContent();
     }
 
@@ -931,12 +988,19 @@ public class ProjectAssetsController : ControllerBase
         var latestRunByAsset = latestRuns
             .GroupBy(r => r.AssetId)
             .ToDictionary(g => g.Key, g => g.First());
+        var assignedWorkflowAssetIds = await _db.AssetWorkflowAssignments
+            .Where(a => assetIds.Contains(a.AssetId) && a.Active)
+            .Select(a => a.AssetId)
+            .Distinct()
+            .AsNoTracking()
+            .ToListAsync();
+        var assignedWorkflowAssetIdSet = new HashSet<string>(assignedWorkflowAssetIds);
 
         var summaries = new Dictionary<string, ProjectAssetWorkflowSummaryDto>(assetIds.Count);
         foreach (var asset in assetList)
         {
             latestRunByAsset.TryGetValue(asset.Id, out var latestRun);
-            summaries[asset.Id] = BuildWorkflowSummary(asset, latestRun);
+            summaries[asset.Id] = BuildWorkflowSummary(asset, latestRun, assignedWorkflowAssetIdSet.Contains(asset.Id));
         }
 
         return summaries;
@@ -1023,9 +1087,10 @@ public class ProjectAssetsController : ControllerBase
         return -1;
     }
 
-    private static ProjectAssetWorkflowSummaryDto BuildWorkflowSummary(ProjectAssetEntity asset, AssetWorkflowRunEntity? latestRun)
+    private static ProjectAssetWorkflowSummaryDto BuildWorkflowSummary(ProjectAssetEntity asset, AssetWorkflowRunEntity? latestRun, bool hasAssignedWorkflow = false)
     {
-        var hasWorkflow = !string.IsNullOrWhiteSpace(asset.ProductConfigId)
+        var hasWorkflow = hasAssignedWorkflow
+            || !string.IsNullOrWhiteSpace(asset.ProductConfigId)
             || !string.IsNullOrWhiteSpace(asset.WorkflowTemplateId)
             || latestRun is not null;
 

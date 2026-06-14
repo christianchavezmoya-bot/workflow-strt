@@ -7,6 +7,7 @@ const statusColorMap: Record<ProjectStatus, "default" | "success" | "warning" | 
   Approved: "success",
   "In Progress": "warning",
   Completed: "success",
+  Closed: "info",
   "Pending Approval": "warning",
   "On Hold": "warning",
   Cancelled: "error"

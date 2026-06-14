@@ -29,6 +29,7 @@ builder.Services.AddScoped<IInspectionImportAdapterService, InspectionImportAdap
 builder.Services.AddScoped<IInspectionImportValidatorService, InspectionImportValidatorService>();
 builder.Services.AddScoped<NotificationSettingsService>();
 builder.Services.AddScoped<NotificationFeedService>();
+builder.Services.AddScoped<ProjectLifecycleService>();
 builder.Services.AddSingleton<SseHub>();
 builder.Services.AddSingleton<SqliteBackupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());

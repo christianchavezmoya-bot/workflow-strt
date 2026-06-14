@@ -232,6 +232,10 @@ interface AssetHealth {
   noWorkflow: number;
 }
 
+function assetHasConfiguredWorkflow(asset: ProjectAsset): boolean {
+  return !!asset.workflowSummary?.hasWorkflow || !!asset.productConfigId || !!asset.workflowTemplateId;
+}
+
 function computeHealth(list: ProjectAsset[]): AssetHealth {
   return {
     total: list.length,
@@ -241,7 +245,7 @@ function computeHealth(list: ProjectAsset[]): AssetHealth {
     pending: list.filter((a) => a.status === "Pending").length,
     complete: list.filter((a) => a.status === "Complete").length,
     issue: list.filter((a) => a.status === "Issue").length,
-    noWorkflow: list.filter((a) => !a.productConfigId && !a.workflowTemplateId).length,
+    noWorkflow: list.filter((a) => !assetHasConfiguredWorkflow(a)).length,
   };
 }
 
@@ -992,7 +996,7 @@ const AssetInstallationPage = () => {
         if (isAssignmentScoped && a.assignedUserId !== currentUser.id) return false;
         if (ownedProjectIds && !ownedProjectIds.has(a.projectId)) return false;
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
-        if (showNoWorkflow && (a.productConfigId || a.workflowTemplateId)) return false;
+        if (showNoWorkflow && assetHasConfiguredWorkflow(a)) return false;
       }
       if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q)))) return false;
       return true;

@@ -16,7 +16,7 @@ import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
-import { fetchProjects, setProjects } from "../../store/projectSlice";
+import { fetchProjects, setProjects, updateProjectStatus } from "../../store/projectSlice";
 import { fetchProducts } from "../../store/productsSlice";
 import { officesService } from "../../services/officesService";
 import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
@@ -176,8 +176,7 @@ type ScopedWorkloadItem = {
 
 function isDashboardVisibleProjectStatus(status?: string | null) {
   const normalized = String(status ?? "").trim().toLowerCase().replace(/\s+/g, "");
-  return normalized !== "completed"
-    && normalized !== "cancelled"
+  return normalized !== "cancelled"
     && normalized !== "closed"
     && normalized !== "archived";
 }
@@ -258,6 +257,7 @@ const Dashboard = () => {
     JSON.parse(localStorage.getItem("installer_photo_reminders") ?? "[]")
   );
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
+  const [closingDashboardProjectId, setClosingDashboardProjectId] = useState<string | null>(null);
   const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
   const [issueDetailLoading, setIssueDetailLoading] = useState(false);
@@ -636,6 +636,7 @@ const Dashboard = () => {
   const highIssues = visibleOpenIssues.filter((i) => !i.isBlocking && i.severity === "high");
   const overdueProjects = dashboardProjects.filter((p) => {
     if (!p.finishDate) return false;
+    if (String(p.status ?? "") === "Completed") return false;
     return new Date(p.finishDate) < new Date();
   });
   const attentionCount = blockingIssues.length + visiblePendingSigs.length + overdueProjects.length + highIssues.length;
@@ -685,6 +686,38 @@ const Dashboard = () => {
     () => new Map(products.map((product) => [product.id, product.name])),
     [products]
   );
+
+  const getProjectCompletionMetrics = useCallback((project: { id: string; assetCount?: number | null }) => {
+    const summary = projectSummaryById.get(project.id);
+    const projectAssets = openAssets.filter((asset) => asset.projectId === project.id);
+    const issueCount = projectAssets.filter((asset) => String(asset.status ?? "").toLowerCase() === "issue").length;
+    const noWorkflowCount = projectAssets.filter((asset) => !asset.hasWorkflow && String(asset.status ?? "").toLowerCase() !== "complete").length;
+    const totalAssets = summary?.total ?? project.assetCount ?? projectAssets.length;
+    const notStarted = summary?.notStarted ?? projectAssets.filter((asset) => isNotStartedAsset(asset.status)).length;
+    const inProgress = summary?.inProgress ?? projectAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length;
+    const complete = summary?.complete ?? Math.max(0, totalAssets - notStarted - inProgress - issueCount);
+    const completionPct = totalAssets > 0 ? Math.round((complete / totalAssets) * 100) : 0;
+    return { projectAssets, issueCount, noWorkflowCount, totalAssets, notStarted, inProgress, complete, completionPct };
+  }, [openAssets, projectSummaryById]);
+
+  const isReadyToCloseProject = useCallback((project: { status?: string | null; completedAtUtc?: string | null }, completionPct: number) => {
+    return String(project.status ?? "") === "Completed" && completionPct >= 100;
+  }, []);
+
+  const closeProjectFromDashboard = useCallback(async (projectId: string) => {
+    setClosingDashboardProjectId(projectId);
+    try {
+      await dispatch(updateProjectStatus({ id: projectId, payload: { status: "Closed" } })).unwrap();
+      await dispatch(fetchProjects({
+        country: activeOffice !== "All" ? activeOffice : undefined,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to close this project right now.";
+      window.alert(message);
+    } finally {
+      setClosingDashboardProjectId(null);
+    }
+  }, [activeOffice, dispatch]);
 
   const projectPmLabel = useCallback(
     (projectId?: string | null) => {
@@ -1650,7 +1683,7 @@ const Dashboard = () => {
 
   const statusColor: Record<string, string> = {
     "In Progress": "primary", "Completed": "success", "Pending Approval": "warning",
-    "Cancelled": "error", "Draft": "default", "Approved": "info", "On Hold": "warning",
+    "Closed": "info", "Cancelled": "error", "Draft": "default", "Approved": "info", "On Hold": "warning",
   };
 
   const MyInspectionWorkspace = (
@@ -2061,10 +2094,10 @@ const Dashboard = () => {
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
         {viewedDashboardUserId
-          ? `${dashboardProjectScope === "mine" ? "My" : "All"} active projects for ${viewingOwnDashboard ? "you" : viewedDashboardUser?.fullName ?? "this user"}`
+          ? `${dashboardProjectScope === "mine" ? "My" : "All"} open projects and projects ready to close for ${viewingOwnDashboard ? "you" : viewedDashboardUser?.fullName ?? "this user"}`
           : isAdmin
-            ? `${dashboardProjectScope === "mine" ? "Your" : "All"} active projects in the current dashboard scope.`
-            : `${dashboardProjectScope === "mine" ? "Your" : "All"} active projects in the current dashboard scope.`}
+            ? `${dashboardProjectScope === "mine" ? "Your" : "All"} open projects and projects ready to close in the current dashboard scope.`
+            : `${dashboardProjectScope === "mine" ? "Your" : "All"} open projects and projects ready to close in the current dashboard scope.`}
       </Typography>
 
       {dashboardProjects.length === 0 ? (
@@ -2072,15 +2105,8 @@ const Dashboard = () => {
       ) : (
         <Stack spacing={1.25}>
           {dashboardProjects.map((project) => {
-            const summary = projectSummaryById.get(project.id);
-            const projectAssets = openAssets.filter((asset) => asset.projectId === project.id);
-            const issueCount = projectAssets.filter((asset) => String(asset.status ?? "").toLowerCase() === "issue").length;
-            const noWorkflowCount = projectAssets.filter((asset) => !asset.totalSteps && String(asset.status ?? "").toLowerCase() !== "complete").length;
-            const totalAssets = summary?.total ?? project.assetCount ?? projectAssets.length;
-            const notStarted = summary?.notStarted ?? projectAssets.filter((asset) => isNotStartedAsset(asset.status)).length;
-            const inProgress = summary?.inProgress ?? projectAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length;
-            const complete = summary?.complete ?? Math.max(0, totalAssets - notStarted - inProgress - issueCount);
-            const completionPct = totalAssets > 0 ? Math.round((complete / totalAssets) * 100) : 0;
+            const { issueCount, noWorkflowCount, totalAssets, notStarted, inProgress, complete, completionPct } = getProjectCompletionMetrics(project);
+            const readyToClose = isReadyToCloseProject(project, completionPct);
             const productNames = (project.productIds ?? [])
               .map((id) => productNameById.get(id) ?? id)
               .filter(Boolean)
@@ -2093,13 +2119,13 @@ const Dashboard = () => {
                   px: 2,
                   py: 1.25,
                   borderRadius: 2,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.03)",
+                  border: readyToClose ? "1px solid rgba(59,130,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
+                  background: readyToClose ? "linear-gradient(135deg, rgba(59,130,246,0.12), rgba(16,185,129,0.08))" : "rgba(255,255,255,0.03)",
                   cursor: "pointer",
                   transition: "all 0.2s",
                   "&:hover": {
-                    background: "rgba(45,212,191,0.06)",
-                    borderColor: "rgba(45,212,191,0.25)",
+                    background: readyToClose ? "linear-gradient(135deg, rgba(59,130,246,0.16), rgba(16,185,129,0.1))" : "rgba(45,212,191,0.06)",
+                    borderColor: readyToClose ? "rgba(59,130,246,0.6)" : "rgba(45,212,191,0.25)",
                   },
                 }}
                 onClick={() => navigate(projectAssetsPath(project))}
@@ -2125,6 +2151,14 @@ const Dashboard = () => {
                       >
                         {totalAssets} assets
                       </Typography>
+                      {readyToClose && (
+                        <Chip
+                          label="Ready to Close"
+                          size="small"
+                          color="info"
+                          sx={{ height: 20, fontSize: "0.68rem", fontWeight: 700 }}
+                        />
+                      )}
                     </Stack>
                     <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
                       {notStarted > 0 && <Chip size="small" label={`${notStarted} Not Started`} sx={{ height: 20, fontSize: "0.68rem" }} />}
@@ -2148,22 +2182,45 @@ const Dashboard = () => {
                   <Typography variant="caption" color="text.secondary" noWrap>
                     {[project.customerName, project.siteName, productNames || "No products linked"].filter(Boolean).join(" - ")}
                   </Typography>
+                  {readyToClose && (
+                    <Typography variant="caption" color="info.main">
+                      {project.completedAtUtc
+                        ? `Completed ${new Date(project.completedAtUtc).toLocaleString()}${project.completedBy ? ` by ${project.completedBy}` : ""}`
+                        : "This project is complete and waiting for PM/Admin closure."}
+                    </Typography>
+                  )}
                   <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap>
                     <Typography variant="caption" color={project.projectManager?.trim() ? "text.secondary" : "warning.main"} noWrap>
                       PM: {project.projectManager?.trim() || "No PM assigned"}
                     </Typography>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(projectAssetsPath(project));
-                      }}
-                      sx={{ fontSize: "0.72rem", minHeight: 26 }}
-                    >
-                      Go to Project Assets
-                    </Button>
+                    <Stack direction="row" spacing={1} useFlexGap>
+                      {readyToClose && isManager && (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          disabled={closingDashboardProjectId === project.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void closeProjectFromDashboard(project.id);
+                          }}
+                          sx={{ fontSize: "0.72rem", minHeight: 26 }}
+                        >
+                          {closingDashboardProjectId === project.id ? "Closing..." : "Mark as Closed"}
+                        </Button>
+                      )}
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(projectAssetsPath(project));
+                        }}
+                        sx={{ fontSize: "0.72rem", minHeight: 26 }}
+                      >
+                        Go to Project Assets
+                      </Button>
+                    </Stack>
                   </Stack>
                 </Stack>
               </Box>
@@ -3036,14 +3093,7 @@ const Dashboard = () => {
               ? <Typography variant="caption" color="text.secondary">No projects in scope.</Typography>
               : <Stack spacing={1}>
                   {dashboardProjects.slice(0, 6).map((project) => {
-                    const summary = projectSummaryById.get(project.id);
-                    const projectAssets = openAssets.filter((asset) => asset.projectId === project.id);
-                    const issueCount = projectAssets.filter((asset) => String(asset.status ?? "").toLowerCase() === "issue").length;
-                    const totalAssets = summary?.total ?? project.assetCount ?? projectAssets.length;
-                    const notStarted = summary?.notStarted ?? projectAssets.filter((asset) => isNotStartedAsset(asset.status)).length;
-                    const inProgress = summary?.inProgress ?? projectAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length;
-                    const complete = summary?.complete ?? Math.max(0, totalAssets - notStarted - inProgress - issueCount);
-                    const completionPct = totalAssets > 0 ? Math.round((complete / totalAssets) * 100) : 0;
+                    const { issueCount, totalAssets, complete, completionPct } = getProjectCompletionMetrics(project);
 
                     return (
                       <Paper key={project.id} elevation={0} onClick={() => navigate(projectAssetsPath(project))}

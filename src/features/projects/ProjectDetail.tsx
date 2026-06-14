@@ -110,8 +110,8 @@ const ProjectDetail = () => {
     if (project.status === "Approved" && canEditProject && installationEnabled(project.workflowMode)) {
       list.push("Start Work");
     }
-    if (project.status === "In Progress" && canEditProject && installationEnabled(project.workflowMode)) {
-      list.push("Mark Completed");
+    if (project.status === "Completed" && canEditProject && installationEnabled(project.workflowMode)) {
+      list.push("Mark as Closed");
     }
     return list;
   }, [canEditProject, project, can.projects?.editScope]);
@@ -156,21 +156,13 @@ const ProjectDetail = () => {
       );
     }
 
-    if (label === "Mark Completed") {
+    if (label === "Mark as Closed") {
       try {
-        const assets = await projectAssetService.listByProject(project.id);
-        const totalAssets = assets.length;
-        const completedAssets = assets.filter((a) => a.status === "Complete").length;
-        const percentComplete = totalAssets > 0 ? Math.round((completedAssets / totalAssets) * 100) : 0;
-        if (percentComplete < 100) {
-          window.alert(
-            `This project is only ${percentComplete}% complete (${completedAssets}/${totalAssets} assets completed). Complete all project assets before marking the project completed.`
-          );
-          return;
-        }
-        window.alert("Project assets are 100% complete. The Project Manager has been notified to change the project status to Completed.");
-      } catch {
-        window.alert("Unable to verify project completion right now. Check asset progress and API availability.");
+        const updated = await dispatch(updateProjectStatus({ id: project.id, payload: { status: "Closed" } })).unwrap();
+        setProject(updated);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to close this project right now.";
+        window.alert(message);
       }
     }
   };
@@ -273,6 +265,23 @@ const ProjectDetail = () => {
             <Stack spacing={1}>
               <Typography variant="subtitle1">Project snapshot</Typography>
               <Typography variant="body2">Status: {project.status}</Typography>
+              {project.completedAtUtc && (
+                <Typography variant="body2">
+                  Completed: {new Date(project.completedAtUtc).toLocaleString()}
+                  {project.completedBy ? ` by ${project.completedBy}` : ""}
+                </Typography>
+              )}
+              {project.closedAtUtc && (
+                <Typography variant="body2">
+                  Closed: {new Date(project.closedAtUtc).toLocaleString()}
+                  {project.closedBy ? ` by ${project.closedBy}` : ""}
+                </Typography>
+              )}
+              {project.deletedAtUtc && (
+                <Typography variant="body2">
+                  Deleted: {new Date(project.deletedAtUtc).toLocaleString()}
+                </Typography>
+              )}
               {project.approvalDecision && <Typography variant="body2">Approval: {project.approvalDecision}</Typography>}
               <Typography variant="body2">Type: {project.projectType}</Typography>
               <Typography variant="body2">

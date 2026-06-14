@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Box,
   Button,
   Checkbox,
@@ -51,13 +50,14 @@ import { useWorkScope } from "../../hooks/useWorkScope";
 import { fieldService } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
 import { projectAssetService } from "../../services/projectAssetService";
+import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
-import { deleteProject, fetchProjects, updateProjectStatus } from "../../store/projectSlice";
+import { deleteProject, fetchProjects, setProjects, updateProjectStatus } from "../../store/projectSlice";
 import { projectService } from "../../services/projectService";
-import { Project } from "../../types/project";
+import { Project, ProjectStatus } from "../../types/project";
 import ProjectForm from "./ProjectForm";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { Capacitor } from "@capacitor/core";
@@ -310,6 +310,7 @@ const ProjectList = () => {
     user?.role === "Project Manager" ? "mine" : "all"
   );
   const [projectNumberFilter, setProjectNumberFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ProjectStatus | "All">("All");
   const isAdminUser = user?.role === "Admin";
   const isPmUser = user?.role === "Project Manager";
   const canCreateProjects = isAdminUser || isPmUser;
@@ -345,8 +346,7 @@ const ProjectList = () => {
   }, [can.projects?.editScope, user?.fullName, user?.id]);
 
   // Block-complete dialog — shown when assets are not all done
-  const [blockComplete, setBlockComplete] = useState<{ open: boolean; incomplete: number; total: number }>({ open: false, incomplete: 0, total: 0 });
-  const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
+  const [closingProjectId, setClosingProjectId] = useState<string | null>(null);
 
   // Clear column filters when active office changes
   useEffect(() => {
@@ -361,17 +361,39 @@ const ProjectList = () => {
         country: activeOffice !== "All" ? activeOffice : undefined,
         scope: "browse",
         ownershipScope: canViewAllProjects ? projectViewFilter : "mine",
+        status: statusFilter,
         projectNumber: projectNumberFilter.trim() || undefined,
         page: page + 1,
         pageSize: rowsPerPage,
         includeDeleted: showArchived
       })
     );
-  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, canViewAllProjects, projectViewFilter, projectNumberFilter]);
+  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, canViewAllProjects, projectViewFilter, projectNumberFilter, statusFilter]);
 
   useEffect(() => {
     setPage(0);
-  }, [showArchived, projectViewFilter, projectNumberFilter]);
+  }, [showArchived, projectViewFilter, projectNumberFilter, statusFilter]);
+
+  const currentRequestKey = useMemo(() => buildProjectRequestKey({
+    country: activeOffice !== "All" ? activeOffice : undefined,
+    scope: "browse",
+    ownershipScope: canViewAllProjects ? projectViewFilter : "mine",
+    status: statusFilter,
+    projectNumber: projectNumberFilter.trim() || undefined,
+    page: page + 1,
+    pageSize: rowsPerPage,
+    includeDeleted: showArchived,
+  }), [activeOffice, canViewAllProjects, page, projectNumberFilter, projectViewFilter, rowsPerPage, showArchived, statusFilter]);
+
+  useEffect(() => {
+    const handleUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectRepositoryUpdateDetail>).detail;
+      if (!detail || detail.requestKey !== currentRequestKey) return;
+      dispatch(setProjects({ items: detail.items, total: detail.total }));
+    };
+    window.addEventListener("repo:projects:updated", handleUpdated);
+    return () => window.removeEventListener("repo:projects:updated", handleUpdated);
+  }, [currentRequestKey, dispatch]);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -564,24 +586,17 @@ const ProjectList = () => {
       );
     }
 
-    if (label === "Mark Completed") {
+    if (label === "Mark as Closed") {
       // Enforce: all installation assets must be Complete before project can be marked Completed.
       // Project Managers (and above) are subject to the same rule — no exceptions.
-      setCompletingProjectId(project.id);
+      setClosingProjectId(project.id);
       try {
-        const assets = await projectAssetService.listByProject(project.id);
-        const total = assets.length;
-        const incomplete = assets.filter((a) => a.status !== "Complete").length;
-        if (incomplete > 0) {
-          setBlockComplete({ open: true, incomplete, total });
-          return;
-        }
-        dispatch(updateProjectStatus({ id: project.id, payload: { status: "Completed" } }));
-      } catch {
-        // If we can't verify assets, block the action to be safe
-        setBlockComplete({ open: true, incomplete: -1, total: 0 });
+        await dispatch(updateProjectStatus({ id: project.id, payload: { status: "Closed" } })).unwrap();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to close this project right now.";
+        window.alert(message);
       } finally {
-        setCompletingProjectId(null);
+        setClosingProjectId(null);
       }
     }
   };
@@ -597,8 +612,8 @@ const ProjectList = () => {
       actions.push("Start Work");
     }
 
-    if (project.status === "In Progress" && canEditProjectFromWebTable(project)) {
-      actions.push("Mark Completed");
+    if (project.status === "Completed" && canEditProjectFromWebTable(project)) {
+      actions.push("Mark as Closed");
     }
 
     if (actions.length === 0) {
@@ -613,8 +628,8 @@ const ProjectList = () => {
             size="small"
             variant="outlined"
             color="primary"
-            disabled={label === "Mark Completed" && completingProjectId === project.id}
-            startIcon={label === "Mark Completed" && completingProjectId === project.id
+            disabled={label === "Mark as Closed" && closingProjectId === project.id}
+            startIcon={label === "Mark as Closed" && closingProjectId === project.id
               ? <CircularProgress size={12} /> : undefined}
             onClick={() => handleAction(project, label)}
           >
@@ -677,6 +692,20 @@ const ProjectList = () => {
               </Select>
             </FormControl>
           )}
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel id="project-status-filter-label">Status</InputLabel>
+            <Select
+              labelId="project-status-filter-label"
+              label="Status"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as ProjectStatus | "All")}
+            >
+              <MenuItem value="All">All statuses</MenuItem>
+              {(["Draft", "In Planning", "Pending Approval", "Approved", "In Progress", "On Hold", "Completed", "Closed", "Cancelled"] as const).map((status) => (
+                <MenuItem key={status} value={status}>{status}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
           <TextField
             size="small"
             label="Project number"
@@ -691,14 +720,15 @@ const ProjectList = () => {
                 size="small"
                 onClick={() => {
                   setProjectViewFilter("all");
+                  setStatusFilter("All");
                   setProjectNumberFilter("");
                   setAutoFilters({});
                 }}
                 sx={{
                   border: "1px solid",
-                  borderColor: (projectViewFilter !== "all" || projectNumberFilter || Object.keys(autoFilters ?? {}).length > 0)
+                  borderColor: (projectViewFilter !== "all" || statusFilter !== "All" || projectNumberFilter || Object.keys(autoFilters ?? {}).length > 0)
                     ? "primary.main" : "divider",
-                  color: (projectViewFilter !== "all" || projectNumberFilter || Object.keys(autoFilters ?? {}).length > 0)
+                  color: (projectViewFilter !== "all" || statusFilter !== "All" || projectNumberFilter || Object.keys(autoFilters ?? {}).length > 0)
                     ? "primary.main" : "text.disabled",
                   borderRadius: 1.5,
                   p: 0.75,
@@ -738,7 +768,7 @@ const ProjectList = () => {
               const actions: string[] = [];
               if (project.status === "Draft" && user?.role === "Project Manager") actions.push("Submit for Approval");
               if (project.status === "Pending Approval" && user?.role === "Admin") actions.push("Approve", "Request Info", "Reject");
-              if (project.status === "In Progress" && can.modifyData) actions.push("Mark Completed");
+              if (project.status === "Completed" && canEditProjectFromWebTable(project)) actions.push("Mark as Closed");
               return actions;
             })();
 
@@ -1191,24 +1221,6 @@ const ProjectList = () => {
       />
 
       {/* Block-complete dialog — shown when not all assets are done */}
-      <Dialog open={blockComplete.open} onClose={() => setBlockComplete({ open: false, incomplete: 0, total: 0 })} maxWidth="xs" fullWidth>
-        <DialogTitle>Cannot Complete Project</DialogTitle>
-        <DialogContent>
-          <Alert severity="warning" sx={{ mb: 1 }}>
-            {blockComplete.incomplete === -1
-              ? "Unable to verify installation asset status. Please try again or contact support."
-              : `${blockComplete.incomplete} of ${blockComplete.total} installation asset${blockComplete.incomplete !== 1 ? "s are" : " is"} not yet completed.`}
-          </Alert>
-          <Typography variant="body2" color="text.secondary">
-            A project can only be marked as Completed once <strong>all installation assets</strong> have a "Complete" status. Please finish the remaining assets first.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setBlockComplete({ open: false, incomplete: 0, total: 0 })} variant="contained">
-            OK
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <TableConfigDialog
         open={tableConfigOpen}

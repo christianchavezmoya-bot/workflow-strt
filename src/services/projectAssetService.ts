@@ -190,6 +190,7 @@ export interface OpenAssetItem {
   assetName?: string;
   assetModel?: string;
   manufacturer?: string;
+  hasWorkflow: boolean;
   status: string;
   runStatus?: string;
   completedSteps: number;
