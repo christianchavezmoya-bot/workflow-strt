@@ -44,7 +44,7 @@ export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermi
     };
   }
   const canEdit   = p.editFields || p.modifyData;
-  const canDelete = p.modifyData;
+  const canDelete = p.createDeleteTables;
   const canBuild  = p.editForms;
   // createDeleteTables is the clearest proxy for "full admin access" — those roles see and edit all records.
   // Roles without it (Installer, Engineer, Technician, Supervisor) default to viewing/editing only their own.

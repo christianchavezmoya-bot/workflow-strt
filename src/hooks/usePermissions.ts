@@ -31,14 +31,15 @@ const FALLBACK_PERMISSIONS: Record<string, RolePermissions> = {
   Viewer:            createRolePermissions({ viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false }, { upload: false, delete: false }),
 };
 
-const resolveDomains = (roleName: string | undefined, permissions: RolePermissions) => {
+const resolveDomains = (roleName: string | undefined, permissions: RolePermissions): DomainPermissions => {
+  let domains: DomainPermissions;
   if (permissions.domains) {
     // Merge computed defaults underneath the saved values so that fields added
     // after a config was saved (e.g. viewScope, editScope) are filled in correctly
     // rather than falling back to the hardcoded "own" missing-field default.
     const defaults = defaultDomains(permissions);
     const saved = permissions.domains;
-    return {
+    domains = {
       projects:                { ...defaults.projects,                ...saved.projects },
       installationAssets:      { ...defaults.installationAssets,      ...saved.installationAssets },
       workInstructionsBuilder: { ...defaults.workInstructionsBuilder, ...saved.workInstructionsBuilder },
@@ -50,14 +51,23 @@ const resolveDomains = (roleName: string | undefined, permissions: RolePermissio
         edit: defaults.settings.edit || (saved.settings?.edit ?? false),
       },
     };
+  } else {
+    const fallback = roleName ? FALLBACK_PERMISSIONS[roleName] : undefined;
+    domains = fallback?.domains ?? defaultDomains(permissions);
   }
 
-  const fallback = roleName ? FALLBACK_PERMISSIONS[roleName] : undefined;
-  if (fallback?.domains) {
-    return fallback.domains;
+  // Hard-lock: viewOnly roles (Viewer, Client) can never delete, archive, restore, or purge,
+  // regardless of what an admin may have saved in the role config.
+  if (permissions.viewOnly) {
+    return {
+      ...domains,
+      projects:           { ...domains.projects,           delete: false },
+      installationAssets: { ...domains.installationAssets, delete: false },
+      documents:          { ...domains.documents,          delete: false },
+    };
   }
 
-  return defaultDomains(permissions);
+  return domains;
 };
 
 export const usePermissions = () => {
