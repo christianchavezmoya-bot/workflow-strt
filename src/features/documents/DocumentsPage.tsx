@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AddOutlined,
+  ArrowDropDown,
   AttachFileOutlined,
   DeleteOutline,
   DragIndicatorOutlined,
@@ -17,6 +18,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -28,6 +30,7 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
+  ListItemText,
   Menu,
   MenuItem,
   Paper,
@@ -205,8 +208,9 @@ export default function DocumentsPage() {
   const [loading, setLoading] = useState(false);
   const [catTab, setCatTab]   = useState(0);
   const [search, setSearch]   = useState("");
-  const [sortBy, setSortBy] = useState<DocumentSortKey>("dateCreated");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [autoSort,    setAutoSort]    = useState({ key: "dateCreated", dir: "desc" as "asc" | "desc" });
+  const [autoFilters, setAutoFilters] = useState<Record<string, Set<string>>>({});
+  const [autoMenu,    setAutoMenu]    = useState<{ anchorEl: HTMLElement | null; key: string }>({ anchorEl: null, key: "" });
 
   // ---- tab & field config — loaded from backend, cached in LS -----
   const [tabs, setTabs]               = useState<DocTab[]>(() => lsGet<DocTab[]>(LS_TABS_KEY, DEFAULT_TABS).filter((t) => t.id !== "tips"));
@@ -340,29 +344,44 @@ export default function DocumentsPage() {
     });
   }, [docs, activeCategoryId, search]);
 
-  const sortedDocs = useMemo(() => {
-    const getSortValue = (doc: DocumentRecord) => {
-      switch (sortBy) {
-        case "name": return (doc.name ?? "").toLowerCase();
-        case "category": return (doc.type ?? "").toLowerCase();
-        case "linkedTo": return (doc.linkedTo ?? "").toLowerCase();
-        case "size": return doc.fileSize ?? 0;
-        case "createdBy": return (doc.createdBy ?? "").toLowerCase();
-        case "dateCreated":
-        default:
-          return doc.uploadedAt ? Date.parse(doc.uploadedAt) || 0 : 0;
-      }
+  const docAccessors = useMemo(() => {
+    const n = (v: string | null | undefined) => String(v ?? "");
+    return {
+      name:        (d: DocumentRecord) => n(d.name),
+      category:    (d: DocumentRecord) => n(d.type),
+      linkedTo:    (d: DocumentRecord) => n(d.linkedTo),
+      size:        (d: DocumentRecord) => String(d.fileSize ?? 0).padStart(20, "0"),
+      dateCreated: (d: DocumentRecord) => n(d.uploadedAt),
+      createdBy:   (d: DocumentRecord) => n(d.createdBy),
     };
+  }, []);
 
-    const multiplier = sortDir === "asc" ? 1 : -1;
-    return [...visibleDocs].sort((a, b) => {
-      const aVal = getSortValue(a);
-      const bVal = getSortValue(b);
-      if (aVal < bVal) return -1 * multiplier;
-      if (aVal > bVal) return 1 * multiplier;
-      return 0;
+  const docFilterOptions = useMemo(() => {
+    const opts: Record<string, string[]> = {};
+    (["name","category","linkedTo","createdBy"] as const).forEach((k) => {
+      opts[k] = Array.from(new Set(visibleDocs.map((d) => docAccessors[k](d)))).sort();
     });
-  }, [visibleDocs, sortBy, sortDir]);
+    return opts;
+  }, [visibleDocs, docAccessors]);
+
+  const sortedDocs = useMemo(() => {
+    let rows = visibleDocs.filter((d) =>
+      Object.entries(autoFilters).every(([k, sel]) => {
+        if (!sel || sel.size === 0) return true;
+        return sel.has((docAccessors[k as keyof typeof docAccessors])?.(d) ?? "");
+      })
+    );
+    if (autoSort.key && docAccessors[autoSort.key as keyof typeof docAccessors]) {
+      const acc = docAccessors[autoSort.key as keyof typeof docAccessors];
+      rows = [...rows].sort((a, b) => {
+        const av = acc(a), bv = acc(b);
+        if (av < bv) return autoSort.dir === "asc" ? -1 : 1;
+        if (av > bv) return autoSort.dir === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return rows;
+  }, [visibleDocs, autoFilters, autoSort, docAccessors]);
 
   const categoryCounts = useMemo(() => {
     const m: Record<string, number> = {};
@@ -753,24 +772,6 @@ export default function DocumentsPage() {
           value={search} onChange={(e) => setSearch(e.target.value)} sx={{ maxWidth: 440, width: "100%" }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchOutlined fontSize="small" /></InputAdornment> }}
         />
-        <FormControl size="small" sx={{ minWidth: 170 }}>
-          <InputLabel shrink>Sort By</InputLabel>
-          <Select label="Sort By" value={sortBy} onChange={(e) => setSortBy(e.target.value as DocumentSortKey)}>
-            <MenuItem value="dateCreated">Date Created</MenuItem>
-            <MenuItem value="name">Name</MenuItem>
-            <MenuItem value="category">Category</MenuItem>
-            <MenuItem value="linkedTo">Linked To</MenuItem>
-            <MenuItem value="createdBy">Created By</MenuItem>
-            <MenuItem value="size">Size</MenuItem>
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 150 }}>
-          <InputLabel shrink>Order</InputLabel>
-          <Select label="Order" value={sortDir} onChange={(e) => setSortDir(e.target.value as "asc" | "desc")}>
-            <MenuItem value="asc">Ascending</MenuItem>
-            <MenuItem value="desc">Descending</MenuItem>
-          </Select>
-        </FormControl>
       </Stack>
 
       {/* Documents table */}
@@ -787,15 +788,24 @@ export default function DocumentsPage() {
           <Table size="small">
             <TableHead>
               <TableRow>
-                {columnOrder.map((colId) => (
-                  <TableCell key={colId}>
-                    <Typography variant="caption" fontWeight={700}>
-                      {(BUILTIN_COL_IDS as readonly string[]).includes(colId)
-                        ? BUILTIN_COL_LABELS[colId as BuiltinColId]
-                        : (customFields.find((f) => f.id === colId)?.label ?? colId)}
-                    </Typography>
-                  </TableCell>
-                ))}
+                {columnOrder.map((colId) => {
+                    const label = (BUILTIN_COL_IDS as readonly string[]).includes(colId)
+                      ? BUILTIN_COL_LABELS[colId as BuiltinColId]
+                      : (customFields.find((f) => f.id === colId)?.label ?? colId);
+                    const sortable = (BUILTIN_COL_IDS as readonly string[]).includes(colId);
+                    return (
+                      <TableCell key={colId}>
+                        <Stack direction="row" alignItems="center" spacing={0.25}>
+                          <Typography variant="caption" fontWeight={700}>{label}</Typography>
+                          {sortable && (
+                            <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: colId })}>
+                              <ArrowDropDown fontSize="small" />
+                            </IconButton>
+                          )}
+                        </Stack>
+                      </TableCell>
+                    );
+                  })}
                 <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
               </TableRow>
             </TableHead>
@@ -1374,6 +1384,30 @@ export default function DocumentsPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Column sort / filter menu */}
+      <Menu anchorEl={autoMenu.anchorEl} open={Boolean(autoMenu.anchorEl)} onClose={() => setAutoMenu({ anchorEl: null, key: "" })}>
+        <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort A → Z</MenuItem>
+        <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "desc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort Z → A</MenuItem>
+        <MenuItem onClick={() => { setAutoSort({ key: "dateCreated", dir: "desc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Clear sort</MenuItem>
+        {(docFilterOptions[autoMenu.key] ?? []).map((option) => {
+          const label = option || "(Blank)";
+          const selected = !!autoFilters[autoMenu.key]?.has(option);
+          return (
+            <MenuItem key={`${autoMenu.key}-${option}`} onClick={() => {
+              if (!autoMenu.key) return;
+              setAutoFilters((prev) => {
+                const cur = new Set(prev[autoMenu.key] ?? []);
+                if (cur.has(option)) cur.delete(option); else cur.add(option);
+                return { ...prev, [autoMenu.key]: cur };
+              });
+            }}>
+              <Checkbox checked={selected} size="small" />
+              <ListItemText primary={label} />
+            </MenuItem>
+          );
+        })}
+      </Menu>
     </Stack>
   );
 }

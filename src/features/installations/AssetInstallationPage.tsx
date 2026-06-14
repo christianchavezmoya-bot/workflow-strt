@@ -1,6 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AddOutlined,
+  ArrowDropDown,
   ArchiveOutlined,
   ArticleOutlined,
   AssignmentOutlined,
@@ -381,6 +382,9 @@ const AssetInstallationPage = () => {
   );
   const [statusFilter, setStatusFilter] = useState<ProjectAssetStatus | "All">("All");
   const [showNoWorkflow, setShowNoWorkflow] = useState(false);
+  const [autoSort,    setAutoSort]    = useState({ key: "", dir: "asc" as "asc" | "desc" });
+  const [autoFilters, setAutoFilters] = useState<Record<string, Set<string>>>({});
+  const [autoMenu,    setAutoMenu]    = useState<{ anchorEl: HTMLElement | null; key: string }>({ anchorEl: null, key: "" });
   const [search, setSearch] = useState("");
   const [healthExpanded, setHealthExpanded] = useState(true);
   const [assetSearchOpen, setAssetSearchOpen] = useState(false);
@@ -1092,7 +1096,50 @@ const AssetInstallationPage = () => {
   }, [latestPublishedWfConfigs, selectedBulkWorkflowType]);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
-  // â"€â"€ Print scope computation (needs userMap / projectMap / configMap / runsMap) â"€â"€
+  const assetAccessors = useMemo(() => {
+    const n = (v: string | null | undefined) => String(v ?? "");
+    return {
+      assetTag:    (a: ProjectAsset) => n(a.assetTag),
+      assetName:   (a: ProjectAsset) => n(a.assetName),
+      serialNumber:(a: ProjectAsset) => n(a.serialNumber),
+      assetModel:  (a: ProjectAsset) => n(a.assetModel),
+      manufacturer:(a: ProjectAsset) => n(a.manufacturer),
+      configType:  (a: ProjectAsset) => n(a.productConfigId ? (configMap.get(a.productConfigId)?.configType ?? wfConfigMap.get(a.productConfigId)?.configType) : ""),
+      project:     (a: ProjectAsset) => n(projectMap.get(a.projectId)?.jobNumber ?? a.projectId.slice(0, 8)),
+      siteName:    (a: ProjectAsset) => n(projectMap.get(a.projectId)?.siteName),
+      location:    (a: ProjectAsset) => n(a.location),
+      assignedTech:(a: ProjectAsset) => n(a.assignedUserId ? userMap.get(a.assignedUserId)?.fullName : ""),
+      status:      (a: ProjectAsset) => n(a.status),
+    };
+  }, [configMap, projectMap, userMap, wfConfigMap]);
+
+  const assetFilterOptions = useMemo(() => {
+    const opts: Record<string, string[]> = {};
+    (["assetTag","assetName","serialNumber","assetModel","manufacturer","configType","project","siteName","location","assignedTech","status"] as const)
+      .forEach((k) => { opts[k] = Array.from(new Set(visibleAssets.map((a) => assetAccessors[k](a)))).sort(); });
+    return opts;
+  }, [visibleAssets, assetAccessors]);
+
+  const displayAssets = useMemo(() => {
+    let rows = visibleAssets.filter((a) =>
+      Object.entries(autoFilters).every(([k, sel]) => {
+        if (!sel || sel.size === 0) return true;
+        return sel.has((assetAccessors[k as keyof typeof assetAccessors])?.(a) ?? "");
+      })
+    );
+    if (autoSort.key && assetAccessors[autoSort.key as keyof typeof assetAccessors]) {
+      const acc = assetAccessors[autoSort.key as keyof typeof assetAccessors];
+      rows = [...rows].sort((a, b) => {
+        const av = acc(a).toLowerCase(), bv = acc(b).toLowerCase();
+        if (av < bv) return autoSort.dir === "asc" ? -1 : 1;
+        if (av > bv) return autoSort.dir === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return rows;
+  }, [visibleAssets, autoFilters, autoSort, assetAccessors]);
+
+  // Print scope computation (needs userMap / projectMap / configMap / runsMap)
   const printRows = useMemo((): PrintRow[] => {
     let pool = assets;
     if (printScope === "selection") {
@@ -3574,7 +3621,7 @@ const AssetInstallationPage = () => {
         <Stack alignItems="center" justifyContent="center" sx={{ p: 6 }}>
           <CircularProgress size={32} />
         </Stack>
-      ) : visibleAssets.length === 0 ? (
+      ) : displayAssets.length === 0 ? (
         <Alert severity="info">
           {assets.length === 0
             ? archiveMode
@@ -3590,7 +3637,7 @@ const AssetInstallationPage = () => {
         </Alert>
       ) : isNativePlatform ? (
         <Stack spacing={0.75}>
-          {visibleAssets.map((asset) => {
+          {displayAssets.map((asset) => {
             const proj = projectMap.get(asset.projectId);
             const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
             const isExpanded = expandedAssetId === asset.id;
@@ -3812,27 +3859,32 @@ const AssetInstallationPage = () => {
                   <TableCell sx={{ width: 28, px: 0.5 }}>
                     <Checkbox
                       size="small"
-                      indeterminate={selectedAssetIds.size > 0 && selectedAssetIds.size < visibleAssets.length}
-                      checked={visibleAssets.length > 0 && selectedAssetIds.size === visibleAssets.length}
+                      indeterminate={selectedAssetIds.size > 0 && selectedAssetIds.size < displayAssets.length}
+                      checked={displayAssets.length > 0 && selectedAssetIds.size === displayAssets.length}
                       onChange={(e) => {
-                        if (e.target.checked) setSelectedAssetIds(new Set(visibleAssets.map((a) => a.id)));
+                        if (e.target.checked) setSelectedAssetIds(new Set(displayAssets.map((a) => a.id)));
                         else setSelectedAssetIds(new Set());
                       }}
                     />
                   </TableCell>
                   <TableCell sx={{ width: 36, px: 1 }} />
-                  <TableCell><Typography variant="caption" fontWeight={700}>Asset Tag</Typography></TableCell>
+                  <TableCell>
+                    <Stack direction="row" alignItems="center" spacing={0.25}>
+                      <Typography variant="caption" fontWeight={700}>Asset Tag</Typography>
+                      <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: "assetTag" })}>
+                        <ArrowDropDown fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </TableCell>
                   {visibleColumns.map((col) => (
                     <TableCell key={col.id}>
-                      {col.id === "features" ? (
-                        <Stack direction="row" spacing={0.5} alignItems="center">
-                          <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
+                      <Stack direction="row" alignItems="center" spacing={0.25}>
+                        <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
+                        {col.id === "features" ? (
                           <Tooltip
                             title={
                               <Stack spacing={0.5}>
-                                <Typography variant="caption" sx={{ fontWeight: 700, color: "common.white" }}>
-                                  Feature Colors
-                                </Typography>
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: "common.white" }}>Feature Colors</Typography>
                                 <Typography variant="caption">Amber: Pending or Paused</Typography>
                                 <Typography variant="caption">Blue: Running</Typography>
                                 <Typography variant="caption">Green: Complete</Typography>
@@ -3842,17 +3894,19 @@ const AssetInstallationPage = () => {
                           >
                             <InfoOutlined sx={{ fontSize: 14, color: "text.disabled", cursor: "help" }} />
                           </Tooltip>
-                        </Stack>
-                      ) : (
-                        <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
-                      )}
+                        ) : (
+                          <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: col.id })}>
+                            <ArrowDropDown fontSize="small" />
+                          </IconButton>
+                        )}
+                      </Stack>
                     </TableCell>
                   ))}
                   <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {visibleAssets.flatMap((asset) => {
+                {displayAssets.flatMap((asset) => {
                   const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
                   const proj = projectMap.get(asset.projectId);
                   const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
@@ -4354,6 +4408,30 @@ const AssetInstallationPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Column sort / filter menu */}
+      <Menu anchorEl={autoMenu.anchorEl} open={Boolean(autoMenu.anchorEl)} onClose={() => setAutoMenu({ anchorEl: null, key: "" })}>
+        <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort A → Z</MenuItem>
+        <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "desc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort Z → A</MenuItem>
+        <MenuItem onClick={() => { setAutoSort({ key: "", dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Clear sort</MenuItem>
+        {(assetFilterOptions[autoMenu.key] ?? []).map((option) => {
+          const label = option || "(Blank)";
+          const selected = !!autoFilters[autoMenu.key]?.has(option);
+          return (
+            <MenuItem key={`${autoMenu.key}-${option}`} onClick={() => {
+              if (!autoMenu.key) return;
+              setAutoFilters((prev) => {
+                const cur = new Set(prev[autoMenu.key] ?? []);
+                if (cur.has(option)) cur.delete(option); else cur.add(option);
+                return { ...prev, [autoMenu.key]: cur };
+              });
+            }}>
+              <Checkbox checked={selected} size="small" />
+              <ListItemText primary={label} />
+            </MenuItem>
+          );
+        })}
+      </Menu>
 
       {/* Archive confirmation */}
       <Dialog open={Boolean(deleteAsset)} onClose={() => !deletingAsset && setDeleteAsset(null)} maxWidth="xs" fullWidth>

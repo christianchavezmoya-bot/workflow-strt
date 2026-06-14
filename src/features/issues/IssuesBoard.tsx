@@ -2,12 +2,15 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Collapse,
   Divider,
   Grid,
   IconButton,
+  ListItemText,
+  Menu,
   MenuItem,
   Paper,
   Select,
@@ -26,6 +29,7 @@ import {
   useTheme,
 } from "@mui/material";
 import {
+  ArrowDropDown,
   CheckCircleOutlineOutlined,
   CheckCircleOutlined,
   ErrorOutlineOutlined,
@@ -169,6 +173,77 @@ const IssuesBoard = () => {
     for (const i of closedIssues) if (!seen.has(i.projectId)) seen.set(i.projectId, `${i.jobNumber} — ${i.customerName}`);
     return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [closedIssues]);
+
+  // ── Column sort / filter ─────────────────────────────────────────────────
+  const [autoSort,    setAutoSort]    = useState({ key: "", dir: "asc" as "asc" | "desc" });
+  const [autoFilters, setAutoFilters] = useState<Record<string, Set<string>>>({});
+  const [autoMenu,    setAutoMenu]    = useState<{ anchorEl: HTMLElement | null; key: string }>({ anchorEl: null, key: "" });
+
+  const n = (v: string | null | undefined) => String(v ?? "");
+
+  const issueAccessors = useMemo(() => ({
+    type:        (i: OpenIssueRecord) => n(i.issueType),
+    severity:    (i: OpenIssueRecord) => n(i.severity),
+    description: (i: OpenIssueRecord) => n(i.description),
+    step:        (i: OpenIssueRecord) => n(i.stepTitle),
+    asset:       (i: OpenIssueRecord) => n(i.assetTag),
+    project:     (i: OpenIssueRecord) => n(i.jobNumber),
+    reported:    (i: OpenIssueRecord) => n(i.reportedAt),
+    by:          (i: OpenIssueRecord) => n(i.createdBy),
+  }), []);
+
+  const historyAccessors = useMemo(() => ({
+    type:             (i: ClosedIssueRecord) => n(i.issueType),
+    severity:         (i: ClosedIssueRecord) => n(i.severity),
+    description:      (i: ClosedIssueRecord) => n(i.description),
+    step:             (i: ClosedIssueRecord) => n(i.stepTitle),
+    asset:            (i: ClosedIssueRecord) => n(i.assetTag),
+    project:          (i: ClosedIssueRecord) => n(i.jobNumber),
+    reported:         (i: ClosedIssueRecord) => n(i.reportedAt),
+    closedBy:         (i: ClosedIssueRecord) => n(i.resolvedBy),
+    closed:           (i: ClosedIssueRecord) => n(i.resolvedAt),
+    correctiveAction: (i: ClosedIssueRecord) => n(i.resolutionNote),
+  }), []);
+
+  const issueFilterOptions = useMemo(() => {
+    const opts: Record<string, string[]> = {};
+    (["type","severity","asset","project","by"] as const).forEach((k) => {
+      opts[k] = Array.from(new Set(filtered.map((i) => issueAccessors[k](i)))).sort();
+    });
+    return opts;
+  }, [filtered, issueAccessors]);
+
+  const historyFilterOptions = useMemo(() => {
+    const opts: Record<string, string[]> = {};
+    (["type","severity","asset","project","closedBy"] as const).forEach((k) => {
+      opts[k] = Array.from(new Set(filteredHistory.map((i) => historyAccessors[k](i)))).sort();
+    });
+    return opts;
+  }, [filteredHistory, historyAccessors]);
+
+  const applyColFilter = <T,>(rows: T[], accessors: Record<string, (r: T) => string>) =>
+    rows.filter((r) => Object.entries(autoFilters).every(([k, sel]) => !sel?.size || sel.has(accessors[k]?.(r) ?? "")));
+
+  const applyColSort = <T,>(rows: T[], accessors: Record<string, (r: T) => string>) => {
+    if (!autoSort.key || !accessors[autoSort.key]) return rows;
+    const acc = accessors[autoSort.key];
+    return [...rows].sort((a, b) => {
+      const av = acc(a).toLowerCase(), bv = acc(b).toLowerCase();
+      return av < bv ? (autoSort.dir === "asc" ? -1 : 1) : av > bv ? (autoSort.dir === "asc" ? 1 : -1) : 0;
+    });
+  };
+
+  const sortedFiltered = useMemo(
+    () => applyColSort(applyColFilter(filtered, issueAccessors), issueAccessors),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filtered, autoFilters, autoSort, issueAccessors]
+  );
+
+  const sortedHistory = useMemo(
+    () => applyColSort(applyColFilter(filteredHistory, historyAccessors), historyAccessors),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredHistory, autoFilters, autoSort, historyAccessors]
+  );
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
   const blockingCount    = issues.filter(i => i.isBlocking).length;
@@ -476,21 +551,25 @@ const IssuesBoard = () => {
             <Table size="small" sx={{ minWidth: 1000 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Type</TableCell>
-                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Sev.</TableCell>
-                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Description</TableCell>
-                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Step</TableCell>
-                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Asset</TableCell>
-                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Project</TableCell>
-                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Reported</TableCell>
-                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem", color: "success.main" }}>Closed By</TableCell>
-                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem", color: "success.main" }}>Closed</TableCell>
-                  <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem", color: "success.main" }}>Corrective Action</TableCell>
+                  {(["type","severity","description","step","asset","project","reported","closedBy","closed","correctiveAction"] as const).map((k) => {
+                    const labels: Record<string, string> = { type:"Type", severity:"Sev.", description:"Description", step:"Step", asset:"Asset", project:"Project", reported:"Reported", closedBy:"Closed By", closed:"Closed", correctiveAction:"Corrective Action" };
+                    const isSuccess = ["closedBy","closed","correctiveAction"].includes(k);
+                    return (
+                      <TableCell key={k} sx={{ py: 1 }}>
+                        <Stack direction="row" alignItems="center" spacing={0.25}>
+                          <Typography sx={{ fontWeight: 700, fontSize: "0.75rem", color: isSuccess ? "success.main" : undefined }}>{labels[k]}</Typography>
+                          <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: k })}>
+                            <ArrowDropDown fontSize="small" />
+                          </IconButton>
+                        </Stack>
+                      </TableCell>
+                    );
+                  })}
                   <TableCell sx={{ py: 1, width: 36 }}></TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {filteredHistory.map((iss) => (
+                {sortedHistory.map((iss) => (
                   <TableRow key={`${iss.runId}-${iss.issueId}`} hover sx={{ borderLeft: "3px solid", borderLeftColor: "success.main" }}>
                     <TableCell sx={{ py: 0.75 }}>
                       <Chip label={typeLabel(iss.issueType)} size="small" color={typeColor(iss.issueType)} variant="outlined" sx={{ fontSize: "0.65rem", height: 18 }} />
@@ -674,19 +753,23 @@ const IssuesBoard = () => {
               <TableRow>
                 <TableCell sx={{ width: 36, py: 1 }}></TableCell>
                 <TableCell sx={{ width: 36, py: 1 }}></TableCell>
-                <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Type</TableCell>
-                <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Severity</TableCell>
-                <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Description</TableCell>
-                <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Step</TableCell>
-                <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Asset</TableCell>
-                <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Project</TableCell>
-                <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>Reported</TableCell>
-                <TableCell sx={{ py: 1, fontWeight: 700, fontSize: "0.75rem" }}>By</TableCell>
+                {(["type","severity","description","step","asset","project","reported","by"] as const).map((k) => (
+                  <TableCell key={k} sx={{ py: 1 }}>
+                    <Stack direction="row" alignItems="center" spacing={0.25}>
+                      <Typography sx={{ fontWeight: 700, fontSize: "0.75rem" }}>
+                        {k === "type" ? "Type" : k === "severity" ? "Severity" : k === "description" ? "Description" : k === "step" ? "Step" : k === "asset" ? "Asset" : k === "project" ? "Project" : k === "reported" ? "Reported" : "By"}
+                      </Typography>
+                      <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: k })}>
+                        <ArrowDropDown fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </TableCell>
+                ))}
                 <TableCell sx={{ py: 1, width: 36 }}></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {filtered.map((iss) => {
+              {sortedFiltered.map((iss) => {
                 const key = `${iss.source}-${iss.assetId}-${iss.issueId}`;
                 const isExpanded = expandedKey === key;
                 const isClosing  = closingKey === key;
@@ -867,6 +950,30 @@ const IssuesBoard = () => {
           </Table>
         </Box>
       ))}
+
+      {/* Column sort / filter menu — shared between open and history tables */}
+      <Menu anchorEl={autoMenu.anchorEl} open={Boolean(autoMenu.anchorEl)} onClose={() => setAutoMenu({ anchorEl: null, key: "" })}>
+        <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort A → Z</MenuItem>
+        <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "desc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort Z → A</MenuItem>
+        <MenuItem onClick={() => { setAutoSort({ key: "", dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Clear sort</MenuItem>
+        {((activeTab === "history" ? historyFilterOptions : issueFilterOptions)[autoMenu.key] ?? []).map((option) => {
+          const label = option || "(Blank)";
+          const selected = !!autoFilters[autoMenu.key]?.has(option);
+          return (
+            <MenuItem key={`${autoMenu.key}-${option}`} onClick={() => {
+              if (!autoMenu.key) return;
+              setAutoFilters((prev) => {
+                const cur = new Set(prev[autoMenu.key] ?? []);
+                if (cur.has(option)) cur.delete(option); else cur.add(option);
+                return { ...prev, [autoMenu.key]: cur };
+              });
+            }}>
+              <Checkbox checked={selected} size="small" />
+              <ListItemText primary={label} />
+            </MenuItem>
+          );
+        })}
+      </Menu>
     </Stack>
   );
 };
