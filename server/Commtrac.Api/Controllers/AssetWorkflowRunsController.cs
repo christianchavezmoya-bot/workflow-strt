@@ -1345,10 +1345,24 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         try
         {
-            var runs = await _db.AssetWorkflowRuns
+            var pendingRuns = await _db.AssetWorkflowRuns
                 .Where(r => r.IsLocked && (r.SignatureStatus == "PendingInstaller" || r.SignatureStatus == "PendingCustomer"))
-                .OrderByDescending(r => r.CompletedAt)
                 .ToListAsync();
+
+            // Keep only the latest actionable locked run per asset so stale historical
+            // pending-installer runs do not appear after a newer run advances to customer sign-off.
+            var runs = pendingRuns
+                .GroupBy(r => r.AssetId)
+                .Select(group => group
+                    .OrderByDescending(r => r.CompletedAt ?? r.UpdatedAt)
+                    .ThenByDescending(r => r.StartedAt)
+                    .ThenByDescending(r => r.CreatedAt)
+                    .ThenByDescending(r => r.RunNumber)
+                    .First())
+                .OrderByDescending(r => r.CompletedAt ?? r.UpdatedAt)
+                .ThenByDescending(r => r.StartedAt)
+                .ThenByDescending(r => r.CreatedAt)
+                .ToList();
 
             var assetIds  = runs.Select(r => r.AssetId).Distinct().ToList();
             var assets    = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
