@@ -974,6 +974,16 @@ const AssetInstallationPage = () => {
   useEffect(() => {
     try { sessionStorage.setItem("assets_scope", assetsScope); } catch {}
   }, [assetsScope]);
+  // When permissions finish loading and the role has "all" viewScope, default to showing
+  // all assets — unless the user has already set an explicit session preference.
+  // This means an admin granting viewScope="all" takes effect immediately for that role
+  // without requiring each user to manually switch the toggle.
+  const hasScopePreference = useRef(!!sessionStorage.getItem("assets_scope"));
+  useEffect(() => {
+    if (canViewAllAssets && !isAdminUser && !hasScopePreference.current) {
+      setAssetsScope("all");
+    }
+  }, [canViewAllAssets, isAdminUser]);
 
   // Active scope: user chose "all" AND has permission to see all; admins always see all.
   const showAllAssets = canViewAllAssets && (assetsScope === "all" || isAdminUser);

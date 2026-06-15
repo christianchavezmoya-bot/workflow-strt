@@ -902,19 +902,21 @@ export const UserManagement: React.FC = () => {
       setRoles(roleNames);
     }
 
-    // Notify same-tab listeners
-    window.dispatchEvent(new CustomEvent("roles-config-changed"));
-
     // Skip database save on initial mount to avoid overwriting with stale localStorage data
     if (isInitialRolesMount.current) {
       isInitialRolesMount.current = false;
       return;
     }
 
-    // Save to database when roles are actually changed by user
+    // Save to database when roles are actually changed by user.
+    // Dispatch the "roles-config-changed" event AFTER the PUT completes so that
+    // usePermissions re-fetches from a DB that already has the new data. Dispatching
+    // before the PUT (old order) caused a race: the GET triggered by the event would
+    // finish after the PUT and overwrite the in-memory cache with stale data.
     roleConfigService.update({ roles: rolesConfig })
       .then(() => {
         console.log('✅ Roles saved to database');
+        window.dispatchEvent(new CustomEvent("roles-config-changed"));
       })
       .catch((error) => {
         console.error('❌ Failed to save roles to database:', error);
