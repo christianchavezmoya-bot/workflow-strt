@@ -3389,13 +3389,13 @@ const AssetInstallationPage = () => {
       </Stack>
 
       {/* Scope indicator — shown when user sees a filtered subset of assets */}
-      {!canViewAllAssets && !archiveMode && (
+      {!showAllAssets && !archiveMode && (
         <Alert severity="info" sx={{ py: 0.5, fontSize: "0.78rem" }}>
           {isAssignmentScoped
             ? "Showing only assets assigned to you."
             : assignedProjectIds.size > 0
-              ? "Showing only assets in your managed projects and those directly assigned to you."
-              : "Showing only assets in your managed projects."}
+              ? "Showing only assets in projects you manage or are a member of, plus those directly assigned to you."
+              : "Showing only assets in projects you manage or are a member of."}
         </Alert>
       )}
 
