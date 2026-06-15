@@ -53,7 +53,7 @@ public class ProjectAssetsController : ControllerBase
                 g.Key,
                 g.Count(a => a.Status == "NotStarted"),
                 g.Count(a => a.Status == "InProgress"),
-                g.Count(a => a.Status == "Complete" || a.Status == "Completed"),
+                g.Count(a => a.Status == "Complete" || a.Status == "Completed" || a.Status == "Closed"),
                 g.Count()))
             .ToListAsync();
         return Ok(counts);
@@ -77,7 +77,7 @@ public class ProjectAssetsController : ControllerBase
 
         // Active assets = not complete, not cancelled (includes Issue, Pending, OnHold, InProgress, NotStarted)
         var assetsQuery = _db.ProjectAssets
-            .Where(a => a.Status != "Complete" && a.Status != "Completed" && a.Status != "Cancelled");
+            .Where(a => a.Status != "Complete" && a.Status != "Completed" && a.Status != "Closed" && a.Status != "Cancelled");
 
         if (!canViewAllOpenAssets)
         {
@@ -317,7 +317,7 @@ public class ProjectAssetsController : ControllerBase
         // Active assets = not complete, not cancelled (includes Issue, Pending, OnHold, InProgress, NotStarted)
         var assets = await _db.ProjectAssets
             .Where(a => a.AssignedUserId != null && a.AssignedUserId != ""
-                     && a.Status != "Complete" && a.Status != "Completed" && a.Status != "Cancelled")
+                     && a.Status != "Complete" && a.Status != "Completed" && a.Status != "Closed" && a.Status != "Cancelled")
             .ToListAsync();
 
         var userIds   = assets.Select(a => a.AssignedUserId!).Distinct().ToList();
@@ -430,7 +430,7 @@ public class ProjectAssetsController : ControllerBase
         // Active assets = not complete, not cancelled (includes Issue, Pending, OnHold, InProgress, NotStarted)
         var assets = await _db.ProjectAssets
             .Where(a => a.AssignedUserId != null && a.AssignedUserId != ""
-                     && a.Status != "Complete" && a.Status != "Completed" && a.Status != "Cancelled")
+                     && a.Status != "Complete" && a.Status != "Completed" && a.Status != "Closed" && a.Status != "Cancelled")
             .ToListAsync();
 
         if (assets.Count == 0) return Ok(Array.Empty<TechnicianWorkloadSummaryDto>());
@@ -729,7 +729,37 @@ public class ProjectAssetsController : ControllerBase
 
         asset.IssuesJson = string.IsNullOrWhiteSpace(request.IssuesJson) ? "[]" : request.IssuesJson;
         asset.UpdatedAt = DateTime.UtcNow;
+        var allRuns = await _db.AssetWorkflowRuns.Where(r => r.AssetId == asset.Id).ToListAsync();
+        var anyRunOpenIssue = allRuns.Any(r => HasOpenIssues(r.IssuesJson));
+        var anyAssetOpenIssue = HasOpenIssues(asset.IssuesJson);
+        var anyLockedRun = allRuns.Any(r => r.IsLocked);
+        if (anyRunOpenIssue || anyAssetOpenIssue)
+        {
+            asset.Status = "Issue";
+        }
+        else if (anyLockedRun)
+        {
+            var latestLockedRun = allRuns
+                .Where(r => r.IsLocked)
+                .OrderByDescending(r => r.CompletedAt ?? r.UpdatedAt)
+                .FirstOrDefault();
+            asset.Status = latestLockedRun?.SignatureStatus switch
+            {
+                "Signed" or "WaivedCustomer" => "Closed",
+                "PendingCustomer" or "Declined" => "Complete",
+                "PendingInstaller" => "Pending",
+                _ => "Complete",
+            };
+        }
         await _db.SaveChangesAsync();
+        var actorUserId = User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var actorName = User.Identity?.Name
+            ?? User.FindFirst("email")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? "Unknown user";
+        await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId, actorName);
         var patchUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         await _sse.BroadcastExceptAsync(patchUserId, "assets:updated",
             new { productId = asset.ProductId, projectId = asset.ProjectId });
@@ -1016,8 +1046,11 @@ public class ProjectAssetsController : ControllerBase
         var assetStatus = (asset.Status ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
         var runStatus = (latestRun?.Status ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
 
-        // Completed/cancelled assets are never "current"
-        if (assetStatus is "complete" or "completed" or "cancelled") return false;
+        if (latestRun?.IsLocked == true && string.Equals(latestRun.SignatureStatus, "PendingInstaller", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Complete/closed/cancelled assets are never "current"
+        if (assetStatus is "complete" or "completed" or "closed" or "cancelled") return false;
 
         // Active assets that need work are "current" (includes Issue, Pending)
         if (runStatus is "paused" or "inprogress") return true;
@@ -1032,8 +1065,10 @@ public class ProjectAssetsController : ControllerBase
         var normalizedAssetStatus = assetStatus.ToLowerInvariant().Replace(" ", string.Empty);
         var normalizedProjectStatus = (projectStatus ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
 
-        if (normalizedAssetStatus is "complete" or "completed") return "Completed";
+        if (normalizedAssetStatus == "closed") return "Closed";
+        if (normalizedAssetStatus is "complete" or "completed") return "Field Work Complete";
         if (normalizedAssetStatus == "cancelled" || normalizedProjectStatus == "cancelled") return "Cancelled";
+        if (string.Equals(latestRun?.SignatureStatus, "PendingInstaller", StringComparison.OrdinalIgnoreCase)) return "Awaiting Installer Sign-off";
         if (latestRun?.CompletedAt is not null || latestRun?.IsLocked == true) return "Finished";
         if (normalizedProjectStatus == "completed") return "Closed";
         if (normalizedAssetStatus == "onhold") return "On Hold";
@@ -1115,7 +1150,7 @@ public class ProjectAssetsController : ControllerBase
         var counts = CountWorkflowEvidence(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
         var hasOpenIssues = HasOpenIssues(latestRun.IssuesJson) || HasOpenIssues(asset.IssuesJson);
 
-        var allStepsCompleted = HasCompletedAllWorkflowSteps(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
+        var allStepsCompleted = HasCompletedAllWorkflowSteps(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson, latestRun.IsLocked);
         var evidenceStatus = "Pending";
         if (string.Equals(latestRun.Status, "Paused", StringComparison.OrdinalIgnoreCase))
         {
@@ -1178,6 +1213,12 @@ public class ProjectAssetsController : ControllerBase
         try
         {
             var results = JsonSerializer.Deserialize<List<WorkflowStepResultSummary>>(stepResultsJson, _json) ?? [];
+            var visitedStepIds = GetVisitedStepIds(results);
+            var resultStepIds = results
+                .Where(r => !string.Equals(r.StepId, "__nav__", StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.StepId)
+                .Where(stepId => !string.IsNullOrWhiteSpace(stepId))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             int requiredItems = 0;
             int completedItems = 0;
 
@@ -1231,6 +1272,18 @@ public class ProjectAssetsController : ControllerBase
                 }
             }
 
+            foreach (var stepId in visitedStepIds)
+            {
+                if (string.IsNullOrWhiteSpace(stepId) || resultStepIds.Contains(stepId) || !stepsById.TryGetValue(stepId, out var step))
+                    continue;
+
+                requiredItems += (step.Inputs ?? []).Count(input =>
+                    string.Equals(input.Type, "photo", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(input.Type, "video", StringComparison.OrdinalIgnoreCase) ||
+                    input.Required);
+                requiredItems += (step.CaptureFields ?? []).Count(field => field.Required);
+            }
+
             return (requiredItems, completedItems, Math.Max(requiredItems - completedItems, 0));
         }
         catch
@@ -1239,7 +1292,7 @@ public class ProjectAssetsController : ControllerBase
         }
     }
 
-    private static bool HasCompletedAllWorkflowSteps(string? workflowSnapshotJson, string? stepResultsJson)
+    private static bool HasCompletedAllWorkflowSteps(string? workflowSnapshotJson, string? stepResultsJson, bool isLocked)
     {
         var stepsById = ParseWorkflowSteps(workflowSnapshotJson)
             .Where(step => !string.IsNullOrWhiteSpace(step.Id))
@@ -1252,6 +1305,10 @@ public class ProjectAssetsController : ControllerBase
         try
         {
             var results = JsonSerializer.Deserialize<List<WorkflowStepResultSummary>>(stepResultsJson, _json) ?? [];
+            var hasLockedNavigationTrail = isLocked && GetVisitedStepIds(results).Count > 0;
+            if (hasLockedNavigationTrail)
+                return true;
+
             var completedStepIds = results
                 .Where(result => !string.Equals(result.StepId, "__nav__", StringComparison.OrdinalIgnoreCase))
                 .Select(result => result.StepId)
@@ -1264,6 +1321,46 @@ public class ProjectAssetsController : ControllerBase
         {
             return false;
         }
+    }
+
+    private static HashSet<string> GetVisitedStepIds(List<WorkflowStepResultSummary> results)
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var result in results)
+        {
+            if (string.IsNullOrWhiteSpace(result.StepId)) continue;
+            if (!string.Equals(result.StepId, "__nav__", StringComparison.OrdinalIgnoreCase))
+            {
+                visited.Add(result.StepId);
+                continue;
+            }
+
+            if (result.Values is null) continue;
+
+            if (result.Values.TryGetValue("currentStepId", out var currentStepId) &&
+                !string.IsNullOrWhiteSpace(currentStepId))
+            {
+                visited.Add(currentStepId);
+            }
+
+            if (!result.Values.TryGetValue("historyJson", out var historyJson) || string.IsNullOrWhiteSpace(historyJson))
+                continue;
+
+            try
+            {
+                var history = JsonSerializer.Deserialize<List<string>>(historyJson, _json) ?? [];
+                foreach (var stepId in history.Where(stepId => !string.IsNullOrWhiteSpace(stepId)))
+                {
+                    visited.Add(stepId);
+                }
+            }
+            catch
+            {
+                // Ignore malformed navigation history.
+            }
+        }
+
+        return visited;
     }
 
     private static List<WorkflowStepSummary> ParseWorkflowSteps(string? workflowSnapshotJson)

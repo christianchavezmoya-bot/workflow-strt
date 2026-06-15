@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { notificationService } from "../services/notificationService";
 import { useAuth } from "../hooks/useAuth";
 import type { AppNotification } from "../types/notification";
@@ -11,7 +11,8 @@ const ASSIGNMENT_EVENT_TYPES = new Set([
 
 const RUN_STATE_EVENT_TYPES = new Set([
   "workflow-started", "workflow-paused", "workflow-resumed", "workflow-completed",
-  "asset-completed", "workflow-issue", "workflow-issues-updated", "workflow-reopened",
+  "asset-pending-installer-signature", "asset-completed", "asset-closed", "asset-signature-declined",
+  "workflow-issue", "workflow-issues-updated", "workflow-reopened",
   "workflow-updated", "project-completed", "project-closed", "asset-deleted",
 ]);
 
@@ -35,7 +36,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
   const seenUnreadIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     const path = window.location.pathname;
     const isPublicRoute =
       path === "/login" ||
@@ -45,6 +46,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
 
     if (!isAuthenticated || !user?.id || isPublicRoute) {
       setNotifications([]);
+      setBannerNotification(null);
       initializedRef.current = false;
       seenUnreadIdsRef.current = new Set();
       return;
@@ -59,6 +61,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       if (!initializedRef.current) {
         initializedRef.current = true;
         seenUnreadIdsRef.current = unreadIds;
+        setBannerNotification(next.find((n) => !n.isRead) ?? null);
         return;
       }
 
@@ -73,20 +76,45 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
           window.dispatchEvent(new Event("notifications:run-state-changed"));
         }
       }
-    } catch {
-      // server unreachable — keep existing notifications, retry on next interval
+    } catch (error) {
+      console.error("Notification inbox refresh failed:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAuthenticated, user?.id]);
 
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => {
       void refresh();
     }, 15000);
-    return () => window.clearInterval(timer);
-  }, [isAuthenticated, user?.id]);
+
+    const handleRefreshTrigger = () => {
+      void refresh();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refresh();
+      }
+    };
+
+    window.addEventListener("focus", handleRefreshTrigger);
+    window.addEventListener("online", handleRefreshTrigger);
+    window.addEventListener("auth-change", handleRefreshTrigger);
+    window.addEventListener("auth-user-updated", handleRefreshTrigger);
+    window.addEventListener("notifications:refresh", handleRefreshTrigger);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", handleRefreshTrigger);
+      window.removeEventListener("online", handleRefreshTrigger);
+      window.removeEventListener("auth-change", handleRefreshTrigger);
+      window.removeEventListener("auth-user-updated", handleRefreshTrigger);
+      window.removeEventListener("notifications:refresh", handleRefreshTrigger);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [refresh]);
 
   useEffect(() => {
     if (!bannerNotification) return;
@@ -112,7 +140,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     acknowledge,
     dismissBanner: () => setBannerNotification(null),
     refresh,
-  }), [notifications, bannerNotification, loading]);
+  }), [notifications, bannerNotification, loading, refresh]);
 
   return (
     <NotificationInboxContext.Provider value={value}>

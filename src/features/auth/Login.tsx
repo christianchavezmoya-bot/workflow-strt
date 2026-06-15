@@ -132,6 +132,7 @@ const Login = () => {
     
     // Notify App.tsx that auth state has changed
     window.dispatchEvent(new Event("auth-change"));
+    window.dispatchEvent(new Event("auth-user-updated"));
     
     console.log("[Login] Login success, navigating to:", result.isFirstLogin || result.passwordExpired ? "/profile" : "/");
     setLoading(false);

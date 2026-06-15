@@ -10,6 +10,7 @@ function normalizeStatus(raw: unknown): ProjectAssetStatus {
   if (value === "paused") return "Paused";
   if (value === "pending") return "Pending";
   if (value === "complete" || value === "completed" || value === "done") return "Complete";
+  if (value === "closed") return "Closed";
   if (value === "issue" || value === "issues" || value === "missing") return "Issue";
   return "NotStarted";
 }
@@ -77,7 +78,11 @@ export const projectAssetService = {
 
   async patchIssues(id: string, issuesJson: string): Promise<ProjectAsset> {
     const res = await api.patch<ProjectAsset>(`/project-assets/${id}/issues`, { issuesJson });
-    return fromDto(res.data);
+    const asset = fromDto(res.data);
+    await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+    window.dispatchEvent(new Event("notifications:run-state-changed"));
+    window.dispatchEvent(new Event("notifications:refresh"));
+    return asset;
   },
 
   async remove(id: string): Promise<void> {

@@ -64,6 +64,75 @@ export function parseWorkflowStepResults(json: string): StepResult[] {
   }
 }
 
+function parseVisitedStepIds(stepResultsJson: string): Set<string> {
+  try {
+    const parsed = JSON.parse(stepResultsJson) as Array<{ stepId?: string; values?: Record<string, string> }>;
+    const visited = new Set<string>();
+    for (const entry of parsed) {
+      if (!entry?.stepId) continue;
+      if (entry.stepId !== "__nav__") {
+        visited.add(entry.stepId);
+        continue;
+      }
+
+      const currentStepId = entry.values?.currentStepId;
+      if (currentStepId) visited.add(currentStepId);
+
+      const rawHistory = entry.values?.historyJson;
+      if (!rawHistory) continue;
+      try {
+        const history = JSON.parse(rawHistory) as string[];
+        for (const stepId of history) {
+          if (stepId) visited.add(stepId);
+        }
+      } catch {
+        // Ignore malformed navigation history.
+      }
+    }
+    return visited;
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function getMissingItemsForUncapturedStep(step: WorkflowStep | undefined): MissingWorkflowItem[] {
+  if (!step) return [];
+
+  const missingInputs: MissingWorkflowItem[] = [];
+  for (const input of step.inputs ?? []) {
+    if (input.type === "photo" || input.type === "video") {
+      missingInputs.push({
+        id: input.id,
+        label: input.label || (input.type === "video" ? "Video" : "Photo"),
+        kind: input.type,
+        required: true,
+      });
+      continue;
+    }
+
+    if (!input.required) continue;
+    missingInputs.push({
+      id: input.id,
+      label: input.label || input.id,
+      kind: "input",
+      required: true,
+    });
+  }
+
+  const missingCaptureFields: MissingWorkflowItem[] = [];
+  for (const field of step.captureFields ?? []) {
+    if (!field.required) continue;
+    missingCaptureFields.push({
+      id: field.id,
+      label: field.label || field.key || field.id,
+      kind: "capture",
+      required: true,
+    });
+  }
+
+  return [...missingInputs, ...missingCaptureFields];
+}
+
 const IMPORT_ONLY_KEYS = new Set(["value", "unit", "pass", "label", "notes"]);
 
 export function getMissingWorkflowItems(
@@ -127,11 +196,28 @@ export function getMissingWorkflowItems(
 }
 
 export function countMissingWorkflowItems(run: AssetWorkflowRun): number {
-  const stepMap = new Map(parseWorkflowStepsFromSnapshot(run.workflowSnapshotJson).map((step) => [step.id, step]));
-  return parseWorkflowStepResults(run.stepResultsJson).reduce((count, result) => {
+  return getRunMissingWorkflowItems(run).length;
+}
+
+export function getRunMissingWorkflowItems(run: AssetWorkflowRun): MissingWorkflowItem[] {
+  const steps = parseWorkflowStepsFromSnapshot(run.workflowSnapshotJson);
+  const stepMap = new Map(steps.map((step) => [step.id, step]));
+  const results = parseWorkflowStepResults(run.stepResultsJson);
+  const visitedStepIds = parseVisitedStepIds(run.stepResultsJson);
+  const resultStepIds = new Set(results.map((result) => result.stepId));
+
+  const missingFromResults = results.flatMap((result) => {
     const step = stepMap.get(result.stepId);
-    return count + getMissingWorkflowItems(step, result.values).length;
-  }, 0);
+    return getMissingWorkflowItems(step, result.values);
+  });
+
+  const missingFromVisitedWithoutResults: MissingWorkflowItem[] = [];
+  for (const stepId of visitedStepIds) {
+    if (resultStepIds.has(stepId)) continue;
+    missingFromVisitedWithoutResults.push(...getMissingItemsForUncapturedStep(stepMap.get(stepId)));
+  }
+
+  return [...missingFromResults, ...missingFromVisitedWithoutResults];
 }
 
 export function getWorkflowStepCompletion(run: AssetWorkflowRun): { completedSteps: number; totalSteps: number } {
@@ -141,6 +227,11 @@ export function getWorkflowStepCompletion(run: AssetWorkflowRun): { completedSte
 }
 
 export function runHasCompletedAllSteps(run: AssetWorkflowRun): boolean {
+  const visitedStepIds = parseVisitedStepIds(run.stepResultsJson);
+  if (run.isLocked && visitedStepIds.size > 0) {
+    return true;
+  }
+
   const { completedSteps, totalSteps } = getWorkflowStepCompletion(run);
   return totalSteps > 0 && completedSteps >= totalSteps;
 }

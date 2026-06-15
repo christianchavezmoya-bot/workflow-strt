@@ -29,7 +29,7 @@ public class RoleConfigsController : ControllerBase
         // Return the roles dict verbatim — the raw JSON preserves every field the frontend
         // wrote (viewScope, editScope, etc.) without any lossy C# model round-trip.
         using var doc = JsonDocument.Parse(config.ConfigJson);
-        return Ok(new { roles = doc.RootElement });
+        return Ok(new { roles = doc.RootElement.Clone() });
     }
 
     [HttpPut]

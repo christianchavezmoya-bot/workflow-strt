@@ -24,8 +24,6 @@ import {
   Table,
   TextField,
   TableBody,
-  ToggleButton,
-  ToggleButtonGroup,
   TableCell,
   TableHead,
   TablePagination,
@@ -51,7 +49,6 @@ import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { useWorkScope } from "../../hooks/useWorkScope";
 import { fieldService } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
-import { projectAssetService } from "../../services/projectAssetService";
 import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
@@ -266,7 +263,6 @@ const ProjectList = () => {
   const projectsDynamic = useDynamicFields("projects");
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
   const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
-  const [myProjectIds, setMyProjectIds] = useState<string[]>([]);
 
   useEffect(() => {
     officesService.getAll().then(setGlobalOffices);
@@ -306,32 +302,15 @@ const ProjectList = () => {
   const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  // Non-admin users default to "mine" so the page loads focused on their work.
-  // Persisted in sessionStorage so it survives in-session navigation.
-  const [projectViewFilter, setProjectViewFilter] = useState<"all" | "mine">(
-    () => (sessionStorage.getItem("projects_scope") as "all" | "mine") ?? "mine"
-  );
   const [projectNumberFilter, setProjectNumberFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | "All">("All");
   const isAdminUser = user?.role === "Admin";
   const isPmUser = user?.role === "Project Manager";
   const canCreateProjects = isAdminUser || isPmUser;
   const canManageProjectTable = isAdminUser || isPmUser;
-  // Scope dropdown visible only when the role's viewScope permits seeing all projects
-  const canViewAllProjects = (can.projects?.viewScope ?? "own") === "all";
-  const canActAsFieldTechnician = !!can.installationAssets?.runWorkflow && !can.viewOnly;
   const { complexViewActive } = useComplexView();
   // Web always shows full management controls; native keeps them behind Complex View.
   const showComplexControls = !Capacitor.isNativePlatform() || complexViewActive;
-
-  // Load the user's assigned project IDs whenever the "Mine" scope is active for non-PM field users
-  useEffect(() => {
-    if (projectViewFilter === "mine" && canActAsFieldTechnician && !isPmUser) {
-      projectAssetService.myProjectIds().then(setMyProjectIds);
-    } else {
-      setMyProjectIds([]);
-    }
-  }, [canActAsFieldTechnician, isPmUser, projectViewFilter]);
 
   const canEditProject = useMemo(() => (project: Project) => {
     if (isAdminUser) return true;
@@ -350,11 +329,6 @@ const ProjectList = () => {
   // Block-complete dialog — shown when assets are not all done
   const [closingProjectId, setClosingProjectId] = useState<string | null>(null);
 
-  // Persist scope choice so it survives in-session page navigation
-  useEffect(() => {
-    try { sessionStorage.setItem("projects_scope", projectViewFilter); } catch {}
-  }, [projectViewFilter]);
-
   // Clear column filters when active office changes
   useEffect(() => {
     setAutoFilters({});
@@ -367,7 +341,7 @@ const ProjectList = () => {
         // Filter by country on the server so pagination doesn't hide matching projects.
         country: activeOffice !== "All" ? activeOffice : undefined,
         scope: "browse",
-        ownershipScope: canViewAllProjects ? projectViewFilter : "mine",
+        ownershipScope: "all",
         status: statusFilter,
         projectNumber: projectNumberFilter.trim() || undefined,
         page: page + 1,
@@ -375,22 +349,22 @@ const ProjectList = () => {
         includeDeleted: showArchived
       })
     );
-  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, canViewAllProjects, projectViewFilter, projectNumberFilter, statusFilter]);
+  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, projectNumberFilter, statusFilter]);
 
   useEffect(() => {
     setPage(0);
-  }, [showArchived, projectViewFilter, projectNumberFilter, statusFilter]);
+  }, [showArchived, projectNumberFilter, statusFilter]);
 
   const currentRequestKey = useMemo(() => buildProjectRequestKey({
     country: activeOffice !== "All" ? activeOffice : undefined,
     scope: "browse",
-    ownershipScope: canViewAllProjects ? projectViewFilter : "mine",
+    ownershipScope: "all",
     status: statusFilter,
     projectNumber: projectNumberFilter.trim() || undefined,
     page: page + 1,
     pageSize: rowsPerPage,
     includeDeleted: showArchived,
-  }), [activeOffice, canViewAllProjects, page, projectNumberFilter, projectViewFilter, rowsPerPage, showArchived, statusFilter]);
+  }), [activeOffice, page, projectNumberFilter, rowsPerPage, showArchived, statusFilter]);
 
   useEffect(() => {
     const handleUpdated = (event: Event) => {
@@ -459,43 +433,9 @@ const ProjectList = () => {
       return projectCountry === activeOffice || project.office === activeOffice;
     });
 
-    // Scope-aware filtering.
-    // All non-admin users: "mine" scopes them to projects they own/are-assigned to;
-    // "all" shows everything allowed by their role permissions.
-    let scopeFiltered = officeFiltered;
-    if (!isAdmin) {
-      if (role === "Project Manager") {
-        if (!canViewAllProjects || projectViewFilter === "mine") {
-          const myName = String(user?.fullName ?? "").trim().toLowerCase();
-          scopeFiltered = officeFiltered.filter(
-            (p) => String(p.projectManager ?? "").trim().toLowerCase() === myName
-          );
-        }
-        // projectViewFilter === "all" && canViewAllProjects → no extra filter
-      } else if (projectViewFilter === "mine" && canActAsFieldTechnician) {
-        const idSet = new Set(myProjectIds);
-        scopeFiltered = officeFiltered.filter((p) => idSet.has(p.id));
-      }
-    }
-
-    const filtered = applyAutoFilter(scopeFiltered, autoFilters, projectAccessors);
+    const filtered = applyAutoFilter(officeFiltered, autoFilters, projectAccessors);
     return applyAutoSort(filtered, autoSort, projectAccessors);
-  }, [activeOffice, canActAsFieldTechnician, canViewAllProjects, globalOffices, projectViewFilter, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, myProjectIds, user?.role, user?.fullName]);
-
-  // Auto-fallback: if "My Projects" returns nothing once data is loaded, switch to "All"
-  // so non-admin users don't land on a blank page (e.g. new user with no assignments yet).
-  useEffect(() => {
-    if (
-      !isAdminUser &&
-      projectViewFilter === "mine" &&
-      !loading &&
-      globalOffices.length > 0 &&   // offices loaded — avoids false trigger during race
-      sourceProjects.length > 0 &&   // data is actually loaded
-      filteredProjects.length === 0
-    ) {
-      setProjectViewFilter("all");
-    }
-  }, [filteredProjects.length, globalOffices.length, isAdminUser, loading, projectViewFilter, sourceProjects.length]);
+  }, [activeOffice, globalOffices, sourceProjects, autoFilters, autoSort, projectAccessors, countryForOffice, user?.role]);
 
   const numberedProjects = useMemo(
     () => filteredProjects.map((project, index) => ({ ...project, seq: index + 1 })),
@@ -684,18 +624,6 @@ const ProjectList = () => {
 
       <Box className="glass-card" sx={{ p: 2 }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
-          {canViewAllProjects && !isAdminUser && (
-            <ToggleButtonGroup
-              value={projectViewFilter}
-              exclusive
-              size="small"
-              onChange={(_, v) => { if (v) setProjectViewFilter(v as "all" | "mine"); }}
-              sx={{ flexShrink: 0 }}
-            >
-              <ToggleButton value="mine">My Projects</ToggleButton>
-              <ToggleButton value="all">All Projects</ToggleButton>
-            </ToggleButtonGroup>
-          )}
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel id="project-status-filter-label">Status</InputLabel>
             <Select
@@ -1014,7 +942,7 @@ const ProjectList = () => {
                                     fetchProjects({
                                       country: activeOffice !== "All" ? activeOffice : undefined,
                                       scope: "browse",
-                                      ownershipScope: projectViewFilter,
+                                      ownershipScope: "all",
                                       projectNumber: projectNumberFilter.trim() || undefined,
                                       page: page + 1,
                                       pageSize: rowsPerPage,
@@ -1207,7 +1135,7 @@ const ProjectList = () => {
               fetchProjects({
                 country: activeOffice !== "All" ? activeOffice : undefined,
                 scope: "browse",
-                ownershipScope: projectViewFilter,
+                ownershipScope: "all",
                 projectNumber: projectNumberFilter.trim() || undefined,
                 page: page + 1,
                 pageSize: rowsPerPage,
@@ -1330,7 +1258,7 @@ const ProjectList = () => {
                     fetchProjects({
                       country: activeOffice !== "All" ? activeOffice : undefined,
                       scope: "browse",
-                      ownershipScope: projectViewFilter,
+                      ownershipScope: "all",
                       projectNumber: projectNumberFilter.trim() || undefined,
                       page: page + 1,
                       pageSize: rowsPerPage,

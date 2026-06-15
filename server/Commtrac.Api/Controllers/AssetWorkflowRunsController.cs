@@ -722,7 +722,7 @@ public class AssetWorkflowRunsController : ControllerBase
                 ParseIssues(r.IssuesJson).Any(i =>
                     i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean()));
 
-            asset.Status    = anyOpenIssue ? "Issue" : "Complete";
+            asset.Status    = anyOpenIssue ? "Issue" : "Pending";
             asset.UpdatedAt = now;
             // Record who completed the installation and when (only on first successful completion)
             if (!anyBlock && asset.InstalledAt is null)
@@ -752,15 +752,15 @@ public class AssetWorkflowRunsController : ControllerBase
             "Workflow completed",
             $"{(req.CompletedByName ?? ResolveActorName())} completed workflow for asset {{asset}} on job {{job}}.",
             notifyInstaller: false);
-        if (asset is not null && string.Equals(asset.Status, "Complete", StringComparison.OrdinalIgnoreCase))
+        if (asset is not null && string.Equals(asset.Status, "Pending", StringComparison.OrdinalIgnoreCase))
         {
             await NotifyAssetEventAsync(
                 asset,
-                "asset-completed",
-                "success",
-                "Asset completed",
-                $"{asset.AssetTag} was fully completed on job {{job}} by {(req.CompletedByName ?? ResolveActorName())}.",
-                notifyInstaller: false,
+                "asset-pending-installer-signature",
+                "warning",
+                "Installer sign-off required",
+                $"{asset.AssetTag} finished field work on job {{job}} and is waiting for installer sign-off.",
+                notifyInstaller: true,
                 runId: run.Id);
         }
         return Ok(ToDto(run));
@@ -787,10 +787,21 @@ public class AssetWorkflowRunsController : ControllerBase
                 return ParseIssues(json).Any(i =>
                     i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean());
             });
-            var anyLocked = allRuns.Any(r => r.IsLocked || r.Id == id);
-            if (anyLocked)
+            var latestLocked = allRuns
+                .Where(r => r.IsLocked || r.Id == id)
+                .OrderByDescending(r => r.CompletedAt ?? r.UpdatedAt)
+                .FirstOrDefault();
+            if (latestLocked is not null)
             {
-                asset.Status    = anyOpenIssue ? "Issue" : "Complete";
+                asset.Status = anyOpenIssue
+                    ? "Issue"
+                    : latestLocked.SignatureStatus switch
+                    {
+                        "Signed" or "WaivedCustomer" => "Closed",
+                        "PendingCustomer" or "Declined" => "Complete",
+                        "PendingInstaller" => "Pending",
+                        _ => "Complete",
+                    };
                 asset.UpdatedAt = DateTime.UtcNow;
             }
         }
@@ -888,7 +899,7 @@ public class AssetWorkflowRunsController : ControllerBase
         _db.AssetWorkflowRuns.Add(newRun);
 
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == source.AssetId);
-        if (asset is not null && asset.Status == "Complete")
+        if (asset is not null && (asset.Status == "Complete" || asset.Status == "Closed" || asset.Status == "Pending"))
         {
             asset.Status    = "InProgress";
             asset.UpdatedAt = now;
@@ -1327,7 +1338,7 @@ public class AssetWorkflowRunsController : ControllerBase
         }
     }
 
-    // GET api/asset-workflow-runs/pending-signatures — locked runs awaiting customer sign-off, with project context
+    // GET api/asset-workflow-runs/pending-signatures — locked runs awaiting installer or customer sign-off, with project context
     // Optional ?userId={id} filters to signatures on assets assigned to that user
     [HttpGet("pending-signatures")]
     public async Task<IActionResult> GetPendingSignatures([FromQuery] string? userId = null)
@@ -1335,7 +1346,7 @@ public class AssetWorkflowRunsController : ControllerBase
         try
         {
             var runs = await _db.AssetWorkflowRuns
-                .Where(r => r.IsLocked && r.SignatureStatus == "PendingCustomer")
+                .Where(r => r.IsLocked && (r.SignatureStatus == "PendingInstaller" || r.SignatureStatus == "PendingCustomer"))
                 .OrderByDescending(r => r.CompletedAt)
                 .ToListAsync();
 
@@ -1369,7 +1380,8 @@ public class AssetWorkflowRunsController : ControllerBase
                     JobNumber:    project?.JobNumber ?? "",
                     CustomerName: project?.CustomerName ?? "",
                     CompletedAt:  r.CompletedAt?.ToString("O") ?? "",
-                    CompletedBy:  r.CompletedByName ?? ""
+                    CompletedBy:  r.CompletedByName ?? "",
+                    SignatureStatus: r.SignatureStatus ?? "None"
                 );
             });
 
@@ -1394,7 +1406,28 @@ public class AssetWorkflowRunsController : ControllerBase
 
         run.SignatureStatus = "WaivedCustomer";
         run.UpdatedAt = DateTime.UtcNow;
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is not null)
+        {
+            asset.Status = "Closed";
+            asset.UpdatedAt = run.UpdatedAt;
+        }
         await _db.SaveChangesAsync();
+        if (asset is not null)
+        {
+            var actorUserId = User.FindFirst("sub")?.Value
+                ?? User.FindFirst("nameid")?.Value
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId, ResolveActorName());
+            await NotifyAssetEventAsync(
+                asset,
+                "asset-closed",
+                "info",
+                "Asset closed",
+                $"{asset.AssetTag} was closed on job {{job}} with customer signature waived.",
+                notifyInstaller: false,
+                runId: run.Id);
+        }
         return Ok(ToDto(run));
     }
 }

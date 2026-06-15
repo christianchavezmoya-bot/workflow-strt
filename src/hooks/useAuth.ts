@@ -83,6 +83,10 @@ export const useAuth = () => {
       syncFromStorage();
     };
 
+    const onAuthChange = () => {
+      syncFromStorage();
+    };
+
     const onStorage = (event: StorageEvent) => {
       if (event.key === "auth_user" || event.key === "local_auth_user" || event.key === "auth_token") {
         syncFromStorage();
@@ -95,10 +99,12 @@ export const useAuth = () => {
     };
 
     window.addEventListener("auth-user-updated", onAuthUserUpdated);
+    window.addEventListener("auth-change", onAuthChange);
     window.addEventListener("storage", onStorage);
     window.addEventListener("dev-role-override-changed", onDevRoleOverride);
     return () => {
       window.removeEventListener("auth-user-updated", onAuthUserUpdated);
+      window.removeEventListener("auth-change", onAuthChange);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("dev-role-override-changed", onDevRoleOverride);
     };

@@ -234,19 +234,27 @@ export default function WorkflowRunHistoryDialog({
   const [tokenMessage, setTokenMessage] = useState("");
   const [tokenSending, setTokenSending] = useState(false);
   const [tokenLink, setTokenLink] = useState<string | null>(null);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [tokenWarning, setTokenWarning] = useState<string | null>(null);
   const [projectContacts, setProjectContacts] = useState<ProjectContact[]>([]);
   const [autoContact, setAutoContact] = useState<ProjectContact | null>(null);
   const [tokenEditMode, setTokenEditMode] = useState(false);
   const [tokenSaveAsNew, setTokenSaveAsNew] = useState(false);
   const [expandedStepResultIds, setExpandedStepResultIds] = useState<Record<string, boolean>>({});
 
-  const DEFAULT_MESSAGE = "We are pleased to inform you that the installation work has been completed. Please use the link below to review the completed workflow documentation and provide your sign-off.";
+  const buildDefaultMessage = () => {
+    const assetLabel = asset.assetTag || asset.assetName || "this asset";
+    const jobLabel = project?.jobNumber ? ` on job ${project.jobNumber}` : "";
+    return `We are pleased to inform you that field work for asset ${assetLabel}${jobLabel} has been completed. Please use the link below to review the completed workflow documentation and provide your sign-off.`;
+  };
 
   const openTokenDialog = async (run: AssetWorkflowRun) => {
     setTokenLink(null);
+    setTokenError(null);
+    setTokenWarning(null);
     setTokenEditMode(false);
     setTokenSaveAsNew(false);
-    setTokenMessage(DEFAULT_MESSAGE);
+    setTokenMessage(buildDefaultMessage());
     try {
       const contacts = await projectContactService.listContacts(asset.projectId);
       setProjectContacts(contacts);
@@ -266,16 +274,22 @@ export default function WorkflowRunHistoryDialog({
   const closeTokenDialog = () => {
     setTokenDialogRun(null);
     setTokenLink(null);
+    setTokenError(null);
+    setTokenWarning(null);
     setTokenEditMode(false);
     setTokenSaveAsNew(false);
   };
 
   const handleSignedRefresh = () => {
     if (!open) return;
-    assetWorkflowRunService.listByAsset(asset.id).then((all) => {
+    assetWorkflowRunService.listByAssetFresh(asset.id).then((all) => {
       const filtered = all
         .filter((r) => r.workflowConfigId === workflowConfigId)
-        .sort((a, b) => (b.runNumber ?? 0) - (a.runNumber ?? 0));
+        .sort(
+          (a, b) =>
+            (b.runNumber ?? 0) - (a.runNumber ?? 0) ||
+            new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+        );
       setRuns(filtered);
     });
   };
@@ -283,6 +297,8 @@ export default function WorkflowRunHistoryDialog({
   const handleCreateToken = async () => {
     if (!tokenDialogRun) return;
     setTokenSending(true);
+    setTokenError(null);
+    setTokenWarning(null);
     try {
       // Determine contactId: if using the auto-populated contact and not editing, link it
       const isUsingAutoContact = !tokenEditMode && autoContact != null;
@@ -311,7 +327,9 @@ export default function WorkflowRunHistoryDialog({
             ccReports: false,
             address: ""
           });
-        } catch { /* silently fail — token was already created */ }
+        } catch {
+          setTokenWarning("Signature email was sent, but the new project contact could not be saved.");
+        }
       }
 
       // If no contacts existed, save as Customer 1
@@ -329,9 +347,14 @@ export default function WorkflowRunHistoryDialog({
           });
           setProjectContacts([saved]);
           setAutoContact(saved);
-        } catch { /* silently fail */ }
+        } catch {
+          setTokenWarning("Signature email was sent, but Customer 1 could not be saved to project contacts.");
+        }
       }
-    } catch { /* handled inline */ }
+    } catch (error: unknown) {
+      const apiMessage = (error as { response?: { data?: { message?: string; detail?: string } } })?.response?.data;
+      setTokenError(apiMessage?.message ?? apiMessage?.detail ?? "Customer signature email could not be sent.");
+    }
     finally { setTokenSending(false); }
   };
 
@@ -1204,10 +1227,12 @@ export default function WorkflowRunHistoryDialog({
         <DialogTitle>Request Customer Signature</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {tokenError && <Alert severity="error">{tokenError}</Alert>}
+            {tokenWarning && !tokenError && <Alert severity="warning">{tokenWarning}</Alert>}
             {tokenLink ? (
               <>
                 <Alert severity="success">
-                  Secure link generated and email sent to {tokenEmail}.
+                  Secure link generated and email sent to {tokenEmail} for asset {asset.assetTag || asset.assetName || asset.id}.
                 </Alert>
                 <Box sx={{ p: 1.5, background: "rgba(0,0,0,0.2)", borderRadius: 1, wordBreak: "break-all" }}>
                   <Typography variant="caption" fontFamily="monospace">{tokenLink}</Typography>

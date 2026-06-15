@@ -18,6 +18,7 @@ export interface PendingSignatureRecord {
   customerName: string;
   completedAt:  string;
   completedBy:  string;
+  signatureStatus: string;
 }
 
 export interface OpenIssueRecord {
@@ -211,6 +212,15 @@ export const assetWorkflowRunService = {
       const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
       const runs = res.data;
       return await cacheServerRuns(runs);
+    } catch {
+      return await offlineStore.listRunsByAsset(assetId);
+    }
+  },
+
+  async listByAssetFresh(assetId: string): Promise<AssetWorkflowRun[]> {
+    try {
+      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
+      return await cacheServerRuns(res.data);
     } catch {
       return await offlineStore.listRunsByAsset(assetId);
     }
@@ -417,7 +427,10 @@ export const assetWorkflowRunService = {
     try {
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/issues`, requestBody);
-      return await cacheServerRun(res.data);
+      const updatedRun = await cacheServerRun(res.data);
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return updatedRun;
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
 
@@ -456,6 +469,8 @@ export const assetWorkflowRunService = {
           optimisticPatch: { issuesJson, updatedAt: now },
         });
       }
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
       return offlineRun;
     }
   },
@@ -484,7 +499,10 @@ export const assetWorkflowRunService = {
       amendedAt: new Date().toISOString(),
     });
     const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/step-results`, requestBody);
-    return res.data;
+    const updatedRun = await cacheServerRun(res.data);
+    window.dispatchEvent(new Event("notifications:run-state-changed"));
+    window.dispatchEvent(new Event("notifications:refresh"));
+    return updatedRun;
   },
 
   /** Replace the full time-entries array and recompute metrics. Works on locked runs. */
@@ -498,7 +516,10 @@ export const assetWorkflowRunService = {
   async waiveCustomerSignature(runId: string): Promise<AssetWorkflowRun> {
     const resolvedRunId = await resolveRunId(runId);
     const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/waive-customer-signature`);
-    return res.data;
+    const updatedRun = await cacheServerRun(res.data);
+    window.dispatchEvent(new Event("notifications:run-state-changed"));
+    window.dispatchEvent(new Event("notifications:refresh"));
+    return updatedRun;
   },
 
   async trackTimeEntry(

@@ -7,6 +7,12 @@ namespace Commtrac.Api.Services;
 public sealed class NotificationFeedService
 {
     private readonly AppDbContext _db;
+    private static readonly HashSet<string> SuppressedRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Viewer",
+        "Client",
+        "Customer",
+    };
 
     public NotificationFeedService(AppDbContext db)
     {
@@ -15,6 +21,11 @@ public sealed class NotificationFeedService
 
     public async Task<List<NotificationInboxDto>> ListForUserAsync(string userId, string role, bool includeRead, int take)
     {
+        if (IsSuppressedRole(role))
+        {
+            return [];
+        }
+
         var normalizedTake = Math.Clamp(take, 1, 200);
         var query = _db.NotificationInbox
             .AsNoTracking()
@@ -36,6 +47,11 @@ public sealed class NotificationFeedService
 
     public async Task<int> MarkAsReadAsync(string userId, string role, IReadOnlyCollection<string>? notificationIds)
     {
+        if (IsSuppressedRole(role))
+        {
+            return 0;
+        }
+
         var query = _db.NotificationInbox.Where(n =>
             (n.RecipientUserId == userId || (n.RecipientRole != null && n.RecipientRole == role)) &&
             n.ReadAtUtc == null);
@@ -63,15 +79,26 @@ public sealed class NotificationFeedService
 
     public async Task CreateAsync(CreateNotificationRequest request)
     {
-        var recipientUserIds = request.RecipientUserIds?
+        var requestedRecipientUserIds = request.RecipientUserIds?
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList() ?? [];
 
         var recipientRoles = request.RecipientRoles?
             .Where(role => !string.IsNullOrWhiteSpace(role))
+            .Select(role => role.Trim())
+            .Where(role => !IsSuppressedRole(role))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList() ?? [];
+
+        var recipientUserIds = requestedRecipientUserIds.Count == 0
+            ? []
+            : await _db.Users
+                .AsNoTracking()
+                .Where(u => requestedRecipientUserIds.Contains(u.Id) && !SuppressedRoles.Contains(u.Role))
+                .Select(u => u.Id)
+                .Distinct()
+                .ToListAsync();
 
         foreach (var userId in recipientUserIds)
         {
@@ -89,6 +116,11 @@ public sealed class NotificationFeedService
         }
 
         await _db.SaveChangesAsync();
+    }
+
+    private static bool IsSuppressedRole(string? role)
+    {
+        return !string.IsNullOrWhiteSpace(role) && SuppressedRoles.Contains(role.Trim());
     }
 
     public Task NotifyRolesAsync(

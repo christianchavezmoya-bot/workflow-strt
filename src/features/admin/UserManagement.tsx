@@ -4204,6 +4204,11 @@ export const UserManagement: React.FC = () => {
                   Example: an Engineer or Supervisor with this enabled can start runs, resume runs, add missing photos, and complete field sign-off on assigned assets.
                 </Typography>
               </Alert>
+              <Alert severity="info" sx={{ mb: 1.5 }}>
+                <Typography variant="caption" display="block">
+                  Projects, Assets, Documents, and Issues now use page-level filters for visibility. Their role view-scope setting is no longer used.
+                </Typography>
+              </Alert>
               <Table size="small" sx={{ "& th": { fontWeight: 700, fontSize: "0.72rem", color: "text.secondary" } }}>
                 <TableHead>
                   <TableRow>
@@ -4228,13 +4233,9 @@ export const UserManagement: React.FC = () => {
                       </Stack>
                     </TableCell>
                     <TableCell align="center">
-                      <Select size="small" value={roleForm.domains.projects.viewScope ?? "own"}
-                        disabled={!roleForm.domains.projects.view}
-                        onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, projects: { ...prev.domains.projects, viewScope: e.target.value as "own" | "all" } } }))}
-                        sx={{ fontSize: "0.7rem", height: 24, minWidth: 70 }}>
-                        <MenuItem value="own">Own</MenuItem>
-                        <MenuItem value="all">All</MenuItem>
-                      </Select>
+                      <Typography variant="caption" color="text.secondary">
+                        Page filters
+                      </Typography>
                     </TableCell>
                     <TableCell align="center">
                       <Stack alignItems="center" spacing={0}>
@@ -4280,13 +4281,9 @@ export const UserManagement: React.FC = () => {
                       </Stack>
                     </TableCell>
                     <TableCell align="center">
-                      <Select size="small" value={roleForm.domains.installationAssets.viewScope ?? "own"}
-                        disabled={!roleForm.domains.installationAssets.view}
-                        onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, installationAssets: { ...prev.domains.installationAssets, viewScope: e.target.value as "own" | "all" } } }))}
-                        sx={{ fontSize: "0.7rem", height: 24, minWidth: 70 }}>
-                        <MenuItem value="own">Own</MenuItem>
-                        <MenuItem value="all">All</MenuItem>
-                      </Select>
+                      <Typography variant="caption" color="text.secondary">
+                        Page filters
+                      </Typography>
                     </TableCell>
                     <TableCell align="center">
                       <Stack alignItems="center" spacing={0}>
@@ -4375,13 +4372,9 @@ export const UserManagement: React.FC = () => {
                       </Stack>
                     </TableCell>
                     <TableCell align="center">
-                      <Select size="small" value={roleForm.domains.documents.viewScope ?? "own"}
-                        disabled={!roleForm.domains.documents.view}
-                        onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, documents: { ...prev.domains.documents, viewScope: e.target.value as "own" | "all" } } }))}
-                        sx={{ fontSize: "0.7rem", height: 24, minWidth: 70 }}>
-                        <MenuItem value="own">Own</MenuItem>
-                        <MenuItem value="all">All</MenuItem>
-                      </Select>
+                      <Typography variant="caption" color="text.secondary">
+                        Page filters
+                      </Typography>
                     </TableCell>
                     <TableCell align="center">
                       <Stack alignItems="center" spacing={0}>

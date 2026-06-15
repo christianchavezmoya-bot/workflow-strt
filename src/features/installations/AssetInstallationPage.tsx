@@ -169,12 +169,13 @@ function loadColumnConfig(): { order: string[]; hidden: string[] } {
 // Status helpers
 // ------------------------------------------------------------------
 
-const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success" | "error" | "warning"> = {
+const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success" | "error" | "warning" | "info"> = {
   NotStarted: "default",
   InProgress: "primary",
   Paused: "warning",
   Pending: "warning",
   Complete: "success",
+  Closed: "info",
   Issue: "error",
 };
 
@@ -184,6 +185,7 @@ const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   Paused: "Paused",
   Pending: "Pending",
   Complete: "Complete",
+  Closed: "Closed",
   Issue: "Issue",
 };
 
@@ -229,6 +231,7 @@ interface AssetHealth {
   paused: number;
   pending: number;
   complete: number;
+  closed: number;
   issue: number;
   noWorkflow: number;
 }
@@ -245,6 +248,7 @@ function computeHealth(list: ProjectAsset[]): AssetHealth {
     paused: list.filter((a) => a.status === "Paused").length,
     pending: list.filter((a) => a.status === "Pending").length,
     complete: list.filter((a) => a.status === "Complete").length,
+    closed: list.filter((a) => a.status === "Closed").length,
     issue: list.filter((a) => a.status === "Issue").length,
     noWorkflow: list.filter((a) => !assetHasConfiguredWorkflow(a)).length,
   };
@@ -253,7 +257,7 @@ function computeHealth(list: ProjectAsset[]): AssetHealth {
 function tabDotColor(h: AssetHealth | undefined): string | null {
   if (!h || h.total === 0) return null;
   if (h.issue > 0) return "error.main";
-  if (h.complete === h.total) return "success.main";
+  if (h.complete + h.closed === h.total) return "success.main";
   return "warning.main";
 }
 
@@ -537,7 +541,7 @@ const AssetInstallationPage = () => {
   const [printScope, setPrintScope]       = useState<"selection" | "visible" | "custom">("visible");
   const [printTechId, setPrintTechId]     = useState("");
   const [printModel, setPrintModel]       = useState("");
-  const [printStatuses, setPrintStatuses] = useState<string[]>(["NotStarted", "InProgress", "Paused", "Pending", "Complete", "Issue"]);
+  const [printStatuses, setPrintStatuses] = useState<string[]>(["NotStarted", "InProgress", "Paused", "Pending", "Complete", "Closed", "Issue"]);
   const [printPendingSig, setPrintPendingSig] = useState(false);
   const [printColumns, setPrintColumns]   = useState<(keyof PrintRow)[]>([
     "assetTag", "assetName", "serialNumber", "assetModel", "location",
@@ -962,63 +966,18 @@ const AssetInstallationPage = () => {
     });
   }, [selectedAddConfig?.workflowTemplateId]);
 
-  // Scope: roles with viewScope="own" see only projects/assets they manage.
-  const canViewAllAssets = (can.installationAssets?.viewScope ?? "own") === "all";
   const isAdminUser = currentUser.role === "Admin";
 
-  // Per-session user preference: "mine" = focused on their work, "all" = big picture.
-  // Only meaningful (and visible) when canViewAllAssets is true.
-  const [assetsScope, setAssetsScope] = useState<"mine" | "all">(
-    () => (sessionStorage.getItem("assets_scope") as "mine" | "all") ?? "mine"
-  );
-  useEffect(() => {
-    try { sessionStorage.setItem("assets_scope", assetsScope); } catch {}
-  }, [assetsScope]);
-  // When permissions finish loading and the role has "all" viewScope, default to showing
-  // all assets — unless the user has already set an explicit session preference.
-  // This means an admin granting viewScope="all" takes effect immediately for that role
-  // without requiring each user to manually switch the toggle.
-  const hasScopePreference = useRef(!!sessionStorage.getItem("assets_scope"));
-  useEffect(() => {
-    if (canViewAllAssets && !isAdminUser && !hasScopePreference.current) {
-      setAssetsScope("all");
-    }
-  }, [canViewAllAssets, isAdminUser]);
-
-  // Active scope: user chose "all" AND has permission to see all; admins always see all.
-  const showAllAssets = canViewAllAssets && (assetsScope === "all" || isAdminUser);
-
-  // Compute project IDs the user can access:
-  //   - Projects where they are the project manager (matched by full name)
-  //   - Projects where they are listed as a team member (matched by user ID)
-  // Returns null when showAllAssets=true (no restriction needed) OR when the user
-  // has no matching projects (signals that assignment-based fallback should apply).
-  const ownedProjectIds = useMemo((): Set<string> | null => {
-    if (showAllAssets) return null;
+  // View is now table-filter driven on this page. Keep edit ownership rules separate.
+  const manageableProjectIds = useMemo(() => {
     const myName = (currentUser.fullName ?? "").trim().toLowerCase();
-    const owned = new Set(
+    return new Set(
       projects.filter((p) =>
         String(p.projectManager ?? "").trim().toLowerCase() === myName ||
         (p.teamMemberIds?.includes(currentUser.id) ?? false)
       ).map((p) => p.id)
     );
-    // Return null (not an empty Set) so downstream null-checks correctly trigger the assignment fallback.
-    return owned.size > 0 ? owned : null;
-  }, [showAllAssets, currentUser.fullName, currentUser.id, projects]);
-
-  // Assignment-scoped: showAllAssets is false AND the user has no owned/team projects.
-  // These users (e.g. Installer, Technician) see only assets directly assigned to them.
-  // No role names are hardcoded — the scope type is derived entirely from permission config + project data.
-  const isAssignmentScoped = !showAllAssets && ownedProjectIds === null;
-
-  // Project IDs where this user has a direct asset assignment (only relevant when ownedProjectIds is
-  // non-null, i.e. the user also manages some projects). Lets them see directly-assigned assets that
-  // live outside their managed projects — e.g. an Installer who is a team member on Project A but is
-  // assigned an inspection asset in Project B.
-  const assignedProjectIds = useMemo(
-    () => new Set(assets.filter((a) => !a.isDeleted && a.assignedUserId === currentUser.id).map((a) => a.projectId)),
-    [assets, currentUser.id],
-  );
+  }, [currentUser.fullName, currentUser.id, projects]);
 
   const visibleAssets = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1028,43 +987,30 @@ const AssetInstallationPage = () => {
       } else {
         if (a.isDeleted) return false;
         if (selectedProjectId && a.projectId !== selectedProjectId) return false;
-        // Scope restriction always applies, regardless of whether a project is pre-selected.
-        // When ownedProjectIds is set, directly-assigned assets in non-owned projects are still allowed
-        // through so that users who are both team-members and assignees see all their work.
-        if (isAssignmentScoped && a.assignedUserId !== currentUser.id) return false;
-        if (ownedProjectIds && !ownedProjectIds.has(a.projectId) && a.assignedUserId !== currentUser.id) return false;
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
         if (showNoWorkflow && assetHasConfiguredWorkflow(a)) return false;
       }
       if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q)))) return false;
       return true;
     });
-  }, [assets, ownedProjectIds, isAssignmentScoped, currentUser.id, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode]);
+  }, [assets, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode]);
 
-  // Projects filtered to those linked to the active product (used in add/edit dialogs and the project selector).
-  // Also filtered to owned projects when the role's viewScope is "own", but always includes projects where
-  // the user has a direct asset assignment so URL-driven navigation (e.g. from Dashboard) resolves correctly.
+  // Projects linked to the active product (used in add/edit dialogs and the project selector).
   const productProjects = useMemo(
     () => {
-      const byProduct = activeProduct?.id
+      return activeProduct?.id
         ? projects.filter((p) => p.productIds?.includes(activeProduct.id))
         : projects;
-      return ownedProjectIds
-        ? byProduct.filter((p) => ownedProjectIds.has(p.id) || assignedProjectIds.has(p.id))
-        : byProduct;
     },
-    [projects, activeProduct?.id, ownedProjectIds, assignedProjectIds],
+    [projects, activeProduct?.id],
   );
 
   const canEditAssetFromWebTable = useMemo(() => (asset: ProjectAsset) => {
     if (can.installationAssets?.editScope === "all") return true;
     if (can.installationAssets?.editScope !== "own") return false;
-    if (ownedProjectIds?.has(asset.projectId)) return true;
-    // Allow editing assets directly assigned to this user even when they also have managed projects
-    // (isAssignmentScoped would be false in that hybrid case, but the user still owns their work).
-    if (asset.assignedUserId === currentUser.id) return true;
-    return isAssignmentScoped;
-  }, [can.installationAssets?.editScope, currentUser.id, isAssignmentScoped, ownedProjectIds]);
+    if (manageableProjectIds.has(asset.projectId)) return true;
+    return asset.assignedUserId === currentUser.id;
+  }, [can.installationAssets?.editScope, currentUser.id, manageableProjectIds]);
 
   const canManageAssetDocuments = can.documents.view || can.documents.upload || can.documents.delete;
 
@@ -1163,13 +1109,13 @@ const AssetInstallationPage = () => {
         if (!printStatuses.includes(a.status)) return false;
         if (printPendingSig) {
           const runs = runsMap[a.id] ?? [];
-          if (!runs[0] || runs[0].signatureStatus !== "PendingCustomer") return false;
+          if (!runs[0] || (runs[0].signatureStatus !== "PendingCustomer" && runs[0].signatureStatus !== "PendingInstaller")) return false;
         }
         return true;
       });
     }
     const statusLabel: Record<string, string> = {
-      NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Issue: "Issue",
+      NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Closed: "Closed", Issue: "Issue",
     };
     return pool.map((a): PrintRow => {
       const tech        = a.assignedUserId ? userMap.get(a.assignedUserId) : undefined;
@@ -2094,7 +2040,7 @@ const AssetInstallationPage = () => {
     const openIssues = [...assetIssuesList.filter(i => !i.resolved), ...runIssuesList.filter(i => !i.resolved)];
     if (openIssues.some(i => i.severity === "high" || (i.isBlocking && i.severity !== "medium" && i.severity !== "low"))) return "red";
     if (openIssues.some(i => i.severity === "medium")) return "amber";
-    if (openIssues.length === 0 && asset.status === "Complete") return "green";
+    if (openIssues.length === 0 && (asset.status === "Complete" || asset.status === "Closed")) return "green";
     return null; // no open issues â†' use default status color
   }
 
@@ -2439,10 +2385,11 @@ const AssetInstallationPage = () => {
       ? (assignments.length > 0 || !!asset.productConfigId || !!asset.workflowTemplateId || !!latestRun || !!asset.workflowSummary?.hasWorkflow)
       : (asset.workflowSummary?.hasWorkflow ?? (!!asset.productConfigId || !!asset.workflowTemplateId));
     const canViewCompletedRun = asset.status === "Complete"
+      || asset.status === "Closed"
       || (asset.workflowSummary?.latestRunStatus === "Complete" && !asset.workflowSummary?.hasOpenIssues);
     const openImportDialog = () => setImportDialogAsset(asset);
 
-    if (inspectionEnabled && asset.status === "Complete" && !latestRun && !hasAssignments) {
+    if (inspectionEnabled && (asset.status === "Complete" || asset.status === "Closed") && !latestRun && !hasAssignments) {
       return {
         label: "Run Details",
         tooltip: "View or edit linked external inspection JSON",
@@ -2517,8 +2464,10 @@ const AssetInstallationPage = () => {
     }
     if (summary.awaitingInstallerSig || summary.awaitingCustomerSig) {
       return {
-        label: "Complete Sign-off",
-        tooltip: "Open run history to complete installer or customer signatures",
+        label: summary.awaitingInstallerSig ? "Installer Sign-off" : "Customer Sign-off",
+        tooltip: summary.awaitingInstallerSig
+          ? "Open run history to complete installer sign-off"
+          : "Open run history to complete customer sign-off",
         color: "warning",
         icon: <DrawOutlined />,
         onClick: () => openRunHistory(asset),
@@ -2862,29 +2811,19 @@ const AssetInstallationPage = () => {
         const status = asset.status as ProjectAssetStatus;
         const baseColor = STATUS_COLORS[status] ?? "default";
         const issueHealth = computeAssetHealth(asset, runsMap[asset.id] ?? []);
-        // Check if complete but awaiting customer signature
-        const latestRuns = runsMap[asset.id] ?? [];
-        const latestLocked = [...latestRuns].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).find(r => r.isLocked);
-        const awaitingCustomerSig = status === "Complete" && !!latestLocked
-          && !latestLocked.customerSignedAt
-          && latestLocked.signatureStatus !== "WaivedCustomer";
         const chipColor =
           issueHealth === "red"   ? "error"   :
           issueHealth === "amber" ? "warning" :
-          awaitingCustomerSig     ? "warning" :
           issueHealth === "green" ? "success" :
           baseColor;
-        const chipLabel =
-          awaitingCustomerSig && issueHealth !== "red" && issueHealth !== "amber" ? "Awaiting Signature" :
-          STATUS_LABELS[status] ?? asset.status;
         return (
           <Chip
             size="small"
-            label={chipLabel}
+            label={STATUS_LABELS[status] ?? asset.status}
             color={chipColor}
             icon={
               asset.status === "InProgress" ? <HourglassEmptyOutlined sx={{ fontSize: "0.9rem !important" }} /> :
-              asset.status === "Complete" && !awaitingCustomerSig ? <CheckCircleOutlined sx={{ fontSize: "0.9rem !important" }} /> :
+              (asset.status === "Complete" || asset.status === "Closed") ? <CheckCircleOutlined sx={{ fontSize: "0.9rem !important" }} /> :
               asset.status === "Issue" ? <ErrorOutlined sx={{ fontSize: "0.9rem !important" }} /> :
               undefined
             }
@@ -3252,12 +3191,13 @@ const AssetInstallationPage = () => {
             {!healthExpanded && (
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                 {activeHealth.complete > 0 && <Chip size="small" label={`${activeHealth.complete} Complete`} color="success" sx={{ height: 18, fontSize: 10 }} />}
+                {activeHealth.closed > 0 && <Chip size="small" label={`${activeHealth.closed} Closed`} color="info" sx={{ height: 18, fontSize: 10 }} />}
                 {activeHealth.inProgress > 0 && <Chip size="small" label={`${activeHealth.inProgress} In Progress`} color="primary" sx={{ height: 18, fontSize: 10 }} />}
                 {activeHealth.paused > 0 && <Chip size="small" label={`${activeHealth.paused} Paused`} color="warning" sx={{ height: 18, fontSize: 10 }} />}
                 {activeHealth.pending > 0 && <Chip size="small" label={`${activeHealth.pending} Pending`} color="warning" sx={{ height: 18, fontSize: 10 }} />}
                 {activeHealth.issue > 0 && <Chip size="small" label={`${activeHealth.issue} Issue`} color="error" sx={{ height: 18, fontSize: 10 }} />}
                 <Typography variant="caption" color="text.secondary" sx={{ alignSelf: "center" }}>
-                  {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}%
+                  {activeHealth.total > 0 ? Math.round(((activeHealth.complete + activeHealth.closed) / activeHealth.total) * 100) : 0}%
                 </Typography>
               </Stack>
             )}
@@ -3287,6 +3227,9 @@ const AssetInstallationPage = () => {
                 {activeHealth.complete > 0 && (
                   <Chip size="small" label={`${activeHealth.complete} Complete`} color="success" />
                 )}
+                {activeHealth.closed > 0 && (
+                  <Chip size="small" label={`${activeHealth.closed} Closed`} color="info" />
+                )}
                 {activeHealth.issue > 0 && (
                   <Chip size="small" label={`${activeHealth.issue} Issue`} color="error" />
                 )}
@@ -3299,13 +3242,13 @@ const AssetInstallationPage = () => {
               <Box sx={{ flex: 1, minWidth: 100 }}>
                 <LinearProgress
                   variant="determinate"
-                  value={activeHealth.total > 0 ? (activeHealth.complete / activeHealth.total) * 100 : 0}
+                  value={activeHealth.total > 0 ? ((activeHealth.complete + activeHealth.closed) / activeHealth.total) * 100 : 0}
                   color={activeHealth.issue > 0 ? "error" : "success"}
                   sx={{ height: 6, borderRadius: 1 }}
                 />
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                {activeHealth.total > 0 ? Math.round((activeHealth.complete / activeHealth.total) * 100) : 0}% complete
+                {activeHealth.total > 0 ? Math.round(((activeHealth.complete + activeHealth.closed) / activeHealth.total) * 100) : 0}% field work complete
               </Typography>
               {(activeTimeRollup.productive > 0 || activeTimeRollup.downtime > 0) && (
                 <>
@@ -3331,18 +3274,6 @@ const AssetInstallationPage = () => {
 
       {/* Filters */}
       <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
-        {canViewAllAssets && !isAdminUser && (
-          <ToggleButtonGroup
-            value={assetsScope}
-            exclusive
-            size="small"
-            onChange={(_, v) => { if (v) setAssetsScope(v as "mine" | "all"); }}
-            sx={{ flexShrink: 0 }}
-          >
-            <ToggleButton value="mine">My Assets</ToggleButton>
-            <ToggleButton value="all">All Assets</ToggleButton>
-          </ToggleButtonGroup>
-        )}
         <FormControl size="small" sx={{ flex: 1, minWidth: 150 }}>
           <InputLabel shrink>Project</InputLabel>
           <Select label="Project" value={productProjects.length > 0 ? selectedProjectId : ""} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
@@ -3378,6 +3309,7 @@ const AssetInstallationPage = () => {
             <MenuItem value="Paused">Paused</MenuItem>
             <MenuItem value="Pending">Pending</MenuItem>
             <MenuItem value="Complete">Complete</MenuItem>
+            <MenuItem value="Closed">Closed</MenuItem>
             <MenuItem value="Issue">Issue</MenuItem>
           </Select>
         </FormControl>
@@ -3398,17 +3330,6 @@ const AssetInstallationPage = () => {
         </Tooltip>
       </Stack>
 
-      {/* Scope indicator — shown when user sees a filtered subset of assets */}
-      {!showAllAssets && !archiveMode && (
-        <Alert severity="info" sx={{ py: 0.5, fontSize: "0.78rem" }}>
-          {isAssignmentScoped
-            ? "Showing only assets assigned to you."
-            : assignedProjectIds.size > 0
-              ? "Showing only assets in projects you manage or are a member of, plus those directly assigned to you."
-              : "Showing only assets in projects you manage or are a member of."}
-        </Alert>
-      )}
-
       {/* Bulk actions toolbar — visible when ≥1 asset is selected */}
       {selectedAssetIds.size > 0 && (
         <Paper className="glass-card" sx={{ px: 2, py: 1, display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
@@ -3426,12 +3347,12 @@ const AssetInstallationPage = () => {
               const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
               const withWf = sel.filter((a) =>
                 (assignmentsMap[a.id] && assignmentsMap[a.id].length > 0) ||
-                a.status === "InProgress" || a.status === "Complete"
+                a.status === "InProgress" || a.status === "Complete" || a.status === "Closed"
               );
               if (withWf.length === 0) { setBulkWfOpen(true); return; }
               setBulkWarnTitle("Some assets already have workflow assignments");
               setBulkWarnBody(
-                "These assets already have one or more workflow assignments. Adding a new assignment will not remove existing ones. Assets that are In Progress or Completed may behave unexpectedly with additional assignments."
+                "These assets already have one or more workflow assignments. Adding a new assignment will not remove existing ones. Assets that are in progress, complete, or closed may behave unexpectedly with additional assignments."
               );
               setBulkWarnRows(withWf.map((a) => ({
                 assetTag: a.assetTag,
@@ -3637,13 +3558,7 @@ const AssetInstallationPage = () => {
             ? archiveMode
               ? "No archived assets found for this product."
               : `No assets added for ${activeProduct?.name ?? "this product"} yet.`
-            : !showAllAssets && selectedProjectId && assets.some((a) => a.projectId === selectedProjectId && !a.isDeleted)
-              ? isAssignmentScoped
-                ? "You have no assets assigned to you in this project."
-                : assignedProjectIds.size > 0
-                  ? "You have no assets assigned to you or in your managed projects matching this selection."
-                  : "You have no assets in your managed projects matching this selection."
-              : "No assets match the current filters."}
+            : "No assets match the current filters."}
         </Alert>
       ) : isNativePlatform ? (
         <Stack spacing={0.75}>
@@ -3661,16 +3576,13 @@ const AssetInstallationPage = () => {
               && !latestLocked.customerSignedAt
               && latestLocked.signatureStatus !== "WaivedCustomer";
 
-            // Smart composite status chip (reflects true condition, not raw asset.status)
-            const smartChipColor: "default" | "primary" | "success" | "error" | "warning" =
+            // Smart composite status chip (reflects lifecycle state, not just issue state)
+            const smartChipColor: "default" | "primary" | "success" | "error" | "warning" | "info" =
               healthColor === "red" ? "error" :
               healthColor === "amber" ? "warning" :
-              awaitingCustomerSig ? "warning" :
               healthColor === "green" ? "success" :
               STATUS_COLORS[asset.status as ProjectAssetStatus];
-            const smartChipLabel = awaitingCustomerSig && healthColor !== "red" && healthColor !== "amber"
-              ? "Awaiting Sig"
-              : STATUS_LABELS[asset.status as ProjectAssetStatus];
+            const smartChipLabel = STATUS_LABELS[asset.status as ProjectAssetStatus];
 
             // Evidence/workflow sub-status badge
             const latestRun = [...runs].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
@@ -3703,9 +3615,11 @@ const AssetInstallationPage = () => {
               const st = asset.status as ProjectAssetStatus;
               let cond = "";
               if (st === "Complete") {
-                if (awaitingCustomerSig) cond = "complete · awaiting signature";
+                if (awaitingCustomerSig) cond = "complete · awaiting customer sign-off";
                 else if (subLabel === "Missing") cond = "complete · missing data";
                 else cond = issueNote ? `complete · ${issueNote}` : "complete";
+              } else if (st === "Closed") {
+                cond = issueNote ? `closed · ${issueNote}` : "closed";
               } else if (st === "InProgress") {
                 const base = subLabel === "Paused" ? "paused" : "in progress · running";
                 cond = issueNote ? `${base} · ${issueNote}` : base;
@@ -3729,7 +3643,7 @@ const AssetInstallationPage = () => {
               healthColor === "red" ? "error.main" :
               healthColor === "amber" ? "warning.main" :
               subColor === "error" ? "error.main" :
-              awaitingCustomerSig ? "warning.main" :
+              awaitingCustomerSig ? "info.main" :
               "transparent";
 
             // Quick action button — most common next action without needing to expand
@@ -3982,7 +3896,7 @@ const AssetInstallationPage = () => {
                       ))}
                       <TableCell align="right">
                         <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-                          {(canRunAssetWorkflow || asset.status === "Complete") && actionButton(asset, proj?.workflowMode)}
+                          {(canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed") && actionButton(asset, proj?.workflowMode)}
                           {canManageAssetDocuments && (
                             <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
                               <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
@@ -4046,7 +3960,7 @@ const AssetInstallationPage = () => {
                               </span>
                             </Tooltip>
                           )}
-                          {!((canRunAssetWorkflow || asset.status === "Complete")
+                          {!((canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed")
                             || canManageAssetDocuments
                             || canViewInstallationAssets
                             || (canEditInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode)
@@ -4123,7 +4037,7 @@ const AssetInstallationPage = () => {
                 <Chip size="small" label={STATUS_LABELS[a.status as ProjectAssetStatus]} color={STATUS_COLORS[a.status as ProjectAssetStatus]} sx={{ fontSize: "0.7rem" }} />
               </Stack>
               <Divider />
-              {(canRunAssetWorkflow || a.status === "Complete") && (
+              {(canRunAssetWorkflow || a.status === "Complete" || a.status === "Closed") && (
                 <Box>{actionButton(a, proj?.workflowMode)}</Box>
               )}
               {canManageAssetDocuments && (
@@ -4404,6 +4318,7 @@ const AssetInstallationPage = () => {
                 <MenuItem value="Paused">Paused</MenuItem>
                 <MenuItem value="Pending">Pending</MenuItem>
                 <MenuItem value="Complete">Complete</MenuItem>
+                <MenuItem value="Closed">Closed</MenuItem>
                 <MenuItem value="Issue">Issue</MenuItem>
               </Select>
             </FormControl>
@@ -5405,9 +5320,9 @@ const AssetInstallationPage = () => {
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>Statuses to include</Typography>
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      {(["NotStarted", "InProgress", "Paused", "Pending", "Complete", "Issue"] as const).map((s) => {
+                      {(["NotStarted", "InProgress", "Paused", "Pending", "Complete", "Closed", "Issue"] as const).map((s) => {
                         const labels: Record<string, string> = {
-                          NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Issue: "Issue",
+                          NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Closed: "Closed", Issue: "Issue",
                         };
                         const checked = printStatuses.includes(s);
                         return (

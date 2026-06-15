@@ -202,7 +202,7 @@ export async function generateProjectReport(data: ProjectReportData): Promise<vo
   // ── 2. Health KPI strip ────────────────────────────────────────────────────
   const runByAsset = new Map(latestRuns.map(r => [r.assetId, r]));
   const totalAssets    = assets.length;
-  const completeAssets = assets.filter(a => a.status === "Complete").length;
+  const completeAssets = assets.filter(a => a.status === "Complete" || a.status === "Closed").length;
   const pctComplete    = totalAssets > 0 ? Math.round((completeAssets / totalAssets) * 100) : 0;
 
   const blockingIssues = latestRuns.reduce((acc, r) => {
@@ -254,7 +254,9 @@ export async function generateProjectReport(data: ProjectReportData): Promise<vo
     })();
     const openBlocking = issues.filter(i => !i.resolved && i.isBlocking).length;
     const statusLabel =
-      run?.isLocked && !run.customerSignedAt && run.signatureStatus !== "WaivedCustomer" ? "Awaiting Signature" :
+      run?.isLocked && run.signatureStatus === "PendingInstaller" ? "Pending Installer" :
+      run?.isLocked && run.signatureStatus === "PendingCustomer" ? "Pending Customer" :
+      a.status === "Closed"     ? "Closed"     :
       a.status === "Complete"   ? "Complete"   :
       a.status === "InProgress" ? "In Progress" :
       a.status === "Issue"      ? "Issue"       : a.status;
@@ -291,7 +293,8 @@ export async function generateProjectReport(data: ProjectReportData): Promise<vo
       if (hookData.section === "body" && hookData.column.index === 4) {
         const val = String(hookData.cell.raw);
         if (val === "Complete") hookData.cell.styles.textColor = GREEN;
-        else if (val === "Issue" || val === "Awaiting Signature") hookData.cell.styles.textColor = ORANGE;
+        else if (val === "Closed") hookData.cell.styles.textColor = TEAL;
+        else if (val === "Issue" || val === "Pending Installer" || val === "Pending Customer") hookData.cell.styles.textColor = ORANGE;
         else if (val === "In Progress") hookData.cell.styles.textColor = TEAL;
       }
       if (hookData.section === "body" && hookData.column.index === 6) {

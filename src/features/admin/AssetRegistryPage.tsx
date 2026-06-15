@@ -35,12 +35,13 @@ import type { ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset"
 
 type RegistrySortKey = "assetTag" | "product" | "assetModel" | "manufacturer" | "serialNumber" | "project" | "site" | "configWorkflow" | "status";
 
-const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success" | "error" | "warning"> = {
+const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success" | "error" | "warning" | "info"> = {
   NotStarted: "default",
   InProgress: "primary",
   Paused: "warning",
   Pending: "warning",
   Complete: "success",
+  Closed: "info",
   Issue: "error",
 };
 
@@ -50,6 +51,7 @@ const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   Paused: "Paused",
   Pending: "Pending",
   Complete: "Complete",
+  Closed: "Closed",
   Issue: "Issue",
 };
 
@@ -142,7 +144,7 @@ export default function AssetRegistryPage() {
 
   const summary = useMemo(() => ({
     total: assets.length,
-    complete: assets.filter((a) => a.status === "Complete").length,
+    complete: assets.filter((a) => a.status === "Complete" || a.status === "Closed").length,
     issue: assets.filter((a) => a.status === "Issue").length,
     inProgress: assets.filter((a) => a.status === "InProgress").length,
     notStarted: assets.filter((a) => a.status === "NotStarted").length,
@@ -200,6 +202,7 @@ export default function AssetRegistryPage() {
             <MenuItem value="Paused">Paused</MenuItem>
             <MenuItem value="Pending">Pending</MenuItem>
             <MenuItem value="Complete">Complete</MenuItem>
+            <MenuItem value="Closed">Closed</MenuItem>
             <MenuItem value="Issue">Issue</MenuItem>
           </Select>
         </FormControl>

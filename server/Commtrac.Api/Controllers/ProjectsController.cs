@@ -43,16 +43,6 @@ public class ProjectsController : ControllerBase
         var query = includeDeleted
             ? _db.Projects.IgnoreQueryFilters().AsQueryable()
             : _db.Projects.AsQueryable();
-        var allowedProjectIds = await GetRoleScopedProjectIdsAsync();
-        if (allowedProjectIds is { Count: > 0 })
-        {
-            query = query.Where(p => allowedProjectIds.Contains(p.Id));
-        }
-        else if (allowedProjectIds is { Count: 0 })
-        {
-            return Ok(new ProjectListResponse(new List<ProjectDto>(), 0));
-        }
-
         if (!string.IsNullOrWhiteSpace(country) && country != "All")
         {
             static List<string> Aliases(string input)
@@ -168,11 +158,6 @@ public class ProjectsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<ProjectDto>> GetById(string id, [FromQuery] bool includeDeleted = false)
     {
-        var allowedProjectIds = await GetRoleScopedProjectIdsAsync();
-        if (allowedProjectIds is not null && !allowedProjectIds.Contains(id))
-        {
-            return NotFound();
-        }
         var projects = includeDeleted ? _db.Projects.IgnoreQueryFilters() : _db.Projects;
         var project = await projects.FirstOrDefaultAsync(p => p.Id == id);
         if (project is null)
@@ -663,50 +648,6 @@ public class ProjectsController : ControllerBase
             ?? "Unknown user";
     }
 
-    private async Task<HashSet<string>?> GetRoleScopedProjectIdsAsync()
-    {
-        var role = User.FindFirstValue(ClaimTypes.Role);
-        if (string.IsNullOrWhiteSpace(role)) return null;
-
-        if (role is "Installer" or "Technician")
-        {
-            // Check if admin has granted viewScope:"all" for this role in the role config.
-            // If so, remove the server-side restriction so the user sees all projects.
-            var roleConfig = await _db.RoleConfigs.FirstOrDefaultAsync();
-            if (roleConfig != null && !string.IsNullOrWhiteSpace(roleConfig.ConfigJson))
-            {
-                try
-                {
-                    using var doc = JsonDocument.Parse(roleConfig.ConfigJson);
-                    if (doc.RootElement.TryGetProperty(role, out var roleEl) &&
-                        roleEl.TryGetProperty("domains", out var domains) &&
-                        domains.TryGetProperty("projects", out var projects) &&
-                        projects.TryGetProperty("viewScope", out var viewScope) &&
-                        viewScope.GetString() == "all")
-                    {
-                        return null; // Unrestricted — admin granted view-all for this role
-                    }
-                }
-                catch { /* malformed config — fall through to default scoping */ }
-            }
-
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (string.IsNullOrWhiteSpace(userId)) return new HashSet<string>();
-
-            var assignedProjectIds = await _db.ProjectAssets
-                .Where(a => a.AssignedUserId == userId)
-                .Select(a => a.ProjectId)
-                .Distinct()
-                .ToListAsync();
-            return assignedProjectIds.ToHashSet();
-        }
-
-        // Project Manager sees all projects — "My Projects" vs "All Projects"
-        // scoping is handled client-side via the role permissions viewScope config.
-        if (role == "Project Manager") return null;
-
-        return null;
-    }
 }
 
 public record ProjectListResponse(List<ProjectDto> Items, int Total);

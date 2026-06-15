@@ -63,7 +63,7 @@ import QRUploadButton from "../../components/QRUploadButton";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
-import { getMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
+import { getMissingWorkflowItems, getRunMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
 
 // Types
 
@@ -940,6 +940,20 @@ export default function WorkOrderRunner({
       const bomToSave = finalBomActual ?? bomActual;
       const bomJson = bomToSave.length > 0 ? JSON.stringify(bomToSave) : undefined;
 
+      if (activeRun) {
+        const pendingCompletionRun: AssetWorkflowRun = {
+          ...activeRun,
+          stepResultsJson: stepsJson,
+          issuesJson,
+          bomActualJson: bomJson,
+        };
+        const missingCompletionItems = getRunMissingWorkflowItems(pendingCompletionRun);
+        if (missingCompletionItems.length > 0) {
+          openValidationDialog("blocking", missingCompletionItems, null);
+          return;
+        }
+      }
+
       if (activeRunId) {
         // Flush any queued time-tracking actions before locking â€” run rejects changes once locked.
         await flushTimeQueue();
@@ -954,7 +968,10 @@ export default function WorkOrderRunner({
           } catch { return 0; }
         }
 
-        const allMediaInputs = stepsSorted.flatMap(step =>
+        const visitedStepIds = new Set<string>([...history, currentStepId ?? ""].filter(Boolean));
+        const mediaSteps = stepsSorted.filter((step) => visitedStepIds.size === 0 || visitedStepIds.has(step.id));
+
+        const allMediaInputs = mediaSteps.flatMap(step =>
           (step.inputs ?? []).filter(inp => inp.type === "photo" || inp.type === "video")
             .map(inp => ({ stepId: step.id, stepTitle: step.title ?? step.id, inputId: inp.id, inputLabel: inp.label ?? inp.id }))
         );

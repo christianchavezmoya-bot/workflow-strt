@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Security.Claims;
 using Commtrac.Api.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -98,6 +99,42 @@ builder.Services
             // the long WS-Federation URI (ClaimTypes.Role) not the short "role" key.
             RoleClaimType = "role",
             NameClaimType = "unique_name"
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                if (context.Principal?.Identity is not ClaimsIdentity identity)
+                {
+                    return Task.CompletedTask;
+                }
+
+                static void AddClaimIfMissing(ClaimsIdentity claimsIdentity, string sourceType, string targetType)
+                {
+                    if (claimsIdentity.HasClaim(c => c.Type == targetType))
+                    {
+                        return;
+                    }
+
+                    var source = claimsIdentity.FindFirst(sourceType);
+                    if (source is null || string.IsNullOrWhiteSpace(source.Value))
+                    {
+                        return;
+                    }
+
+                    claimsIdentity.AddClaim(new Claim(targetType, source.Value));
+                }
+
+                // Map short JWT claim names back onto ClaimTypes so the existing controllers
+                // keep working even with MapInboundClaims disabled.
+                AddClaimIfMissing(identity, "nameid", ClaimTypes.NameIdentifier);
+                AddClaimIfMissing(identity, "email", ClaimTypes.Email);
+                AddClaimIfMissing(identity, "unique_name", ClaimTypes.Name);
+                AddClaimIfMissing(identity, "role", ClaimTypes.Role);
+
+                return Task.CompletedTask;
+            }
         };
     });
 

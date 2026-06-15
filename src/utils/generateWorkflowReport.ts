@@ -124,6 +124,37 @@ function parseStepResults(json: string): StepResult[] {
   catch { return []; }
 }
 
+function parseVisitedStepIds(json: string): Set<string> {
+  try {
+    const parsed = JSON.parse(json) as Array<{ stepId?: string; values?: Record<string, string> }>;
+    const visited = new Set<string>();
+    for (const entry of parsed) {
+      if (!entry?.stepId) continue;
+      if (entry.stepId !== "__nav__") {
+        visited.add(entry.stepId);
+        continue;
+      }
+
+      const currentStepId = entry.values?.currentStepId;
+      if (currentStepId) visited.add(currentStepId);
+
+      const rawHistory = entry.values?.historyJson;
+      if (!rawHistory) continue;
+      try {
+        const history = JSON.parse(rawHistory) as string[];
+        for (const stepId of history) {
+          if (stepId) visited.add(stepId);
+        }
+      } catch {
+        // Ignore malformed history.
+      }
+    }
+    return visited;
+  } catch {
+    return new Set<string>();
+  }
+}
+
 function parseIssues(json: string): RunIssue[] {
   try { return JSON.parse(json) as RunIssue[]; } catch { return []; }
 }
@@ -193,6 +224,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   const steps       = parseSteps(run.workflowSnapshotJson ?? "");
   const stepMap     = new Map(steps.map((s) => [s.id, s]));
   const stepResults = parseStepResults(run.stepResultsJson);
+  const visitedStepIds = parseVisitedStepIds(run.stepResultsJson);
   const issues      = parseIssues(run.issuesJson);
   const openIssues  = issues.filter((i) => !i.resolved);
 
@@ -403,11 +435,10 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   const stepResultMap = new Map(stepResults.map((sr) => [sr.stepId, sr]));
   const stepsToRender: Array<{ step: WorkflowStep; sr: StepResult | undefined }> = includeAllSteps
     ? [...steps].sort((a, b) => a.order - b.order).map((s) => ({ step: s, sr: stepResultMap.get(s.id) }))
-    : stepResults.map((sr) => {
-        const found = stepMap.get(sr.stepId);
-        const importedLabel = (sr.values as Record<string, string>)?.["label"];
-        return { step: found ?? ({ id: sr.stepId, title: importedLabel ?? sr.stepId, order: 0, inputs: [] } as unknown as WorkflowStep), sr };
-      });
+    : [...steps]
+        .sort((a, b) => a.order - b.order)
+        .filter((step) => visitedStepIds.has(step.id) || stepResultMap.has(step.id))
+        .map((step) => ({ step, sr: stepResultMap.get(step.id) }));
 
   const completedCount = stepResults.length;
   const totalCount     = steps.length;
@@ -486,10 +517,23 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       if (desc) bodyRows.push(["Description", desc]);
 
       if (!isCompleted) {
-        // Show expected inputs as blank rows
-        if (inputDefs.length > 0) {
+        const missingItems = new Map(getMissingWorkflowItems(step, {}).map((item) => [item.id, item]));
+        if (inputDefs.length > 0 || (step.captureFields?.length ?? 0) > 0) {
           for (const inp of inputDefs) {
-            bodyRows.push([inp.label ?? inp.id, "—"]);
+            const missing = missingItems.get(inp.id);
+            bodyRows.push([
+              inp.label ?? inp.id,
+              missing
+                ? (missing.kind === "video" ? "MISSING - video not captured" : "MISSING - image not captured")
+                : "—",
+            ]);
+          }
+          for (const captureDef of step.captureFields ?? []) {
+            const missing = missingItems.get(captureDef.id);
+            bodyRows.push([
+              captureDef.label ?? captureDef.key ?? captureDef.id,
+              missing ? "MISSING - required capture not provided" : "—",
+            ]);
           }
         } else {
           bodyRows.push(["(Step not completed)", ""]);

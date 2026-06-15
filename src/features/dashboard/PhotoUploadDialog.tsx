@@ -94,6 +94,21 @@ type TokenStatus = {
   status: "pending" | "complete" | "expired" | "not_found";
 };
 
+const CAPTURE_KEY_DELIMITER = "__INPUT__";
+
+function buildCaptureKey(stepId: string, inputId: string): string {
+  return `${stepId}${CAPTURE_KEY_DELIMITER}${inputId}`;
+}
+
+function parseCaptureKey(key: string): { stepId: string; inputId: string } | null {
+  const delimiterIndex = key.indexOf(CAPTURE_KEY_DELIMITER);
+  if (delimiterIndex < 0) return null;
+  return {
+    stepId: key.slice(0, delimiterIndex),
+    inputId: key.slice(delimiterIndex + CAPTURE_KEY_DELIMITER.length),
+  };
+}
+
 // ── Props ──────────────────────────────────────────────────────────────────────
 
 interface PhotoUploadDialogProps {
@@ -250,7 +265,7 @@ export default function PhotoUploadDialog({
   const [allPhotoSteps, setAllPhotoSteps] = useState<MissingStep[]>([]);
   const [effectiveMissingSteps, setEffectiveMissingSteps] = useState<MissingStep[]>([]);
 
-  // Editable captures keyed by `${stepId}-${inputId}`
+  // Editable captures keyed by a delimiter-safe composite key.
   const [editedCaptures, setEditedCaptures] = useState<Record<string, string[]>>({});
   const photoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const videoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -281,7 +296,7 @@ export default function PhotoUploadDialog({
     const values = parseStepValues(run.stepResultsJson ?? "[]");
     const captures = parseStepCaptures(run.stepResultsJson ?? "[]");
     const seededCaptures = allSteps.reduce<Record<string, string[]>>((acc, step) => {
-      acc[`${step.stepId}-${step.inputId}`] = parseCaptures(values[step.stepId]?.[step.inputId]);
+      acc[buildCaptureKey(step.stepId, step.inputId)] = parseCaptures(values[step.stepId]?.[step.inputId]);
       return acc;
     }, {});
     setRunValues(values);
@@ -409,7 +424,7 @@ export default function PhotoUploadDialog({
   }
 
   function getCurrentCaptures(stepId: string, inputId: string): string[] {
-    const key = `${stepId}-${inputId}`;
+    const key = buildCaptureKey(stepId, inputId);
     return editedCaptures[key] ?? getExistingCaptures(stepId, inputId);
   }
 
@@ -420,12 +435,12 @@ export default function PhotoUploadDialog({
   ) {
     if (!files || files.length === 0) return;
     const base64s = await readFilesAsBase64(files);
-    const key = `${stepId}-${inputId}`;
+    const key = buildCaptureKey(stepId, inputId);
     setEditedCaptures((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), ...base64s] }));
   }
 
   function handleRemoveCapture(stepId: string, inputId: string, index: number) {
-    const key = `${stepId}-${inputId}`;
+    const key = buildCaptureKey(stepId, inputId);
     setEditedCaptures((prev) => ({
       ...prev,
       [key]: (prev[key] ?? []).filter((_, itemIndex) => itemIndex !== index),
@@ -438,9 +453,9 @@ export default function PhotoUploadDialog({
     try {
       const merged: Record<string, Record<string, string>> = { ...runValues };
       for (const [key, captures] of Object.entries(editedCaptures)) {
-        const dashIdx = key.indexOf("-");
-        const stepId = key.slice(0, dashIdx);
-        const inputId = key.slice(dashIdx + 1);
+        const parsedKey = parseCaptureKey(key);
+        if (!parsedKey) continue;
+        const { stepId, inputId } = parsedKey;
         if (!merged[stepId]) merged[stepId] = {};
         merged[stepId][inputId] = JSON.stringify(captures);
       }
@@ -670,7 +685,7 @@ export default function PhotoUploadDialog({
 
             {/* Installer mode: show only missing steps with upload */}
             {!isPM && installerSteps.map(({ stepId, stepOrder, stepTitle, stepDescription, inputId, inputLabel, inputType }) => {
-              const key = `${stepId}-${inputId}`;
+              const key = buildCaptureKey(stepId, inputId);
               const currentCount = getCurrentCaptures(stepId, inputId).length;
               const isMissing = currentCount === 0;
               const isVideo = inputType === "video";

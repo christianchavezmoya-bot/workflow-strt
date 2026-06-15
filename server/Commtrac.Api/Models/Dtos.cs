@@ -1186,7 +1186,8 @@ public record SignatureTokenDto(
     DateTime ExpiresAtUtc,
     DateTime? UsedAtUtc,
     bool IsRevoked,
-    bool IsExpired
+    bool IsExpired,
+    bool EmailSent
 );
 
 public record CreateSignatureTokenRequest(
@@ -1323,7 +1324,8 @@ public record PendingSignatureDto(
     string JobNumber,
     string CustomerName,
     string CompletedAt,
-    string CompletedBy
+    string CompletedBy,
+    string SignatureStatus
 );
 
 /// <summary>

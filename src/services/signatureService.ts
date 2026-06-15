@@ -53,6 +53,29 @@ export const signatureService = {
     try {
       const requestPayload = await mediaStore.resolveUploadPayload(queuedPayload);
       const r = await api.post<SignatureEvent>("/signature-events", requestPayload, { params: { runId: resolvedRunId } });
+      const now = r.data.signedAtUtc ?? new Date().toISOString();
+      const cachedRun = await offlineStore.getRun(runId) ?? await offlineStore.getRun(resolvedRunId);
+      if (cachedRun) {
+        const updatedRun = {
+          ...cachedRun,
+          installerSignedAt: payload.signerRole === "Installer" ? now : cachedRun.installerSignedAt,
+          customerSignedAt: payload.signerRole === "Customer" ? now : cachedRun.customerSignedAt,
+          signatureStatus: payload.signerRole === "Customer"
+            ? (payload.reasonCode === "Declined" ? "Declined" : "Signed")
+            : "PendingCustomer",
+          updatedAt: now,
+          lastLocalSavedAt: now,
+          dirty: false,
+          localStatus: "Synced" as const,
+          syncError: undefined,
+        };
+        await offlineStore.saveRun(updatedRun);
+        window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+          detail: { assetId: updatedRun.assetId, runs: [updatedRun] },
+        }));
+      }
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
       return r.data;
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
@@ -92,6 +115,9 @@ export const signatureService = {
           lastLocalSavedAt: now,
         });
       }
+
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
 
       return {
         id: `offline-signature-${crypto.randomUUID()}`,

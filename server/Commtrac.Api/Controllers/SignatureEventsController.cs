@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,8 +13,21 @@ namespace Commtrac.Api.Controllers;
 public class SignatureEventsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly NotificationFeedService _feed;
+    private readonly SseHub _sse;
+    private readonly ProjectLifecycleService _projectLifecycle;
 
-    public SignatureEventsController(AppDbContext db) => _db = db;
+    public SignatureEventsController(
+        AppDbContext db,
+        NotificationFeedService feed,
+        SseHub sse,
+        ProjectLifecycleService projectLifecycle)
+    {
+        _db = db;
+        _feed = feed;
+        _sse = sse;
+        _projectLifecycle = projectLifecycle;
+    }
 
     // GET /api/signature-events?runId=xxx
     [HttpGet]
@@ -40,6 +54,8 @@ public class SignatureEventsController : ControllerBase
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == runId);
         if (run is null) return NotFound();
         if (!run.IsLocked) return BadRequest(new { message = "Run must be completed before signing." });
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        var project = asset is null ? null : await _db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
 
         var role = req.SignerRole?.Trim() ?? "";
         if (role != "Installer" && role != "Customer")
@@ -80,16 +96,131 @@ public class SignatureEventsController : ControllerBase
         {
             run.SignatureStatus   = "PendingCustomer";
             run.InstallerSignedAt = now;
+            if (asset is not null)
+            {
+                asset.Status = "Complete";
+                asset.UpdatedAt = now;
+            }
         }
         else // Customer
         {
             run.SignatureStatus  = req.ReasonCode == "Declined" ? "Declined" : "Signed";
             run.CustomerSignedAt = now;
+            if (asset is not null)
+            {
+                asset.Status = req.ReasonCode == "Declined" ? "Complete" : "Closed";
+                asset.UpdatedAt = now;
+            }
         }
 
         run.UpdatedAt = now;
         await _db.SaveChangesAsync();
+
+        if (asset is not null)
+        {
+            var actorUserId = User.FindFirst("sub")?.Value
+                ?? User.FindFirst("nameid")?.Value
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            var actorName = User.Identity?.Name
+                ?? User.FindFirst("email")?.Value
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+                ?? req.SignerName
+                ?? "Unknown user";
+
+            await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId, actorName);
+
+            if (role == "Installer")
+            {
+                await NotifyAssetEventAsync(
+                    asset,
+                    "asset-completed",
+                    "success",
+                    "Asset completed",
+                    $"{asset.AssetTag} field work was completed on job {{job}} and is now waiting for customer sign-off.",
+                    runId,
+                    actorUserId,
+                    actorName,
+                    project?.JobNumber);
+            }
+            else if (req.ReasonCode == "Declined")
+            {
+                await NotifyAssetEventAsync(
+                    asset,
+                    "asset-signature-declined",
+                    "warning",
+                    "Customer sign-off declined",
+                    $"{asset.AssetTag} customer sign-off was declined on job {{job}}.",
+                    runId,
+                    actorUserId,
+                    actorName,
+                    project?.JobNumber);
+            }
+            else
+            {
+                await NotifyAssetEventAsync(
+                    asset,
+                    "asset-closed",
+                    "info",
+                    "Asset closed",
+                    $"{asset.AssetTag} was customer-signed and closed on job {{job}}.",
+                    runId,
+                    actorUserId,
+                    actorName,
+                    project?.JobNumber);
+            }
+
+            if (!string.IsNullOrWhiteSpace(actorUserId))
+            {
+                await _sse.BroadcastExceptAsync(actorUserId, "assets:updated", new { projectId = asset.ProjectId });
+            }
+        }
+
         return CreatedAtAction(nameof(List), new { runId }, ToDto(entity));
+    }
+
+    private async Task NotifyAssetEventAsync(
+        ProjectAssetEntity asset,
+        string eventType,
+        string severity,
+        string title,
+        string template,
+        string runId,
+        string? actorUserId,
+        string actorName,
+        string? jobNumber)
+    {
+        var message = template.Replace("{job}", jobNumber ?? "unknown", StringComparison.Ordinal);
+
+        await _feed.NotifyRolesAsync(
+            eventType,
+            severity,
+            title,
+            message,
+            ["Admin", "Project Manager"],
+            asset.ProjectId,
+            asset.Id,
+            runId,
+            "project-asset",
+            asset.Id,
+            actorUserId,
+            actorName);
+
+        if (!string.IsNullOrWhiteSpace(asset.AssignedUserId))
+        {
+            await _feed.NotifyUsersAsync(
+                eventType,
+                severity,
+                title,
+                message,
+                [asset.AssignedUserId],
+                asset.ProjectId,
+                asset.Id,
+                runId,
+                "project-asset",
+                asset.Id,
+                actorUserId,
+                actorName);
+        }
     }
 
     private static SignatureEventDto ToDto(SignatureEventEntity e) => new(

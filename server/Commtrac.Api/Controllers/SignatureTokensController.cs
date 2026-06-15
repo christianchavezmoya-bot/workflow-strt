@@ -44,46 +44,66 @@ public class SignatureTokensController : ControllerBase
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == req.RunId);
         if (run is null) return NotFound(new { message = "Run not found." });
         if (!run.IsLocked) return BadRequest(new { message = "Run must be completed before requesting customer signature." });
+        if (run.SignatureStatus == "Signed" || run.SignatureStatus == "Declined" || run.SignatureStatus == "WaivedCustomer")
+            return BadRequest(new { message = "Run is already finalized and cannot request customer signature." });
+        if (run.SignatureStatus != "PendingCustomer")
+            return BadRequest(new { message = "Customer signature can only be requested after installer sign-off." });
+        if (string.IsNullOrWhiteSpace(req.RecipientEmail))
+            return BadRequest(new { message = "Recipient email is required." });
 
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown";
         var expiresHours = Math.Clamp(req.ExpiresInHours <= 0 ? 72 : req.ExpiresInHours, 1, 720);
         var now = DateTime.UtcNow;
+        var normalizedEmail = req.RecipientEmail.Trim();
+        var recipientName = req.RecipientName?.Trim();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        var assetLabel = asset?.AssetTag ?? asset?.AssetName ?? asset?.SerialNumber ?? "Asset";
+        var baseUrl = _config["Email:FrontendBaseUrl"]?.TrimEnd('/') ?? "http://localhost:5173";
 
         var token = new SignatureTokenEntity
         {
             RunId            = req.RunId,
             ContactId        = req.ContactId,
-            RecipientEmail   = req.RecipientEmail,
-            RecipientName    = req.RecipientName,
+            RecipientEmail   = normalizedEmail,
+            RecipientName    = recipientName,
             CreatedByUserId  = userId,
             CreatedAtUtc     = now,
             ExpiresAtUtc     = now.AddHours(expiresHours),
             IsRevoked        = false
         };
 
-        _db.SignatureTokens.Add(token);
-        await _db.SaveChangesAsync();
-
-        if (run.SignatureStatus == "Signed" || run.SignatureStatus == "Declined")
-            return BadRequest(new { message = "Run is already fully signed or declined." });
-
         // Auto-send the sign link to the recipient if an email address was provided
         if (!string.IsNullOrWhiteSpace(token.RecipientEmail))
         {
-            var baseUrl = _config["Email:FrontendBaseUrl"]?.TrimEnd('/') ?? "http://localhost:5173";
+            _db.SignatureTokens.Add(token);
+            await _db.SaveChangesAsync();
+
             var signLink = $"{baseUrl}/sign/{token.Id}";
-
-            // Resolve the asset name from the run's asset
-            var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
-            var assetName = asset?.AssetName ?? asset?.AssetTag ?? asset?.SerialNumber ?? "Asset";
-
-            _ = _email.SendSignatureLinkAsync(
-                token.RecipientEmail,
-                token.RecipientName ?? "",
-                signLink,
-                assetName,
-                token.ExpiresAtUtc,
-                req.CustomMessage);
+            try
+            {
+                await _email.SendSignatureLinkAsync(
+                    token.RecipientEmail,
+                    token.RecipientName ?? "",
+                    signLink,
+                    assetLabel,
+                    token.ExpiresAtUtc,
+                    req.CustomMessage);
+            }
+            catch (Exception ex)
+            {
+                _db.SignatureTokens.Remove(token);
+                await _db.SaveChangesAsync();
+                return StatusCode(StatusCodes.Status502BadGateway, new
+                {
+                    message = $"Signature link could not be emailed for asset {assetLabel}. Check email settings and try again.",
+                    detail = ex.Message
+                });
+            }
+        }
+        else
+        {
+            _db.SignatureTokens.Add(token);
+            await _db.SaveChangesAsync();
         }
 
         return CreatedAtAction(nameof(List), new { runId = req.RunId }, ToDto(token));
@@ -111,6 +131,7 @@ public class SignatureTokensController : ControllerBase
         t.ExpiresAtUtc,
         t.UsedAtUtc,
         t.IsRevoked,
-        t.ExpiresAtUtc < DateTime.UtcNow
+        t.ExpiresAtUtc < DateTime.UtcNow,
+        true
     );
 }
