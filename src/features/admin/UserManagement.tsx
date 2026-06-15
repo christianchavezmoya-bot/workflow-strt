@@ -741,6 +741,7 @@ export const UserManagement: React.FC = () => {
     } as Record<string, boolean>,
     domains: emptyDomains(),
   });
+  const isHydratingRolesConfig = useRef(false);
 
   useEffect(() => {
     dispatch(fetchUsers());
@@ -770,6 +771,7 @@ export const UserManagement: React.FC = () => {
       const roleNames = Object.keys(normalizedRoles);
 
       if (roleNames.length > 0) {
+        isHydratingRolesConfig.current = true;
         setRoles(roleNames);
         setRolesConfig(normalizedRoles);
       }
@@ -908,13 +910,20 @@ export const UserManagement: React.FC = () => {
       return;
     }
 
+    if (isHydratingRolesConfig.current) {
+      isHydratingRolesConfig.current = false;
+      return;
+    }
+
     // Save to database when roles are actually changed by user.
     // Dispatch the "roles-config-changed" event AFTER the PUT completes so that
     // usePermissions re-fetches from a DB that already has the new data. Dispatching
     // before the PUT (old order) caused a race: the GET triggered by the event would
     // finish after the PUT and overwrite the in-memory cache with stale data.
     roleConfigService.update({ roles: rolesConfig })
-      .then(() => {
+      .then(async () => {
+        roleConfigService.clearCache();
+        await loadRolesFromDatabase();
         console.log('✅ Roles saved to database');
         window.dispatchEvent(new CustomEvent("roles-config-changed"));
       })

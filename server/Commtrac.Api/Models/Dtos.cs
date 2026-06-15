@@ -687,10 +687,10 @@ public record CustomFieldDefinitionDto(
     bool IsActive
 );
 
-public record ProjectDomainPermissions(bool View, bool Edit, bool Approve, bool Delete);
-public record InstallationAssetsDomainPermissions(bool View, bool Edit, bool RunWorkflow, bool Delete);
-public record WorkInstructionsBuilderDomainPermissions(bool View, bool Build, bool Publish, bool Archive);
-public record DocumentsDomainPermissions(bool View, bool Upload, bool Delete);
+public record ProjectDomainPermissions(bool View, string ViewScope = "own", bool Edit = false, string EditScope = "none", bool Approve = false, bool Delete = false);
+public record InstallationAssetsDomainPermissions(bool View, string ViewScope = "own", bool Edit = false, string EditScope = "none", bool RunWorkflow = false, bool Delete = false);
+public record WorkInstructionsBuilderDomainPermissions(bool View, string ViewScope = "own", bool Build = false, bool Publish = false, bool Archive = false);
+public record DocumentsDomainPermissions(bool View, string ViewScope = "own", bool Upload = false, bool Delete = false);
 public record SettingsDomainPermissions(bool View, bool Edit);
 
 public record DomainPermissions(

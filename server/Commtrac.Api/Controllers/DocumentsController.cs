@@ -311,17 +311,17 @@ public class DocumentsController : ControllerBase
 
         if (DocumentManagers.Contains(role))
         {
-            return new DocumentsDomainPermissions(true, true, true);
+            return new DocumentsDomainPermissions(true, "all", true, true);
         }
 
-        return new DocumentsDomainPermissions(true, false, false);
+        return new DocumentsDomainPermissions(true, "all", false, false);
     }
 
     private static DocumentsDomainPermissions GetDefaultDocumentPermissions(string role)
     {
         return DocumentManagers.Contains(role)
-            ? new DocumentsDomainPermissions(true, true, true)
-            : new DocumentsDomainPermissions(true, false, false);
+            ? new DocumentsDomainPermissions(true, "all", true, true)
+            : new DocumentsDomainPermissions(true, "all", false, false);
     }
 
     private static DocumentDto ToDto(DocumentEntity doc, HttpRequest request)
