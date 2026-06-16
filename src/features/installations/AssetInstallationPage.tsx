@@ -65,6 +65,7 @@ import {
   Radio,
   RadioGroup,
   Select,
+  Skeleton,
   Stack,
   Switch,
   Tab,
@@ -915,6 +916,33 @@ const AssetInstallationPage = () => {
     return () => window.removeEventListener("sse:assets:updated", handler as EventListener);
   }, [refreshAssets, products, selectedProjectId]);
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { assetId, projectId, runs } = (e as CustomEvent<{
+        assetId?: string; projectId?: string; runs: AssetWorkflowRun[];
+      }>).detail ?? {};
+      if (!Array.isArray(runs) || runs.length === 0) return;
+      setRunsMap((prev) => {
+        const next = { ...prev };
+        if (assetId) {
+          next[assetId] = runs;
+        } else if (projectId) {
+          const byAsset: Record<string, AssetWorkflowRun[]> = {};
+          runs.forEach((r) => {
+            if (!byAsset[r.assetId]) byAsset[r.assetId] = [];
+            byAsset[r.assetId].push(r);
+          });
+          Object.entries(byAsset).forEach(([id, fresh]) => {
+            if (!prev[id] || prev[id].length <= 1) next[id] = fresh;
+          });
+        }
+        return next;
+      });
+    };
+    window.addEventListener("workflow-runs-cache-updated", handler as EventListener);
+    return () => window.removeEventListener("workflow-runs-cache-updated", handler as EventListener);
+  }, []);
+
   // Fix 6 — Background poll every 90s while page is visible (mobile only)
   useEffect(() => {
     if (!isNativePlatform) return;
@@ -967,6 +995,9 @@ const AssetInstallationPage = () => {
   }, [selectedAddConfig?.workflowTemplateId]);
 
   const isAdminUser = currentUser.role === "Admin";
+
+  // Phone-only: "mine" filters cards to assets assigned to this user; "all" shows everything.
+  const [mobileScope, setMobileScope] = useState<"mine" | "all">("all");
 
   // View is now table-filter driven on this page. Keep edit ownership rules separate.
   const manageableProjectIds = useMemo(() => {
@@ -1094,6 +1125,11 @@ const AssetInstallationPage = () => {
     }
     return rows;
   }, [visibleAssets, autoFilters, autoSort, assetAccessors]);
+
+  const mobileAssets = useMemo(() => {
+    if (!isNativePlatform || mobileScope === "all") return displayAssets;
+    return displayAssets.filter((a) => a.assignedUserId === currentUser.id);
+  }, [displayAssets, isNativePlatform, mobileScope, currentUser.id]);
 
   // Print scope computation (needs userMap / projectMap / configMap / runsMap)
   const printRows = useMemo((): PrintRow[] => {
@@ -3273,62 +3309,134 @@ const AssetInstallationPage = () => {
       )}
 
       {/* Filters */}
-      <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
-        <FormControl size="small" sx={{ flex: 1, minWidth: 150 }}>
-          <InputLabel shrink>Project</InputLabel>
-          <Select label="Project" value={productProjects.length > 0 ? selectedProjectId : ""} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
-            <MenuItem value="">All projects</MenuItem>
-            {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} - {p.customerName}</MenuItem>)}
-          </Select>
-        </FormControl>
-        <Tooltip title={statusFilter !== "All" ? "Reset status filter to use this" : ""}>
-          <span>
-            <Button
+      {isNativePlatform ? (
+        <Stack spacing={0.75}>
+          {/* Row 1: project picker + search */}
+          <Stack direction="row" spacing={1} alignItems="center">
+            <FormControl size="small" sx={{ flex: 1 }}>
+              <InputLabel shrink>Project</InputLabel>
+              <Select label="Project" value={productProjects.length > 0 ? selectedProjectId : ""} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
+                <MenuItem value="">All projects</MenuItem>
+                {productProjects.map((p) => (
+                  <MenuItem key={p.id} value={p.id}>
+                    {p.jobNumber}{p.customerName ? ` · ${p.customerName}` : ""}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <IconButton
               size="small"
-              variant={showNoWorkflow ? "contained" : "outlined"}
-              color={showNoWorkflow ? "warning" : "inherit"}
-              disabled={statusFilter !== "All"}
-              onClick={() => setShowNoWorkflow((v) => !v)}
-              sx={{ whiteSpace: "nowrap", height: 40 }}
+              onClick={() => { setAssetSearchQuery(""); setAssetSearchOpen(true); }}
+              sx={{ border: "1px solid", borderColor: search ? "primary.main" : "divider", borderRadius: 1, color: search ? "primary.main" : "text.secondary", p: 0.75, flexShrink: 0 }}
             >
-              No Workflow
-            </Button>
-          </span>
-        </Tooltip>
-        <FormControl size="small" sx={{ minWidth: 140 }}>
-          <InputLabel shrink>Status</InputLabel>
-          <Select
-            label="Status"
-            value={statusFilter}
-            disabled={showNoWorkflow}
-            onChange={(e) => setStatusFilter(e.target.value as ProjectAssetStatus | "All")}
-          >
-            <MenuItem value="All">All statuses</MenuItem>
-            <MenuItem value="NotStarted">Not Started</MenuItem>
-            <MenuItem value="InProgress">In Progress</MenuItem>
-            <MenuItem value="Paused">Paused</MenuItem>
-            <MenuItem value="Pending">Pending</MenuItem>
-            <MenuItem value="Complete">Complete</MenuItem>
-            <MenuItem value="Closed">Closed</MenuItem>
-            <MenuItem value="Issue">Issue</MenuItem>
-          </Select>
-        </FormControl>
-        <Tooltip title="Search by asset tag, serial number, or installer">
-          <IconButton
+              <SearchOutlined sx={{ fontSize: 20 }} />
+            </IconButton>
+          </Stack>
+          {/* Row 2: My/All scope toggle */}
+          <ToggleButtonGroup
+            value={mobileScope}
+            exclusive
             size="small"
-            onClick={() => { setAssetSearchQuery(""); setAssetSearchOpen(true); }}
-            sx={{
-              border: "1px solid",
-              borderColor: search ? "primary.main" : "divider",
-              borderRadius: 1,
-              color: search ? "primary.main" : "text.secondary",
-              p: 0.75,
-            }}
+            onChange={(_, v) => { if (v) setMobileScope(v as "mine" | "all"); }}
+            sx={{ alignSelf: "flex-start" }}
           >
-            <SearchOutlined sx={{ fontSize: 20 }} />
-          </IconButton>
-        </Tooltip>
-      </Stack>
+            <ToggleButton value="mine" sx={{ fontSize: 11, py: 0.4, px: 1.25 }}>My Assets</ToggleButton>
+            <ToggleButton value="all" sx={{ fontSize: 11, py: 0.4, px: 1.25 }}>All Assets</ToggleButton>
+          </ToggleButtonGroup>
+          {/* Row 3: status chips */}
+          <Box sx={{ overflowX: "auto", pb: 0.25, mx: -0.25 }}>
+            <Stack direction="row" spacing={0.6} sx={{ width: "max-content", px: 0.25 }}>
+              {([
+                { value: "All",        label: "All",         color: "default"  },
+                { value: "NotStarted", label: "Not Started", color: "default"  },
+                { value: "InProgress", label: "In Progress", color: "primary"  },
+                { value: "Paused",     label: "Paused",      color: "warning"  },
+                { value: "Pending",    label: "Pending",     color: "default"  },
+                { value: "Complete",   label: "Complete",    color: "success"  },
+                { value: "Closed",     label: "Closed",      color: "info"     },
+                { value: "Issue",      label: "Issue",       color: "error"    },
+              ] as const).map(({ value, label, color }) => (
+                <Chip
+                  key={value}
+                  label={label}
+                  size="small"
+                  color={statusFilter === value ? (color as "default" | "primary" | "success" | "error" | "warning" | "info") : "default"}
+                  variant={statusFilter === value ? "filled" : "outlined"}
+                  clickable
+                  onClick={() => { setStatusFilter(value as ProjectAssetStatus | "All"); setShowNoWorkflow(false); }}
+                  sx={{ fontSize: 11, height: 26 }}
+                />
+              ))}
+              <Chip
+                label="No Workflow"
+                size="small"
+                color={showNoWorkflow ? "warning" : "default"}
+                variant={showNoWorkflow ? "filled" : "outlined"}
+                clickable
+                onClick={() => { setShowNoWorkflow((v) => !v); if (!showNoWorkflow) setStatusFilter("All"); }}
+                sx={{ fontSize: 11, height: 26 }}
+              />
+            </Stack>
+          </Box>
+        </Stack>
+      ) : (
+        <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
+          <FormControl size="small" sx={{ flex: 1, minWidth: 150 }}>
+            <InputLabel shrink>Project</InputLabel>
+            <Select label="Project" value={productProjects.length > 0 ? selectedProjectId : ""} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
+              <MenuItem value="">All projects</MenuItem>
+              {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} - {p.customerName}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <Tooltip title={statusFilter !== "All" ? "Reset status filter to use this" : ""}>
+            <span>
+              <Button
+                size="small"
+                variant={showNoWorkflow ? "contained" : "outlined"}
+                color={showNoWorkflow ? "warning" : "inherit"}
+                disabled={statusFilter !== "All"}
+                onClick={() => setShowNoWorkflow((v) => !v)}
+                sx={{ whiteSpace: "nowrap", height: 40 }}
+              >
+                No Workflow
+              </Button>
+            </span>
+          </Tooltip>
+          <FormControl size="small" sx={{ minWidth: 140 }}>
+            <InputLabel shrink>Status</InputLabel>
+            <Select
+              label="Status"
+              value={statusFilter}
+              disabled={showNoWorkflow}
+              onChange={(e) => setStatusFilter(e.target.value as ProjectAssetStatus | "All")}
+            >
+              <MenuItem value="All">All statuses</MenuItem>
+              <MenuItem value="NotStarted">Not Started</MenuItem>
+              <MenuItem value="InProgress">In Progress</MenuItem>
+              <MenuItem value="Paused">Paused</MenuItem>
+              <MenuItem value="Pending">Pending</MenuItem>
+              <MenuItem value="Complete">Complete</MenuItem>
+              <MenuItem value="Closed">Closed</MenuItem>
+              <MenuItem value="Issue">Issue</MenuItem>
+            </Select>
+          </FormControl>
+          <Tooltip title="Search by asset tag, serial number, or installer">
+            <IconButton
+              size="small"
+              onClick={() => { setAssetSearchQuery(""); setAssetSearchOpen(true); }}
+              sx={{
+                border: "1px solid",
+                borderColor: search ? "primary.main" : "divider",
+                borderRadius: 1,
+                color: search ? "primary.main" : "text.secondary",
+                p: 0.75,
+              }}
+            >
+              <SearchOutlined sx={{ fontSize: 20 }} />
+            </IconButton>
+          </Tooltip>
+        </Stack>
+      )}
 
       {/* Bulk actions toolbar — visible when ≥1 asset is selected */}
       {selectedAssetIds.size > 0 && (
@@ -3529,7 +3637,7 @@ const AssetInstallationPage = () => {
       )}
 
       {/* Fix 3 — Pull-to-refresh tap target (mobile only) */}
-      {isNativePlatform && !loadingAssets && visibleAssets.length > 0 && (
+      {isNativePlatform && !loadingAssets && mobileAssets.length > 0 && (
         <Stack direction="row" justifyContent="center" alignItems="center" spacing={0.5}
           onClick={() => void refreshAssets()}
           sx={{ cursor: "pointer", py: 0.5 }}>
@@ -3549,10 +3657,30 @@ const AssetInstallationPage = () => {
 
       {/* Web keeps the original table workspace; native keeps the mobile card list. */}
       {loadingAssets ? (
-        <Stack alignItems="center" justifyContent="center" sx={{ p: 6 }}>
-          <CircularProgress size={32} />
-        </Stack>
-      ) : displayAssets.length === 0 ? (
+        isNativePlatform ? (
+          <Stack spacing={0.75}>
+            {[0, 1, 2, 3].map((i) => (
+              <Paper key={i} className="glass-card" sx={{ overflow: "hidden", borderLeft: "3px solid transparent" }}>
+                <Stack direction="row" alignItems="center" sx={{ px: 1.25, py: 1.25 }} spacing={1}>
+                  <Skeleton variant="circular" width={24} height={24} sx={{ flexShrink: 0 }} />
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Skeleton variant="text" width="55%" height={16} sx={{ mb: 0.5 }} />
+                    <Skeleton variant="text" width="80%" height={12} />
+                  </Box>
+                  <Stack alignItems="flex-end" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    <Skeleton variant="rounded" width={60} height={20} />
+                  </Stack>
+                  <Skeleton variant="rounded" width={72} height={28} sx={{ flexShrink: 0 }} />
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        ) : (
+          <Stack alignItems="center" justifyContent="center" sx={{ p: 6 }}>
+            <CircularProgress size={32} />
+          </Stack>
+        )
+      ) : mobileAssets.length === 0 ? (
         <Alert severity="info">
           {assets.length === 0
             ? archiveMode
@@ -3562,7 +3690,7 @@ const AssetInstallationPage = () => {
         </Alert>
       ) : isNativePlatform ? (
         <Stack spacing={0.75}>
-          {displayAssets.map((asset) => {
+          {mobileAssets.map((asset) => {
             const proj = projectMap.get(asset.projectId);
             const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
             const isExpanded = expandedAssetId === asset.id;
@@ -3674,6 +3802,12 @@ const AssetInstallationPage = () => {
                   overflow: "hidden",
                   borderLeft: "3px solid",
                   borderLeftColor,
+                  transition: "transform 0.18s ease-out, box-shadow 0.18s ease-out",
+                  "&:active": {
+                    transform: "scale(0.982)",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+                    transition: "transform 0.07s, box-shadow 0.07s",
+                  },
                 }}
               >
                 {/* Main card row */}
