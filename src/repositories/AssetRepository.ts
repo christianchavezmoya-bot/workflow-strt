@@ -7,6 +7,7 @@ import {
   entityReplaceAssetsByProduct,
   entityReplaceAssetsByProject,
   pendingAdd,
+  syncMetaSet,
 } from "../services/localDB";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
@@ -51,6 +52,7 @@ export const AssetRepository = {
           productId,
           res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
         );
+        await syncMetaSet("assets");
         window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { productId } }));
       })
       .catch(() => { window.dispatchEvent(new Event("repo:assets:fetch-failed")); });
@@ -76,6 +78,7 @@ export const AssetRepository = {
           projectId,
           res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
         );
+        await syncMetaSet("assets");
         window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { projectId } }));
       })
       .catch(() => { window.dispatchEvent(new Event("repo:assets:fetch-failed")); });

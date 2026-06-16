@@ -1,6 +1,6 @@
 import api from "../services/api";
 import type { Project } from "../types/project";
-import { entityGetAllProjects, entityPutProjects, reconcileProjects } from "../services/localDB";
+import { entityGetAllProjects, entityPutProjects, reconcileProjects, syncMetaSet } from "../services/localDB";
 import type { ProjectFilters, ProjectListResponse } from "../services/projectService";
 
 export type ProjectRepositoryUpdateDetail = {
@@ -58,6 +58,7 @@ export const ProjectRepository = {
         if (canReconcileProjects(filters)) {
           await reconcileProjects(items.map((p) => p.id));
         }
+        await syncMetaSet("projects");
         window.dispatchEvent(new CustomEvent<ProjectRepositoryUpdateDetail>("repo:projects:updated", {
           detail: { items, total, requestKey }
         }));

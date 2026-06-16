@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { Network } from "@capacitor/network";
+import { App } from "@capacitor/app";
 import api from "../services/api";
 import {
   entityGetAsset,
@@ -417,6 +418,26 @@ export function useSyncEngine(): SyncState {
     return () => {
       active = false;
       remove?.();
+    };
+  }, [flush]);
+
+  // iOS app foreground - appStateChange is more reliable than visibilitychange in WKWebView.
+  // Flushes pending writes when the app comes to the foreground on a native platform.
+  // Also dispatches "app-foregrounded" for the stale-pull hook (useStaleOnResume).
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let listenerHandle: { remove: () => void } | undefined;
+    App.addListener("appStateChange", ({ isActive }) => {
+      if (!isActive) return; // going to background - nothing to do here
+      if (navigator.onLine) void flush();
+      window.dispatchEvent(new CustomEvent("app-foregrounded", {
+        detail: { timestamp: Date.now() },
+      }));
+    }).then((handle) => {
+      listenerHandle = handle;
+    });
+    return () => {
+      listenerHandle?.remove();
     };
   }, [flush]);
 

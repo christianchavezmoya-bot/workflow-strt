@@ -1,6 +1,6 @@
 import api from "../services/api";
 import type { OpenIssueRecord } from "../services/assetWorkflowRunService";
-import { entityGetAllIssues, entityReplaceAllIssues } from "../services/localDB";
+import { entityGetAllIssues, entityReplaceAllIssues, syncMetaSet } from "../services/localDB";
 
 function toRecord(i: OpenIssueRecord) {
   return { id: i.issueId, assetId: i.assetId, projectId: i.projectId, data: i };
@@ -14,6 +14,7 @@ export const IssueRepository = {
     api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", { params: userId ? { userId } : undefined })
       .then(async (res) => {
         await entityReplaceAllIssues(res.data.map(toRecord));
+        await syncMetaSet("issues");
         window.dispatchEvent(new Event("repo:issues:updated"));
       })
       .catch(() => {});

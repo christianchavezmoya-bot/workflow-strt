@@ -266,7 +266,15 @@ export async function pendingMarkRetry(id: string, error: string): Promise<void>
     if (newRetries >= MAX_RETRIES) {
       await db.delete("pending_actions", id);
       window.dispatchEvent(new Event("sync-pending-changed"));
-      console.warn(`[sync] Action ${id} (${item.opType ?? item.method} ${item.url}) dropped after ${MAX_RETRIES} retries.`, item);
+      window.dispatchEvent(new CustomEvent("sync-action-dropped", {
+        detail: {
+          opType: item.opType ?? item.method,
+          entityType: item.entityType,
+          entityId: item.entityId,
+          lastError: item.lastError,
+          createdAt: item.createdAt,
+        },
+      }));
       return;
     }
     await db.put("pending_actions", {

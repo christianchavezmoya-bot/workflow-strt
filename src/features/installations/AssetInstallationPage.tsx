@@ -130,6 +130,8 @@ import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
 import InspectionImportDialog from "../projects/InspectionImportDialog";
+import { useStaleOnResume } from "../../hooks/useStaleOnResume";
+import { AssetRepository } from "../../repositories/AssetRepository";
 
 // ------------------------------------------------------------------
 // Column configuration
@@ -588,6 +590,16 @@ const AssetInstallationPage = () => {
     () => (productsState.items.length ? productsState.items : demoProducts),
     [productsState.items],
   );
+
+  // Trigger a background pull when asset data is more than 15 minutes old.
+  // Uses the stable useCallback identity of the pull function to avoid re-registration.
+  useStaleOnResume("assets", useCallback(() => {
+    if (selectedProjectId) {
+      AssetRepository.getByProject(selectedProjectId).catch(() => {});
+    } else {
+      products.forEach((p) => AssetRepository.getByProduct(p.id).catch(() => {}));
+    }
+  }, [selectedProjectId, products]));
 
   // Restore selected project from URL params (priority) or sessionStorage (fallback).
   useEffect(() => {

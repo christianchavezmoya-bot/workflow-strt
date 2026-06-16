@@ -90,7 +90,7 @@ interface WorkOrderRunnerProps {
   productName: string;
   /** Links this run to a specific project asset. Required for real run tracking. */
   projectAssetId?: string;
-  /** The WorkflowConfig id â€” used to call startRun() if no runId. */
+  /** The WorkflowConfig id â€" used to call startRun() if no runId. */
   workflowConfigId?: string;
   /** Provide to continue an existing run (skips startRun call). */
   existingRunId?: string;
@@ -98,23 +98,23 @@ interface WorkOrderRunnerProps {
   prefillValues?: Record<string, Record<string, string>>;
   /** Called after run is locked. */
   onComplete?: (capturedFeatureValues: Record<string, string>) => void;
-  /** Called when user pauses â€” receives progress, step titles, and any feature values captured so far. */
+  /** Called when user pauses â€" receives progress, step titles, and any feature values captured so far. */
   onPause?: (progress: { done: number; total: number; completedTitles: string[]; partialFeatureValues: Record<string, string> }) => void;
   /** Full name of the currently logged-in user, stored on each issue. */
   currentUserName?: string;
-  /** ID of the currently logged-in user â€” used for missing-media flag ownership. */
+  /** ID of the currently logged-in user â€" used for missing-media flag ownership. */
   currentUserId?: string;
   /** Asset tag shown in dashboard flags. */
   assetTag?: string;
   /** Job number shown in dashboard flags. */
   jobNumber?: string;
-  /** Product feature definitions â€” used to look up feature names for repeatFeatureId steps. */
+  /** Product feature definitions â€" used to look up feature names for repeatFeatureId steps. */
   productFeatures?: ProductFeatureDefinition[];
-  /** Feature selections from the workflow config â€” provides expected qty per feature. */
+  /** Feature selections from the workflow config â€" provides expected qty per feature. */
   featureSelections?: FeatureSelection[];
   /** Project team members for user-select inputs. Falls back to allUsers when empty. */
   teamMembers?: { id: string; fullName: string }[];
-  /** All active users â€” fallback when no team is assigned to the project. */
+  /** All active users â€" fallback when no team is assigned to the project. */
   allUsers?: { id: string; fullName: string }[];
 }
 
@@ -258,11 +258,11 @@ export default function WorkOrderRunner({
   // Right-click context menu anchor for the issues chip
   const [issueMenuAnchor, setIssueMenuAnchor] = useState<Element | null>(null);
 
-  // Repeatable steps â€” how many iterations per step, current iteration, picker input value
+  // Repeatable steps â€" how many iterations per step, current iteration, picker input value
   const [repeatCounts, setRepeatCounts] = useState<Record<string, number>>({});
   const [repeatIter, setRepeatIter] = useState<Record<string, number>>({});
   const [repeatPickerCount, setRepeatPickerCount] = useState(1);
-  // Feature-linked repeatable steps â€” qty modifications made by installer
+  // Feature-linked repeatable steps â€" qty modifications made by installer
   interface QtyModification { stepId: string; featureId: string; featureName: string; expectedQty: number; actualQty: number; reason: string; modifiedAt: string; }
   const [qtyModifications, setQtyModifications] = useState<Record<string, QtyModification>>({});
   const [modifyQtyOpen, setModifyQtyOpen] = useState(false);
@@ -277,7 +277,7 @@ export default function WorkOrderRunner({
   const [bomActual, setBomActual] = useState<BomActualItem[]>([]);
   const [unlistedConsumables, setUnlistedConsumables] = useState<UnlistedConsumable[]>([]);
 
-  // Consumable features from the product library â€” drives the end-of-run survey
+  // Consumable features from the product library â€" drives the end-of-run survey
   const [libConsumableFeatures, setLibConsumableFeatures] = useState<Feature[]>([]);
   useEffect(() => {
     if (!open || !productId) return;
@@ -295,7 +295,7 @@ export default function WorkOrderRunner({
   const [startError, setStartError] = useState<string | null>(null);
   const [blockingError, setBlockingError] = useState<string | null>(null);
 
-  // â”€â”€ Installer sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Installer sign-off â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const [instPadData,   setInstPadData]   = useState<string | null>(null);
   const [instName,      setInstName]      = useState("");
   const [instOutcome,   setInstOutcome]   = useState<"Completed" | "Conditional">("Completed");
@@ -305,7 +305,7 @@ export default function WorkOrderRunner({
   // stable ref so canvas onChange doesn't re-add listeners on every render
   const instPadOnChange = useRef((d: string | null) => setInstPadData(d));
 
-  // â”€â”€ Customer sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Customer sign-off â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   type CustSignMode = "options" | "sign-now" | "send-link";
   const [custMode,      setCustMode]      = useState<CustSignMode>("options");
   const [custPadData,   setCustPadData]   = useState<string | null>(null);
@@ -336,7 +336,7 @@ export default function WorkOrderRunner({
 
   const isRealRun = Boolean(projectAssetId && workflowConfigId);
 
-  // Stable callback ref â€” avoids stale closures inside the hook
+  // Stable callback ref â€" avoids stale closures inside the hook
   const syncRunTimeStateRef = useCallback((run: AssetWorkflowRun) => {
     setActiveRun(run);
     syncRunTimeState(run);
@@ -401,7 +401,7 @@ export default function WorkOrderRunner({
     if (!open) reset();
   }, [open, existingRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Tick every second while the dialog is open â€” drives productiveSecondsLive
+  // Tick every second while the dialog is open â€" drives productiveSecondsLive
   // and downtimeSecondsLive in real time. Running unconditionally (not gated
   // on stage or trackingCategory) means the clock never stops due to a stage
   // transition and always restarts cleanly when tracking switches categories.
@@ -481,11 +481,11 @@ export default function WorkOrderRunner({
     try {
       const updated = await queueOrSend(action, reason);
       if (updated) {
-        // Online â€” sync from authoritative server response
+        // Online â€" sync from authoritative server response
         setActiveRun(updated);
         syncRunTimeState(updated);
       } else {
-        // Queued (offline) â€” apply optimistic UI state immediately
+        // Queued (offline) â€" apply optimistic UI state immediately
         const nowIso = new Date().toISOString();
         if (action === "StartDowntime") {
           setProductiveSecondsBase(productiveSecondsLive);
@@ -570,20 +570,30 @@ export default function WorkOrderRunner({
     autosaveProgress();
   }
 
-  function handleClose() {
+  async function handleClose() {
+    // When closing during an active run (backdrop tap, Escape key, or most close buttons),
+    // save the current step state before unmounting. autosaveProgress is offline-safe -
+    // it queues to IndexedDB if the network is unavailable.
+    // Only autosave during "running" stage - other stages (setup, summary, sign flows)
+    // have their own save paths or nothing to save.
+    if (activeRunId && isRealRun && stage === "running") {
+      await autosaveProgress();
+    }
     onClose();
   }
 
   async function handlePause() {
     if (activeRunId && isRealRun) {
-      try {
-        // Call directly (not via the offline queue) â€” pause is a fire-once
-        // action tied to closing the dialog; queuing it causes a stale "sync
-        // pending" chip when the user reopens the run.
-        const updated = await assetWorkflowRunService.trackTimeEntry(activeRunId, "StopAll");
-        if (updated) syncRunTimeState(updated);
-      } catch {
-        // non-fatal â€” idle state will be restored on next open
+      // Route StopAll through the offline queue - identical to StartDowntime/ResumeProductive.
+      // Online: sends immediately, syncs time state from server response.
+      // Offline: queues for replay with the original timestamp; optimistically stops the clock.
+      const updated = await queueOrSend("StopAll");
+      if (updated) {
+        syncRunTimeState(updated);
+      } else {
+        // Queued (offline path) - stop the clock in the UI immediately
+        setTrackingCategory(null);
+        setTrackingStartedAt(null);
       }
     }
     await autosaveProgress(undefined, undefined, "Paused");
@@ -635,7 +645,7 @@ export default function WorkOrderRunner({
         try {
           const resumed = await assetWorkflowRunService.trackTimeEntry(run.id, "ResumeProductive", "Continued");
           if (resumed) syncRunTimeState(resumed);
-        } catch { /* non-fatal â€” tracking will still work manually */ }
+        } catch { /* non-fatal â€" tracking will still work manually */ }
       }
 
       // Restore step values and issues from saved progress
@@ -846,7 +856,7 @@ export default function WorkOrderRunner({
       }
     }
 
-    // Navigation marker â€” always saved so exact step + history can be restored on resume.
+    // Navigation marker â€" always saved so exact step + history can be restored on resume.
     // When navigating forward we pass the NEXT step explicitly (state updates are async,
     // so reading currentStepId/history from closure would give the previous step).
     const navEntry: StepCapture = {
@@ -883,7 +893,7 @@ export default function WorkOrderRunner({
         status,
       );
     } catch {
-      // silent â€” not critical
+      // silent â€" not critical
     }
   }
 
@@ -955,12 +965,12 @@ export default function WorkOrderRunner({
       }
 
       if (activeRunId) {
-        // Flush any queued time-tracking actions before locking â€” run rejects changes once locked.
+        // Flush any queued time-tracking actions before locking â€" run rejects changes once locked.
         await flushTimeQueue();
         const lockedRun = await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName, bomJson);
         transitionToLockedRunStage(lockedRun);
 
-        // Check if any photo/video steps exist but have no captures â€” flag for PM + installer
+        // Check if any photo/video steps exist but have no captures â€" flag for PM + installer
         function countCaptured(stepId: string, inputId: string): number {
           try {
             const arr = JSON.parse(values[stepId]?.[inputId] ?? "[]");
@@ -1001,7 +1011,7 @@ export default function WorkOrderRunner({
             totalCaptured,
           };
           const existing = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
-          // Deduplicate by runId â€” remove any prior flag for this run then push new one
+          // Deduplicate by runId â€" remove any prior flag for this run then push new one
           const deduped = existing.filter((e: { runId: string }) => e.runId !== activeRunId);
           localStorage.setItem("pm_missing_media_flags", JSON.stringify([...deduped, flag]));
           window.dispatchEvent(new Event("missing-media-flags-changed"));
@@ -1107,7 +1117,7 @@ export default function WorkOrderRunner({
     if (!activeRunId) { handleClose(); return; }
     try {
       await assetWorkflowRunService.waiveCustomerSignature(activeRunId);
-    } catch { /* non-critical â€” close anyway */ }
+    } catch { /* non-critical â€" close anyway */ }
     handleClose();
   }
 
@@ -1417,7 +1427,7 @@ export default function WorkOrderRunner({
     const isLast = !hasDecisions && !currentStep.nextStepId;
     const blockingCount = issues.filter((i) => i.isBlocking && !i.resolved).length;
 
-    // Feature-linked repeatable step â€” derived from inputs or capture fields with featureId
+    // Feature-linked repeatable step â€" derived from inputs or capture fields with featureId
     const derivedFeatureLink = getFeatureLinkContext(currentStep);
     const linkedFeature = derivedFeatureLink?.feature ?? null;
     const linkedFeatureSel = derivedFeatureLink?.sel ?? null;
@@ -1499,7 +1509,7 @@ export default function WorkOrderRunner({
           <LinearProgress variant="determinate" value={progress} sx={{ mt: 1, borderRadius: 1 }} />
 {isRealRun && activeRunId && (
             <Stack spacing={1} sx={{ mt: 1.25 }}>
-              {/* Time tracking bar â€” colour-coded, always visible */}
+              {/* Time tracking bar â€" colour-coded, always visible */}
               <Box sx={{
                 display: "flex", alignItems: "center", gap: 1.5,
                 px: 1.5, py: 0.75, borderRadius: 1.5,
@@ -1561,7 +1571,7 @@ export default function WorkOrderRunner({
                   />
                 ) : null}
               </Stack>
-              {/* Controls row â€” single toggle button */}
+              {/* Controls row â€" single toggle button */}
               <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap>
                 <Button
                   size="small"
@@ -1572,7 +1582,7 @@ export default function WorkOrderRunner({
                 >
                   Edit Times
                 </Button>
-                {/* Single toggle: downtime â†” productive */}
+                {/* Single toggle: downtime â†" productive */}
                 {trackingCategory === "downtime" ? (
                   <Button
                     size="small"
@@ -1657,7 +1667,7 @@ export default function WorkOrderRunner({
         <DialogContent>
           <Stack spacing={2.5} sx={{ mt: 1 }}>
 
-            {/* Feature-linked repeatable step â€” qty confirmation panel */}
+            {/* Feature-linked repeatable step â€" qty confirmation panel */}
             {needsConfirmation && (
               <Paper variant="outlined" sx={{ p: 2, borderColor: "primary.light" }}>
                 <Stack spacing={1.5}>
@@ -1712,7 +1722,7 @@ export default function WorkOrderRunner({
               </Paper>
             )}
 
-            {/* Legacy repeatable step â€” count picker */}
+            {/* Legacy repeatable step â€" count picker */}
             {needsCountPicker && (
               <Paper variant="outlined" sx={{ p: 2, borderColor: "primary.light" }}>
                 <Stack spacing={1.5}>
@@ -1747,7 +1757,7 @@ export default function WorkOrderRunner({
               </Paper>
             )}
 
-            {/* Repeatable step â€” iteration header */}
+            {/* Repeatable step â€" iteration header */}
             {(isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0 && (
               <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "primary.50", borderColor: "primary.light" }}>
                 <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
@@ -1768,7 +1778,7 @@ export default function WorkOrderRunner({
               </Paper>
             )}
 
-            {/* Step content â€” hidden until count is confirmed for repeatable steps */}
+            {/* Step content â€" hidden until count is confirmed for repeatable steps */}
             {!needsConfirmation && !needsCountPicker && (
               <>
                 <Box>
@@ -1828,7 +1838,7 @@ export default function WorkOrderRunner({
                   </Stack>
                 )}
 
-                {/* Capture fields â€” structured data for the as-built document */}
+                {/* Capture fields â€" structured data for the as-built document */}
                 {hasCaptureFields && (
                   <Stack spacing={1}>
                     <Stack direction="row" alignItems="center" spacing={0.75}>
@@ -2107,7 +2117,7 @@ export default function WorkOrderRunner({
               </Button>
             </Tooltip>
             <Tooltip title="Close without saving current step inputs">
-              <Button size="small" color="inherit" onClick={handleClose}>
+              <Button size="small" color="inherit" onClick={onClose}>
                 Cancel
               </Button>
             </Tooltip>
@@ -2483,7 +2493,7 @@ export default function WorkOrderRunner({
     );
   }
 
-  // â”€â”€ Stage: BOM confirmation (inventory items only â€” serial number capture) â”€â”€
+  // â"€â"€ Stage: BOM confirmation (inventory items only â€" serial number capture) â"€â"€
   function renderBom() {
     // Only show inventory items here; consumables handled in the next stage
     const inventoryItems = (workflow.bomItems ?? []).filter(i => i.isInventory);
@@ -2587,7 +2597,7 @@ export default function WorkOrderRunner({
     );
   }
 
-  // â”€â”€ Stage: Consumables confirm / adjust â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Stage: Consumables confirm / adjust â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   function renderConsumables() {
     const consumableItems = (workflow.bomItems ?? []).filter(i => !i.isInventory);
     const hasInventory = (workflow.bomItems ?? []).some(i => i.isInventory);
@@ -2659,7 +2669,7 @@ export default function WorkOrderRunner({
                       label={<Typography variant="caption">N/A</Typography>}
                       sx={{ m: 0 }}
                     />
-                    {/* Qty field â€” hidden when N/A */}
+                    {/* Qty field â€" hidden when N/A */}
                     {!actual.isNA && (
                       <Stack direction="row" spacing={0.5} alignItems="center">
                         <TextField
@@ -2779,7 +2789,7 @@ export default function WorkOrderRunner({
     );
   }
 
-  // â”€â”€ Stage: installer sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Stage: installer sign-off â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   function renderInstallerSign() {
     return (
       <>
@@ -2829,7 +2839,7 @@ export default function WorkOrderRunner({
     );
   }
 
-  // â”€â”€ Stage: customer sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Stage: customer sign-off â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   function renderCustomerSign() {
     return (
       <>
@@ -2975,7 +2985,7 @@ export default function WorkOrderRunner({
         {stage === "consumables"    && renderConsumables()}
         {stage === "installer-sign" && renderInstallerSign()}
         {stage === "customer-sign"  && renderCustomerSign()}
-        {/* â”€â”€ Persistent offline / sync bar â”€â”€ */}
+        {/* â"€â"€ Persistent offline / sync bar â"€â"€ */}
         {isRealRun && (!isOnline || pendingCount > 0 || syncing) && (
           <Box sx={{
             px: 2, py: 0.75,
@@ -3022,7 +3032,7 @@ export default function WorkOrderRunner({
         />
       )}
 
-      {/* Modify qty dialog â€” for feature-linked repeatable steps */}
+      {/* Modify qty dialog â€" for feature-linked repeatable steps */}
       <Dialog open={modifyQtyOpen} onClose={() => setModifyQtyOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Modify installed quantity</DialogTitle>
         <DialogContent>

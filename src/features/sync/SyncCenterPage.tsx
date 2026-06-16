@@ -82,6 +82,13 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   const { status, pendingCount, conflictCount, lastSyncAt, syncing, triggerSync, resolveConflictKeep, resolveConflictDiscard } = useSyncEngine();
   const [queue, setQueue]         = useState<PendingAction[]>([]);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [droppedActions, setDroppedActions] = useState<Array<{
+    opType: string;
+    entityType: string;
+    entityId: string;
+    lastError?: string;
+    createdAt: string;
+  }>>([]);
 
   const loadQueue = async () => setQueue(await pendingGetAll());
 
@@ -98,6 +105,18 @@ export default function SyncCenterPage({ open, onClose }: Props) {
       window.removeEventListener("sync-pending-changed", h);
       window.removeEventListener("sync-conflict-detected", h);
     };
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as {
+        opType: string; entityType: string; entityId: string;
+        lastError?: string; createdAt: string;
+      };
+      setDroppedActions((prev) => [...prev, detail]);
+    };
+    window.addEventListener("sync-action-dropped", handler);
+    return () => window.removeEventListener("sync-action-dropped", handler);
   }, []);
 
   const handleClearFailed = async () => {
@@ -152,6 +171,32 @@ export default function SyncCenterPage({ open, onClose }: Props) {
           </Stack>
 
           <Divider sx={{ mb: 2 }} />
+
+          {/* Dropped actions alert */}
+          {droppedActions.length > 0 && (
+            <Alert
+              severity="error"
+              sx={{ mb: 2, fontSize: "0.78rem" }}
+              action={
+                <Button
+                  size="small"
+                  color="error"
+                  onClick={() => setDroppedActions([])}
+                >
+                  Dismiss
+                </Button>
+              }
+            >
+              <Typography variant="body2" fontWeight={600} gutterBottom>
+                {droppedActions.length} change{droppedActions.length !== 1 ? "s" : ""} could not be saved
+              </Typography>
+              {droppedActions.map((d, i) => (
+                <Typography key={i} variant="caption" display="block">
+                  {d.opType} · {d.entityType} · {new Date(d.createdAt).toLocaleTimeString()} · {d.lastError ?? "server rejected"}
+                </Typography>
+              ))}
+            </Alert>
+          )}
 
           {/* Action buttons */}
           <Stack direction="row" spacing={1} mb={3} flexWrap="wrap" useFlexGap>
