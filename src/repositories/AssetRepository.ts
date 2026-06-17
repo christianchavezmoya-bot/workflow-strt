@@ -16,6 +16,7 @@ function normalizeStatus(raw: unknown): ProjectAssetStatus {
   if (value === "paused") return "Paused";
   if (value === "pending") return "Pending";
   if (value === "complete" || value === "completed" || value === "done") return "Complete";
+  if (value === "closed") return "Closed";
   if (value === "issue" || value === "issues" || value === "missing") return "Issue";
   return "NotStarted";
 }

@@ -124,6 +124,24 @@ function toOfflineRun(run: AssetWorkflowRun, projectId: string, overrides: Parti
 
 async function cacheServerRun(run: AssetWorkflowRun): Promise<AssetWorkflowRun> {
   const projectId = await resolveProjectId(run.assetId, run.id);
+  const existing = await offlineStore.getRun(run.id);
+  if (existing?.dirty) {
+    // Local data is newer (pending sync) — merge server metadata but keep local payload intact
+    await offlineStore.saveRun({
+      ...toOfflineRun(run, projectId),
+      stepResultsJson: existing.stepResultsJson,
+      issuesJson: existing.issuesJson,
+      status: existing.status,
+      timeTrackingJson: existing.timeTrackingJson,
+      productiveSeconds: existing.productiveSeconds,
+      downtimeSeconds: existing.downtimeSeconds,
+      dirty: true,
+      localStatus: existing.localStatus,
+      syncError: existing.syncError,
+      lastLocalSavedAt: existing.lastLocalSavedAt,
+    });
+    return run;
+  }
   await offlineStore.saveRun(toOfflineRun(run, projectId));
   return run;
 }

@@ -91,6 +91,7 @@ async function hashPin(pin: string): Promise<string> {
  */
 export async function getLaunchAuthModeAsync(): Promise<BiometricCheckResult> {
   if (!isMobileNativePlatform()) return "not-native";
+  if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return "not-native";
 
   const token = secureGet("auth_token");
   if (!token) return "no-session";

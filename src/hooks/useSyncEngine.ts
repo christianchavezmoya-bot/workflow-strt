@@ -221,7 +221,11 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
   }
 
   if (action.entityType === "workflow-run" && responseData && typeof responseData === "object") {
-    await markRunSyncedFromServer(responseData as AssetWorkflowRun, action.entityId);
+    const syncedRun = responseData as AssetWorkflowRun;
+    await markRunSyncedFromServer(syncedRun, action.entityId);
+    window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+      detail: { assetId: syncedRun.assetId, runs: [syncedRun] },
+    }));
     return;
   }
 
