@@ -11,7 +11,6 @@ import StarOutlinedIcon from "@mui/icons-material/StarOutlined";
 import StarBorderOutlinedIcon from "@mui/icons-material/StarBorderOutlined";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Capacitor } from "@capacitor/core";
 import { useAuth } from "../../hooks/useAuth";
 import { useNotificationInbox } from "../../contexts/NotificationInboxContext";
 import { useComplexView } from "../../contexts/ComplexViewContext";
@@ -24,6 +23,7 @@ import { brandSettingsService } from "../../services/brandSettingsService";
 import { secureClearAuth } from "../../services/secureStorage";
 import strataLogo from "../../assets/strata_transparent.png";
 import SyncStatusBadge from "../ui/SyncStatusBadge";
+import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 
 function getRolesFromCache(): string[] {
   try {
@@ -97,7 +97,8 @@ const Topbar = () => {
   const { isFavorited, getFavorite, add, remove } = useFavoritesContext();
   const products = useAppSelector((s) => s.products.items);
   const projects = useAppSelector((s) => s.projects.items);
-  const isNativePlatform = Capacitor.isNativePlatform();
+  const isNativeMobile = isMobileNativePlatform();
+  const isDesktopLike = isDesktopLikePlatform();
 
   const [appName, setAppName] = useState("Field Operations");
   const [qbEnabled, setQbEnabled] = useState(false);
@@ -378,7 +379,7 @@ const Topbar = () => {
   return (
     <Box className="topbar">
       <Stack direction="row" spacing={2} alignItems="center">
-        {isNativePlatform ? (
+        {isNativeMobile ? (
           <Box
             component="img"
             src={strataLogo}
@@ -417,9 +418,9 @@ const Topbar = () => {
           </>
         )}
       </Stack>
-      <Stack direction="row" spacing={isNativePlatform ? 0.5 : 2} alignItems="center">
-        {isNativePlatform && <SyncStatusBadge />}
-        {!isNativePlatform && qbEnabled && (() => {
+      <Stack direction="row" spacing={isNativeMobile ? 0.5 : 2} alignItems="center">
+        <SyncStatusBadge />
+        {isDesktopLike && qbEnabled && (() => {
           const provider = qbHost.includes("quickbase") ? "Quickbase"
             : qbHost.includes("salesforce") ? "Salesforce"
             : qbHost ? ((() => { try { return new URL(`https://${qbHost}`).hostname.split(".").slice(-2, -1)[0] ?? "API"; } catch { return "API"; } })())
@@ -431,7 +432,7 @@ const Topbar = () => {
             </Box>
           );
         })()}
-        {!isNativePlatform && isAdminUser && (
+        {isDesktopLike && isAdminUser && (
           <>
             <Chip
               size="small"
@@ -494,7 +495,7 @@ const Topbar = () => {
             </Popover>
           </>
         )}
-        {!isNativePlatform && (
+        {isDesktopLike && (
           <Tooltip title={alreadyFavorited ? "Remove from Favorites" : "Add to Favorites"}>
             <IconButton color="inherit" onClick={handleStarClick}>
               {alreadyFavorited
@@ -510,7 +511,7 @@ const Topbar = () => {
         </Tooltip>
 
         {/* Add-favorite popover */}
-        {!isNativePlatform && (
+        {isDesktopLike && (
           <Popover
             open={Boolean(starAnchor)}
             anchorEl={starAnchor}

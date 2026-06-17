@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useRef, useState } from "react";
-import { Capacitor } from "@capacitor/core";
 import type { ReactNode } from "react";
+import { isMobileNativePlatform } from "../utils/platform";
 
 interface ComplexViewCtx {
   complexViewActive: boolean;
@@ -22,7 +22,7 @@ export function ComplexViewProvider({ children }: { children: ReactNode }) {
   const lastTap = useRef(0);
 
   const recordLogoTap = useCallback((role: string) => {
-    if (!Capacitor.isNativePlatform()) return;
+    if (!isMobileNativePlatform()) return;
     if (!ELIGIBLE_ROLES.has(role)) return;
 
     const now = Date.now();

@@ -32,9 +32,9 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
-import { Capacitor } from "@capacitor/core";
 import { settingsService } from "../../services/settingsService";
 import api from "../../services/api";
+import { isMobileNativePlatform } from "../../utils/platform";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -269,7 +269,7 @@ export default function PhotoUploadDialog({
   const [editedCaptures, setEditedCaptures] = useState<Record<string, string[]>>({});
   const photoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const videoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  const isNativePlatform = Capacitor.isNativePlatform();
+  const isNativePlatform = isMobileNativePlatform();
   const isWebBrowser = !isNativePlatform;
   const isPM = mode === "pm";
 

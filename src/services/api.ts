@@ -1,13 +1,13 @@
 import axios from "axios";
-import { Capacitor } from "@capacitor/core";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
+import { isMobileNativePlatform } from "../utils/platform";
 
 export const API_BASE_URL: string = getApiBaseUrl();
 
 if (
-  Capacitor.isNativePlatform() &&
+  isMobileNativePlatform() &&
   (API_BASE_URL.includes("localhost") || API_BASE_URL.includes("127.0.0.1"))
 ) {
   console.warn(

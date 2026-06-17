@@ -59,6 +59,7 @@ import { brandSettingsService } from "../../services/brandSettingsService";
 import * as XLSX from "xlsx";
 import PasswordField from "../../components/ui/PasswordField";
 import { secureGet, secureRemove } from "../../services/secureStorage";
+import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import RecoveryCenter from "./RecoveryCenter";
 
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
@@ -752,12 +753,24 @@ const Settings = () => {
   }
 
   function exportFeaturesPDF() {
-    const win = window.open("", "_blank");
-    if (!win) return;
-    const rows = features.map(f => `<tr><td>${f.name}</td><td>${f.description??""}</td><td>${f.valueType}</td><td>${f.brand??""}</td><td>${f.supplier??""}</td><td>${f.alternativePartNumber??""}</td><td>${f.manufacturerPartNumber??""}</td><td>${f.unitPrice??""}</td></tr>`).join("");
-    win.document.write(`<html><head><title>Feature Library</title><style>table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px;font-size:12px}th{background:#f5f5f5}</style></head><body><h2>Feature Library</h2><table><thead><tr><th>Name/Part#</th><th>Description</th><th>Type</th><th>Brand</th><th>Supplier</th><th>Business Part#</th><th>Mfr Part#</th><th>Unit Price</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
-    win.document.close();
-    win.print();
+    const rows = features.map((f) => `
+      <tr>
+        <td>${escapeHtml(f.name)}</td>
+        <td>${escapeHtml(f.description ?? "")}</td>
+        <td>${escapeHtml(f.valueType)}</td>
+        <td>${escapeHtml(f.brand ?? "")}</td>
+        <td>${escapeHtml(f.supplier ?? "")}</td>
+        <td>${escapeHtml(f.alternativePartNumber ?? "")}</td>
+        <td>${escapeHtml(f.manufacturerPartNumber ?? "")}</td>
+        <td>${escapeHtml(f.unitPrice ?? "")}</td>
+      </tr>
+    `).join("");
+    if (!openPrintWindow(
+      `<html><head><title>Feature Library</title><style>table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px;font-size:12px}th{background:#f5f5f5}</style></head><body><h2>Feature Library</h2><table><thead><tr><th>Name/Part#</th><th>Description</th><th>Type</th><th>Brand</th><th>Supplier</th><th>Business Part#</th><th>Mfr Part#</th><th>Unit Price</th></tr></thead><tbody>${rows}</tbody></table></body></html>`,
+      true
+    )) {
+      console.warn("[Settings] Print popup was blocked -- allow popups for this site to print.");
+    }
   }
 
   function downloadFeatureTemplate() {
@@ -1371,13 +1384,7 @@ const Settings = () => {
     }
   };
 
-  const escapeHtml = (str: string) =>
-    str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
   const handlePrintFields = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
     // Sort fields alphabetically (same as UI)
     const sortedFields = [...fieldDefinitions].sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
@@ -1433,8 +1440,9 @@ const Settings = () => {
       </html>
     `;
 
-    printWindow.document.write(tableHTML);
-    printWindow.document.close();
+    if (!openPrintWindow(tableHTML)) {
+      console.warn("[Settings] Print popup was blocked -- allow popups for this site to print.");
+    }
   };
 
   const handleDownloadCSV = () => {

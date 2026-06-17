@@ -16,6 +16,7 @@
 
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { openObjectUrl } from "./printWindow";
 
 // ─── Colour palette (shared with generateProjectReport) ──────────────────────
 const NAVY:       [number, number, number] = [26,  39,  68];
@@ -305,15 +306,10 @@ export async function generateAssetListReport(opts: AssetListReportOptions): Pro
     doc.autoPrint();
     const blob = doc.output("blob");
     const url = URL.createObjectURL(blob);
-    const win = window.open(url, "_blank");
-    if (win) {
-      win.addEventListener("load", () => {
-        setTimeout(() => {
-          win.focus();
-          win.print();
-          URL.revokeObjectURL(url);
-        }, 400);
-      });
+    const opened = openObjectUrl(url, { autoPrint: true });
+    if (!opened) {
+      URL.revokeObjectURL(url);
+      doc.save(outFilename);
     }
   } else {
     doc.save(outFilename);

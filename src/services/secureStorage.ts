@@ -16,7 +16,7 @@
  *   initSecureStorage()     → must be awaited once before the app renders
  */
 
-import { Capacitor } from "@capacitor/core";
+import { isMobileNativePlatform } from "../utils/platform";
 
 type SecureStoragePluginHandle = {
   plugin: {
@@ -45,7 +45,7 @@ let _initPromise: Promise<void> | null = null;
 
 // Lazy-load the plugin so it doesn't break on web where the native layer is absent
 async function getPlugin(): Promise<SecureStoragePluginHandle | null> {
-  if (!Capacitor.isNativePlatform()) return null;
+  if (!isMobileNativePlatform()) return null;
   try {
     // Add timeout to plugin loading
     const pluginPromise = import("capacitor-secure-storage-plugin");

@@ -18,6 +18,7 @@ import type { ProjectAsset } from "../types/projectAsset";
 import type { WorkflowStep } from "../types/workflow";
 import type { SignatureEvent } from "../types/signature";
 import { getMissingWorkflowItems } from "./workflowCompleteness";
+import { openObjectUrl } from "./printWindow";
 
 // â”€â”€â”€ Colour palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const NAVY: [number, number, number]       = [26,  39,  68];   // header band / step card header
@@ -973,9 +974,11 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   const runNum   = run.runNumber ?? 1;
   const fileName = `installation-record_${safeName}_run${runNum}.pdf`;
   if (outputMode === "open") {
-    const blobUrl = doc.output("bloburl");
-    const opened = window.open(blobUrl, "_blank", "noopener,noreferrer");
+    const blob = doc.output("blob");
+    const blobUrl = URL.createObjectURL(blob);
+    const opened = openObjectUrl(blobUrl);
     if (!opened) {
+      URL.revokeObjectURL(blobUrl);
       doc.save(fileName);
     }
     return;

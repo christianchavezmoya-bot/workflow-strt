@@ -11,7 +11,6 @@ import {
 } from "@mui/icons-material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Capacitor } from "@capacitor/core";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -48,6 +47,8 @@ import type { Workflow } from "../../types/workflow";
 import type { AssetIssue } from "../../types/projectAsset";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
+import { isMobileNativePlatform } from "../../utils/platform";
+import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -173,6 +174,7 @@ function GaugeCircle({ value, size = 80, color = "primary.main" }: { value: numb
 const WINDOW_OPTIONS = [30, 60, 90, 180];
 
 const ALL_DASHBOARDS_VALUE = "__all__";
+const DASHBOARD_PROJECT_REQUEST_KEY = buildProjectRequestKey();
 
 type PmDashboardTab = "pm-projects" | "my-inspections" | "my-installs";
 
@@ -216,7 +218,7 @@ const Dashboard = () => {
   const isEngineer   = user.role === "Engineer" || user.role === "QA Inspector";
   const isViewer     = user.role === "Viewer" || user.role === "Client";
   const canActAsFieldTechnician = !!can.installationAssets?.runWorkflow && !isViewer;
-  const isNativePlatform = Capacitor.isNativePlatform();
+  const isNativePlatform = isMobileNativePlatform();
   const showNativeManagerHome = isManager && isNativePlatform;
 
   const { activeOffice, updateActiveOffice } = useActiveOffice();
@@ -385,12 +387,22 @@ const Dashboard = () => {
   // Redux state — avoids a second API round-trip while still evicting any ghost projects.
   useEffect(() => {
     const handleUpdated = (e: Event) => {
-      const { items } = (e as CustomEvent<{ items: import("../../types/project").Project[] }>).detail;
+      const detail = (e as CustomEvent<ProjectRepositoryUpdateDetail>).detail;
+      if (!detail || detail.requestKey !== DASHBOARD_PROJECT_REQUEST_KEY) return;
+      const { items } = detail;
       dispatch(setProjects({ items, total: items.length }));
     };
     window.addEventListener("repo:projects:updated", handleUpdated);
     return () => window.removeEventListener("repo:projects:updated", handleUpdated);
   }, [dispatch]);
+
+  useEffect(() => {
+    const handleIssuesUpdated = () => {
+      void loadAttention();
+    };
+    window.addEventListener("repo:issues:updated", handleIssuesUpdated);
+    return () => window.removeEventListener("repo:issues:updated", handleIssuesUpdated);
+  }, [loadAttention]);
 
   useEffect(() => {
     if (isViewer) {

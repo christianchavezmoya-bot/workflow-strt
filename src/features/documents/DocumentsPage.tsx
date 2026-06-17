@@ -55,7 +55,7 @@ import { customerService } from "../../services/customerService";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useComplexView } from "../../contexts/ComplexViewContext";
-import { Capacitor } from "@capacitor/core";
+import { isDesktopLikePlatform } from "../../utils/platform";
 
 // ------------------------------------------------------------------
 // Types
@@ -202,7 +202,7 @@ export default function DocumentsPage() {
   const canDeleteDocuments = can.documents.delete;
   const { complexViewActive } = useComplexView();
   // Web always shows full document controls; native keeps them behind Complex View.
-  const showComplexControls = !Capacitor.isNativePlatform() || complexViewActive;
+  const showComplexControls = isDesktopLikePlatform() || complexViewActive;
   // ---- data -------------------------------------------------------
   const [docs, setDocs]       = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(false);

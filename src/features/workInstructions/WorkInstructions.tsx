@@ -61,6 +61,7 @@ import { fetchProducts } from "../../store/productsSlice";
 import type { Workflow } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowType } from "../../types/workflowType";
+import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import WorkflowBuilder from "./WorkflowBuilder";
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -104,8 +105,8 @@ function printPdf(cfg: WorkflowConfig, productName: string) {
     .map(
       (step) => `
       <div style="margin-bottom:16px">
-        <div style="font-size:14px;font-weight:600;margin-bottom:4px;padding-bottom:3px;border-bottom:1px solid #ddd">${step.title}</div>
-        ${step.description ? `<p style="margin:0 0 6px;font-size:12px;color:#666">${step.description}</p>` : ""}
+        <div style="font-size:14px;font-weight:600;margin-bottom:4px;padding-bottom:3px;border-bottom:1px solid #ddd">${escapeHtml(step.title)}</div>
+        ${step.description ? `<p style="margin:0 0 6px;font-size:12px;color:#666">${escapeHtml(step.description)}</p>` : ""}
         ${
           step.inputs.length
             ? `<table style="width:100%;border-collapse:collapse">
@@ -113,7 +114,7 @@ function printPdf(cfg: WorkflowConfig, productName: string) {
                   .map(
                     (inp) =>
                       `<tr>
-                        <td style="padding:3px 10px 3px 0;color:#555;font-size:12px;width:40%">${inp.label}</td>
+                        <td style="padding:3px 10px 3px 0;color:#555;font-size:12px;width:40%">${escapeHtml(inp.label)}</td>
                         <td style="padding:3px 0;font-size:12px;color:#aaa;font-style:italic">_______________</td>
                        </tr>`,
                   )
@@ -125,27 +126,24 @@ function printPdf(cfg: WorkflowConfig, productName: string) {
     )
     .join("");
 
-  const html = `<html><head><title>Work Instruction — ${cfg.name}</title>
+  const html = `<html><head><title>Work Instruction - ${escapeHtml(cfg.name)}</title>
     <style>body{font-family:Arial,sans-serif;padding:30px;color:#1a1a1a}@media print{body{padding:0}}</style>
     </head><body>
-    <h2 style="margin:0 0 4px">Work Instruction: ${cfg.name}</h2>
+    <h2 style="margin:0 0 4px">Work Instruction: ${escapeHtml(cfg.name)}</h2>
     <p style="margin:0 0 16px;font-size:13px;color:#666">
-      Product: ${productName}&nbsp;|&nbsp;
-      Configuration Type: ${cfg.configType ?? "—"}&nbsp;|&nbsp;
-      Status: ${cfg.status}&nbsp;|&nbsp;v${cfg.version}
+      Product: ${escapeHtml(productName)}&nbsp;|&nbsp;
+      Configuration Type: ${escapeHtml(cfg.configType ?? "-")}&nbsp;|&nbsp;
+      Status: ${escapeHtml(cfg.status)}&nbsp;|&nbsp;v${escapeHtml(cfg.version)}
     </p>
-    ${cfg.notes ? `<p style="margin:0 0 12px;font-size:12px;color:#555;font-style:italic">${cfg.notes}</p>` : ""}
-    ${cfg.createdBy ? `<p style="margin:0 0 12px;font-size:12px;color:#888">Created by: ${cfg.createdBy} on ${formatDate(cfg.createdAt)}</p>` : ""}
+    ${cfg.notes ? `<p style="margin:0 0 12px;font-size:12px;color:#555;font-style:italic">${escapeHtml(cfg.notes)}</p>` : ""}
+    ${cfg.createdBy ? `<p style="margin:0 0 12px;font-size:12px;color:#888">Created by: ${escapeHtml(cfg.createdBy)} on ${escapeHtml(formatDate(cfg.createdAt))}</p>` : ""}
     <hr style="margin:14px 0">
     ${stepsHtml || "<p>No workflow steps defined.</p>"}
     </body></html>`;
 
-  const w = window.open("", "_blank");
-  if (!w) return;
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  w.print();
+  if (!openPrintWindow(html, true)) {
+    console.warn("[WorkInstructions] Print popup was blocked -- allow popups for this site to print.");
+  }
 }
 
 // â”€â”€â”€ Status chip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

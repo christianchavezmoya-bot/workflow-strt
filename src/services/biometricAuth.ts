@@ -5,8 +5,8 @@
  * On web: always returns "available: false" so the gate is skipped.
  */
 
-import { Capacitor } from "@capacitor/core";
 import { secureGet, secureSet } from "./secureStorage";
+import { isMobileNativePlatform } from "../utils/platform";
 
 // How long (ms) a session can be used offline before requiring a full re-login
 export const OFFLINE_GRACE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -34,7 +34,7 @@ export type BiometricCheckResult =
  * Check if biometric is available on the device.
  */
 export async function isBiometricAvailable(): Promise<boolean> {
-  if (!Capacitor.isNativePlatform()) return false;
+  if (!isMobileNativePlatform()) return false;
   if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return false;
   try {
     const { NativeBiometric } = await import("capacitor-native-biometric");
@@ -90,7 +90,7 @@ async function hashPin(pin: string): Promise<string> {
  * Now async to check biometric availability.
  */
 export async function getLaunchAuthModeAsync(): Promise<BiometricCheckResult> {
-  if (!Capacitor.isNativePlatform()) return "not-native";
+  if (!isMobileNativePlatform()) return "not-native";
 
   const token = secureGet("auth_token");
   if (!token) return "no-session";
@@ -113,7 +113,7 @@ export async function getLaunchAuthModeAsync(): Promise<BiometricCheckResult> {
  * Assumes biometric is available on native platforms.
  */
 export function getLaunchAuthMode(): BiometricCheckResult {
-  if (!Capacitor.isNativePlatform()) return "not-native";
+  if (!isMobileNativePlatform()) return "not-native";
   if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return "not-native";
 
   const token = secureGet("auth_token");

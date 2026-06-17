@@ -64,7 +64,7 @@ import { featureDependencyService } from "../../services/featureDependencyServic
 import type { FeatureDependency } from "../../types/featureDependency";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
-import { Capacitor } from "@capacitor/core";
+import { isMobileNativePlatform } from "../../utils/platform";
 import type { WorkflowType } from "../../types/workflowType";
 import WorkOrderRunner from "./WorkOrderRunner";
 
@@ -407,7 +407,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
     [workflow.steps]
   );
-  const isMobile = Capacitor.isNativePlatform();
+  const isMobile = isMobileNativePlatform();
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(() => stepsSorted[0]?.id || null);
 

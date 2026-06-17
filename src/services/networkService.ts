@@ -6,10 +6,10 @@
  * - Server unavailable (internet works, but API is down)
  */
 
-import { Capacitor } from "@capacitor/core";
 import { CapacitorHttp } from "@capacitor/core";
 import { Network } from "@capacitor/network";
 import { getApiBaseUrl } from "./apiBase";
+import { isMobileNativePlatform } from "../utils/platform";
 
 export interface NetworkStatus {
   hasInternet: boolean;      // Phone has internet connection
@@ -22,7 +22,7 @@ export interface NetworkStatus {
  */
 export async function hasInternetConnection(): Promise<boolean> {
   try {
-    if (Capacitor.isNativePlatform()) {
+    if (isMobileNativePlatform()) {
       const status = await Network.getStatus();
       return status.connected;
     } else {
@@ -39,7 +39,7 @@ export async function hasInternetConnection(): Promise<boolean> {
  */
 export async function isServerReachable(): Promise<boolean> {
   try {
-    if (Capacitor.isNativePlatform()) {
+    if (isMobileNativePlatform()) {
       const response = await CapacitorHttp.get({
         url: `${getApiBaseUrl()}/health`,
         connectTimeout: 5000,

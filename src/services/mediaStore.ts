@@ -1,6 +1,6 @@
-import { Capacitor } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import type { OfflineMediaRef } from "./offlineStore";
+import { isMobileNativePlatform } from "../utils/platform";
 
 const MEDIA_ROOT = "offline-media";
 const MEDIA_REF_PREFIX = "offline-media-ref:";
@@ -213,7 +213,7 @@ export const mediaStore = {
   },
 
   isNativeFilesystemAvailable(): boolean {
-    return Capacitor.isNativePlatform();
+    return isMobileNativePlatform();
   },
 };
 

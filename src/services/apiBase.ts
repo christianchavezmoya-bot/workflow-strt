@@ -1,4 +1,4 @@
-import { Capacitor } from "@capacitor/core";
+import { isMobileNativePlatform } from "../utils/platform";
 
 const API_BASE_STORAGE_KEY = "commtrac_api_base";
 
@@ -32,7 +32,7 @@ export function getDefaultApiBaseUrl(): string {
 
   // Browser dev on localhost should talk to localhost by default even if
   // VITE_API_BASE is set to a LAN IP for native phone builds.
-  if (!Capacitor.isNativePlatform() && (hostname === "localhost" || hostname === "127.0.0.1")) {
+  if (!isMobileNativePlatform() && (hostname === "localhost" || hostname === "127.0.0.1")) {
     return localBrowserDefault;
   }
 

@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import { Box, Button, CircularProgress, Stack, Typography, TextField, Divider, Alert } from "@mui/material";
 import { FingerprintOutlined, WifiOffOutlined, LockOutlined, PinOutlined, WifiOutlined } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
-import { Capacitor } from "@capacitor/core";
 import { Network } from "@capacitor/network";
 import { promptBiometric, verifyPin, isBiometricAvailable, isPinSet } from "../services/biometricAuth";
 import { secureGet, secureClearAuth } from "../services/secureStorage";
+import { isMobileNativePlatform } from "../utils/platform";
 
 interface Props {
   onUnlocked: () => void;
@@ -47,7 +47,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
     // Check network status using Capacitor Network plugin
     const checkNetwork = async () => {
       try {
-        if (Capacitor.isNativePlatform()) {
+        if (isMobileNativePlatform()) {
           const status = await Network.getStatus();
           setIsOffline(!status.connected);
           console.log("[BiometricLockScreen] Network status:", status.connected ? "online" : "offline");
@@ -70,7 +70,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
     
     let listener: { remove: () => void } | undefined;
     
-    if (Capacitor.isNativePlatform()) {
+    if (isMobileNativePlatform()) {
       Network.addListener("networkStatusChange", handleNetworkChange).then(l => {
         listener = l;
       });

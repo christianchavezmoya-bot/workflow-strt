@@ -13,7 +13,6 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Capacitor } from "@capacitor/core";
 import { Network } from "@capacitor/network";
 import { App } from "@capacitor/app";
 import api from "../services/api";
@@ -41,6 +40,7 @@ import type { ProjectAsset } from "../types/projectAsset";
 import type { SignatureEvent } from "../types/signature";
 import { mediaStore } from "../services/mediaStore";
 import syncQueue from "../services/syncQueue";
+import { isMobileNativePlatform } from "../utils/platform";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -399,7 +399,7 @@ export function useSyncEngine(): SyncState {
 
   // Native mobile connectivity events are more reliable than window online/offline.
   useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
+    if (!isMobileNativePlatform()) return;
     let active = true;
     let remove: (() => void) | undefined;
 
@@ -425,7 +425,7 @@ export function useSyncEngine(): SyncState {
   // Flushes pending writes when the app comes to the foreground on a native platform.
   // Also dispatches "app-foregrounded" for the stale-pull hook (useStaleOnResume).
   useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
+    if (!isMobileNativePlatform()) return;
     let listenerHandle: { remove: () => void } | undefined;
     App.addListener("appStateChange", ({ isActive }) => {
       if (!isActive) return; // going to background - nothing to do here

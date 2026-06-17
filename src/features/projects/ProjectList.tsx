@@ -59,7 +59,7 @@ import { projectService } from "../../services/projectService";
 import { Project, ProjectStatus } from "../../types/project";
 import ProjectForm from "./ProjectForm";
 import { useComplexView } from "../../contexts/ComplexViewContext";
-import { Capacitor } from "@capacitor/core";
+import { isDesktopLikePlatform } from "../../utils/platform";
 
 // Style for field definition labels (yellow bold)
 const fieldLabelStyle = {
@@ -310,7 +310,7 @@ const ProjectList = () => {
   const canManageProjectTable = isAdminUser || isPmUser;
   const { complexViewActive } = useComplexView();
   // Web always shows full management controls; native keeps them behind Complex View.
-  const showComplexControls = !Capacitor.isNativePlatform() || complexViewActive;
+  const showComplexControls = isDesktopLikePlatform() || complexViewActive;
 
   const canEditProject = useMemo(() => (project: Project) => {
     if (isAdminUser) return true;

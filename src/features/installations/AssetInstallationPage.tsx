@@ -83,7 +83,6 @@ import {
   Typography,
 } from "@mui/material";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Capacitor } from "@capacitor/core";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -132,6 +131,7 @@ import QRUploadButton from "../../components/QRUploadButton";
 import InspectionImportDialog from "../projects/InspectionImportDialog";
 import { useStaleOnResume } from "../../hooks/useStaleOnResume";
 import { AssetRepository } from "../../repositories/AssetRepository";
+import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 
 // ------------------------------------------------------------------
 // Column configuration
@@ -362,9 +362,9 @@ const AssetInstallationPage = () => {
   const { user: currentUser } = useAuth();
   const can = usePermissions();
   const { complexViewActive } = useComplexView();
-  const isNativePlatform = Capacitor.isNativePlatform();
+  const isNativePlatform = isMobileNativePlatform();
   const showComplexControls = complexViewActive && isNativePlatform;
-  const showAdvancedAssetActions = !isNativePlatform || showComplexControls;
+  const showAdvancedAssetActions = isDesktopLikePlatform() || showComplexControls;
   const productsState = useAppSelector((s) => s.products);
   const projects = useAppSelector((s) => s.projects.items);
   const users = useAppSelector((s) => s.users.items);

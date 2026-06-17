@@ -24,7 +24,6 @@ import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined
 import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
 import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
 import { NavLink } from "react-router-dom";
-import { Capacitor } from "@capacitor/core";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -34,8 +33,9 @@ import type { Office } from "../../components/GlobalOfficeMap";
 import strataLogo from "../../assets/strata_transparent.png";
 import FavoritesSection from "./FavoritesSection";
 import { BOM_MODULE_ENABLED } from "../../modules/bom-project";
+import { isMobileNativePlatform } from "../../utils/platform";
 
-const isNative = Capacitor.isNativePlatform();
+const isNativeMobile = isMobileNativePlatform();
 
 const navItems = [
   { label: "Dashboard",         icon: <DashboardOutlinedIcon />,                  to: "/",                      end: true,  tourKey: "nav-dashboard" },
@@ -47,7 +47,7 @@ const navItems = [
   { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,                  to: "/tips",                              tourKey: "nav-tips" },
   ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project", tourKey: "nav-bom" }] : []),
   // Admin and Settings are web/desktop only — hidden on native mobile app
-  ...(!isNative ? [
+  ...(!isNativeMobile ? [
     { label: "Admin",    icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin",    end: true,  tourKey: "nav-admin",     requiresFullAccess: false },
     { label: "Settings", icon: <SettingsOutlinedIcon />,           to: "/settings",            tourKey: "nav-settings",  requiresFullAccess: true  },
   ] : []),

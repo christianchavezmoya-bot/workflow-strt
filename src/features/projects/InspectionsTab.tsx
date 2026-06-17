@@ -13,8 +13,8 @@ import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
-import { Capacitor } from "@capacitor/core";
 import api from "../../services/api";
+import { isMobileNativePlatform } from "../../utils/platform";
 
 interface AssetWorkflowRun {
   id: string;
@@ -39,7 +39,7 @@ const STATUS_COLOR: Record<string, "default" | "info" | "warning" | "success" | 
   failed: "error",
 };
 
-const isNative = Capacitor.isNativePlatform();
+const isNative = isMobileNativePlatform();
 
 const InspectionsTab = ({ projectId }: Props) => {
   const navigate = useNavigate();
