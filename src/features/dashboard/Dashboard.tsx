@@ -397,14 +397,6 @@ const Dashboard = () => {
   }, [dispatch]);
 
   useEffect(() => {
-    const handleIssuesUpdated = () => {
-      void loadAttention();
-    };
-    window.addEventListener("repo:issues:updated", handleIssuesUpdated);
-    return () => window.removeEventListener("repo:issues:updated", handleIssuesUpdated);
-  }, [loadAttention]);
-
-  useEffect(() => {
     if (isViewer) {
       setDashboardWorkspace({
         currentInstalls: [],
