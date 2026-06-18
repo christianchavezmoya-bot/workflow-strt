@@ -1,4 +1,5 @@
 import api from "./api";
+import { cacheGet, cachePut } from "./localDB";
 
 export interface FeatureSelection {
   featureId: string;
@@ -46,8 +47,23 @@ function lsWrite(productId: string, configs: ProductConfig[]) {
 
 export const productConfigService = {
   async listByProduct(productId: string): Promise<ProductConfig[]> {
+    const cacheKey = `product_configs_v2_${productId}`;
+    const cached = await cacheGet<ProductConfig[]>(cacheKey);
+
+    // Background refresh — always runs, keeps cache warm for next time
+    api.get<ProductConfig[]>(`/wi-templates/by-product/${productId}`)
+      .then((res) => {
+        cachePut(cacheKey, res.data).catch(() => {});
+        lsWrite(productId, res.data); // keep legacy fallback in sync too
+      })
+      .catch(() => {});
+
+    if (cached !== null) return cached;
+
+    // No cache yet — wait for network (first-ever load for this product)
     try {
       const res = await api.get<ProductConfig[]>(`/wi-templates/by-product/${productId}`);
+      await cachePut(cacheKey, res.data);
       lsWrite(productId, res.data);
       return res.data;
     } catch (err: unknown) {

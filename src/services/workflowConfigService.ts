@@ -60,21 +60,39 @@ export const workflowConfigService = {
   },
 
   async listByProduct(productId: string, status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
-    try {
-      const params = status ? `?status=${status}` : "";
-      const res = await api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}${params}`);
-      // Only cache unfiltered results — a status-filtered response would corrupt the cache
-      // for callers that need all statuses (e.g. WorkInstructions table).
-      if (!status) {
+    // The cache always stores the UNFILTERED superset for a product, regardless
+    // of what status the caller asked for. This guarantees the cache gets warmed
+    // even when every caller for a given product only ever requests a filtered
+    // status (e.g. AssetInstallationPage always asks for "Published" only) —
+    // without this, a status-filtered-only product would never build a usable
+    // cache and offline loads would always fall through to the network wait.
+    const cached = await offlineStore.getCache<WorkflowConfig[]>(CACHE_PRODUCT_KEY(productId));
+
+    // Background refresh — always fetches the UNFILTERED list so the cache stays
+    // a complete superset usable by any caller, regardless of this call's status arg.
+    api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}`)
+      .then(async (res) => {
         lsWrite(productId, res.data);
         await offlineStore.saveCache(CACHE_PRODUCT_KEY(productId), res.data);
-      }
+        await cacheConfigs(res.data);
+      })
+      .catch(() => {});
+
+    if (cached && cached.length > 0) {
+      return status ? cached.filter((c) => c.status === status) : cached;
+    }
+
+    // No cache yet — wait for network (first-ever load for this product).
+    // Still fetch unfiltered here too, so the very first load also warms the
+    // full cache rather than only ever caching whatever status was requested.
+    try {
+      const res = await api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}`);
+      lsWrite(productId, res.data);
+      await offlineStore.saveCache(CACHE_PRODUCT_KEY(productId), res.data);
       await cacheConfigs(res.data);
-      return res.data;
+      return status ? res.data.filter((c) => c.status === status) : res.data;
     } catch (err: unknown) {
       console.warn("[workflowConfigService] API unavailable, falling back to localStorage", err);
-      const cached = !status ? await offlineStore.getCache<WorkflowConfig[]>(CACHE_PRODUCT_KEY(productId)) : null;
-      if (cached && cached.length > 0) return status ? cached.filter((c) => c.status === status) : cached;
       const local = lsRead(productId);
       return status ? local.filter((c) => c.status === status) : local;
     }
