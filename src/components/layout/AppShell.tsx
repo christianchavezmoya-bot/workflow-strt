@@ -2,6 +2,7 @@
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import ConnectivityDebugBar from "./ConnectivityDebugBar";
 import DebugPanel from "./DebugPanel";
 import FieldNotificationBar from "../FieldNotificationBar";
 import BottomTabBar from "./BottomTabBar";
@@ -68,6 +69,7 @@ const AppShell = () => {
             </Box>
           )}
           <Topbar />
+          <ConnectivityDebugBar />
           <FieldNotificationBar />
           <PullToRefresh>
             <Box component="main" className="app-content">

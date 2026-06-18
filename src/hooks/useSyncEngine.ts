@@ -51,11 +51,12 @@ export type SyncStatus =
   | "error"       // last flush had failures
   | "offline";    // no connection
 
-type ConnectivityState = "online" | "server-unreachable" | "offline" | "token-expired";
+export type ConnectivityState = "online" | "server-unreachable" | "offline" | "token-expired";
 
 export interface SyncState {
   status: SyncStatus;
   isOnline: boolean;
+  connectivity: ConnectivityState;
   pendingCount: number;
   conflictCount: number;
   lastSyncAt: Date | null;
@@ -223,6 +224,28 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
   if (action.entityType === "workflow-run" && responseData && typeof responseData === "object") {
     const syncedRun = responseData as AssetWorkflowRun;
     await markRunSyncedFromServer(syncedRun, action.entityId);
+    // Fix: when a queued RUN_COMPLETE action finally syncs after reconnecting,
+    // the server has already updated the asset's status (e.g. to "Pending"
+    // awaiting signature) — but that response only contains the run, never the
+    // asset. Refetch the asset here so the locally cached copy matches the
+    // server immediately, instead of staying stuck on its pre-completion status
+    // until some unrelated screen happens to refresh it.
+    if (action.opType === "RUN_COMPLETE") {
+      try {
+        const assetRes = await api.get<{ id: string; productId: string; projectId: string; status: string }>(
+          `/project-assets/${syncedRun.assetId}`
+        );
+        await entityPutAsset({
+          id: assetRes.data.id,
+          productId: assetRes.data.productId,
+          projectId: assetRes.data.projectId,
+          data: assetRes.data,
+          dirty: false,
+        });
+      } catch {
+        // Non-fatal — see same note in assetWorkflowRunService.completeRun.
+      }
+    }
     window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
       detail: { assetId: syncedRun.assetId, runs: [syncedRun] },
     }));
@@ -466,17 +489,27 @@ export function useSyncEngine(): SyncState {
     const handleUnreachable = () => setConnectivity("server-unreachable");
     const handleReachable   = () => {
       setConnectivity("online");
+      setLastSyncAt(new Date());
       void flush();
     };
     const handleAuthError   = () => setConnectivity("token-expired");
 
-    window.addEventListener("api-serving-cache",    handleUnreachable);
-    window.addEventListener("api-server-reachable", handleReachable);
-    window.addEventListener("api-auth-error",       handleAuthError);
+    window.addEventListener("api-serving-cache",        handleUnreachable);
+    window.addEventListener("api-server-reachable",     handleReachable);
+    window.addEventListener("api-auth-error",           handleAuthError);
+    // Background read failures from repositories — these fire on every screen's
+    // data refresh, not just on writes, so they catch "server is down but I have
+    // nothing queued" which the write-only paths below can never detect.
+    window.addEventListener("repo:assets:fetch-failed",   handleUnreachable);
+    window.addEventListener("repo:projects:fetch-failed", handleUnreachable);
+    window.addEventListener("repo:issues:fetch-failed",   handleUnreachable);
     return () => {
-      window.removeEventListener("api-serving-cache",    handleUnreachable);
-      window.removeEventListener("api-server-reachable", handleReachable);
-      window.removeEventListener("api-auth-error",       handleAuthError);
+      window.removeEventListener("api-serving-cache",        handleUnreachable);
+      window.removeEventListener("api-server-reachable",     handleReachable);
+      window.removeEventListener("api-auth-error",           handleAuthError);
+      window.removeEventListener("repo:assets:fetch-failed",   handleUnreachable);
+      window.removeEventListener("repo:projects:fetch-failed", handleUnreachable);
+      window.removeEventListener("repo:issues:fetch-failed",   handleUnreachable);
     };
   }, [flush]);
 
@@ -552,6 +585,7 @@ export function useSyncEngine(): SyncState {
   return {
     status,
     isOnline,
+    connectivity,
     pendingCount: pending,
     conflictCount: conflicts,
     lastSyncAt,

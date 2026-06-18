@@ -3,7 +3,7 @@ import { IssueRepository } from "../repositories/IssueRepository";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import offlineStore, { type OfflineRun } from "./offlineStore";
 import syncQueue from "./syncQueue";
-import { entityGetAsset } from "./localDB";
+import { entityGetAsset, entityPutAsset } from "./localDB";
 import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
@@ -389,7 +389,29 @@ export const assetWorkflowRunService = {
     try {
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/complete`, requestBody);
-      return await cacheServerRun(res.data);
+      const cachedRun = await cacheServerRun(res.data);
+      // Fix: the server's /complete response only contains the run, but completing
+      // a run also changes the asset's own status server-side (e.g. to "Pending"
+      // awaiting signature). Without this refetch, the locally cached asset stays
+      // stuck on its pre-completion status (usually "InProgress"), which causes
+      // the asset list to show the wrong action button ("Continue Run" instead of
+      // "Installer Sign-off") until some unrelated full refresh happens to overwrite it.
+      try {
+        const assetRes = await api.get<{ id: string; productId: string; projectId: string; status: string }>(
+          `/project-assets/${res.data.assetId}`
+        );
+        await entityPutAsset({
+          id: assetRes.data.id,
+          productId: assetRes.data.productId,
+          projectId: assetRes.data.projectId,
+          data: assetRes.data,
+          dirty: false,
+        });
+      } catch {
+        // Non-fatal — the run itself completed successfully. The asset will
+        // self-correct on its next normal refresh if this refetch fails.
+      }
+      return cachedRun;
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
 
@@ -405,6 +427,12 @@ export const assetWorkflowRunService = {
         bomActualJson: bomActualJson ?? cachedRun.bomActualJson,
         status: "Complete",
         isLocked: true,
+        // Fix: the server always sets this to "PendingInstaller" on completion
+        // (see AssetWorkflowRunsController.CompleteRun). The offline fallback
+        // previously never set it, so the run stayed on whatever signatureStatus
+        // it had before completing — meaning the installer signature screen
+        // never appeared until after reconnecting and re-syncing.
+        signatureStatus: "PendingInstaller",
         completedAt: now,
         updatedAt: now,
         lastLocalSavedAt: now,

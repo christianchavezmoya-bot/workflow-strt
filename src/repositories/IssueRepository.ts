@@ -17,7 +17,7 @@ export const IssueRepository = {
         await syncMetaSet("issues");
         window.dispatchEvent(new Event("repo:issues:updated"));
       })
-      .catch(() => {});
+      .catch(() => { window.dispatchEvent(new Event("repo:issues:fetch-failed")); });
 
     if (local.length > 0) return local as OpenIssueRecord[];
 

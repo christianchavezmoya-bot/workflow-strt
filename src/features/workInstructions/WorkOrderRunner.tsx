@@ -1212,6 +1212,8 @@ export default function WorkOrderRunner({
       const isVideo = inp.type === "video";
       let media: string[] = [];
       try { media = JSON.parse(val || "[]"); } catch {}
+      const acceptType = isVideo ? "video/*" : "image/*";
+      const captureLabel = isVideo ? "Add video" : "Add photo";
       return (
         <Box>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
@@ -1221,11 +1223,18 @@ export default function WorkOrderRunner({
             component="label"
             startIcon={isVideo ? <VideocamOutlined /> : <PhotoCameraOutlined />}
           >
-            {media.length > 0 ? (isVideo ? "Add video" : "Add photo") : (isVideo ? "Capture video" : "Capture photo")}
+            {captureLabel}
+            {/*
+              Fix: previously had capture="environment", which on iOS Safari/WKWebView
+              skips the photo/video picker entirely and jumps straight to the camera —
+              no way to select an existing photo or video from the library. Removing
+              the capture attribute restores iOS's native choice sheet ("Take Photo or
+              Video" / "Photo Library"), matching the working pattern already used in
+              MediaCapture.tsx elsewhere in this app.
+            */}
             <input
               type="file"
-              accept={isVideo ? "video/*" : "image/*"}
-              capture="environment"
+              accept={acceptType}
               hidden
               onChange={(e) => {
                 const file = e.target.files?.[0];

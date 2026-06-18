@@ -871,11 +871,18 @@ const AssetInstallationPage = () => {
         setAssets(a);
         setLastFetchedAt(new Date());
         setServerReachable(true);
+        // Fix: health bar previously stayed on a stale snapshot here because this
+        // handler only updated `assets`, never `healthMap`. The status column read
+        // `assets` directly so it looked correct, but the health bar reads from the
+        // separately cached `healthMap` — which was never told fresh data arrived.
+        if (activeProduct?.id) {
+          setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+        }
       }
     };
     window.addEventListener("repo:assets:updated", handler as EventListener);
     return () => window.removeEventListener("repo:assets:updated", handler as EventListener);
-  }, [products, selectedProjectId, archiveMode]);
+  }, [products, selectedProjectId, archiveMode, activeProduct?.id]);
 
   // Mark server as unreachable when background fetch fails
   useEffect(() => {

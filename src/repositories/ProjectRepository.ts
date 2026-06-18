@@ -63,7 +63,7 @@ export const ProjectRepository = {
           detail: { items, total, requestKey }
         }));
       })
-      .catch(() => {});
+      .catch(() => { window.dispatchEvent(new Event("repo:projects:fetch-failed")); });
 
     if (local.length > 0) {
       let items = local as Project[];
