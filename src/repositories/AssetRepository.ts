@@ -9,6 +9,7 @@ import {
   pendingAdd,
   syncMetaSet,
 } from "../services/localDB";
+import { isMobileNativePlatform } from "../utils/platform";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -44,6 +45,11 @@ export const AssetRepository = {
   },
 
   async getByProduct(productId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`, { params: { includeDeleted: includeDeleted || undefined } });
+      return res.data.map(fromDto);
+    }
+
     const local = await this.getLocalByProduct(productId, includeDeleted);
 
     // Background network refresh — runs unconditionally to keep IndexedDB fresh
@@ -70,6 +76,11 @@ export const AssetRepository = {
   },
 
   async getByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, { params: { includeDeleted: includeDeleted || undefined } });
+      return res.data.map(fromDto);
+    }
+
     const local = await this.getLocalByProject(projectId, includeDeleted);
 
     // Background network refresh — runs unconditionally to keep IndexedDB fresh
@@ -99,6 +110,11 @@ export const AssetRepository = {
     id: string,
     patch: Partial<ProjectAsset> & Record<string, unknown>
   ): Promise<ProjectAsset | null> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
+      return fromDto(res.data);
+    }
+
     try {
       const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
       await entityPutAsset({

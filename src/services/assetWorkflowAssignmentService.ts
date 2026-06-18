@@ -2,6 +2,7 @@ import axios from "axios";
 import api from "./api";
 import type { WorkflowAssignment } from "../types/workflowType";
 import { pendingAdd } from "./localDB";
+import { isMobileNativePlatform } from "../utils/platform";
 
 export const assetWorkflowAssignmentService = {
   async listByAsset(assetId: string): Promise<WorkflowAssignment[]> {
@@ -24,6 +25,11 @@ export const assetWorkflowAssignmentService = {
   },
 
   async remove(id: string): Promise<void> {
+    if (!isMobileNativePlatform()) {
+      await api.delete(`/asset-workflow-assignments/${id}`);
+      return;
+    }
+
     try {
       await api.delete(`/asset-workflow-assignments/${id}`);
     } catch (error) {

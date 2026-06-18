@@ -1,6 +1,7 @@
 import api from "./api";
 import type { WorkflowConfig, UpsertWorkflowConfigInput, WorkflowConfigStatus } from "../types/workflowConfig";
 import offlineStore from "./offlineStore";
+import { isMobileNativePlatform } from "../utils/platform";
 
 const LS_KEY = (productId: string) => `workflow_configs_v1_${productId}`;
 const CACHE_ALL_KEY = "workflow-configs:all";
@@ -46,6 +47,12 @@ async function cacheConfigs(configs: WorkflowConfig[]): Promise<void> {
 
 export const workflowConfigService = {
   async getAll(status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
+    if (!isMobileNativePlatform()) {
+      const params = status ? `?status=${status}` : "";
+      const res = await api.get<WorkflowConfig[]>(`/workflow-configs${params}`);
+      return res.data;
+    }
+
     try {
       const params = status ? `?status=${status}` : "";
       const res = await api.get<WorkflowConfig[]>(`/workflow-configs${params}`);
@@ -60,6 +67,11 @@ export const workflowConfigService = {
   },
 
   async listByProduct(productId: string, status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}`);
+      return status ? res.data.filter((c) => c.status === status) : res.data;
+    }
+
     // The cache always stores the UNFILTERED superset for a product, regardless
     // of what status the caller asked for. This guarantees the cache gets warmed
     // even when every caller for a given product only ever requests a filtered
@@ -99,6 +111,17 @@ export const workflowConfigService = {
   },
 
   async getById(id: string): Promise<WorkflowConfig | null> {
+    if (!isMobileNativePlatform()) {
+      try {
+        const res = await api.get<WorkflowConfig>(`/workflow-configs/${id}`);
+        return res.data;
+      } catch (err: unknown) {
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        if (status === 404) return null;
+        throw err;
+      }
+    }
+
     try {
       const res = await api.get<WorkflowConfig>(`/workflow-configs/${id}`);
       await offlineStore.saveCache(CACHE_ID_KEY(id), res.data);

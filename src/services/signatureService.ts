@@ -3,6 +3,7 @@ import type { SignatureEvent, SignatureToken } from "../types/signature";
 import syncQueue from "./syncQueue";
 import offlineStore from "./offlineStore";
 import { mediaStore } from "./mediaStore";
+import { isMobileNativePlatform } from "../utils/platform";
 
 export interface SubmitSignaturePayload {
   signerRole: "Installer" | "Customer";
@@ -38,12 +39,24 @@ function isOfflineNetworkError(error: unknown): boolean {
 
 export const signatureService = {
   async listEvents(runId: string): Promise<SignatureEvent[]> {
+    if (!isMobileNativePlatform()) {
+      const r = await api.get<SignatureEvent[]>("/signature-events", { params: { runId } });
+      return r.data;
+    }
+
     const resolvedRunId = await offlineStore.getMappedId("workflow-run", runId) ?? runId;
     const r = await api.get<SignatureEvent[]>("/signature-events", { params: { runId: resolvedRunId } });
     return r.data;
   },
 
   async submitSignature(runId: string, payload: SubmitSignaturePayload): Promise<SignatureEvent> {
+    if (!isMobileNativePlatform()) {
+      const r = await api.post<SignatureEvent>("/signature-events", payload, { params: { runId } });
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return r.data;
+    }
+
     const resolvedRunId = await offlineStore.getMappedId("workflow-run", runId) ?? runId;
     const signatureData = payload.signatureData
       ? await mediaStore.persistMediaValue(payload.signatureData, "signature", "signature", `${runId}:${payload.signerRole}`)
@@ -135,12 +148,22 @@ export const signatureService = {
   },
 
   async listTokens(runId: string): Promise<SignatureToken[]> {
+    if (!isMobileNativePlatform()) {
+      const r = await api.get<SignatureToken[]>("/signature-tokens", { params: { runId } });
+      return r.data;
+    }
+
     const resolvedRunId = await offlineStore.getMappedId("workflow-run", runId) ?? runId;
     const r = await api.get<SignatureToken[]>("/signature-tokens", { params: { runId: resolvedRunId } });
     return r.data;
   },
 
   async createToken(payload: CreateTokenPayload): Promise<SignatureToken> {
+    if (!isMobileNativePlatform()) {
+      const r = await api.post<SignatureToken>("/signature-tokens", payload);
+      return r.data;
+    }
+
     const resolvedRunId = await offlineStore.getMappedId("workflow-run", payload.runId) ?? payload.runId;
     const r = await api.post<SignatureToken>("/signature-tokens", { ...payload, runId: resolvedRunId });
     return r.data;

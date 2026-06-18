@@ -420,7 +420,7 @@ const Topbar = () => {
         )}
       </Stack>
       <Stack direction="row" spacing={isNativeMobile ? 0.5 : 2} alignItems="center">
-        <SyncStatusBadge />
+        {isNativeMobile && <SyncStatusBadge />}
         {isDesktopLike && qbEnabled && (() => {
           const provider = qbHost.includes("quickbase") ? "Quickbase"
             : qbHost.includes("salesforce") ? "Salesforce"

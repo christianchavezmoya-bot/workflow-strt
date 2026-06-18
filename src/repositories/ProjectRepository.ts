@@ -2,6 +2,7 @@ import api from "../services/api";
 import type { Project } from "../types/project";
 import { entityGetAllProjects, entityPutProjects, reconcileProjects, syncMetaSet } from "../services/localDB";
 import type { ProjectFilters, ProjectListResponse } from "../services/projectService";
+import { isMobileNativePlatform } from "../utils/platform";
 
 export type ProjectRepositoryUpdateDetail = {
   items: Project[];
@@ -44,12 +45,19 @@ function canReconcileProjects(filters?: ProjectFilters): boolean {
 
 export const ProjectRepository = {
   async getAll(filters?: ProjectFilters): Promise<ProjectListResponse> {
+    const params = filters && Object.keys(filters).length ? filters : undefined;
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<Project[] | ProjectListResponse>("/projects", { params });
+      return Array.isArray(res.data)
+        ? { items: res.data, total: res.data.length }
+        : res.data;
+    }
+
     const local = await entityGetAllProjects();
     const requestKey = buildProjectRequestKey(filters);
 
     // Background refresh keeps IndexedDB current, but only unfiltered full-sync fetches
     // are allowed to reconcile/remove rows from the cache.
-    const params = filters && Object.keys(filters).length ? filters : undefined;
     api.get<Project[] | ProjectListResponse>("/projects", { params })
       .then(async (res) => {
         const items = Array.isArray(res.data) ? res.data : res.data.items;

@@ -1,5 +1,6 @@
 import api from "./api";
 import type { WorkInstruction, WorkInstructionInput } from "../types/workInstruction";
+import { isMobileNativePlatform } from "../utils/platform";
 
 // ------------------------------------------------------------------
 // DTO shape from backend
@@ -66,6 +67,11 @@ function fromDto(dto: WorkInstructionDto): WorkInstruction {
 
 export const workInstructionService = {
   async listByProduct(productId: string): Promise<WorkInstruction[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<WorkInstructionDto[]>(`/work-instructions/by-product/${productId}`);
+      return res.data.map(fromDto);
+    }
+
     try {
       const res = await api.get<WorkInstructionDto[]>(`/work-instructions/by-product/${productId}`);
       const items = res.data.map(fromDto);
@@ -80,6 +86,20 @@ export const workInstructionService = {
   },
 
   async create(productId: string, input: WorkInstructionInput): Promise<WorkInstruction> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.post<WorkInstructionDto>(
+        `/work-instructions?productId=${encodeURIComponent(productId)}`,
+        {
+          title: input.title.trim(),
+          summary: input.summary?.trim() || null,
+          stepsJson: JSON.stringify(input.steps),
+          status: input.status,
+          featureValuesJson: JSON.stringify(input.featureValues),
+        }
+      );
+      return fromDto(res.data);
+    }
+
     try {
       const res = await api.post<WorkInstructionDto>(
         `/work-instructions?productId=${encodeURIComponent(productId)}`,
@@ -111,6 +131,17 @@ export const workInstructionService = {
   },
 
   async update(id: string, input: WorkInstructionInput): Promise<WorkInstruction> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.put<WorkInstructionDto>(`/work-instructions/${id}`, {
+        title: input.title.trim(),
+        summary: input.summary?.trim() || null,
+        stepsJson: JSON.stringify(input.steps),
+        status: input.status,
+        featureValuesJson: JSON.stringify(input.featureValues),
+      });
+      return fromDto(res.data);
+    }
+
     try {
       const res = await api.put<WorkInstructionDto>(`/work-instructions/${id}`, {
         title: input.title.trim(),
@@ -145,6 +176,11 @@ export const workInstructionService = {
   },
 
   async remove(id: string): Promise<string> {
+    if (!isMobileNativePlatform()) {
+      await api.delete(`/work-instructions/${id}`);
+      return id;
+    }
+
     try {
       await api.delete(`/work-instructions/${id}`);
     } catch { /* best effort */ }

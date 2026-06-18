@@ -155,6 +155,11 @@ function isNetworkOrTimeoutError(error: unknown): boolean {
 // and notifies subscribers when fresh data arrives.
 // Falls back to waiting for the network when no cache exists yet.
 export async function cachedGet<T>(url: string, params?: Record<string, unknown>): Promise<T> {
+  if (!isMobileNativePlatform()) {
+    const res = await api.get<T>(url, { params });
+    return res.data;
+  }
+
   const key = apiCacheKey(url, params);
   const cached = await cacheGet<T>(key);
 
@@ -190,7 +195,7 @@ api.interceptors.response.use(
     });
 
     // Persist every fresh GET response so the cache stays warm
-    if (response.config.method?.toLowerCase() === "get" && response.config.url) {
+    if (isMobileNativePlatform() && response.config.method?.toLowerCase() === "get" && response.config.url) {
       cachePut(
         apiCacheKey(response.config.url, response.config.params as Record<string, unknown>),
         response.data
@@ -218,7 +223,7 @@ api.interceptors.response.use(
     });
 
     // Last-resort fallback: if a network request fails (cache miss path) try cache
-    if (config.method?.toLowerCase() === "get" && isNetworkOrTimeoutError(error) && config.url) {
+    if (isMobileNativePlatform() && config.method?.toLowerCase() === "get" && isNetworkOrTimeoutError(error) && config.url) {
       const key = apiCacheKey(config.url, config.params as Record<string, unknown>);
       const cached = await cacheGet(key);
       if (cached !== null) {

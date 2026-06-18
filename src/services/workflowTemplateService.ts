@@ -1,6 +1,7 @@
 import api from "./api";
 import type { Workflow } from "../types/workflow";
 import offlineStore from "./offlineStore";
+import { isMobileNativePlatform } from "../utils/platform";
 
 // Shape returned by the backend
 export interface WorkflowTemplateDto {
@@ -74,6 +75,11 @@ export const workflowTemplateService = {
    * Priority: API → localStorage fallback.
    */
   async getByProduct(productId: string): Promise<Workflow[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<WorkflowTemplateDto[]>(`/workflow-templates/by-product/${productId}`);
+      return res.data.map(toWorkflow);
+    }
+
     try {
       const res = await api.get<WorkflowTemplateDto[]>(`/workflow-templates/by-product/${productId}`);
       const workflows = res.data.map(toWorkflow);
@@ -101,6 +107,17 @@ export const workflowTemplateService = {
    * Returns null if not found.
    */
   async getById(id: string): Promise<Workflow | null> {
+    if (!isMobileNativePlatform()) {
+      try {
+        const res = await api.get<WorkflowTemplateDto>(`/workflow-templates/${id}`);
+        return toWorkflow(res.data);
+      } catch (err: unknown) {
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        if (status === 404) return null;
+        throw err;
+      }
+    }
+
     try {
       const res = await api.get<WorkflowTemplateDto>(`/workflow-templates/${id}`);
       const wf = toWorkflow(res.data);
@@ -125,6 +142,11 @@ export const workflowTemplateService = {
    * Kept for backward compat with WorkflowBuilder default mode.
    */
   async getFirstByProduct(productId: string): Promise<Workflow | null> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<WorkflowTemplateDto[]>(`/workflow-templates/by-product/${productId}`);
+      return res.data.length === 0 ? null : toWorkflow(res.data[0]);
+    }
+
     try {
       const res = await api.get<WorkflowTemplateDto[]>(`/workflow-templates/by-product/${productId}`);
       if (res.data.length === 0) return null;
@@ -177,7 +199,9 @@ export const workflowTemplateService = {
    */
   async upsert(templateId: string | null, workflow: Workflow): Promise<string> {
     try {
-      lsWrite(workflow); // always write locally first as optimistic cache
+      if (isMobileNativePlatform()) {
+        lsWrite(workflow); // always write locally first as optimistic cache
+      }
       if (templateId) {
         const dto = await this.update(templateId, workflow);
         return dto.id;
@@ -219,6 +243,7 @@ export const workflowTemplateService = {
 
   /** Remove the LS cache for a product (e.g. after deletion). */
   clearCache(productId: string) {
+    if (!isMobileNativePlatform()) return;
     try { localStorage.removeItem(LS_KEY(productId)); } catch {}
   },
 };

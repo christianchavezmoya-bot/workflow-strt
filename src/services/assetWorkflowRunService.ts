@@ -7,6 +7,7 @@ import { entityGetAsset, entityPutAsset } from "./localDB";
 import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
+import { isMobileNativePlatform } from "../utils/platform";
 
 export interface PendingSignatureRecord {
   runId:        string;
@@ -204,6 +205,11 @@ async function enqueueRunMutation(
 
 export const assetWorkflowRunService = {
   async listLatestByProject(projectId: string): Promise<AssetWorkflowRun[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
+      return res.data;
+    }
+
     const cachedRuns = await offlineStore.listRunsByProject(projectId);
     if (cachedRuns.length > 0) {
       refreshRunsInBackground({ type: "project", id: projectId }, `/asset-workflow-runs/by-project/${projectId}`);
@@ -220,6 +226,11 @@ export const assetWorkflowRunService = {
   },
 
   async listByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
+      return res.data;
+    }
+
     const cachedRuns = await offlineStore.listRunsByAsset(assetId);
     if (cachedRuns.length > 0) {
       refreshRunsInBackground({ type: "asset", id: assetId }, `/asset-workflow-runs/by-asset/${assetId}`);
@@ -236,6 +247,11 @@ export const assetWorkflowRunService = {
   },
 
   async listByAssetFresh(assetId: string): Promise<AssetWorkflowRun[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
+      return res.data;
+    }
+
     try {
       const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
       return await cacheServerRuns(res.data);
@@ -245,6 +261,15 @@ export const assetWorkflowRunService = {
   },
 
   async getById(id: string): Promise<AssetWorkflowRun | null> {
+    if (!isMobileNativePlatform()) {
+      try {
+        const res = await api.get<AssetWorkflowRun>(`/asset-workflow-runs/${id}`);
+        return res.data;
+      } catch {
+        return null;
+      }
+    }
+
     const resolvedId = await resolveRunId(id);
     try {
       const res = await api.get<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedId}`);
@@ -255,6 +280,15 @@ export const assetWorkflowRunService = {
   },
 
   async startRun(assetId: string, workflowConfigId: string, technicianUserId?: string): Promise<AssetWorkflowRun> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", {
+        assetId,
+        workflowConfigId,
+        technicianUserId: technicianUserId ?? null,
+      });
+      return res.data;
+    }
+
     const body = {
       assetId,
       workflowConfigId,
@@ -332,6 +366,16 @@ export const assetWorkflowRunService = {
   },
 
   async saveProgress(runId: string, stepResultsJson: string, issuesJson?: string, status?: string): Promise<AssetWorkflowRun> {
+    if (!isMobileNativePlatform()) {
+      const requestBody = await mediaStore.resolveUploadPayload({
+        stepResultsJson,
+        issuesJson: issuesJson ?? null,
+        status: status ?? null,
+      });
+      const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${runId}`, requestBody);
+      return res.data;
+    }
+
     const resolvedRunId = await resolveRunId(runId);
     const body = {
       stepResultsJson,
@@ -379,6 +423,17 @@ export const assetWorkflowRunService = {
   },
 
   async completeRun(runId: string, stepResultsJson: string, issuesJson: string, completedByName?: string, bomActualJson?: string): Promise<AssetWorkflowRun> {
+    if (!isMobileNativePlatform()) {
+      const requestBody = await mediaStore.resolveUploadPayload({
+        stepResultsJson,
+        issuesJson,
+        completedByName: completedByName ?? null,
+        bomActualJson: bomActualJson ?? null,
+      });
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/complete`, requestBody);
+      return res.data;
+    }
+
     const resolvedRunId = await resolveRunId(runId);
     const body = {
       stepResultsJson,
@@ -468,6 +523,14 @@ export const assetWorkflowRunService = {
 
   /** Patch issues only — works on locked and in-progress runs. */
   async patchIssues(runId: string, issuesJson: string): Promise<AssetWorkflowRun> {
+    if (!isMobileNativePlatform()) {
+      const requestBody = await mediaStore.resolveUploadPayload({ issuesJson });
+      const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/issues`, requestBody);
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return res.data;
+    }
+
     const resolvedRunId = await resolveRunId(runId);
     const body = { issuesJson };
     try {
@@ -538,6 +601,18 @@ export const assetWorkflowRunService = {
 
   /** Patch step results on a locked/complete run — used to add missing photos after completion. */
   async patchStepResults(runId: string, stepResultsJson: string, amendedByName?: string): Promise<AssetWorkflowRun> {
+    if (!isMobileNativePlatform()) {
+      const requestBody = await mediaStore.resolveUploadPayload({
+        stepResultsJson,
+        amendedByName: amendedByName ?? null,
+        amendedAt: new Date().toISOString(),
+      });
+      const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/step-results`, requestBody);
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return res.data;
+    }
+
     const resolvedRunId = await resolveRunId(runId);
     const requestBody = await mediaStore.resolveUploadPayload({
       stepResultsJson,
@@ -553,6 +628,11 @@ export const assetWorkflowRunService = {
 
   /** Replace the full time-entries array and recompute metrics. Works on locked runs. */
   async patchTimeEntries(runId: string, timeEntriesJson: string): Promise<AssetWorkflowRun> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entries`, { timeEntriesJson });
+      return res.data;
+    }
+
     const resolvedRunId = await resolveRunId(runId);
     const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entries`, { timeEntriesJson });
     return res.data;
@@ -560,6 +640,13 @@ export const assetWorkflowRunService = {
 
   /** Mark customer signature as waived — run stays complete but skips customer sign-off. */
   async waiveCustomerSignature(runId: string): Promise<AssetWorkflowRun> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/waive-customer-signature`);
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return res.data;
+    }
+
     const resolvedRunId = await resolveRunId(runId);
     const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/waive-customer-signature`);
     const updatedRun = await cacheServerRun(res.data);
@@ -575,6 +662,16 @@ export const assetWorkflowRunService = {
     startedAtUtc?: string,
     endedAtUtc?: string
   ): Promise<AssetWorkflowRun> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entry`, {
+        action,
+        reason: reason ?? null,
+        startedAtUtc: startedAtUtc ?? null,
+        endedAtUtc: endedAtUtc ?? null,
+      });
+      return res.data;
+    }
+
     const resolvedRunId = await resolveRunId(runId);
     const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entry`, {
       action,

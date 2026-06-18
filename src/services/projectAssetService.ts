@@ -3,6 +3,7 @@ import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 import { entityDeleteAsset, entityGetAsset, entityPutAsset, pendingAdd, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
+import { isMobileNativePlatform } from "../utils/platform";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -21,6 +22,7 @@ function fromDto(dto: ProjectAsset): ProjectAsset {
 
 /** Return all asset IDs that have a pending action queued. */
 export async function pendingAssetIds(): Promise<Set<string>> {
+  if (!isMobileNativePlatform()) return new Set<string>();
   const all = await pendingGetAll();
   return new Set(all.filter((a) => a.entityType === "asset").map((a) => a.entityId));
 }
@@ -49,18 +51,27 @@ export const projectAssetService = {
   async create(input: CreateProjectAssetInput): Promise<ProjectAsset> {
     const res = await api.post<ProjectAsset>("/project-assets", input);
     const asset = fromDto(res.data);
-    await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+    if (isMobileNativePlatform()) {
+      await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+    }
     return asset;
   },
 
   async bulkCreate(projectId: string, productId: string, assets: CreateProjectAssetInput[]): Promise<ProjectAsset[]> {
     const res = await api.post<ProjectAsset[]>("/project-assets/bulk", { projectId, productId, assets });
     const created = res.data.map(fromDto);
-    await Promise.all(created.map((a) => entityPutAsset({ id: a.id, productId: a.productId, projectId: a.projectId, data: a })));
+    if (isMobileNativePlatform()) {
+      await Promise.all(created.map((a) => entityPutAsset({ id: a.id, productId: a.productId, projectId: a.projectId, data: a })));
+    }
     return created;
   },
 
   async getById(id: string): Promise<ProjectAsset | null> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
+      return fromDto(res.data);
+    }
+
     try {
       const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
       return fromDto(res.data);
@@ -71,6 +82,11 @@ export const projectAssetService = {
   },
 
   async update(id: string, patch: Partial<CreateProjectAssetInput> & { status?: string; workOrderId?: string }): Promise<ProjectAsset> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
+      return fromDto(res.data);
+    }
+
     const result = await AssetRepository.update(id, patch as Partial<ProjectAsset> & Record<string, unknown>);
     if (result === null) throw new Error("Offline — change queued");
     return result;
@@ -79,13 +95,20 @@ export const projectAssetService = {
   async patchIssues(id: string, issuesJson: string): Promise<ProjectAsset> {
     const res = await api.patch<ProjectAsset>(`/project-assets/${id}/issues`, { issuesJson });
     const asset = fromDto(res.data);
-    await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+    if (isMobileNativePlatform()) {
+      await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+    }
     window.dispatchEvent(new Event("notifications:run-state-changed"));
     window.dispatchEvent(new Event("notifications:refresh"));
     return asset;
   },
 
   async remove(id: string): Promise<void> {
+    if (!isMobileNativePlatform()) {
+      await api.delete(`/project-assets/${id}`);
+      return;
+    }
+
     try {
       await api.delete(`/project-assets/${id}`);
       await entityDeleteAsset(id);
@@ -181,7 +204,9 @@ export const projectAssetService = {
 
   async purge(id: string): Promise<void> {
     await api.delete(`/project-assets/${id}/purge`);
-    await entityDeleteAsset(id);
+    if (isMobileNativePlatform()) {
+      await entityDeleteAsset(id);
+    }
   },
 };
 

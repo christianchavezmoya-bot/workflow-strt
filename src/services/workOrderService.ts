@@ -1,5 +1,6 @@
 import api from "./api";
 import type { WorkOrder, WorkOrderStatus, StepCapture, CreateWorkOrderInput } from "../types/workOrder";
+import { isMobileNativePlatform } from "../utils/platform";
 
 export interface WorkOrderDto {
   id: string;
@@ -47,6 +48,11 @@ function lsWrite(productId: string, orders: WorkOrder[]) {
 
 export const workOrderService = {
   async listByProduct(productId: string): Promise<WorkOrder[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<WorkOrderDto[]>(`/work-orders/by-product/${productId}`);
+      return res.data.map(fromDto);
+    }
+
     try {
       const res = await api.get<WorkOrderDto[]>(`/work-orders/by-product/${productId}`);
       const orders = res.data.map(fromDto);

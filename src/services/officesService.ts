@@ -1,5 +1,6 @@
 import { Office } from "../components/GlobalOfficeMap";
 import api from "./api";
+import { isMobileNativePlatform } from "../utils/platform";
 
 // In-memory cache for offices (shared across all users in same session)
 let officesCache: Office[] | null = null;
@@ -7,6 +8,12 @@ let isMigrating = false; // Prevent infinite migration loops
 
 export const officesService = {
   async getAll(): Promise<Office[]> {
+    if (!isMobileNativePlatform()) {
+      const response = await api.get<Office[]>("/offices");
+      officesCache = response.data;
+      return response.data;
+    }
+
     try {
       const response = await api.get<Office[]>("/offices");
       const data = response.data;
@@ -59,6 +66,12 @@ export const officesService = {
   },
 
   async create(office: Omit<Office, "id">): Promise<Office> {
+    if (!isMobileNativePlatform()) {
+      const response = await api.post<Office>("/offices", office);
+      officesCache = officesCache ? [...officesCache, response.data] : [response.data];
+      return response.data;
+    }
+
     try {
       const response = await api.post<Office>("/offices", office);
       const newOffice = response.data;
@@ -87,6 +100,15 @@ export const officesService = {
   },
 
   async update(id: string, office: Omit<Office, "id">): Promise<Office> {
+    if (!isMobileNativePlatform()) {
+      const response = await api.put<Office>(`/offices/${id}`, office);
+      const updatedOffice = response.data;
+      if (officesCache) {
+        officesCache = officesCache.map((o) => (o.id === id ? updatedOffice : o));
+      }
+      return updatedOffice;
+    }
+
     try {
       const response = await api.put<Office>(`/offices/${id}`, office);
       const updatedOffice = response.data;
@@ -113,6 +135,14 @@ export const officesService = {
   },
 
   async delete(id: string): Promise<void> {
+    if (!isMobileNativePlatform()) {
+      await api.delete(`/offices/${id}`);
+      if (officesCache) {
+        officesCache = officesCache.filter((o) => o.id !== id);
+      }
+      return;
+    }
+
     try {
       await api.delete(`/offices/${id}`);
 

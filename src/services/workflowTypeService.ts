@@ -1,5 +1,6 @@
 import api from "./api";
 import type { WorkflowType } from "../types/workflowType";
+import { isMobileNativePlatform } from "../utils/platform";
 
 const LS_KEY = "workflow_types_v1";
 
@@ -17,6 +18,11 @@ function lsWrite(types: WorkflowType[]) {
 
 export const workflowTypeService = {
   async list(): Promise<WorkflowType[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<WorkflowType[]>("/workflow-types");
+      return res.data;
+    }
+
     try {
       const res = await api.get<WorkflowType[]>("/workflow-types");
       lsWrite(res.data);

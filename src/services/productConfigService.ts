@@ -1,5 +1,6 @@
 import api from "./api";
 import { cacheGet, cachePut } from "./localDB";
+import { isMobileNativePlatform } from "../utils/platform";
 
 export interface FeatureSelection {
   featureId: string;
@@ -47,6 +48,11 @@ function lsWrite(productId: string, configs: ProductConfig[]) {
 
 export const productConfigService = {
   async listByProduct(productId: string): Promise<ProductConfig[]> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.get<ProductConfig[]>(`/wi-templates/by-product/${productId}`);
+      return res.data;
+    }
+
     const cacheKey = `product_configs_v2_${productId}`;
     const cached = await cacheGet<ProductConfig[]>(cacheKey);
 

@@ -1,5 +1,6 @@
 import api from "./api";
 import { cacheGet, cachePut } from "./localDB";
+import { isMobileNativePlatform } from "../utils/platform";
 
 export interface DocumentRecord {
   id: string;
@@ -37,6 +38,11 @@ export function isBackendDocumentUrl(downloadUrl: string): boolean {
 
 export const documentService = {
   async getDocuments() {
+    if (!isMobileNativePlatform()) {
+      const response = await api.get<DocumentRecord[]>("/documents");
+      return response.data.map(hydrateCustomValues);
+    }
+
     const cacheKey = "documents_v1_all";
     const cached = await cacheGet<DocumentRecord[]>(cacheKey);
 
