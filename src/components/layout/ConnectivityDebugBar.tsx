@@ -183,16 +183,11 @@ export default function ConnectivityDebugBar() {
     <Box
       sx={{
         width: "100%",
-        px: 1.5,
+        px: 0,
         py: 0.5,
-        borderBottom: "0.5px solid",
-        borderColor: "divider",
-        bgcolor: "background.paper",
-        "@media (max-width: 768px)": {
-          position: "sticky",
-          top: "82px",
-          zIndex: 149,
-        },
+        borderTop: "0.5px solid",
+        borderColor: "rgba(255,255,255,0.08)",
+        bgcolor: "transparent",
       }}
     >
       <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">

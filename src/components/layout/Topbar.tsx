@@ -24,6 +24,7 @@ import { secureClearAuth } from "../../services/secureStorage";
 import strataLogo from "../../assets/strata_transparent.png";
 import SyncStatusBadge from "../ui/SyncStatusBadge";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
+import ConnectivityDebugBar from "./ConnectivityDebugBar";
 
 function getRolesFromCache(): string[] {
   try {
@@ -761,6 +762,7 @@ const Topbar = () => {
           )}
         </Menu>
       </Stack>
+      <ConnectivityDebugBar />
       {/* Test mode banner */}
       {isTestMode && (
         <Box sx={{

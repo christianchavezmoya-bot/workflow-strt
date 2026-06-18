@@ -103,6 +103,7 @@ body {
 
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   padding: 20px 28px;
@@ -131,9 +132,9 @@ body {
     z-index: 150;
   }
 
-  /* Push page content below the fixed mobile topbar. */
+  /* Push page content below the fixed mobile topbar (main row ~80px + debug bar ~30px). */
   .app-main {
-    padding-top: 76px !important;
+    padding-top: 114px !important;
   }
 }
 
