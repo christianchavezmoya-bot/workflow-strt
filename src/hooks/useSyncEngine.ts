@@ -430,7 +430,7 @@ export function useSyncEngine(): SyncState {
   useEffect(() => {
     const handleOnline  = () => {
       setConnectivity(prev => prev === "token-expired" ? prev : "online");
-      pingNow(); // don't wait up to 30s for the next scheduled check
+      if (isMobileNativePlatform()) pingNow();
       void flush();
     };
     const handleOffline = () => setConnectivity("offline");
@@ -452,7 +452,7 @@ export function useSyncEngine(): SyncState {
       if (!active) return;
       if (status.connected) {
         setConnectivity((prev) => prev === "token-expired" ? prev : "online");
-        pingNow(); // don't wait up to 30s for the next scheduled check
+        if (isMobileNativePlatform()) pingNow();
         void flush();
       } else {
         setConnectivity("offline");
@@ -538,6 +538,7 @@ export function useSyncEngine(): SyncState {
   // to call from every instance of this hook, since the module only ever
   // starts its internal timer once regardless of how many subscribers exist.
   useEffect(() => {
+    if (!isMobileNativePlatform()) return;
     return subscribeServerReachable((reachable) => setServerReachable(reachable));
   }, []);
 
