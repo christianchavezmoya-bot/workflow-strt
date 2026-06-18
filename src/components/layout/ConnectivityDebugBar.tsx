@@ -47,7 +47,7 @@ const TONE_COLORS: Record<Chip["tone"], { bg: string; fg: string }> = {
 };
 
 export default function ConnectivityDebugBar() {
-  const { connectivity, pendingCount, conflictCount, syncing, lastSyncAt } = useSyncEngine();
+  const { connectivity, serverReachable, pendingCount, conflictCount, syncing, lastSyncAt } = useSyncEngine();
   // Tracks whether the screen currently on display is known to be showing
   // cached/local data rather than data freshly confirmed from the server.
   // Driven by the same repo:*:fetch-failed / repo:*:updated events added in
@@ -101,19 +101,24 @@ export default function ConnectivityDebugBar() {
     });
   }
 
-  if (connectivity === "server-unreachable") {
+  // One fact, two states — no third "unknown" option once the app has run
+  // its first check. `serverReachable` comes from a dedicated background
+  // ping (services/connectivityMonitor.ts) that runs on a timer independent
+  // of whatever screen is open, so this stays accurate even on pages that
+  // never happen to make a request that could fail.
+  if (!serverReachable) {
     chips.push({
       key: "server",
       label: "Server not responding",
-      tooltip: "Phone has signal, but the last attempt to reach the server failed or timed out.",
+      tooltip: "Phone has signal, but the last background check could not reach the server.",
       icon: <DnsOutlinedIcon sx={{ fontSize: 14 }} />,
       tone: "danger",
     });
-  } else if (connectivity === "online") {
+  } else {
     chips.push({
       key: "server",
       label: "Server reachable",
-      tooltip: "The most recent request to the server succeeded.",
+      tooltip: "The last background check successfully reached the server.",
       icon: <DnsOutlinedIcon sx={{ fontSize: 14 }} />,
       tone: "success",
     });
@@ -169,7 +174,7 @@ export default function ConnectivityDebugBar() {
     });
   }
 
-  if (chips.length === 1 && connectivity === "online" && pendingCount === 0 && !syncing && conflictCount === 0 && !showingCachedData) {
+  if (chips.length === 1 && serverReachable && connectivity !== "offline" && connectivity !== "token-expired" && pendingCount === 0 && !syncing && conflictCount === 0 && !showingCachedData) {
     chips.push({
       key: "settled",
       label: `All confirmed · ${timeAgoShort(lastSyncAt)}`,

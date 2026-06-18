@@ -41,6 +41,7 @@ import type { SignatureEvent } from "../types/signature";
 import { mediaStore } from "../services/mediaStore";
 import syncQueue from "../services/syncQueue";
 import { isMobileNativePlatform } from "../utils/platform";
+import { subscribeServerReachable, pingNow } from "../services/connectivityMonitor";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,17 @@ export interface SyncState {
   status: SyncStatus;
   isOnline: boolean;
   connectivity: ConnectivityState;
+  /**
+   * True/false fact: was the last background ping to the server's /health
+   * endpoint successful? Unlike `connectivity`, this is not inferred from
+   * side effects of other requests — it comes from a dedicated periodic
+   * check (see services/connectivityMonitor.ts) that runs independently of
+   * which screen is open, so it stays accurate even on screens that never
+   * happen to make a request that could fail. Starts `true` optimistically
+   * until the first check completes, to avoid a flash of "not reachable"
+   * on a fresh app launch.
+   */
+  serverReachable: boolean;
   pendingCount: number;
   conflictCount: number;
   lastSyncAt: Date | null;
@@ -268,6 +280,11 @@ export function useSyncEngine(): SyncState {
   const [conflicts,     setConflicts]     = useState(0);
   const [lastSyncAt,    setLastSyncAt]    = useState<Date | null>(null);
   const [hasError,      setHasError]      = useState(false);
+  // Optimistic default of `true` avoids a flash of "server not reachable" on
+  // a fresh app launch, before the singleton's first ping has had a chance
+  // to complete. See services/connectivityMonitor.ts for why this lives
+  // outside this hook rather than as its own timer in here.
+  const [serverReachable, setServerReachable] = useState(true);
 
   const connectivityRef = useRef(connectivity);
   connectivityRef.current = connectivity;
@@ -413,6 +430,7 @@ export function useSyncEngine(): SyncState {
   useEffect(() => {
     const handleOnline  = () => {
       setConnectivity(prev => prev === "token-expired" ? prev : "online");
+      pingNow(); // don't wait up to 30s for the next scheduled check
       void flush();
     };
     const handleOffline = () => setConnectivity("offline");
@@ -434,6 +452,7 @@ export function useSyncEngine(): SyncState {
       if (!active) return;
       if (status.connected) {
         setConnectivity((prev) => prev === "token-expired" ? prev : "online");
+        pingNow(); // don't wait up to 30s for the next scheduled check
         void flush();
       } else {
         setConnectivity("offline");
@@ -513,6 +532,15 @@ export function useSyncEngine(): SyncState {
     };
   }, [flush]);
 
+  // ── Server reachability via dedicated background ping ─────────────────────
+  // Subscribes to the singleton ping in services/connectivityMonitor.ts.
+  // Subscribing also starts the monitor if it isn't already running — safe
+  // to call from every instance of this hook, since the module only ever
+  // starts its internal timer once regardless of how many subscribers exist.
+  useEffect(() => {
+    return subscribeServerReachable((reachable) => setServerReachable(reachable));
+  }, []);
+
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
     void refreshPending();
@@ -586,6 +614,7 @@ export function useSyncEngine(): SyncState {
     status,
     isOnline,
     connectivity,
+    serverReachable,
     pendingCount: pending,
     conflictCount: conflicts,
     lastSyncAt,
