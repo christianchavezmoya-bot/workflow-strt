@@ -188,6 +188,11 @@ export default function ConnectivityDebugBar() {
         borderBottom: "0.5px solid",
         borderColor: "divider",
         bgcolor: "background.paper",
+        "@media (max-width: 768px)": {
+          position: "sticky",
+          top: "82px",
+          zIndex: 149,
+        },
       }}
     >
       <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
