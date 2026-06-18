@@ -762,7 +762,7 @@ const Topbar = () => {
           )}
         </Menu>
       </Stack>
-      <ConnectivityDebugBar />
+      {isNativeMobile && <ConnectivityDebugBar />}
       {/* Test mode banner */}
       {isTestMode && (
         <Box sx={{
