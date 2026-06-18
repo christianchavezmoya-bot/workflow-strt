@@ -95,16 +95,22 @@ export function getNetworkMessage(status: NetworkStatus): {
   title: string;
   description: string;
 } {
+  const isNativeMobile = isMobileNativePlatform();
+
   switch (status.status) {
     case "offline":
       return {
         title: "No internet connection",
-        description: "First-time login requires internet access. Connect to WiFi or cellular data to sign in."
+        description: isNativeMobile
+          ? "First-time login requires internet access. Connect to WiFi or cellular data to sign in."
+          : "A live internet connection is required to sign in. Check your network and try again."
       };
     case "server-unavailable":
       return {
         title: "Server unavailable",
-        description: "Your phone is online but the server is not responding. Please try again later or contact support."
+        description: isNativeMobile
+          ? "Your phone is online but the server is not responding. Please try again later or contact support."
+          : "Your browser is online but the server is not responding. Check the server address and try again."
       };
     case "online":
     default:
