@@ -4,6 +4,7 @@ import syncQueue from "./syncQueue";
 import offlineStore from "./offlineStore";
 import { mediaStore } from "./mediaStore";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
 export interface SubmitSignaturePayload {
   signerRole: "Installer" | "Customer";
@@ -40,8 +41,16 @@ function isOfflineNetworkError(error: unknown): boolean {
 export const signatureService = {
   async listEvents(runId: string): Promise<SignatureEvent[]> {
     if (!isMobileNativePlatform()) {
-      const r = await api.get<SignatureEvent[]>("/signature-events", { params: { runId } });
-      return r.data;
+      // Short TTL — signature status is the kind of thing that should
+      // never feel stale to whoever is checking it.
+      return webCachedGet(
+        `/signature-events?runId=${runId}`,
+        async () => {
+          const r = await api.get<SignatureEvent[]>("/signature-events", { params: { runId } });
+          return r.data;
+        },
+        { ttlMs: 5_000 }
+      );
     }
 
     const resolvedRunId = await offlineStore.getMappedId("workflow-run", runId) ?? runId;
@@ -52,6 +61,8 @@ export const signatureService = {
   async submitSignature(runId: string, payload: SubmitSignaturePayload): Promise<SignatureEvent> {
     if (!isMobileNativePlatform()) {
       const r = await api.post<SignatureEvent>("/signature-events", payload, { params: { runId } });
+      invalidateWebCache(`/signature-events?runId=${runId}`);
+      invalidateWebCache(`/asset-workflow-runs/${runId}`);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return r.data;
@@ -149,8 +160,14 @@ export const signatureService = {
 
   async listTokens(runId: string): Promise<SignatureToken[]> {
     if (!isMobileNativePlatform()) {
-      const r = await api.get<SignatureToken[]>("/signature-tokens", { params: { runId } });
-      return r.data;
+      return webCachedGet(
+        `/signature-tokens?runId=${runId}`,
+        async () => {
+          const r = await api.get<SignatureToken[]>("/signature-tokens", { params: { runId } });
+          return r.data;
+        },
+        { ttlMs: 5_000 }
+      );
     }
 
     const resolvedRunId = await offlineStore.getMappedId("workflow-run", runId) ?? runId;
@@ -161,6 +178,7 @@ export const signatureService = {
   async createToken(payload: CreateTokenPayload): Promise<SignatureToken> {
     if (!isMobileNativePlatform()) {
       const r = await api.post<SignatureToken>("/signature-tokens", payload);
+      invalidateWebCache(`/signature-tokens?runId=${payload.runId}`);
       return r.data;
     }
 

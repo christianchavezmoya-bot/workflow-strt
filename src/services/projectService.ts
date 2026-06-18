@@ -4,6 +4,7 @@ import { Project, ProjectStatus, ProjectType } from "../types/project";
 import { ProjectRepository } from "../repositories/ProjectRepository";
 import { entityDeleteProject, entityPutProject } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
 export interface ProjectFilters {
   office?: string;
@@ -36,6 +37,12 @@ export const projectService = {
     return ProjectRepository.getAll(filters);
   },
   async getProject(id: string) {
+    if (!isMobileNativePlatform()) {
+      return webCachedGet(`/projects/${id}`, async () => {
+        const response = await api.get<Project>(`/projects/${id}`);
+        return response.data;
+      });
+    }
     const response = await api.get<Project>(`/projects/${id}`);
     return response.data;
   },
@@ -50,6 +57,8 @@ export const projectService = {
     const response = await api.put<Project>(`/projects/${id}`, payload);
     if (isMobileNativePlatform()) {
       await entityPutProject({ id: response.data.id, data: response.data });
+    } else {
+      invalidateWebCache(`/projects/${id}`);
     }
     return response.data;
   },
@@ -58,6 +67,8 @@ export const projectService = {
       const response = await api.patch<Project>(`/projects/${id}/status`, payload);
       if (isMobileNativePlatform()) {
         await entityPutProject({ id: response.data.id, data: response.data });
+      } else {
+        invalidateWebCache(`/projects/${id}`);
       }
       return response.data;
     } catch (error) {
@@ -74,6 +85,8 @@ export const projectService = {
     await api.delete(`/projects/${id}`);
     if (isMobileNativePlatform()) {
       await entityDeleteProject(id);
+    } else {
+      invalidateWebCache(`/projects/${id}`);
     }
     return id;
   },

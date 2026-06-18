@@ -1,6 +1,7 @@
 import api from "./api";
 import type { WorkInstruction, WorkInstructionInput } from "../types/workInstruction";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 // ------------------------------------------------------------------
 // DTO shape from backend
@@ -68,8 +69,10 @@ function fromDto(dto: WorkInstructionDto): WorkInstruction {
 export const workInstructionService = {
   async listByProduct(productId: string): Promise<WorkInstruction[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<WorkInstructionDto[]>(`/work-instructions/by-product/${productId}`);
-      return res.data.map(fromDto);
+      return webCachedGet(`/work-instructions/by-product/${productId}`, async () => {
+        const res = await api.get<WorkInstructionDto[]>(`/work-instructions/by-product/${productId}`);
+        return res.data.map(fromDto);
+      });
     }
 
     try {
@@ -97,6 +100,7 @@ export const workInstructionService = {
           featureValuesJson: JSON.stringify(input.featureValues),
         }
       );
+      invalidateWebCache(`/work-instructions/by-product/${productId}`);
       return fromDto(res.data);
     }
 
@@ -139,6 +143,7 @@ export const workInstructionService = {
         status: input.status,
         featureValuesJson: JSON.stringify(input.featureValues),
       });
+      invalidateWebCache(`/work-instructions/by-product/${res.data.productId}`);
       return fromDto(res.data);
     }
 
@@ -178,6 +183,9 @@ export const workInstructionService = {
   async remove(id: string): Promise<string> {
     if (!isMobileNativePlatform()) {
       await api.delete(`/work-instructions/${id}`);
+      // productId isn't known here — drop every cached product's list rather
+      // than risk one staying stale until its TTL naturally expires.
+      invalidateWebCacheByPrefix("/work-instructions/by-product/");
       return id;
     }
 

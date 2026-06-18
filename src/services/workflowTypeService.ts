@@ -1,6 +1,7 @@
 import api from "./api";
 import type { WorkflowType } from "../types/workflowType";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
 const LS_KEY = "workflow_types_v1";
 
@@ -19,8 +20,15 @@ function lsWrite(types: WorkflowType[]) {
 export const workflowTypeService = {
   async list(): Promise<WorkflowType[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<WorkflowType[]>("/workflow-types");
-      return res.data;
+      // Reference data that rarely changes — longer TTL than the default.
+      return webCachedGet(
+        "/workflow-types",
+        async () => {
+          const res = await api.get<WorkflowType[]>("/workflow-types");
+          return res.data;
+        },
+        { ttlMs: 60_000 }
+      );
     }
 
     try {
@@ -48,15 +56,18 @@ export const workflowTypeService = {
 
   async create(name: string, icon?: string, sortOrder?: number): Promise<WorkflowType> {
     const res = await api.post<WorkflowType>("/workflow-types", { name, icon, sortOrder: sortOrder ?? 99 });
+    invalidateWebCache("/workflow-types");
     return res.data;
   },
 
   async update(id: string, name: string, icon?: string, sortOrder?: number): Promise<WorkflowType> {
     const res = await api.put<WorkflowType>(`/workflow-types/${id}`, { name, icon, sortOrder: sortOrder ?? 99 });
+    invalidateWebCache("/workflow-types");
     return res.data;
   },
 
   async remove(id: string): Promise<void> {
     await api.delete(`/workflow-types/${id}`);
+    invalidateWebCache("/workflow-types");
   },
 };

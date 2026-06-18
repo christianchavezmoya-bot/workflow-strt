@@ -8,6 +8,7 @@ import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 export interface PendingSignatureRecord {
   runId:        string;
@@ -206,8 +207,10 @@ async function enqueueRunMutation(
 export const assetWorkflowRunService = {
   async listLatestByProject(projectId: string): Promise<AssetWorkflowRun[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
-      return res.data;
+      return webCachedGet(`/asset-workflow-runs/by-project/${projectId}`, async () => {
+        const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
+        return res.data;
+      });
     }
 
     const cachedRuns = await offlineStore.listRunsByProject(projectId);
@@ -227,8 +230,16 @@ export const assetWorkflowRunService = {
 
   async listByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
-      return res.data;
+      // Shorter TTL than the default — this feeds run-state decisions (e.g.
+      // "Continue Run" vs "Start Run") that should stay close to live.
+      return webCachedGet(
+        `/asset-workflow-runs/by-asset/${assetId}`,
+        async () => {
+          const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
+          return res.data;
+        },
+        { ttlMs: 8_000 }
+      );
     }
 
     const cachedRuns = await offlineStore.listRunsByAsset(assetId);
@@ -263,8 +274,10 @@ export const assetWorkflowRunService = {
   async getById(id: string): Promise<AssetWorkflowRun | null> {
     if (!isMobileNativePlatform()) {
       try {
-        const res = await api.get<AssetWorkflowRun>(`/asset-workflow-runs/${id}`);
-        return res.data;
+        return await webCachedGet(`/asset-workflow-runs/${id}`, async () => {
+          const res = await api.get<AssetWorkflowRun>(`/asset-workflow-runs/${id}`);
+          return res.data;
+        });
       } catch {
         return null;
       }
@@ -286,6 +299,7 @@ export const assetWorkflowRunService = {
         workflowConfigId,
         technicianUserId: technicianUserId ?? null,
       });
+      invalidateWebCache(`/asset-workflow-runs/by-asset/${assetId}`);
       return res.data;
     }
 
@@ -373,6 +387,7 @@ export const assetWorkflowRunService = {
         status: status ?? null,
       });
       const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${runId}`, requestBody);
+      invalidateWebCache(`/asset-workflow-runs/${runId}`);
       return res.data;
     }
 
@@ -431,6 +446,13 @@ export const assetWorkflowRunService = {
         bomActualJson: bomActualJson ?? null,
       });
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/complete`, requestBody);
+      // Completing a run also changes the asset's own status server-side
+      // (see AssetWorkflowRunsController.CompleteRun) — invalidate both so
+      // the very next read of either is guaranteed live, not a stale
+      // pre-completion snapshot.
+      invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      invalidateWebCache(`/project-assets/${res.data.assetId}`);
+      invalidateWebCache(`/asset-workflow-runs/by-asset/${res.data.assetId}`);
       return res.data;
     }
 
@@ -526,6 +548,7 @@ export const assetWorkflowRunService = {
     if (!isMobileNativePlatform()) {
       const requestBody = await mediaStore.resolveUploadPayload({ issuesJson });
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/issues`, requestBody);
+      invalidateWebCache(`/asset-workflow-runs/${runId}`);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return res.data;
@@ -608,6 +631,7 @@ export const assetWorkflowRunService = {
         amendedAt: new Date().toISOString(),
       });
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/step-results`, requestBody);
+      invalidateWebCache(`/asset-workflow-runs/${runId}`);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return res.data;
@@ -630,6 +654,7 @@ export const assetWorkflowRunService = {
   async patchTimeEntries(runId: string, timeEntriesJson: string): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entries`, { timeEntriesJson });
+      invalidateWebCache(`/asset-workflow-runs/${runId}`);
       return res.data;
     }
 
@@ -642,6 +667,7 @@ export const assetWorkflowRunService = {
   async waiveCustomerSignature(runId: string): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/waive-customer-signature`);
+      invalidateWebCache(`/asset-workflow-runs/${runId}`);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return res.data;

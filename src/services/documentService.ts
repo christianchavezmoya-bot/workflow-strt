@@ -1,6 +1,7 @@
 import api from "./api";
 import { cacheGet, cachePut } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
 export interface DocumentRecord {
   id: string;
@@ -39,8 +40,10 @@ export function isBackendDocumentUrl(downloadUrl: string): boolean {
 export const documentService = {
   async getDocuments() {
     if (!isMobileNativePlatform()) {
-      const response = await api.get<DocumentRecord[]>("/documents");
-      return response.data.map(hydrateCustomValues);
+      return webCachedGet("/documents", async () => {
+        const response = await api.get<DocumentRecord[]>("/documents");
+        return response.data.map(hydrateCustomValues);
+      });
     }
 
     const cacheKey = "documents_v1_all";
@@ -66,6 +69,7 @@ export const documentService = {
   async createDocument(payload: DocumentRecord) {
     const body = { ...payload, customValuesJson: payload.customValues ? JSON.stringify(payload.customValues) : payload.customValuesJson };
     const response = await api.post<DocumentRecord>("/documents", body);
+    invalidateWebCache("/documents");
     return hydrateCustomValues(response.data);
   },
 
@@ -87,11 +91,13 @@ export const documentService = {
   async updateDocument(id: string, payload: DocumentRecord) {
     const body = { ...payload, customValuesJson: payload.customValues ? JSON.stringify(payload.customValues) : payload.customValuesJson };
     const response = await api.put<DocumentRecord>(`/documents/${id}`, body);
+    invalidateWebCache("/documents");
     return hydrateCustomValues(response.data);
   },
 
   async deleteDocument(id: string): Promise<void> {
     await api.delete(`/documents/${id}`);
+    invalidateWebCache("/documents");
   },
 
   // ── Document UI config (tabs + custom fields) ─────────────────────────────

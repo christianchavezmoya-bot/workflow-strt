@@ -2,6 +2,7 @@ import api from "./api";
 import type { WorkflowConfig, UpsertWorkflowConfigInput, WorkflowConfigStatus } from "../types/workflowConfig";
 import offlineStore from "./offlineStore";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 const LS_KEY = (productId: string) => `workflow_configs_v1_${productId}`;
 const CACHE_ALL_KEY = "workflow-configs:all";
@@ -49,8 +50,10 @@ export const workflowConfigService = {
   async getAll(status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
     if (!isMobileNativePlatform()) {
       const params = status ? `?status=${status}` : "";
-      const res = await api.get<WorkflowConfig[]>(`/workflow-configs${params}`);
-      return res.data;
+      return webCachedGet(`/workflow-configs${params}`, async () => {
+        const res = await api.get<WorkflowConfig[]>(`/workflow-configs${params}`);
+        return res.data;
+      });
     }
 
     try {
@@ -68,8 +71,11 @@ export const workflowConfigService = {
 
   async listByProduct(productId: string, status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}`);
-      return status ? res.data.filter((c) => c.status === status) : res.data;
+      const all = await webCachedGet(`/workflow-configs/by-product/${productId}`, async () => {
+        const res = await api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}`);
+        return res.data;
+      });
+      return status ? all.filter((c) => c.status === status) : all;
     }
 
     // The cache always stores the UNFILTERED superset for a product, regardless
@@ -113,8 +119,10 @@ export const workflowConfigService = {
   async getById(id: string): Promise<WorkflowConfig | null> {
     if (!isMobileNativePlatform()) {
       try {
-        const res = await api.get<WorkflowConfig>(`/workflow-configs/${id}`);
-        return res.data;
+        return await webCachedGet(`/workflow-configs/${id}`, async () => {
+          const res = await api.get<WorkflowConfig>(`/workflow-configs/${id}`);
+          return res.data;
+        });
       } catch (err: unknown) {
         const status = (err as { response?: { status?: number } })?.response?.status;
         if (status === 404) return null;
@@ -143,6 +151,7 @@ export const workflowConfigService = {
     const configs = lsRead(input.productId);
     configs.unshift(res.data);
     lsWrite(input.productId, configs);
+    invalidateWebCacheByPrefix("/workflow-configs");
     return res.data;
   },
 
@@ -150,21 +159,25 @@ export const workflowConfigService = {
     const res = await api.put<WorkflowConfig>(`/workflow-configs/${id}`, input);
     const configs = lsRead(res.data.productId).map((c) => (c.id === id ? res.data : c));
     lsWrite(res.data.productId, configs);
+    invalidateWebCacheByPrefix("/workflow-configs");
     return res.data;
   },
 
   async publish(id: string): Promise<WorkflowConfig> {
     const res = await api.post<WorkflowConfig>(`/workflow-configs/${id}/publish`);
+    invalidateWebCacheByPrefix("/workflow-configs");
     return res.data;
   },
 
   async archive(id: string): Promise<WorkflowConfig> {
     const res = await api.post<WorkflowConfig>(`/workflow-configs/${id}/archive`);
+    invalidateWebCacheByPrefix("/workflow-configs");
     return res.data;
   },
 
   async clone(id: string): Promise<WorkflowConfig> {
     const res = await api.post<WorkflowConfig>(`/workflow-configs/${id}/clone`);
+    invalidateWebCacheByPrefix("/workflow-configs");
     return res.data;
   },
 
@@ -172,6 +185,7 @@ export const workflowConfigService = {
     await api.delete(`/workflow-configs/${id}`);
     const configs = lsRead(productId).filter((c) => c.id !== id);
     lsWrite(productId, configs);
+    invalidateWebCacheByPrefix("/workflow-configs");
   },
 
   async uploadMedia(id: string, file: File): Promise<WorkflowConfig> {

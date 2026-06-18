@@ -1,6 +1,7 @@
 import api from "./api";
 import type { WorkOrder, WorkOrderStatus, StepCapture, CreateWorkOrderInput } from "../types/workOrder";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
 export interface WorkOrderDto {
   id: string;
@@ -49,8 +50,10 @@ function lsWrite(productId: string, orders: WorkOrder[]) {
 export const workOrderService = {
   async listByProduct(productId: string): Promise<WorkOrder[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<WorkOrderDto[]>(`/work-orders/by-product/${productId}`);
-      return res.data.map(fromDto);
+      return webCachedGet(`/work-orders/by-product/${productId}`, async () => {
+        const res = await api.get<WorkOrderDto[]>(`/work-orders/by-product/${productId}`);
+        return res.data.map(fromDto);
+      });
     }
 
     try {
@@ -78,6 +81,7 @@ export const workOrderService = {
     const order = fromDto(res.data);
     const existing = lsRead(order.productId);
     lsWrite(order.productId, [order, ...existing]);
+    invalidateWebCache(`/work-orders/by-product/${order.productId}`);
     return order;
   },
 
@@ -86,11 +90,13 @@ export const workOrderService = {
       status,
       stepsDataJson: JSON.stringify(stepsData),
     });
+    invalidateWebCache(`/work-orders/by-product/${res.data.productId}`);
     return fromDto(res.data);
   },
 
   async patch(id: string, fields: { jobReference?: string; notes?: string }): Promise<WorkOrder> {
     const res = await api.put<WorkOrderDto>(`/work-orders/${id}`, fields);
+    invalidateWebCache(`/work-orders/by-product/${res.data.productId}`);
     return fromDto(res.data);
   },
 
@@ -98,5 +104,6 @@ export const workOrderService = {
     try { await api.delete(`/work-orders/${id}`); } catch {}
     const existing = lsRead(productId);
     lsWrite(productId, existing.filter((o) => o.id !== id));
+    invalidateWebCache(`/work-orders/by-product/${productId}`);
   },
 };

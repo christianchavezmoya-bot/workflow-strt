@@ -2,6 +2,7 @@ import api from "./api";
 import type { Workflow } from "../types/workflow";
 import offlineStore from "./offlineStore";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 // Shape returned by the backend
 export interface WorkflowTemplateDto {
@@ -76,8 +77,10 @@ export const workflowTemplateService = {
    */
   async getByProduct(productId: string): Promise<Workflow[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<WorkflowTemplateDto[]>(`/workflow-templates/by-product/${productId}`);
-      return res.data.map(toWorkflow);
+      return webCachedGet(`/workflow-templates/by-product/${productId}`, async () => {
+        const res = await api.get<WorkflowTemplateDto[]>(`/workflow-templates/by-product/${productId}`);
+        return res.data.map(toWorkflow);
+      });
     }
 
     try {
@@ -109,8 +112,10 @@ export const workflowTemplateService = {
   async getById(id: string): Promise<Workflow | null> {
     if (!isMobileNativePlatform()) {
       try {
-        const res = await api.get<WorkflowTemplateDto>(`/workflow-templates/${id}`);
-        return toWorkflow(res.data);
+        return await webCachedGet(`/workflow-templates/${id}`, async () => {
+          const res = await api.get<WorkflowTemplateDto>(`/workflow-templates/${id}`);
+          return toWorkflow(res.data);
+        });
       } catch (err: unknown) {
         const status = (err as { response?: { status?: number } })?.response?.status;
         if (status === 404) return null;
@@ -143,8 +148,11 @@ export const workflowTemplateService = {
    */
   async getFirstByProduct(productId: string): Promise<Workflow | null> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<WorkflowTemplateDto[]>(`/workflow-templates/by-product/${productId}`);
-      return res.data.length === 0 ? null : toWorkflow(res.data[0]);
+      const all = await webCachedGet(`/workflow-templates/by-product/${productId}`, async () => {
+        const res = await api.get<WorkflowTemplateDto[]>(`/workflow-templates/by-product/${productId}`);
+        return res.data.map(toWorkflow);
+      });
+      return all.length === 0 ? null : all[0];
     }
 
     try {
@@ -175,6 +183,7 @@ export const workflowTemplateService = {
       mediaJson: JSON.stringify(workflow.media ?? []),
     });
     lsWrite(toWorkflow(res.data));
+    invalidateWebCacheByPrefix("/workflow-templates");
     return res.data;
   },
 
@@ -190,6 +199,7 @@ export const workflowTemplateService = {
       mediaJson: JSON.stringify(workflow.media ?? []),
     });
     lsWrite(toWorkflow(res.data));
+    invalidateWebCacheByPrefix("/workflow-templates");
     return res.data;
   },
 
@@ -227,6 +237,7 @@ export const workflowTemplateService = {
     });
     const wf = toWorkflow(res.data);
     lsWrite(wf);
+    invalidateWebCacheByPrefix("/workflow-templates");
     return wf;
   },
 
@@ -238,6 +249,7 @@ export const workflowTemplateService = {
     const res = await api.delete<WorkflowTemplateDto>(`/workflow-templates/${templateId}/media/${mediaId}`);
     const wf = toWorkflow(res.data);
     lsWrite(wf);
+    invalidateWebCacheByPrefix("/workflow-templates");
     return wf;
   },
 

@@ -4,6 +4,7 @@ import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "
 import { entityDeleteAsset, entityGetAsset, entityPutAsset, pendingAdd, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -68,8 +69,10 @@ export const projectAssetService = {
 
   async getById(id: string): Promise<ProjectAsset | null> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
-      return fromDto(res.data);
+      return webCachedGet(`/project-assets/${id}`, async () => {
+        const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
+        return fromDto(res.data);
+      });
     }
 
     try {
@@ -84,6 +87,7 @@ export const projectAssetService = {
   async update(id: string, patch: Partial<CreateProjectAssetInput> & { status?: string; workOrderId?: string }): Promise<ProjectAsset> {
     if (!isMobileNativePlatform()) {
       const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
+      invalidateWebCache(`/project-assets/${id}`);
       return fromDto(res.data);
     }
 
@@ -97,6 +101,8 @@ export const projectAssetService = {
     const asset = fromDto(res.data);
     if (isMobileNativePlatform()) {
       await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+    } else {
+      invalidateWebCache(`/project-assets/${id}`);
     }
     window.dispatchEvent(new Event("notifications:run-state-changed"));
     window.dispatchEvent(new Event("notifications:refresh"));
@@ -106,6 +112,7 @@ export const projectAssetService = {
   async remove(id: string): Promise<void> {
     if (!isMobileNativePlatform()) {
       await api.delete(`/project-assets/${id}`);
+      invalidateWebCache(`/project-assets/${id}`);
       return;
     }
 

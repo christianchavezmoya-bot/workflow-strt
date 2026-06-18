@@ -3,10 +3,23 @@ import api from "./api";
 import type { WorkflowAssignment } from "../types/workflowType";
 import { pendingAdd } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
 export const assetWorkflowAssignmentService = {
   async listByAsset(assetId: string): Promise<WorkflowAssignment[]> {
     try {
+      if (!isMobileNativePlatform()) {
+        // Short TTL — this feeds the "asset assigned to someone else"
+        // reassignment check, which should stay close to live.
+        return await webCachedGet(
+          `/asset-workflow-assignments/by-asset/${assetId}`,
+          async () => {
+            const res = await api.get<WorkflowAssignment[]>(`/asset-workflow-assignments/by-asset/${assetId}`);
+            return res.data;
+          },
+          { ttlMs: 8_000 }
+        );
+      }
       const res = await api.get<WorkflowAssignment[]>(`/asset-workflow-assignments/by-asset/${assetId}`);
       return res.data;
     } catch (err: unknown) {
@@ -21,12 +34,14 @@ export const assetWorkflowAssignmentService = {
       workflowConfigId,
       workflowTypeId,
     });
+    invalidateWebCache(`/asset-workflow-assignments/by-asset/${assetId}`);
     return res.data;
   },
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, assetId?: string): Promise<void> {
     if (!isMobileNativePlatform()) {
       await api.delete(`/asset-workflow-assignments/${id}`);
+      if (assetId) invalidateWebCache(`/asset-workflow-assignments/by-asset/${assetId}`);
       return;
     }
 

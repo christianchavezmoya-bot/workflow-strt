@@ -10,6 +10,7 @@ import {
   syncMetaSet,
 } from "../services/localDB";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, webCacheKey, invalidateWebCacheByPrefix } from "../services/webFreshCache";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -46,8 +47,13 @@ export const AssetRepository = {
 
   async getByProduct(productId: string, includeDeleted = false): Promise<ProjectAsset[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`, { params: { includeDeleted: includeDeleted || undefined } });
-      return res.data.map(fromDto);
+      return webCachedGet(
+        webCacheKey(`/project-assets/by-product/${productId}`, { includeDeleted: includeDeleted || undefined }),
+        async () => {
+          const res = await api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`, { params: { includeDeleted: includeDeleted || undefined } });
+          return res.data.map(fromDto);
+        }
+      );
     }
 
     const local = await this.getLocalByProduct(productId, includeDeleted);
@@ -77,8 +83,13 @@ export const AssetRepository = {
 
   async getByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, { params: { includeDeleted: includeDeleted || undefined } });
-      return res.data.map(fromDto);
+      return webCachedGet(
+        webCacheKey(`/project-assets/by-project/${projectId}`, { includeDeleted: includeDeleted || undefined }),
+        async () => {
+          const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, { params: { includeDeleted: includeDeleted || undefined } });
+          return res.data.map(fromDto);
+        }
+      );
     }
 
     const local = await this.getLocalByProject(projectId, includeDeleted);
@@ -112,6 +123,10 @@ export const AssetRepository = {
   ): Promise<ProjectAsset | null> {
     if (!isMobileNativePlatform()) {
       const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
+      // A write just happened — make sure the next list read for this asset's
+      // product/project is live, not a stale pre-edit snapshot from cache.
+      invalidateWebCacheByPrefix("/project-assets/by-product/");
+      invalidateWebCacheByPrefix("/project-assets/by-project/");
       return fromDto(res.data);
     }
 

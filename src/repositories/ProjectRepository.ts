@@ -3,6 +3,7 @@ import type { Project } from "../types/project";
 import { entityGetAllProjects, entityPutProjects, reconcileProjects, syncMetaSet } from "../services/localDB";
 import type { ProjectFilters, ProjectListResponse } from "../services/projectService";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, webCacheKey } from "../services/webFreshCache";
 
 export type ProjectRepositoryUpdateDetail = {
   items: Project[];
@@ -47,10 +48,19 @@ export const ProjectRepository = {
   async getAll(filters?: ProjectFilters): Promise<ProjectListResponse> {
     const params = filters && Object.keys(filters).length ? filters : undefined;
     if (!isMobileNativePlatform()) {
-      const res = await api.get<Project[] | ProjectListResponse>("/projects", { params });
-      return Array.isArray(res.data)
-        ? { items: res.data, total: res.data.length }
-        : res.data;
+      // Browser path: always confirms with the server, but a short-lived
+      // in-memory cache (cleared on page reload, never persisted) avoids
+      // making the user wait on a full round trip every single time they
+      // revisit a screen they were just on. See webFreshCache.ts.
+      return webCachedGet(
+        webCacheKey("/projects", params as Record<string, unknown> | undefined),
+        async () => {
+          const res = await api.get<Project[] | ProjectListResponse>("/projects", { params });
+          return Array.isArray(res.data)
+            ? { items: res.data, total: res.data.length }
+            : res.data;
+        }
+      );
     }
 
     const local = await entityGetAllProjects();

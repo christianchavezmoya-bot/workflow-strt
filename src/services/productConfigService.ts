@@ -1,6 +1,7 @@
 import api from "./api";
 import { cacheGet, cachePut } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
 export interface FeatureSelection {
   featureId: string;
@@ -49,8 +50,10 @@ function lsWrite(productId: string, configs: ProductConfig[]) {
 export const productConfigService = {
   async listByProduct(productId: string): Promise<ProductConfig[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<ProductConfig[]>(`/wi-templates/by-product/${productId}`);
-      return res.data;
+      return webCachedGet(`/wi-templates/by-product/${productId}`, async () => {
+        const res = await api.get<ProductConfig[]>(`/wi-templates/by-product/${productId}`);
+        return res.data;
+      });
     }
 
     const cacheKey = `product_configs_v2_${productId}`;
@@ -91,6 +94,7 @@ export const productConfigService = {
     const configs = lsRead(input.productId);
     configs.unshift(res.data);
     lsWrite(input.productId, configs);
+    invalidateWebCache(`/wi-templates/by-product/${input.productId}`);
     return res.data;
   },
 
@@ -99,6 +103,7 @@ export const productConfigService = {
     const productId = res.data.productId;
     const configs = lsRead(productId).map((c) => (c.id === id ? res.data : c));
     lsWrite(productId, configs);
+    invalidateWebCache(`/wi-templates/by-product/${productId}`);
     return res.data;
   },
 
@@ -106,5 +111,6 @@ export const productConfigService = {
     await api.delete(`/wi-templates/${id}`);
     const configs = lsRead(productId).filter((c) => c.id !== id);
     lsWrite(productId, configs);
+    invalidateWebCache(`/wi-templates/by-product/${productId}`);
   },
 };
