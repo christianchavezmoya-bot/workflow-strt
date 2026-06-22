@@ -8,6 +8,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Dialog,
   DialogContent,
   DialogTitle,
@@ -21,7 +22,10 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useEffect, useState } from "react";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
+import api from "../../services/api";
 import {
+  entityGetAsset,
+  entityGetWorkflowRun,
   pendingGetAll,
   pendingRemove,
   droppedActionsGetAll,
@@ -30,10 +34,28 @@ import {
   type DroppedAction,
 } from "../../services/localDB";
 import ApiDebugPanel from "../../components/ui/ApiDebugPanel";
+import type { ProjectAsset } from "../../types/projectAsset";
+import type { AssetWorkflowRun, RunIssue, StepResult } from "../../types/assetWorkflowRun";
+import offlineStore from "../../services/offlineStore";
 
 interface Props {
   open: boolean;
   onClose: () => void;
+}
+
+interface ConflictFieldComparison {
+  label: string;
+  localValue: string;
+  serverValue: string;
+}
+
+interface ConflictDetail {
+  title: string;
+  subtitle?: string;
+  localLabel: string;
+  serverLabel: string;
+  fields: ConflictFieldComparison[];
+  fetchError?: string;
 }
 
 function timeAgo(date: Date): string {
@@ -89,11 +111,314 @@ function connectivityLabel(
   }
 }
 
+function parseJsonArray<T>(raw: string | null | undefined): T[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as T[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function formatDateTime(iso?: string | null): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString();
+}
+
+function formatValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return value.trim() || "—";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatIssuesSummary(raw: string | null | undefined): string {
+  const issues = parseJsonArray<RunIssue>(raw);
+  const open = issues.filter((issue) => !issue.resolved).length;
+  const blocking = issues.filter((issue) => issue.isBlocking && !issue.resolved).length;
+  return `${open} open${blocking > 0 ? ` · ${blocking} blocking` : ""}`;
+}
+
+function formatStepResultsSummary(raw: string | null | undefined): string {
+  const steps = parseJsonArray<StepResult>(raw);
+  return `${steps.length} completed step${steps.length === 1 ? "" : "s"}`;
+}
+
+function formatFeatureValuesSummary(raw: string | null | undefined): string {
+  if (!raw) return "0 values";
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return `${Object.values(parsed ?? {}).filter((value) => value !== null && value !== undefined && value !== "").length} values`;
+  } catch {
+    return "—";
+  }
+}
+
+function formatBomSummary(raw: string | null | undefined): string {
+  const items = parseJsonArray<unknown>(raw);
+  return `${items.length} BOM item${items.length === 1 ? "" : "s"}`;
+}
+
+function deriveChangedKeys(action: PendingAction): string[] {
+  const source = Object.keys(action.optimisticPatch ?? {});
+  if (source.length > 0) return source;
+  if (action.body && typeof action.body === "object") {
+    return Object.keys(action.body as Record<string, unknown>);
+  }
+  return [];
+}
+
+function getQueuedFieldValue<T extends object>(
+  action: PendingAction,
+  key: keyof T & string,
+  fallback: unknown,
+): unknown {
+  const optimisticValue = (action.optimisticPatch as Record<string, unknown> | undefined)?.[key];
+  if (optimisticValue !== undefined) return optimisticValue;
+  const bodyValue = action.body && typeof action.body === "object"
+    ? (action.body as Record<string, unknown>)[key]
+    : undefined;
+  if (bodyValue !== undefined) return bodyValue;
+  return fallback;
+}
+
+function buildAssetConflictFields(
+  action: PendingAction,
+  localAsset?: ProjectAsset | null,
+  serverAsset?: ProjectAsset | null,
+): ConflictFieldComparison[] {
+  const changedKeys = deriveChangedKeys(action);
+  const fields: ConflictFieldComparison[] = [];
+  const addField = (label: string, localValue: unknown, serverValue: unknown) => {
+    fields.push({
+      label,
+      localValue: formatValue(localValue),
+      serverValue: formatValue(serverValue),
+    });
+  };
+
+  changedKeys.forEach((key) => {
+    switch (key) {
+      case "status":
+        addField("Status", getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.status), serverAsset?.status);
+        break;
+      case "assetTag":
+        addField("Asset Tag", getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.assetTag), serverAsset?.assetTag);
+        break;
+      case "assetName":
+        addField("Asset Name", getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.assetName), serverAsset?.assetName);
+        break;
+      case "location":
+        addField("Location", getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.location), serverAsset?.location);
+        break;
+      case "assignedUserId":
+        addField("Assigned User", getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.assignedUserId), serverAsset?.assignedUserId);
+        break;
+      case "workOrderId":
+        addField("Work Order", getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.workOrderId), serverAsset?.workOrderId);
+        break;
+      case "notes":
+        addField("Notes", getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.notes), serverAsset?.notes);
+        break;
+      case "issuesJson":
+        addField(
+          "Issues",
+          formatIssuesSummary(getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.issuesJson) as string | undefined),
+          formatIssuesSummary(serverAsset?.issuesJson)
+        );
+        break;
+      case "featureValuesJson":
+        addField(
+          "Feature Values",
+          formatFeatureValuesSummary(getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.featureValuesJson) as string | undefined),
+          formatFeatureValuesSummary(serverAsset?.featureValuesJson)
+        );
+        break;
+      case "updatedAt":
+        addField(
+          "Updated",
+          formatDateTime(getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.updatedAt) as string | undefined),
+          formatDateTime(serverAsset?.updatedAt)
+        );
+        break;
+      default:
+        addField(
+          key,
+          getQueuedFieldValue<ProjectAsset>(action, key as keyof ProjectAsset & string, localAsset?.[key as keyof ProjectAsset]),
+          serverAsset?.[key as keyof ProjectAsset]
+        );
+        break;
+    }
+  });
+
+  if (fields.length === 0) {
+    addField("Queued change", action.method, `${action.method} ${action.url}`);
+  }
+  return fields;
+}
+
+function buildRunConflictFields(
+  action: PendingAction,
+  localRun?: AssetWorkflowRun | null,
+  serverRun?: AssetWorkflowRun | null,
+): ConflictFieldComparison[] {
+  const changedKeys = deriveChangedKeys(action);
+  const fields: ConflictFieldComparison[] = [];
+  const addField = (label: string, localValue: unknown, serverValue: unknown) => {
+    fields.push({
+      label,
+      localValue: formatValue(localValue),
+      serverValue: formatValue(serverValue),
+    });
+  };
+
+  changedKeys.forEach((key) => {
+    switch (key) {
+      case "status":
+        addField("Status", getQueuedFieldValue<AssetWorkflowRun>(action, key, localRun?.status), serverRun?.status);
+        break;
+      case "stepResultsJson":
+        addField(
+          "Steps",
+          formatStepResultsSummary(getQueuedFieldValue<AssetWorkflowRun>(action, key, localRun?.stepResultsJson) as string | undefined),
+          formatStepResultsSummary(serverRun?.stepResultsJson)
+        );
+        break;
+      case "issuesJson":
+        addField(
+          "Issues",
+          formatIssuesSummary(getQueuedFieldValue<AssetWorkflowRun>(action, key, localRun?.issuesJson) as string | undefined),
+          formatIssuesSummary(serverRun?.issuesJson)
+        );
+        break;
+      case "signatureStatus":
+        addField("Signature", getQueuedFieldValue<AssetWorkflowRun>(action, key, localRun?.signatureStatus), serverRun?.signatureStatus);
+        break;
+      case "completedAt":
+        addField(
+          "Completed",
+          formatDateTime(getQueuedFieldValue<AssetWorkflowRun>(action, key, localRun?.completedAt) as string | undefined),
+          formatDateTime(serverRun?.completedAt)
+        );
+        break;
+      case "updatedAt":
+        addField(
+          "Updated",
+          formatDateTime(getQueuedFieldValue<AssetWorkflowRun>(action, key, localRun?.updatedAt) as string | undefined),
+          formatDateTime(serverRun?.updatedAt)
+        );
+        break;
+      case "productiveSeconds":
+        addField("Productive Time", getQueuedFieldValue<AssetWorkflowRun>(action, key, localRun?.productiveSeconds), serverRun?.productiveSeconds);
+        break;
+      case "downtimeSeconds":
+        addField("Downtime", getQueuedFieldValue<AssetWorkflowRun>(action, key, localRun?.downtimeSeconds), serverRun?.downtimeSeconds);
+        break;
+      case "bomActualJson":
+        addField(
+          "BOM",
+          formatBomSummary(getQueuedFieldValue<AssetWorkflowRun>(action, key, localRun?.bomActualJson) as string | undefined),
+          formatBomSummary(serverRun?.bomActualJson)
+        );
+        break;
+      default:
+        addField(
+          key,
+          getQueuedFieldValue<AssetWorkflowRun>(action, key as keyof AssetWorkflowRun & string, localRun?.[key as keyof AssetWorkflowRun]),
+          serverRun?.[key as keyof AssetWorkflowRun]
+        );
+        break;
+    }
+  });
+
+  if (fields.length === 0) {
+    addField("Queued change", action.method, `${action.method} ${action.url}`);
+  }
+  return fields;
+}
+
+async function buildConflictDetail(action: PendingAction): Promise<ConflictDetail> {
+  if (action.entityType === "asset") {
+    const localRecord = await entityGetAsset(action.entityId);
+    const localAsset = (localRecord?.data as ProjectAsset | undefined) ?? null;
+    let serverAsset: ProjectAsset | null = null;
+    let fetchError: string | undefined;
+    try {
+      const response = await api.get<ProjectAsset>(`/project-assets/${action.entityId}`);
+      serverAsset = response.data;
+    } catch {
+      fetchError = "Could not load the current server version.";
+    }
+
+    return {
+      title: localAsset?.assetTag ? `Asset ${localAsset.assetTag}` : `Asset ${action.entityId}`,
+      subtitle: localAsset?.assetName ?? serverAsset?.assetName ?? action.url,
+      localLabel: "Your offline version",
+      serverLabel: "Current server version",
+      fields: buildAssetConflictFields(action, localAsset, serverAsset),
+      fetchError,
+    };
+  }
+
+  if (action.entityType === "workflow-run") {
+    const localRun = (await offlineStore.getRun(action.entityId)) ?? ((await entityGetWorkflowRun(action.entityId))?.data as AssetWorkflowRun | undefined) ?? null;
+    const resolvedRunId = await offlineStore.getMappedId("workflow-run", action.entityId) ?? action.entityId;
+    let serverRun: AssetWorkflowRun | null = null;
+    let fetchError: string | undefined;
+    try {
+      const response = await api.get<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}`);
+      serverRun = response.data;
+    } catch {
+      fetchError = "Could not load the current server version.";
+    }
+
+    const localAsset = localRun?.assetId ? await entityGetAsset(localRun.assetId) : null;
+    const localAssetData = (localAsset?.data as ProjectAsset | undefined) ?? null;
+    return {
+      title: localAssetData?.assetTag ? `Run for ${localAssetData.assetTag}` : `Run ${resolvedRunId}`,
+      subtitle: localRun?.status ? `${localRun.status} · ${action.method} ${action.url}` : action.url,
+      localLabel: "Your offline version",
+      serverLabel: "Current server version",
+      fields: buildRunConflictFields(action, localRun, serverRun),
+      fetchError,
+    };
+  }
+
+  return {
+    title: `${action.entityType} conflict`,
+    subtitle: `${action.method} ${action.url}`,
+    localLabel: "Your queued change",
+    serverLabel: "Current server version",
+    fields: deriveChangedKeys(action).length > 0
+      ? deriveChangedKeys(action).map((key) => ({
+        label: key,
+        localValue: formatValue((action.optimisticPatch as Record<string, unknown>)[key] ?? (action.body as Record<string, unknown> | undefined)?.[key]),
+        serverValue: "Unavailable",
+      }))
+      : [{
+        label: "Queued change",
+        localValue: `${action.method} ${action.url}`,
+        serverValue: "Unavailable",
+      }],
+    fetchError: "Detailed comparison is not available for this record type yet.",
+  };
+}
+
 export default function SyncCenterPage({ open, onClose }: Props) {
   const { status, pendingCount, conflictCount, lastSyncAt, syncing, triggerSync, resolveConflictKeep, resolveConflictDiscard } = useSyncEngine();
   const [queue, setQueue]         = useState<PendingAction[]>([]);
   const [debugOpen, setDebugOpen] = useState(false);
   const [droppedActions, setDroppedActions] = useState<DroppedAction[]>([]);
+  const [conflictDetails, setConflictDetails] = useState<Record<string, ConflictDetail>>({});
+  const [loadingConflictIds, setLoadingConflictIds] = useState<Record<string, boolean>>({});
 
   const loadQueue = async () => setQueue(await pendingGetAll());
   const loadDropped = async () => setDroppedActions(await droppedActionsGetAll());
@@ -127,6 +452,43 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   const conflicted   = queue.filter(a => a.conflictDetected);
   const nonConflicted = queue.filter(a => !a.conflictDetected);
   const hasFailed    = nonConflicted.some(a => a.status === "failed");
+
+  useEffect(() => {
+    if (!open || conflicted.length === 0) return;
+
+    let active = true;
+    setLoadingConflictIds(Object.fromEntries(conflicted.map((action) => [action.id, true])));
+
+    void Promise.all(
+      conflicted.map(async (action) => {
+        try {
+          const detail = await buildConflictDetail(action);
+          return [action.id, detail] as const;
+        } catch {
+          return [action.id, {
+            title: `${action.entityType} conflict`,
+            subtitle: `${action.method} ${action.url}`,
+            localLabel: "Your queued change",
+            serverLabel: "Current server version",
+            fields: [{
+              label: "Queued change",
+              localValue: `${action.method} ${action.url}`,
+              serverValue: "Unavailable",
+            }],
+            fetchError: "Could not build the comparison for this conflict.",
+          } satisfies ConflictDetail] as const;
+        }
+      })
+    ).then((entries) => {
+      if (!active) return;
+      setConflictDetails(Object.fromEntries(entries));
+      setLoadingConflictIds({});
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [open, conflicted]);
 
   return (
     <>
@@ -268,6 +630,68 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                         {action.method} {action.url}
                       </Typography>
                     </Stack>
+
+                    {loadingConflictIds[action.id] && !conflictDetails[action.id] ? (
+                      <Stack direction="row" alignItems="center" spacing={1} sx={{ py: 1 }}>
+                        <CircularProgress size={14} />
+                        <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                          Loading comparison…
+                        </Typography>
+                      </Stack>
+                    ) : conflictDetails[action.id] ? (
+                      <Stack spacing={1} sx={{ pt: 0.5 }}>
+                        <Box>
+                          <Typography variant="body2" fontWeight={600}>
+                            {conflictDetails[action.id].title}
+                          </Typography>
+                          {conflictDetails[action.id].subtitle && (
+                            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                              {conflictDetails[action.id].subtitle}
+                            </Typography>
+                          )}
+                        </Box>
+
+                        {conflictDetails[action.id].fetchError && (
+                          <Alert severity="info" sx={{ py: 0.25, fontSize: "0.72rem" }}>
+                            {conflictDetails[action.id].fetchError}
+                          </Alert>
+                        )}
+
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+                          <Box sx={{ flex: 1, border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1, bgcolor: "background.paper" }}>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>
+                              {conflictDetails[action.id].localLabel}
+                            </Typography>
+                            <Stack spacing={0.75} sx={{ mt: 0.75 }}>
+                              {conflictDetails[action.id].fields.map((field) => (
+                                <Box key={`${action.id}-local-${field.label}`}>
+                                  <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }}>
+                                    {field.label}
+                                  </Typography>
+                                  <Typography variant="body2">{field.localValue}</Typography>
+                                </Box>
+                              ))}
+                            </Stack>
+                          </Box>
+
+                          <Box sx={{ flex: 1, border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1, bgcolor: "background.paper" }}>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>
+                              {conflictDetails[action.id].serverLabel}
+                            </Typography>
+                            <Stack spacing={0.75} sx={{ mt: 0.75 }}>
+                              {conflictDetails[action.id].fields.map((field) => (
+                                <Box key={`${action.id}-server-${field.label}`}>
+                                  <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }}>
+                                    {field.label}
+                                  </Typography>
+                                  <Typography variant="body2">{field.serverValue}</Typography>
+                                </Box>
+                              ))}
+                            </Stack>
+                          </Box>
+                        </Stack>
+                      </Stack>
+                    ) : null}
 
                     <Stack direction="row" spacing={1} pt={0.5}>
                       <Button
