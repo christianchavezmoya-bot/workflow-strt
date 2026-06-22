@@ -1,10 +1,11 @@
 import axios from "axios";
 import api from "./api";
-import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
-import { entityDeleteAsset, entityGetAsset, entityPutAsset, pendingAdd, pendingGetAll } from "./localDB";
+import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus, AssetIssue } from "../types/projectAsset";
+import { entityDeleteAsset, entityGetAsset, entityPutAsset, entityPutIssues, pendingAdd, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
+import type { OpenIssueRecord } from "./assetWorkflowRunService";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -26,6 +27,46 @@ export async function pendingAssetIds(): Promise<Set<string>> {
   if (!isMobileNativePlatform()) return new Set<string>();
   const all = await pendingGetAll();
   return new Set(all.filter((a) => a.entityType === "asset").map((a) => a.entityId));
+}
+
+// ── Pure derivation helpers ────────────────────────────────────────────────────
+
+/** Derive {id, assetId, projectId, data} records for the issues store from an
+ *  asset's issuesJson. Only unresolved issues are included — matching the server's
+ *  GetOpenIssues logic. jobNumber/customerName are left blank for asset-level
+ *  issues (they require a project lookup); the background refresh in
+ *  IssueRepository corrects these fields on the next server sync. */
+function deriveOpenIssuesFromAsset(asset: ProjectAsset): Array<{
+  id: string; assetId: string; projectId: string; data: unknown;
+}> {
+  let issues: AssetIssue[] = [];
+  try { issues = JSON.parse(asset.issuesJson ?? "[]"); } catch { /* empty */ }
+  return issues
+    .filter((i) => !i.resolved)
+    .map((i) => ({
+      id: i.id,
+      assetId: asset.id,
+      projectId: asset.projectId,
+      data: {
+        issueId: i.id,
+        description: i.description,
+        issueType: i.issueType,
+        severity: i.severity,
+        isBlocking: i.isBlocking,
+        reportedAt: i.reportedAt,
+        createdBy: null,
+        stepTitle: i.stepTitle ?? null,
+        runId: "",
+        assetId: asset.id,
+        assetTag: asset.assetTag ?? "",
+        assetName: asset.assetName ?? "",
+        assetLocation: asset.location ?? "",
+        projectId: asset.projectId,
+        jobNumber: "",
+        customerName: "",
+        source: "asset" as const,
+      } satisfies OpenIssueRecord,
+    }));
 }
 
 export const projectAssetService = {
@@ -101,6 +142,11 @@ export const projectAssetService = {
     const asset = fromDto(res.data);
     if (isMobileNativePlatform()) {
       await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+      // Sync the issues store so Issues Board reflects this change even while offline.
+      // Write only open (unresolved) issues — resolved ones are excluded from the
+      // server's open-issues response and Issues Board only shows open ones.
+      const openRecords = deriveOpenIssuesFromAsset(asset);
+      if (openRecords.length > 0) await entityPutIssues(openRecords);
     } else {
       invalidateWebCache(`/project-assets/${id}`);
     }

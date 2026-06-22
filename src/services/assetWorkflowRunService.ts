@@ -1,9 +1,10 @@
 import api from "./api";
 import { IssueRepository } from "../repositories/IssueRepository";
-import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
+import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
+import type { ProjectAsset } from "../types/projectAsset";
 import offlineStore, { type OfflineRun } from "./offlineStore";
 import syncQueue from "./syncQueue";
-import { entityGetAsset, entityPutAsset } from "./localDB";
+import { entityGetAsset, entityPutAsset, entityPutIssues } from "./localDB";
 import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
@@ -202,6 +203,50 @@ async function enqueueRunMutation(
     body: input.body,
     optimisticPatch: input.optimisticPatch,
   });
+}
+
+// ── Pure derivation helpers ────────────────────────────────────────────────────
+
+/** Derive {id, assetId, projectId, data} records for the issues store from a
+ *  run's issuesJson. Only unresolved issues are included. Enriches with run/asset
+ *  context. jobNumber/customerName require a project lookup and are left blank;
+ *  the background refresh in IssueRepository corrects them on the next sync. */
+async function deriveOpenIssuesFromRun(run: AssetWorkflowRun): Promise<Array<{
+  id: string; assetId: string; projectId: string; data: unknown;
+}>> {
+  let issues: RunIssue[] = [];
+  try { issues = JSON.parse(run.issuesJson ?? "[]"); } catch { /* empty */ }
+
+  const assetRecord = await entityGetAsset(run.assetId);
+  const projectId = assetRecord?.projectId ?? "";
+  const asset = (assetRecord?.data as ProjectAsset | null) ?? null;
+
+  return issues
+    .filter((i) => !i.resolved)
+    .map((i) => ({
+      id: i.id,
+      assetId: run.assetId,
+      projectId,
+      data: {
+        issueId: i.id,
+        description: i.description,
+        issueType: i.issueType,
+        severity: i.severity,
+        isBlocking: i.isBlocking,
+        reportedAt: i.reportedAt,
+        createdBy: i.createdBy ?? null,
+        stepTitle: i.stepTitle ?? null,
+        runId: run.id,
+        assetId: run.assetId,
+        assetTag: asset?.assetTag ?? "",
+        assetName: asset?.assetName ?? "",
+        assetLocation: asset?.location ?? "",
+        projectId,
+        jobNumber: "",
+        customerName: "",
+        source: "run" as const,
+      } satisfies OpenIssueRecord,
+    }));
 }
 
 export const assetWorkflowRunService = {
@@ -421,6 +466,9 @@ export const assetWorkflowRunService = {
       };
 
       await offlineStore.saveRun(offlineRun);
+      // Sync issues store so Issues Board reflects any issue changes from progress saves.
+      const openRecords = await deriveOpenIssuesFromRun(offlineRun);
+      if (openRecords.length > 0) await entityPutIssues(openRecords);
       await enqueueRunMutation(resolvedRunId, {
         opType: "RUN_UPDATE",
         method: "PUT",
@@ -519,6 +567,9 @@ export const assetWorkflowRunService = {
       };
 
       await offlineStore.saveRun(offlineRun);
+      // Sync issues store so Issues Board reflects any issue changes from completion.
+      const openRecords = await deriveOpenIssuesFromRun(offlineRun);
+      if (openRecords.length > 0) await entityPutIssues(openRecords);
       await enqueueRunMutation(resolvedRunId, {
         opType: "RUN_COMPLETE",
         method: "POST",
@@ -560,6 +611,10 @@ export const assetWorkflowRunService = {
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/issues`, requestBody);
       const updatedRun = await cacheServerRun(res.data);
+      // Sync issues store so Issues Board reflects the change even while offline.
+      const openRecords = await deriveOpenIssuesFromRun(updatedRun);
+      if (openRecords.length > 0) await entityPutIssues(openRecords);
+      window.dispatchEvent(new Event("repo:issues:updated"));
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return updatedRun;
@@ -581,6 +636,9 @@ export const assetWorkflowRunService = {
       };
 
       await offlineStore.saveRun(offlineRun);
+      // Sync issues store so Issues Board reflects the change immediately, offline.
+      const openRecords = await deriveOpenIssuesFromRun(offlineRun);
+      if (openRecords.length > 0) await entityPutIssues(openRecords);
       const existing = (await syncQueue.listByEntityId(resolvedRunId))
         .filter((op) => op.opType === "ISSUE_UPDATE" && op.url === `/asset-workflow-runs/${resolvedRunId}/issues`)
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
@@ -601,6 +659,7 @@ export const assetWorkflowRunService = {
           optimisticPatch: { issuesJson, updatedAt: now },
         });
       }
+      window.dispatchEvent(new Event("repo:issues:updated"));
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return offlineRun;

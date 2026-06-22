@@ -130,6 +130,14 @@ const IssuesBoard = () => {
     if (activeTab === "history") loadHistory();
   }, [activeTab, loadHistory]);
 
+  // ── Listen for local issue changes so Issues Board refreshes live, offline or online.
+  //    Mirrors the pattern already used by the Assets page for asset updates.
+  useEffect(() => {
+    const h = () => void load();
+    window.addEventListener("repo:issues:updated", h);
+    return () => window.removeEventListener("repo:issues:updated", h);
+  }, [load]);
+
 
   // ── Derived filter options ─────────────────────────────────────────────────
   const projectOptions = useMemo(() => {

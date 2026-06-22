@@ -1,13 +1,10 @@
 import {
   cacheGet,
   cachePut,
-  entityGetAllIssues,
-  entityGetIssue,
   entityGetWorkflowRun,
   entityGetWorkflowRunsByAsset,
   entityGetWorkflowRunsByProject,
   entityDeleteWorkflowRun,
-  entityPutIssue,
   entityPutWorkflowRun,
 } from "./localDB";
 import type { AssetWorkflowRun, RunStatus } from "../types/assetWorkflowRun";
@@ -33,31 +30,6 @@ export interface OfflineMediaRef {
   uploaded: boolean;
   serverUrl?: string;
   serverDocumentId?: string;
-  syncError?: string;
-}
-
-export interface OfflineIssue {
-  id: string;
-  serverIssueId?: string;
-  localIssueId?: string;
-  source: "asset" | "run";
-  runId?: string;
-  assetId: string;
-  projectId: string;
-  description: string;
-  issueType: "blocking" | "observation" | "scope-deviation";
-  severity: "low" | "medium" | "high";
-  isBlocking: boolean;
-  reportedAt: string;
-  resolved: boolean;
-  resolutionNote?: string;
-  resolvedAt?: string;
-  resolvedBy?: string;
-  comments?: unknown[];
-  reportMedia?: OfflineMediaRef[];
-  resolutionMedia?: OfflineMediaRef[];
-  dirty: boolean;
-  syncStatus: OfflineEntitySyncStatus;
   syncError?: string;
 }
 
@@ -119,26 +91,6 @@ export const offlineStore = {
   async listRunsByProject(projectId: string): Promise<OfflineRun[]> {
     const runs = await entityGetWorkflowRunsByProject(projectId);
     return runs as OfflineRun[];
-  },
-
-  async saveIssue(issue: OfflineIssue): Promise<void> {
-    await entityPutIssue({
-      id: issue.id,
-      assetId: issue.assetId,
-      projectId: issue.projectId,
-      data: issue,
-      dirty: issue.dirty,
-    });
-  },
-
-  async getIssue(issueId: string): Promise<OfflineIssue | null> {
-    const record = await entityGetIssue(issueId);
-    return record ? (record.data as OfflineIssue) : null;
-  },
-
-  async listIssuesByAsset(assetId: string): Promise<OfflineIssue[]> {
-    const all = await entityGetAllIssues();
-    return (all as OfflineIssue[]).filter((issue) => issue.assetId === assetId);
   },
 
   async saveCache<T>(key: string, data: T): Promise<void> {
