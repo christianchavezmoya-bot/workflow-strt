@@ -1,7 +1,7 @@
 import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus, AssetIssue } from "../types/projectAsset";
-import { entityDeleteAsset, entityGetAsset, entityPutAsset, entityPutIssues, pendingAdd, pendingGetAll } from "./localDB";
+import { entityDeleteAsset, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
@@ -145,8 +145,13 @@ export const projectAssetService = {
       // Sync the issues store so Issues Board reflects this change even while offline.
       // Write only open (unresolved) issues — resolved ones are excluded from the
       // server's open-issues response and Issues Board only shows open ones.
+      // Fix: must call this even when openRecords is empty (every issue just
+      // resolved) — entityReplaceIssuesForAsset correctly removes stale closed
+      // entries; the old entityPutIssues-only call never deleted anything,
+      // leaving resolved issues stuck in the store indefinitely while offline.
       const openRecords = deriveOpenIssuesFromAsset(asset);
-      if (openRecords.length > 0) await entityPutIssues(openRecords);
+      await entityReplaceIssuesForAsset(asset.id, openRecords);
+      window.dispatchEvent(new Event("repo:issues:updated"));
     } else {
       invalidateWebCache(`/project-assets/${id}`);
     }

@@ -4,7 +4,7 @@ import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
 import type { ProjectAsset } from "../types/projectAsset";
 import offlineStore, { type OfflineRun } from "./offlineStore";
 import syncQueue from "./syncQueue";
-import { entityGetAsset, entityPutAsset, entityPutIssues } from "./localDB";
+import { entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset } from "./localDB";
 import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
@@ -467,8 +467,11 @@ export const assetWorkflowRunService = {
 
       await offlineStore.saveRun(offlineRun);
       // Sync issues store so Issues Board reflects any issue changes from progress saves.
+      // Fix: must call this even when openRecords is empty — entityReplaceIssuesForAsset
+      // correctly removes stale closed entries, unlike the old entityPutIssues-only call.
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
-      if (openRecords.length > 0) await entityPutIssues(openRecords);
+      await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);
+      window.dispatchEvent(new Event("repo:issues:updated"));
       await enqueueRunMutation(resolvedRunId, {
         opType: "RUN_UPDATE",
         method: "PUT",
@@ -569,7 +572,8 @@ export const assetWorkflowRunService = {
       await offlineStore.saveRun(offlineRun);
       // Sync issues store so Issues Board reflects any issue changes from completion.
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
-      if (openRecords.length > 0) await entityPutIssues(openRecords);
+      await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);
+      window.dispatchEvent(new Event("repo:issues:updated"));
       await enqueueRunMutation(resolvedRunId, {
         opType: "RUN_COMPLETE",
         method: "POST",
@@ -611,9 +615,10 @@ export const assetWorkflowRunService = {
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/issues`, requestBody);
       const updatedRun = await cacheServerRun(res.data);
-      // Sync issues store so Issues Board reflects the change even while offline.
+      // Sync issues store so Issues Board reflects the change immediately,
+      // without waiting for IssueRepository's own background refresh.
       const openRecords = await deriveOpenIssuesFromRun(updatedRun);
-      if (openRecords.length > 0) await entityPutIssues(openRecords);
+      await entityReplaceIssuesForAsset(updatedRun.assetId, openRecords);
       window.dispatchEvent(new Event("repo:issues:updated"));
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
@@ -638,7 +643,7 @@ export const assetWorkflowRunService = {
       await offlineStore.saveRun(offlineRun);
       // Sync issues store so Issues Board reflects the change immediately, offline.
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
-      if (openRecords.length > 0) await entityPutIssues(openRecords);
+      await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);
       const existing = (await syncQueue.listByEntityId(resolvedRunId))
         .filter((op) => op.opType === "ISSUE_UPDATE" && op.url === `/asset-workflow-runs/${resolvedRunId}/issues`)
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];

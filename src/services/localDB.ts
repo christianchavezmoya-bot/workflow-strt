@@ -561,20 +561,6 @@ export async function entityPutIssue(record: { id: string; assetId: string; proj
   } catch { /* ignore */ }
 }
 
-export async function entityPutIssues(records: Array<{ id: string; assetId: string; projectId: string; data: unknown }>): Promise<void> {
-  try {
-    const db = await getDB();
-    const tx = db.transaction("issues", "readwrite");
-    const now = new Date().toISOString();
-    await Promise.all([
-      ...records.map((r) =>
-        tx.store.put({ id: r.id, assetId: r.assetId, projectId: r.projectId, data: r.data, syncedAt: now, dirty: false })
-      ),
-      tx.done,
-    ]);
-  } catch { /* ignore */ }
-}
-
 export async function entityReplaceAllIssues(records: Array<{ id: string; assetId: string; projectId: string; data: unknown }>): Promise<void> {
   try {
     const db = await getDB();
@@ -586,6 +572,44 @@ export async function entityReplaceAllIssues(records: Array<{ id: string; assetI
     await Promise.all([
       ...existing.filter((r) => !nextIds.has(r.id)).map((r) => store.delete(r.id)),
       ...records.map((r) => store.put({ id: r.id, assetId: r.assetId, projectId: r.projectId, data: r.data, syncedAt: now, dirty: false })),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
+/**
+ * Replace the locally-stored open issues for ONE asset, removing any
+ * previously-stored issue for that asset that is no longer open.
+ *
+ * This exists because entityPutIssues() only ever calls put() — it never
+ * deletes anything. A caller that derives "currently open issues" from an
+ * asset/run's issuesJson and calls entityPutIssues() with that list will
+ * correctly add/update open issues, but a just-resolved issue's old record
+ * is never removed, since it simply isn't present in the new list. That
+ * stale record then sits in IndexedDB indefinitely and keeps showing up
+ * everywhere this store is read from (e.g. Issues Board), especially
+ * offline, where there's no background server sync to eventually correct
+ * it via entityReplaceAllIssues.
+ *
+ * `openRecords` may legitimately be an empty array (every issue for this
+ * asset just got resolved) — that's a valid, meaningful input, not a
+ * no-op: it means "delete every stored issue for this asset." Callers
+ * must NOT skip calling this when openRecords is empty.
+ */
+export async function entityReplaceIssuesForAsset(
+  assetId: string,
+  openRecords: Array<{ id: string; assetId: string; projectId: string; data: unknown }>
+): Promise<void> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction("issues", "readwrite");
+    const store = tx.objectStore("issues");
+    const existingForAsset = (await store.getAll()).filter((r) => r.assetId === assetId);
+    const nextIds = new Set(openRecords.map((r) => r.id));
+    const now = new Date().toISOString();
+    await Promise.all([
+      ...existingForAsset.filter((r) => !nextIds.has(r.id)).map((r) => store.delete(r.id)),
+      ...openRecords.map((r) => store.put({ id: r.id, assetId: r.assetId, projectId: r.projectId, data: r.data, syncedAt: now, dirty: false })),
       tx.done,
     ]);
   } catch { /* ignore */ }
