@@ -1,7 +1,7 @@
 import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus, AssetIssue } from "../types/projectAsset";
-import { entityDeleteAsset, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll } from "./localDB";
+import { entityDeleteAsset, entityGetAsset, entityGetAllAssets, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
@@ -235,6 +235,33 @@ export const projectAssetService = {
       const res = await api.get<OpenAssetItem[]>("/project-assets/open");
       return res.data;
     } catch {
+      // Offline fallback: derive from cached assets
+      if (isMobileNativePlatform()) {
+        const cached = await entityGetAllAssets();
+        return cached.map((asset) => {
+          const a = asset as ProjectAsset;
+          return {
+            id: a.id,
+            projectId: a.projectId,
+            jobNumber: (a as unknown as { jobNumber?: string }).jobNumber ?? "",
+            office: (a as unknown as { office?: string }).office ?? "",
+            officeId: (a as unknown as { officeId?: string }).officeId,
+            assetTag: a.assetTag,
+            assetName: a.assetName,
+            assetModel: a.assetModel,
+            manufacturer: (a as unknown as { manufacturer?: string }).manufacturer,
+            hasWorkflow: !!(a as unknown as { workflowSummary?: unknown }).workflowSummary,
+            status: a.status,
+            runStatus: (a as unknown as { workflowSummary?: { latestRunStatus?: string } }).workflowSummary?.latestRunStatus,
+            completedSteps: (a as unknown as { workflowSummary?: { completedSteps?: number } }).workflowSummary?.completedSteps ?? 0,
+            totalSteps: (a as unknown as { workflowSummary?: { requiredItems?: number } }).workflowSummary?.requiredItems ?? 0,
+            missingItems: (a as unknown as { workflowSummary?: { missingItems?: number } }).workflowSummary?.missingItems ?? 0,
+            evidenceStatus: (a as unknown as { workflowSummary?: { evidenceStatus?: string } }).workflowSummary?.evidenceStatus,
+            assignedUserId: (a as unknown as { assignedUserId?: string }).assignedUserId,
+            location: a.location,
+          } satisfies OpenAssetItem;
+        }).filter((a) => a.status !== "Complete" && a.status !== "Closed");
+      }
       return [];
     }
   },
@@ -246,6 +273,73 @@ export const projectAssetService = {
       });
       return res.data;
     } catch {
+      // Offline fallback: derive from cached assets
+      if (isMobileNativePlatform()) {
+        const cached = await entityGetAllAssets();
+        const now = new Date();
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+        const toWorkspaceItem = (asset: ProjectAsset): DashboardWorkspaceAssetItem => ({
+          id: asset.id,
+          projectId: asset.projectId,
+          jobNumber: (asset as unknown as { jobNumber?: string }).jobNumber ?? "",
+          assetTag: asset.assetTag,
+          assetName: asset.assetName,
+          assetModel: asset.assetModel,
+          location: asset.location,
+          status: asset.status,
+          runStatus: (asset as unknown as { workflowSummary?: { latestRunStatus?: string } }).workflowSummary?.latestRunStatus,
+          historyStatus: asset.status,
+          completedSteps: (asset as unknown as { workflowSummary?: { completedSteps?: number } }).workflowSummary?.completedSteps ?? 0,
+          totalSteps: (asset as unknown as { workflowSummary?: { requiredItems?: number } }).workflowSummary?.requiredItems ?? 0,
+          missingItems: (asset as unknown as { workflowSummary?: { missingItems?: number } }).workflowSummary?.missingItems ?? 0,
+          evidenceStatus: (asset as unknown as { workflowSummary?: { evidenceStatus?: string } }).workflowSummary?.evidenceStatus,
+          assignedUserId: (asset as unknown as { assignedUserId?: string }).assignedUserId,
+          workflowMode: (asset as unknown as { workflowMode?: string }).workflowMode ?? "",
+          isDeleted: asset.isDeleted ?? false,
+          deletedAtUtc: (asset as unknown as { deletedAtUtc?: string }).deletedAtUtc,
+          deleteReason: (asset as unknown as { deleteReason?: string }).deleteReason,
+          latestActivityAt: (asset as unknown as { latestActivityAt?: string }).latestActivityAt,
+          completedAt: (asset as unknown as { completedAt?: string }).completedAt,
+          hasOpenIssues: (asset as unknown as { hasOpenIssues?: boolean }).hasOpenIssues ?? false,
+          signatureStatus: (asset as unknown as { signatureStatus?: string }).signatureStatus,
+        });
+
+        const allItems = cached
+          .map((a) => toWorkspaceItem(a as ProjectAsset))
+          .filter((item) => !item.isDeleted && item.status !== "Cancelled" && item.status !== "Closed");
+
+        // Filter by userId if provided (for personal workspace)
+        const userFiltered = userId
+          ? allItems.filter((item) => item.assignedUserId === userId)
+          : allItems;
+
+        const isInstallationWorkflow = (mode?: string) =>
+          !mode || mode === "INSTALLATION_ONLY" || mode === "MIXED";
+        const isInspectionWorkflow = (mode?: string) =>
+          mode === "INSPECTION_ONLY" || mode === "MIXED";
+
+        const isCurrent = (item: DashboardWorkspaceAssetItem) =>
+          item.status !== "Complete" && item.status !== "Completed" && item.status !== "Closed";
+
+        const isHistory = (item: DashboardWorkspaceAssetItem) =>
+          item.status === "Complete" || item.status === "Completed";
+
+        const currentInstalls = userFiltered.filter(
+          (item) => isCurrent(item) && isInstallationWorkflow(item.workflowMode)
+        );
+        const currentInspections = userFiltered.filter(
+          (item) => isCurrent(item) && isInspectionWorkflow(item.workflowMode)
+        );
+        const installHistory = userFiltered.filter(
+          (item) => isHistory(item) && isInstallationWorkflow(item.workflowMode)
+        );
+        const inspectionHistory = userFiltered.filter(
+          (item) => isHistory(item) && isInspectionWorkflow(item.workflowMode)
+        );
+
+        return { currentInstalls, currentInspections, installHistory, inspectionHistory };
+      }
       return {
         currentInstalls: [],
         currentInspections: [],

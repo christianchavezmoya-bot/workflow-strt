@@ -545,6 +545,14 @@ export async function entityGetAssetsByProject(projectId: string): Promise<unkno
   } catch { return []; }
 }
 
+export async function entityGetAllAssets(): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const records = await db.getAll("assets");
+    return records.map((r) => r.data);
+  } catch { return []; }
+}
+
 // ── Issue entity helpers ──────────────────────────────────────────────────────
 
 export async function entityPutIssue(record: { id: string; assetId: string; projectId: string; data: unknown; dirty?: boolean }): Promise<void> {
