@@ -24,7 +24,10 @@ import { useSyncEngine } from "../../hooks/useSyncEngine";
 import {
   pendingGetAll,
   pendingRemove,
+  droppedActionsGetAll,
+  droppedActionDismiss,
   type PendingAction,
+  type DroppedAction,
 } from "../../services/localDB";
 import ApiDebugPanel from "../../components/ui/ApiDebugPanel";
 
@@ -47,6 +50,14 @@ function formatTime(iso?: string): string {
   if (secs <= 0) return "now";
   if (secs < 60)  return `in ${secs}s`;
   return `in ${Math.floor(secs / 60)}m`;
+}
+
+function droppedActionLabel(action: DroppedAction): string {
+  const entity = action.entityType
+    ? action.entityType.charAt(0).toUpperCase() + action.entityType.slice(1)
+    : "Record";
+  const op = action.opType ? `${action.opType} ` : "";
+  return `${op}${entity}`;
 }
 
 function statusChipColor(
@@ -82,41 +93,28 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   const { status, pendingCount, conflictCount, lastSyncAt, syncing, triggerSync, resolveConflictKeep, resolveConflictDiscard } = useSyncEngine();
   const [queue, setQueue]         = useState<PendingAction[]>([]);
   const [debugOpen, setDebugOpen] = useState(false);
-  const [droppedActions, setDroppedActions] = useState<Array<{
-    opType: string;
-    entityType: string;
-    entityId: string;
-    lastError?: string;
-    createdAt: string;
-  }>>([]);
+  const [droppedActions, setDroppedActions] = useState<DroppedAction[]>([]);
 
   const loadQueue = async () => setQueue(await pendingGetAll());
+  const loadDropped = async () => setDroppedActions(await droppedActionsGetAll());
 
   useEffect(() => {
-    if (open) void loadQueue();
+    if (open) {
+      void loadQueue();
+      void loadDropped();
+    }
   }, [open]);
 
   useEffect(() => {
     void loadQueue();
-    const h = () => void loadQueue();
+    void loadDropped();
+    const h = () => { void loadQueue(); void loadDropped(); };
     window.addEventListener("sync-pending-changed", h);
     window.addEventListener("sync-conflict-detected", h);
     return () => {
       window.removeEventListener("sync-pending-changed", h);
       window.removeEventListener("sync-conflict-detected", h);
     };
-  }, []);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail as {
-        opType: string; entityType: string; entityId: string;
-        lastError?: string; createdAt: string;
-      };
-      setDroppedActions((prev) => [...prev, detail]);
-    };
-    window.addEventListener("sync-action-dropped", handler);
-    return () => window.removeEventListener("sync-action-dropped", handler);
   }, []);
 
   const handleClearFailed = async () => {
@@ -172,7 +170,7 @@ export default function SyncCenterPage({ open, onClose }: Props) {
 
           <Divider sx={{ mb: 2 }} />
 
-          {/* Dropped actions alert */}
+          {/* Dropped actions alert — reads from persisted IndexedDB store */}
           {droppedActions.length > 0 && (
             <Alert
               severity="error"
@@ -181,19 +179,32 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                 <Button
                   size="small"
                   color="error"
-                  onClick={() => setDroppedActions([])}
+                  onClick={() => {
+                    droppedActions.forEach(a => droppedActionDismiss(a.id));
+                    void loadDropped();
+                  }}
                 >
-                  Dismiss
+                  Dismiss all
                 </Button>
               }
             >
               <Typography variant="body2" fontWeight={600} gutterBottom>
-                {droppedActions.length} change{droppedActions.length !== 1 ? "s" : ""} could not be saved
+                {droppedActions.length} change{droppedActions.length !== 1 ? "s" : ""} permanently failed to sync — manual action required
               </Typography>
-              {droppedActions.map((d, i) => (
-                <Typography key={i} variant="caption" display="block">
-                  {d.opType} · {d.entityType} · {new Date(d.createdAt).toLocaleTimeString()} · {d.lastError ?? "server rejected"}
-                </Typography>
+              {droppedActions.map((d) => (
+                <Stack key={d.id} direction="row" alignItems="center" spacing={1} justifyContent="space-between">
+                  <Typography variant="caption" display="block" sx={{ flex: 1 }}>
+                    {droppedActionLabel(d)} · {new Date(d.createdAt).toLocaleTimeString()} · {d.lastError ?? "server unreachable after 20 retries"}
+                  </Typography>
+                  <Button
+                    size="small"
+                    color="inherit"
+                    onClick={() => { droppedActionDismiss(d.id); void loadDropped(); }}
+                    sx={{ fontSize: "0.68rem", color: "error.light", minWidth: 0, px: 0.5 }}
+                  >
+                    Dismiss
+                  </Button>
+                </Stack>
               ))}
             </Alert>
           )}

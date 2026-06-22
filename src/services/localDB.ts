@@ -44,6 +44,17 @@ export interface PendingAction {
   conflictDetected?: boolean;  // true when server refreshed a newer version after we queued
 }
 
+/** A sync action that permanently failed after exhausting all retries. */
+export interface DroppedAction {
+  id: string;
+  opType: string;
+  entityType: string;
+  entityId: string;
+  lastError?: string;
+  createdAt: string;
+  droppedAt: string; // ISO wall-clock time the action was permanently dropped
+}
+
 // ── Cache age thresholds ──────────────────────────────────────────────────────
 export const CACHE_SOFT_LIMIT_MS = 4  * 60 * 60 * 1000;  // 4 h  — show warning
 export const CACHE_HARD_LIMIT_MS = 24 * 60 * 60 * 1000;  // 24 h — force re-fetch banner
@@ -120,6 +131,10 @@ interface CommtracDB extends DBSchema {
     value: IssueRecord;
     indexes: { by_project: string };
   };
+  dropped_actions: {
+    key: string;
+    value: DroppedAction;
+  };
 }
 
 // ── Singleton ─────────────────────────────────────────────────────────────────
@@ -156,6 +171,9 @@ export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
       if (!db.objectStoreNames.contains("issues")) {
         const store = db.createObjectStore("issues", { keyPath: "id" });
         store.createIndex("by_project", "projectId");
+      }
+      if (!db.objectStoreNames.contains("dropped_actions")) {
+        db.createObjectStore("dropped_actions", { keyPath: "id" });
       }
     },
   });
@@ -256,7 +274,9 @@ export async function pendingGetByEntityId(entityId: string): Promise<PendingAct
 const MAX_RETRIES = 20;
 
 /** Increment retries, set lastError, compute nextRetryAt via backoff, mark status = "failed".
- *  Drops the action after MAX_RETRIES to prevent unbounded queue growth. */
+ *  Drops the action after MAX_RETRIES to prevent unbounded queue growth,
+ *  persisting it to `dropped_actions` so it survives reload and can be
+ *  displayed app-wide rather than only in Sync Center at the moment it drops. */
 export async function pendingMarkRetry(id: string, error: string): Promise<void> {
   try {
     const db = await getDB();
@@ -264,16 +284,21 @@ export async function pendingMarkRetry(id: string, error: string): Promise<void>
     if (!item) return;
     const newRetries = item.retries + 1;
     if (newRetries >= MAX_RETRIES) {
+      // Persist to dropped_actions before deleting from pending_actions
+      const dropped: DroppedAction = {
+        id: item.id,
+        opType: item.opType ?? item.method,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        lastError: item.lastError,
+        createdAt: item.createdAt,
+        droppedAt: new Date().toISOString(),
+      };
+      await db.put("dropped_actions", dropped);
       await db.delete("pending_actions", id);
       window.dispatchEvent(new Event("sync-pending-changed"));
       window.dispatchEvent(new CustomEvent("sync-action-dropped", {
-        detail: {
-          opType: item.opType ?? item.method,
-          entityType: item.entityType,
-          entityId: item.entityId,
-          lastError: item.lastError,
-          createdAt: item.createdAt,
-        },
+        detail: dropped,
       }));
       return;
     }
@@ -293,6 +318,34 @@ export async function pendingCount(): Promise<number> {
     const db = await getDB();
     return await db.count("pending_actions");
   } catch { return 0; }
+}
+
+// ── Dropped-action helpers ─────────────────────────────────────────────────────
+
+/** Retrieve all permanently-dropped sync actions (persisted across reloads). */
+export async function droppedActionsGetAll(): Promise<DroppedAction[]> {
+  try {
+    const db = await getDB();
+    return await db.getAll("dropped_actions");
+  } catch { return []; }
+}
+
+/** Dismiss (remove) a single dropped action after the user has acknowledged it. */
+export async function droppedActionDismiss(id: string): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.delete("dropped_actions", id);
+    window.dispatchEvent(new Event("sync-pending-changed"));
+  } catch { /* ignore */ }
+}
+
+/** Dismiss all dropped actions at once. */
+export async function droppedActionsDismissAll(): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.clear("dropped_actions");
+    window.dispatchEvent(new Event("sync-pending-changed"));
+  } catch { /* ignore */ }
 }
 
 // ── Sync meta helpers ─────────────────────────────────────────────────────────
