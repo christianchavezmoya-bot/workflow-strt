@@ -1656,6 +1656,19 @@ const Dashboard = () => {
     () => missingMediaFlags.filter((flag) => myInspectionAssets.some((asset) => asset.id === flag.assetId)).length,
     [missingMediaFlags, myInspectionAssets]
   );
+  // Fix: this was missing entirely — myInstallHighObservations had an Inspections
+  // equivalent for blocking issues, pending signatures, and missing media, but
+  // not for high-severity observations. Modeled directly on myInstallHighObservations.
+  const myInspectionHighObservations = useMemo(
+    () => openIssues.filter((issue) =>
+      !issue.isBlocking &&
+      issue.severity === "high" &&
+      issue.issueType === "observation" &&
+      myInspectionAssets.some((asset) => asset.id === issue.assetId)
+    ),
+    [openIssues, myInspectionAssets]
+  );
+  const myInspectionAttentionCount = myInspectionBlocking.length + myInspectionPendingSigs.length + myInspectionHighObservations.length;
 
   const inspectionScopeProjects = useMemo(
     () => dashboardProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
@@ -2125,6 +2138,159 @@ const Dashboard = () => {
     </Stack>
   );
   // Reusable JSX blocks
+
+  // Fix: My Installs has its own scoped "Needs Attention" panel (blocking
+  // issues, pending signatures, high observations — all filtered to the
+  // current user's assigned install assets), but My Inspections never had
+  // an equivalent. The underlying data (myInspectionBlocking,
+  // myInspectionPendingSigs, myInspectionHighObservations,
+  // myInspectionAttentionCount) was correctly computed and even drove the
+  // small notification badge on the Inspections tab label, but no panel
+  // ever rendered it — so blocking issues, pending signatures, and high
+  // observations on inspection assets were never surfaced to the user.
+  // Modeled directly on the Installer "Needs Attention" block.
+  const MyInspectionAttentionSection = (
+    <Box className="glass-card" sx={{ p: 2.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+        <WarningAmberOutlined sx={{ color: myInspectionAttentionCount > 0 ? "warning.main" : "success.main", fontSize: 20 }} />
+        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Needs Attention</Typography>
+        {attentionLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
+        {myInspectionAttentionCount === 0 && !attentionLoading && (
+          <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ ml: 1, height: 20, fontSize: "0.7rem" }} />
+        )}
+        <Box sx={{ flex: 1 }} />
+        <Button size="small" variant="text" component={Link} to="/issues"
+          endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />} sx={{ fontSize: "0.72rem" }}>
+          Issues Board
+        </Button>
+      </Stack>
+
+      <Grid container spacing={2}>
+
+        {/* My Blocking Issues (inspections) */}
+        <Grid item xs={12} sm={6} md={4}>
+          <Box sx={{
+            p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
+            border: "1px solid", transition: "all 0.2s",
+            borderColor: myInspectionBlocking.length > 0 ? "error.main" : "rgba(255,255,255,0.08)",
+            background:  myInspectionBlocking.length > 0
+              ? "linear-gradient(180deg, rgba(64,15,17,0.78) 0%, rgba(33,13,14,0.56) 100%)"
+              : "rgba(255,255,255,0.03)",
+          }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+              <ErrorOutlineOutlined sx={{ fontSize: 18, color: myInspectionBlocking.length > 0 ? "error.main" : "text.disabled" }} />
+              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Blocking Issues</Typography>
+              {resolvingDashboardIssueId && (
+                <Chip
+                  label="Updating"
+                  size="small"
+                  color="error"
+                  variant="outlined"
+                  sx={{ height: 18, fontSize: "0.62rem", fontWeight: 700 }}
+                />
+              )}
+            </Stack>
+            <Typography variant="h5" fontWeight={700} color={myInspectionBlocking.length > 0 ? "error.main" : "text.secondary"}>
+              {myInspectionBlocking.length}
+            </Typography>
+            {myInspectionBlocking.length > 0 ? (
+              <Stack spacing={0.25} sx={{ mt: 1 }}>
+                {myInspectionBlocking.slice(0, 3).map((iss) => (
+                  <ItemRow key={iss.issueId}
+                    label={`${iss.jobNumber}: ${iss.assetTag}`}
+                    sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
+                    actionLabel="Resolve now"
+                    onClick={() => openIssueRepair(iss)} />
+                ))}
+                {myInspectionBlocking.length > 3 && (
+                  <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
+                    +{myInspectionBlocking.length - 3} more
+                  </Typography>
+                )}
+              </Stack>
+            ) : (
+              <Typography variant="caption" color="success.main">
+                {resolvingDashboardIssueId ? "Refreshing blocking issues..." : "No blocking issues"}
+              </Typography>
+            )}
+          </Box>
+        </Grid>
+
+        {/* My Pending Signatures (inspections) */}
+        <Grid item xs={12} sm={6} md={4}>
+          <Box sx={{
+            p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
+            border: "1px solid", transition: "all 0.2s",
+            borderColor: myInspectionPendingSigs.length > 0 ? "warning.main" : "rgba(255,255,255,0.08)",
+            background:  myInspectionPendingSigs.length > 0 ? "rgba(230,119,0,0.07)" : "rgba(255,255,255,0.03)",
+          }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+              <PendingActionsOutlined sx={{ fontSize: 18, color: myInspectionPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
+              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Pending Signatures</Typography>
+            </Stack>
+            <Typography variant="h5" fontWeight={700} color={myInspectionPendingSigs.length > 0 ? "warning.main" : "text.secondary"}>
+              {myInspectionPendingSigs.length}
+            </Typography>
+            {myInspectionPendingSigs.length > 0 ? (
+              <Stack spacing={0.25} sx={{ mt: 1 }}>
+                {myInspectionPendingSigs.slice(0, 3).map((s) => (
+                  <ItemRow key={s.runId}
+                    label={`${s.jobNumber}: ${s.assetTag}`}
+                    sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
+                    actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
+                    onClick={() => openSignatureRepair(s)} />
+                ))}
+                {myInspectionPendingSigs.length > 3 && (
+                  <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
+                    +{myInspectionPendingSigs.length - 3} more
+                  </Typography>
+                )}
+              </Stack>
+            ) : (
+              <Typography variant="caption" color="success.main">All signatures collected</Typography>
+            )}
+          </Box>
+        </Grid>
+
+        {/* My High Observations (inspections) */}
+        <Grid item xs={12} sm={6} md={4}>
+          <Box sx={{
+            p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
+            border: "1px solid", transition: "all 0.2s",
+            borderColor: myInspectionHighObservations.length > 0 ? "warning.dark" : "rgba(255,255,255,0.08)",
+            background:  myInspectionHighObservations.length > 0 ? "rgba(249,168,37,0.07)" : "rgba(255,255,255,0.03)",
+          }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+              <ReportOutlined sx={{ fontSize: 18, color: myInspectionHighObservations.length > 0 ? "warning.main" : "text.disabled" }} />
+              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My High Observations</Typography>
+            </Stack>
+            <Typography variant="h5" fontWeight={700} color={myInspectionHighObservations.length > 0 ? "warning.main" : "text.secondary"}>
+              {myInspectionHighObservations.length}
+            </Typography>
+            {myInspectionHighObservations.length > 0 ? (
+              <Stack spacing={0.25} sx={{ mt: 1 }}>
+                {myInspectionHighObservations.slice(0, 3).map((iss) => (
+                  <ItemRow key={iss.issueId}
+                    label={`${iss.jobNumber}: ${iss.assetTag}`}
+                    sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
+                    actionLabel="Review"
+                    onClick={() => openIssueRepair(iss)} />
+                ))}
+                {myInspectionHighObservations.length > 3 && (
+                  <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
+                    +{myInspectionHighObservations.length - 3} more
+                  </Typography>
+                )}
+              </Stack>
+            ) : (
+              <Typography variant="caption" color="success.main">No high-severity observations</Typography>
+            )}
+          </Box>
+        </Grid>
+
+      </Grid>
+    </Box>
+  );
 
   const NeedsAttentionSection = (
     <Box className="glass-card" sx={{ p: 2.5 }}>
@@ -3662,6 +3828,7 @@ const Dashboard = () => {
       )}
 
       {/* My Inspections tab content - non-manager users */}
+      {showTabBar && !isManager && pmDashboardTab === "my-inspections" && MyInspectionAttentionSection}
       {showTabBar && !isManager && pmDashboardTab === "my-inspections" && MyInspectionWorkspace}
 
 
@@ -4186,6 +4353,7 @@ const Dashboard = () => {
           {pmDashboardTab === "pm-projects" && NeedsAttentionSection}
 
           {/* Inspection workspace */}
+          {pmDashboardTab === "my-inspections" && !isAdmin && MyInspectionAttentionSection}
           {pmDashboardTab === "my-inspections" && (isAdmin ? AdminInspectionWorkspace : MyInspectionWorkspace)}
 
           {/* Pending Approvals strip - if any */}

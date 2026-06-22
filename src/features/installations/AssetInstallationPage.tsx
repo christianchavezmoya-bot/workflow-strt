@@ -843,7 +843,33 @@ const AssetInstallationPage = () => {
           });
           setRunsMap((prev) => {
             const merged = { ...runMap };
-            Object.keys(prev).forEach((id) => { if (prev[id].length > 1) merged[id] = prev[id]; });
+            Object.keys(prev).forEach((id) => {
+              // Fix: previously only preserved an asset's locally-known runs when
+              // there was more than one cached run — a heuristic that didn't cover
+              // the common case of an asset with exactly one run. The real signal
+              // that matters is whether the locally-known run is actually MORE
+              // RECENT than what this fresh network fetch returned. submitSignature
+              // writes synchronously to the local run cache before this
+              // fire-and-forget fetch resolves; if the fetch reflects a moment
+              // before that write was visible server-side (read-after-write lag,
+              // or the write is still queued offline), it would otherwise silently
+              // overwrite the newer local state — exactly the "installer sign-off
+              // reverts after closing the window" bug. A dirty=true run (still
+              // queued, unsynced) is always preserved outright, since the network
+              // fetch cannot possibly reflect a change that hasn't reached the
+              // server yet.
+              const prevRuns = prev[id];
+              if (!prevRuns) return;
+              const freshRuns = merged[id] ?? [];
+              const freshById = new Map(freshRuns.map((r) => [r.id, r]));
+              const anyLocalIsNewerOrUnsynced = prevRuns.some((localRun) => {
+                if ((localRun as AssetWorkflowRun & { dirty?: boolean }).dirty === true) return true;
+                const freshMatch = freshById.get(localRun.id);
+                if (!freshMatch) return false;
+                return new Date(localRun.updatedAt).getTime() > new Date(freshMatch.updatedAt).getTime();
+              });
+              if (anyLocalIsNewerOrUnsynced || prevRuns.length > 1) merged[id] = prevRuns;
+            });
             return merged;
           });
         })
