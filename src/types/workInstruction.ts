@@ -9,6 +9,8 @@ export interface WorkInstruction {
   status: WorkInstructionStatus;
   featureValues: Record<string, string>;
   updatedAt: string;
+  dirty?: boolean;
+  syncError?: string;
 }
 
 export interface WorkInstructionInput {

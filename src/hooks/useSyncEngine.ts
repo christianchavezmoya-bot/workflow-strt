@@ -42,6 +42,13 @@ import { mediaStore } from "../services/mediaStore";
 import syncQueue from "../services/syncQueue";
 import { isMobileNativePlatform } from "../utils/platform";
 import { subscribeServerReachable, pingNow } from "../services/connectivityMonitor";
+import {
+  fromWorkInstructionDto,
+  removeLocalWorkInstruction,
+  replaceLocalWorkInstructionId,
+  saveLocalWorkInstruction,
+} from "../services/workInstructionService";
+import type { WorkInstruction } from "../types/workInstruction";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -173,6 +180,57 @@ async function processRunCreateAction(action: PendingAction, responseData: unkno
   }
 }
 
+async function processWorkInstructionCreateAction(action: PendingAction, responseData: unknown): Promise<void> {
+  if (!responseData || typeof responseData !== "object") return;
+  const serverInstruction = fromWorkInstructionDto(responseData as {
+    id: string;
+    productId: string;
+    title: string;
+    summary?: string | null;
+    stepsJson: string;
+    status: string;
+    featureValuesJson: string;
+    createdAt: string;
+    updatedAt: string;
+  });
+  const otherPending = (await pendingGetByEntityId(action.entityId)).filter((item: PendingAction) => item.id !== action.id);
+  const reconciled: WorkInstruction = {
+    ...serverInstruction,
+    dirty: otherPending.length > 0,
+    syncError: undefined,
+  };
+
+  await offlineStore.saveIdMapping("work-instruction", action.entityId, serverInstruction.id);
+  if (action.entityId !== serverInstruction.id) {
+    await syncQueue.replaceEntityReferences(action.entityId, serverInstruction.id);
+    replaceLocalWorkInstructionId(action.entityId, reconciled);
+    return;
+  }
+
+  saveLocalWorkInstruction(reconciled);
+}
+
+async function processWorkInstructionUpdateAction(action: PendingAction, responseData: unknown): Promise<void> {
+  if (!responseData || typeof responseData !== "object") return;
+  const serverInstruction = fromWorkInstructionDto(responseData as {
+    id: string;
+    productId: string;
+    title: string;
+    summary?: string | null;
+    stepsJson: string;
+    status: string;
+    featureValuesJson: string;
+    createdAt: string;
+    updatedAt: string;
+  });
+  const otherPending = (await pendingGetByEntityId(action.entityId)).filter((item: PendingAction) => item.id !== action.id);
+  saveLocalWorkInstruction({
+    ...serverInstruction,
+    dirty: otherPending.length > 0,
+    syncError: undefined,
+  });
+}
+
 async function markRunSyncFailed(runId: string, error: string): Promise<void> {
   const cachedRun = await offlineStore.getRun(runId);
   if (!cachedRun) return;
@@ -210,6 +268,21 @@ async function markAssetSyncedFromServer(asset: ProjectAsset): Promise<void> {
 async function processSyncedAction(action: PendingAction, responseData: unknown): Promise<void> {
   if (action.opType === "RUN_CREATE") {
     await processRunCreateAction(action, responseData);
+    return;
+  }
+
+  if (action.opType === "WORK_INSTRUCTION_CREATE") {
+    await processWorkInstructionCreateAction(action, responseData);
+    return;
+  }
+
+  if (action.opType === "WORK_INSTRUCTION_UPDATE") {
+    await processWorkInstructionUpdateAction(action, responseData);
+    return;
+  }
+
+  if (action.opType === "WORK_INSTRUCTION_DELETE") {
+    removeLocalWorkInstruction(action.entityId);
     return;
   }
 

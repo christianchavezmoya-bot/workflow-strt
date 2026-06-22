@@ -12,6 +12,9 @@ export type SyncOpType =
   | "ISSUE_CREATE"
   | "ISSUE_UPDATE"
   | "ISSUE_CLOSE"
+  | "WORK_INSTRUCTION_CREATE"
+  | "WORK_INSTRUCTION_UPDATE"
+  | "WORK_INSTRUCTION_DELETE"
   | "MEDIA_UPLOAD"
   | "SIGNATURE_SUBMIT";
 
@@ -141,6 +144,24 @@ export const syncQueue = {
         .map((op) => tx.store.put({ ...op, entityId: newEntityId }))
     );
     await tx.done;
+  },
+
+  async replaceEntityReferences(oldEntityId: string, newEntityId: string): Promise<void> {
+    const db = await getDB();
+    const tx = db.transaction("pending_actions", "readwrite");
+    const all = (await tx.store.getAll()) as SyncQueueOp[];
+    await Promise.all(
+      all
+        .filter((op) => op.entityId === oldEntityId || op.url.includes(oldEntityId) || op.serverEntityId === oldEntityId)
+        .map((op) => tx.store.put({
+          ...op,
+          entityId: op.entityId === oldEntityId ? newEntityId : op.entityId,
+          serverEntityId: op.serverEntityId === oldEntityId ? newEntityId : op.serverEntityId,
+          url: op.url.split(oldEntityId).join(newEntityId),
+        }))
+    );
+    await tx.done;
+    window.dispatchEvent(new Event("sync-pending-changed"));
   },
 
   async replaceRunIdReferences(oldRunId: string, newRunId: string): Promise<void> {
