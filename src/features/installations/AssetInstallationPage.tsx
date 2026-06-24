@@ -91,7 +91,7 @@ import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { demoProducts } from "../../data/demo";
-import { projectAssetService, deriveOpenIssuesFromAsset } from "../../services/projectAssetService";
+import { projectAssetService } from "../../services/projectAssetService";
 import { productConfigService, type ProductConfig } from "../../services/productConfigService";
 import { workflowTemplateService } from "../../services/workflowTemplateService";
 import { workflowConfigService } from "../../services/workflowConfigService";
@@ -132,6 +132,7 @@ import InspectionImportDialog from "../projects/InspectionImportDialog";
 import { useStaleOnResume } from "../../hooks/useStaleOnResume";
 import { AssetRepository } from "../../repositories/AssetRepository";
 import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
+import { deriveOpenIssuesFromAsset } from "../../utils/issueDerivation";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 
 // ------------------------------------------------------------------

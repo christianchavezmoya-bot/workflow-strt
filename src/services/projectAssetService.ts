@@ -1,12 +1,11 @@
 import axios from "axios";
 import api from "./api";
-import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus, AssetIssue } from "../types/projectAsset";
-import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll } from "./localDB";
+import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
+import { entityDeleteAsset, entityGetAllAssets, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
-import type { OpenIssueRecord } from "./assetWorkflowRunService";
-import type { Project } from "../types/project";
+import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -30,109 +29,10 @@ export async function pendingAssetIds(): Promise<Set<string>> {
   return new Set(all.filter((a) => a.entityType === "asset").map((a) => a.entityId));
 }
 
-// ── Pure derivation helpers ────────────────────────────────────────────────────
-
-/** Derive {id, assetId, projectId, data} records for the issues store from an
- *  asset's issuesJson. Only unresolved issues are included — matching the server's
- *  GetOpenIssues logic. jobNumber/customerName are left blank for asset-level
- *  issues (they require a project lookup); the background refresh in
- *  IssueRepository corrects these fields on the next server sync. */
-export function deriveOpenIssuesFromAsset(asset: ProjectAsset): Array<{
-  id: string; assetId: string; projectId: string; data: unknown;
-}> {
-  let issues: AssetIssue[] = [];
-  try { issues = JSON.parse(asset.issuesJson ?? "[]"); } catch { /* empty */ }
-  return issues
-    .filter((i) => !i.resolved)
-    .map((i) => ({
-      id: i.id,
-      assetId: asset.id,
-      projectId: asset.projectId,
-      data: {
-        issueId: i.id,
-        description: i.description,
-        issueType: i.issueType,
-        severity: i.severity,
-        isBlocking: i.isBlocking,
-        reportedAt: i.reportedAt,
-        createdBy: null,
-        stepTitle: i.stepTitle ?? null,
-        runId: "",
-        assetId: asset.id,
-        assetTag: asset.assetTag ?? "",
-        assetName: asset.assetName ?? "",
-        assetLocation: asset.location ?? "",
-        projectId: asset.projectId,
-        jobNumber: "",
-        customerName: "",
-        source: "asset" as const,
-      } satisfies OpenIssueRecord,
-    }));
-}
-
-function dedupeAssetsById(assets: ProjectAsset[]): ProjectAsset[] {
-  const byId = new Map<string, ProjectAsset>();
-  for (const asset of assets) {
-    byId.set(asset.id, asset);
-  }
-  return Array.from(byId.values());
-}
-
-async function getCachedProjectProductIds(projectId: string): Promise<string[]> {
-  try {
-    const projects = await entityGetAllProjects();
-    const project = (projects as Project[]).find((item) => item.id === projectId);
-    return Array.from(new Set((project?.productIds ?? []).filter(Boolean)));
-  } catch {
-    return [];
-  }
-}
-
-async function getProjectProductIds(projectId: string): Promise<string[]> {
-  const cachedIds = await getCachedProjectProductIds(projectId);
-  if (cachedIds.length > 0) return cachedIds;
-
-  try {
-    const res = await api.get<Project>(`/projects/${projectId}`);
-    return Array.from(new Set((res.data.productIds ?? []).filter(Boolean)));
-  } catch {
-    return [];
-  }
-}
-
-async function listAssetsByProjectProducts(
-  projectId: string,
-  productIds: string[],
-  includeDeleted: boolean,
-  mode: "local" | "live",
-): Promise<ProjectAsset[]> {
-  if (productIds.length === 0) return [];
-
-  const groups = await Promise.all(
-    productIds.map((productId) =>
-      (mode === "local"
-        ? AssetRepository.getLocalByProduct(productId, includeDeleted)
-        : AssetRepository.getByProduct(productId, includeDeleted)
-      ).catch(() => [])
-    )
-  );
-
-  return dedupeAssetsById(groups.flat().filter((asset) => asset.projectId === projectId));
-}
-
 export const projectAssetService = {
   async listByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
-    try {
-      const assets = await AssetRepository.getByProject(projectId, includeDeleted);
-      if (assets.length > 0 || !isMobileNativePlatform()) return assets;
-
-      const productIds = await getProjectProductIds(projectId);
-      return await listAssetsByProjectProducts(projectId, productIds, includeDeleted, "live");
-    } catch {
-      if (!isMobileNativePlatform()) return [];
-      const productIds = await getProjectProductIds(projectId);
-      return await listAssetsByProjectProducts(projectId, productIds, includeDeleted, "live");
-    }
+    try { return await AssetRepository.getByProject(projectId, includeDeleted); }
+    catch { return []; }
   },
 
   async listByProduct(productId: string, includeDeleted = false): Promise<ProjectAsset[]> {
@@ -146,16 +46,8 @@ export const projectAssetService = {
   },
 
   async listLocalByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
-    try {
-      const assets = await AssetRepository.getLocalByProject(projectId, includeDeleted);
-      if (assets.length > 0) return assets;
-
-      const productIds = await getCachedProjectProductIds(projectId);
-      return await listAssetsByProjectProducts(projectId, productIds, includeDeleted, "local");
-    } catch {
-      const productIds = await getCachedProjectProductIds(projectId);
-      return await listAssetsByProjectProducts(projectId, productIds, includeDeleted, "local");
-    }
+    try { return await AssetRepository.getLocalByProject(projectId, includeDeleted); }
+    catch { return []; }
   },
 
   async create(input: CreateProjectAssetInput): Promise<ProjectAsset> {

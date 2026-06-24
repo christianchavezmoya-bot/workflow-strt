@@ -1,5 +1,5 @@
 import api from "../services/api";
-import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../types/projectAsset";
+import type { ProjectAsset, ProjectAssetStatus } from "../types/projectAsset";
 import {
   entityGetAsset,
   entityGetAssetsByProduct,
@@ -12,6 +12,7 @@ import {
   syncMetaSet,
 } from "../services/localDB";
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
+import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, webCacheKey, invalidateWebCacheByPrefix } from "../services/webFreshCache";
 
@@ -31,39 +32,6 @@ function fromDto(dto: ProjectAsset): ProjectAsset {
     ...dto,
     status: normalizeStatus(dto.status),
   };
-}
-
-function deriveOpenIssuesFromAsset(asset: ProjectAsset): Array<{
-  id: string; assetId: string; projectId: string; data: unknown;
-}> {
-  let issues: AssetIssue[] = [];
-  try { issues = JSON.parse(asset.issuesJson ?? "[]"); } catch { /* empty */ }
-  return issues
-    .filter((issue) => !issue.resolved)
-    .map((issue) => ({
-      id: issue.id,
-      assetId: asset.id,
-      projectId: asset.projectId,
-      data: {
-        issueId: issue.id,
-        description: issue.description,
-        issueType: issue.issueType,
-        severity: issue.severity,
-        isBlocking: issue.isBlocking,
-        reportedAt: issue.reportedAt,
-        createdBy: null,
-        stepTitle: issue.stepTitle ?? null,
-        runId: "",
-        assetId: asset.id,
-        assetTag: asset.assetTag ?? "",
-        assetName: asset.assetName ?? "",
-        assetLocation: asset.location ?? "",
-        projectId: asset.projectId,
-        jobNumber: "",
-        customerName: "",
-        source: "asset" as const,
-      },
-    }));
 }
 
 async function cacheAssetLocally(
