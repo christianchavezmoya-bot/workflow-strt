@@ -1,6 +1,7 @@
 import api from "./api";
 import type { Workflow } from "../types/workflow";
 import offlineStore from "./offlineStore";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCacheByPrefix } from "./webFreshCache";
 
@@ -83,6 +84,17 @@ export const workflowTemplateService = {
       });
     }
 
+    if (shouldSkipBlockingFetch()) {
+      const cached = await offlineStore.getCache<Workflow[]>(CACHE_PRODUCT_KEY(productId));
+      if (cached && cached.length > 0) return cached;
+      try {
+        const raw = localStorage.getItem(LS_LIST_KEY(productId));
+        if (raw) return (JSON.parse(raw) as WorkflowTemplateDto[]).map(toWorkflow);
+      } catch {}
+      const single = lsRead(productId);
+      return single ? [single] : [];
+    }
+
     try {
       const res = await api.get<WorkflowTemplateDto[]>(`/workflow-templates/by-product/${productId}`);
       const workflows = res.data.map(toWorkflow);
@@ -123,6 +135,16 @@ export const workflowTemplateService = {
       }
     }
 
+    if (shouldSkipBlockingFetch()) {
+      const cached = await offlineStore.getCache<Workflow>(CACHE_ID_KEY(id));
+      if (cached) return cached;
+      try {
+        const raw = localStorage.getItem(`wf_builder_v2_${id}`);
+        if (raw) return JSON.parse(raw) as Workflow;
+      } catch {}
+      return null;
+    }
+
     try {
       const res = await api.get<WorkflowTemplateDto>(`/workflow-templates/${id}`);
       const wf = toWorkflow(res.data);
@@ -153,6 +175,12 @@ export const workflowTemplateService = {
         return res.data.map(toWorkflow);
       });
       return all.length === 0 ? null : all[0];
+    }
+
+    if (shouldSkipBlockingFetch()) {
+      const cached = await offlineStore.getCache<Workflow[]>(CACHE_PRODUCT_KEY(productId));
+      if (cached && cached.length > 0) return cached[0] ?? null;
+      return lsRead(productId);
     }
 
     try {

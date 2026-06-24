@@ -1,6 +1,7 @@
 import api from "./api";
 import type { WorkflowConfig, UpsertWorkflowConfigInput, WorkflowConfigStatus } from "../types/workflowConfig";
 import offlineStore from "./offlineStore";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
@@ -56,6 +57,12 @@ export const workflowConfigService = {
       });
     }
 
+    if (shouldSkipBlockingFetch()) {
+      const cached = !status ? await offlineStore.getCache<WorkflowConfig[]>(CACHE_ALL_KEY) : null;
+      const all = cached ?? lsReadAll();
+      return status ? all.filter((c) => c.status === status) : all;
+    }
+
     try {
       const params = status ? `?status=${status}` : "";
       const res = await api.get<WorkflowConfig[]>(`/workflow-configs${params}`);
@@ -100,6 +107,11 @@ export const workflowConfigService = {
       return status ? cached.filter((c) => c.status === status) : cached;
     }
 
+    if (shouldSkipBlockingFetch()) {
+      const local = lsRead(productId);
+      return status ? local.filter((c) => c.status === status) : local;
+    }
+
     // No cache yet — wait for network (first-ever load for this product).
     // Still fetch unfiltered here too, so the very first load also warms the
     // full cache rather than only ever caching whatever status was requested.
@@ -128,6 +140,14 @@ export const workflowConfigService = {
         if (status === 404) return null;
         throw err;
       }
+    }
+
+    if (shouldSkipBlockingFetch()) {
+      const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
+      if (cached) return cached;
+      const all = lsReadAll();
+      const local = all.find((c) => c.id === id);
+      return local ?? null;
     }
 
     try {
