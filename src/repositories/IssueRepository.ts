@@ -1,5 +1,6 @@
 import api from "../services/api";
 import type { OpenIssueRecord } from "../services/assetWorkflowRunService";
+import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { entityGetAllIssues, entityReplaceAllIssues, syncMetaSet } from "../services/localDB";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, webCacheKey } from "../services/webFreshCache";
@@ -33,7 +34,8 @@ export const IssueRepository = {
 
     if (local.length > 0) return local as OpenIssueRecord[];
 
-    // No local data — wait for network
+    if (shouldSkipBlockingFetch()) return [];
+
     const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", { params: userId ? { userId } : undefined });
     await entityReplaceAllIssues(res.data.map(toRecord));
     return res.data;

@@ -91,7 +91,7 @@ import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { demoProducts } from "../../data/demo";
-import { projectAssetService } from "../../services/projectAssetService";
+import { projectAssetService, deriveOpenIssuesFromAsset } from "../../services/projectAssetService";
 import { productConfigService, type ProductConfig } from "../../services/productConfigService";
 import { workflowTemplateService } from "../../services/workflowTemplateService";
 import { workflowConfigService } from "../../services/workflowConfigService";
@@ -101,7 +101,7 @@ import { workflowTypeService } from "../../services/workflowTypeService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
-import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS } from "../../services/localDB";
+import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, entityReplaceIssuesForAsset } from "../../services/localDB";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import {
@@ -131,6 +131,7 @@ import QRUploadButton from "../../components/QRUploadButton";
 import InspectionImportDialog from "../projects/InspectionImportDialog";
 import { useStaleOnResume } from "../../hooks/useStaleOnResume";
 import { AssetRepository } from "../../repositories/AssetRepository";
+import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 
 // ------------------------------------------------------------------
@@ -1511,7 +1512,14 @@ const AssetInstallationPage = () => {
       // New path: productConfigId â†' WorkflowConfig (published work instruction)
       if (asset.productConfigId) {
         const wfConfig = await workflowConfigService.getById(asset.productConfigId);
-        if (!wfConfig) { alert("Work instruction config not found."); return; }
+        if (!wfConfig) {
+          if (shouldSkipBlockingFetch()) {
+            alert("This work order hasn't been downloaded to this device yet. Connect to the internet once to load it, then it will work offline.");
+          } else {
+            alert("Work instruction config not found.");
+          }
+          return;
+        }
         let wf: Workflow | null = null;
         try { wf = JSON.parse(wfConfig.stepsJson) as Workflow; } catch {}
         if (!wf) { alert("Work instruction has no steps. Open it in Work Instructions and add steps first."); return; }
@@ -1645,10 +1653,20 @@ const AssetInstallationPage = () => {
       reportMedia: issueMedia.length > 0 ? issueMedia : undefined,
     };
     issues.push(newIssue);
+    const issuesJson = JSON.stringify(issues);
     try {
-      const updated = await projectAssetService.update(issueDialogAsset.id, { issuesJson: JSON.stringify(issues) });
+      const updated = await projectAssetService.update(issueDialogAsset.id, { issuesJson });
       setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
-    } catch { console.warn("Failed to add issue"); }
+    } catch {
+      const optimisticAsset = { ...issueDialogAsset, issuesJson };
+      setAssets((prev) => prev.map((a) => (a.id === issueDialogAsset.id ? optimisticAsset : a)));
+      if (isMobileNativePlatform()) {
+        await entityReplaceIssuesForAsset(optimisticAsset.id, deriveOpenIssuesFromAsset(optimisticAsset));
+        window.dispatchEvent(new Event("repo:issues:updated"));
+      }
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+    }
     setIssueDialogOpen(false);
     setIssueDialogAsset(null);
     setIssueForm({ description: "", severity: "medium" });
@@ -1659,10 +1677,20 @@ const AssetInstallationPage = () => {
     let issues: AssetIssue[] = [];
     try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
     issues = issues.map((i) => i.id === issueId ? { ...i, resolved: !i.resolved } : i);
+    const issuesJson = JSON.stringify(issues);
     try {
-      const updated = await projectAssetService.update(asset.id, { issuesJson: JSON.stringify(issues) });
+      const updated = await projectAssetService.update(asset.id, { issuesJson });
       setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
-    } catch { console.warn("Failed to update issue"); }
+    } catch {
+      const optimisticAsset = { ...asset, issuesJson };
+      setAssets((prev) => prev.map((a) => (a.id === asset.id ? optimisticAsset : a)));
+      if (isMobileNativePlatform()) {
+        await entityReplaceIssuesForAsset(optimisticAsset.id, deriveOpenIssuesFromAsset(optimisticAsset));
+        window.dispatchEvent(new Event("repo:issues:updated"));
+      }
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+    }
   }
 
   async function handleIssueDetailSave(updatedIssue: AssetIssue) {
@@ -1670,12 +1698,23 @@ const AssetInstallationPage = () => {
     let issues: AssetIssue[] = [];
     try { issues = JSON.parse(issueDetailAsset.issuesJson || "[]"); } catch {}
     issues = issues.map((i) => i.id === updatedIssue.id ? updatedIssue : i);
+    const issuesJson = JSON.stringify(issues);
     try {
-      const updated = await projectAssetService.update(issueDetailAsset.id, { issuesJson: JSON.stringify(issues) });
+      const updated = await projectAssetService.update(issueDetailAsset.id, { issuesJson });
       setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
       // Keep the dialog open with refreshed asset so the user sees the saved state
       setIssueDetailAsset(updated);
-    } catch { console.warn("Failed to update issue"); }
+    } catch {
+      const optimisticAsset = { ...issueDetailAsset, issuesJson };
+      setAssets((prev) => prev.map((a) => (a.id === issueDetailAsset.id ? optimisticAsset : a)));
+      setIssueDetailAsset(optimisticAsset);
+      if (isMobileNativePlatform()) {
+        await entityReplaceIssuesForAsset(optimisticAsset.id, deriveOpenIssuesFromAsset(optimisticAsset));
+        window.dispatchEvent(new Event("repo:issues:updated"));
+      }
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+    }
   }
 
   // ------------------------------------------------------------------

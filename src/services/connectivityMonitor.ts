@@ -88,6 +88,15 @@ export function getServerReachable(): boolean | null {
 }
 
 /**
+ * Skip blocking live fetches only when we have a definite "no" signal.
+ * Unknown/null still allows a first-load network attempt.
+ */
+export function shouldSkipBlockingFetch(): boolean {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  return getServerReachable() === false;
+}
+
+/**
  * Force an immediate check outside the regular interval — e.g. right after
  * the app comes back online, so the bar doesn't wait up to 30s to confirm.
  */

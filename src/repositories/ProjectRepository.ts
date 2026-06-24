@@ -2,6 +2,7 @@ import api from "../services/api";
 import type { Project } from "../types/project";
 import { entityGetAllProjects, entityPutProjects, reconcileProjects, syncMetaSet } from "../services/localDB";
 import type { ProjectFilters, ProjectListResponse } from "../services/projectService";
+import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, webCacheKey } from "../services/webFreshCache";
 
@@ -109,6 +110,8 @@ export const ProjectRepository = {
       // filtering once offices have loaded.
       return { items, total: items.length };
     }
+
+    if (shouldSkipBlockingFetch()) return { items: [], total: 0 };
 
     const res = await api.get<Project[] | ProjectListResponse>("/projects", { params });
     const items = Array.isArray(res.data) ? res.data : res.data.items;
