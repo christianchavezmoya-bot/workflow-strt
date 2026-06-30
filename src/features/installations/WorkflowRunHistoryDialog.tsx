@@ -48,6 +48,8 @@ import {
   TextField,
   Tooltip,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { brandSettingsService } from "../../services/brandSettingsService";
@@ -221,6 +223,8 @@ export default function WorkflowRunHistoryDialog({
   customerLogoBase64,
   assignedTechnician,
 }: Props) {
+  const theme = useTheme();
+  const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const [runs, setRuns] = useState<AssetWorkflowRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
@@ -429,12 +433,28 @@ export default function WorkflowRunHistoryDialog({
       <Dialog
         open={open}
         onClose={onClose}
-        maxWidth="md"
+        fullScreen={isPhone}
+        maxWidth={isPhone ? false : "md"}
         fullWidth
-        PaperProps={{ sx: { maxHeight: "90vh" } }}
+        PaperProps={{
+          sx: isPhone
+            ? {
+                width: "100%",
+                maxWidth: "100%",
+                height: "100%",
+                maxHeight: "100%",
+                m: 0,
+                borderRadius: 0,
+              }
+            : { maxHeight: "90vh" },
+        }}
       >
-        <DialogTitle sx={{ pb: 1 }}>
-          <Stack direction="row" alignItems="flex-start" spacing={1.5}>
+        <DialogTitle sx={{ pb: 1, px: isPhone ? 2 : 3, pt: isPhone ? 2 : 2.5 }}>
+          <Stack
+            direction={isPhone ? "column" : "row"}
+            alignItems={isPhone ? "stretch" : "flex-start"}
+            spacing={1.5}
+          >
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="subtitle1" fontWeight={700}>
                 Run History — {asset.assetTag}
@@ -443,12 +463,18 @@ export default function WorkflowRunHistoryDialog({
                 {workflowConfigName}
               </Typography>
             </Box>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0, pt: 0.25 }}>
+            <Stack
+              direction={isPhone ? "column" : "row"}
+              spacing={1}
+              alignItems={isPhone ? "stretch" : "center"}
+              sx={{ flexShrink: 0, pt: isPhone ? 0 : 0.25, width: isPhone ? "100%" : "auto" }}
+            >
               {runs.length > 0 && (
                 <Chip
                   size="small"
                   label={`${runs.length} run${runs.length !== 1 ? "s" : ""}`}
                   variant="outlined"
+                  sx={{ alignSelf: isPhone ? "flex-start" : "center" }}
                 />
               )}
               {latestInProgressRun && onContinue && (
@@ -459,6 +485,7 @@ export default function WorkflowRunHistoryDialog({
                     color="primary"
                     startIcon={<PlayArrowOutlined />}
                     onClick={() => { onContinue(latestInProgressRun); onClose(); }}
+                    fullWidth={isPhone}
                   >
                     Resume Run
                   </Button>
@@ -478,6 +505,7 @@ export default function WorkflowRunHistoryDialog({
                     startIcon={<ReplayOutlined />}
                     disabled={!latestLockedRun}
                     onClick={() => setRerunConfirmOpen(true)}
+                    fullWidth={isPhone}
                   >
                     Re-run
                   </Button>
@@ -487,7 +515,7 @@ export default function WorkflowRunHistoryDialog({
           </Stack>
         </DialogTitle>
 
-        <DialogContent dividers sx={{ px: 0, pb: 2, overflowX: "hidden" }}>
+        <DialogContent dividers sx={{ px: 0, pb: isPhone ? 1.5 : 2, overflowX: "hidden" }}>
           {loading ? (
             <Stack alignItems="center" sx={{ p: 4 }}>
               <CircularProgress size={28} />
@@ -520,115 +548,154 @@ export default function WorkflowRunHistoryDialog({
 
                     {/* ── Run summary row ── */}
                     <Stack
-                      direction="row"
-                      alignItems="center"
+                      direction={isPhone ? "column" : "row"}
+                      alignItems={isPhone ? "stretch" : "center"}
                       spacing={1.5}
                       sx={{
-                        px: 3,
+                        px: isPhone ? 1.5 : 3,
                         py: 1.25,
                         cursor: "pointer",
                         "&:hover": { bgcolor: "action.hover" },
                       }}
                       onClick={() => setExpandedRunId(isExpanded ? null : run.id)}
                     >
-                      <IconButton size="small" sx={{ flexShrink: 0 }}>
-                        {isExpanded ? (
-                          <ExpandLessOutlined fontSize="small" />
-                        ) : (
-                          <ExpandMoreOutlined fontSize="small" />
-                        )}
-                      </IconButton>
+                      <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ width: "100%" }}>
+                        <IconButton size="small" sx={{ flexShrink: 0, mt: isPhone ? 0.25 : 0 }}>
+                          {isExpanded ? (
+                            <ExpandLessOutlined fontSize="small" />
+                          ) : (
+                            <ExpandMoreOutlined fontSize="small" />
+                          )}
+                        </IconButton>
 
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                          <Typography variant="body2" fontWeight={700}>
-                            Run #{run.runNumber ?? idx + 1}
-                          </Typography>
-                          <Typography variant="caption" color="text.disabled">
-                            v{run.workflowVersion}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {new Date(run.startedAt).toLocaleDateString(undefined, {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                            })}{" "}
-                            {new Date(run.startedAt).toLocaleTimeString(undefined, {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </Typography>
-                          {run.completedByName && (
-                            <Typography variant="caption" color="text.secondary">
-                              · Completed by {run.completedByName}
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+                            <Typography variant="body2" fontWeight={700}>
+                              Run #{run.runNumber ?? idx + 1}
                             </Typography>
-                          )}
-                          {signatureActionBlocked && (
+                            <Typography variant="caption" color="text.disabled">
+                              v{run.workflowVersion}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {new Date(run.startedAt).toLocaleDateString(undefined, {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                              })}{" "}
+                              {new Date(run.startedAt).toLocaleTimeString(undefined, {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </Typography>
+                            {run.completedByName && (
+                              <Typography variant="caption" color="text.secondary">
+                                {isPhone ? `Completed by ${run.completedByName}` : `· Completed by ${run.completedByName}`}
+                              </Typography>
+                            )}
+                            {signatureActionBlocked && (
+                              <Chip
+                                size="small"
+                                label={`Superseded by Run #${latestRunNumber}`}
+                                color="default"
+                                variant="outlined"
+                                sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.6 } }}
+                              />
+                            )}
+                          </Stack>
+                          <Stack
+                            direction="row"
+                            alignItems="center"
+                            spacing={0.75}
+                            mt={0.5}
+                            flexWrap="wrap"
+                            useFlexGap
+                          >
+                            <Typography variant="caption" color="text.secondary">
+                              {stepResults.length} step
+                              {stepResults.length !== 1 ? "s" : ""} captured
+                            </Typography>
                             <Chip
                               size="small"
-                              label={`Superseded by Run #${latestRunNumber}`}
-                              color="default"
+                              label={`Productive ${formatDuration(run.productiveSeconds)}`}
+                              color="success"
                               variant="outlined"
-                              sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.6 } }}
+                              sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
                             />
-                          )}
-                        </Stack>
-                        <Stack direction="row" alignItems="center" spacing={0.75} mt={0.25}>
-                          <Typography variant="caption" color="text.secondary">
-                            {stepResults.length} step
-                            {stepResults.length !== 1 ? "s" : ""} captured
-                          </Typography>
-                          <Chip
-                            size="small"
-                            label={`Productive ${formatDuration(run.productiveSeconds)}`}
-                            color="success"
-                            variant="outlined"
-                            sx={{ height: 16, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
-                          />
-                          <Chip
-                            size="small"
-                            label={`Downtime ${formatDuration(run.downtimeSeconds)}`}
-                            color={run.downtimeSeconds > 0 ? "warning" : "default"}
-                            variant="outlined"
-                            sx={{ height: 16, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
-                          />
-                          {openIssues > 0 && (
                             <Chip
                               size="small"
-                              icon={
-                                <ReportProblemOutlined
-                                  sx={{ fontSize: "0.75rem !important" }}
-                                />
-                              }
-                              label={`${openIssues} issue${openIssues !== 1 ? "s" : ""}`}
-                              color="error"
+                              label={`Downtime ${formatDuration(run.downtimeSeconds)}`}
+                              color={run.downtimeSeconds > 0 ? "warning" : "default"}
                               variant="outlined"
-                              sx={{
-                                height: 16,
-                                fontSize: 10,
-                                "& .MuiChip-label": { px: 0.5 },
-                              }}
+                              sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
                             />
-                          )}
-                          {missingMedia > 0 && (
-                            <Chip
-                              size="small"
-                              icon={<WarningAmberOutlined sx={{ fontSize: "0.75rem !important" }} />}
-                              label={`${missingMedia} missing items`}
-                              color="warning"
-                              variant="outlined"
-                              sx={{ height: 16, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
-                            />
-                          )}
-                        </Stack>
-                      </Box>
+                            {openIssues > 0 && (
+                              <Chip
+                                size="small"
+                                icon={
+                                  <ReportProblemOutlined
+                                    sx={{ fontSize: "0.75rem !important" }}
+                                  />
+                                }
+                                label={`${openIssues} issue${openIssues !== 1 ? "s" : ""}`}
+                                color="error"
+                                variant="outlined"
+                                sx={{
+                                  height: 18,
+                                  fontSize: 10,
+                                  "& .MuiChip-label": { px: 0.5 },
+                                }}
+                              />
+                            )}
+                            {missingMedia > 0 && (
+                              <Chip
+                                size="small"
+                                icon={<WarningAmberOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                                label={`${missingMedia} missing items`}
+                                color="warning"
+                                variant="outlined"
+                                sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
+                              />
+                            )}
+                          </Stack>
+                        </Box>
+                      </Stack>
 
                       <Stack
-                        direction="row"
-                        alignItems="center"
+                        direction={isPhone ? "column" : "row"}
+                        alignItems={isPhone ? "stretch" : "center"}
                         spacing={0.75}
-                        sx={{ flexShrink: 0 }}
+                        useFlexGap
+                        flexWrap="wrap"
+                        sx={{ flexShrink: 0, width: isPhone ? "100%" : "auto", pl: isPhone ? 5 : 0 }}
                       >
+                        <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center">
+                          <Chip
+                            size="small"
+                            label={run.status === "InProgress" ? "In Progress" : run.status}
+                            color={STATUS_COLOR[run.status] ?? "default"}
+                            icon={
+                              (STATUS_ICON[run.status] as React.ReactElement) ?? undefined
+                            }
+                          />
+                          {run.isLocked && (
+                            <SignatureBadge status={run.signatureStatus ?? "None"} />
+                          )}
+                          {run.isLocked && (
+                            <Tooltip title="Run is locked (completed)">
+                              <LockOutlined
+                                sx={{ fontSize: "0.9rem", color: "text.secondary" }}
+                              />
+                            </Tooltip>
+                          )}
+                        </Stack>
+                        <Stack
+                          direction="row"
+                          spacing={0.75}
+                          useFlexGap
+                          flexWrap="wrap"
+                          alignItems="center"
+                          sx={{ width: isPhone ? "100%" : "auto" }}
+                        >
                         <Tooltip title="Edit / correct time entries">
                           <IconButton
                             size="small"
@@ -678,7 +745,7 @@ export default function WorkflowRunHistoryDialog({
                                 e.stopPropagation();
                                 onAddMissingMedia(run);
                               }}
-                              sx={{ py: 0, minHeight: 26 }}
+                              sx={{ py: 0, minHeight: 30, width: isPhone ? "100%" : "auto" }}
                             >
                               Add Missing Photos
                             </Button>
@@ -694,7 +761,7 @@ export default function WorkflowRunHistoryDialog({
                                 startIcon={<DrawOutlined />}
                                 disabled={signatureActionBlocked}
                                 onClick={(e) => { e.stopPropagation(); setSignDialogRun(run); }}
-                                sx={{ py: 0, minHeight: 26 }}
+                                sx={{ py: 0, minHeight: 30, width: isPhone ? "100%" : "auto" }}
                               >
                                 Sign
                               </Button>
@@ -714,7 +781,7 @@ export default function WorkflowRunHistoryDialog({
                                   e.stopPropagation();
                                   void openTokenDialog(run);
                                 }}
-                                sx={{ py: 0, minHeight: 26 }}
+                                sx={{ py: 0, minHeight: 30, width: isPhone ? "100%" : "auto" }}
                               >
                                 Send to customer
                               </Button>
@@ -733,25 +800,19 @@ export default function WorkflowRunHistoryDialog({
                                 onContinue(run);
                                 onClose();
                               }}
-                              sx={{ ml: 0.5 }}
+                              sx={{ ml: isPhone ? 0 : 0.5, width: isPhone ? "100%" : "auto" }}
                             >
                               Resume Run
                             </Button>
                           </Tooltip>
                         )}
-                        {run.isLocked && (
-                          <Tooltip title="Run is locked (completed)">
-                            <LockOutlined
-                              sx={{ fontSize: "0.9rem", color: "text.secondary" }}
-                            />
-                          </Tooltip>
-                        )}
+                        </Stack>
                       </Stack>
                     </Stack>
 
                     {/* ── Expanded details ── */}
                     <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                      <Box sx={{ px: 4, pb: 2, bgcolor: "rgba(255,255,255,0.02)" }}>
+                      <Box sx={{ px: isPhone ? 2 : 4, pb: 2, bgcolor: "rgba(255,255,255,0.02)" }}>
                         {signatureActionBlocked && (
                           <Alert severity="info" sx={{ mt: 1.25, mb: 1.5 }}>
                             This run has been superseded by Run #{latestRunNumber}. Signature actions are disabled for this older run.
@@ -759,7 +820,13 @@ export default function WorkflowRunHistoryDialog({
                         )}
                         {/* Download report CTA inside expanded section */}
                         {run.isLocked && (
-                          <Stack direction="row" spacing={1} sx={{ mt: 1.25, mb: 1.5 }} flexWrap="wrap" useFlexGap>
+                          <Stack
+                            direction={isPhone ? "column" : "row"}
+                            spacing={1}
+                            sx={{ mt: 1.25, mb: 1.5 }}
+                            flexWrap="wrap"
+                            useFlexGap
+                          >
                             <Tooltip title="Completed steps only">
                               <Button
                                 size="small"
@@ -767,6 +834,7 @@ export default function WorkflowRunHistoryDialog({
                                 startIcon={reportGenerating === run.id ? <CircularProgress size={13} /> : <DownloadOutlined />}
                                 disabled={reportGenerating === run.id}
                                 onClick={() => void handleDownloadReport(run, false)}
+                                fullWidth={isPhone}
                               >
                                 {reportGenerating === run.id ? "Generating…" : "Standard Report"}
                               </Button>
@@ -779,6 +847,7 @@ export default function WorkflowRunHistoryDialog({
                                 startIcon={reportGenerating === run.id ? <CircularProgress size={13} /> : <DownloadOutlined />}
                                 disabled={reportGenerating === run.id}
                                 onClick={() => void handleDownloadReport(run, true)}
+                                fullWidth={isPhone}
                               >
                                 Full Report (all steps)
                               </Button>
@@ -797,6 +866,47 @@ export default function WorkflowRunHistoryDialog({
                           const entries = parseTimeEntries(run.timeTrackingJson ?? "[]");
                           const downtimeEntries = entries.filter((e) => e.category === "downtime");
                           if (downtimeEntries.length === 0) return null;
+                          if (isPhone) {
+                            return (
+                              <>
+                                <Typography variant="caption" fontWeight={700} color="text.secondary"
+                                  sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 0.75 }}>
+                                  Downtime Events ({downtimeEntries.length})
+                                </Typography>
+                                <Stack spacing={1} sx={{ mb: 1.5 }}>
+                                  {downtimeEntries.map((e) => {
+                                    const dur = timeEntryDuration(e, run.completedAt ?? undefined);
+                                    return (
+                                      <Paper key={e.id} variant="outlined" sx={{ p: 1.25 }}>
+                                        <Stack spacing={0.5}>
+                                          <Typography variant="body2" fontWeight={600}>
+                                            {e.reason || "No reason recorded"}
+                                          </Typography>
+                                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                                            <Chip size="small" variant="outlined" label={`Start ${fmtTime(e.startedAtUtc)}`} sx={{ height: 22 }} />
+                                            <Chip
+                                              size="small"
+                                              variant="outlined"
+                                              label={`End ${e.endedAtUtc ? fmtTime(e.endedAtUtc) : "Open"}`}
+                                              color={e.endedAtUtc ? "default" : "warning"}
+                                              sx={{ height: 22 }}
+                                            />
+                                            <Chip
+                                              size="small"
+                                              variant="outlined"
+                                              label={`Duration ${dur > 0 ? formatDuration(dur) : "—"}`}
+                                              color="warning"
+                                              sx={{ height: 22 }}
+                                            />
+                                          </Stack>
+                                        </Stack>
+                                      </Paper>
+                                    );
+                                  })}
+                                </Stack>
+                              </>
+                            );
+                          }
                           return (
                             <>
                               <Typography variant="caption" fontWeight={700} color="text.secondary"
@@ -1005,10 +1115,10 @@ export default function WorkflowRunHistoryDialog({
                                                   return (
                                                     <Stack
                                                       key={inputId}
-                                                      direction="row"
+                                                      direction={isPhone ? "column" : "row"}
                                                       spacing={1}
                                                       justifyContent="space-between"
-                                                      alignItems="flex-start"
+                                                      alignItems={isPhone ? "stretch" : "flex-start"}
                                                       sx={{ gap: 1, minWidth: 0 }}
                                                     >
                                                       <Typography
@@ -1020,7 +1130,12 @@ export default function WorkflowRunHistoryDialog({
                                                       </Typography>
                                                       <Typography
                                                         variant="caption"
-                                                        sx={{ flexShrink: 0, fontWeight: 600, textAlign: "right" }}
+                                                        sx={{
+                                                          flexShrink: 0,
+                                                          fontWeight: 600,
+                                                          textAlign: isPhone ? "left" : "right",
+                                                          wordBreak: "break-word",
+                                                        }}
                                                       >
                                                         {displayValue}
                                                       </Typography>
@@ -1159,8 +1274,8 @@ export default function WorkflowRunHistoryDialog({
             </Stack>
           )}
         </DialogContent>
-        <DialogActions sx={{ px: 2.5, py: 1.5 }}>
-          <Button onClick={onClose}>Close</Button>
+        <DialogActions sx={{ px: isPhone ? 2 : 2.5, py: 1.5 }}>
+          <Button onClick={onClose} fullWidth={isPhone}>Close</Button>
         </DialogActions>
       </Dialog>
 
@@ -1168,7 +1283,8 @@ export default function WorkflowRunHistoryDialog({
       <Dialog
         open={rerunConfirmOpen}
         onClose={() => setRerunConfirmOpen(false)}
-        maxWidth="xs"
+        fullScreen={isPhone}
+        maxWidth={isPhone ? false : "xs"}
         fullWidth
       >
         <DialogTitle>Re-run Workflow</DialogTitle>
@@ -1185,12 +1301,13 @@ export default function WorkflowRunHistoryDialog({
             </Alert>
           </Stack>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setRerunConfirmOpen(false)}>Cancel</Button>
+        <DialogActions sx={{ flexDirection: isPhone ? "column-reverse" : "row", gap: 1, px: 2, pb: 2 }}>
+          <Button onClick={() => setRerunConfirmOpen(false)} fullWidth={isPhone}>Cancel</Button>
           <Button
             variant="contained"
             onClick={handleRerunConfirm}
             startIcon={<ReplayOutlined />}
+            fullWidth={isPhone}
           >
             Start Re-run →
           </Button>
@@ -1223,7 +1340,13 @@ export default function WorkflowRunHistoryDialog({
       )}
 
       {/* ── Request Customer Signature Dialog ── */}
-      <Dialog open={Boolean(tokenDialogRun)} onClose={closeTokenDialog} maxWidth="sm" fullWidth>
+      <Dialog
+        open={Boolean(tokenDialogRun)}
+        onClose={closeTokenDialog}
+        fullScreen={isPhone}
+        maxWidth={isPhone ? false : "sm"}
+        fullWidth
+      >
         <DialogTitle>Request Customer Signature</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
@@ -1240,6 +1363,7 @@ export default function WorkflowRunHistoryDialog({
                 <Button
                   variant="outlined"
                   onClick={() => { navigator.clipboard.writeText(tokenLink!); }}
+                  fullWidth={isPhone}
                 >
                   Copy link
                 </Button>
@@ -1329,8 +1453,8 @@ export default function WorkflowRunHistoryDialog({
             )}
           </Stack>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={closeTokenDialog}>
+        <DialogActions sx={{ flexDirection: isPhone ? "column-reverse" : "row", gap: 1, px: 2, pb: 2 }}>
+          <Button onClick={closeTokenDialog} fullWidth={isPhone}>
             {tokenLink ? "Done" : "Cancel"}
           </Button>
           {!tokenLink && (
@@ -1338,6 +1462,7 @@ export default function WorkflowRunHistoryDialog({
               variant="contained"
               onClick={handleCreateToken}
               disabled={!tokenEmail.trim() || tokenSending}
+              fullWidth={isPhone}
             >
               {tokenSending ? <CircularProgress size={18} /> : "Send to customer"}
             </Button>

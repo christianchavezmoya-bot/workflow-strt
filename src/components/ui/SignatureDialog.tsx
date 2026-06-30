@@ -17,7 +17,9 @@ import {
   Select,
   Stack,
   TextField,
-  Typography
+  Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { GestureOutlined, KeyboardOutlined } from "@mui/icons-material";
 import { signatureService, type SubmitSignaturePayload } from "../../services/signatureService";
@@ -129,6 +131,8 @@ export default function SignatureDialog({
   onClose,
   onSigned
 }: Props) {
+  const theme = useTheme();
+  const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const [inputMode, setInputMode] = useState<InputMode>("typed");
   const [signerName, setSignerName] = useState(defaultSignerName);
   const [signerEmail, setSignerEmail] = useState(defaultSignerEmail);
@@ -187,13 +191,19 @@ export default function SignatureDialog({
   const roleLabel = signerRole === "Installer" ? "Field Sign-off" : "Customer Sign-off";
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullScreen={isPhone}
+      maxWidth={isPhone ? false : "sm"}
+      fullWidth
+    >
       <DialogTitle>{roleLabel}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           {error && <Alert severity="error">{error}</Alert>}
 
-          <Stack direction="row" spacing={1}>
+          <Stack direction={isPhone ? "column" : "row"} spacing={1}>
             <TextField
               label="Full name *"
               value={signerName}
@@ -247,12 +257,13 @@ export default function SignatureDialog({
             <Typography variant="caption" color="text.secondary">Signature</Typography>
           </Divider>
 
-          <Stack direction="row" spacing={1}>
+          <Stack direction={isPhone ? "column" : "row"} spacing={1}>
             <Button
               variant={inputMode === "typed" ? "contained" : "outlined"}
               size="small"
               startIcon={<KeyboardOutlined />}
               onClick={() => setInputMode("typed")}
+              fullWidth={isPhone}
             >
               Type name
             </Button>
@@ -261,6 +272,7 @@ export default function SignatureDialog({
               size="small"
               startIcon={<GestureOutlined />}
               onClick={() => setInputMode("drawn")}
+              fullWidth={isPhone}
             >
               Draw signature
             </Button>
@@ -274,10 +286,11 @@ export default function SignatureDialog({
                 p: 2,
                 background: "rgba(0,0,0,0.2)",
                 fontFamily: "cursive",
-                fontSize: "1.5rem",
+                fontSize: isPhone ? "1.15rem" : "1.5rem",
                 color: signerName ? "#e0f7f4" : "text.disabled",
                 minHeight: 56,
-                textAlign: "center"
+                textAlign: "center",
+                wordBreak: "break-word",
               }}
             >
               {signerName || "— your name will appear here —"}
@@ -308,13 +321,14 @@ export default function SignatureDialog({
           />
         </Stack>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose} disabled={saving}>Cancel</Button>
+      <DialogActions sx={{ flexDirection: isPhone ? "column-reverse" : "row", gap: 1, px: 2, pb: 2 }}>
+        <Button onClick={onClose} disabled={saving} fullWidth={isPhone}>Cancel</Button>
         <Button
           variant="contained"
           color={reasonCode === "Declined" ? "error" : "primary"}
           onClick={handleSubmit}
           disabled={!canSubmit || saving}
+          fullWidth={isPhone}
         >
           {saving ? <CircularProgress size={18} /> : reasonCode === "Declined" ? "Decline & Submit" : "Sign"}
         </Button>
