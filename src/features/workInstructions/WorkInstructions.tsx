@@ -479,7 +479,6 @@ const WorkInstructions = () => {
   const [viewMode, setViewMode] = useState<"instructions" | "builder">("instructions");
 
   const [configs, setConfigs] = useState<WorkflowConfig[]>([]);
-  const [configsLoading, setConfigsLoading] = useState(false);
   const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
   const [configSearch, setConfigSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkInstructionSortKey>("dateCreated");
@@ -570,14 +569,15 @@ const WorkInstructions = () => {
     setSelectedConfigId(null);
   }, [activeProduct?.id]);
 
+  // workflowConfigService.listByProduct is local-first, so when the cache exists
+  // the data is available essentially instantly. Showing a spinner here caused a
+  // brief but unnecessary flash of empty state on every product tab switch. We
+  // let the empty-state UI ("No work instructions yet…") stand in for the rare
+  // first-ever-load case instead of blocking the render with a misleading
+  // loading indicator.
   const loadConfigs = useCallback(async (productId: string) => {
-    setConfigsLoading(true);
-    try {
-      const data = await workflowConfigService.listByProduct(productId);
-      setConfigs(data);
-    } finally {
-      setConfigsLoading(false);
-    }
+    const data = await workflowConfigService.listByProduct(productId);
+    setConfigs(data);
   }, []);
 
   useEffect(() => {
@@ -888,11 +888,7 @@ const WorkInstructions = () => {
                 )}
               </Stack>
 
-              {configsLoading ? (
-                <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
-                  <CircularProgress size={28} />
-                </Box>
-              ) : filteredConfigs.length === 0 ? (
+              {filteredConfigs.length === 0 ? (
                 <Alert severity="info">
                   {configs.length === 0
                     ? `No work instructions yet for ${activeProduct.name}. Click "+ New Work Instruction" to create one.`
