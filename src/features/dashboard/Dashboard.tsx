@@ -486,9 +486,15 @@ const Dashboard = () => {
     };
     window.addEventListener("notifications:run-state-changed", refresh);
     window.addEventListener("notifications:refresh", refresh);
+    // Also listen for asset-level changes dispatched by AssetRepository (and
+    // forwarded by offline issue mutations) so the workspace + attention
+    // counts refresh live when assets change offline — not only when the
+    // notifications:* events happen to be fired alongside.
+    window.addEventListener("repo:assets:updated", refresh);
     return () => {
       window.removeEventListener("notifications:run-state-changed", refresh);
       window.removeEventListener("notifications:refresh", refresh);
+      window.removeEventListener("repo:assets:updated", refresh);
     };
   }, [isManager, selectedDashboardId, loadAttention]);
 
