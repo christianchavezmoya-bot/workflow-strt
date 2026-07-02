@@ -767,58 +767,121 @@ const AssetInstallationPage = () => {
   }, [requestedWorkflowType]);
 
   useEffect(() => {
-    if (products.length === 0) { setAssets([]); setConfigs([]); setPublishedWfConfigs([]); return; }
+    if (products.length === 0) {
+      setAssets([]);
+      setConfigs([]);
+      setPublishedWfConfigs([]);
+      setLoadingAssets(false);
+      return;
+    }
     // Increment the load ID so any in-flight load from a previous product is ignored
     const loadId = ++assetLoadIdRef.current;
     setLoadingAssets(true);
+
+    // Tier 1 — assets (local-first, the primary content the user wants to see).
+    // Resolves independently so the page can render the asset list as soon as
+    // it's available, without waiting for configs or workflow data.
     const assetPromise = selectedProjectId
       ? projectAssetService.listByProject(selectedProjectId, archiveMode)
       : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode)))
           .then((groups) => groups.flat());
-    const configPromise = activeProduct?.id ? productConfigService.listByProduct(activeProduct.id) : Promise.resolve([]);
-    const workflowPromise = activeProduct?.id ? workflowConfigService.listByProduct(activeProduct.id, "Published") : Promise.resolve([]);
-    Promise.all([assetPromise, configPromise, workflowPromise]).then(([a, c, wc]) => {
+
+    assetPromise.then((a) => {
       if (loadId !== assetLoadIdRef.current) return; // Stale — a newer load is in flight
       setAssets(a);
       setLastFetchedAt(new Date());
-      setConfigs(c);
-      setPublishedWfConfigs(wc);
       if (activeProduct?.id) {
         setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
       }
-      // Pre-load latest run per asset (for signature status in status chip) — fire-and-forget
-      const uniqueProjectIds = [...new Set(a.map(asset => asset.projectId).filter(Boolean))];
-      Promise.all(uniqueProjectIds.map(pid => assetWorkflowRunService.listLatestByProject(pid)))
-        .then(results => {
-          if (loadId !== assetLoadIdRef.current) return;
+      // Once assets are shown, the page is no longer "loading" — configs and
+      // runs will fill in below as their own independent promises resolve.
+      setLoadingAssets(false);
+    }).catch(() => {
+      if (loadId === assetLoadIdRef.current) setLoadingAssets(false);
+    });
+
+    // Tier 2 — configs (independent, updates its own state when it arrives).
+    if (activeProduct?.id) {
+      productConfigService.listByProduct(activeProduct.id)
+        .then((c) => {
+          if (loadId !== assetLoadIdRef.current) return; // Stale
+          setConfigs(c);
+        })
+        .catch(() => {/* non-blocking */});
+    } else {
+      setConfigs([]);
+    }
+
+    // Tier 2 — published workflow configs (independent, updates its own state).
+    if (activeProduct?.id) {
+      workflowConfigService.listByProduct(activeProduct.id, "Published")
+        .then((wc) => {
+          if (loadId !== assetLoadIdRef.current) return; // Stale
+          setPublishedWfConfigs(wc);
+        })
+        .catch(() => {/* non-blocking */});
+    } else {
+      setPublishedWfConfigs([]);
+    }
+
+    // Tier 3 — latest runs per project. Chained off the asset promise (since
+    // we need the projectIds from the asset list), but otherwise independent
+    // of configs/workflow — updates runsMap on its own when it resolves.
+    assetPromise.then((a) => {
+      if (loadId !== assetLoadIdRef.current) return; // Stale
+      const uniqueProjectIds = [...new Set(a.map((asset) => asset.projectId).filter(Boolean))];
+      Promise.all(uniqueProjectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
+        .then((results) => {
+          if (loadId !== assetLoadIdRef.current) return; // Stale
           const runMap: Record<string, AssetWorkflowRun[]> = {};
-          results.flat().forEach(run => {
+          results.flat().forEach((run) => {
             if (!runMap[run.assetId]) runMap[run.assetId] = [];
             runMap[run.assetId].push(run);
           });
-          setRunsMap(prev => {
+          setRunsMap((prev) => {
             const merged = { ...runMap };
             // Only preserve entries that were fully loaded via loadAssignmentsForAsset
             // (those have ALL runs, not just the latest). Batch load always wins otherwise.
-            Object.keys(prev).forEach(id => {
+            Object.keys(prev).forEach((id) => {
               if (prev[id].length > 1) merged[id] = prev[id];
             });
             return merged;
           });
-        }).catch(() => {/* non-blocking */});
-      // Load document counts per asset (fire-and-forget, non-blocking)
-      const countMap: Record<string, number> = {};
-      Promise.all(a.map(async (asset) => {
-        const docs = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
-        countMap[asset.id] = docs.length;
-      })).then(() => {
-        if (loadId !== assetLoadIdRef.current) return; // Stale
-        setDocsCountMap(countMap);
-      });
-    }).finally(() => {
-      if (loadId === assetLoadIdRef.current) setLoadingAssets(false);
-    });
+        })
+        .catch(() => {/* non-blocking */});
+    }).catch(() => {/* non-blocking */});
   }, [activeProduct?.id, archiveMode, products, selectedProjectId]);
+
+  // Document counts per asset — fetched in a fully independent effect that
+  // runs after the asset list is already shown. Counts are cosmetic
+  // (badges / "+N docs" indicators), so a slow or failed network call here
+  // never blocks the page. Never touches loadingAssets. The dependency is a
+  // stable sorted-id key so optimistic per-asset updates (which create a new
+  // array reference via setAssets(prev => prev.map(...))) don't re-fire the
+  // full per-asset fetch loop — only changes to the underlying SET of assets
+  // (e.g. product switch, manual refresh, CSV import) trigger a refetch.
+  const assetsKey = useMemo(
+    () => assets.map((a) => a.id).sort().join("|"),
+    [assets],
+  );
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
+  useEffect(() => {
+    if (assetsKey === "") return;
+    const myLoadId = ++assetLoadIdRef.current;
+    const snapshot = assetsRef.current;
+    const countMap: Record<string, number> = {};
+    Promise.all(snapshot.map(async (asset) => {
+      const docs = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
+      countMap[asset.id] = docs.length;
+    })).then(() => {
+      if (myLoadId !== assetLoadIdRef.current) return; // Stale — a newer load is in flight
+      setDocsCountMap(countMap);
+    });
+    // assetsRef.current is intentionally read at run-time; only assetsKey
+    // (the set of asset IDs) should trigger this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetsKey]);
 
   const refreshAssets = useCallback(async () => {
     // Collapse concurrent calls — only one refresh runs at a time.
@@ -828,6 +891,16 @@ const AssetInstallationPage = () => {
       const refreshPromise = selectedProjectId
         ? projectAssetService.listByProject(selectedProjectId, archiveMode)
         : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode))).then((groups) => groups.flat());
+      // Fire runs fetch IN PARALLEL with the asset refresh (was previously
+      // nested inside the asset .then() — moved out so a slow runs call
+      // can't hold up the asset update, and so both fill in independently).
+      const runsPromise = refreshPromise.then((a) =>
+        Promise.all(
+          [...new Set(a.map((asset) => asset.projectId).filter(Boolean))].map((pid) =>
+            assetWorkflowRunService.listLatestByProject(pid),
+          ),
+        ),
+      );
       const a = await refreshPromise;
       setAssets(a);
       lastRefreshTsRef.current = Date.now();    setLastFetchedAt(new Date());
@@ -835,8 +908,7 @@ const AssetInstallationPage = () => {
         setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
       }
       // Re-load runs so signature chips stay current — fire-and-forget, non-blocking.
-      const projectIds = [...new Set(a.map((asset) => asset.projectId).filter(Boolean))];
-      void Promise.all(projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
+      void runsPromise
         .then((results) => {
           const runMap: Record<string, AssetWorkflowRun[]> = {};
           results.flat().forEach((run) => {
