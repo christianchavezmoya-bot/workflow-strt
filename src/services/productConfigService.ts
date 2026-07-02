@@ -2,6 +2,7 @@ import api from "./api";
 import { cacheGet, cachePut } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 
 export interface FeatureSelection {
   featureId: string;
@@ -68,6 +69,13 @@ export const productConfigService = {
       .catch(() => {});
 
     if (cached !== null) return cached;
+
+    // If we already know we're offline (or the OS reports offline), don't
+    // block waiting for a network round-trip that will never arrive — return
+    // the localStorage fallback immediately, matching the pattern already
+    // used by AssetRepository, ProjectRepository, IssueRepository,
+    // workflowConfigService, and workflowTemplateService.
+    if (shouldSkipBlockingFetch()) return lsRead(productId);
 
     // No cache yet — wait for network (first-ever load for this product)
     try {
