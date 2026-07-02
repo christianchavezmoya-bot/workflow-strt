@@ -778,29 +778,86 @@ const AssetInstallationPage = () => {
     const loadId = ++assetLoadIdRef.current;
     setLoadingAssets(true);
 
-    // Tier 1 — assets (local-first, the primary content the user wants to see).
-    // Resolves independently so the page can render the asset list as soon as
-    // it's available, without waiting for configs or workflow data.
-    const assetPromise = selectedProjectId
-      ? projectAssetService.listByProject(selectedProjectId, archiveMode)
-      : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode)))
-          .then((groups) => groups.flat());
+    // ─── Phase F — TIER 1: LOCAL-ONLY (instant) ───────────────────────────
+    // Read from IndexedDB for every scope in parallel. The phone is offline-
+    // first: local data is the source of truth, the network is a refresher.
+    // IndexedDB index lookups (by_product / by_project) are local and instant
+    // — the page does NOT block on any network call to show the primary
+    // content. setLoadingAssets(false) fires the moment the local lookups
+    // resolve, so a slow or failing /project-assets/by-product/{id} endpoint
+    // can no longer hold the page on its loading spinner.
+    const scopes: Array<{
+      scopeKind: "project" | "product";
+      scopeId: string;
+      fetchLocal: () => Promise<ProjectAsset[]>;
+      fetchRemote: () => Promise<ProjectAsset[]>;
+    }> = selectedProjectId
+      ? [
+          {
+            scopeKind: "project",
+            scopeId: selectedProjectId,
+            fetchLocal: () => projectAssetService.listLocalByProject(selectedProjectId, archiveMode),
+            fetchRemote: () => projectAssetService.listByProject(selectedProjectId, archiveMode),
+          },
+        ]
+      : products.map((p) => ({
+          scopeKind: "product",
+          scopeId: p.id,
+          fetchLocal: () => projectAssetService.listLocalByProduct(p.id, archiveMode),
+          fetchRemote: () => projectAssetService.listByProduct(p.id, archiveMode),
+        }));
 
-    assetPromise.then((a) => {
-      if (loadId !== assetLoadIdRef.current) return; // Stale — a newer load is in flight
-      setAssets(a);
+    // Single shared local lookup — both Tier 1 and Tier 5 consume it so
+    // IndexedDB is read once per scope, not twice.
+    const localLookupPromise = Promise.all(
+      scopes.map((s) =>
+        s.fetchLocal()
+          .then((assets) => ({ scope: s, assets }))
+          .catch(() => ({ scope: s, assets: [] as ProjectAsset[] })),
+      ),
+    );
+
+    localLookupPromise.then((results) => {
+      if (loadId !== assetLoadIdRef.current) return; // Stale
+      const combined = results.flatMap((r) => r.assets);
+      setAssets(combined);
       setLastFetchedAt(new Date());
       if (activeProduct?.id) {
-        setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+        setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(combined) }));
       }
-      // Once assets are shown, the page is no longer "loading" — configs and
-      // runs will fill in below as their own independent promises resolve.
+      // The page is no longer "loading" — Tier 2 will quietly update each
+      // scope's slice as the server's fresh data arrives.
       setLoadingAssets(false);
-    }).catch(() => {
-      if (loadId === assetLoadIdRef.current) setLoadingAssets(false);
     });
 
-    // Tier 2 — configs (independent, updates its own state when it arrives).
+    // ─── TIER 2: SERVER REFRESH (background, per-scope) ───────────────────
+    // Each scope's local-first service call runs independently. When local
+    // is warm, it returns instantly with the same data Tier 1 just rendered
+    // (idempotent replace — no visible change). When local is cold, it does
+    // a blocking API call, but the page is already showing Tier 1 data, so
+    // a slow or timing-out server endpoint no longer blocks the UI. The
+    // loadId guard discards results from a superseded product switch.
+    scopes.forEach((s) => {
+      s.fetchRemote()
+        .then((freshAssets) => {
+          if (loadId !== assetLoadIdRef.current) return; // Stale
+          setAssets((prev) => {
+            // Replace only this scope's slice; keep the other scopes' assets.
+            const others = prev.filter((a) =>
+              s.scopeKind === "project" ? a.projectId !== s.scopeId : a.productId !== s.scopeId,
+            );
+            const next = [...others, ...freshAssets];
+            if (activeProduct?.id) {
+              setHealthMap((hmPrev) => ({ ...hmPrev, [activeProduct.id]: computeHealth(next) }));
+            }
+            return next;
+          });
+          setLastFetchedAt(new Date());
+        })
+        .catch(() => {/* non-blocking — local data is the source of truth */});
+    });
+
+    // ─── TIER 3: CONFIGS (independent, unchanged from Phase A) ────────────
     if (activeProduct?.id) {
       productConfigService.listByProduct(activeProduct.id)
         .then((c) => {
@@ -812,7 +869,7 @@ const AssetInstallationPage = () => {
       setConfigs([]);
     }
 
-    // Tier 2 — published workflow configs (independent, updates its own state).
+    // ─── TIER 4: PUBLISHED WORKFLOW CONFIGS (independent) ────────────────
     if (activeProduct?.id) {
       workflowConfigService.listByProduct(activeProduct.id, "Published")
         .then((wc) => {
@@ -824,32 +881,38 @@ const AssetInstallationPage = () => {
       setPublishedWfConfigs([]);
     }
 
-    // Tier 3 — latest runs per project. Chained off the asset promise (since
-    // we need the projectIds from the asset list), but otherwise independent
-    // of configs/workflow — updates runsMap on its own when it resolves.
-    assetPromise.then((a) => {
-      if (loadId !== assetLoadIdRef.current) return; // Stale
-      const uniqueProjectIds = [...new Set(a.map((asset) => asset.projectId).filter(Boolean))];
-      Promise.all(uniqueProjectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
-        .then((results) => {
-          if (loadId !== assetLoadIdRef.current) return; // Stale
-          const runMap: Record<string, AssetWorkflowRun[]> = {};
-          results.flat().forEach((run) => {
-            if (!runMap[run.assetId]) runMap[run.assetId] = [];
-            runMap[run.assetId].push(run);
-          });
-          setRunsMap((prev) => {
-            const merged = { ...runMap };
-            // Only preserve entries that were fully loaded via loadAssignmentsForAsset
-            // (those have ALL runs, not just the latest). Batch load always wins otherwise.
-            Object.keys(prev).forEach((id) => {
-              if (prev[id].length > 1) merged[id] = prev[id];
+    // ─── TIER 5: LATEST RUNS PER PROJECT (chained off LOCAL asset list) ──
+    // Uses the local asset list (just read in Tier 1) for projectIds so the
+    // runs fetch starts immediately. Each listLatestByProject is itself
+    // local-first internally (offlineStore.listRunsByProject), so warm
+    // caches return instantly. Was previously chained off the full
+    // listByProduct, which made runs wait for the slow server asset call.
+    localLookupPromise
+      .then((localSlices) => {
+        if (loadId !== assetLoadIdRef.current) return; // Stale
+        const localAssets = localSlices.flatMap((s) => s.assets);
+        const uniqueProjectIds = [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
+        if (uniqueProjectIds.length === 0) return;
+        Promise.all(uniqueProjectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
+          .then((results) => {
+            if (loadId !== assetLoadIdRef.current) return; // Stale
+            const runMap: Record<string, AssetWorkflowRun[]> = {};
+            results.flat().forEach((run) => {
+              if (!runMap[run.assetId]) runMap[run.assetId] = [];
+              runMap[run.assetId].push(run);
             });
-            return merged;
-          });
-        })
-        .catch(() => {/* non-blocking */});
-    }).catch(() => {/* non-blocking */});
+            setRunsMap((prev) => {
+              const merged = { ...runMap };
+              // Only preserve entries that were fully loaded via loadAssignmentsForAsset
+              // (those have ALL runs, not just the latest). Batch load always wins otherwise.
+              Object.keys(prev).forEach((id) => {
+                if (prev[id].length > 1) merged[id] = prev[id];
+              });
+              return merged;
+            });
+          })
+          .catch(() => {/* non-blocking */});
+      });
   }, [activeProduct?.id, archiveMode, products, selectedProjectId]);
 
   // Document counts per asset — fetched in a fully independent effect that
@@ -888,25 +951,114 @@ const AssetInstallationPage = () => {
     if (isRefreshingRef.current) return;
     isRefreshingRef.current = true;
     try {
-      const refreshPromise = selectedProjectId
-        ? projectAssetService.listByProject(selectedProjectId, archiveMode)
-        : Promise.all(products.map((p) => projectAssetService.listByProduct(p.id, archiveMode))).then((groups) => groups.flat());
-      // Fire runs fetch IN PARALLEL with the asset refresh (was previously
-      // nested inside the asset .then() — moved out so a slow runs call
-      // can't hold up the asset update, and so both fill in independently).
-      const runsPromise = refreshPromise.then((a) =>
+      // Phase F — Tier 1 (local): show what we already have instantly so the
+      // page is responsive while the network refresh is in flight. The
+      // local-first service call returns from IndexedDB without touching
+      // the network when the cache is warm.
+      const localScopes: Array<{
+        scopeKind: "project" | "product";
+        scopeId: string;
+        fetchLocal: () => Promise<ProjectAsset[]>;
+      }> = selectedProjectId
+        ? [
+            {
+              scopeKind: "project",
+              scopeId: selectedProjectId,
+              fetchLocal: () => projectAssetService.listLocalByProject(selectedProjectId, archiveMode),
+            },
+          ]
+        : products.map((p) => ({
+            scopeKind: "product",
+            scopeId: p.id,
+            fetchLocal: () => projectAssetService.listLocalByProduct(p.id, archiveMode),
+          }));
+
+      const localPromise = Promise.all(
+        localScopes.map((s) => s.fetchLocal().catch(() => [] as ProjectAsset[])),
+      ).then((slices) => slices.flat());
+
+      // Tier 2 (server refresh): fire the local-first service call per scope
+      // — when local is warm, returns instantly with the same data; when
+      // local is cold, does a blocking API call but the page is already
+      // showing Tier 1 data.
+      const remoteScopes: Array<{
+        scopeKind: "project" | "product";
+        scopeId: string;
+        fetchRemote: () => Promise<ProjectAsset[]>;
+      }> = selectedProjectId
+        ? [
+            {
+              scopeKind: "project",
+              scopeId: selectedProjectId,
+              fetchRemote: () => projectAssetService.listByProject(selectedProjectId, archiveMode),
+            },
+          ]
+        : products.map((p) => ({
+            scopeKind: "product",
+            scopeId: p.id,
+            fetchRemote: () => projectAssetService.listByProduct(p.id, archiveMode),
+          }));
+
+      // Fire the runs fetch off the LOCAL asset list so it starts
+      // immediately with projectIds from local — the runs service is
+      // itself local-first internally, so warm caches return instantly.
+      const localForRuns = localPromise;
+      const remoteAssetsPromise = Promise.all(
+        remoteScopes.map((s) =>
+          s.fetchRemote()
+            .then((freshAssets) => ({ scope: s, assets: freshAssets }))
+            .catch(() => ({ scope: s, assets: [] as ProjectAsset[] })),
+        ),
+      );
+      const runsPromise = localForRuns.then((localAssets) =>
         Promise.all(
-          [...new Set(a.map((asset) => asset.projectId).filter(Boolean))].map((pid) =>
+          [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))].map((pid) =>
             assetWorkflowRunService.listLatestByProject(pid),
           ),
         ),
       );
-      const a = await refreshPromise;
+
+      // Apply Tier 1 (local) to the UI immediately.
+      const a = await localPromise;
       setAssets(a);
-      lastRefreshTsRef.current = Date.now();    setLastFetchedAt(new Date());
+      lastRefreshTsRef.current = Date.now();
+      setLastFetchedAt(new Date());
       if (activeProduct?.id) {
         setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
       }
+
+      // Release the concurrency guard as soon as Tier 1 has applied — the
+      // remaining Tier 2 work is fire-and-forget, so a follow-up pull-to-
+      // refresh or mutation should be able to trigger another refresh
+      // without piling up behind a slow server call.
+      isRefreshingRef.current = false;
+
+      // Tier 2: replace each scope's slice with fresh server data as it
+      // arrives (each scope is independent, so the slowest one decides
+      // when the page is fully consistent, but the UI is responsive
+      // throughout).
+      remoteAssetsPromise
+        .then((results) => {
+          setAssets((prev) => {
+            let next = prev;
+            for (const r of results) {
+              if (r.assets.length === 0) continue;
+              const others = next.filter((a2) =>
+                r.scope.scopeKind === "project"
+                  ? a2.projectId !== r.scope.scopeId
+                  : a2.productId !== r.scope.scopeId,
+              );
+              next = [...others, ...r.assets];
+            }
+            if (activeProduct?.id) {
+              setHealthMap((hmPrev) => ({ ...hmPrev, [activeProduct.id]: computeHealth(next) }));
+            }
+            return next;
+          });
+          setLastFetchedAt(new Date());
+        })
+        .catch(() => {/* non-blocking */});
+
       // Re-load runs so signature chips stay current — fire-and-forget, non-blocking.
       void runsPromise
         .then((results) => {
@@ -948,7 +1100,8 @@ const AssetInstallationPage = () => {
           });
         })
         .catch(() => {/* non-blocking */});
-    } finally {
+    } catch {
+      // Defensive — release the guard on any unexpected error.
       isRefreshingRef.current = false;
     }
   }, [selectedProjectId, archiveMode, products, activeProduct?.id]);
