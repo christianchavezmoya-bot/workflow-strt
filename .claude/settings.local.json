@@ -11,7 +11,8 @@
       "Bash(dotnet build:*)",
       "Bash(sqlite3:*)",
       "Bash(npx tsc:*)",
-      "Bash(python3 -c \":*)"
+      "Bash(python3 -c \":*)",
+      "Bash(xcrun devicectl *)"
     ]
   }
 }
