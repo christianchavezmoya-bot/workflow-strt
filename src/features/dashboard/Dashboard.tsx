@@ -1582,6 +1582,15 @@ const Dashboard = () => {
     if (!autoAssignConfirm) return;
     const { asset, assignment } = autoAssignConfirm;
     setAutoAssignConfirm(null);
+    // Persist the take-over / auto-assign so the asset actually changes hands.
+    // Previously this only opened the runner, so assignedUserId never changed
+    // (server or client) and the asset's assigned technician stayed the original.
+    try {
+      await projectAssetService.update(asset.id, { assignedUserId: user.id });
+      projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
+    } catch {
+      // Offline (native): the reassignment is queued and will sync on reconnect.
+    }
     if (assignment) {
       void startWorkflowFromDashboard(asset, assignment);
     }

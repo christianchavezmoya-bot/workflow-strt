@@ -4,7 +4,7 @@ import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "
 import { entityDeleteAsset, entityGetAllAssets, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
-import { webCachedGet, invalidateWebCache } from "./webFreshCache";
+import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
@@ -88,7 +88,13 @@ export const projectAssetService = {
   async update(id: string, patch: Partial<CreateProjectAssetInput> & { status?: string; workOrderId?: string }): Promise<ProjectAsset> {
     if (!isMobileNativePlatform()) {
       const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
+      // A write happened — invalidate BOTH the single-asset cache AND the
+      // by-project/by-product LIST caches, or the asset lists (e.g. the assigned-
+      // technician column) keep serving a stale pre-edit snapshot for up to the
+      // cache TTL and the change appears to "revert". Mirrors AssetRepository.update.
       invalidateWebCache(`/project-assets/${id}`);
+      invalidateWebCacheByPrefix("/project-assets/by-product/");
+      invalidateWebCacheByPrefix("/project-assets/by-project/");
       const asset = fromDto(res.data);
       window.dispatchEvent(new CustomEvent("repo:assets:updated", {
         detail: { productId: asset.productId, projectId: asset.projectId },

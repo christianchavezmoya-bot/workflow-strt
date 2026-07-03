@@ -547,22 +547,28 @@ export async function entityReplaceAssetsByProduct(
     const index = store.index("by_product");
     const existing = await index.getAll(productId);
     const nextIds = new Set(records.map((record) => record.id));
+    // Preserve locally-dirty (optimistic, not-yet-synced) rows: a background
+    // revalidation must NOT clobber an offline edit before its queued write
+    // flushes, or the change appears to "revert" on reconnect.
+    const dirtyIds = new Set(existing.filter((r) => r.dirty).map((r) => r.id));
     const now = new Date().toISOString();
 
     await Promise.all([
       ...existing
-        .filter((record) => !nextIds.has(record.id))
+        .filter((record) => !nextIds.has(record.id) && !record.dirty)
         .map((record) => store.delete(record.id)),
-      ...records.map((record) =>
-        store.put({
-          id: record.id,
-          productId: record.productId,
-          projectId: record.projectId,
-          data: record.data,
-          syncedAt: now,
-          dirty: false,
-        })
-      ),
+      ...records
+        .filter((record) => !dirtyIds.has(record.id))
+        .map((record) =>
+          store.put({
+            id: record.id,
+            productId: record.productId,
+            projectId: record.projectId,
+            data: record.data,
+            syncedAt: now,
+            dirty: false,
+          })
+        ),
       tx.done,
     ]);
   } catch { /* ignore */ }
@@ -579,22 +585,28 @@ export async function entityReplaceAssetsByProject(
     const index = store.index("by_project");
     const existing = await index.getAll(projectId);
     const nextIds = new Set(records.map((record) => record.id));
+    // Preserve locally-dirty (optimistic, not-yet-synced) rows: a background
+    // revalidation must NOT clobber an offline edit before its queued write
+    // flushes, or the change appears to "revert" on reconnect.
+    const dirtyIds = new Set(existing.filter((r) => r.dirty).map((r) => r.id));
     const now = new Date().toISOString();
 
     await Promise.all([
       ...existing
-        .filter((record) => !nextIds.has(record.id))
+        .filter((record) => !nextIds.has(record.id) && !record.dirty)
         .map((record) => store.delete(record.id)),
-      ...records.map((record) =>
-        store.put({
-          id: record.id,
-          productId: record.productId,
-          projectId: record.projectId,
-          data: record.data,
-          syncedAt: now,
-          dirty: false,
-        })
-      ),
+      ...records
+        .filter((record) => !dirtyIds.has(record.id))
+        .map((record) =>
+          store.put({
+            id: record.id,
+            productId: record.productId,
+            projectId: record.projectId,
+            data: record.data,
+            syncedAt: now,
+            dirty: false,
+          })
+        ),
       tx.done,
     ]);
   } catch { /* ignore */ }
