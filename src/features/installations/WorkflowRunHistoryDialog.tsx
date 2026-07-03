@@ -53,6 +53,8 @@ import {
 } from "@mui/material";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import { mediaStore } from "../../services/mediaStore";
+import { isMobileNativePlatform } from "../../utils/platform";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { countMissingWorkflowItems, getMissingWorkflowItems } from "../../utils/workflowCompleteness";
 import type { AssetWorkflowRun, RunIssue, RunTimeEntry, StepResult } from "../../types/assetWorkflowRun";
@@ -398,8 +400,11 @@ export default function WorkflowRunHistoryDialog({
       const bizLogoResolved = brandSettings.logoBase64
         ? await resolveImageToDataUrl(brandSettings.logoBase64)
         : null;
+      const reportRun = isMobileNativePlatform()
+        ? await mediaStore.resolveUploadPayload(run)
+        : run;
       await generateWorkflowReport({
-        run,
+        run: reportRun,
         asset,
         workflowConfigName,
         businessLogoBase64: bizLogoResolved,

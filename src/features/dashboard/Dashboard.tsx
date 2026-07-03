@@ -48,6 +48,7 @@ import type { AssetIssue } from "../../types/projectAsset";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { mediaStore } from "../../services/mediaStore";
 import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 
 function fmtDate(iso: string | null | undefined) {
@@ -847,8 +848,11 @@ const Dashboard = () => {
       const bizLogoResolved = brandSettings.logoBase64
         ? await resolveImageToDataUrl(brandSettings.logoBase64)
         : null;
+      const reportRun = isMobileNativePlatform()
+        ? await mediaStore.resolveUploadPayload(latestRun)
+        : latestRun;
       await generateWorkflowReport({
-        run: latestRun,
+        run: reportRun,
         asset,
         workflowConfigName: configName,
         businessLogoBase64: bizLogoResolved,

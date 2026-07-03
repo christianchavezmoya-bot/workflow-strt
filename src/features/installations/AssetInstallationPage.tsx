@@ -131,6 +131,8 @@ import QRUploadButton from "../../components/QRUploadButton";
 import InspectionImportDialog from "../projects/InspectionImportDialog";
 import { useStaleOnResume } from "../../hooks/useStaleOnResume";
 import { AssetRepository } from "../../repositories/AssetRepository";
+import { WorkflowAssignmentRepository } from "../../repositories/WorkflowAssignmentRepository";
+import { mediaStore } from "../../services/mediaStore";
 import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { deriveOpenIssuesFromAsset } from "../../utils/issueDerivation";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
@@ -946,6 +948,40 @@ const AssetInstallationPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assetsKey]);
 
+  // Mobile only: prime assignmentsMap from the offline cache for every visible
+  // asset so the "Start workflow" action works instantly offline — even for
+  // assets the user never expanded. Reads are local IndexedDB only (no network).
+  useEffect(() => {
+    if (!isMobileNativePlatform()) return;
+    if (assetsKey === "") return;
+    const snapshot = assetsRef.current;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        snapshot.map(async (asset) => {
+          const local = await WorkflowAssignmentRepository.getLocalByAsset(asset.id).catch(() => []);
+          return [asset.id, local] as const;
+        })
+      );
+      if (cancelled) return;
+      setAssignmentsMap((prev) => {
+        const next = { ...prev };
+        for (const [assetId, local] of entries) {
+          // Don't clobber a fully-loaded entry (from expansion) with a possibly
+          // empty local snapshot; only fill gaps.
+          if (local.length > 0 && (prev[assetId] === undefined || prev[assetId].length === 0)) {
+            next[assetId] = local;
+          } else if (prev[assetId] === undefined) {
+            next[assetId] = local;
+          }
+        }
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetsKey]);
+
   const refreshAssets = useCallback(async () => {
     // Collapse concurrent calls — only one refresh runs at a time.
     if (isRefreshingRef.current) return;
@@ -1145,6 +1181,24 @@ const AssetInstallationPage = () => {
     };
     window.addEventListener("repo:assets:fetch-failed", handler);
     return () => window.removeEventListener("repo:assets:fetch-failed", handler);
+  }, []);
+
+  // Refresh a single asset's assignments in the map when the background
+  // assignment refresh (or login bootstrap) updates the offline cache.
+  useEffect(() => {
+    if (!isMobileNativePlatform()) return;
+    const handler = async (e: Event) => {
+      const assetId = (e as CustomEvent<{ assetId?: string }>).detail?.assetId;
+      if (!assetId) return;
+      const local = await WorkflowAssignmentRepository.getLocalByAsset(assetId).catch(() => []);
+      setAssignmentsMap((prev) => {
+        // Preserve a fully-loaded (expanded) entry rather than shrink it.
+        if (prev[assetId] && prev[assetId].length > local.length) return prev;
+        return { ...prev, [assetId]: local };
+      });
+    };
+    window.addEventListener("repo:assignments:updated", handler as EventListener);
+    return () => window.removeEventListener("repo:assignments:updated", handler as EventListener);
   }, []);
 
   // Track when the server goes offline so api-server-reachable knows it's a recovery event.
@@ -2264,8 +2318,14 @@ const AssetInstallationPage = () => {
         rawCustomerLogo ? resolveImageToDataUrl(rawCustomerLogo) : Promise.resolve(null),
       ]);
 
+      // Resolve any offline media refs (photos/signatures stored on the device
+      // filesystem) into data URLs so the PDF renders them while offline.
+      const reportRun = isMobileNativePlatform()
+        ? await mediaStore.resolveUploadPayload(effectiveRun)
+        : effectiveRun;
+
       await generateWorkflowReport({
-        run: effectiveRun,
+        run: reportRun,
         asset,
         workflowConfigName: configName,
         businessLogoBase64: bizLogoResolved,
