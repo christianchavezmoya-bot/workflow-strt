@@ -979,7 +979,6 @@ const AssetInstallationPage = () => {
       });
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assetsKey]);
 
   const refreshAssets = useCallback(async () => {
