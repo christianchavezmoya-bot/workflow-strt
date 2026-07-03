@@ -9,6 +9,7 @@ import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 export interface PendingSignatureRecord {
@@ -217,6 +218,7 @@ async function enqueueTimeEntry(
 }
 
 function isOfflineNetworkError(error: unknown): boolean {
+  if (shouldSkipBlockingFetch()) return true;
   if (!error || typeof error !== "object") return !navigator.onLine;
   const candidate = error as { code?: string; message?: string; response?: unknown };
   if (candidate.response) return false;
@@ -323,6 +325,7 @@ function refreshRunsInBackground(
   scope: { type: "project"; id: string } | { type: "asset"; id: string },
   endpoint: string,
 ): void {
+  if (shouldSkipBlockingFetch()) return;
   api.get<AssetWorkflowRun[]>(endpoint)
     .then(async (res) => {
       const runs = await cacheServerRuns(res.data);
@@ -330,6 +333,20 @@ function refreshRunsInBackground(
         detail: scope.type === "project"
           ? { projectId: scope.id, runs }
           : { assetId: scope.id, runs },
+      }));
+    })
+    .catch(() => {
+      window.dispatchEvent(new Event("api-serving-cache"));
+    });
+}
+
+function refreshRunByIdInBackground(resolvedId: string): void {
+  if (shouldSkipBlockingFetch()) return;
+  api.get<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedId}`)
+    .then(async (res) => {
+      await cacheServerRun(res.data);
+      window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+        detail: { assetId: res.data.assetId, runs: [res.data] },
       }));
     })
     .catch(() => {
@@ -435,6 +452,10 @@ export const assetWorkflowRunService = {
       return cachedRuns;
     }
 
+    if (shouldSkipBlockingFetch()) {
+      return cachedRuns;
+    }
+
     try {
       const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
       const runs = res.data;
@@ -464,6 +485,10 @@ export const assetWorkflowRunService = {
       return cachedRuns;
     }
 
+    if (shouldSkipBlockingFetch()) {
+      return cachedRuns;
+    }
+
     try {
       const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
       const runs = res.data;
@@ -477,6 +502,10 @@ export const assetWorkflowRunService = {
     if (!isMobileNativePlatform()) {
       const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
       return res.data;
+    }
+
+    if (shouldSkipBlockingFetch()) {
+      return await offlineStore.listRunsByAsset(assetId);
     }
 
     try {
@@ -500,6 +529,16 @@ export const assetWorkflowRunService = {
     }
 
     const resolvedId = await resolveRunId(id);
+    const cached = await getCachedRun(id);
+    if (cached) {
+      refreshRunByIdInBackground(resolvedId);
+      return cached;
+    }
+
+    if (shouldSkipBlockingFetch()) {
+      return null;
+    }
+
     try {
       const res = await api.get<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedId}`);
       return await cacheServerRun(res.data);

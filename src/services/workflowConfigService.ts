@@ -48,6 +48,30 @@ async function cacheConfigs(configs: WorkflowConfig[]): Promise<void> {
   await Promise.all(configs.map((config) => offlineStore.saveCache(CACHE_ID_KEY(config.id), config)));
 }
 
+/** Resolve a workflow config from any native offline store (per-id, all-list, localStorage). */
+async function lookupConfigById(id: string): Promise<WorkflowConfig | null> {
+  const byId = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
+  if (byId) return byId;
+
+  const allCached = await offlineStore.getCache<WorkflowConfig[]>(CACHE_ALL_KEY);
+  if (allCached) {
+    const fromAll = allCached.find((c) => c.id === id);
+    if (fromAll) return fromAll;
+  }
+
+  return lsReadAll().find((c) => c.id === id) ?? null;
+}
+
+function refreshConfigByIdInBackground(id: string): void {
+  api.get<WorkflowConfig>(`/workflow-configs/${id}`)
+    .then(async (res) => {
+      await offlineStore.saveCache(CACHE_ID_KEY(id), res.data);
+    })
+    .catch(() => {
+      window.dispatchEvent(new Event("api-serving-cache"));
+    });
+}
+
 export const workflowConfigService = {
   async getAll(status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
     if (!isMobileNativePlatform()) {
@@ -59,8 +83,8 @@ export const workflowConfigService = {
     }
 
     if (shouldSkipBlockingFetch()) {
-      const cached = !status ? await offlineStore.getCache<WorkflowConfig[]>(CACHE_ALL_KEY) : null;
-      const all = cached ?? lsReadAll();
+      const allCached = await offlineStore.getCache<WorkflowConfig[]>(CACHE_ALL_KEY);
+      const all = allCached ?? lsReadAll();
       return status ? all.filter((c) => c.status === status) : all;
     }
 
@@ -146,13 +170,16 @@ export const workflowConfigService = {
       }
     }
 
-    if (shouldSkipBlockingFetch()) {
-      const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
-      if (cached) return await configMediaCache.hydrateConfig(cached);
-      const all = lsReadAll();
-      const local = all.find((c) => c.id === id);
-      return local ? await configMediaCache.hydrateConfig(local) : null;
+    // Cache-first on native — instant offline start/continue; refresh in background when online.
+    const local = await lookupConfigById(id);
+    if (local) {
+      if (!shouldSkipBlockingFetch()) {
+        refreshConfigByIdInBackground(id);
+      }
+      return await configMediaCache.hydrateConfig(local);
     }
+
+    if (shouldSkipBlockingFetch()) return null;
 
     try {
       const res = await api.get<WorkflowConfig>(`/workflow-configs/${id}`);
@@ -161,12 +188,8 @@ export const workflowConfigService = {
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) return null;
-      const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
-      if (cached) return await configMediaCache.hydrateConfig(cached);
-      const all = lsReadAll();
-      const local = all.find((c) => c.id === id);
-      if (local) return await configMediaCache.hydrateConfig(local);
-      return null;
+      const fallback = await lookupConfigById(id);
+      return fallback ? await configMediaCache.hydrateConfig(fallback) : null;
     }
   },
 

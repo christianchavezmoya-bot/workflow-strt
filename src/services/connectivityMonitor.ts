@@ -19,6 +19,7 @@
  * tracks one fact (serverReachable: boolean) and notifies subscribers.
  */
 import { App } from "@capacitor/app";
+import { Network } from "@capacitor/network";
 import { isServerReachable } from "./networkService";
 import { isMobileNativePlatform } from "../utils/platform";
 
@@ -28,9 +29,21 @@ type Listener = (reachable: boolean) => void;
 
 let started = false;
 let currentValue: boolean | null = null; // null = no successful check yet
+/** Capacitor network status — more reliable on iOS/Android than navigator.onLine. */
+let nativeNetworkConnected: boolean | null = null;
 let isForeground = true;
 let intervalId: ReturnType<typeof setInterval> | null = null;
 const listeners = new Set<Listener>();
+
+function startNativeNetworkTracking(): void {
+  if (!isMobileNativePlatform()) return;
+  void Network.getStatus()
+    .then((status) => { nativeNetworkConnected = status.connected; })
+    .catch(() => { /* keep null until listener fires */ });
+  void Network.addListener("networkStatusChange", (status) => {
+    nativeNetworkConnected = status.connected;
+  });
+}
 
 function notify(value: boolean) {
   currentValue = value;
@@ -65,6 +78,7 @@ function startForegroundTracking() {
 export function startConnectivityMonitor(): void {
   if (started) return;
   started = true;
+  startNativeNetworkTracking();
   startForegroundTracking();
   void runPingIfForeground();
   intervalId = setInterval(() => { void runPingIfForeground(); }, PING_INTERVAL_MS);
@@ -87,11 +101,19 @@ export function getServerReachable(): boolean | null {
   return currentValue;
 }
 
+/** Capacitor-reported link state (null until first status event). */
+export function getNativeNetworkConnected(): boolean | null {
+  return nativeNetworkConnected;
+}
+
 /**
- * Skip blocking live fetches only when we have a definite "no" signal.
- * Unknown/null still allows a first-load network attempt.
+ * Skip blocking live fetches when the device or server is definitely unreachable.
+ * On native, Capacitor Network is preferred over navigator.onLine (often wrong in
+ * airplane mode). When server ping has not completed yet but the device has no
+ * link, still skip — cache-first reads will return local data instantly.
  */
 export function shouldSkipBlockingFetch(): boolean {
+  if (isMobileNativePlatform() && nativeNetworkConnected === false) return true;
   if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
   return getServerReachable() === false;
 }
@@ -108,6 +130,7 @@ export function pingNow(): void {
 export function _resetConnectivityMonitorForTests(): void {
   started = false;
   currentValue = null;
+  nativeNetworkConnected = null;
   isForeground = true;
   if (intervalId) clearInterval(intervalId);
   intervalId = null;
