@@ -1845,8 +1845,12 @@ const AssetInstallationPage = () => {
           return;
         }
         let wf: Workflow | null = null;
-        try { wf = JSON.parse(wfConfig.stepsJson) as Workflow; } catch {}
-        if (!wf) { alert("Work instruction has no steps. Open it in Work Instructions and add steps first."); return; }
+        try {
+          const parsed = JSON.parse(wfConfig.stepsJson);
+          if (parsed?.steps) wf = parsed as Workflow;
+          else if (Array.isArray(parsed)) wf = { id: wfConfig.id, name: wfConfig.name, productId: wfConfig.productId, createdAt: Date.now(), steps: parsed, media: [] };
+        } catch {}
+        if (!wf || wf.steps.length === 0) { alert("Work instruction has no steps. Open it in Work Instructions and add steps first."); return; }
 
         // Find the active (non-locked) run so we can resume exactly where we left off
         let existingRunId: string | undefined = undefined;
