@@ -1,5 +1,10 @@
 ﻿import api from "./api";
 import { User, UserRole } from "../types/user";
+import { isMobileNativePlatform } from "../utils/platform";
+import { referenceDataGet, referenceDataSet, syncMetaSet } from "./localDB";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
+
+const USERS_REF_KEY = "users";
 
 export interface CreateUserPayload {
   fullName: string;
@@ -19,8 +24,32 @@ export interface UpdateUserPayload {
 
 export const userService = {
   async getUsers() {
-    const response = await api.get<User[]>("/users");
-    return response.data;
+    if (!isMobileNativePlatform()) {
+      const response = await api.get<User[]>("/users");
+      return response.data;
+    }
+
+    const cached = await referenceDataGet<User[]>(USERS_REF_KEY);
+
+    // Names of technicians/PMs are shown in issues and reports; keep the cache
+    // fresh in the background so offline reports render real names.
+    api.get<User[]>("/users")
+      .then(async (res) => {
+        await referenceDataSet(USERS_REF_KEY, res.data);
+        await syncMetaSet("users");
+      })
+      .catch(() => { /* offline — cache is source of truth */ });
+
+    if (cached && cached.length > 0) return cached;
+    if (shouldSkipBlockingFetch()) return cached ?? [];
+
+    try {
+      const response = await api.get<User[]>("/users");
+      await referenceDataSet(USERS_REF_KEY, response.data);
+      return response.data;
+    } catch {
+      return cached ?? [];
+    }
   },
   async createUser(payload: CreateUserPayload) {
     const response = await api.post<User>("/users", payload);

@@ -98,6 +98,40 @@ export interface IssueRecord {
   dirty: boolean;
 }
 
+/** Workflow assignment cached for offline start of not-yet-opened workflows. */
+export interface WorkflowAssignmentRecord {
+  id: string;
+  assetId: string;
+  data: unknown;
+  syncedAt: string;
+}
+
+/** Feature (global/product) cached for offline workflow step rendering. */
+export interface FeatureRecord {
+  id: string;
+  productId: string;
+  data: unknown;
+  syncedAt: string;
+}
+
+/** Small shared reference datasets (users, workflow types, brand settings). */
+export interface ReferenceDataRecord {
+  key: string;            // e.g. "users" | "workflow_types" | "brand_settings"
+  data: unknown;
+  syncedAt: string;
+}
+
+/** Tracks a workflow-config media asset downloaded to the device filesystem. */
+export interface ConfigMediaRecord {
+  id: string;             // `${configId}:${mediaId}`
+  configId: string;
+  mediaId: string;
+  remoteUrl: string;
+  localPath: string;      // Capacitor Filesystem path
+  mimeType?: string;
+  syncedAt: string;
+}
+
 interface CommtracDB extends DBSchema {
   cache: {
     key: string;
@@ -135,6 +169,25 @@ interface CommtracDB extends DBSchema {
     key: string;
     value: DroppedAction;
   };
+  workflow_assignments: {
+    key: string;
+    value: WorkflowAssignmentRecord;
+    indexes: { by_asset: string };
+  };
+  features: {
+    key: string;
+    value: FeatureRecord;
+    indexes: { by_product: string };
+  };
+  reference_data: {
+    key: string;
+    value: ReferenceDataRecord;
+  };
+  config_media: {
+    key: string;
+    value: ConfigMediaRecord;
+    indexes: { by_config: string };
+  };
 }
 
 // ── Singleton ─────────────────────────────────────────────────────────────────
@@ -143,7 +196,10 @@ let _db: IDBPDatabase<CommtracDB> | null = null;
 
 export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
   if (_db) return _db;
-  _db = await openDB<CommtracDB>("commtrac_offline_v2", 1, {
+  // v2 (schema version 2) adds offline-bootstrap stores: workflow_assignments,
+  // features, reference_data, config_media. The upgrade is additive and
+  // idempotent so existing v1 databases migrate without data loss.
+  _db = await openDB<CommtracDB>("commtrac_offline_v2", 2, {
     upgrade(db) {
       if (!db.objectStoreNames.contains("cache")) {
         db.createObjectStore("cache", { keyPath: "key" });
@@ -174,6 +230,21 @@ export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
       }
       if (!db.objectStoreNames.contains("dropped_actions")) {
         db.createObjectStore("dropped_actions", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("workflow_assignments")) {
+        const store = db.createObjectStore("workflow_assignments", { keyPath: "id" });
+        store.createIndex("by_asset", "assetId");
+      }
+      if (!db.objectStoreNames.contains("features")) {
+        const store = db.createObjectStore("features", { keyPath: "id" });
+        store.createIndex("by_product", "productId");
+      }
+      if (!db.objectStoreNames.contains("reference_data")) {
+        db.createObjectStore("reference_data", { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains("config_media")) {
+        const store = db.createObjectStore("config_media", { keyPath: "id" });
+        store.createIndex("by_config", "configId");
       }
     },
   });
@@ -766,4 +837,108 @@ export async function pendingGetConflicted(): Promise<PendingAction[]> {
     const all = await pendingGetAll();
     return all.filter((a) => a.conflictDetected);
   } catch { return []; }
+}
+
+// ── Workflow assignment helpers ───────────────────────────────────────────────
+
+export async function entityGetAssignmentsByAsset(assetId: string): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const records = await db.getAllFromIndex("workflow_assignments", "by_asset", assetId);
+    return records.map((r) => r.data);
+  } catch { return []; }
+}
+
+/**
+ * Replace the cached assignments for ONE asset. An empty array is meaningful
+ * ("this asset has no assignments") and deletes any stale cached rows.
+ */
+export async function entityReplaceAssignmentsByAsset(
+  assetId: string,
+  records: Array<{ id: string; assetId: string; data: unknown }>
+): Promise<void> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction("workflow_assignments", "readwrite");
+    const store = tx.objectStore("workflow_assignments");
+    const index = store.index("by_asset");
+    const existing = await index.getAll(assetId);
+    const nextIds = new Set(records.map((r) => r.id));
+    const now = new Date().toISOString();
+    await Promise.all([
+      ...existing.filter((r) => !nextIds.has(r.id)).map((r) => store.delete(r.id)),
+      ...records.map((r) => store.put({ id: r.id, assetId: r.assetId, data: r.data, syncedAt: now })),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
+// ── Feature helpers ───────────────────────────────────────────────────────────
+
+export async function entityGetFeaturesByProduct(productId: string): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const records = await db.getAllFromIndex("features", "by_product", productId);
+    return records.map((r) => r.data);
+  } catch { return []; }
+}
+
+export async function entityReplaceFeaturesByProduct(
+  productId: string,
+  records: Array<{ id: string; productId: string; data: unknown }>
+): Promise<void> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction("features", "readwrite");
+    const store = tx.objectStore("features");
+    const index = store.index("by_product");
+    const existing = await index.getAll(productId);
+    const nextIds = new Set(records.map((r) => r.id));
+    const now = new Date().toISOString();
+    await Promise.all([
+      ...existing.filter((r) => !nextIds.has(r.id)).map((r) => store.delete(r.id)),
+      ...records.map((r) => store.put({ id: r.id, productId: r.productId, data: r.data, syncedAt: now })),
+      tx.done,
+    ]);
+  } catch { /* ignore */ }
+}
+
+// ── Reference data helpers ────────────────────────────────────────────────────
+
+export async function referenceDataGet<T>(key: string): Promise<T | null> {
+  try {
+    const db = await getDB();
+    const record = await db.get("reference_data", key);
+    return record ? (record.data as T) : null;
+  } catch { return null; }
+}
+
+export async function referenceDataSet(key: string, data: unknown): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.put("reference_data", { key, data, syncedAt: new Date().toISOString() });
+  } catch { /* ignore */ }
+}
+
+// ── Config media helpers ──────────────────────────────────────────────────────
+
+export async function configMediaGetByConfig(configId: string): Promise<ConfigMediaRecord[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("config_media", "by_config", configId);
+  } catch { return []; }
+}
+
+export async function configMediaGet(id: string): Promise<ConfigMediaRecord | null> {
+  try {
+    const db = await getDB();
+    return (await db.get("config_media", id)) ?? null;
+  } catch { return null; }
+}
+
+export async function configMediaPut(record: Omit<ConfigMediaRecord, "syncedAt">): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.put("config_media", { ...record, syncedAt: new Date().toISOString() });
+  } catch { /* ignore */ }
 }

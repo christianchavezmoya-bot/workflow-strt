@@ -17,6 +17,7 @@ import { useOnboarding } from "../../onboarding/hooks/useOnboarding";
 import { useAuth } from "../../hooks/useAuth";
 import { authService } from "../../services/authService";
 import { useSseEvents } from "../../hooks/useSseEvents";
+import { useOfflineBootstrap } from "../../hooks/useOfflineBootstrap";
 import { useCallback, useEffect } from "react";
 import { initTapFeedback } from "../../services/tapFeedback";
 
@@ -53,6 +54,7 @@ const AppShell = () => {
   const { viewMode } = useViewMode();
   const { isViewOnly } = useAccessMode();
   useSseEvents(); // real-time push from server
+  useOfflineBootstrap(); // keep offline cache warm (native only)
 
   useEffect(() => { initTapFeedback(); }, []);
 

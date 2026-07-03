@@ -4,6 +4,7 @@ import offlineStore from "./offlineStore";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
+import { configMediaCache } from "./configMediaCache";
 
 const LS_KEY = (productId: string) => `workflow_configs_v1_${productId}`;
 const CACHE_ALL_KEY = "workflow-configs:all";
@@ -144,10 +145,10 @@ export const workflowConfigService = {
 
     if (shouldSkipBlockingFetch()) {
       const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
-      if (cached) return cached;
+      if (cached) return await configMediaCache.hydrateConfig(cached);
       const all = lsReadAll();
       const local = all.find((c) => c.id === id);
-      return local ?? null;
+      return local ? await configMediaCache.hydrateConfig(local) : null;
     }
 
     try {
@@ -158,10 +159,10 @@ export const workflowConfigService = {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) return null;
       const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
-      if (cached) return cached;
+      if (cached) return await configMediaCache.hydrateConfig(cached);
       const all = lsReadAll();
       const local = all.find((c) => c.id === id);
-      if (local) return local;
+      if (local) return await configMediaCache.hydrateConfig(local);
       return null;
     }
   },

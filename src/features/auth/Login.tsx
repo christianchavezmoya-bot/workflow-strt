@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom";
 import { authService } from "../../services/authService";
 import { secureGet, secureSet } from "../../services/secureStorage";
 import { recordOnlineLogin } from "../../services/biometricAuth";
+import { offlineBootstrapService } from "../../services/offlineBootstrapService";
 import { getNetworkStatus, getNetworkMessage, NetworkStatus } from "../../services/networkService";
 import strataLogo from "../../assets/strata_transparent.png";
 
@@ -133,7 +134,11 @@ const Login = () => {
     // Notify App.tsx that auth state has changed
     window.dispatchEvent(new Event("auth-change"));
     window.dispatchEvent(new Event("auth-user-updated"));
-    
+
+    // Kick off a silent background prefetch of everything assigned to this user
+    // so the app is fully usable offline. Fire-and-forget — never blocks login.
+    void offlineBootstrapService.run({ force: true });
+
     console.log("[Login] Login success, navigating to:", result.isFirstLogin || result.passwordExpired ? "/profile" : "/");
     setLoading(false);
     
