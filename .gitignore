@@ -75,3 +75,7 @@ server/**/objbuildcheck2*/
 # Windows oddities
 nul
 .gradle-local
+
+# Walkthrough e2e artifacts (videos/screenshots/reports)
+walkthrough-artifacts/
+walkthrough-report/
