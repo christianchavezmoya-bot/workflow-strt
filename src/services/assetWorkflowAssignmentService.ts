@@ -17,24 +17,70 @@ export const assetWorkflowAssignmentService = {
   },
 
   async create(assetId: string, workflowConfigId: string, workflowTypeId: string): Promise<WorkflowAssignment> {
-    const res = await api.post<WorkflowAssignment>("/asset-workflow-assignments", {
+    // Web path — always goes to the server, no offline handling needed.
+    if (!isMobileNativePlatform()) {
+      const res = await api.post<WorkflowAssignment>("/asset-workflow-assignments", {
+        assetId,
+        workflowConfigId,
+        workflowTypeId,
+      });
+      invalidateWebCache(`/asset-workflow-assignments/by-asset/${assetId}`);
+      return res.data;
+    }
+
+    // ── Mobile native path ──────────────────────────────────────────
+    // 1. Optimistically write a temp assignment to the local cache so the
+    //    UI updates immediately (the workflow becomes startable offline).
+    const tempId = `local-${crypto.randomUUID()}`;
+    const optimistic = {
+      id: tempId,
       assetId,
       workflowConfigId,
       workflowTypeId,
-    });
-    invalidateWebCache(`/asset-workflow-assignments/by-asset/${assetId}`);
-    // Keep the offline cache in sync so the new assignment is immediately
-    // startable offline without waiting for the next background refresh.
-    if (isMobileNativePlatform()) {
+      createdAt: new Date().toISOString(),
+    } as unknown as WorkflowAssignment;
+
+    try {
+      const current = await WorkflowAssignmentRepository.getLocalByAsset(assetId);
+      await WorkflowAssignmentRepository.replaceByAsset(assetId, [
+        ...current.filter((a) => a.workflowConfigId !== workflowConfigId),
+        optimistic,
+      ]);
+    } catch { /* non-fatal — optimistic write best-effort */ }
+
+    // 2. Try the server call.
+    try {
+      const res = await api.post<WorkflowAssignment>("/asset-workflow-assignments", {
+        assetId,
+        workflowConfigId,
+        workflowTypeId,
+      });
+      // Replace the temp entry with the real server record.
       try {
-        const current = await WorkflowAssignmentRepository.getLocalByAsset(assetId);
+        const updated = await WorkflowAssignmentRepository.getLocalByAsset(assetId);
         await WorkflowAssignmentRepository.replaceByAsset(assetId, [
-          ...current.filter((a) => a.id !== res.data.id),
+          ...updated.filter((a) => a.id !== tempId && a.id !== res.data.id),
           res.data,
         ]);
       } catch { /* non-fatal */ }
+      return res.data;
+    } catch (error) {
+      // 3. Offline network error — queue the POST for later sync.
+      if (axios.isAxiosError(error) && !error.response) {
+        await pendingAdd({
+          id: crypto.randomUUID(),
+          url: "/asset-workflow-assignments",
+          method: "POST",
+          body: { assetId, workflowConfigId, workflowTypeId },
+          entityType: "workflowAssignment",
+          entityId: tempId,
+          optimisticPatch: { assetId, workflowConfigId, workflowTypeId } as unknown as Record<string, unknown>,
+          createdAt: new Date().toISOString(),
+        });
+        return optimistic;
+      }
+      throw error;
     }
-    return res.data;
   },
 
   async remove(id: string, assetId?: string): Promise<void> {

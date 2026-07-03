@@ -68,21 +68,23 @@ export const ProjectRepository = {
     const requestKey = buildProjectRequestKey(filters);
 
     // Background refresh keeps IndexedDB current, but only unfiltered full-sync fetches
-    // are allowed to reconcile/remove rows from the cache.
-    api.get<Project[] | ProjectListResponse>("/projects", { params })
-      .then(async (res) => {
-        const items = Array.isArray(res.data) ? res.data : res.data.items;
-        const total = Array.isArray(res.data) ? res.data.length : res.data.total;
-        await entityPutProjects(items.map((p) => ({ id: p.id, data: p })));
-        if (canReconcileProjects(filters)) {
-          await reconcileProjects(items.map((p) => p.id));
-        }
-        await syncMetaSet("projects");
-        window.dispatchEvent(new CustomEvent<ProjectRepositoryUpdateDetail>("repo:projects:updated", {
-          detail: { items, total, requestKey }
-        }));
-      })
-      .catch(() => { window.dispatchEvent(new Event("repo:projects:fetch-failed")); });
+    // are allowed to reconcile/remove rows from the cache. Skip when offline.
+    if (!shouldSkipBlockingFetch()) {
+      api.get<Project[] | ProjectListResponse>("/projects", { params })
+        .then(async (res) => {
+          const items = Array.isArray(res.data) ? res.data : res.data.items;
+          const total = Array.isArray(res.data) ? res.data.length : res.data.total;
+          await entityPutProjects(items.map((p) => ({ id: p.id, data: p })));
+          if (canReconcileProjects(filters)) {
+            await reconcileProjects(items.map((p) => p.id));
+          }
+          await syncMetaSet("projects");
+          window.dispatchEvent(new CustomEvent<ProjectRepositoryUpdateDetail>("repo:projects:updated", {
+            detail: { items, total, requestKey }
+          }));
+        })
+        .catch(() => { window.dispatchEvent(new Event("repo:projects:fetch-failed")); });
+    }
 
     if (local.length > 0) {
       let items = local as Project[];

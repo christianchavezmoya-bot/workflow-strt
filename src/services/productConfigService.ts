@@ -60,13 +60,15 @@ export const productConfigService = {
     const cacheKey = `product_configs_v2_${productId}`;
     const cached = await cacheGet<ProductConfig[]>(cacheKey);
 
-    // Background refresh — always runs, keeps cache warm for next time
-    api.get<ProductConfig[]>(`/wi-templates/by-product/${productId}`)
-      .then((res) => {
-        cachePut(cacheKey, res.data).catch(() => {});
-        lsWrite(productId, res.data); // keep legacy fallback in sync too
-      })
-      .catch(() => {});
+    // Background refresh — skip when offline to avoid doomed requests
+    if (!shouldSkipBlockingFetch()) {
+      api.get<ProductConfig[]>(`/wi-templates/by-product/${productId}`)
+        .then((res) => {
+          cachePut(cacheKey, res.data).catch(() => {});
+          lsWrite(productId, res.data); // keep legacy fallback in sync too
+        })
+        .catch(() => {});
+    }
 
     if (cached !== null) return cached;
 

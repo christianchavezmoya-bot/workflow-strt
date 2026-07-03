@@ -52,14 +52,16 @@ export const WorkflowAssignmentRepository = {
 
     const local = await this.getLocalByAsset(assetId);
 
-    // Background refresh keeps the cache warm for offline starts.
-    api.get<WorkflowAssignment[]>(`/asset-workflow-assignments/by-asset/${assetId}`)
-      .then(async (res) => {
-        await this.replaceByAsset(assetId, res.data);
-        await syncMetaSet("workflow_assignments");
-        window.dispatchEvent(new CustomEvent("repo:assignments:updated", { detail: { assetId } }));
-      })
-      .catch(() => { /* offline — local cache is the source of truth */ });
+    // Background refresh keeps the cache warm for offline starts. Skip when offline.
+    if (!shouldSkipBlockingFetch()) {
+      api.get<WorkflowAssignment[]>(`/asset-workflow-assignments/by-asset/${assetId}`)
+        .then(async (res) => {
+          await this.replaceByAsset(assetId, res.data);
+          await syncMetaSet("workflow_assignments");
+          window.dispatchEvent(new CustomEvent("repo:assignments:updated", { detail: { assetId } }));
+        })
+        .catch(() => { /* offline — local cache is the source of truth */ });
+    }
 
     if (local.length > 0) return local;
 

@@ -96,13 +96,16 @@ export const workflowConfigService = {
 
     // Background refresh — always fetches the UNFILTERED list so the cache stays
     // a complete superset usable by any caller, regardless of this call's status arg.
-    api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}`)
-      .then(async (res) => {
-        lsWrite(productId, res.data);
-        await offlineStore.saveCache(CACHE_PRODUCT_KEY(productId), res.data);
-        await cacheConfigs(res.data);
-      })
-      .catch(() => {});
+    // Skip when offline to avoid doomed requests.
+    if (!shouldSkipBlockingFetch()) {
+      api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}`)
+        .then(async (res) => {
+          lsWrite(productId, res.data);
+          await offlineStore.saveCache(CACHE_PRODUCT_KEY(productId), res.data);
+          await cacheConfigs(res.data);
+        })
+        .catch(() => {});
+    }
 
     if (cached && cached.length > 0) {
       // Ensure per-ID cache entries exist so getById() works offline even

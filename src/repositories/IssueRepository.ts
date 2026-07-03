@@ -23,14 +23,16 @@ export const IssueRepository = {
 
     const local = await entityGetAllIssues();
 
-    // Background refresh — reconciles deleted rows via replace-all
-    api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", { params: userId ? { userId } : undefined })
-      .then(async (res) => {
-        await entityReplaceAllIssues(res.data.map(toRecord));
-        await syncMetaSet("issues");
-        window.dispatchEvent(new Event("repo:issues:updated"));
-      })
-      .catch(() => { window.dispatchEvent(new Event("repo:issues:fetch-failed")); });
+    // Background refresh — reconciles deleted rows via replace-all (skip when offline)
+    if (!shouldSkipBlockingFetch()) {
+      api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", { params: userId ? { userId } : undefined })
+        .then(async (res) => {
+          await entityReplaceAllIssues(res.data.map(toRecord));
+          await syncMetaSet("issues");
+          window.dispatchEvent(new Event("repo:issues:updated"));
+        })
+        .catch(() => { window.dispatchEvent(new Event("repo:issues:fetch-failed")); });
+    }
 
     if (local.length > 0) return local as OpenIssueRecord[];
 

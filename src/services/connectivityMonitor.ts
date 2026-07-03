@@ -41,7 +41,13 @@ function startNativeNetworkTracking(): void {
     .then((status) => { nativeNetworkConnected = status.connected; })
     .catch(() => { /* keep null until listener fires */ });
   void Network.addListener("networkStatusChange", (status) => {
+    const wasOff = nativeNetworkConnected === false;
     nativeNetworkConnected = status.connected;
+    // When the radio comes back online after being down, ping immediately
+    // so reconnect is detected instantly rather than waiting up to 30s.
+    if (wasOff && status.connected) {
+      pingNow();
+    }
   });
 }
 
@@ -52,6 +58,12 @@ function notify(value: boolean) {
 
 async function runPingIfForeground() {
   if (!isForeground) return;
+  // If Capacitor already reports no radio, skip the guaranteed-to-fail HTTP
+  // call and report unreachable directly — saves battery + noise.
+  if (isMobileNativePlatform() && nativeNetworkConnected === false) {
+    notify(false);
+    return;
+  }
   const reachable = await isServerReachable();
   notify(reachable);
 }

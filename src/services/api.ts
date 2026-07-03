@@ -21,9 +21,12 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json"
   },
-  // 15 s gives the server headroom for slow queries; auth endpoints override this to 0.
-  // Previously 5 s — too tight and caused cascading timeout floods when the server was busy.
-  timeout: 15000,
+  // 10 s ceiling for stalled requests; auth endpoints override this to 0.
+  // With fetch-suppression guards in repositories, this rarely fires — it only
+  // matters for genuine "was reachable a moment ago but this request stalls" cases.
+  // Avoid going lower (e.g. 5s) because slow-but-valid requests on weak field
+  // connections can take 6–8s.
+  timeout: 10000,
 });
 
 type DebugLog = {

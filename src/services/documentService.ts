@@ -2,6 +2,7 @@ import api from "./api";
 import { cacheGet, cachePut } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 
 export interface DocumentRecord {
   id: string;
@@ -49,18 +50,22 @@ export const documentService = {
     const cacheKey = "documents_v1_all";
     const cached = await cacheGet<DocumentRecord[]>(cacheKey);
 
-    // Background refresh — always runs, keeps cache warm for next time
-    api.get<DocumentRecord[]>("/documents")
-      .then((res) => {
-        cachePut(cacheKey, res.data).catch(() => {});
-      })
-      .catch(() => {});
+    // Background refresh — skip when offline to avoid doomed requests
+    if (!shouldSkipBlockingFetch()) {
+      api.get<DocumentRecord[]>("/documents")
+        .then((res) => {
+          cachePut(cacheKey, res.data).catch(() => {});
+        })
+        .catch(() => {});
+    }
 
     if (cached !== null) {
       return cached.map(hydrateCustomValues);
     }
 
-    // No cache yet — wait for network (first-ever load)
+    // No cache yet — if offline, return empty instead of hanging
+    if (shouldSkipBlockingFetch()) return [];
+
     const response = await api.get<DocumentRecord[]>("/documents");
     await cachePut(cacheKey, response.data);
     return response.data.map(hydrateCustomValues);

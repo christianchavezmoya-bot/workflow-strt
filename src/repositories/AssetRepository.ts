@@ -88,17 +88,19 @@ export const AssetRepository = {
 
     const local = await this.getLocalByProduct(productId, includeDeleted);
 
-    // Background network refresh — runs unconditionally to keep IndexedDB fresh
-    api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`, { params: { includeDeleted: includeDeleted || undefined } })
-      .then(async (res) => {
-        await entityReplaceAssetsByProduct(
-          productId,
-          res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
-        );
-        await syncMetaSet("assets");
-        window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { productId } }));
-      })
-      .catch(() => { window.dispatchEvent(new Event("repo:assets:fetch-failed")); });
+    // Background network refresh — skip when offline to avoid doomed requests & noise
+    if (!shouldSkipBlockingFetch()) {
+      api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`, { params: { includeDeleted: includeDeleted || undefined } })
+        .then(async (res) => {
+          await entityReplaceAssetsByProduct(
+            productId,
+            res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
+          );
+          await syncMetaSet("assets");
+          window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { productId } }));
+        })
+        .catch(() => { window.dispatchEvent(new Event("repo:assets:fetch-failed")); });
+    }
 
     if (local.length > 0) return local;
 
@@ -125,17 +127,19 @@ export const AssetRepository = {
 
     const local = await this.getLocalByProject(projectId, includeDeleted);
 
-    // Background network refresh — runs unconditionally to keep IndexedDB fresh
-    api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, { params: { includeDeleted: includeDeleted || undefined } })
-      .then(async (res) => {
-        await entityReplaceAssetsByProject(
-          projectId,
-          res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
-        );
-        await syncMetaSet("assets");
-        window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { projectId } }));
-      })
-      .catch(() => { window.dispatchEvent(new Event("repo:assets:fetch-failed")); });
+    // Background network refresh — skip when offline to avoid doomed requests & noise
+    if (!shouldSkipBlockingFetch()) {
+      api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, { params: { includeDeleted: includeDeleted || undefined } })
+        .then(async (res) => {
+          await entityReplaceAssetsByProject(
+            projectId,
+            res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
+          );
+          await syncMetaSet("assets");
+          window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { projectId } }));
+        })
+        .catch(() => { window.dispatchEvent(new Event("repo:assets:fetch-failed")); });
+    }
 
     if (local.length > 0) return local;
 

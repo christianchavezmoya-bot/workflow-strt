@@ -484,6 +484,9 @@ export function useSyncEngine(): SyncState {
 
   // ── Scheduled retry timer ─────────────────────────────────────────────────
   const scheduleRetry = useCallback(async () => {
+    // Don't schedule retry timers while offline — the connectivity-restored
+    // subscription will trigger flush() the instant the server comes back.
+    if (connectivity === "offline" || connectivity === "server-unreachable") return;
     const all = await pendingGetAll();
     if (all.length === 0) return;
     const future = all
@@ -492,7 +495,7 @@ export function useSyncEngine(): SyncState {
     if (future.length === 0) return;
     const nextMs = Math.max(Math.min(...future) - Date.now(), 1000);
     setTimeout(() => void flush(), Math.min(nextMs, 300_000)); // cap at 5 min
-  }, [flush]);
+  }, [flush, connectivity]);
 
   // Wire up the ref so flush can call scheduleRetry without circular deps
   useEffect(() => {
