@@ -51,6 +51,171 @@ export interface ClosedIssueRecord extends OpenIssueRecord {
   resolutionNote:  string | null;
 }
 
+function parseTimeEntries(json: string): RunTimeEntry[] {
+  try {
+    const parsed = JSON.parse(json) as RunTimeEntry[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function serializeTimeEntries(entries: RunTimeEntry[]): string {
+  return JSON.stringify(
+    [...entries].sort(
+      (a, b) => new Date(a.startedAtUtc).getTime() - new Date(b.startedAtUtc).getTime()
+    )
+  );
+}
+
+function recomputeTimeMetrics(entries: RunTimeEntry[], nowUtc: string): {
+  productiveSeconds: number;
+  downtimeSeconds: number;
+  downtimeEvents: number;
+} {
+  const nowMs = Date.parse(nowUtc);
+  let productiveSeconds = 0;
+  let downtimeSeconds = 0;
+  let downtimeEvents = 0;
+  for (const entry of entries) {
+    const startMs = Date.parse(entry.startedAtUtc);
+    const endMs = entry.endedAtUtc ? Date.parse(entry.endedAtUtc) : nowMs;
+    const seconds = Number.isNaN(startMs) || Number.isNaN(endMs)
+      ? 0
+      : Math.max(0, Math.floor((endMs - startMs) / 1000));
+    if (entry.category === "downtime") {
+      downtimeSeconds += seconds;
+      downtimeEvents += 1;
+    } else {
+      productiveSeconds += seconds;
+    }
+  }
+  return { productiveSeconds, downtimeSeconds, downtimeEvents };
+}
+
+function closeOpenCategory(entries: RunTimeEntry[], category: RunTimeEntry["category"], atUtc: string): void {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (!entry.endedAtUtc && entry.category === category) {
+      entry.endedAtUtc = atUtc;
+      return;
+    }
+  }
+}
+
+function closeAnyOpenTimeEntry(entries: RunTimeEntry[], atUtc: string): void {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (!entries[i].endedAtUtc) {
+      entries[i].endedAtUtc = atUtc;
+      return;
+    }
+  }
+}
+
+function startProductivePeriod(entries: RunTimeEntry[], atUtc: string, reason?: string | null): void {
+  if (entries.some((e) => !e.endedAtUtc && e.category === "productive")) return;
+  entries.push({
+    id: crypto.randomUUID(),
+    category: "productive",
+    startedAtUtc: atUtc,
+    endedAtUtc: null,
+    reason: reason ?? "Resumed",
+  });
+}
+
+function startDowntimePeriod(entries: RunTimeEntry[], atUtc: string, reason?: string | null): void {
+  if (entries.some((e) => !e.endedAtUtc && e.category === "downtime")) return;
+  entries.push({
+    id: crypto.randomUUID(),
+    category: "downtime",
+    startedAtUtc: atUtc,
+    endedAtUtc: null,
+    reason: reason ?? "Paused",
+  });
+}
+
+/** Mirror server TrackTimeEntry logic for offline replay. */
+function applyOfflineTimeEntryAction(
+  run: OfflineRun,
+  action: "StartProductive" | "ResumeProductive" | "StartDowntime" | "StopDowntime" | "StopAll",
+  reason: string | undefined,
+  startedAtUtc: string,
+  endedAtUtc: string,
+): OfflineRun {
+  const entries = parseTimeEntries(run.timeTrackingJson ?? "[]");
+  const normalized = action.trim().toLowerCase();
+
+  switch (normalized) {
+    case "startproductive":
+    case "resumeproductive":
+      closeOpenCategory(entries, "downtime", endedAtUtc);
+      startProductivePeriod(entries, startedAtUtc, reason);
+      break;
+    case "startdowntime":
+    case "stopproductive":
+      closeOpenCategory(entries, "productive", endedAtUtc);
+      startDowntimePeriod(entries, startedAtUtc, reason);
+      break;
+    case "stopdowntime":
+      closeOpenCategory(entries, "downtime", endedAtUtc);
+      break;
+    case "stopall":
+    case "pause":
+      closeAnyOpenTimeEntry(entries, endedAtUtc);
+      break;
+    default:
+      throw new Error(`Unknown time entry action: ${action}`);
+  }
+
+  const now = new Date().toISOString();
+  const metrics = recomputeTimeMetrics(entries, now);
+  const status =
+    normalized === "stopall" || normalized === "pause"
+      ? ("Paused" as const)
+      : normalized === "startproductive" || normalized === "resumeproductive"
+        ? ("InProgress" as const)
+        : run.status;
+
+  return {
+    ...run,
+    timeTrackingJson: serializeTimeEntries(entries),
+    productiveSeconds: metrics.productiveSeconds,
+    downtimeSeconds: metrics.downtimeSeconds,
+    downtimeEvents: metrics.downtimeEvents,
+    status,
+    updatedAt: now,
+    lastLocalSavedAt: now,
+    dirty: true,
+    localStatus: "PendingSync",
+    syncError: undefined,
+  };
+}
+
+async function enqueueTimeEntry(
+  runId: string,
+  body: Record<string, unknown>,
+  optimisticPatch: Record<string, unknown>,
+): Promise<void> {
+  const existing = (await syncQueue.listByEntityId(runId))
+    .filter((op) => op.opType === "TIME_ENTRY" && op.url.endsWith("/time-entry"))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+  if (existing && existing.status !== "uploading") {
+    await syncQueue.updateQueuedOp(existing.id, { body, optimisticPatch });
+    return;
+  }
+
+  await syncQueue.enqueue({
+    opType: "TIME_ENTRY",
+    url: `/asset-workflow-runs/${runId}/time-entry`,
+    method: "POST",
+    entityType: "workflow-run",
+    entityId: runId,
+    body,
+    optimisticPatch,
+  });
+}
+
 function isOfflineNetworkError(error: unknown): boolean {
   if (!error || typeof error !== "object") return !navigator.onLine;
   const candidate = error as { code?: string; message?: string; response?: unknown };
@@ -250,6 +415,12 @@ async function deriveOpenIssuesFromRun(run: AssetWorkflowRun): Promise<Array<{
 }
 
 export const assetWorkflowRunService = {
+  /** IndexedDB runs for an asset — native only; no network. */
+  async listLocalByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
+    if (!isMobileNativePlatform()) return [];
+    return offlineStore.listRunsByAsset(assetId);
+  },
+
   async listLatestByProject(projectId: string): Promise<AssetWorkflowRun[]> {
     if (!isMobileNativePlatform()) {
       return webCachedGet(`/asset-workflow-runs/by-project/${projectId}`, async () => {
@@ -752,24 +923,51 @@ export const assetWorkflowRunService = {
     startedAtUtc?: string,
     endedAtUtc?: string
   ): Promise<AssetWorkflowRun> {
-    if (!isMobileNativePlatform()) {
-      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entry`, {
-        action,
-        reason: reason ?? null,
-        startedAtUtc: startedAtUtc ?? null,
-        endedAtUtc: endedAtUtc ?? null,
-      });
-      return res.data;
-    }
-
-    const resolvedRunId = await resolveRunId(runId);
-    const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entry`, {
+    const body = {
       action,
       reason: reason ?? null,
       startedAtUtc: startedAtUtc ?? null,
       endedAtUtc: endedAtUtc ?? null,
-    });
-    return res.data;
+    };
+
+    if (!isMobileNativePlatform()) {
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entry`, body);
+      return res.data;
+    }
+
+    const resolvedRunId = await resolveRunId(runId);
+    try {
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entry`, body);
+      return await cacheServerRun(res.data);
+    } catch (error) {
+      if (!isOfflineNetworkError(error)) throw error;
+
+      const cachedRun = await getCachedRun(runId);
+      if (!cachedRun) throw error;
+
+      const now = new Date().toISOString();
+      const startAt = startedAtUtc && !Number.isNaN(Date.parse(startedAtUtc)) ? startedAtUtc : now;
+      const endAt = endedAtUtc && !Number.isNaN(Date.parse(endedAtUtc)) ? endedAtUtc : now;
+
+      const offlineRun = applyOfflineTimeEntryAction(
+        cachedRun,
+        action,
+        reason,
+        startAt,
+        endAt,
+      );
+
+      await offlineStore.saveRun(offlineRun);
+      await enqueueTimeEntry(resolvedRunId, body, {
+        timeTrackingJson: offlineRun.timeTrackingJson,
+        productiveSeconds: offlineRun.productiveSeconds,
+        downtimeSeconds: offlineRun.downtimeSeconds,
+        downtimeEvents: offlineRun.downtimeEvents,
+        status: offlineRun.status,
+        updatedAt: offlineRun.updatedAt,
+      });
+      return offlineRun;
+    }
   },
 
   async listPendingSignatures(userId?: string): Promise<PendingSignatureRecord[]> {

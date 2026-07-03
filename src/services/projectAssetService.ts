@@ -107,7 +107,20 @@ export const projectAssetService = {
     }
 
     const result = await AssetRepository.update(id, patch as Partial<ProjectAsset> & Record<string, unknown>);
-    if (result === null) throw new Error("Offline — change queued");
+    if (result === null) {
+      // Queued with no local row to merge — re-read after a list refresh may still fail;
+      // return a minimal optimistic object so takeover/start flows can proceed in-session.
+      const local = await entityGetAsset(id);
+      const data = local?.data as ProjectAsset | undefined;
+      if (data) {
+        const optimistic = fromDto({ ...data, ...patch } as ProjectAsset);
+        window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+          detail: { productId: optimistic.productId, projectId: optimistic.projectId },
+        }));
+        return optimistic;
+      }
+      throw new Error("Offline — asset not cached yet; open this project once while online");
+    }
     window.dispatchEvent(new CustomEvent("repo:assets:updated", {
       detail: { productId: result.productId, projectId: result.projectId },
     }));

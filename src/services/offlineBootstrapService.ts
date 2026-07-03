@@ -7,6 +7,8 @@ import { assetWorkflowAssignmentService } from "./assetWorkflowAssignmentService
 import { assetWorkflowRunService } from "./assetWorkflowRunService";
 import { workflowConfigService } from "./workflowConfigService";
 import { workflowTypeService } from "./workflowTypeService";
+import { workflowTemplateService } from "./workflowTemplateService";
+import { productConfigService } from "./productConfigService";
 import { featureService } from "./featureService";
 import { userService } from "./userService";
 import { brandSettingsService } from "./brandSettingsService";
@@ -16,11 +18,13 @@ import type { User } from "../types/user";
 import type { WorkflowConfig } from "../types/workflowConfig";
 
 /**
- * offlineBootstrapService — silent, background prefetch of everything a
- * technician needs to work fully offline. Runs after a successful online login
- * (and on foreground when the last bootstrap is stale). It reuses each domain
- * service's own offline-caching read path, so simply calling them in the right
- * order warms IndexedDB / the filesystem. Nothing here blocks the UI.
+ * offlineBootstrapService — silent, background prefetch of everything needed
+ * to work fully offline on the native phone app.
+ *
+ * Runs after login and whenever the device reconnects (full sync) or on
+ * foreground when the last bootstrap is stale (~4h). Warms IndexedDB and
+ * the filesystem via each domain service's own caching read path — including
+ * assets/workflows the user never opened in the UI while online.
  */
 
 export type BootstrapScope = "assigned" | "all";
@@ -29,6 +33,11 @@ export interface BootstrapProgress {
   phase: string;
   done: number;
   total: number;
+}
+
+export interface BootstrapRunOptions {
+  /** "all" (default) caches every project asset; "assigned" limits deep workflow prefetch. */
+  scope?: BootstrapScope;
 }
 
 const BOOTSTRAP_META_KEY = "bootstrap";
@@ -68,6 +77,16 @@ function currentUserId(): string | null {
   }
 }
 
+function assetsForDeepCache(allAssets: ProjectAsset[], scope: BootstrapScope, userId: string | null): ProjectAsset[] {
+  if (scope === "all") return allAssets;
+  return allAssets.filter((a) =>
+    (userId && a.assignedUserId === userId) ||
+    a.status === "InProgress" ||
+    a.status === "Paused" ||
+    a.status === "Pending"
+  );
+}
+
 export const offlineBootstrapService = {
   /** Whether a bootstrap pass is currently executing. */
   isRunning(): boolean {
@@ -82,30 +101,37 @@ export const offlineBootstrapService = {
   },
 
   /**
-   * Prefetch all data assigned/relevant to the logged-in user. Fire-and-forget:
-   * callers should not await the field-work-critical path on this. Always runs
-   * when called directly (the stale-gate lives in useOfflineBootstrap).
+   * Full download pass — call when the device comes back online so every asset,
+   * assignment, run, and workflow config is on the phone even if never visited.
    */
-  async run(options?: { scope?: BootstrapScope }): Promise<void> {
-    // Offline caching only applies to the native app; the web build is online-first.
+  async runOnReconnect(): Promise<void> {
+    return this.run({ scope: "all" });
+  },
+
+  /**
+   * Prefetch offline data. Fire-and-forget — never blocks the UI.
+   * Default scope is "all" so the entire accessible project catalog is cached.
+   */
+  async run(options?: BootstrapRunOptions): Promise<void> {
     if (!isMobileNativePlatform()) return;
     if (_running) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) return;
 
-    const scope = options?.scope ?? "assigned";
+    const scope = options?.scope ?? "all";
     const userId = currentUserId();
 
     _running = true;
     emit("bootstrap:started", { scope });
 
     try {
-      // ── Phase 1: shared reference data (small, parallel) ──────────────────
+      // ── Phase 1: shared reference data ────────────────────────────────────
       emit("bootstrap:progress", { phase: "reference", done: 0, total: 1 } satisfies BootstrapProgress);
       await Promise.allSettled([
         workflowTypeService.list(),
         userService.getUsers(),
         brandSettingsService.get(),
         featureService.getAll(),
+        workflowConfigService.getAll("Published").catch(() => []),
       ]);
 
       // ── Phase 2: projects ─────────────────────────────────────────────────
@@ -113,7 +139,7 @@ export const offlineBootstrapService = {
       const projectsResp = await projectService.getProjects();
       const projects = projectsResp.items ?? [];
 
-      // ── Phase 3: assets per project (warms the assets list cache) ─────────
+      // ── Phase 3: assets per project (full list cache) ─────────────────────
       const allAssets: ProjectAsset[] = [];
       let projDone = 0;
       await runPool(projects, 4, async (project) => {
@@ -123,42 +149,49 @@ export const offlineBootstrapService = {
         emit("bootstrap:progress", { phase: "assets", done: projDone, total: projects.length } satisfies BootstrapProgress);
       });
 
-      // ── Phase 4: determine deep-cache scope ───────────────────────────────
-      const deepAssets = scope === "all"
-        ? allAssets
-        : allAssets.filter((a) =>
-            (userId && a.assignedUserId === userId) ||
-            a.status === "InProgress" ||
-            a.status === "Paused" ||
-            a.status === "Pending"
-          );
+      const deepAssets = assetsForDeepCache(allAssets, scope, userId);
+      const productIds = [...new Set(allAssets.map((a) => a.productId).filter(Boolean))];
 
-      // ── Phase 5: product-level config + feature caches ────────────────────
-      const productIds = [...new Set(deepAssets.map((a) => a.productId).filter(Boolean))];
+      // ── Phase 4: product-level templates, configs, features ───────────────
       const configsByProduct = new Map<string, WorkflowConfig[]>();
       let prodDone = 0;
       await runPool(productIds, 4, async (productId) => {
-        const [configs] = await Promise.all([
-          workflowConfigService.listByProduct(productId).catch(() => [] as WorkflowConfig[]),
-          featureService.getByProduct(productId).catch(() => []),
+        await Promise.allSettled([
+          productConfigService.listByProduct(productId),
+          featureService.getByProduct(productId),
         ]);
+        const configs = await workflowConfigService.listByProduct(productId).catch(() => [] as WorkflowConfig[]);
         configsByProduct.set(productId, configs);
         prodDone++;
         emit("bootstrap:progress", { phase: "configs", done: prodDone, total: productIds.length } satisfies BootstrapProgress);
       });
 
-      // ── Phase 6: per-asset assignments + runs ─────────────────────────────
+      // ── Phase 5: workflow configs linked directly on assets + legacy templates
+      const linkedConfigIds = [...new Set(allAssets.map((a) => a.productConfigId).filter(Boolean) as string[])];
+      let cfgDone = 0;
+      await runPool(linkedConfigIds, 6, async (configId) => {
+        await workflowConfigService.getById(configId).catch(() => null);
+        cfgDone++;
+        emit("bootstrap:progress", { phase: "linked-configs", done: cfgDone, total: linkedConfigIds.length } satisfies BootstrapProgress);
+      });
+
+      const templateIds = [...new Set(allAssets.map((a) => a.workflowTemplateId).filter(Boolean) as string[])];
+      await runPool(templateIds, 4, async (templateId) => {
+        await workflowTemplateService.getById(templateId).catch(() => null);
+      });
+
+      // ── Phase 6: per-asset assignments + full run history (network refresh) ─
       let assetDone = 0;
       await runPool(deepAssets, 4, async (asset) => {
         await Promise.allSettled([
           assetWorkflowAssignmentService.listByAsset(asset.id),
-          assetWorkflowRunService.listByAsset(asset.id),
+          assetWorkflowRunService.listByAssetFresh(asset.id),
         ]);
         assetDone++;
         emit("bootstrap:progress", { phase: "workflows", done: assetDone, total: deepAssets.length } satisfies BootstrapProgress);
       });
 
-      // ── Phase 7: download workflow-config reference media ─────────────────
+      // ── Phase 7: workflow-config reference media ──────────────────────────
       const relevantConfigs: WorkflowConfig[] = [];
       const seenConfig = new Set<string>();
       for (const productId of productIds) {
@@ -169,6 +202,15 @@ export const offlineBootstrapService = {
           }
         }
       }
+      for (const configId of linkedConfigIds) {
+        if (seenConfig.has(configId)) continue;
+        const cfg = await workflowConfigService.getById(configId).catch(() => null);
+        if (cfg?.status === "Published") {
+          seenConfig.add(configId);
+          relevantConfigs.push(cfg);
+        }
+      }
+
       let mediaDone = 0;
       await runPool(relevantConfigs, 3, async (cfg) => {
         await configMediaCache.prefetchConfig(cfg).catch(() => {});
@@ -178,6 +220,7 @@ export const offlineBootstrapService = {
 
       await syncMetaSet(BOOTSTRAP_META_KEY);
       emit("bootstrap:complete", {
+        scope,
         projects: projects.length,
         assets: allAssets.length,
         deepAssets: deepAssets.length,

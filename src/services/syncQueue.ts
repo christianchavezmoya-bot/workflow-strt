@@ -16,7 +16,8 @@ export type SyncOpType =
   | "WORK_INSTRUCTION_UPDATE"
   | "WORK_INSTRUCTION_DELETE"
   | "MEDIA_UPLOAD"
-  | "SIGNATURE_SUBMIT";
+  | "SIGNATURE_SUBMIT"
+  | "TIME_ENTRY";
 
 export interface SyncQueueOp extends PendingAction {
   opType: SyncOpType;

@@ -1,6 +1,7 @@
 import api from "../services/api";
 import type { ProjectAsset, ProjectAssetStatus } from "../types/projectAsset";
 import {
+  entityGetAllAssets,
   entityGetAsset,
   entityGetAssetsByProduct,
   entityGetAssetsByProject,
@@ -32,6 +33,14 @@ function fromDto(dto: ProjectAsset): ProjectAsset {
     ...dto,
     status: normalizeStatus(dto.status),
   };
+}
+
+async function findLocalAsset(id: string): Promise<ProjectAsset | null> {
+  const cached = await entityGetAsset(id);
+  if (cached) return fromDto(cached.data as ProjectAsset);
+  const all = await entityGetAllAssets();
+  const found = (all as ProjectAsset[]).find((asset) => asset.id === id);
+  return found ? fromDto(found) : null;
 }
 
 async function cacheAssetLocally(
@@ -161,27 +170,7 @@ export const AssetRepository = {
       await cacheAssetLocally(asset, { dirty: false, syncIssues });
       return asset;
     } catch {
-      const cached = await entityGetAsset(id);
-      if (cached) {
-        const merged = fromDto({
-          ...(cached.data as ProjectAsset),
-          ...patch,
-        } as ProjectAsset);
-        await cacheAssetLocally(merged, { dirty: true, syncIssues });
-        await pendingAdd({
-          id: crypto.randomUUID(),
-          url: `/project-assets/${id}`,
-          method: "PUT",
-          body: patch,
-          entityType: "asset",
-          entityId: id,
-          optimisticPatch: patch as Record<string, unknown>,
-          createdAt: new Date().toISOString(),
-        });
-        return merged;
-      }
-
-      // No local asset to merge into — queue for later and preserve the old behavior.
+      const base = await findLocalAsset(id);
       await pendingAdd({
         id: crypto.randomUUID(),
         url: `/project-assets/${id}`,
@@ -192,7 +181,15 @@ export const AssetRepository = {
         optimisticPatch: patch as Record<string, unknown>,
         createdAt: new Date().toISOString(),
       });
-      return null;
+
+      if (!base) {
+        // Asset not in IndexedDB yet — change is queued; caller gets null.
+        return null;
+      }
+
+      const merged = fromDto({ ...base, ...patch } as ProjectAsset);
+      await cacheAssetLocally(merged, { dirty: true, syncIssues });
+      return merged;
     }
   },
 };
