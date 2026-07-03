@@ -137,6 +137,20 @@ import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { deriveOpenIssuesFromAsset } from "../../utils/issueDerivation";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 
+// Reference media lives on the config's mediaJson, separate from stepsJson.
+// Merge it into the workflow so step reference images render. Offline, the cfg
+// has already been media-hydrated by workflowConfigService.getById, so the URLs
+// are embedded data URLs that work without a network. Existing stepsJson-embedded
+// media (if any) always wins.
+function mergeConfigMedia(wf: Workflow, cfg: { mediaJson?: string }): Workflow {
+  if (wf.media && wf.media.length > 0) return wf;
+  try {
+    const cfgMedia = JSON.parse(cfg.mediaJson || "[]");
+    if (Array.isArray(cfgMedia) && cfgMedia.length > 0) return { ...wf, media: cfgMedia };
+  } catch { /* no media */ }
+  return wf;
+}
+
 // ------------------------------------------------------------------
 // Column configuration
 // ------------------------------------------------------------------
@@ -967,11 +981,12 @@ const AssetInstallationPage = () => {
       setAssignmentsMap((prev) => {
         const next = { ...prev };
         for (const [assetId, local] of entries) {
-          // Don't clobber a fully-loaded entry (from expansion) with a possibly
-          // empty local snapshot; only fill gaps.
+          // Only fill from cache when there's actually something cached. Never
+          // write an empty array here: that would make resolvePreferredAssignment
+          // treat the asset as "loaded, no assignments" and skip its on-demand
+          // network fetch. Assets with no cached assignments stay undefined so
+          // the normal fetch-on-start path still runs.
           if (local.length > 0 && (prev[assetId] === undefined || prev[assetId].length === 0)) {
-            next[assetId] = local;
-          } else if (prev[assetId] === undefined) {
             next[assetId] = local;
           }
         }
@@ -2115,6 +2130,7 @@ const AssetInstallationPage = () => {
         else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
       } catch {}
       if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
+      wf = mergeConfigMedia(wf, cfg);
 
       // Find the active (non-locked) run so we can resume exactly where we left off
       let existingRunId: string | undefined = undefined;
@@ -2364,6 +2380,7 @@ const AssetInstallationPage = () => {
         else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
       } catch {}
       if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
+      wf = mergeConfigMedia(wf, cfg);
 
       setRunnerPrefillValues(prefillValues);
       setRunnerExistingRunId(undefined); // fresh run
@@ -2394,6 +2411,7 @@ const AssetInstallationPage = () => {
         else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
       } catch {}
       if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
+      wf = mergeConfigMedia(wf, cfg);
       setRunnerExistingRunId(run.id);
       setRunnerAsset(asset);
       setRunnerWorkflow(wf);

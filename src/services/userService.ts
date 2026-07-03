@@ -29,23 +29,17 @@ export const userService = {
       return response.data;
     }
 
+    // Network-first with an offline fallback: admin screens must show live data
+    // when online, while offline screens (issue/report author names) still work.
+    // The cache is only used when the server is known-unreachable or the call
+    // fails — it is not served ahead of a live response.
     const cached = await referenceDataGet<User[]>(USERS_REF_KEY);
-
-    // Names of technicians/PMs are shown in issues and reports; keep the cache
-    // fresh in the background so offline reports render real names.
-    api.get<User[]>("/users")
-      .then(async (res) => {
-        await referenceDataSet(USERS_REF_KEY, res.data);
-        await syncMetaSet("users");
-      })
-      .catch(() => { /* offline — cache is source of truth */ });
-
-    if (cached && cached.length > 0) return cached;
     if (shouldSkipBlockingFetch()) return cached ?? [];
 
     try {
       const response = await api.get<User[]>("/users");
       await referenceDataSet(USERS_REF_KEY, response.data);
+      await syncMetaSet("users");
       return response.data;
     } catch {
       return cached ?? [];

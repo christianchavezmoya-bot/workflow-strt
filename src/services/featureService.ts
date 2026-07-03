@@ -20,21 +20,16 @@ export const featureService = {
       return res.data;
     }
 
+    // Network-first with offline fallback — the global feature library is
+    // edited in admin, so a live response must win when online; the cache only
+    // backs up offline reads.
     const cached = await referenceDataGet<Feature[]>(ALL_FEATURES_KEY);
-
-    api.get<Feature[]>("/features")
-      .then(async (res) => {
-        await referenceDataSet(ALL_FEATURES_KEY, res.data);
-        await syncMetaSet("features");
-      })
-      .catch(() => { /* offline — cache is source of truth */ });
-
-    if (cached && cached.length > 0) return cached;
     if (shouldSkipBlockingFetch()) return cached ?? [];
 
     try {
       const res = await api.get<Feature[]>("/features");
       await referenceDataSet(ALL_FEATURES_KEY, res.data);
+      await syncMetaSet("features");
       return res.data;
     } catch {
       return cached ?? [];

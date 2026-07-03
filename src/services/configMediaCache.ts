@@ -3,6 +3,7 @@ import type { WorkflowConfig } from "../types/workflowConfig";
 import type { MediaItem } from "../types/workflow";
 import { configMediaGet, configMediaGetByConfig, configMediaPut } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
+import { getApiBaseUrl } from "./apiBase";
 
 /**
  * configMediaCache — downloads a workflow config's reference media (step photos,
@@ -30,8 +31,25 @@ function stripDataUrlPrefix(dataUrl: string): string {
   return idx >= 0 ? dataUrl.slice(idx + "base64,".length) : dataUrl;
 }
 
-function isRemoteUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url);
+/** A media URL worth caching: anything that isn't already embedded as data. */
+function isCacheableUrl(url: string | undefined): url is string {
+  return !!url && !url.startsWith("data:") && !url.startsWith("blob:");
+}
+
+/**
+ * Resolve a possibly server-relative media URL (e.g.
+ * "/api/workflow-configs/{id}/media/{mediaId}/file") to an absolute URL that
+ * fetch() can reach. Absolute http(s) URLs pass through unchanged. Returns null
+ * when the URL can't be resolved.
+ */
+function toAbsoluteUrl(url: string): string | null {
+  if (/^https?:\/\//i.test(url)) return url;
+  try {
+    const origin = new URL(getApiBaseUrl()).origin;
+    return url.startsWith("/") ? `${origin}${url}` : `${origin}/${url}`;
+  } catch {
+    return null;
+  }
 }
 
 function parseMedia(config: WorkflowConfig): MediaItem[] {
@@ -78,13 +96,16 @@ export const configMediaCache = {
     if (media.length === 0) return;
 
     for (const item of media) {
-      if (!item?.url || !isRemoteUrl(item.url)) continue;
+      if (!item?.id || !isCacheableUrl(item.url)) continue;
       const recordId = `${config.id}:${item.id}`;
       const existing = await configMediaGet(recordId);
       if (existing) continue; // already downloaded
 
+      const absoluteUrl = toAbsoluteUrl(item.url);
+      if (!absoluteUrl) continue;
+
       try {
-        const resp = await fetch(item.url, { mode: "cors" });
+        const resp = await fetch(absoluteUrl, { mode: "cors" });
         if (!resp.ok) continue;
         const blob = await resp.blob();
         const { base64, mime } = await blobToBase64(blob);
@@ -135,7 +156,7 @@ export const configMediaCache = {
     let changed = false;
     const hydrated = await Promise.all(
       media.map(async (item) => {
-        if (!item?.url || !isRemoteUrl(item.url)) return item;
+        if (!item?.id || !isCacheableUrl(item.url)) return item;
         const dataUrl = await this.getLocalDataUrl(config.id, item.id);
         if (dataUrl) {
           changed = true;

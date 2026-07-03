@@ -83,9 +83,10 @@ export const offlineBootstrapService = {
 
   /**
    * Prefetch all data assigned/relevant to the logged-in user. Fire-and-forget:
-   * callers should not await the field-work-critical path on this.
+   * callers should not await the field-work-critical path on this. Always runs
+   * when called directly (the stale-gate lives in useOfflineBootstrap).
    */
-  async run(options?: { scope?: BootstrapScope; force?: boolean }): Promise<void> {
+  async run(options?: { scope?: BootstrapScope }): Promise<void> {
     // Offline caching only applies to the native app; the web build is online-first.
     if (!isMobileNativePlatform()) return;
     if (_running) return;
