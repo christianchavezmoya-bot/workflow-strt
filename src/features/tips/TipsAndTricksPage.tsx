@@ -633,6 +633,8 @@ export default function TipsAndTricksPage() {
             elevation={0}
             sx={{
               height: "100%",
+              display: "flex",
+              flexDirection: "column",
               border: "1px solid var(--stroke)",
               background: "linear-gradient(180deg, rgba(10,18,24,0.92), rgba(8,14,19,0.96))",
               borderRadius: 2,
@@ -646,7 +648,7 @@ export default function TipsAndTricksPage() {
           >
             <CardActionArea
               onClick={() => setPreviewDoc(doc)}
-              sx={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "flex-start" }}
+              sx={{ flexGrow: 1, display: "flex", flexDirection: "column", alignItems: "flex-start" }}
             >
               {doc.downloadUrl && (
                 <DocThumbnail
@@ -678,47 +680,49 @@ export default function TipsAndTricksPage() {
                     {doc.notes}
                   </Typography>
                 )}
-                <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mt: 0.75 }}>
-                  {fmtSize(doc.fileSize) && (
-                    <Typography variant="caption" sx={{ color: "text.disabled" }}>
-                      {fmtSize(doc.fileSize)}
-                    </Typography>
-                  )}
-                  <Stack direction="row" spacing={0.25} sx={{ ml: "auto" }}>
-                    {doc.downloadUrl && canViewTips && (
-                      <IconButton
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void documentService.downloadDocument(doc.downloadUrl!, doc.name);
-                        }}
-                        sx={{ p: 0.25 }}
-                      >
-                        <DownloadOutlined sx={{ fontSize: 14, color: "text.disabled" }} />
-                      </IconButton>
-                    )}
-                    {canDeleteTips && (
-                      <IconButton
-                        size="small"
-                        color="error"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleDelete(doc.id);
-                        }}
-                        sx={{ p: 0.25 }}
-                      >
-                        <DeleteOutline sx={{ fontSize: 16 }} />
-                      </IconButton>
-                    )}
-                    {!((doc.downloadUrl && canViewTips) || canDeleteTips) && (
-                      <Typography variant="caption" color="text.disabled">
-                        No actions
-                      </Typography>
-                    )}
-                  </Stack>
-                </Stack>
               </CardContent>
             </CardActionArea>
+
+            {/* Action footer lives OUTSIDE CardActionArea: nesting IconButtons
+                (each a <button>) inside the card's <button> (CardActionArea) is
+                invalid DOM. Kept at the card bottom to preserve the layout, and
+                since these are no longer inside the click target, the previous
+                e.stopPropagation() guards are no longer needed. */}
+            <Box sx={{ px: 1.5, pb: 1.5 }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                {fmtSize(doc.fileSize) && (
+                  <Typography variant="caption" sx={{ color: "text.disabled" }}>
+                    {fmtSize(doc.fileSize)}
+                  </Typography>
+                )}
+                <Stack direction="row" spacing={0.25} sx={{ ml: "auto" }}>
+                  {doc.downloadUrl && canViewTips && (
+                    <IconButton
+                      size="small"
+                      onClick={() => void documentService.downloadDocument(doc.downloadUrl!, doc.name)}
+                      sx={{ p: 0.25 }}
+                    >
+                      <DownloadOutlined sx={{ fontSize: 14, color: "text.disabled" }} />
+                    </IconButton>
+                  )}
+                  {canDeleteTips && (
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onClick={() => void handleDelete(doc.id)}
+                      sx={{ p: 0.25 }}
+                    >
+                      <DeleteOutline sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  )}
+                  {!((doc.downloadUrl && canViewTips) || canDeleteTips) && (
+                    <Typography variant="caption" color="text.disabled">
+                      No actions
+                    </Typography>
+                  )}
+                </Stack>
+              </Stack>
+            </Box>
           </Card>
         </Grid>
       ))}
