@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build            # tsc -b (the only typecheck) + vite bundle
+      - run: npm test                 # vitest run
+      # Lint is a non-blocking backlog gate for now (legacy codebase had no linter).
+      # Remove continue-on-error once the ~13 error-level findings are burned down.
+      - run: npm run lint
+        continue-on-error: true
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet build --nologo
+        working-directory: server/Commtrac.Api
+      - run: dotnet test --nologo
+        working-directory: server/Commtrac.Api.Tests
+
+  standards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # docs-fresh + hygiene gates via the committed runner
+      - run: node .claude/skills/enterprise-dev-practices/scripts/check-gates.mjs docs hygiene
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e

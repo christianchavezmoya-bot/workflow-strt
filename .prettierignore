@@ -1,0 +1,9 @@
+dist
+tempbuild
+node_modules
+android
+ios
+server
+docs
+package-lock.json
+*.md

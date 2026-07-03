@@ -32,6 +32,10 @@ public static class DbInitializer
         EnsureFeatureProcurementColumns(db);
         EnsureProjectMinimumCompletionPercentColumn(db);
         EnsureLinkableKeyFieldDefinitions(db);
+        // Soft-delete columns are model-only (no migration creates them); add them
+        // BEFORE any seeding query below hits a !IsDeleted query filter, or a fresh
+        // database crashes with "no such column: IsDeleted".
+        EnsureSoftDeleteColumns(db);
 
         if (!db.Users.Any())
         {
@@ -736,6 +740,59 @@ public static class DbInitializer
         {
             conn.Close();
         }
+    }
+
+    /// <summary>
+    /// Adds the soft-delete columns (IsDeleted, DeletedAtUtc) to every table whose
+    /// entity carries a `!IsDeleted` query filter (see AppDbContext). These columns
+    /// are model-only — no migration reliably creates them — so on a fresh database
+    /// the query filters would reference a non-existent column and startup would
+    /// crash with "no such column: IsDeleted". Idempotent: a no-op where the columns
+    /// (or table) already exist. Must run before any seeding query touches these tables.
+    /// </summary>
+    private static void EnsureSoftDeleteColumns(AppDbContext db)
+    {
+        var tables = new[] { "Projects", "Installations", "Documents", "ProjectAssets", "BomImportRuns" };
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            foreach (var table in tables)
+            {
+                if (!TableExists(conn, table)) continue;
+                // Full soft-delete cluster carried by these entities (Entities.cs):
+                AddColumnIfMissing(conn, table, "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+                AddColumnIfMissing(conn, table, "DeletedAtUtc", "TEXT NULL");
+                AddColumnIfMissing(conn, table, "DeletedByUserId", "TEXT NULL");
+                AddColumnIfMissing(conn, table, "DeleteReason", "TEXT NULL");
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static bool TableExists(System.Data.Common.DbConnection conn, string table)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$name";
+        var p = cmd.CreateParameter();
+        p.ParameterName = "$name";
+        p.Value = table;
+        cmd.Parameters.Add(p);
+        return Convert.ToInt64(cmd.ExecuteScalar()) != 0;
+    }
+
+    private static void AddColumnIfMissing(System.Data.Common.DbConnection conn, string table, string column, string columnDef)
+    {
+        using var check = conn.CreateCommand();
+        check.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{column}'";
+        if (Convert.ToInt64(check.ExecuteScalar()) != 0) return;
+
+        using var alter = conn.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {columnDef}";
+        alter.ExecuteNonQuery();
     }
 
     /// <summary>

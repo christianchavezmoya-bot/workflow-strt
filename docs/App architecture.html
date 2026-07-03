@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Commtrac — Full System Architecture</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Mono:wght@400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+tailwind.config={theme:{extend:{fontFamily:{heading:['Syne','sans-serif'],mono:['DM Mono','monospace'],body:['Inter','sans-serif']},colors:{bg:'#070d10',surface:'#0c1a20',surface2:'#112530',surface3:'#1a3040',bdr:'#1e3a4a',bdr2:'#2a4a5e',tx:'#d8eef5',tx2:'#7aabc0',tx3:'#3d6b7a',ac:'#00c8ff',ac2:'#00ff9d',ac3:'#ff6b35',ac4:'#b06cff',ac5:'#ffb830'}}}}
+</script>
+<style>
+:root{--bg:#070d10;--surface:#0c1a20;--surface2:#112530;--surface3:#1a3040;--border:#1e3a4a;--border2:#2a4a5e;--text:#d8eef5;--text2:#7aabc0;--text3:#3d6b7a;--accent:#00c8ff;--accent2:#00ff9d;--accent3:#ff6b35;--accent4:#b06cff;--accent5:#ffb830}
+*{scrollbar-width:thin;scrollbar-color:var(--border) var(--bg)}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif}
+h1,h2,h3,h4,.font-heading{font-family:'Syne',sans-serif}
+.font-mono,.mono{font-family:'DM Mono',monospace}
+body::before{content:'';position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:.04;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.hero-glow{position:absolute;top:-120px;right:-120px;width:500px;height:500px;background:radial-gradient(circle,rgba(0,200,255,.08) 0%,transparent 70%);pointer-events:none}
+.nav-link{transition:all 150ms;border-left:2px solid transparent;color:var(--text2)}
+.nav-link:hover,.nav-link.active{color:var(--accent);background:rgba(0,200,255,.05);border-left-color:var(--accent)}
+.nav-group-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.card{position:relative;transition:all 250ms ease;overflow:hidden;border:1px solid var(--border)}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent4));opacity:0;transition:opacity 250ms;z-index:1}
+.card:hover{border-color:var(--border2);box-shadow:0 0 20px rgba(0,200,255,.12)}
+.card:hover::before{opacity:1}
+.b-cyan{color:#00c8ff;border:1px solid rgba(0,200,255,.25);background:rgba(0,200,255,.06)}
+.b-green{color:#00ff9d;border:1px solid rgba(0,255,157,.25);background:rgba(0,255,157,.06)}
+.b-orange{color:#ff6b35;border:1px solid rgba(255,107,53,.25);background:rgba(255,107,53,.06)}
+.b-purple{color:#b06cff;border:1px solid rgba(176,108,255,.25);background:rgba(176,108,255,.06)}
+.b-amber{color:#ffb830;border:1px solid rgba(255,184,48,.25);background:rgba(255,184,48,.06)}
+.b-red{color:#ff4d6a;border:1px solid rgba(255,77,106,.25);background:rgba(255,77,106,.06)}
+.tab-b{border-bottom:2px solid transparent;color:var(--text2);transition:all 150ms;cursor:pointer;background:none;padding:8px 12px}
+.tab-b:hover{color:var(--text)}
+.tab-b.active{color:var(--accent);border-bottom-color:var(--accent)}
+.dt tr:hover td{background:rgba(0,200,255,.03);color:var(--text)}
+.dt th{font-family:'DM Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);background:var(--surface2)}
+.collapse-body{max-height:0;overflow:hidden;transition:max-height 350ms ease}
+.collapse-body.open{max-height:5000px}
+.sec-divider{height:1px;background:linear-gradient(90deg,var(--border),transparent)}
+.glow-c{box-shadow:0 0 20px rgba(0,200,255,.15)}
+.glow-g{box-shadow:0 0 20px rgba(0,255,157,.15)}
+.glow-o{box-shadow:0 0 20px rgba(255,107,53,.15)}
+.glow-p{box-shadow:0 0 20px rgba(176,108,255,.15)}
+.glow-a{box-shadow:0 0 20px rgba(255,184,48,.15)}
+@media(max-width:900px){.sidebar-el{transform:translateX(-100%)!important}.main-el{margin-left:0!important}.mob-show{display:block!important}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+.anim-in{animation:fadeUp .4s ease-out both}
+.toast{animation:tIn .2s ease-out,tO .2s ease-in 2.5s forwards}
+@keyframes tIn{from{transform:translateY(14px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes tO{to{opacity:0;pointer-events:none}}
+@media print{.no-print{display:none!important}.main-el{margin-left:0!important}}
+</style>
+</head>
+<body class="antialiased">
+<div id="toast-box" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2"></div>
+<header class="fixed top-0 left-0 right-0 h-14 bg-surface/95 backdrop-blur-xl border-b border-bdr z-40 no-print">
+<div class="h-full flex items-center justify-between px-4 lg:px-6">
+<div class="flex items-center gap-3">
+<button onclick="toggleSidebar()" class="p-2 hover:bg-surface3 rounded-lg mob-show" style="display:none"><i data-lucide="menu" class="w-4 h-4 text-tx2"></i></button>
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-gradient-to-br from-ac to-ac4 flex items-center justify-center"><i data-lucide="layers" class="w-4 h-4 text-bg"></i></div>
+<div><h1 class="text-xs font-heading font-bold leading-tight text-tx">Commtrac Architecture</h1><p class="text-[9px] text-tx3 uppercase tracking-widest font-mono">25 tables · 50+ apis · v0.1.0</p></div>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<div class="relative hidden md:block">
+<i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-tx3"></i>
+<input id="searchInput" type="text" placeholder="Search..." class="w-52 lg:w-64 pl-8 pr-3 py-1.5 bg-surface2 border border-bdr rounded-lg text-xs font-body focus:outline-none focus:border-ac/50 placeholder:text-tx3 text-tx" oninput="doSearch(this.value)">
+</div>
+<button onclick="downloadPage()" class="flex items-center gap-1.5 px-3 py-1.5 border border-bdr2 bg-transparent text-tx2 rounded-lg text-xs font-mono hover:border-ac hover:text-ac hover:bg-ac/5 transition-all"><i data-lucide="download" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">Download</span></button>
+</div>
+</div>
+</header>
+<aside id="sidebar" class="sidebar-el fixed top-14 left-0 bottom-0 w-[240px] bg-surface border-r border-bdr overflow-y-auto z-30 transition-transform duration-300 no-print">
+<nav class="py-4 px-2" id="sidebarNav"></nav>
+</aside>
+<div id="overlay" class="fixed inset-0 bg-black/60 z-20 hidden" onclick="toggleSidebar()"></div>
+<main class="main-el ml-[240px] pt-14 min-h-screen">
+<div class="max-w-[1200px] mx-auto px-[60px] py-10 relative" id="root"><div class="hero-glow"></div></div>
+</main>
+<button id="btt" onclick="scrollTo({top:0,behavior:'smooth'})" class="fixed bottom-6 left-[calc(240px+1.5rem)] w-8 h-8 bg-surface border border-bdr rounded-full items-center justify-center hover:border-ac/40 transition-all opacity-0 pointer-events-none z-30 no-print" style="display:none"><i data-lucide="arrow-up" class="w-3.5 h-3.5 text-tx3"></i></button>
+
+<script>
+var CC={cyan:'#00c8ff',green:'#00ff9d',orange:'#ff6b35',purple:'#b06cff',amber:'#ffb830',red:'#ff4d6a'};
+var CB={cyan:'b-cyan',green:'b-green',orange:'b-orange',purple:'b-purple',amber:'b-amber',red:'b-red'};
+var CG={cyan:'glow-c',green:'glow-g',orange:'glow-o',purple:'glow-p',amber:'glow-a'};
+
+var NAV=[
+  {id:'overview',icon:'rocket',label:'Overview',color:'cyan'},
+  {id:'techstack',icon:'cpu',label:'Tech Stack',color:'cyan'},
+  {id:'routes',icon:'route',label:'Routes & Pages',color:'green'},
+  {id:'navigation',icon:'layout',label:'Navigation',color:'green'},
+  {id:'controllers',icon:'server',label:'API Controllers',color:'orange'},
+  {id:'schema',icon:'database',label:'Database Schema',color:'purple'},
+  {id:'relationships',icon:'git-branch',label:'Relationships',color:'purple'},
+  {id:'roles',icon:'shield',label:'Roles & Perms',color:'amber'},
+  {id:'auth',icon:'lock',label:'Auth Flow',color:'red'},
+  {id:'directories',icon:'folder-tree',label:'Code Structure',color:'cyan'},
+  {id:'integrations',icon:'plug',label:'Integrations',color:'orange'},
+  {id:'stats',icon:'bar-chart-3',label:'Stats',color:'green'}
+];
+
+var ROUTES=[
+  {path:'/login',comp:'Login',auth:'Public',notes:''},
+  {path:'/reset-password',comp:'ResetPassword',auth:'Public',notes:''},
+  {path:'/sign/:tokenId',comp:'ExternalSignPage',auth:'Public',notes:'External signing'},
+  {path:'/',comp:'Dashboard',auth:'Required',notes:'Main dashboard'},
+  {path:'/projects',comp:'ProjectsPage',auth:'Required',notes:'Project list'},
+  {path:'/projects/new',comp:'ProjectForm',auth:'Required',notes:'Create project'},
+  {path:'/projects/:id',comp:'ProjectDetail',auth:'Required',notes:'Project detail'},
+  {path:'/projects/:id/edit',comp:'ProjectForm',auth:'Required',notes:'Edit project'},
+  {path:'/projects/:id/inspections',comp:'ProjectInspectionsRedirect',auth:'Required',notes:'Redirect'},
+  {path:'/projects/:id/assets/:assetId/inspections',comp:'ProjectAssetInspectionPage',auth:'Required',notes:'Asset inspections'},
+  {path:'/installations/assets',comp:'AssetInstallationPage',auth:'Required',notes:'Asset registry'},
+  {path:'/work-instructions',comp:'WorkInstructions',auth:'Required',notes:'Work instructions'},
+  {path:'/documents',comp:'DocumentsPage',auth:'Required',notes:'Document library'},
+  {path:'/tips',comp:'TipsAndTricksPage',auth:'Required',notes:'Tips & tricks'},
+  {path:'/admin',comp:'UserManagement',auth:'Required',notes:'User admin'},
+  {path:'/admin/customers/:customerId/sites',comp:'CustomerSites',auth:'Required',notes:'Customer sites'},
+  {path:'/admin/asset-registry',comp:'Navigate',auth:'Required',notes:'Redirect'},
+  {path:'/issues',comp:'IssuesBoard',auth:'Required',notes:'Issue tracker'},
+  {path:'/settings',comp:'SettingsRoute',auth:'Required',notes:'Permission-gated'},
+  {path:'/profile',comp:'ProfileWizard',auth:'Required',notes:'User profile'},
+  {path:'/admin/bom-project',comp:'BomDashboard',auth:'Required',notes:'BOM module'},
+  {path:'/admin/bom-project/upload',comp:'BomUploadPage',auth:'Required',notes:'BOM upload'},
+  {path:'/admin/bom-project/imports/:id/mapping',comp:'BomMappingPage',auth:'Required',notes:'BOM mapping'},
+  {path:'/admin/bom-project/imports/:id/classification',comp:'BomClassificationPage',auth:'Required',notes:'BOM classify'},
+  {path:'/admin/bom-project/imports/:id/compare',comp:'Navigate',auth:'Required',notes:'Redirect'},
+  {path:'/admin/bom-project/imports/:id/preview',comp:'Navigate',auth:'Required',notes:'Redirect'},
+  {path:'/admin/bom-project/imports/:id/commit',comp:'BomCommitPage',auth:'Required',notes:'BOM commit'},
+  {path:'/mobile-upload',comp:'MobileUploadPage',auth:'Required',notes:'Standalone upload'},
+  {path:'*',comp:'Navigate',auth:'Required',notes:'Catch-all redirect'}
+];
+
+var DESK_NAV=[{label:'Dashboard',path:'/'},{label:'Projects',path:'/projects'},{label:'Issues Board',path:'/issues'},{label:'Assets',path:'/installations/assets'},{label:'Work Instructions',path:'/work-instructions'},{label:'Documents',path:'/documents'},{label:'Tips & Tricks',path:'/tips'},{label:'BOM to Project',path:'/admin/bom-project'},{label:'Admin',path:'/admin'},{label:'Settings',path:'/settings'},{label:'Profile',path:'/profile'}];
+var MOB_TABS=[{label:'Home',path:'/'},{label:'Projects',path:'/projects'},{label:'Assets',path:'/installations/assets'},{label:'Issues',path:'/issues'},{label:'More',path:'__more__'}];
+var MOB_MORE=[{label:'Work Instructions',path:'/work-instructions'},{label:'Documents',path:'/documents'},{label:'Tips & Tricks',path:'/tips'},{label:'Profile',path:'/profile'}];
+
+var CTRL_AREAS={
+  'Core':{color:'cyan',items:['Auth','Dashboard','Health','Issues','ProjectAssets','Projects','Users']},
+  'Workflow':{color:'purple',items:['AssetWorkflowAssignments','AssetWorkflowRuns','PublicSign','SignatureEvents','SignatureTokens','WorkflowConfigFeatures','WorkflowConfigs','WorkflowTemplates','WorkflowTypes','WorkInstructions','WorkInstructionTemplates','WorkOrders']},
+  'Admin / Config':{color:'orange',items:['Admin','AdminTabRows','AdminTabs','BrandSettings','CustomFields','FieldDefinitions','FieldValues','Offices','RoleConfigs','Settings','TableConfigs']},
+  'Content / Sync':{color:'green',items:['AssetDocumentLinks','AssetDocuments','Documents','InspectionImports','MobileUpload','Notifications','Search','Sse']},
+  'Additional':{color:'amber',items:['BomImportRuns','Customers','DispatchOrders','Divisions','Features','FeatureDependencies','Inspections','Installations','InstallationTabRows','InstallationTabs','Products','ProjectContacts','ProjectDeliveryProfiles','ProjectInboundItems','QuickbaseDiscovery','QuickbaseGoodsMovements','Sites']}
+};
+
+var TABLES={
+  Users:{cols:['Id TEXT PK','Email TEXT','FullName TEXT','Role TEXT','Office TEXT','IsActive INT','Is2faEnabled INT','IsFirstLogin INT','PasswordHash TEXT','TotpSecret TEXT','RecoveryCodesJson TEXT','ResetToken TEXT','ResetTokenExpiresUtc TEXT','PasswordChangedAt TEXT'],idx:[],cat:'Auth'},
+  Sessions:{cols:['Id TEXT PK','UserId TEXT → Users.Id','UserEmail TEXT','CreatedAt TEXT','LastActiveAt TEXT','IsRevoked INT','IpAddress TEXT','UserAgent TEXT'],idx:['UserId'],cat:'Auth'},
+  AuditLogs:{cols:['Id TEXT PK','UserId TEXT → Users.Id','UserEmail TEXT','Action TEXT','Details TEXT','Timestamp TEXT','IpAddress TEXT'],idx:['Timestamp','UserId'],cat:'Auth'},
+  RoleConfigs:{cols:['Id INT PK','ConfigJson TEXT'],idx:[],cat:'Auth'},
+  Customers:{cols:['Id TEXT PK','CustomerId TEXT','Name TEXT','Office TEXT','Industry TEXT','Logo TEXT','LogoShape TEXT','LogoSize INT','PhotoScale INT'],idx:[],cat:'Admin'},
+  Sites:{cols:['Id TEXT PK','CustomerId TEXT → Customers.Id','Name TEXT','Address TEXT','City TEXT','State TEXT','ZipCode TEXT','Country TEXT','ContactName TEXT','ContactEmail TEXT','ContactPhone TEXT','Notes TEXT','CreatedAt TEXT'],idx:['CustomerId'],cat:'Admin'},
+  Offices:{cols:['Id TEXT PK','City TEXT','State TEXT','Country TEXT','Lat REAL','Lng REAL'],idx:[],cat:'Admin'},
+  Products:{cols:['Id TEXT PK','Name TEXT','Description TEXT','FeaturesJson TEXT'],idx:[],cat:'Admin'},
+  Projects:{cols:['Id TEXT PK','JobNumber TEXT','CustomerName TEXT','CustomerId TEXT → Customers.Id','SiteId TEXT → Sites.Id','ProductIds TEXT → Products.Id (JSON)','ProjectManager TEXT → Users.FullName (weak)','Description TEXT','ProjectType TEXT','Status TEXT','Office TEXT','StartDate TEXT','FinishDate TEXT','Region TEXT','ProbabilityStage TEXT','ApprovalDecision TEXT','ContractValue TEXT','IsInstallationProject INT','InstallationMode TEXT','ProductFeatureValuesJson TEXT'],idx:[],cat:'Operational'},
+  Installations:{cols:['Id TEXT PK','ProjectId TEXT → Projects.Id','InstallationNumber TEXT','InstallationId TEXT','InstallationName TEXT','AssignedTeam TEXT','AssignedUsers TEXT → Users.Id (JSON)','Office TEXT','SiteLocation TEXT','MachineType TEXT','ScheduledStart TEXT','ScheduledEnd TEXT','ActualStart TEXT','ActualFinish TEXT','Status TEXT','Pm1Serial TEXT','Pm2Serial TEXT','Pm3Serial TEXT','Pm4Serial TEXT','InstallerNotes TEXT','SiteContactName TEXT','SiteContactEmail TEXT','SiteContactPhone TEXT','CustomerSignOffContact TEXT','CustomerSignOffDate TEXT','CustomFieldsJson TEXT'],idx:['ProjectId'],cat:'Execution'},
+  Inspections:{cols:['Id TEXT PK','InstallationId TEXT → Installations.Id','Name TEXT','Inspector TEXT','ScheduledDate TEXT','Status TEXT','PhotoCount INT'],idx:['InstallationId'],cat:'Execution'},
+  InspectionPhotos:{cols:['Id TEXT PK','InspectionId TEXT → Inspections.Id','FileName TEXT','FilePath TEXT','ContentType TEXT','FileSize INT','UploadedAt TEXT'],idx:['InspectionId'],cat:'Execution'},
+  Issues:{cols:['Id TEXT PK','InstallationId TEXT → Installations.Id','Title TEXT','Description TEXT','Priority TEXT','Status TEXT','Owner TEXT'],idx:['InstallationId'],cat:'Execution'},
+  Assets:{cols:['Id TEXT PK','MachineId TEXT','MachineType TEXT','SerialNumber TEXT','PmCount TEXT','Seq INT','Comments TEXT'],idx:[],cat:'Execution'},
+  Documents:{cols:['Id TEXT PK','Name TEXT','Type TEXT','LinkedTo TEXT','FilePath TEXT','ContentType TEXT','FileSize INT','UploadedAt TEXT'],idx:[],cat:'Execution'},
+  FieldDefinitions:{cols:['Id TEXT PK','Name TEXT','FieldType TEXT','LinkToFieldId TEXT','ActionType TEXT','IsActive INT','SortOrder INT','TablesJson TEXT'],idx:[],cat:'Config'},
+  FieldValues:{cols:['Id TEXT PK','FieldDefinitionId TEXT → FieldDefinitions.Id','TableName TEXT','EntityId TEXT','Value TEXT','UpdatedAt TEXT'],idx:['FieldDefinitionId','TableName,EntityId'],cat:'Config'},
+  CustomFieldDefinitions:{cols:['Id TEXT PK','Name TEXT','FieldType TEXT','Scope TEXT','Product TEXT','IsActive INT','SortOrder INT','OptionsJson TEXT'],idx:[],cat:'Config'},
+  TableConfigs:{cols:['Id INT PK','TableName TEXT UNIQUE','BaseFieldMetaJson TEXT','BaseFieldNamesJson TEXT','OrderJson TEXT','HiddenJson TEXT'],idx:['TableName'],cat:'Config'},
+  AdminTabs:{cols:['Id TEXT PK','Label TEXT','Type TEXT','Position INT','ColumnsJson TEXT','ConfigJson TEXT','FieldIdsJson TEXT','PrimaryActionLabel TEXT'],idx:[],cat:'Config'},
+  AdminTabRows:{cols:['Id TEXT PK','TabId TEXT → AdminTabs.Id','Position INT','DataJson TEXT'],idx:[],cat:'Config'},
+  InstallationTabs:{cols:['Id TEXT PK','Label TEXT','Type TEXT','Position INT'],idx:[],cat:'Config'},
+  InstallationTabRows:{cols:['Id TEXT PK','TabId TEXT → InstallationTabs.Id','Position INT','DataJson TEXT'],idx:[],cat:'Config'},
+  NotificationSettings:{cols:['Id INT PK','SmtpHost TEXT','SmtpPort INT','SmtpUser TEXT','SmtpPass TEXT','SmtpFrom TEXT','SmtpUseSsl INT','SmsProvider TEXT','SmsApiKey TEXT','SmsSender TEXT','FrontendBaseUrl TEXT'],idx:[],cat:'Config'},
+  QuickbaseSettings:{cols:['Id INT PK','Enabled INT','RealmHostname TEXT','UserToken TEXT','ProjectsTableId TEXT','ProjectsFieldMapJson TEXT','InstallationsTableId TEXT','InstallationsFieldMapJson TEXT'],idx:[],cat:'Config'}
+};
+
+var RELS=[
+  {from:'Projects',to:'Customers',col:'CustomerId',type:'N:1',color:'cyan'},
+  {from:'Projects',to:'Sites',col:'SiteId',type:'N:1 (opt)',color:'green'},
+  {from:'Projects',to:'Products',col:'ProductIds',type:'N:N (JSON)',color:'orange'},
+  {from:'Projects',to:'Users',col:'ProjectManager',type:'Weak (text)',color:'amber'},
+  {from:'Installations',to:'Projects',col:'ProjectId',type:'N:1',color:'cyan'},
+  {from:'Installations',to:'Users',col:'AssignedUsers',type:'N:N (JSON)',color:'orange'},
+  {from:'Inspections',to:'Installations',col:'InstallationId',type:'N:1',color:'cyan'},
+  {from:'Issues',to:'Installations',col:'InstallationId',type:'N:1',color:'cyan'},
+  {from:'InspectionPhotos',to:'Inspections',col:'InspectionId',type:'N:1',color:'cyan'},
+  {from:'Sites',to:'Customers',col:'CustomerId',type:'N:1',color:'green'},
+  {from:'FieldValues',to:'FieldDefinitions',col:'FieldDefinitionId',type:'N:1',color:'purple'},
+  {from:'AdminTabRows',to:'AdminTabs',col:'TabId',type:'N:1',color:'purple'},
+  {from:'InstallationTabRows',to:'InstallationTabs',col:'TabId',type:'N:1',color:'purple'},
+  {from:'Sessions',to:'Users',col:'UserId',type:'N:1',color:'cyan'},
+  {from:'AuditLogs',to:'Users',col:'UserId',type:'N:1',color:'cyan'}
+];
+
+var PERMS=['viewOnly','createDeleteTables','createUsers','editFields','modifyData','editForms'];
+var DIRS=[{path:'src/app',desc:'App bootstrap & route table'},{path:'src/components/layout',desc:'Shared shell, sidebar, topbar, mobile tabs'},{path:'src/features',desc:'Page-level feature modules'},{path:'src/services',desc:'API/domain service layer'},{path:'src/modules/bom-project',desc:'Feature-flagged BOM workflow'},{path:'server/Commtrac.Api',desc:'ASP.NET Core API, controllers, EF/SQLite'},{path:'docs',desc:'Generated architecture docs'}];
+var CAT_C={Auth:'cyan',Admin:'green',Operational:'orange',Execution:'purple',Config:'amber'};
+
+// FIX: use string concat, never nested backticks
+function ic(n, cls, clr) {
+  cls = cls || 'w-4 h-4';
+  var s = clr ? ' style="color:' + clr + '"' : '';
+  return '<i data-lucide="' + n + '" class="' + cls + '"' + s + '></i>';
+}
+function badge(text, cls) {
+  return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono ' + cls + '">' + text + '</span>';
+}
+function dot(c) {
+  return '<span class="nav-group-dot" style="background:' + (CC[c] || CC.cyan) + '"></span>';
+}
+function sec(id, title, sub, c) {
+  c = c || 'cyan';
+  return '<section id="' + id + '" class="mb-[52px] scroll-mt-20 anim-in">' +
+    '<div class="sec-divider mb-[52px]"></div>' +
+    '<div class="flex items-center gap-3 mb-8">' +
+    dot(c) +
+    '<div><h2 class="font-heading font-bold text-[22px] leading-tight text-tx">' + title + '</h2>' +
+    (sub ? '<p class="text-xs text-tx3 font-mono mt-1">' + sub + '</p>' : '') +
+    '</div></div></section>';
+}
+
+function buildSidebar() {
+  var groups = [['overview','techstack'],['routes','navigation'],['controllers'],['schema','relationships'],['roles','auth'],['directories','integrations','stats']];
+  var h = '<div class="mb-4 px-3"><p class="text-[9px] font-mono text-tx3 uppercase tracking-widest">System Map</p></div>';
+  groups.forEach(function(g) {
+    h += '<div class="mb-3">';
+    g.forEach(function(id) {
+      var n = NAV.find(function(x){ return x.id === id; });
+      h += '<a href="#' + n.id + '" class="nav-link flex items-center gap-2.5 px-3 py-[7px] text-[12px] rounded-r-lg cursor-pointer">' +
+        dot(n.color) + '<span class="font-body">' + n.label + '</span></a>';
+    });
+    h += '</div>';
+  });
+  document.getElementById('sidebarNav').innerHTML = h;
+}
+
+function buildPage() {
+  var h = '';
+
+  // ── OVERVIEW ──
+  h += sec('overview', 'System Overview', 'workflow-strt · Field Operations Platform', 'cyan');
+  h += '<div class="grid gap-4 mb-8" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">';
+  h += '<div class="card bg-surface rounded-xl p-5 glow-c"><div class="w-11 h-11 rounded-lg bg-gradient-to-br from-ac to-ac4 flex items-center justify-center mb-3">' + ic('globe','w-5 h-5') + '</div><h3 class="font-heading font-semibold text-sm mb-1">Web Browser</h3><p class="text-[13px] text-tx2 font-body">React + Vite</p><p class="text-[10px] text-tx3 mt-0.5 font-body">commtrac-project-studio 0.1.0</p><p class="text-[10px] text-ac mt-2 font-mono">http://&lt;host&gt;:5173</p></div>';
+  h += '<div class="card bg-surface rounded-xl p-5 glow-g"><div class="w-11 h-11 rounded-lg bg-gradient-to-br from-ac2 to-green-600 flex items-center justify-center mb-3">' + ic('smartphone','w-5 h-5') + '</div><h3 class="font-heading font-semibold text-sm mb-1">Mobile Apps</h3><p class="text-[13px] text-tx2 font-body">Capacitor (Android + iOS)</p><p class="text-[10px] text-tx3 mt-0.5 font-body">Same React bundle</p><p class="text-[10px] text-ac2 mt-2 font-mono">android/ &amp; ios/</p></div>';
+  h += '<div class="card bg-surface rounded-xl p-5 glow-o"><div class="w-11 h-11 rounded-lg bg-gradient-to-br from-ac3 to-red-600 flex items-center justify-center mb-3">' + ic('server','w-5 h-5') + '</div><h3 class="font-heading font-semibold text-sm mb-1">Backend API</h3><p class="text-[13px] text-tx2 font-body">ASP.NET Core + SQLite</p><p class="text-[10px] text-tx3 mt-0.5 font-body">REST API</p><p class="text-[10px] text-ac3 mt-2 font-mono">http://0.0.0.0:4000</p></div>';
+  h += '</div>';
+
+  h += '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">';
+  var rt = [['Router','BrowserRouter','cyan'],['Vite Port','5173 strict','green'],['API Base','/api or VITE_API_BASE','orange'],['Shell','AppShell wraps auth','purple']];
+  for (var i = 0; i < rt.length; i++) {
+    h += '<div class="bg-surface border border-bdr rounded-lg p-3"><p class="text-[9px] text-tx3 uppercase tracking-wider font-mono mb-1">' + rt[i][0] + '</p><p class="text-xs font-mono" style="color:' + CC[rt[i][2]] + '">' + rt[i][1] + '</p></div>';
+  }
+  h += '</div>';
+
+  h += '<div class="bg-surface border border-bdr rounded-xl p-5"><h3 class="font-heading font-semibold text-sm mb-3 flex items-center gap-2">' + ic('lock','w-4 h-4',CC.red) + '<span class="text-tx">Auth &amp; Boot Flow</span></h3><div class="flex flex-wrap gap-2 items-center text-xs font-body"><span class="b-red rounded-lg px-3 py-1.5">Biometric/PIN lock on native</span><span class="text-tx3">' + ic('arrow-right','w-3 h-3') + '</span><span class="b-orange rounded-lg px-3 py-1.5">No session? → Login</span><span class="text-tx3">' + ic('arrow-right','w-3 h-3') + '</span><span class="b-green rounded-lg px-3 py-1.5">Session valid → AppShell</span><span class="text-tx3">' + ic('arrow-right','w-3 h-3') + '</span><span class="b-cyan rounded-lg px-3 py-1.5">BrowserRouter renders</span></div></div>';
+
+  // ── TECH STACK ──
+  h += sec('techstack', 'Technology Stack', 'Frameworks, libraries, and infrastructure', 'cyan');
+  h += '<div class="grid md:grid-cols-2 gap-4">';
+  var fe = [['React','UI Framework','purple'],['Vite','Build tool & dev server','amber'],['React Router (BrowserRouter)','Client-side routing','cyan'],['Tailwind CSS','Utility-first styling','cyan'],['Lucide Icons','Icon library','green'],['Capacitor','Native mobile wrappers','orange']];
+  var be = [['ASP.NET Core','Web API framework','purple'],['SQLite','Embedded database','amber'],['Entity Framework Core','ORM / migrations','cyan'],['JWT + 2FA/TOTP','Authentication','red'],['SSE (Server-Sent Events)','Real-time push','green'],['SMTP + SMS','Notifications','cyan']];
+  h += '<div class="card bg-surface rounded-xl p-5"><h3 class="font-heading font-semibold text-sm text-ac mb-4 flex items-center gap-2">' + ic('monitor','w-4 h-4') + 'Frontend</h3><div class="space-y-0">';
+  for (i = 0; i < fe.length; i++) {
+    h += '<div class="flex items-center justify-between py-2 border-b border-bdr/50 last:border-0"><span class="text-[13px] font-body text-tx">' + fe[i][0] + '</span><span class="text-[10px] font-mono ' + CB[fe[i][2]] + ' rounded px-2 py-0.5">' + fe[i][1] + '</span></div>';
+  }
+  h += '</div></div>';
+  h += '<div class="card bg-surface rounded-xl p-5"><h3 class="font-heading font-semibold text-sm text-ac2 mb-4 flex items-center gap-2">' + ic('server','w-4 h-4') + 'Backend</h3><div class="space-y-0">';
+  for (i = 0; i < be.length; i++) {
+    h += '<div class="flex items-center justify-between py-2 border-b border-bdr/50 last:border-0"><span class="text-[13px] font-body text-tx">' + be[i][0] + '</span><span class="text-[10px] font-mono ' + CB[be[i][2]] + ' rounded px-2 py-0.5">' + be[i][1] + '</span></div>';
+  }
+  h += '</div></div></div>';
+
+  // ── ROUTES ──
+  h += sec('routes', 'Routes & Pages', ROUTES.length + ' routes · 3 public · ' + (ROUTES.length - 3) + ' authenticated', 'green');
+  h += '<div class="card bg-surface rounded-xl overflow-hidden"><div class="overflow-x-auto"><table class="w-full dt"><thead><tr><th class="text-left p-3">Route</th><th class="text-left p-3">Component</th><th class="text-left p-3">Auth</th><th class="text-left p-3">Notes</th></tr></thead><tbody>';
+  for (i = 0; i < ROUTES.length; i++) {
+    var r = ROUTES[i];
+    var pub = r.auth === 'Public';
+    var cls = pub ? 'text-ac2' : (r.path.indexOf('bom') >= 0 ? 'text-ac3' : 'text-tx2');
+    h += '<tr class="border-b border-bdr/50"><td class="p-3 font-mono text-[11px] ' + cls + '">' + r.path + '</td><td class="p-3 text-[11px] text-tx3 font-body">' + r.comp + '</td><td class="p-3">' + badge(r.auth, pub ? 'b-green' : 'b-cyan') + '</td><td class="p-3 text-[11px] text-tx3 font-body">' + (r.notes || '—') + '</td></tr>';
+  }
+  h += '</tbody></table></div></div>';
+
+  // ── NAVIGATION ──
+  h += sec('navigation', 'Navigation Map', 'Desktop sidebar vs Mobile bottom tabs', 'green');
+  h += '<div class="grid md:grid-cols-2 gap-4">';
+  h += '<div class="card bg-surface rounded-xl p-5"><h3 class="font-heading font-semibold text-sm text-ac mb-4 flex items-center gap-2">' + ic('monitor','w-4 h-4') + 'Desktop — Left Sidebar</h3><div class="space-y-0.5">';
+  for (i = 0; i < DESK_NAV.length; i++) {
+    var active = i === 0;
+    h += '<div class="flex items-center gap-3 py-[6px] px-2 rounded-lg ' + (active ? 'bg-ac/5 border border-ac/10' : 'hover:bg-surface3') + '"><span class="text-[10px] text-tx3 w-4 font-mono">' + (i + 1) + '</span><span class="text-[13px] font-body ' + (active ? 'text-ac' : 'text-tx2') + '">' + DESK_NAV[i].label + '</span><span class="text-[10px] text-tx3 font-mono ml-auto">' + DESK_NAV[i].path + '</span></div>';
+  }
+  h += '</div></div>';
+  h += '<div>';
+  h += '<div class="card bg-surface rounded-xl p-5 mb-4"><h3 class="font-heading font-semibold text-sm text-ac2 mb-4 flex items-center gap-2">' + ic('smartphone','w-4 h-4') + 'Mobile — Bottom Tabs</h3><div class="flex gap-2 justify-center">';
+  var mIcons = ['home','folder','box','alert-circle','more-horizontal'];
+  for (i = 0; i < MOB_TABS.length; i++) {
+    var act = i === 0;
+    h += '<div class="flex flex-col items-center gap-1 px-3 py-2 rounded-xl ' + (act ? 'bg-ac2/5 border border-ac2/20' : 'bg-surface3/50') + '">' + ic(mIcons[i], 'w-5 h-5', act ? CC.green : CC.tx3) + '<span class="text-[10px] font-body ' + (act ? 'text-ac2' : 'text-tx3') + '">' + MOB_TABS[i].label + '</span></div>';
+  }
+  h += '</div></div>';
+  h += '<div class="card bg-surface rounded-xl p-5"><h3 class="font-heading font-semibold text-sm text-ac mb-3 flex items-center gap-2">' + ic('menu','w-4 h-4') + 'Mobile — "More" Drawer</h3><div class="space-y-0.5">';
+  for (i = 0; i < MOB_MORE.length; i++) {
+    h += '<div class="flex items-center justify-between py-[6px] px-2 rounded hover:bg-surface3"><span class="text-[13px] font-body text-tx2">' + MOB_MORE[i].label + '</span><span class="text-[10px] text-tx3 font-mono">' + MOB_MORE[i].path + '</span></div>';
+  }
+  h += '</div></div></div></div>';
+
+  // ── CONTROLLERS ──
+  var totalCtrl = 0;
+  for (var ak in CTRL_AREAS) totalCtrl += CTRL_AREAS[ak].items.length;
+  h += sec('controllers', 'API Controllers', totalCtrl + ' controllers across 5 areas', 'orange');
+  h += '<div class="space-y-3">';
+  for (ak in CTRL_AREAS) {
+    var data = CTRL_AREAS[ak];
+    var k = 'c' + ak.replace(/[^a-z]/gi, '');
+    h += '<div class="card bg-surface rounded-xl overflow-hidden"><button onclick="toggleCollapse(\'' + k + '\')" class="w-full p-4 flex items-center justify-between hover:bg-surface3 transition-colors"><div class="flex items-center gap-3">' + dot(data.color) + '<span class="font-heading font-semibold text-sm text-tx">' + ak + '</span>' + badge(data.items.length + ' controllers', CB[data.color]) + '</div>' + ic('chevron-down','w-4 h-4 text-tx3') + '</button><div id="' + k + '" class="collapse-body"><div class="px-4 pb-4 pt-1 flex flex-wrap gap-2">';
+    for (i = 0; i < data.items.length; i++) {
+      h += '<span class="text-[11px] font-mono text-tx2 bg-surface2 border border-bdr rounded-lg px-3 py-1.5">' + data.items[i] + 'Controller</span>';
+    }
+    h += '</div></div></div>';
+  }
+  h += '</div>';
+
+  // ── SCHEMA ──
+  h += sec('schema', 'Database Schema', '25 tables · 0 explicit FKs · 15 inferred relationships · SQLite', 'purple');
+  var cats = [];
+  var seenCats = {};
+  for (var tn in TABLES) {
+    if (!seenCats[TABLES[tn].cat]) { seenCats[TABLES[tn].cat] = true; cats.push(TABLES[tn].cat); }
+  }
+  h += '<div class="flex flex-wrap gap-1 mb-5 border-b border-bdr pb-3">';
+  h += '<button onclick="filterSchema(\'all\',this)" class="tab-b active text-[11px] font-mono">All (' + Object.keys(TABLES).length + ')</button>';
+  for (i = 0; i < cats.length; i++) {
+    var cnt = 0;
+    for (tn in TABLES) { if (TABLES[tn].cat === cats[i]) cnt++; }
+    h += '<button onclick="filterSchema(\'' + cats[i] + '\',this)" class="tab-b text-[11px] font-mono">' + cats[i] + ' (' + cnt + ')</button>';
+  }
+  h += '</div>';
+  h += '<div id="schemaContainer" class="space-y-2">';
+  for (tn in TABLES) {
+    var tbl = TABLES[tn];
+    var cc = CAT_C[tbl.cat] || 'cyan';
+    var sk = 's' + tn;
+    h += '<div class="schema-tbl card bg-surface rounded-xl overflow-hidden" data-cat="' + tbl.cat + '"><button onclick="toggleCollapse(\'' + sk + '\')" class="w-full p-3.5 flex items-center justify-between hover:bg-surface3 transition-colors"><div class="flex items-center gap-2.5">' + dot(cc) + '<span class="font-heading font-semibold text-[13px] text-tx">' + tn + '</span>' + badge(tbl.cat, CB[cc]) + '<span class="text-[10px] text-tx3 font-mono">' + tbl.cols.length + ' cols</span>' + (tbl.idx.length ? badge(tbl.idx.length + ' idx', 'b-purple') : '') + '</div>' + ic('chevron-down','w-3.5 h-3.5 text-tx3') + '</button><div id="' + sk + '" class="collapse-body"><div class="px-3.5 pb-3.5"><table class="w-full dt"><thead><tr><th class="text-left p-2">Column</th><th class="text-left p-2">Type / Ref</th></tr></thead><tbody>';
+    for (var ci = 0; ci < tbl.cols.length; ci++) {
+      var c = tbl.cols[ci];
+      var isPK = c.indexOf('PK') >= 0;
+      var fkM = c.match(/→\s*(.+)/);
+      h += '<tr class="border-b border-bdr/30"><td class="p-2 font-mono text-[11px] ' + (isPK ? 'text-ac2' : 'text-tx2') + '">' + (isPK ? '🔑 ' : '') + c.split(' ')[0] + '</td><td class="p-2 text-[11px]">' + (fkM ? badge(fkM[1], 'b-cyan') : '<span class="text-tx3 font-mono">' + c.split(' ').slice(1).join(' ') + '</span>') + '</td></tr>';
+    }
+    if (tbl.idx.length) {
+      h += '<tr><td colspan="2" class="p-2 text-[10px] text-tx3 font-mono">Indexes: ' + tbl.idx.map(function(x){return '[' + x + ']';}).join(', ') + '</td></tr>';
+    }
+    h += '</tbody></table></div></div></div>';
+  }
+  h += '</div>';
+
+  // ── RELATIONSHIPS ──
+  h += sec('relationships', 'Entity Relationships', '15 inferred application-level relationships (no DB-enforced FKs)', 'purple');
+  h += '<div class="card bg-surface rounded-xl p-6 mb-5"><p class="text-[10px] text-tx3 uppercase tracking-widest font-mono mb-6 text-center">Relationship Diagram</p><div class="overflow-x-auto"><div class="min-w-[640px] flex flex-col items-center gap-2">';
+  var diagMain = [['Customers','cyan'],['Projects','orange'],['Installations','purple']];
+  for (i = 0; i < diagMain.length; i++) {
+    if (i > 0) h += '<span class="text-ac5 font-mono text-xs">← N:1 ←</span>';
+    h += '<div class="border rounded-xl px-5 py-3 text-center" style="border-color:' + CC[diagMain[i][1]] + '40;background:' + CC[diagMain[i][1]] + '0a"><p class="font-heading font-semibold text-[13px]" style="color:' + CC[diagMain[i][1]] + '">' + diagMain[i][0] + '</p></div>';
+  }
+  h += '</div><div class="flex items-center gap-4 flex-wrap justify-center mt-2">';
+  h += '<div class="border rounded-lg px-4 py-2 text-center" style="border-color:' + CC.green + '40;background:' + CC.green + '0a"><p class="font-heading font-semibold text-xs" style="color:' + CC.green + '">Sites</p><p class="text-[9px] text-tx3 font-mono">← Customers</p></div>';
+  h += '<div class="border rounded-lg px-4 py-2 text-center" style="border-color:' + CC.purple + '40;background:' + CC.purple + '0a"><p class="font-heading font-semibold text-xs" style="color:' + CC.purple + '">Products</p><p class="text-[9px] text-tx3 font-mono">← Projects (N:N)</p></div>';
+  h += '</div><div class="flex items-center gap-4 flex-wrap justify-center mt-2">';
+  var diagChild = [['Inspections','cyan','Installations'],['Issues','red','Installations'],['Photos','amber','Inspections']];
+  for (i = 0; i < diagChild.length; i++) {
+    h += '<div class="border rounded-lg px-3 py-1.5 text-center" style="border-color:' + CC[diagChild[i][1]] + '40;background:' + CC[diagChild[i][1]] + '0a"><p class="font-heading font-semibold text-[11px]" style="color:' + CC[diagChild[i][1]] + '">' + diagChild[i][0] + '</p><p class="text-[9px] text-tx3 font-mono">← ' + diagChild[i][2] + '</p></div>';
+  }
+  h += '</div><div class="flex items-center gap-4 flex-wrap justify-center mt-2">';
+  var diagMisc = [['Users','tx2','← Sessions, AuditLogs, Installations'],['Assets','tx3','Standalone'],['Documents','tx3','Linked to any entity']];
+  for (i = 0; i < diagMisc.length; i++) {
+    h += '<div class="border border-bdr rounded-lg px-3 py-1.5 text-center bg-surface2"><p class="font-heading font-semibold text-[11px] text-' + diagMisc[i][1] + '">' + diagMisc[i][0] + '</p><p class="text-[9px] text-tx3 font-mono">' + diagMisc[i][2] + '</p></div>';
+  }
+  h += '</div></div></div>';
+  h += '<div class="card bg-surface rounded-xl overflow-hidden"><div class="overflow-x-auto"><table class="w-full dt"><thead><tr><th class="text-left p-3">From</th><th class="text-left p-3">Column</th><th class="text-left p-3">→ To</th><th class="text-left p-3">Cardinality</th></tr></thead><tbody>';
+  for (i = 0; i < RELS.length; i++) {
+    var rl = RELS[i];
+    h += '<tr class="border-b border-bdr/50"><td class="p-3 font-mono text-[11px]" style="color:' + CC[rl.color] + '">' + rl.from + '</td><td class="p-3 font-mono text-[11px] text-tx3">' + rl.col + '</td><td class="p-3 text-[11px] text-tx font-body">' + rl.to + '</td><td class="p-3">' + badge(rl.type, CB[rl.color]) + '</td></tr>';
+  }
+  h += '</tbody></table></div></div>';
+
+  // ── ROLES ──
+  h += sec('roles', 'Roles & Permissions', 'JSON-based role config · No normalized permission rows', 'amber');
+  h += '<div class="grid md:grid-cols-2 gap-4">';
+  h += '<div class="card bg-surface rounded-xl p-5"><h3 class="font-heading font-semibold text-sm text-ac5 mb-4 flex items-center gap-2">' + ic('shield','w-4 h-4') + 'Permission Flags</h3><p class="text-[13px] text-tx2 font-body mb-4">Stored in <code class="text-[11px] bg-surface2 border border-bdr px-1.5 py-0.5 rounded font-mono text-ac4">RoleConfigs.ConfigJson</code> as boolean flags:</p><div class="grid grid-cols-2 gap-2">';
+  for (i = 0; i < PERMS.length; i++) {
+    h += '<div class="flex items-center gap-2 bg-surface2 rounded-lg px-3 py-2 border border-bdr/50"><div class="w-3 h-3 rounded-sm border border-ac2 bg-ac2/20 flex items-center justify-center">' + ic('check','w-2 h-2',CC.green) + '</div><code class="text-[11px] font-mono text-tx2">' + PERMS[i] + '</code></div>';
+  }
+  h += '</div></div>';
+  h += '<div class="card bg-surface rounded-xl p-5"><h3 class="font-heading font-semibold text-sm text-ac3 mb-4 flex items-center gap-2">' + ic('users','w-4 h-4') + 'User Model</h3><div class="space-y-0">';
+  var um = [['Role','TEXT — role name','purple'],['Office','TEXT — office assignment','cyan'],['IsActive','INT — active/inactive','green'],['Is2faEnabled','INT — 2FA on/off','cyan'],['IsFirstLogin','INT — force profile setup','orange'],['TotpSecret','TEXT — TOTP 2FA secret','amber']];
+  for (i = 0; i < um.length; i++) {
+    h += '<div class="flex items-center justify-between py-2 border-b border-bdr/50 last:border-0"><span class="font-mono text-[11px] text-tx">' + um[i][0] + '</span><span class="text-[10px] font-mono ' + CB[um[i][2]] + ' rounded px-2 py-0.5">' + um[i][1] + '</span></div>';
+  }
+  h += '</div><div class="mt-4 p-3 bg-ac3/5 border border-ac3/20 rounded-lg"><p class="text-[11px] text-ac3 font-body flex items-center gap-1.5">' + ic('alert-triangle','w-3 h-3',CC.orange) + 'Roles are free-text strings, not FKs to a roles table</p></div></div></div>';
+
+  // ── AUTH ──
+  h += sec('auth', 'Authentication Flow', 'Session-based with JWT · 2FA/TOTP support', 'red');
+  h += '<div class="card bg-surface rounded-xl p-6"><div class="flex flex-col md:flex-row gap-6"><div class="flex-1 space-y-4">';
+  var af = [['1','User opens app','No session or grace period expired?','orange'],['2','Login screen','Email + password + optional 2FA code','red'],['3','AuthController','Validates credentials, creates session','purple'],['4','Session stored','Sessions table (JWT token)','cyan'],['5','AppShell wraps routes','BrowserRouter renders protected pages','green'],['6','Session refresh','LastActiveAt updated on each request','cyan']];
+  for (i = 0; i < af.length; i++) {
+    h += '<div class="flex items-start gap-3"><div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-heading font-bold text-bg" style="background:' + CC[af[i][3]] + '">' + af[i][0] + '</div><div><p class="text-[13px] font-body font-medium text-tx">' + af[i][1] + '</p><p class="text-[11px] text-tx3 font-body">' + af[i][2] + '</p></div></div>';
+  }
+  h += '</div><div class="w-full md:w-56 bg-surface2 rounded-xl p-4 flex-shrink-0 border border-bdr/50"><p class="text-[9px] text-tx3 uppercase tracking-widest font-mono mb-3">Session Table</p><div class="space-y-1.5 text-[11px] font-mono">';
+  var st = [['Id','TEXT PK','ac2'],['UserId','→ Users','cyan'],['CreatedAt','DATETIME','tx3'],['LastActiveAt','DATETIME','tx3'],['IsRevoked','BOOL','tx3'],['IpAddress','TEXT?','tx3'],['UserAgent','TEXT?','tx3']];
+  for (i = 0; i < st.length; i++) {
+    h += '<div class="flex justify-between"><span style="color:' + (CC[st[i][2]] || CC.cyan) + '">' + st[i][0] + '</span><span class="text-tx3">' + st[i][1] + '</span></div>';
+  }
+  h += '</div></div></div></div>';
+
+  // ── DIRECTORIES ──
+  h += sec('directories', 'Code Structure', 'Key directories and their purposes', 'cyan');
+  h += '<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">';
+  var dIcons = ['folder','layout','box','server','package','database','file-text'];
+  var dColors = ['purple','cyan','green','orange','amber','red','cyan'];
+  for (i = 0; i < DIRS.length; i++) {
+    h += '<div class="card bg-surface rounded-xl p-4 flex items-start gap-3"><div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:' + CC[dColors[i % 7]] + '10">' + ic(dIcons[i % 7], 'w-4 h-4', CC[dColors[i % 7]]) + '</div><div><p class="text-[12px] font-mono font-medium text-tx">' + DIRS[i].path + '</p><p class="text-[11px] text-tx3 font-body mt-0.5">' + DIRS[i].desc + '</p></div></div>';
+  }
+  h += '</div>';
+
+  // ── INTEGRATIONS ──
+  h += sec('integrations', 'Integrations & External Services', 'Quickbase, SMS, SMTP, SSE real-time', 'orange');
+  h += '<div class="grid gap-4" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">';
+  var ints = [['Quickbase','Realm sync via API','QuickbaseSettings table maps fields','orange','database','glow-o'],['SMTP Email','Configurable email server','Host, port, SSL, credentials','cyan','mail','glow-c'],['SMS','Provider-agnostic SMS','API key, sender, provider config','green','smartphone','glow-g'],['SSE Push','Server-Sent Events','Real-time updates via SseController','purple','radio','glow-p']];
+  for (i = 0; i < ints.length; i++) {
+    h += '<div class="card bg-surface rounded-xl p-4 ' + ints[i][5] + '"><div class="w-10 h-10 rounded-lg flex items-center justify-center mb-3" style="background:' + CC[ints[i][3]] + '10">' + ic(ints[i][4], 'w-5 h-5', CC[ints[i][3]]) + '</div><h3 class="font-heading font-semibold text-[13px] text-tx mb-1">' + ints[i][0] + '</h3><p class="text-[12px] text-tx2 font-body mb-2">' + ints[i][1] + '</p><p class="text-[10px] text-tx3 font-body">' + ints[i][2] + '</p></div>';
+  }
+  h += '</div>';
+
+  // ── STATS ──
+  h += sec('stats', 'Stats Summary', 'System at a glance', 'green');
+  var totalCols = 0, totalIdx = 0;
+  for (tn in TABLES) { totalCols += TABLES[tn].cols.length; totalIdx += TABLES[tn].idx.length; }
+  var stats = [['25','Tables','purple','database'],[''+totalCols,'Columns','cyan','columns-3'],[''+totalIdx,'Indexes','amber','hash'],['15','Relationships','purple','git-branch'],[''+totalCtrl,'Controllers','orange','server'],[''+ROUTES.length,'Routes','green','route']];
+  h += '<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">';
+  for (i = 0; i < stats.length; i++) {
+    h += '<div class="card bg-surface rounded-xl p-4 text-center ' + (CG[stats[i][2]] || '') + '">' + ic(stats[i][3], 'w-5 h-5 mx-auto mb-2', CC[stats[i][2]]) + '<p class="text-2xl font-heading font-bold" style="color:' + CC[stats[i][2]] + '">' + stats[i][0] + '</p><p class="text-[9px] text-tx3 uppercase tracking-widest font-mono">' + stats[i][1] + '</p></div>';
+  }
+  h += '</div>';
+  h += '<div class="mt-5 grid md:grid-cols-3 gap-3">';
+  var domains = [{t:'Admin Tables',items:'Users, RoleConfigs, Customers, Offices, Products',c:'green',ic:'shield'},{t:'Operational Table',items:'Projects',c:'orange',ic:'folder-kanban'},{t:'Execution Tables',items:'Installations, Inspections, InspectionPhotos, Issues, Documents, Assets',c:'purple',ic:'play'}];
+  for (i = 0; i < domains.length; i++) {
+    h += '<div class="card bg-surface rounded-xl p-4"><div class="flex items-center gap-2 mb-2">' + ic(domains[i].ic, 'w-4 h-4', CC[domains[i].c]) + '<h4 class="font-heading font-semibold text-[13px] text-tx">' + domains[i].t + '</h4></div><p class="text-[11px] text-tx3 font-body">' + domains[i].items + '</p></div>';
+  }
+  h += '</div>';
+  h += '<div class="mt-3 p-4 bg-ac5/5 border border-ac5/20 rounded-xl"><p class="text-[12px] text-ac5 font-body font-medium mb-1 flex items-center gap-2">' + ic('info','w-3.5 h-3.5',CC.amber) + 'Not present as dedicated tables</p><p class="text-[11px] text-tx3 font-body">Workflows, FormTemplates, FormInstances, InstallationComponents — may exist as code-level constructs or in future schema versions.</p></div>';
+  h += '<div class="mt-3 card bg-surface rounded-xl p-5"><h3 class="font-heading font-semibold text-sm text-ac4 mb-3 flex items-center gap-2">' + ic('lightbulb','w-4 h-4') + 'Normalization Opportunities</h3><div class="space-y-1.5">';
+  var norms = ['Add explicit FK constraints for all 15 inferred ID references','Replace JSON array columns (ProductIds, AssignedUsers) with junction tables','Replace text weak reference ProjectManager → Users.FullName with ProjectManagerUserId FK','Add child table for installation components instead of Pm1Serial..Pm4Serial','Add unique constraints for business keys (JobNumber, CustomerId)'];
+  for (i = 0; i < norms.length; i++) {
+    h += '<div class="flex items-start gap-2 text-[12px] text-tx2 font-body">' + ic('arrow-right','w-3 h-3',CC.purple) + '<span>' + norms[i] + '</span></div>';
+  }
+  h += '</div></div>';
+
+  // ── FOOTER ──
+  h += '<div class="sec-divider mt-[52px] mb-8"></div><footer class="pb-12"><div class="flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-tx3 font-body"><div class="flex items-center gap-2"><div class="w-5 h-5 rounded bg-gradient-to-br from-ac to-ac4 flex items-center justify-center">' + ic('layers','w-2.5 h-2.5') + '</div><span>Commtrac Workflow Management</span></div><div class="flex items-center gap-3 font-mono text-[10px]"><span>v0.1.0</span><span class="text-tx3/50">·</span><span>commit c4c5102</span><span class="text-tx3/50">·</span><span>Generated from source</span></div></div></footer>';
+
+  document.getElementById('root').innerHTML = h;
+  lucide.createIcons();
+}
+
+// ─── INTERACTIONS ─────────────────────────────────────
+function toggleSidebar() {
+  var s = document.getElementById('sidebar'), o = document.getElementById('overlay');
+  s.classList.toggle('-translate-x-full');
+  s.classList.toggle('translate-x-0');
+  o.classList.toggle('hidden');
+}
+document.addEventListener('click', function(e) {
+  if (window.innerWidth <= 900 && e.target.closest('.nav-link')) toggleSidebar();
+});
+
+function toggleCollapse(id) {
+  var el = document.getElementById(id);
+  var ic = document.getElementById(id + '-icon');
+  if (!el) return;
+  el.classList.toggle('open');
+  if (ic) ic.style.transform = el.classList.contains('open') ? 'rotate(180deg)' : '';
+}
+
+function filterSchema(cat, btn) {
+  var btns = document.querySelectorAll('.tab-b');
+  for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
+  btn.classList.add('active');
+  var tbls = document.querySelectorAll('.schema-tbl');
+  for (i = 0; i < tbls.length; i++) {
+    tbls[i].style.display = (cat === 'all' || tbls[i].dataset.cat === cat) ? '' : 'none';
+  }
+}
+
+window.addEventListener('scroll', function() {
+  var cur = '';
+  for (var i = 0; i < NAV.length; i++) {
+    var el = document.getElementById(NAV[i].id);
+    if (el && el.getBoundingClientRect().top < 120) cur = NAV[i].id;
+  }
+  var links = document.querySelectorAll('.nav-link');
+  for (i = 0; i < links.length; i++) {
+    links[i].classList.toggle('active', NAV[i].id === cur);
+  }
+  var b = document.getElementById('btt');
+  if (window.scrollY > 400) {
+    b.style.display = 'flex';
+    b.classList.remove('opacity-0', 'pointer-events-none');
+    b.classList.add('opacity-100');
+  } else {
+    b.classList.add('opacity-0', 'pointer-events-none');
+    b.classList.remove('opacity-100');
+  }
+});
+
+function doSearch(q) {
+  var marks = document.querySelectorAll('.search-highlight');
+  for (var i = 0; i < marks.length; i++) marks[i].outerHTML = marks[i].textContent;
+  if (!q.trim()) return;
+  var rx = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+  var els = document.querySelectorAll('#root p, #root span, #root td, #root h3, #root h4');
+  for (i = 0; i < els.length; i++) {
+    if (els[i].children.length === 0 && els[i].textContent.toLowerCase().indexOf(q.toLowerCase()) >= 0) {
+      els[i].innerHTML = els[i].textContent.replace(rx, '<mark class="search-highlight" style="background:rgba(255,184,48,.25);color:#ffb830;padding:0 2px;border-radius:2px">$1</mark>');
+    }
+  }
+}
+document.addEventListener('keydown', function(e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); document.getElementById('searchInput').focus(); }
+  if (e.key === 'Escape') { var s = document.getElementById('searchInput'); s.blur(); s.value = ''; doSearch(''); }
+});
+
+function downloadPage() {
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['<!DOCTYPE html>\n' + document.documentElement.outerHTML], {type: 'text/html'}));
+  a.download = 'commtrac-architecture.html';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  var t = document.createElement('div');
+  t.className = 'toast bg-surface border border-bdr rounded-lg px-4 py-3 flex items-center gap-2 shadow-xl';
+  t.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4 text-ac2"></i><span class="text-xs font-body text-tx">HTML file downloaded!</span>';
+  document.getElementById('toast-box').appendChild(t);
+  lucide.createIcons();
+  setTimeout(function() { t.remove(); }, 3000);
+}
+
+// ─── INIT ─────────────────────────────────────────────
+buildSidebar();
+buildPage();
+lucide.createIcons();
+</script>
+</body>
+</html>
