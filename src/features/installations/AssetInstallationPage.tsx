@@ -398,6 +398,11 @@ const AssetInstallationPage = () => {
   // results from a superseded fetch (triggered before the tab restoration
   // effect corrects the tab) are silently discarded.
   const assetLoadIdRef = useRef(0);
+  // Separate counter for the document-counts effect so it can NEVER bump the
+  // main asset-load's staleness ref — sharing one ref let the doc-counts effect
+  // invalidate an in-flight load's guard, so setLoadingAssets(false) was skipped
+  // and the page hung on its spinner forever.
+  const docCountLoadIdRef = useRef(0);
   const lastRefreshTsRef = useRef(0);
   const isRefreshingRef = useRef(false);   // in-flight guard — prevents concurrent refreshAssets calls
   const serverWasOfflineRef = useRef(false); // tracks offline→online transition for api-server-reachable
@@ -833,30 +838,54 @@ const AssetInstallationPage = () => {
       ),
     );
 
-    localLookupPromise.then((results) => {
-      if (loadId !== assetLoadIdRef.current) return; // Stale
-      const combined = results.flatMap((r) => r.assets);
-      setAssets(combined);
-      setLastFetchedAt(new Date());
-      if (activeProduct?.id) {
-        setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(combined) }));
+    // Clear the spinner as soon as EITHER tier produces a result for THIS load,
+    // so a slow local Promise.all — or a remote response that wins the race —
+    // can never strand the page on its spinner. Guarded by loadId so a
+    // superseded product switch can't clear a newer load's spinner.
+    let loadingCleared = false;
+    const clearLoadingOnce = () => {
+      if (loadId === assetLoadIdRef.current && !loadingCleared) {
+        loadingCleared = true;
+        setLoadingAssets(false);
       }
-      // The page is no longer "loading" — Tier 2 will quietly update each
-      // scope's slice as the server's fresh data arrives.
-      setLoadingAssets(false);
+    };
+
+    // Remote (Tier 2) is authoritative per scope. Track which scopes it has
+    // already answered so a late Tier-1 local result cannot overwrite fresh
+    // server data with an empty/stale local slice (the web build caches nothing
+    // locally, so its Tier 1 is always empty).
+    const scopeKind = scopes[0]?.scopeKind;
+    const scopeIdOfAsset = (a: ProjectAsset) =>
+      scopeKind === "project" ? a.projectId : a.productId;
+    const remoteAnsweredScopes = new Set<string>();
+
+    localLookupPromise.then((results) => {
+      if (loadId !== assetLoadIdRef.current) return; // Stale — a newer load is in flight
+      setAssets((prev) => {
+        // Keep any scope slices the remote already filled; seed the rest from local.
+        const keptRemote = prev.filter((a) => remoteAnsweredScopes.has(scopeIdOfAsset(a)));
+        const localSeed = results
+          .filter((r) => !remoteAnsweredScopes.has(r.scope.scopeId))
+          .flatMap((r) => r.assets);
+        const next = [...keptRemote, ...localSeed];
+        if (activeProduct?.id) {
+          setHealthMap((hmPrev) => ({ ...hmPrev, [activeProduct.id]: computeHealth(next) }));
+        }
+        return next;
+      });
+      setLastFetchedAt(new Date());
+      clearLoadingOnce();
     });
 
     // ─── TIER 2: SERVER REFRESH (background, per-scope) ───────────────────
-    // Each scope's local-first service call runs independently. When local
-    // is warm, it returns instantly with the same data Tier 1 just rendered
-    // (idempotent replace — no visible change). When local is cold, it does
-    // a blocking API call, but the page is already showing Tier 1 data, so
-    // a slow or timing-out server endpoint no longer blocks the UI. The
+    // Each scope's local-first service call runs independently. Whichever tier
+    // resolves first for this load clears the spinner (clearLoadingOnce); the
     // loadId guard discards results from a superseded product switch.
     scopes.forEach((s) => {
       s.fetchRemote()
         .then((freshAssets) => {
           if (loadId !== assetLoadIdRef.current) return; // Stale
+          remoteAnsweredScopes.add(s.scopeId);
           setAssets((prev) => {
             // Replace only this scope's slice; keep the other scopes' assets.
             const others = prev.filter((a) =>
@@ -869,6 +898,7 @@ const AssetInstallationPage = () => {
             return next;
           });
           setLastFetchedAt(new Date());
+          clearLoadingOnce();
         })
         .catch(() => {/* non-blocking — local data is the source of truth */});
     });
@@ -947,14 +977,14 @@ const AssetInstallationPage = () => {
   assetsRef.current = assets;
   useEffect(() => {
     if (assetsKey === "") return;
-    const myLoadId = ++assetLoadIdRef.current;
+    const myLoadId = ++docCountLoadIdRef.current;
     const snapshot = assetsRef.current;
     const countMap: Record<string, number> = {};
     Promise.all(snapshot.map(async (asset) => {
       const docs = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
       countMap[asset.id] = docs.length;
     })).then(() => {
-      if (myLoadId !== assetLoadIdRef.current) return; // Stale — a newer load is in flight
+      if (myLoadId !== docCountLoadIdRef.current) return; // Stale — a newer doc-count pass is in flight
       setDocsCountMap(countMap);
     });
     // assetsRef.current is intentionally read at run-time; only assetsKey
