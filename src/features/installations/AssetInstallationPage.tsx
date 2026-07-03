@@ -614,6 +614,14 @@ const AssetInstallationPage = () => {
     [productsState.items],
   );
 
+  // The runner needs the *asset's own* product, not the page-level Project-filter-derived
+  // activeProduct — activeProduct is undefined while viewing "All projects", which would
+  // otherwise silently block the runner dialog from ever rendering (see below).
+  const runnerProduct = useMemo(
+    () => (runnerAsset ? products.find((p) => p.id === runnerAsset.productId) : undefined),
+    [runnerAsset, products],
+  );
+
   // Trigger a background pull when asset data is more than 15 minutes old.
   // Uses the stable useCallback identity of the pull function to avoid re-registration.
   useStaleOnResume("assets", useCallback(() => {
@@ -5617,7 +5625,7 @@ const AssetInstallationPage = () => {
         </DialogActions>
       </Dialog>
 
-      {runnerOpen && runnerWorkflow && runnerAsset && activeProduct && (
+      {runnerOpen && runnerWorkflow && runnerAsset && runnerProduct && (
         <WorkOrderRunner
           open={runnerOpen}
           onClose={() => {
@@ -5633,8 +5641,8 @@ const AssetInstallationPage = () => {
             if (closedAssetId) loadAssignmentsForAsset(closedAssetId);
           }}
           workflow={runnerWorkflow}
-          productId={activeProduct.id}
-          productName={activeProduct.name}
+          productId={runnerProduct.id}
+          productName={runnerProduct.name}
           projectAssetId={runnerAsset.id}
           workflowConfigId={runnerWorkflowConfigId}
           existingRunId={runnerExistingRunId}
@@ -5643,7 +5651,7 @@ const AssetInstallationPage = () => {
           currentUserId={currentUser.id}
           assetTag={runnerAsset.assetTag || (runnerAsset as any).assetName || ""}
           jobNumber={(runnerAsset as any).jobNumber || ""}
-          productFeatures={activeProduct.features}
+          productFeatures={runnerProduct.features}
           featureSelections={runnerFeatureSelections}
           onComplete={(vals) => {
             // Clear paused progress badge on completion
