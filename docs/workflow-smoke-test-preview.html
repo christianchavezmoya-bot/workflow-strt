@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Workflow Smoke Test Preview</title>
+  <style>
+    :root {
+      --bg: #f4efe7;
+      --panel: #fffaf3;
+      --panel-strong: #fff;
+      --ink: #182028;
+      --muted: #5f6b76;
+      --line: #d5cab8;
+      --teal: #0f766e;
+      --teal-soft: #d9f3ef;
+      --orange: #c55b1d;
+      --orange-soft: #fde7d7;
+      --red: #b42318;
+      --red-soft: #fde2df;
+      --gold: #8a6a12;
+      --gold-soft: #f7edc9;
+      --slate: #344054;
+      --slate-soft: #e8edf3;
+      --shadow: 0 18px 45px rgba(24, 32, 40, 0.08);
+      --radius: 20px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 26%),
+        radial-gradient(circle at top right, rgba(197, 91, 29, 0.16), transparent 28%),
+        linear-gradient(180deg, #f8f4ed 0%, var(--bg) 100%);
+    }
+
+    .shell {
+      width: min(1400px, calc(100vw - 32px));
+      margin: 20px auto 48px;
+    }
+
+    .hero,
+    .panel {
+      background: rgba(255, 250, 243, 0.88);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(213, 202, 184, 0.9);
+      box-shadow: var(--shadow);
+      border-radius: var(--radius);
+    }
+
+    .hero {
+      padding: 28px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      font-size: 12px;
+      color: var(--teal);
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(32px, 6vw, 56px);
+      line-height: 0.94;
+      letter-spacing: -0.04em;
+      max-width: 900px;
+    }
+
+    .hero p {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.6;
+      color: var(--muted);
+      max-width: 980px;
+    }
+
+    .badge-row,
+    .control-row,
+    .scenario-tabs,
+    .pill-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .badge,
+    .pill,
+    .toggle,
+    .tab {
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      background: var(--panel-strong);
+      color: var(--ink);
+      cursor: pointer;
+      transition: 140ms ease;
+    }
+
+    .badge { cursor: default; }
+    .badge.teal, .toggle[data-tone="teal"].active, .pill.teal { background: var(--teal-soft); color: var(--teal); border-color: rgba(15, 118, 110, 0.22); }
+    .badge.orange, .toggle[data-tone="orange"].active, .pill.orange { background: var(--orange-soft); color: var(--orange); border-color: rgba(197, 91, 29, 0.22); }
+    .badge.red, .toggle[data-tone="red"].active, .pill.red { background: var(--red-soft); color: var(--red); border-color: rgba(180, 35, 24, 0.18); }
+    .badge.gold, .toggle[data-tone="gold"].active, .pill.gold { background: var(--gold-soft); color: var(--gold); border-color: rgba(138, 106, 18, 0.2); }
+    .badge.slate, .toggle[data-tone="slate"].active, .pill.slate { background: var(--slate-soft); color: var(--slate); border-color: rgba(52, 64, 84, 0.16); }
+
+    .toggle:not(.active),
+    .tab:not(.active) {
+      border-color: var(--line);
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--muted);
+    }
+
+    .toggle:hover,
+    .tab:hover { transform: translateY(-1px); }
+
+    .grid {
+      margin-top: 18px;
+      display: grid;
+      gap: 18px;
+      grid-template-columns: 320px minmax(0, 1fr);
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .panel {
+      padding: 22px;
+    }
+
+    .panel h2,
+    .panel h3,
+    .panel h4 {
+      margin: 0 0 12px;
+      letter-spacing: -0.03em;
+    }
+
+    .panel h2 { font-size: 26px; }
+    .panel h3 { font-size: 20px; }
+    .panel h4 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+
+    .meta-list,
+    .bullet-list,
+    .timeline,
+    .source-list,
+    .small-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .meta-list li,
+    .bullet-list li,
+    .small-list li {
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    .timeline li {
+      position: relative;
+      padding: 0 0 0 28px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .timeline li::before {
+      content: "";
+      position: absolute;
+      left: 6px;
+      top: 8px;
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--teal);
+      box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.12);
+    }
+
+    .timeline li::after {
+      content: "";
+      position: absolute;
+      left: 10px;
+      top: 22px;
+      bottom: -12px;
+      width: 2px;
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.3), transparent);
+    }
+
+    .timeline li:last-child::after { display: none; }
+
+    .label {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+
+    .strong {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .preview-grid {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .preview {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(247, 242, 235, 0.88));
+      border-radius: 18px;
+      overflow: hidden;
+      min-height: 250px;
+    }
+
+    .preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,0.8);
+    }
+
+    .preview-title {
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin: 0;
+      font-size: 17px;
+    }
+
+    .preview-sub {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .preview-body {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .mini-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.82);
+      padding: 12px;
+    }
+
+    .mini-card .title {
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .mini-card .sub {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .kpi {
+      border-radius: 14px;
+      padding: 12px;
+      background: var(--panel-strong);
+      border: 1px solid var(--line);
+    }
+
+    .kpi .value {
+      display: block;
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+    }
+
+    .kpi .text {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+    }
+
+    .source-list li {
+      border-top: 1px solid var(--line);
+      padding: 12px 0 0;
+    }
+
+    .source-list li:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    code {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      background: rgba(52, 64, 84, 0.08);
+      border-radius: 6px;
+      padding: 2px 6px;
+    }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 1100px) {
+      .grid,
+      .preview-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 720px) {
+      .shell { width: min(100vw - 18px, 1400px); margin-top: 10px; }
+      .hero, .panel { padding: 18px; border-radius: 18px; }
+      .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="eyebrow">Workflow-Strt / Commtrac smoke-test</div>
+      <h1>Code-grounded workflow smoke-test preview for assignment, takeover, offline work, dashboard, issues, and notifications.</h1>
+      <p>
+        This page is grounded in the fetched <code>origin/main</code> implementation inspected on 2026-07-03.
+        It models the real app split: browser users stay server-live with a short in-memory read cache, while native phone users get local-first data, queued writes, conflict handling, and offline unlock.
+      </p>
+      <div class="badge-row">
+        <span class="badge teal">Upstream source inspected: origin/main @ 54c2ba1</span>
+        <span class="badge orange">Scenario starts from an existing asset with no workflow</span>
+        <span class="badge gold">Roles covered: Admin, Installer A, Installer B</span>
+        <span class="badge slate">Key surfaces: Assets, Dashboard, Issues Board, Notifications, Login, Sync Center</span>
+      </div>
+    </section>
+
+    <div class="grid">
+      <aside class="stack">
+        <section class="panel">
+          <h3>Controls</h3>
+          <div class="label">Platform</div>
+          <div class="control-row" id="platformControls"></div>
+          <div class="label" style="margin-top: 16px;">Connectivity</div>
+          <div class="control-row" id="connectivityControls"></div>
+          <div class="label" style="margin-top: 16px;">Actor</div>
+          <div class="control-row" id="actorControls"></div>
+        </section>
+
+        <section class="panel">
+          <h3>Current rule set</h3>
+          <ul class="meta-list" id="ruleList"></ul>
+        </section>
+
+        <section class="panel">
+          <h3>Latest main focus</h3>
+          <ul class="small-list">
+            <li><span class="strong">Assets page:</span> latest upstream work decouples initial asset loading from slow network calls so phone users see local data immediately.</li>
+            <li><span class="strong">Dashboard:</span> now refreshes from <code>repo:assets:updated</code> in addition to notification events, so offline-originated asset changes surface sooner.</li>
+            <li><span class="strong">Work instructions/product configs:</span> product-specific config loading now skips pointless blocking fetches when connectivity is already known to be down.</li>
+          </ul>
+        </section>
+      </aside>
+
+      <main class="stack">
+        <section class="panel">
+          <h2>Scenario switcher</h2>
+          <div class="scenario-tabs" id="scenarioTabs"></div>
+        </section>
+
+        <section class="panel">
+          <div class="pill-row" id="scenarioPills"></div>
+          <h2 id="scenarioTitle" style="margin-top: 18px;"></h2>
+          <p id="scenarioSummary" class="footer-note" style="font-size: 15px;"></p>
+          <div class="preview-grid" style="margin-top: 18px;">
+            <div class="preview">
+              <div class="preview-header">
+                <div>
+                  <p class="preview-title">Flow preview</p>
+                  <p class="preview-sub" id="flowSub"></p>
+                </div>
+                <span class="pill teal" id="flowTag">Live flow</span>
+              </div>
+              <div class="preview-body">
+                <ul class="timeline" id="flowTimeline"></ul>
+              </div>
+            </div>
+
+            <div class="preview">
+              <div class="preview-header">
+                <div>
+                  <p class="preview-title">Surface behavior</p>
+                  <p class="preview-sub">What the user should expect to see</p>
+                </div>
+                <span class="pill orange">Smoke-test target</span>
+              </div>
+              <div class="preview-body">
+                <div class="kpi-row" id="kpis"></div>
+                <div class="mini-card">
+                  <div class="title">Dashboard</div>
+                  <div class="sub" id="dashboardBehavior"></div>
+                </div>
+                <div class="mini-card">
+                  <div class="title">Issues Board</div>
+                  <div class="sub" id="issuesBehavior"></div>
+                </div>
+                <div class="mini-card">
+                  <div class="title">Notifications / sync / login</div>
+                  <div class="sub" id="notifBehavior"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h3>Smoke-test checklist for this view</h3>
+          <ul class="bullet-list" id="checklist"></ul>
+        </section>
+
+        <section class="panel">
+          <h3>Source anchors</h3>
+          <ul class="source-list" id="sourceList"></ul>
+        </section>
+
+        <section class="panel">
+          <h3>Platform split to keep honest</h3>
+          <div class="preview-grid">
+            <div class="preview">
+              <div class="preview-header">
+                <div>
+                  <p class="preview-title">Web browser</p>
+                  <p class="preview-sub">Server-live, not offline-capable</p>
+                </div>
+                <span class="pill red">No queued offline writes</span>
+              </div>
+              <div class="preview-body">
+                <div class="mini-card">
+                  <div class="title">What works</div>
+                  <div class="sub">Short-lived in-memory read cache, live writes straight to API, normal dashboard/issues/notification surfaces while the server is reachable.</div>
+                </div>
+                <div class="mini-card">
+                  <div class="title">What does not work</div>
+                  <div class="sub">No IndexedDB local-first browser workflow, no offline unlock, no offline queue, no safe "continue working with no server" browser path.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="preview">
+              <div class="preview-header">
+                <div>
+                  <p class="preview-title">Native phone</p>
+                  <p class="preview-sub">Local-first with sync and conflict handling</p>
+                </div>
+                <span class="pill teal">Offline-capable</span>
+              </div>
+              <div class="preview-body">
+                <div class="mini-card">
+                  <div class="title">What works</div>
+                  <div class="sub">Local asset/run caches, offline queue, live sync status chips, Sync Center conflict review, issue updates reflected locally, biometric or PIN unlock with saved session inside the 30-day grace period.</div>
+                </div>
+                <div class="mini-card">
+                  <div class="title">What still requires server</div>
+                  <div class="sub">First-ever login, any browser session, and any blocked admin/security actions guarded by the offline guard.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const scenarios = [
+      {
+        id: "baseline",
+        label: "1. Existing asset, no workflow",
+        roles: ["Admin"],
+        platforms: ["web", "phone"],
+        connectivity: ["online", "server-unreachable", "offline"],
+        summary: "Start with an asset that exists on the job but has no assigned workflow configuration yet. The workflow cannot be started until a published workflow assignment exists.",
+        pills: [
+          ["slate", "Existing asset present"],
+          ["orange", "No workflow assignment yet"],
+          ["gold", "Published config required before assign"]
+        ],
+        timeline: [
+          "Admin opens Assets and sees the asset row, but there is no runnable workflow assignment attached to it yet.",
+          "The assignment API only accepts published workflow configurations, so draft-only workflow definitions are not enough.",
+          "At this point the workflow path is preparation only: the asset exists, but there is nothing for Installer A or B to start."
+        ],
+        dashboard: "The dashboard can still show the project inside active project counts if the project status is active/open/in-progress/pending/overdue. It is not dependent on the asset already having a workflow.",
+        issues: "Issues Board stays empty for this asset until either an asset-level issue is logged or a workflow run produces open issues.",
+        notifications: "No assignment or run-state notifications should exist yet. Notification inbox can still poll and show old history, but this asset creates nothing until assignment changes happen.",
+        kpis: [
+          ["Workflow", "0", "assigned"],
+          ["Installer", "0", "assigned"],
+          ["Open issues", "0", "for asset"],
+          ["Notification", "0", "new events"]
+        ],
+        checklist: [
+          "Verify the asset exists before any workflow assignment is added.",
+          "Verify no Start/Continue workflow path is available without a workflow assignment.",
+          "Verify no fake issue or notification appears just because the asset exists.",
+          "Verify Admin can proceed to assign a published workflow and a technician next."
+        ],
+        sources: [
+          ["server/Commtrac.Api/Controllers/AssetWorkflowAssignmentsController.cs", "Assignment endpoint rejects non-published configurations."],
+          ["src/features/installations/AssetInstallationPage.tsx", "Assets page is the main launch point for workflow start/continue behavior."],
+          ["src/app/routes.tsx", "Assets surface lives at /installations/assets."]
+        ]
+      },
+      {
+        id: "admin-assigns",
+        label: "2. Admin assigns workflow + tech",
+        roles: ["Admin"],
+        platforms: ["web", "phone"],
+        connectivity: ["online"],
+        summary: "Admin assigns a published workflow config and the initial installer. That creates assignment notifications for PM/Admin roles and the assigned installer.",
+        pills: [
+          ["teal", "Published workflow assigned"],
+          ["orange", "Installer A assigned"],
+          ["gold", "Assignment notifications fire"]
+        ],
+        timeline: [
+          "Admin selects a published workflow configuration for the asset.",
+          "Admin assigns Installer A to the asset. Assignment events are written to the notification feed for Admin/Project Manager roles and the assigned installer.",
+          "The asset is now eligible for Installer A to start the workflow from the Assets page."
+        ],
+        dashboard: "Dashboard remains active-project scoped. For Admin/PM, My Projects is the default view and All Projects is optional. Counts only include active/open/in-progress/pending/overdue projects, not closed/completed/archived/cancelled.",
+        issues: "Issues Board still shows nothing until issues are created, but the workflow assignment makes the asset part of the runnable workflow population.",
+        notifications: "Topbar inbox should show unread notifications with assignment-type grouping, unread/history tabs, acknowledge actions, and the 15-second refresh path plus focus/online refresh triggers.",
+        kpis: [
+          ["Workflow", "1", "assigned"],
+          ["Installer", "A", "current owner"],
+          ["Unread", "2+", "possible events"],
+          ["Dashboard", "My", "default scope"]
+        ],
+        checklist: [
+          "Verify only published workflow configs can be assigned.",
+          "Verify Installer A receives an assigned workflow or asset assignment notification.",
+          "Verify PM/Admin role notifications are recorded for the assignment event.",
+          "Verify dashboard still defaults to My Projects, with All Projects available only where allowed."
+        ],
+        sources: [
+          ["server/Commtrac.Api/Controllers/AssetWorkflowAssignmentsController.cs", "Assignment creation notifies roles and installer."],
+          ["server/Commtrac.Api/Controllers/ProjectAssetsController.cs", "Asset assignment update also notifies assigned and previous users."],
+          ["src/contexts/NotificationInboxContext.tsx", "Assignment event types trigger inbox refresh and assignment-changed events."],
+          ["src/components/layout/Topbar.tsx", "Notification inbox UI: unread/history, type filter, ack all, per-item ack."]
+        ]
+      },
+      {
+        id: "installer-a-online",
+        label: "3. Installer A starts online",
+        roles: ["Installer A"],
+        platforms: ["web", "phone"],
+        connectivity: ["online"],
+        summary: "Installer A opens the assigned asset online and starts the workflow normally. If the asset was already assigned to Installer A, the run opens directly.",
+        pills: [
+          ["teal", "Assigned to current user"],
+          ["slate", "Start/Continue opens runner"],
+          ["orange", "In-progress state becomes visible"]
+        ],
+        timeline: [
+          "Installer A opens the asset row. Because the asset is already assigned to the current user, the assignment guard does not interrupt.",
+          "Starting the workflow opens the runner. The UI optimistically marks the asset as InProgress so the Continue path appears if the run is paused.",
+          "As progress, issues, signatures, or completion updates occur, run-state notifications and dashboard refresh events are dispatched."
+        ],
+        dashboard: "Dashboard attention cards and counts are expected to react to run-state changes. Latest upstream main also listens for repo asset updates so local-originated asset changes refresh faster.",
+        issues: "If the run creates open issues, Issues Board should list them under Open Issues, and the row should deep-link back into exact asset issue repair on the Assets page.",
+        notifications: "Run-state events can raise notification refreshes. Notification feed should stay aligned with workflow-started, workflow-paused, workflow-completed, workflow-issue, or related asset status events.",
+        kpis: [
+          ["Run status", "InProgress", "or active"],
+          ["Continue", "Enabled", "after pause"],
+          ["Issues", "Live", "if created"],
+          ["Refresh", "Live", "dashboard + inbox"]
+        ],
+        checklist: [
+          "Verify assigned-user match skips the takeover dialog.",
+          "Verify starting the run marks the asset InProgress quickly enough for Continue behavior.",
+          "Verify any issue creation appears on Issues Board without manual app reload.",
+          "Verify notification refresh and dashboard refresh both react to run-state changes."
+        ],
+        sources: [
+          ["src/features/installations/AssetInstallationPage.tsx", "Start path goes straight through when asset.assignedUserId matches current user."],
+          ["src/services/assetWorkflowRunService.ts", "Run saves, issue updates, completion, and signature updates dispatch notifications and local issue refresh events."],
+          ["src/features/dashboard/Dashboard.tsx", "Dashboard listens for run-state and asset update events."],
+          ["src/features/issues/IssuesBoard.tsx", "Open issues tab refreshes on repo:issues:updated and deep-links to repair."]
+        ]
+      },
+      {
+        id: "installer-b-takeover",
+        label: "4. Installer B takeover / continue",
+        roles: ["Installer B"],
+        platforms: ["web", "phone"],
+        connectivity: ["online"],
+        summary: "Installer B tries to start work on an asset assigned to Installer A. The app warns, reassigns to Installer B after confirmation, and notifies the PM/Admin plus the previous assignee.",
+        pills: [
+          ["red", "Assigned to someone else"],
+          ["orange", "Assign to me and start"],
+          ["gold", "Previous assignee notified"]
+        ],
+        timeline: [
+          "Installer B selects Start or Continue on an asset still assigned to Installer A.",
+          "The Assets page shows the assignment warning dialog: the asset is assigned to someone else and continuing will reassign it to the current user.",
+          "After confirmation, the asset is updated to Installer B, PM/Admin receive takeover context, Installer B becomes the new assignee, and Installer A receives the 'no longer assigned' notification."
+        ],
+        dashboard: "Project still remains under active project counts. If the takeover changes in-progress asset state, dashboard refresh is driven by notification events plus asset-update events.",
+        issues: "Existing issues remain tied to the asset/run. Takeover changes who is working, not whether issue history exists.",
+        notifications: "This is the most notification-heavy branch: PM/Admin get role notifications, Installer B gets assigned, Installer A gets reassigned/unassigned messaging, and the inbox should show the correct unread trail.",
+        kpis: [
+          ["Previous owner", "A", "removed"],
+          ["New owner", "B", "active"],
+          ["PM/Admin", "Notified", "takeover"],
+          ["Installer A", "Warned", "reassigned"]
+        ],
+        checklist: [
+          "Verify the takeover dialog appears when current user does not match assigned user.",
+          "Verify confirm action updates the asset assignment before entering the run.",
+          "Verify Installer A gets the reassignment/unassigned notification.",
+          "Verify PM/Admin receive takeover-aware messaging, not a generic silent reassignment."
+        ],
+        sources: [
+          ["src/features/installations/AssetInstallationPage.tsx", "Auto-assign/takeover dialog says Assign to me and Start."],
+          ["server/Commtrac.Api/Controllers/ProjectAssetsController.cs", "Takeover is detected when self-assign replaces a different previous assignee."],
+          ["src/components/ui/TakeOverDialog.tsx", "Explicit takeover wording and PM notification language."],
+          ["src/contexts/NotificationInboxContext.tsx", "asset-takeover and asset-unassigned are tracked inbox event types."]
+        ]
+      },
+      {
+        id: "phone-midrun-offline",
+        label: "5. Phone user loses server mid-run",
+        roles: ["Installer A", "Installer B"],
+        platforms: ["phone"],
+        connectivity: ["server-unreachable", "offline"],
+        summary: "Native phone user is already in the asset workflow and then loses server connectivity or full internet. The phone should keep working locally, queue writes, reflect local issue changes, and surface sync state clearly.",
+        pills: [
+          ["teal", "Local-first cache"],
+          ["orange", "Pending sync queue"],
+          ["red", "Conflict path if someone else changed same record"]
+        ],
+        timeline: [
+          "The phone user is already inside the workflow runner or asset work surface when connectivity drops.",
+          "Progress, issue updates, and completion attempts are saved locally through the offline store / sync queue instead of being lost.",
+          "Connectivity chips show no signal or server not responding, pending changes waiting to send, and later any conflicts that require Sync Center review."
+        ],
+        dashboard: "Phone dashboard and related asset views can continue from local data. Recent upstream main explicitly reduces loading waits by showing local data first while server refresh happens later.",
+        issues: "Issues Board should reflect offline-created or offline-resolved issue changes immediately from local updates, not wait for a full server round trip.",
+        notifications: "Notification inbox itself still depends on server feed refresh, but local workflow/run changes dispatch local refresh events so the app surfaces changed run state even before the server catches up.",
+        kpis: [
+          ["Writes", "Queued", "locally"],
+          ["Issues Board", "Updates", "offline"],
+          ["Sync Center", "Review", "conflicts if needed"],
+          ["Server", "Deferred", "until reachable"]
+        ],
+        checklist: [
+          "Verify workflow progress is not lost when signal or server disappears mid-run.",
+          "Verify pending sync counts increase and are visible to the phone user.",
+          "Verify local issue create/resolve flows still update the Issues Board immediately.",
+          "Verify conflict review appears if another user changed the same record while this phone was offline."
+        ],
+        sources: [
+          ["src/hooks/useSyncEngine.ts", "Tracks connectivity states, queues writes, flushes on return, and handles conflicts."],
+          ["src/components/layout/ConnectivityDebugBar.tsx", "Shows no signal, server reachable/not reachable, pending changes, conflicts, cached data."],
+          ["src/features/sync/SyncCenterPage.tsx", "Conflict message tells user to choose keep local or accept server version."],
+          ["src/services/assetWorkflowRunService.ts", "Offline run saves and issue updates sync local issue store immediately."]
+        ]
+      },
+      {
+        id: "phone-offline-open",
+        label: "6. Phone app opens offline",
+        roles: ["Installer A", "Installer B"],
+        platforms: ["phone"],
+        connectivity: ["offline", "server-unreachable"],
+        summary: "Opening the native phone app offline splits into two branches: saved-session users inside the 30-day grace period can unlock locally; first-time users or expired sessions cannot.",
+        pills: [
+          ["teal", "Saved session can unlock"],
+          ["gold", "30-day offline grace"],
+          ["red", "First-time login still requires internet"]
+        ],
+        timeline: [
+          "On launch, native auth checks for a saved token and whether last online login is still inside the 30-day offline grace period.",
+          "If valid, the app shows biometric or PIN unlock and the user can enter the app offline with local data.",
+          "If no session exists, local unlock is unavailable, or grace is expired, login is shown and first-time sign-in still requires reachable internet/server."
+        ],
+        dashboard: "After successful offline unlock, phone users can still browse local-first surfaces like dashboard and assets from saved data, with server confirmation deferred.",
+        issues: "Issues Board can load from local issue repository state if already cached and previously synced onto the phone.",
+        notifications: "Login screen warns differently for no internet vs server unavailable. Notification inbox needs server reachability to fetch new server-side items.",
+        kpis: [
+          ["Saved token", "Required", "for offline open"],
+          ["Grace", "30d", "offline unlock"],
+          ["Unlock", "Face ID/PIN", "native only"],
+          ["First login", "Blocked", "offline"]
+        ],
+        checklist: [
+          "Verify saved-session phone user gets biometric or PIN unlock offline.",
+          "Verify no-session or grace-expired user is sent to login, not into the app.",
+          "Verify login messaging distinguishes no internet from server unavailable.",
+          "Verify browser does not get this offline unlock behavior."
+        ],
+        sources: [
+          ["src/services/biometricAuth.ts", "30-day offline grace and native unlock mode selection."],
+          ["src/components/BiometricLockScreen.tsx", "Offline unlock copy, PIN fallback, and no-local-unlock behavior."],
+          ["src/app/App.tsx", "Launch routing between biometric/PIN lock, login, and normal app routes."],
+          ["src/features/auth/Login.tsx", "First-time login requires internet; server-unavailable vs offline warning copy."]
+        ]
+      },
+      {
+        id: "web-offline",
+        label: "7. Web user loses server",
+        roles: ["Admin", "Installer A", "Installer B"],
+        platforms: ["web"],
+        connectivity: ["server-unreachable", "offline"],
+        summary: "Browser behavior is intentionally different from native phone behavior. Reads may briefly reuse the short-lived in-memory cache, but browser users do not have durable offline workflow continuation or queued writes.",
+        pills: [
+          ["red", "Browser is not offline-capable"],
+          ["slate", "Read cache only, short TTL"],
+          ["gold", "Writes still require live server"]
+        ],
+        timeline: [
+          "Browser user loses connectivity or the server stops responding.",
+          "Some read surfaces may show a very recent cached value for up to the short in-memory TTL, but there is no persistent local-first browser mode.",
+          "Any write path that needs POST/PUT/PATCH/DELETE still depends on the live API, so workflow continuation without server reachability is not a supported browser smoke-test outcome."
+        ],
+        dashboard: "Browser dashboard remains useful only while data can still be confirmed from the server or reused from short-lived in-memory read cache. A page reload or cache expiry returns to live fetch dependency.",
+        issues: "Browser Issues Board is live-server oriented. It does not have the same local issue repair continuity that native phone users have offline.",
+        notifications: "Browser login shows online/offline/server-unavailable warnings, but there is no browser offline unlock or browser sync queue.",
+        kpis: [
+          ["Cache", "20s", "read TTL"],
+          ["Writes", "Live API", "required"],
+          ["Offline queue", "None", "browser"],
+          ["Unlock", "None", "browser"]
+        ],
+        checklist: [
+          "Verify browser users cannot be described as having the phone offline queue.",
+          "Verify browser writes fail or block when server is unreachable rather than silently queuing.",
+          "Verify cached reads are short-lived and memory-only, not persisted across reloads.",
+          "Verify smoke-test wording never suggests browser offline unlock or full browser offline workflow."
+        ],
+        sources: [
+          ["src/services/webFreshCache.ts", "Browser read cache is short-lived in-memory only and explicitly not offline-capable."],
+          ["src/services/projectAssetService.ts", "Browser updates go straight to API; offline queue path exists only on native mobile."],
+          ["src/services/networkService.ts", "Browser login messaging distinguishes server unavailable vs offline."],
+          ["src/services/connectivityMonitor.ts", "Server reachability is tracked separately from browser online/offline state."]
+        ]
+      },
+      {
+        id: "issues-closeout",
+        label: "8. Issues resolution + dashboard follow-through",
+        roles: ["Installer A", "Installer B", "Admin"],
+        platforms: ["web", "phone"],
+        connectivity: ["online", "server-unreachable", "offline"],
+        summary: "An open issue is created during workflow execution, later resolved, and the app should keep Issues Board, asset status, and dashboard behavior aligned.",
+        pills: [
+          ["orange", "Open issue captured"],
+          ["teal", "Resolved issue moves to history"],
+          ["gold", "Asset status can settle when no open issues remain"]
+        ],
+        timeline: [
+          "Open issue appears on Issues Board with severity/type filters and a repair deep link into the exact asset issue context.",
+          "Resolver adds corrective action notes and optional media, then closes the issue.",
+          "The issue leaves the open list, appears in history, and if no open issues remain on the asset-side issue path, asset status can settle back to Complete."
+        ],
+        dashboard: "Dashboard should reflect the active asset state and attention changes after the issue is resolved. Upstream main now also reacts to repo asset updates to keep counts tighter.",
+        issues: "Issues Board only shows unresolved issues on the open tab; resolved issues move to history. The board refreshes live from local update events, including offline-originated issue changes on phone.",
+        notifications: "Run-state and issue-related refresh events should keep surrounding surfaces in step. Inbox grouping can filter issues separately from assignments/workflow/media/reminders.",
+        kpis: [
+          ["Open tab", "Active", "unresolved only"],
+          ["History", "Resolved", "issue trail"],
+          ["Corrective action", "Required", "to close"],
+          ["Repair link", "Exact", "asset issue path"]
+        ],
+        checklist: [
+          "Verify open issues appear only while unresolved.",
+          "Verify closing an issue moves it to history and removes it from open counts.",
+          "Verify corrective-action note and optional media can be recorded during issue closeout.",
+          "Verify related asset/dashboard state no longer behaves as blocked once the open issue set is cleared."
+        ],
+        sources: [
+          ["src/features/issues/IssuesBoard.tsx", "Open vs history tabs, close issue flow, exact repair link, live refresh from repo:issues:updated."],
+          ["src/services/projectAssetService.ts", "Asset issue patching updates the local issue store and notification refresh events."],
+          ["src/services/assetWorkflowRunService.ts", "Run issue patching and completion keep local issue records in sync."],
+          ["src/utils/issueDerivation.ts", "Only unresolved issues are derived into the open issue store."]
+        ]
+      }
+    ];
+
+    const state = {
+      scenarioId: "baseline",
+      platform: "web",
+      connectivity: "online",
+      actor: "Admin"
+    };
+
+    const controlDefs = {
+      platform: [
+        { id: "web", label: "Web browser", tone: "slate" },
+        { id: "phone", label: "Native phone", tone: "teal" }
+      ],
+      connectivity: [
+        { id: "online", label: "Online", tone: "teal" },
+        { id: "server-unreachable", label: "Server unreachable", tone: "orange" },
+        { id: "offline", label: "Fully offline", tone: "red" }
+      ],
+      actor: [
+        { id: "Admin", label: "Admin", tone: "gold" },
+        { id: "Installer A", label: "Installer A", tone: "teal" },
+        { id: "Installer B", label: "Installer B", tone: "orange" }
+      ]
+    };
+
+    function $(id) {
+      return document.getElementById(id);
+    }
+
+    function buildControls(group, targetId) {
+      const root = $(targetId);
+      controlDefs[group].forEach((item) => {
+        const button = document.createElement("button");
+        button.className = "toggle";
+        button.dataset.group = group;
+        button.dataset.value = item.id;
+        button.dataset.tone = item.tone;
+        button.textContent = item.label;
+        button.addEventListener("click", () => {
+          state[group] = item.id;
+          autoPickScenario();
+          render();
+        });
+        root.appendChild(button);
+      });
+    }
+
+    function buildScenarioTabs() {
+      const root = $("scenarioTabs");
+      scenarios.forEach((scenario) => {
+        const button = document.createElement("button");
+        button.className = "tab";
+        button.dataset.value = scenario.id;
+        button.textContent = scenario.label;
+        button.addEventListener("click", () => {
+          state.scenarioId = scenario.id;
+          snapToScenario();
+          render();
+        });
+        root.appendChild(button);
+      });
+    }
+
+    function scenarioMatches(scenario) {
+      return scenario.platforms.includes(state.platform)
+        && scenario.connectivity.includes(state.connectivity)
+        && scenario.roles.includes(state.actor);
+    }
+
+    function autoPickScenario() {
+      const current = scenarios.find((s) => s.id === state.scenarioId);
+      if (current && scenarioMatches(current)) return;
+      const next = scenarios.find(scenarioMatches);
+      if (next) state.scenarioId = next.id;
+    }
+
+    function snapToScenario() {
+      const scenario = scenarios.find((s) => s.id === state.scenarioId);
+      if (!scenario) return;
+      if (!scenario.platforms.includes(state.platform)) state.platform = scenario.platforms[0];
+      if (!scenario.connectivity.includes(state.connectivity)) state.connectivity = scenario.connectivity[0];
+      if (!scenario.roles.includes(state.actor)) state.actor = scenario.roles[0];
+    }
+
+    function buildRules(scenario) {
+      const list = [];
+      if (state.platform === "web") {
+        list.push("Browser read path can reuse the short-lived in-memory cache, but browser writes still require the live API.");
+        list.push("Browser users do not get offline queue, IndexedDB-first workflows, or biometric/PIN offline unlock.");
+      } else {
+        list.push("Native phone uses local-first repositories, offline queueing, and conflict resolution through Sync Center.");
+        list.push("Native phone can unlock offline with saved session plus biometric/PIN when still inside the 30-day grace period.");
+      }
+
+      if (state.connectivity === "online") {
+        list.push("Live notifications, dashboard refresh, and server-confirmed reads/writes should all behave normally.");
+      } else if (state.connectivity === "server-unreachable") {
+        list.push("Internet exists, but API health is failing; phone can fall back locally, browser remains server-dependent.");
+      } else {
+        list.push("No WiFi/cellular path exists; only native phone local/offline behavior should keep working.");
+      }
+
+      if (state.actor === "Admin") {
+        list.push("Admin/PM dashboard defaults to My Projects, with All Projects only as an optional broader scope.");
+      } else {
+        list.push("Installer flow is centered on the assigned asset, takeover guard, issue capture, and sync state.");
+      }
+
+      if (scenario.id === "installer-b-takeover") {
+        list.push("Taking over from another installer must notify PM/Admin and notify the previous assignee that the asset was reassigned.");
+      }
+
+      return list;
+    }
+
+    function renderPills(scenario) {
+      const root = $("scenarioPills");
+      root.innerHTML = "";
+      scenario.pills.forEach(([tone, text]) => {
+        const span = document.createElement("span");
+        span.className = `pill ${tone}`;
+        span.textContent = text;
+        root.appendChild(span);
+      });
+    }
+
+    function renderTimeline(scenario) {
+      const root = $("flowTimeline");
+      root.innerHTML = "";
+      scenario.timeline.forEach((step) => {
+        const li = document.createElement("li");
+        li.textContent = step;
+        root.appendChild(li);
+      });
+    }
+
+    function renderKpis(scenario) {
+      const root = $("kpis");
+      root.innerHTML = "";
+      scenario.kpis.forEach(([label, value, text]) => {
+        const div = document.createElement("div");
+        div.className = "kpi";
+        div.innerHTML = `<span class="value">${value}</span><span class="text">${label}</span><div style="margin-top:6px;color:var(--muted);font-size:13px;">${text}</div>`;
+        root.appendChild(div);
+      });
+    }
+
+    function renderList(targetId, items) {
+      const root = $(targetId);
+      root.innerHTML = "";
+      items.forEach((text) => {
+        const li = document.createElement("li");
+        li.textContent = text;
+        root.appendChild(li);
+      });
+    }
+
+    function renderSources(scenario) {
+      const root = $("sourceList");
+      root.innerHTML = "";
+      scenario.sources.forEach(([file, note]) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<div class="strong"><code>${file}</code></div><div class="footer-note">${note}</div>`;
+        root.appendChild(li);
+      });
+    }
+
+    function render() {
+      const scenario = scenarios.find((s) => s.id === state.scenarioId) || scenarios[0];
+
+      document.querySelectorAll(".toggle").forEach((button) => {
+        button.classList.toggle("active", state[button.dataset.group] === button.dataset.value);
+      });
+
+      document.querySelectorAll(".tab").forEach((button) => {
+        button.classList.toggle("active", button.dataset.value === scenario.id);
+      });
+
+      renderPills(scenario);
+      $("scenarioTitle").textContent = scenario.label;
+      $("scenarioSummary").textContent = `${scenario.summary} Current simulation: ${state.actor} on ${state.platform === "web" ? "the web browser" : "the native phone"} while connectivity is "${state.connectivity}".`;
+      $("flowSub").textContent = `${state.actor} / ${state.platform === "web" ? "web browser" : "native phone"} / ${state.connectivity}`;
+      $("flowTag").textContent = state.connectivity === "online"
+        ? "Live flow"
+        : state.platform === "phone"
+          ? "Offline-capable path"
+          : "Server-dependent path";
+
+      renderTimeline(scenario);
+      renderKpis(scenario);
+      $("dashboardBehavior").textContent = scenario.dashboard;
+      $("issuesBehavior").textContent = scenario.issues;
+      $("notifBehavior").textContent = scenario.notifications;
+      renderList("checklist", scenario.checklist);
+      renderList("ruleList", buildRules(scenario));
+      renderSources(scenario);
+    }
+
+    buildControls("platform", "platformControls");
+    buildControls("connectivity", "connectivityControls");
+    buildControls("actor", "actorControls");
+    buildScenarioTabs();
+    render();
+  </script>
+</body>
+</html>

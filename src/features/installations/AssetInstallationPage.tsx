@@ -2003,6 +2003,52 @@ const AssetInstallationPage = () => {
     } catch { console.warn("[AssetInstallationPage] removeAssignment failed"); }
   }
 
+  function pickPreferredAssignment(
+    asset: ProjectAsset,
+    assignments: WorkflowAssignment[],
+    runs: AssetWorkflowRun[] = runsMap[asset.id] ?? [],
+  ): WorkflowAssignment | undefined {
+    if (assignments.length === 0) return undefined;
+
+    const activeRun = runs.find((run) => !run.isLocked);
+    if (activeRun) {
+      const matchingActiveRun = assignments.find((item) => item.workflowConfigId === activeRun.workflowConfigId);
+      if (matchingActiveRun) return matchingActiveRun;
+    }
+
+    if (asset.productConfigId) {
+      const matchingConfig = assignments.find((item) => item.workflowConfigId === asset.productConfigId);
+      if (matchingConfig) return matchingConfig;
+    }
+
+    return assignments[0];
+  }
+
+  async function resolvePreferredAssignment(asset: ProjectAsset): Promise<WorkflowAssignment | null> {
+    const existing = assignmentsMap[asset.id];
+    if (existing !== undefined) {
+      return pickPreferredAssignment(asset, existing) ?? null;
+    }
+
+    try {
+      const assignments = await assetWorkflowAssignmentService.listByAsset(asset.id);
+      setAssignmentsMap((prev) => ({ ...prev, [asset.id]: assignments }));
+      return pickPreferredAssignment(asset, assignments) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function startAssetFromBestWorkflowSource(asset: ProjectAsset) {
+    const assignment = await resolvePreferredAssignment(asset);
+    if (assignment) {
+      await handleStartAssignmentRun(asset, assignment);
+      return;
+    }
+
+    await handleStartWorkOrder(asset);
+  }
+
   async function _doStartAssignmentRun(asset: ProjectAsset, assignment: WorkflowAssignment) {
     setRunnerLoading(asset.id);
     try {
@@ -2038,10 +2084,13 @@ const AssetInstallationPage = () => {
   }
 
   async function handleStartAssignmentRun(asset: ProjectAsset, assignment: WorkflowAssignment) {
-    // Workflow type / config type mismatch guard — warn before proceeding
-    const matchedType = workflowTypes.find((t) => t.id === assignment.workflowTypeId);
-    const matchedCfg = wfConfigMap.get(assignment.workflowConfigId) ?? workflowConfigs.find((c) => c.id === assignment.workflowConfigId);
-    const mismatchMsg = workflowTypeMismatchMessage(matchedType?.name, matchedCfg?.configType);
+    // Workflow type / config type mismatch guard - warn before proceeding.
+    const matchedTypeName = workflowTypes.find((t) => t.id === assignment.workflowTypeId)?.name
+      ?? assignment.workflowTypeName;
+    const matchedCfg = wfConfigMap.get(assignment.workflowConfigId)
+      ?? workflowConfigs.find((c) => c.id === assignment.workflowConfigId)
+      ?? await workflowConfigService.getById(assignment.workflowConfigId);
+    const mismatchMsg = workflowTypeMismatchMessage(matchedTypeName, matchedCfg?.configType);
     if (mismatchMsg) {
       setWfMismatchConfirm({ asset, assignment, message: mismatchMsg });
       return;
@@ -2053,20 +2102,25 @@ const AssetInstallationPage = () => {
   // Auto-assign check â€" intercepts start/continue before opening runner
   // ------------------------------------------------------------------
 
-  function checkAssignmentThenStart(asset: ProjectAsset, assignment?: WorkflowAssignment) {
+  async function checkAssignmentThenStart(asset: ProjectAsset, assignment?: WorkflowAssignment) {
     if (!asset.assignedUserId) {
-      // Unassigned â€" warn and auto-assign
+      // Unassigned - warn and auto-assign
       setAutoAssignConfirm({ asset, assignment, reason: "unassigned" });
       return;
     }
     if (asset.assignedUserId !== currentUser.id) {
-      // Assigned to someone else â€" warn before taking over
+      // Assigned to someone else - warn before taking over
       const otherName = users.find((u) => u.id === asset.assignedUserId)?.fullName ?? "another user";
       setAutoAssignConfirm({ asset, assignment, reason: "other", otherName });
       return;
     }
-    // Assigned to me â€" start directly
-    assignment ? handleStartAssignmentRun(asset, assignment) : handleStartWorkOrder(asset);
+    // Assigned to me - start directly
+    if (assignment) {
+      await handleStartAssignmentRun(asset, assignment);
+      return;
+    }
+
+    await startAssetFromBestWorkflowSource(asset);
   }
 
   async function confirmAutoAssignAndStart() {
@@ -2078,10 +2132,15 @@ const AssetInstallationPage = () => {
       await projectAssetService.update(asset.id, { assignedUserId: currentUser.id });
       setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, assignedUserId: currentUser.id } : a));
     } catch {
-      // Non-fatal â€" continue with start even if update fails
+      // Non-fatal - continue with start even if update fails
     }
     const updated = { ...asset, assignedUserId: currentUser.id };
-    assignment ? handleStartAssignmentRun(updated, assignment) : handleStartWorkOrder(updated);
+    if (assignment) {
+      await handleStartAssignmentRun(updated, assignment);
+      return;
+    }
+
+    await startAssetFromBestWorkflowSource(updated);
   }
 
   // ------------------------------------------------------------------
@@ -2727,15 +2786,15 @@ const AssetInstallationPage = () => {
     const summary = getAssetAttentionSummary(asset);
     const latestRun = summary.latestRun;
     const inspectionEnabled = projectHasInspection(projectWorkflowMode);
-    const hasAssignments = assignments !== undefined
-      ? (assignments.length > 0 || !!asset.productConfigId || !!asset.workflowTemplateId || !!latestRun || !!asset.workflowSummary?.hasWorkflow)
-      : (asset.workflowSummary?.hasWorkflow ?? (!!asset.productConfigId || !!asset.workflowTemplateId));
+    const hasRunnableWorkflowSource = assignments !== undefined
+      ? (assignments.length > 0 || !!asset.productConfigId || !!asset.workflowTemplateId)
+      : (!!asset.productConfigId || !!asset.workflowTemplateId || !!asset.workflowSummary?.hasWorkflow);
     const canViewCompletedRun = asset.status === "Complete"
       || asset.status === "Closed"
       || (asset.workflowSummary?.latestRunStatus === "Complete" && !asset.workflowSummary?.hasOpenIssues);
     const openImportDialog = () => setImportDialogAsset(asset);
 
-    if (inspectionEnabled && (asset.status === "Complete" || asset.status === "Closed") && !latestRun && !hasAssignments) {
+    if (inspectionEnabled && (asset.status === "Complete" || asset.status === "Closed") && !latestRun && !hasRunnableWorkflowSource) {
       return {
         label: "Run Details",
         tooltip: "View or edit linked external inspection JSON",
@@ -2745,7 +2804,7 @@ const AssetInstallationPage = () => {
         variant: "text",
       };
     }
-    if (!hasAssignments) {
+    if (!hasRunnableWorkflowSource) {
       if (inspectionEnabled) {
         return {
           label: "Upload JSON",
@@ -2794,7 +2853,7 @@ const AssetInstallationPage = () => {
         tooltip: "Open this asset to review and close blocking issues",
         color: "error",
         icon: <ReportProblemOutlined />,
-        onClick: () => summary.latestRun ? openRunHistory(asset) : handleStartWorkOrder(asset),
+        onClick: () => summary.latestRun ? openRunHistory(asset) : void startAssetFromBestWorkflowSource(asset),
         variant: "outlined",
       };
     }
@@ -2826,7 +2885,7 @@ const AssetInstallationPage = () => {
         tooltip: "Review high-severity observation issues for this asset",
         color: "warning",
         icon: <InfoOutlined />,
-        onClick: () => summary.latestRun ? openRunHistory(asset) : handleStartWorkOrder(asset),
+        onClick: () => summary.latestRun ? openRunHistory(asset) : void startAssetFromBestWorkflowSource(asset),
         variant: "outlined",
       };
     }
@@ -2855,7 +2914,7 @@ const AssetInstallationPage = () => {
       tooltip: "Open run details to review this asset",
       color: "error",
       icon: <ErrorOutlined />,
-      onClick: () => handleStartWorkOrder(asset),
+      onClick: () => void startAssetFromBestWorkflowSource(asset),
       variant: "outlined",
     };
   }
