@@ -60,20 +60,24 @@ reconnect, and asserts the temp ID was remapped.
 
 - **`MigrationsTests`** (green): applies all ~98 EF migrations to a fresh temp
   SQLite DB and asserts none are pending. This is the migration-chain safety net.
-- **`AuthLoginTests`** (SKIPPED): the `WebApplicationFactory` login smoke. It is
-  skipped because writing it **found a real bug** 👇.
+- **`AuthLoginTests`** (green): the `WebApplicationFactory` login smoke — boots
+  the whole app on a brand-new temp DB and logs in. Writing it **found and drove
+  the fix for a real bug** 👇.
 
-> **🐛 Fresh-DB init bug (found by this test).** Booting the app against a
-> brand-new database throws `SQLite Error 1: 'no such column: p.IsDeleted'`.
-> `DbInitializer.Initialize` queries `db.Projects` (which has an `IsDeleted`
-> soft-delete query filter) **before** the `Ensure*` patch that adds the
-> `IsDeleted` column runs. Production is masked because existing DBs already have
-> the column — but a fresh deploy would fail. Fix: add `IsDeleted` via a proper
-> migration, or run the column-adding `Ensure*` before the first seeding query.
-> Then remove the `Skip` on `AuthLoginTests` and add the 422 flow below.
+> **🐛→✅ Fresh-DB init bug (found by this test, now fixed).** Booting the app on
+> a brand-new database crashed with `SQLite Error 1: 'no such column: IsDeleted'`
+> (then `DeleteReason`). Root cause: five entities carry a soft-delete column
+> cluster (`IsDeleted`, `DeletedAtUtc`, `DeletedByUserId`, `DeleteReason`) with
+> `!IsDeleted` query filters, but **no migration creates those columns** — they
+> were model-only, patched ad hoc on existing DBs. A fresh deploy would fail.
+> **Fix:** `DbInitializer.EnsureSoftDeleteColumns` idempotently adds the cluster
+> to all five tables (`Projects`, `Installations`, `Documents`, `ProjectAssets`,
+> `BomImportRuns`) right after `Migrate()`, before any seeding query. The login
+> test now guards it. *Lesson:* prefer a real migration for mapped columns — this
+> class of drift is exactly what a fresh-DB integration test catches.
 
-Next backend test (after the bug fix): POST a workflow completion with an
-unresolved blocking issue → assert **HTTP 422**, using the same `ApiTestFactory`.
+Next backend test: POST a workflow completion with an unresolved blocking issue →
+assert **HTTP 422**, using the same `ApiTestFactory`.
 
 ### e2e — Playwright — DONE (frontend smoke)
 
@@ -91,10 +95,10 @@ npx playwright install --with-deps chromium   # CI does this in the e2e job
   password field, which only renders when the API on :4000 is reachable — that
   made the smoke non-hermetic.
 - **Next: the login→project→workflow-run flow.** This needs the API running and
-  seeded, so it belongs in a separate backend-backed suite/CI job — and it's
-  currently blocked by the fresh-DB init bug (the API can't seed a clean DB).
-  Fix that first, then automate: login (`admin@commtrac.local` / `Admin123!`) →
-  open a project → start an asset workflow run → complete a step.
+  seeded, so it belongs in a separate backend-backed suite/CI job (start the API,
+  wait for `:4000`, then run the browser flow). The fresh-DB blocker is fixed, so
+  a clean CI database now seeds. Automate: login (`admin@commtrac.local` /
+  `Admin123!`) → open a project → start an asset workflow run → complete a step.
 
 ## Until the suite exists: verify by exercising the flow
 

@@ -113,13 +113,13 @@ skill's introduction). Remaining ⚠️ items are the burn-down backlog.
 | Layered architecture | ✅ enforced by convention | keep boundaries |
 | CI/CD | ✅ `.github/workflows/ci.yml` (frontend/backend/standards/e2e) | keep green |
 | Frontend tests | ✅ Vitest wired, first specs pass (`npm test`) | grow coverage per testing ref |
-| Backend tests | ✅ xUnit project + integration smoke (`server/Commtrac.Api.Tests`) | add the 422 flow next |
+| Backend tests | ✅ xUnit: migration-integrity + login smoke, all passing | add the 422 flow next |
 | e2e | ✅ Playwright config + smoke (`npm run test:e2e`) | add the login→workflow flow |
 | Lint / format | ✅ ESLint + Prettier configured | ⚠️ burn down 13 lint errors, then enforce |
 | Pre-push hook | ✅ `.githooks/pre-push` runs the gates | keep |
 | Pre-commit hook | ⚠️ still only regenerates docs | fine as-is (heavy gates run pre-push) |
 | Repo hygiene | ✅ backup `.db` files untracked; `.gitignore` broadened | `hygiene` gate green |
-| Fresh-DB startup | 🐛 app can't init a brand-new DB (`no such column: p.IsDeleted`) | found by the backend test — fix `DbInitializer` order (see testing ref) |
+| Fresh-DB startup | ✅ fixed — `DbInitializer.EnsureSoftDeleteColumns` adds the model-only soft-delete columns before seeding | guarded by the backend login test |
 | `Entities.cs` / `Dtos.cs` | ⚠️ ~1400 / ~1500-line monoliths | split by domain when you touch them |
 | `axios` layer leaks | ⚠️ a few components/services bypass `api.ts` | route through `api.ts` when you touch them |
 | Bundle size | ⚠️ `pdf-reporting` chunk >1 MB | lazy-load; already partly chunked in `vite.config.ts` |
