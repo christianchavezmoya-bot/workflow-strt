@@ -105,6 +105,9 @@ export const workflowConfigService = {
       .catch(() => {});
 
     if (cached && cached.length > 0) {
+      // Ensure per-ID cache entries exist so getById() works offline even
+      // if the background refresh hasn't completed yet.
+      cacheConfigs(cached).catch(() => {});
       return status ? cached.filter((c) => c.status === status) : cached;
     }
 

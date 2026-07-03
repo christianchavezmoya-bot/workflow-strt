@@ -2150,8 +2150,12 @@ const AssetInstallationPage = () => {
   async function _doStartAssignmentRun(asset: ProjectAsset, assignment: WorkflowAssignment) {
     setRunnerLoading(asset.id);
     try {
-      // Load the workflow config to get steps
-      const cfg = await workflowConfigService.getById(assignment.workflowConfigId);
+      // Load the workflow config to get steps — fallback to in-memory maps
+      // when the per-ID IndexedDB cache is empty (e.g. background refresh
+      // hadn't finished caching individual configs before going offline).
+      const cfg = await workflowConfigService.getById(assignment.workflowConfigId)
+        ?? wfConfigMap.get(assignment.workflowConfigId)
+        ?? publishedWfConfigs.find((c) => c.id === assignment.workflowConfigId);
       if (!cfg) { alert("Workflow config not found."); return; }
       let wf: Workflow | null = null;
       try {
