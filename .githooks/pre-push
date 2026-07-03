@@ -1,0 +1,7 @@
+#!/bin/sh
+# Fail fast locally before pushing: run the fast quality gates.
+# Pre-commit stays lightweight (docs regen only); the heavier gates run here.
+set -e
+
+echo "pre-push: running quality gates (typecheck + backend + docs + hygiene)…"
+node .claude/skills/enterprise-dev-practices/scripts/check-gates.mjs typecheck backend docs hygiene

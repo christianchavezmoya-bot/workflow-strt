@@ -37,6 +37,9 @@ Thumbs.db
 
 # Testing
 coverage/
+playwright-report/
+test-results/
+.playwright/
 
 # Debug
 .vscode/launch.json
@@ -53,11 +56,17 @@ server/**/*.suo
 server/**/.vs/
 
 # SQLite runtime database — never commit, local data only
+# Catches commtrac.db plus all backup/restore/empty snapshots (…-shm/-wal too)
+server/**/commtrac.*.db
+server/**/commtrac.*.db-shm
+server/**/commtrac.*.db-wal
 server/**/commtrac.db
 server/**/commtrac.db-shm
 server/**/commtrac.db-wal
 server/**/commtrac.db-journal
 server/**/commtrac_old.db
+# xUnit test DBs
+server/**/*.Tests/**/*.db*
 server/Commtrac.Api/Storage/
 server/Commtrac.Api/backups/
 server/**/objbuildcheck*/

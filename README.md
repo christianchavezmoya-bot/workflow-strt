@@ -1,5 +1,20 @@
 # workflow-strt
 
+## Docs
+
+Architecture documentation is generated from the current app structure.
+
+```bash
+npm run docs:update
+```
+
+This repo also uses a pre-commit hook to refresh `docs/ARCHITECTURE.md` before each commit.
+If hooks are not active in your local clone, run:
+
+```bash
+npm run hooks:install
+```
+
 ## Android Terminal Setup
 
 Use the helper script before Gradle or ADB commands so Terminal uses the same JDK and SDK as Android Studio:

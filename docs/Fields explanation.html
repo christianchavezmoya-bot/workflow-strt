@@ -1,0 +1,1926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reference Fields - Commtrac Documentation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            yellow: '#FACC15',
+                            dark: '#0f0f11',
+                            panel: '#1a1a1a',
+                            card: '#222222',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        * { scrollbar-width: thin; scrollbar-color: #333 #1a1a1a; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+        html { scroll-behavior: smooth; }
+        body { background: #0f0f11; }
+
+        .gradient-text {
+            background: linear-gradient(to right, #FACC15, #FDE68A);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .code-block {
+            background: #0a0a0b;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .code-block pre {
+            padding: 16px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .code-header {
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sidebar-link {
+            transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+            border-left: 2px solid transparent;
+        }
+
+        .sidebar-link:hover {
+            background: rgba(250, 204, 21, 0.05);
+            border-left-color: rgba(250, 204, 21, 0.3);
+        }
+
+        .sidebar-link.active {
+            background: rgba(250, 204, 21, 0.1);
+            border-left-color: #FACC15;
+            color: #FACC15;
+        }
+
+        .collapsible-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 300ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .collapsible-content.expanded {
+            max-height: 2000px;
+        }
+
+        .tab-btn.active {
+            background: #FACC15;
+            color: #0f0f11;
+        }
+
+        .diagram-box {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .diagram-arrow {
+            color: #FACC15;
+            font-size: 24px;
+        }
+
+        .toast {
+            animation: slideIn 300ms ease-out, fadeOut 300ms ease-in 2700ms;
+            animation-fill-mode: forwards;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+
+        .search-highlight {
+            background: rgba(250, 204, 21, 0.3);
+            padding: 1px 2px;
+            border-radius: 2px;
+        }
+
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white; color: black; }
+            .sidebar { display: none; }
+            .main-content { margin-left: 0 !important; }
+        }
+
+        .feature-card {
+            transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .feature-card:hover {
+            border-color: rgba(250, 204, 21, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px -5px rgba(250, 204, 21, 0.1);
+        }
+
+        .step-number {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #FACC15, #EAB308);
+            color: #0f0f11;
+            border-radius: 50%;
+            font-weight: 600;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .schema-table {
+            font-size: 12px;
+        }
+
+        .schema-table th {
+            background: rgba(250, 204, 21, 0.1);
+            color: #FACC15;
+            font-weight: 500;
+        }
+
+        .schema-table td {
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .badge-pk { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+        .badge-fk { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+        .badge-idx { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+    </style>
+</head>
+<body class="font-sans text-white antialiased">
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2"></div>
+
+    <!-- Top Header -->
+    <header class="fixed top-0 left-0 right-0 h-16 bg-brand-dark/95 backdrop-blur-xl border-b border-white/5 z-40 no-print">
+        <div class="h-full flex items-center justify-between px-4 lg:px-6">
+            <div class="flex items-center gap-4">
+                <button onclick="toggleSidebar()" class="p-2 hover:bg-white/5 rounded-lg transition-colors lg:hidden">
+                    <i data-lucide="menu" class="w-5 h-5"></i>
+                </button>
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-brand-yellow flex items-center justify-center">
+                        <i data-lucide="link" class="w-4 h-4 text-brand-dark"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-sm font-semibold">Reference Fields</h1>
+                        <p class="text-[10px] text-zinc-500 uppercase tracking-wider">Commtrac Documentation v1.0</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <!-- Search -->
+                <div class="relative hidden md:block">
+                    <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"></i>
+                    <input
+                        type="text"
+                        id="search-input"
+                        placeholder="Search documentation..."
+                        class="w-64 lg:w-80 pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-brand-yellow/50 focus:ring-1 focus:ring-brand-yellow/20 placeholder:text-zinc-600"
+                        oninput="handleSearch(this.value)"
+                    >
+                    <kbd class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-600 bg-white/5 px-1.5 py-0.5 rounded">⌘K</kbd>
+                </div>
+
+                <!-- Actions -->
+                <button onclick="printPage()" class="p-2 hover:bg-white/5 rounded-lg transition-colors" title="Print">
+                    <i data-lucide="printer" class="w-4 h-4 text-zinc-400"></i>
+                </button>
+                <button onclick="downloadHTML()" class="flex items-center gap-2 px-3 py-2 bg-brand-yellow text-brand-dark rounded-lg text-sm font-medium hover:bg-yellow-300 transition-colors">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    <span class="hidden sm:inline">Download</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar fixed top-16 left-0 bottom-0 w-72 bg-brand-panel border-r border-white/5 overflow-y-auto z-30 transform -translate-x-full lg:translate-x-0 transition-transform duration-300 no-print">
+        <nav class="p-4 space-y-1">
+            <p class="text-[10px] uppercase tracking-wider text-zinc-600 font-medium px-3 mb-2">Getting Started</p>
+            <a href="#overview" class="sidebar-link active flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 rounded-r-lg">
+                <i data-lucide="book-open" class="w-4 h-4"></i>
+                Overview
+            </a>
+            <a href="#quick-start" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="zap" class="w-4 h-4"></i>
+                Quick Start
+            </a>
+
+            <p class="text-[10px] uppercase tracking-wider text-zinc-600 font-medium px-3 mt-6 mb-2">Core Concepts</p>
+            <a href="#what-are" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="help-circle" class="w-4 h-4"></i>
+                What Are Reference Fields?
+            </a>
+            <a href="#when-to-use" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="check-circle" class="w-4 h-4"></i>
+                When to Use
+            </a>
+            <a href="#how-to-create" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                How to Create
+            </a>
+
+            <p class="text-[10px] uppercase tracking-wider text-zinc-600 font-medium px-3 mt-6 mb-2">Usage</p>
+            <a href="#examples" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="code" class="w-4 h-4"></i>
+                Practical Examples
+            </a>
+            <a href="#actions" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="mouse-pointer-click" class="w-4 h-4"></i>
+                Available Actions
+            </a>
+            <a href="#comparison" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="table" class="w-4 h-4"></i>
+                Field Comparison
+            </a>
+
+            <p class="text-[10px] uppercase tracking-wider text-zinc-600 font-medium px-3 mt-6 mb-2">Best Practices</p>
+            <a href="#best-practices" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="award" class="w-4 h-4"></i>
+                Best Practices
+            </a>
+            <a href="#troubleshooting" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="bug" class="w-4 h-4"></i>
+                Troubleshooting
+            </a>
+            <a href="#migration" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="arrow-right-left" class="w-4 h-4"></i>
+                Migration Guide
+            </a>
+
+            <p class="text-[10px] uppercase tracking-wider text-zinc-600 font-medium px-3 mt-6 mb-2">Advanced</p>
+            <a href="#advanced" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="layers" class="w-4 h-4"></i>
+                Advanced Usage
+            </a>
+            <a href="#architecture" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="git-branch" class="w-4 h-4"></i>
+                Architecture
+            </a>
+            <a href="#schema" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="database" class="w-4 h-4"></i>
+                Database Schema
+            </a>
+
+            <p class="text-[10px] uppercase tracking-wider text-zinc-600 font-medium px-3 mt-6 mb-2">Reference</p>
+            <a href="#quick-reference" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="bookmark" class="w-4 h-4"></i>
+                Quick Reference Card
+            </a>
+            <a href="#faqs" class="sidebar-link flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 rounded-r-lg">
+                <i data-lucide="message-circle" class="w-4 h-4"></i>
+                FAQs
+            </a>
+        </nav>
+    </aside>
+
+    <!-- Mobile Sidebar Overlay -->
+    <div id="sidebar-overlay" class="fixed inset-0 bg-black/50 z-20 hidden lg:hidden" onclick="toggleSidebar()"></div>
+
+    <!-- Main Content -->
+    <main class="main-content lg:ml-72 pt-16">
+        <div class="max-w-4xl mx-auto px-6 py-12">
+
+            <!-- Overview Section -->
+            <section id="overview" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <span class="badge bg-brand-yellow/10 text-brand-yellow">v1.0</span>
+                    <span class="text-zinc-500 text-sm">Last Updated: Feb 5, 2026</span>
+                </div>
+
+                <h1 class="text-4xl lg:text-5xl font-bold tracking-tight mb-6">
+                    <span class="gradient-text">Reference Fields</span>
+                    <br>User Guide
+                </h1>
+
+                <p class="text-lg text-zinc-400 leading-relaxed mb-8 max-w-2xl">
+                    Reference fields create relationships between tables, ensuring data consistency by linking records to a single source of truth. When you need data from one table to appear in another, reference fields keep everything in sync.
+                </p>
+
+                <!-- Feature Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="feature-card bg-brand-card border border-white/5 rounded-xl p-5">
+                        <div class="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center mb-3">
+                            <i data-lucide="link" class="w-5 h-5 text-green-400"></i>
+                        </div>
+                        <h3 class="font-medium text-sm mb-1">Link Tables</h3>
+                        <p class="text-xs text-zinc-500">Connect related data across your system</p>
+                    </div>
+                    <div class="feature-card bg-brand-card border border-white/5 rounded-xl p-5">
+                        <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center mb-3">
+                            <i data-lucide="download" class="w-5 h-5 text-blue-400"></i>
+                        </div>
+                        <h3 class="font-medium text-sm mb-1">Auto-Populate</h3>
+                        <p class="text-xs text-zinc-500">Pull data from source table automatically</p>
+                    </div>
+                    <div class="feature-card bg-brand-card border border-white/5 rounded-xl p-5">
+                        <div class="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center mb-3">
+                            <i data-lucide="shield-check" class="w-5 h-5 text-purple-400"></i>
+                        </div>
+                        <h3 class="font-medium text-sm mb-1">Validate Data</h3>
+                        <p class="text-xs text-zinc-500">Ensure referenced records exist</p>
+                    </div>
+                    <div class="feature-card bg-brand-card border border-white/5 rounded-xl p-5">
+                        <div class="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center mb-3">
+                            <i data-lucide="refresh-cw" class="w-5 h-5 text-yellow-400"></i>
+                        </div>
+                        <h3 class="font-medium text-sm mb-1">Maintain Consistency</h3>
+                        <p class="text-xs text-zinc-500">Changes update everywhere instantly</p>
+                    </div>
+                    <div class="feature-card bg-brand-card border border-white/5 rounded-xl p-5">
+                        <div class="w-10 h-10 rounded-lg bg-pink-500/10 flex items-center justify-center mb-3">
+                            <i data-lucide="external-link" class="w-5 h-5 text-pink-400"></i>
+                        </div>
+                        <h3 class="font-medium text-sm mb-1">Enable Navigation</h3>
+                        <p class="text-xs text-zinc-500">Click to open related records</p>
+                    </div>
+                    <div class="feature-card bg-brand-card border border-white/5 rounded-xl p-5">
+                        <div class="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center mb-3">
+                            <i data-lucide="check-square" class="w-5 h-5 text-cyan-400"></i>
+                        </div>
+                        <h3 class="font-medium text-sm mb-1">Dropdown Lists</h3>
+                        <p class="text-xs text-zinc-500">Show only valid options</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Quick Start Section -->
+            <section id="quick-start" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-yellow-500/10 flex items-center justify-center">
+                        <i data-lucide="zap" class="w-4 h-4 text-yellow-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Quick Start</h2>
+                    <span class="text-xs text-zinc-600 bg-white/5 px-2 py-1 rounded">2 min read</span>
+                </div>
+
+                <!-- Before/After Comparison -->
+                <div class="grid md:grid-cols-2 gap-4 mb-8">
+                    <div class="bg-red-500/5 border border-red-500/20 rounded-xl p-5">
+                        <div class="flex items-center gap-2 mb-3">
+                            <i data-lucide="x-circle" class="w-4 h-4 text-red-400"></i>
+                            <span class="text-sm font-medium text-red-400">Before (Manual Entry)</span>
+                        </div>
+                        <div class="code-block">
+                            <pre class="text-zinc-400 font-mono text-xs"><code>Projects Table:
+- Customer: "Acme Corp"
+- Customer: "Acme Corporation"  ← Different!
+- Customer: "ACME"              ← Wrong!</code></pre>
+                        </div>
+                    </div>
+                    <div class="bg-green-500/5 border border-green-500/20 rounded-xl p-5">
+                        <div class="flex items-center gap-2 mb-3">
+                            <i data-lucide="check-circle" class="w-4 h-4 text-green-400"></i>
+                            <span class="text-sm font-medium text-green-400">After (Reference Field)</span>
+                        </div>
+                        <div class="code-block">
+                            <pre class="text-zinc-400 font-mono text-xs"><code>Projects Table:
+- Customer: [Dropdown] → Acme Corporation ✓
+                      → Beta Industries  ✓
+                      → Gamma Tech       ✓</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 30 Second Setup -->
+                <div class="bg-brand-card border border-white/5 rounded-xl p-6">
+                    <h3 class="text-lg font-medium mb-4 flex items-center gap-2">
+                        <i data-lucide="clock" class="w-5 h-5 text-brand-yellow"></i>
+                        Create in 30 Seconds
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="flex items-start gap-4">
+                            <div class="step-number">1</div>
+                            <div>
+                                <p class="text-sm text-zinc-300">Click <strong class="text-white">⚙️ Settings</strong> on any table</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-4">
+                            <div class="step-number">2</div>
+                            <div class="flex-1">
+                                <p class="text-sm text-zinc-300 mb-3">Under "Create new field", configure:</p>
+                                <div class="bg-black/30 rounded-lg p-4 space-y-2">
+                                    <div class="flex items-center gap-3">
+                                        <span class="text-xs text-zinc-500 w-20">Name:</span>
+                                        <code class="text-xs text-brand-yellow font-mono">Customer Name</code>
+                                    </div>
+                                    <div class="flex items-center gap-3">
+                                        <span class="text-xs text-zinc-500 w-20">Type:</span>
+                                        <code class="text-xs text-green-400 font-mono">reference</code>
+                                    </div>
+                                    <div class="flex items-center gap-3">
+                                        <span class="text-xs text-zinc-500 w-20">Link to:</span>
+                                        <code class="text-xs text-blue-400 font-mono">field-customer</code>
+                                    </div>
+                                    <div class="flex items-center gap-3">
+                                        <span class="text-xs text-zinc-500 w-20">Action:</span>
+                                        <code class="text-xs text-purple-400 font-mono">open referenced record</code>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-4">
+                            <div class="step-number">3</div>
+                            <div>
+                                <p class="text-sm text-zinc-300">Click <strong class="text-white">Create</strong> — Done! ✨</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Common Use Cases -->
+                <div class="mt-8">
+                    <h3 class="text-lg font-medium mb-4">Common Use Cases</h3>
+                    <div class="grid md:grid-cols-2 gap-3">
+                        <div class="bg-brand-card border border-white/5 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <i data-lucide="building" class="w-4 h-4 text-blue-400"></i>
+                                <span class="text-sm font-medium">Customer References</span>
+                            </div>
+                            <p class="text-xs text-zinc-500">Projects, Installations, Issues → Customers table</p>
+                        </div>
+                        <div class="bg-brand-card border border-white/5 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <i data-lucide="map-pin" class="w-4 h-4 text-green-400"></i>
+                                <span class="text-sm font-medium">Site Locations</span>
+                            </div>
+                            <p class="text-xs text-zinc-500">Installations, Service Calls → Sites table</p>
+                        </div>
+                        <div class="bg-brand-card border border-white/5 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <i data-lucide="package" class="w-4 h-4 text-purple-400"></i>
+                                <span class="text-sm font-medium">Product Selection</span>
+                            </div>
+                            <p class="text-xs text-zinc-500">Projects, Orders → Products table</p>
+                        </div>
+                        <div class="bg-brand-card border border-white/5 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <i data-lucide="user" class="w-4 h-4 text-yellow-400"></i>
+                                <span class="text-sm font-medium">User Assignment</span>
+                            </div>
+                            <p class="text-xs text-zinc-500">Tasks, Issues → Users table</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- What Are Reference Fields -->
+            <section id="what-are" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                        <i data-lucide="help-circle" class="w-4 h-4 text-purple-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">What Are Reference Fields?</h2>
+                </div>
+
+                <div class="bg-brand-card border border-white/5 rounded-xl p-6 mb-6">
+                    <p class="text-zinc-400 leading-relaxed mb-4">
+                        Reference fields are a special field type that create <strong class="text-white">validated links</strong> between tables. Instead of manually typing data that exists elsewhere, users select from a dropdown populated directly from the source table.
+                    </p>
+                    <div class="bg-black/30 rounded-lg p-4">
+                        <p class="text-sm text-zinc-300 font-medium mb-2">Key Benefits:</p>
+                        <ul class="space-y-2 text-sm text-zinc-400">
+                            <li class="flex items-start gap-2"><i data-lucide="check" class="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0"></i> Eliminates typos and inconsistencies</li>
+                            <li class="flex items-start gap-2"><i data-lucide="check" class="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0"></i> Updates propagate automatically</li>
+                            <li class="flex items-start gap-2"><i data-lucide="check" class="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0"></i> Validates that referenced records exist</li>
+                            <li class="flex items-start gap-2"><i data-lucide="check" class="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0"></i> Enables click-to-navigate functionality</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Visual Diagram -->
+                <div class="bg-brand-panel border border-white/5 rounded-xl p-6">
+                    <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-6">How It Works</h3>
+                    <div class="flex flex-col md:flex-row items-center justify-center gap-4">
+                        <div class="diagram-box flex-1 max-w-[200px]">
+                            <i data-lucide="database" class="w-8 h-8 text-blue-400 mx-auto mb-2"></i>
+                            <p class="text-sm font-medium">Source Table</p>
+                            <p class="text-xs text-zinc-500 mt-1">Customers</p>
+                            <div class="mt-3 text-left bg-black/30 rounded p-2">
+                                <p class="text-xs text-zinc-400">• Acme Corporation</p>
+                                <p class="text-xs text-zinc-400">• Beta Industries</p>
+                                <p class="text-xs text-zinc-400">• Gamma Tech</p>
+                            </div>
+                        </div>
+                        <div class="diagram-arrow flex flex-col items-center">
+                            <i data-lucide="arrow-right" class="w-6 h-6 hidden md:block"></i>
+                            <i data-lucide="arrow-down" class="w-6 h-6 md:hidden"></i>
+                            <span class="text-[10px] text-brand-yellow mt-1">Reference Link</span>
+                        </div>
+                        <div class="diagram-box flex-1 max-w-[200px]">
+                            <i data-lucide="table" class="w-8 h-8 text-green-400 mx-auto mb-2"></i>
+                            <p class="text-sm font-medium">Referencing Table</p>
+                            <p class="text-xs text-zinc-500 mt-1">Projects</p>
+                            <div class="mt-3 text-left bg-black/30 rounded p-2">
+                                <p class="text-xs text-zinc-400">Customer: <span class="text-brand-yellow">[Dropdown]</span></p>
+                                <p class="text-xs text-zinc-400 text-center mt-1">↓ Selects from source</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- When to Use -->
+            <section id="when-to-use" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center">
+                        <i data-lucide="check-circle" class="w-4 h-4 text-green-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">When to Use Reference Fields</h2>
+                </div>
+
+                <!-- Tabs -->
+                <div class="flex gap-2 mb-6">
+                    <button onclick="switchTab('do-tab', this)" class="tab-btn active px-4 py-2 rounded-lg text-sm font-medium transition-all">✅ Do Use</button>
+                    <button onclick="switchTab('dont-tab', this)" class="tab-btn px-4 py-2 rounded-lg text-sm font-medium bg-white/5 text-zinc-400 hover:bg-white/10 transition-all">❌ Don't Use</button>
+                </div>
+
+                <!-- Do Tab -->
+                <div id="do-tab" class="tab-content">
+                    <div class="space-y-4">
+                        <div class="bg-brand-card border border-green-500/20 rounded-xl p-5">
+                            <div class="flex items-start gap-3">
+                                <div class="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    <span class="text-sm font-bold text-green-400">1</span>
+                                </div>
+                                <div>
+                                    <h3 class="font-medium mb-1">Linking Related Entities</h3>
+                                    <p class="text-sm text-zinc-400 mb-3">When records in one table need to reference records in another.</p>
+                                    <div class="flex flex-wrap gap-2">
+                                        <span class="text-xs bg-black/30 px-2 py-1 rounded">Projects → Customers</span>
+                                        <span class="text-xs bg-black/30 px-2 py-1 rounded">Installations → Sites</span>
+                                        <span class="text-xs bg-black/30 px-2 py-1 rounded">Issues → Installations</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-brand-card border border-green-500/20 rounded-xl p-5">
+                            <div class="flex items-start gap-3">
+                                <div class="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    <span class="text-sm font-bold text-green-400">2</span>
+                                </div>
+                                <div>
+                                    <h3 class="font-medium mb-1">Ensuring Data Consistency</h3>
+                                    <p class="text-sm text-zinc-400 mb-3">When the same data should match across all tables.</p>
+                                    <div class="flex flex-wrap gap-2">
+                                        <span class="text-xs bg-black/30 px-2 py-1 rounded">Customer names</span>
+                                        <span class="text-xs bg-black/30 px-2 py-1 rounded">Product lists</span>
+                                        <span class="text-xs bg-black/30 px-2 py-1 rounded">User assignments</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-brand-card border border-green-500/20 rounded-xl p-5">
+                            <div class="flex items-start gap-3">
+                                <div class="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    <span class="text-sm font-bold text-green-400">3</span>
+                                </div>
+                                <div>
+                                    <h3 class="font-medium mb-1">Creating Dropdown Lists</h3>
+                                    <p class="text-sm text-zinc-400 mb-3">When options should come from a controlled source.</p>
+                                    <div class="flex flex-wrap gap-2">
+                                        <span class="text-xs bg-black/30 px-2 py-1 rounded">Site locations (filtered)</span>
+                                        <span class="text-xs bg-black/30 px-2 py-1 rounded">Products from catalog</span>
+                                        <span class="text-xs bg-black/30 px-2 py-1 rounded">Status values</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Don't Tab -->
+                <div id="dont-tab" class="tab-content hidden">
+                    <div class="space-y-4">
+                        <div class="bg-brand-card border border-red-500/20 rounded-xl p-5">
+                            <div class="flex items-start gap-3">
+                                <div class="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    <i data-lucide="x" class="w-4 h-4 text-red-400"></i>
+                                </div>
+                                <div>
+                                    <h3 class="font-medium mb-1">Free-Text Input Needed</h3>
+                                    <p class="text-sm text-zinc-400">Use a <code class="text-xs bg-black/30 px-1.5 py-0.5 rounded text-blue-400">text</code> field instead for notes, descriptions, or any unique content.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-brand-card border border-red-500/20 rounded-xl p-5">
+                            <div class="flex items-start gap-3">
+                                <div class="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    <i data-lucide="x" class="w-4 h-4 text-red-400"></i>
+                                </div>
+                                <div>
+                                    <h3 class="font-medium mb-1">Data is Unique to Each Record</h3>
+                                    <p class="text-sm text-zinc-400">If the value is different for every record and doesn't exist elsewhere, use <code class="text-xs bg-black/30 px-1.5 py-0.5 rounded text-blue-400">text</code> or <code class="text-xs bg-black/30 px-1.5 py-0.5 rounded text-blue-400">number</code> fields.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-brand-card border border-red-500/20 rounded-xl p-5">
+                            <div class="flex items-start gap-3">
+                                <div class="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    <i data-lucide="x" class="w-4 h-4 text-red-400"></i>
+                                </div>
+                                <div>
+                                    <h3 class="font-medium mb-1">Creating Formulas or Calculations</h3>
+                                    <p class="text-sm text-zinc-400">For computed values, use a <code class="text-xs bg-black/30 px-1.5 py-0.5 rounded text-blue-400">formula</code> field type.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- How to Create -->
+            <section id="how-to-create" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                        <i data-lucide="plus-circle" class="w-4 h-4 text-blue-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">How to Create a Reference Field</h2>
+                </div>
+
+                <!-- Step 1 -->
+                <div class="mb-8">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="step-number">1</div>
+                        <h3 class="text-lg font-medium">Open Table Configuration</h3>
+                    </div>
+                    <div class="ml-11 space-y-2 text-sm text-zinc-400">
+                        <p>Navigate to any table (Projects, Installations, etc.)</p>
+                        <p>Click the <strong class="text-white">⚙️ Settings icon</strong> in the table header</p>
+                        <p>The Table Configuration dialog opens</p>
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="mb-8">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="step-number">2</div>
+                        <h3 class="text-lg font-medium">Create New Field</h3>
+                    </div>
+                    <div class="ml-11">
+                        <p class="text-sm text-zinc-400 mb-4">In the "Create new field" section, configure the following:</p>
+
+                        <div class="code-block mb-4">
+                            <div class="code-header">
+                                <span class="text-xs text-zinc-500 font-mono">Field Configuration</span>
+                                <button onclick="copyCode(this)" class="text-xs text-zinc-500 hover:text-white flex items-center gap-1 transition-colors">
+                                    <i data-lucide="copy" class="w-3 h-3"></i> Copy
+                                </button>
+                            </div>
+                            <pre class="text-zinc-300 font-mono"><code><span class="text-zinc-500"># Field name - Enter a descriptive name</span>
+<span class="text-purple-400">Field name:</span> "Customer Site", "Product Category", "Assigned To"
+
+<span class="text-zinc-500"># Field type - Select "reference" from dropdown</span>
+<span class="text-purple-400">Field type:</span> <span class="text-green-400">"reference"</span>
+
+<span class="text-zinc-500"># Link to - Select the source field</span>
+<span class="text-purple-400">Link to:</span> 
+  - field-customer (primary key)
+  - field-site-name (primary key)
+  - field-job-number (primary key)
+  - Any composite key or lookup field
+
+<span class="text-zinc-500"># Action - Choose click behavior</span>
+<span class="text-purple-400">Action:</span>
+  - "open referenced record" → Opens full record
+  - "filter by reference" → Filters data by selection
+  - "navigate to reference" → Goes to related page</code></pre>
+                        </div>
+
+                        <p class="text-sm text-zinc-400">Click <strong class="text-white">"Create"</strong> to save the field</p>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="step-number">3</div>
+                        <h3 class="text-lg font-medium">Use the Field</h3>
+                    </div>
+                    <div class="ml-11">
+                        <p class="text-sm text-zinc-400 mb-4">The reference field now appears in your table and:</p>
+                        <ul class="space-y-2 text-sm text-zinc-400">
+                            <li class="flex items-start gap-2"><i data-lucide="check" class="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0"></i> Shows a dropdown of valid options</li>
+                            <li class="flex items-start gap-2"><i data-lucide="check" class="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0"></i> Validates entries against the source</li>
+                            <li class="flex items-start gap-2"><i data-lucide="check" class="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0"></i> Enables the selected action on click</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Practical Examples -->
+            <section id="examples" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+                        <i data-lucide="code" class="w-4 h-4 text-cyan-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Practical Examples</h2>
+                </div>
+
+                <!-- Example Selector -->
+                <div class="flex flex-wrap gap-2 mb-6">
+                    <button onclick="showExample(1, this)" class="example-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-yellow text-brand-dark">Example 1</button>
+                    <button onclick="showExample(2, this)" class="example-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-zinc-400 hover:bg-white/10 transition-colors">Example 2</button>
+                    <button onclick="showExample(3, this)" class="example-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-zinc-400 hover:bg-white/10 transition-colors">Example 3</button>
+                </div>
+
+                <!-- Example 1 -->
+                <div id="example-1" class="example-content">
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <div class="p-5 border-b border-white/5">
+                            <h3 class="font-medium text-lg mb-2">Link Installations to Customer Sites</h3>
+                            <p class="text-sm text-zinc-400">When creating an Installation, select from the customer's actual sites</p>
+                        </div>
+                        <div class="p-5">
+                            <div class="code-block mb-4">
+                                <div class="code-header">
+                                    <span class="text-xs text-zinc-500 font-mono">Setup Configuration</span>
+                                    <button onclick="copyCode(this)" class="text-xs text-zinc-500 hover:text-white flex items-center gap-1 transition-colors">
+                                        <i data-lucide="copy" class="w-3 h-3"></i> Copy
+                                    </button>
+                                </div>
+                                <pre class="text-zinc-300 font-mono text-sm"><code><span class="text-purple-400">Field name:</span> "Installation Site"
+<span class="text-purple-400">Field type:</span> <span class="text-green-400">"reference"</span>
+<span class="text-purple-400">Link to:</span> field-site-name (Sites table primary key)
+<span class="text-purple-400">Action:</span> "open referenced record"</code></pre>
+                            </div>
+                            <div class="bg-green-500/5 border border-green-500/20 rounded-lg p-4">
+                                <p class="text-sm font-medium text-green-400 mb-2">Result:</p>
+                                <ul class="space-y-1 text-sm text-zinc-400">
+                                    <li>• Dropdown shows only real customer sites</li>
+                                    <li>• Can't enter invalid site names</li>
+                                    <li>• Clicking the site opens full site details</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Example 2 -->
+                <div id="example-2" class="example-content hidden">
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <div class="p-5 border-b border-white/5">
+                            <h3 class="font-medium text-lg mb-2">Consistent Customer Names</h3>
+                            <p class="text-sm text-zinc-400">Ensure customer names are the same in Projects and Installations</p>
+                        </div>
+                        <div class="p-5">
+                            <div class="grid md:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <p class="text-xs text-zinc-500 uppercase tracking-wider mb-2">Projects Table</p>
+                                    <div class="code-block">
+                                        <pre class="text-zinc-300 font-mono text-sm"><code><span class="text-purple-400">Field name:</span> "Customer Name"
+<span class="text-purple-400">Field type:</span> <span class="text-green-400">"reference"</span>
+<span class="text-purple-400">Link to:</span> field-customer
+<span class="text-purple-400">Action:</span> "navigate to reference"</code></pre>
+                                    </div>
+                                </div>
+                                <div>
+                                    <p class="text-xs text-zinc-500 uppercase tracking-wider mb-2">Installations Table</p>
+                                    <div class="code-block">
+                                        <pre class="text-zinc-300 font-mono text-sm"><code><span class="text-purple-400">Field name:</span> "Customer Name"
+<span class="text-purple-400">Field type:</span> <span class="text-green-400">"reference"</span>
+<span class="text-purple-400">Link to:</span> field-customer
+<span class="text-purple-400">Action:</span> "navigate to reference"</code></pre>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-green-500/5 border border-green-500/20 rounded-lg p-4">
+                                <p class="text-sm font-medium text-green-400 mb-2">Result:</p>
+                                <ul class="space-y-1 text-sm text-zinc-400">
+                                    <li>• Both tables show the same customer list</li>
+                                    <li>• Changes to customer names update everywhere</li>
+                                    <li>• Clicking customer name goes to customer details</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Example 3 -->
+                <div id="example-3" class="example-content hidden">
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <div class="p-5 border-b border-white/5">
+                            <h3 class="font-medium text-lg mb-2">Product Selection from Master Catalog</h3>
+                            <p class="text-sm text-zinc-400">Products selected must be from approved catalog</p>
+                        </div>
+                        <div class="p-5">
+                            <div class="code-block mb-4">
+                                <div class="code-header">
+                                    <span class="text-xs text-zinc-500 font-mono">Setup Configuration</span>
+                                    <button onclick="copyCode(this)" class="text-xs text-zinc-500 hover:text-white flex items-center gap-1 transition-colors">
+                                        <i data-lucide="copy" class="w-3 h-3"></i> Copy
+                                    </button>
+                                </div>
+                                <pre class="text-zinc-300 font-mono text-sm"><code><span class="text-purple-400">Field name:</span> "Selected Product"
+<span class="text-purple-400">Field type:</span> <span class="text-green-400">"reference"</span>
+<span class="text-purple-400">Link to:</span> field-products
+<span class="text-purple-400">Action:</span> "open referenced record"</code></pre>
+                            </div>
+                            <div class="bg-green-500/5 border border-green-500/20 rounded-lg p-4">
+                                <p class="text-sm font-medium text-green-400 mb-2">Result:</p>
+                                <ul class="space-y-1 text-sm text-zinc-400">
+                                    <li>• Dropdown populated from Products table</li>
+                                    <li>• Can't add products that don't exist in catalog</li>
+                                    <li>• Clicking product opens product details</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Available Actions -->
+            <section id="actions" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-pink-500/10 flex items-center justify-center">
+                        <i data-lucide="mouse-pointer-click" class="w-4 h-4 text-pink-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Available Actions</h2>
+                </div>
+
+                <p class="text-zinc-400 mb-6">When setting up a reference field, choose what happens when a user clicks a value:</p>
+
+                <div class="grid md:grid-cols-3 gap-4">
+                    <div class="bg-brand-card border border-white/5 rounded-xl p-5 hover:border-blue-500/30 transition-colors">
+                        <div class="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center mb-4">
+                            <i data-lucide="external-link" class="w-6 h-6 text-blue-400"></i>
+                        </div>
+                        <h3 class="font-medium mb-2">Open Referenced Record</h3>
+                        <p class="text-sm text-zinc-400 mb-3">Opens a detail view of the selected record</p>
+                        <div class="bg-black/30 rounded p-2">
+                            <p class="text-xs text-zinc-500"><span class="text-blue-400">Best for:</span> Quick access to full information</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-brand-card border border-white/5 rounded-xl p-5 hover:border-green-500/30 transition-colors">
+                        <div class="w-12 h-12 rounded-xl bg-green-500/10 flex items-center justify-center mb-4">
+                            <i data-lucide="filter" class="w-6 h-6 text-green-400"></i>
+                        </div>
+                        <h3 class="font-medium mb-2">Filter by Reference</h3>
+                        <p class="text-sm text-zinc-400 mb-3">Filters the current view based on selection</p>
+                        <div class="bg-black/30 rounded p-2">
+                            <p class="text-xs text-zinc-500"><span class="text-green-400">Best for:</span> Finding related records</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-brand-card border border-white/5 rounded-xl p-5 hover:border-purple-500/30 transition-colors">
+                        <div class="w-12 h-12 rounded-xl bg-purple-500/10 flex items-center justify-center mb-4">
+                            <i data-lucide="navigation" class="w-6 h-6 text-purple-400"></i>
+                        </div>
+                        <h3 class="font-medium mb-2">Navigate to Reference</h3>
+                        <p class="text-sm text-zinc-400 mb-3">Navigates to the referenced entity's page</p>
+                        <div class="bg-black/30 rounded p-2">
+                            <p class="text-xs text-zinc-500"><span class="text-purple-400">Best for:</span> Managing referenced records</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Field Types Comparison -->
+            <section id="comparison" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                        <i data-lucide="table" class="w-4 h-4 text-orange-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Field Types Comparison</h2>
+                </div>
+
+                <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="border-b border-white/10">
+                                    <th class="text-left p-4 text-zinc-400 font-medium">Field Type</th>
+                                    <th class="text-left p-4 text-zinc-400 font-medium">Use Case</th>
+                                    <th class="text-left p-4 text-zinc-400 font-medium">Example</th>
+                                    <th class="text-left p-4 text-zinc-400 font-medium">Data Source</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="border-b border-white/5 bg-brand-yellow/5">
+                                    <td class="p-4 font-medium text-brand-yellow">reference</td>
+                                    <td class="p-4 text-zinc-400">Link to other tables</td>
+                                    <td class="p-4"><code class="text-xs bg-black/30 px-1.5 py-0.5 rounded">Customer, Site, Product</code></td>
+                                    <td class="p-4 text-zinc-400">Another table</td>
+                                </tr>
+                                <tr class="border-b border-white/5">
+                                    <td class="p-4 font-medium text-zinc-300">text</td>
+                                    <td class="p-4 text-zinc-400">Free-form text</td>
+                                    <td class="p-4"><code class="text-xs bg-black/30 px-1.5 py-0.5 rounded">Notes, Description</code></td>
+                                    <td class="p-4 text-zinc-400">User input</td>
+                                </tr>
+                                <tr class="border-b border-white/5">
+                                    <td class="p-4 font-medium text-zinc-300">dropdown</td>
+                                    <td class="p-4 text-zinc-400">Fixed list of options</td>
+                                    <td class="p-4"><code class="text-xs bg-black/30 px-1.5 py-0.5 rounded">Priority, Status</code></td>
+                                    <td class="p-4 text-zinc-400">Predefined list</td>
+                                </tr>
+                                <tr class="border-b border-white/5">
+                                    <td class="p-4 font-medium text-zinc-300">lookup field</td>
+                                    <td class="p-4 text-zinc-400">Complex relationships</td>
+                                    <td class="p-4"><code class="text-xs bg-black/30 px-1.5 py-0.5 rounded">Calculated fields</code></td>
+                                    <td class="p-4 text-zinc-400">Related tables</td>
+                                </tr>
+                                <tr>
+                                    <td class="p-4 font-medium text-zinc-300">primary key</td>
+                                    <td class="p-4 text-zinc-400">Unique identifier</td>
+                                    <td class="p-4"><code class="text-xs bg-black/30 px-1.5 py-0.5 rounded">Job Number, ID</code></td>
+                                    <td class="p-4 text-zinc-400">Auto-generated</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Best Practices -->
+            <section id="best-practices" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                        <i data-lucide="award" class="w-4 h-4 text-emerald-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Best Practices</h2>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-6">
+                    <!-- DO Column -->
+                    <div>
+                        <h3 class="text-green-400 font-medium mb-4 flex items-center gap-2">
+                            <i data-lucide="check-circle" class="w-4 h-4"></i> DO
+                        </h3>
+                        <div class="space-y-3">
+                            <div class="bg-green-500/5 border border-green-500/20 rounded-lg p-4">
+                                <p class="text-sm font-medium mb-2">1. Use Descriptive Names</p>
+                                <div class="code-block">
+                                    <pre class="text-xs font-mono"><code><span class="text-green-400">Good:</span> "Installation Site Location"
+<span class="text-red-400">Bad:</span>  "Site", "Field1", "Ref"</code></pre>
+                                </div>
+                            </div>
+
+                            <div class="bg-green-500/5 border border-green-500/20 rounded-lg p-4">
+                                <p class="text-sm font-medium mb-2">2. Link to Primary Keys</p>
+                                <p class="text-xs text-zinc-400">Link to fields marked as "primary key" or "composite key" to ensure uniqueness and data integrity.</p>
+                            </div>
+
+                            <div class="bg-green-500/5 border border-green-500/20 rounded-lg p-4">
+                                <p class="text-sm font-medium mb-2">3. Choose Appropriate Actions</p>
+                                <ul class="text-xs text-zinc-400 space-y-1">
+                                    <li>• <strong class="text-white">Navigation:</strong> For managing related records</li>
+                                    <li>• <strong class="text-white">Open record:</strong> For viewing details</li>
+                                    <li>• <strong class="text-white">Filter:</strong> For finding related data</li>
+                                </ul>
+                            </div>
+
+                            <div class="bg-green-500/5 border border-green-500/20 rounded-lg p-4">
+                                <p class="text-sm font-medium mb-2">4. Document Your References</p>
+                                <p class="text-xs text-zinc-400">Keep track of which fields reference what. This helps when restructuring or debugging.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DON'T Column -->
+                    <div>
+                        <h3 class="text-red-400 font-medium mb-4 flex items-center gap-2">
+                            <i data-lucide="x-circle" class="w-4 h-4"></i> DON'T
+                        </h3>
+                        <div class="space-y-3">
+                            <div class="bg-red-500/5 border border-red-500/20 rounded-lg p-4">
+                                <p class="text-sm font-medium mb-2">1. Create Circular References</p>
+                                <div class="code-block">
+                                    <pre class="text-xs font-mono"><code><span class="text-red-400">Bad:</span> Table A → B → C → A
+Creates confusion and potential loops</code></pre>
+                                </div>
+                            </div>
+
+                            <div class="bg-red-500/5 border border-red-500/20 rounded-lg p-4">
+                                <p class="text-sm font-medium mb-2">2. Reference Temporary Data</p>
+                                <p class="text-xs text-zinc-400">Don't link to fields that change frequently or are marked for deletion.</p>
+                            </div>
+
+                            <div class="bg-red-500/5 border border-red-500/20 rounded-lg p-4">
+                                <p class="text-sm font-medium mb-2">3. Over-Reference</p>
+                                <p class="text-xs text-zinc-400">Not every field needs to be a reference. Use text fields for simple, non-critical data.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Troubleshooting -->
+            <section id="troubleshooting" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                        <i data-lucide="bug" class="w-4 h-4 text-amber-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Troubleshooting</h2>
+                </div>
+
+                <div class="space-y-4">
+                    <!-- Problem 1 -->
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <button onclick="toggleCollapsible('trouble-1')" class="w-full p-5 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors">
+                            <div class="flex items-center gap-3">
+                                <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-400"></i>
+                                <span class="font-medium">Reference Field Not Showing Options</span>
+                            </div>
+                            <i data-lucide="chevron-down" class="w-5 h-5 text-zinc-500 transition-transform" id="trouble-1-icon"></i>
+                        </button>
+                        <div id="trouble-1" class="collapsible-content">
+                            <div class="px-5 pb-5 border-t border-white/5 pt-4">
+                                <div class="space-y-4">
+                                    <div>
+                                        <p class="text-sm text-red-400 font-medium mb-1">Cause 1: No data in source table</p>
+                                        <p class="text-sm text-zinc-400">Solution: Add records to the source table first</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm text-red-400 font-medium mb-1">Cause 2: Linked to wrong field</p>
+                                        <p class="text-sm text-zinc-400">Solution: Edit field → Change "Link to" selection</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Problem 2 -->
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <button onclick="toggleCollapsible('trouble-2')" class="w-full p-5 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors">
+                            <div class="flex items-center gap-3">
+                                <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-400"></i>
+                                <span class="font-medium">Can't Select "Link To"</span>
+                            </div>
+                            <i data-lucide="chevron-down" class="w-5 h-5 text-zinc-500 transition-transform" id="trouble-2-icon"></i>
+                        </button>
+                        <div id="trouble-2" class="collapsible-content">
+                            <div class="px-5 pb-5 border-t border-white/5 pt-4">
+                                <div class="space-y-4">
+                                    <div>
+                                        <p class="text-sm text-red-400 font-medium mb-1">Cause 1: Field type doesn't support linking</p>
+                                        <p class="text-sm text-zinc-400">Solution: Ensure field type is "reference"</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm text-red-400 font-medium mb-1">Cause 2: No primary keys available</p>
+                                        <p class="text-sm text-zinc-400">Solution: Create fields with type "primary key" first</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Problem 3 -->
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <button onclick="toggleCollapsible('trouble-3')" class="w-full p-5 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors">
+                            <div class="flex items-center gap-3">
+                                <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-400"></i>
+                                <span class="font-medium">Action Not Working When Clicked</span>
+                            </div>
+                            <i data-lucide="chevron-down" class="w-5 h-5 text-zinc-500 transition-transform" id="trouble-3-icon"></i>
+                        </button>
+                        <div id="trouble-3" class="collapsible-content">
+                            <div class="px-5 pb-5 border-t border-white/5 pt-4">
+                                <p class="text-sm text-red-400 font-medium mb-3">Cause: Action requires additional setup</p>
+                                <div class="space-y-2">
+                                    <div class="bg-black/30 rounded p-3">
+                                        <p class="text-xs text-zinc-400"><span class="text-blue-400">"navigate to reference"</span> needs a route defined</p>
+                                    </div>
+                                    <div class="bg-black/30 rounded p-3">
+                                        <p class="text-xs text-zinc-400"><span class="text-green-400">"open referenced record"</span> needs a detail view</p>
+                                    </div>
+                                    <div class="bg-black/30 rounded p-3">
+                                        <p class="text-xs text-zinc-400"><span class="text-purple-400">"filter by reference"</span> needs filter configuration</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Migration Guide -->
+            <section id="migration" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center">
+                        <i data-lucide="arrow-right-left" class="w-4 h-4 text-violet-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Migration from Existing Fields</h2>
+                </div>
+
+                <p class="text-zinc-400 mb-6">If you have existing text fields you want to convert to reference fields:</p>
+
+                <div class="space-y-6">
+                    <div class="flex items-start gap-4">
+                        <div class="step-number">1</div>
+                        <div class="flex-1">
+                            <h3 class="font-medium mb-2">Create New Reference Field</h3>
+                            <p class="text-sm text-zinc-400">Don't delete the old field yet. Create the new reference field alongside it.</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-start gap-4">
+                        <div class="step-number">2</div>
+                        <div class="flex-1">
+                            <h3 class="font-medium mb-2">Test Thoroughly</h3>
+                            <ul class="text-sm text-zinc-400 space-y-1">
+                                <li>• Verify dropdown shows correct options</li>
+                                <li>• Check that actions work as expected</li>
+                                <li>• Ensure data validates properly</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="flex items-start gap-4">
+                        <div class="step-number">3</div>
+                        <div class="flex-1">
+                            <h3 class="font-medium mb-2">Migrate Data (if needed)</h3>
+                            <ul class="text-sm text-zinc-400 space-y-1">
+                                <li>• Map old values to new reference IDs</li>
+                                <li>• Update existing records</li>
+                                <li>• Verify no data loss</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="flex items-start gap-4">
+                        <div class="step-number">4</div>
+                        <div class="flex-1">
+                            <h3 class="font-medium mb-2">Remove Old Field</h3>
+                            <ul class="text-sm text-zinc-400 space-y-1">
+                                <li>• Once confident, hide the old field</li>
+                                <li>• After verification period, delete it</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Advanced Usage -->
+            <section id="advanced" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+                        <i data-lucide="layers" class="w-4 h-4 text-indigo-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Advanced Usage</h2>
+                </div>
+
+                <!-- Cascading References -->
+                <div class="bg-brand-card border border-white/5 rounded-xl p-6 mb-6">
+                    <h3 class="font-medium text-lg mb-4 flex items-center gap-2">
+                        <i data-lucide="git-branch" class="w-5 h-5 text-indigo-400"></i>
+                        Cascading References
+                    </h3>
+                    <p class="text-sm text-zinc-400 mb-4">Create multi-level relationships:</p>
+                    <div class="flex flex-col sm:flex-row items-center gap-3 mb-4">
+                        <div class="diagram-box flex-1">
+                            <p class="text-sm font-medium">Customer</p>
+                            <p class="text-xs text-zinc-500">Reference</p>
+                        </div>
+                        <i data-lucide="arrow-right" class="w-5 h-5 text-brand-yellow hidden sm:block"></i>
+                        <i data-lucide="arrow-down" class="w-5 h-5 text-brand-yellow sm:hidden"></i>
+                        <div class="diagram-box flex-1">
+                            <p class="text-sm font-medium">Sites</p>
+                            <p class="text-xs text-zinc-500">Filtered by Customer</p>
+                        </div>
+                        <i data-lucide="arrow-right" class="w-5 h-5 text-brand-yellow hidden sm:block"></i>
+                        <i data-lucide="arrow-down" class="w-5 h-5 text-brand-yellow sm:hidden"></i>
+                        <div class="diagram-box flex-1">
+                            <p class="text-sm font-medium">Installations</p>
+                            <p class="text-xs text-zinc-500">Filtered by Site</p>
+                        </div>
+                    </div>
+                    <div class="code-block">
+                        <pre class="text-zinc-400 font-mono text-sm"><code><span class="text-zinc-500">1.</span> <span class="text-purple-400">Customer field</span> (reference)
+<span class="text-zinc-500">2.</span> <span class="text-purple-400">Site field</span> (reference, filtered by Customer)
+<span class="text-zinc-500">3.</span> <span class="text-purple-400">Installation field</span> (reference, filtered by Site)</code></pre>
+                    </div>
+                </div>
+
+                <!-- Conditional Filtering -->
+                <div class="bg-brand-card border border-white/5 rounded-xl p-6">
+                    <h3 class="font-medium text-lg mb-4 flex items-center gap-2">
+                        <i data-lucide="filter" class="w-5 h-5 text-indigo-400"></i>
+                        Conditional Filtering
+                    </h3>
+                    <p class="text-sm text-zinc-400 mb-4">Show different options based on other field values:</p>
+                    <div class="code-block">
+                        <pre class="text-zinc-400 font-mono text-sm"><code><span class="text-blue-400">If</span> Office = <span class="text-green-400">"USA"</span>:
+  Show only USA Customers
+<span class="text-blue-400">If</span> Office = <span class="text-green-400">"Australia"</span>:
+  Show only Australia Customers</code></pre>
+                    </div>
+                    <p class="text-xs text-zinc-500 mt-3 italic">Note: Advanced filtering requires custom implementation</p>
+                </div>
+            </section>
+
+            <!-- Architecture -->
+            <section id="architecture" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-teal-500/10 flex items-center justify-center">
+                        <i data-lucide="git-branch" class="w-4 h-4 text-teal-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Reference Field Architecture</h2>
+                </div>
+
+                <!-- Data Flow Diagram -->
+                <div class="bg-brand-panel border border-white/5 rounded-xl p-8 mb-6">
+                    <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-8 text-center">Data Flow</h3>
+                    <div class="max-w-lg mx-auto">
+                        <div class="diagram-box mb-6 border-brand-yellow/30">
+                            <div class="flex items-center justify-center gap-2 mb-2">
+                                <i data-lucide="database" class="w-6 h-6 text-brand-yellow"></i>
+                                <p class="text-lg font-semibold">Source Table</p>
+                            </div>
+                            <p class="text-xs text-zinc-500">Master data (Customers, Sites, Products)</p>
+                        </div>
+
+                        <div class="flex justify-center mb-6">
+                            <div class="flex flex-col items-center">
+                                <div class="w-px h-8 bg-brand-yellow/50"></div>
+                                <div class="bg-brand-yellow/10 border border-brand-yellow/30 rounded-full px-4 py-1">
+                                    <span class="text-xs text-brand-yellow font-medium">Reference Link</span>
+                                </div>
+                                <div class="w-px h-8 bg-brand-yellow/50"></div>
+                            </div>
+                        </div>
+
+                        <div class="diagram-box border-green-500/30">
+                            <div class="flex items-center justify-center gap-2 mb-2">
+                                <i data-lucide="table" class="w-6 h-6 text-green-400"></i>
+                                <p class="text-lg font-semibold">Referencing Table</p>
+                            </div>
+                            <p class="text-xs text-zinc-500">Uses data (Projects, Installations)</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Benefits -->
+                <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="bg-brand-card border border-white/5 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i data-lucide="target" class="w-4 h-4 text-brand-yellow"></i>
+                            <span class="text-sm font-medium">Single Source of Truth</span>
+                        </div>
+                        <p class="text-xs text-zinc-500">Update once, reflects everywhere</p>
+                    </div>
+                    <div class="bg-brand-card border border-white/5 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i data-lucide="shield" class="w-4 h-4 text-green-400"></i>
+                            <span class="text-sm font-medium">Data Integrity</span>
+                        </div>
+                        <p class="text-xs text-zinc-500">Can't reference non-existent records</p>
+                    </div>
+                    <div class="bg-brand-card border border-white/5 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i data-lucide="equal" class="w-4 h-4 text-blue-400"></i>
+                            <span class="text-sm font-medium">Consistency</span>
+                        </div>
+                        <p class="text-xs text-zinc-500">All tables use same values</p>
+                    </div>
+                    <div class="bg-brand-card border border-white/5 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i data-lucide="compass" class="w-4 h-4 text-purple-400"></i>
+                            <span class="text-sm font-medium">Navigation</span>
+                        </div>
+                        <p class="text-xs text-zinc-500">Jump between related records</p>
+                    </div>
+                    <div class="bg-brand-card border border-white/5 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i data-lucide="check-circle" class="w-4 h-4 text-cyan-400"></i>
+                            <span class="text-sm font-medium">Validation</span>
+                        </div>
+                        <p class="text-xs text-zinc-500">Automatic checking of data</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Database Schema -->
+            <section id="schema" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center">
+                        <i data-lucide="database" class="w-4 h-4 text-sky-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Database Schema Reference</h2>
+                    <span class="text-xs text-zinc-600 bg-white/5 px-2 py-1 rounded">25 tables</span>
+                </div>
+
+                <p class="text-zinc-400 mb-6">Key tables related to reference fields in the Commtrac system:</p>
+
+                <!-- Schema Selector -->
+                <div class="flex flex-wrap gap-2 mb-4">
+                    <button onclick="showSchema('customers', this)" class="schema-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-yellow text-brand-dark">Customers</button>
+                    <button onclick="showSchema('projects', this)" class="schema-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-zinc-400 hover:bg-white/10 transition-colors">Projects</button>
+                    <button onclick="showSchema('installations', this)" class="schema-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-zinc-400 hover:bg-white/10 transition-colors">Installations</button>
+                    <button onclick="showSchema('sites', this)" class="schema-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-zinc-400 hover:bg-white/10 transition-colors">Sites</button>
+                    <button onclick="showSchema('fielddefs', this)" class="schema-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-zinc-400 hover:bg-white/10 transition-colors">FieldDefinitions</button>
+                </div>
+
+                <!-- Customers Schema -->
+                <div id="schema-customers" class="schema-content">
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <div class="p-4 border-b border-white/5 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span class="badge badge-pk">PK: Id</span>
+                                <span class="text-sm font-medium">Customers</span>
+                            </div>
+                            <span class="text-xs text-zinc-500">Source table for customer references</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full schema-table">
+                                <thead>
+                                    <tr>
+                                        <th class="text-left p-3">Column</th>
+                                        <th class="text-left p-3">Type</th>
+                                        <th class="text-left p-3">Nullable</th>
+                                        <th class="text-left p-3">Max Length</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-zinc-400">
+                                    <tr><td class="p-3 font-mono text-white">Id</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                    <tr><td class="p-3 font-mono">CustomerId</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">80</td></tr>
+                                    <tr><td class="p-3 font-mono">Name</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">200</td></tr>
+                                    <tr><td class="p-3 font-mono">Office</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">40</td></tr>
+                                    <tr><td class="p-3 font-mono">Industry</td><td class="p-3">TEXT</td><td class="p-3">Yes</td><td class="p-3">100</td></tr>
+                                    <tr><td class="p-3 font-mono">Logo</td><td class="p-3">TEXT</td><td class="p-3">Yes</td><td class="p-3">1000</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Projects Schema -->
+                <div id="schema-projects" class="schema-content hidden">
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <div class="p-4 border-b border-white/5 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span class="badge badge-pk">PK: Id</span>
+                                <span class="badge badge-fk">FK: CustomerId, SiteId, ProductIds</span>
+                                <span class="text-sm font-medium">Projects</span>
+                            </div>
+                            <span class="text-xs text-zinc-500">Uses multiple reference fields</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full schema-table">
+                                <thead>
+                                    <tr>
+                                        <th class="text-left p-3">Column</th>
+                                        <th class="text-left p-3">Type</th>
+                                        <th class="text-left p-3">Nullable</th>
+                                        <th class="text-left p-3">References</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-zinc-400">
+                                    <tr><td class="p-3 font-mono text-white">Id</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                    <tr class="bg-blue-500/5"><td class="p-3 font-mono text-blue-400">CustomerId</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3"><span class="badge badge-fk">Customers.Id</span></td></tr>
+                                    <tr class="bg-blue-500/5"><td class="p-3 font-mono text-blue-400">SiteId</td><td class="p-3">TEXT</td><td class="p-3">Yes</td><td class="p-3"><span class="badge badge-fk">Sites.Id</span></td></tr>
+                                    <tr class="bg-blue-500/5"><td class="p-3 font-mono text-blue-400">ProductIds</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3"><span class="badge badge-fk">Products.Id (JSON array)</span></td></tr>
+                                    <tr><td class="p-3 font-mono">JobNumber</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                    <tr><td class="p-3 font-mono">CustomerName</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                    <tr><td class="p-3 font-mono">Status</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Installations Schema -->
+                <div id="schema-installations" class="schema-content hidden">
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <div class="p-4 border-b border-white/5 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span class="badge badge-pk">PK: Id</span>
+                                <span class="badge badge-fk">FK: ProjectId, AssignedUsers</span>
+                                <span class="text-sm font-medium">Installations</span>
+                            </div>
+                            <span class="text-xs text-zinc-500">Child of Projects</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full schema-table">
+                                <thead>
+                                    <tr>
+                                        <th class="text-left p-3">Column</th>
+                                        <th class="text-left p-3">Type</th>
+                                        <th class="text-left p-3">Nullable</th>
+                                        <th class="text-left p-3">References</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-zinc-400">
+                                    <tr><td class="p-3 font-mono text-white">Id</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                    <tr class="bg-blue-500/5"><td class="p-3 font-mono text-blue-400">ProjectId</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3"><span class="badge badge-fk">Projects.Id</span></td></tr>
+                                    <tr class="bg-blue-500/5"><td class="p-3 font-mono text-blue-400">AssignedUsers</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3"><span class="badge badge-fk">Users.Id (JSON array)</span></td></tr>
+                                    <tr><td class="p-3 font-mono">InstallationNumber</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                    <tr><td class="p-3 font-mono">SiteLocation</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                    <tr><td class="p-3 font-mono">Status</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sites Schema -->
+                <div id="schema-sites" class="schema-content hidden">
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <div class="p-4 border-b border-white/5 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span class="badge badge-pk">PK: Id</span>
+                                <span class="badge badge-fk">FK: CustomerId</span>
+                                <span class="badge badge-idx">IDX: CustomerId</span>
+                                <span class="text-sm font-medium">Sites</span>
+                            </div>
+                            <span class="text-xs text-zinc-500">Customer locations</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full schema-table">
+                                <thead>
+                                    <tr>
+                                        <th class="text-left p-3">Column</th>
+                                        <th class="text-left p-3">Type</th>
+                                        <th class="text-left p-3">Nullable</th>
+                                        <th class="text-left p-3">References</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-zinc-400">
+                                    <tr><td class="p-3 font-mono text-white">Id</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                    <tr class="bg-blue-500/5"><td class="p-3 font-mono text-blue-400">CustomerId</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3"><span class="badge badge-fk">Customers.Id</span></td></tr>
+                                    <tr><td class="p-3 font-mono">Name</td><td class="p-3">TEXT</td><td class="p-3">No</td><td class="p-3">—</td></tr>
+                                    <tr><td class="p-3 font-mono">Address</td><td class="p-3">TEXT</td><td class="p-3">Yes</td><td class="p-3">—</td></tr>
+                                    <tr><td class="p-3 font-mono">City</td><td class="p-3">TEXT</td><td class="p-3">Yes</td><td class="p-3">—</td></tr>
+                                    <tr><td class="p-3 font-mono">State</td><td class="p-3">TEXT</td><td class="p-3">Yes</td><td class="p-3">—</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- FieldDefinitions Schema -->
+                <div id="schema-fielddefs" class="schema-content hidden">
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <div class="p-4 border-b border-white/5 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span class="badge badge-pk">PK: Id</span>
+                                <span class="text-sm font-medium">FieldDefinitions</span>
+                            </div>
+                            <span class="text-xs text-zinc-500">Defines reference field configurations</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full schema-table">
+                                <thead>
+                                    <tr>
+                                        <th class="text-left p-3">Column</th>
+                                        <th class="text-left p-3">Type</th>
+                                        <th class="text-left p-3">Description</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-zinc-400">
+                                    <tr><td class="p-3 font-mono text-white">Id</td><td class="p-3">TEXT</td><td class="p-3">Unique identifier</td></tr>
+                                    <tr class="bg-yellow-500/5"><td class="p-3 font-mono text-yellow-400">FieldType</td><td class="p-3">TEXT</td><td class="p-3">Use "reference" for reference fields</td></tr>
+                                    <tr class="bg-yellow-500/5"><td class="p-3 font-mono text-yellow-400">LinkToFieldId</td><td class="p-3">TEXT</td><td class="p-3">ID of the source field to link</td></tr>
+                                    <tr class="bg-yellow-500/5"><td class="p-3 font-mono text-yellow-400">ActionType</td><td class="p-3">TEXT</td><td class="p-3">open/navigate/filter</td></tr>
+                                    <tr><td class="p-3 font-mono">Name</td><td class="p-3">TEXT</td><td class="p-3">Field display name</td></tr>
+                                    <tr><td class="p-3 font-mono">TablesJson</td><td class="p-3">TEXT</td><td class="p-3">Which tables use this field</td></tr>
+                                    <tr><td class="p-3 font-mono">IsActive</td><td class="p-3">INTEGER</td><td class="p-3">Boolean: 1 = active</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reference Map -->
+                <div class="mt-8 bg-brand-panel border border-white/5 rounded-xl p-6">
+                    <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-4">Reference Map (Inferred Relationships)</h3>
+                    <div class="code-block">
+                        <pre class="text-zinc-400 font-mono text-xs"><code><span class="text-zinc-500"># Projects References</span>
+<span class="text-blue-400">Projects.CustomerId</span>      → <span class="text-green-400">Customers.Id</span>          (N:1)
+<span class="text-blue-400">Projects.SiteId</span>          → <span class="text-green-400">Sites.Id</span>              (optional N:1)
+<span class="text-blue-400">Projects.ProductIds</span>      → <span class="text-green-400">Products.Id</span>           (N:N via JSON)
+<span class="text-blue-400">Projects.ProjectManager</span>  → <span class="text-yellow-400">Users.FullName</span>        (weak ref)
+
+<span class="text-zinc-500"># Installations References</span>
+<span class="text-blue-400">Installations.ProjectId</span>    → <span class="text-green-400">Projects.Id</span>          (N:1)
+<span class="text-blue-400">Installations.AssignedUsers</span> → <span class="text-green-400">Users.Id</span>             (N:N via JSON)
+
+<span class="text-zinc-500"># Child Tables</span>
+<span class="text-blue-400">Inspections.InstallationId</span>  → <span class="text-green-400">Installations.Id</span>     (N:1)
+<span class="text-blue-400">Issues.InstallationId</span>      → <span class="text-green-400">Installations.Id</span>     (N:1)
+<span class="text-blue-400">InspectionPhotos.InspectionId</span> → <span class="text-green-400">Inspections.Id</span>       (N:1)
+<span class="text-blue-400">Sites.CustomerId</span>           → <span class="text-green-400">Customers.Id</span>         (N:1)</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Quick Reference Card -->
+            <section id="quick-reference" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center">
+                        <i data-lucide="bookmark" class="w-4 h-4 text-rose-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Quick Reference Card</h2>
+                </div>
+
+                <div class="grid md:grid-cols-3 gap-4">
+                    <!-- Create -->
+                    <div class="bg-brand-card border border-white/5 rounded-xl p-5">
+                        <div class="flex items-center gap-2 mb-4">
+                            <i data-lucide="plus" class="w-4 h-4 text-green-400"></i>
+                            <h3 class="font-medium">Creating</h3>
+                        </div>
+                        <div class="code-block">
+                            <pre class="text-zinc-400 font-mono text-xs"><code><span class="text-zinc-500">1.</span> Click ⚙️ Settings
+<span class="text-zinc-500">2.</span> "Create new field":
+   - Name: [Descriptive]
+   - Type: "reference"
+   - Link to: [Source]
+   - Action: [Choose]
+<span class="text-zinc-500">3.</span> Click "Create"</code></pre>
+                        </div>
+                    </div>
+
+                    <!-- Edit -->
+                    <div class="bg-brand-card border border-white/5 rounded-xl p-5">
+                        <div class="flex items-center gap-2 mb-4">
+                            <i data-lucide="edit" class="w-4 h-4 text-blue-400"></i>
+                            <h3 class="font-medium">Editing</h3>
+                        </div>
+                        <div class="code-block">
+                            <pre class="text-zinc-400 font-mono text-xs"><code><span class="text-zinc-500">1.</span> Click ⚙️ Settings
+<span class="text-zinc-500">2.</span> Find field in list
+<span class="text-zinc-500">3.</span> Click ✏️ Edit icon
+<span class="text-zinc-500">4.</span> Modify:
+   - Name
+   - Link to
+   - Action
+<span class="text-zinc-500">5.</span> Click "Save"</code></pre>
+                        </div>
+                    </div>
+
+                    <!-- Delete -->
+                    <div class="bg-brand-card border border-white/5 rounded-xl p-5">
+                        <div class="flex items-center gap-2 mb-4">
+                            <i data-lucide="trash" class="w-4 h-4 text-red-400"></i>
+                            <h3 class="font-medium">Deleting</h3>
+                        </div>
+                        <div class="code-block">
+                            <pre class="text-zinc-400 font-mono text-xs"><code><span class="text-zinc-500">1.</span> Click ⚙️ Settings
+<span class="text-zinc-500">2.</span> Find field in list
+<span class="text-zinc-500">3.</span> Click 🗑️ Delete icon
+<span class="text-zinc-500">4.</span> Confirm deletion</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- FAQs -->
+            <section id="faqs" class="mb-16 scroll-mt-24">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-lime-500/10 flex items-center justify-center">
+                        <i data-lucide="message-circle" class="w-4 h-4 text-lime-400"></i>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-tight">Frequently Asked Questions</h2>
+                </div>
+
+                <div class="space-y-3">
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <button onclick="toggleCollapsible('faq-1')" class="w-full p-5 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors">
+                            <span class="font-medium pr-4">Can I reference fields from multiple tables?</span>
+                            <i data-lucide="chevron-down" class="w-5 h-5 text-zinc-500 flex-shrink-0 transition-transform" id="faq-1-icon"></i>
+                        </button>
+                        <div id="faq-1" class="collapsible-content">
+                            <div class="px-5 pb-5 border-t border-white/5 pt-4">
+                                <p class="text-sm text-zinc-400">Each reference field links to <strong class="text-white">one source field</strong>. For multiple tables, create multiple reference fields.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <button onclick="toggleCollapsible('faq-2')" class="w-full p-5 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors">
+                            <span class="font-medium pr-4">What happens if the referenced record is deleted?</span>
+                            <i data-lucide="chevron-down" class="w-5 h-5 text-zinc-500 flex-shrink-0 transition-transform" id="faq-2-icon"></i>
+                        </button>
+                        <div id="faq-2" class="collapsible-content">
+                            <div class="px-5 pb-5 border-t border-white/5 pt-4">
+                                <p class="text-sm text-zinc-400">The reference becomes invalid. Best practice: implement "soft deletes" or cascade deletion rules.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <button onclick="toggleCollapsible('faq-3')" class="w-full p-5 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors">
+                            <span class="font-medium pr-4">Can I edit the referenced data from the dropdown?</span>
+                            <i data-lucide="chevron-down" class="w-5 h-5 text-zinc-500 flex-shrink-0 transition-transform" id="faq-3-icon"></i>
+                        </button>
+                        <div id="faq-3" class="collapsible-content">
+                            <div class="px-5 pb-5 border-t border-white/5 pt-4">
+                                <p class="text-sm text-zinc-400">No. Reference fields display existing data. To add new options, go to the source table.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <button onclick="toggleCollapsible('faq-4')" class="w-full p-5 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors">
+                            <span class="font-medium pr-4">Do reference fields work offline?</span>
+                            <i data-lucide="chevron-down" class="w-5 h-5 text-zinc-500 flex-shrink-0 transition-transform" id="faq-4-icon"></i>
+                        </button>
+                        <div id="faq-4" class="collapsible-content">
+                            <div class="px-5 pb-5 border-t border-white/5 pt-4">
+                                <p class="text-sm text-zinc-400">They require data from the source table, so they need connectivity to load options.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-brand-card border border-white/5 rounded-xl overflow-hidden">
+                        <button onclick="toggleCollapsible('faq-5')" class="w-full p-5 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors">
+                            <span class="font-medium pr-4">Can I use reference fields in formulas?</span>
+                            <i data-lucide="chevron-down" class="w-5 h-5 text-zinc-500 flex-shrink-0 transition-transform" id="faq-5-icon"></i>
+                        </button>
+                        <div id="faq-5" class="collapsible-content">
+                            <div class="px-5 pb-5 border-t border-white/5 pt-4">
+                                <p class="text-sm text-zinc-400">Yes! Reference fields can be used in calculations and formulas like any other field.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Summary -->
+            <section class="mb-16">
+                <div class="bg-gradient-to-br from-brand-yellow/10 to-transparent border border-brand-yellow/20 rounded-xl p-8">
+                    <h2 class="text-2xl font-semibold mb-6">Summary</h2>
+                    <p class="text-zinc-400 mb-6">Reference fields are powerful tools for:</p>
+                    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+                        <div class="flex items-center gap-2 text-sm">
+                            <i data-lucide="check" class="w-4 h-4 text-green-400"></i>
+                            <span>Connecting related data</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-sm">
+                            <i data-lucide="check" class="w-4 h-4 text-green-400"></i>
+                            <span>Ensuring consistency</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-sm">
+                            <i data-lucide="check" class="w-4 h-4 text-green-400"></i>
+                            <span>Validating entries</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-sm">
+                            <i data-lucide="check" class="w-4 h-4 text-green-400"></i>
+                            <span>Enabling navigation</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-sm">
+                            <i data-lucide="check" class="w-4 h-4 text-green-400"></i>
+                            <span>Maintaining data integrity</span>
+                        </div>
+                    </div>
+                    <div class="bg-black/30 rounded-lg p-4 border-l-4 border-brand-yellow">
+                        <p class="text-sm text-zinc-300">
+                            <strong class="text-brand-yellow">Remember:</strong> Reference fields link to existing data — they don't create new records. Always ensure your source tables are populated first!
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Footer -->
+            <footer class="border-t border-white/5 pt-8 pb-12">
+                <div class="flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-zinc-500">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded bg-brand-yellow flex items-center justify-center">
+                            <i data-lucide="link" class="w-3 h-3 text-brand-dark"></i>
+                        </div>
+                        <span>Commtrac Workflow Management</span>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <span>Feature Version: 1.0</span>
+                        <span>•</span>
+                        <span>Last Updated: Feb 5, 2026</span>
+                    </div>
+                </div>
+            </footer>
+
+        </div>
+    </main>
+
+    <!-- Back to Top Button -->
+    <button id="back-to-top" onclick="window.scrollTo({top: 0, behavior: 'smooth'})" class="fixed bottom-6 left-6 lg:left-[calc(18rem+1.5rem)] w-10 h-10 bg-brand-card border border-white/10 rounded-full flex items-center justify-center hover:border-brand-yellow/30 transition-all opacity-0 pointer-events-none z-30 no-print">
+        <i data-lucide="arrow-up" class="w-4 h-4 text-zinc-400"></i>
+    </button>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Sidebar Toggle
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            sidebar.classList.toggle('-translate-x-full');
+            overlay.classList.toggle('hidden');
+        }
+
+        // Close sidebar on link click (mobile)
+        document.querySelectorAll('.sidebar-link').forEach(link => {
+            link.addEventListener('click', () => {
+                if (window.innerWidth < 1024) {
+                    toggleSidebar();
+                }
+            });
+        });
+
+        // Active sidebar link on scroll
+        const sections = document.querySelectorAll('section[id]');
+        const sidebarLinks = document.querySelectorAll('.sidebar-link');
+
+        window.addEventListener('scroll', () => {
+            let current = '';
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop - 100;
+                if (window.scrollY >= sectionTop) {
+                    current = section.getAttribute('id');
+                }
+            });
+
+            sidebarLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href') === `#${current}`) {
+                    link.classList.add('active');
+                }
+            });
+
+            // Back to top button
+            const backToTop = document.getElementById('back-to-top');
+            if (window.scrollY > 500) {
+                backToTop.classList.remove('opacity-0', 'pointer-events-none');
+                backToTop.classList.add('opacity-100');
+            } else {
+                backToTop.classList.add('opacity-0', 'pointer-events-none');
+                backToTop.classList.remove('opacity-100');
+            }
+        });
+
+        // Tab switching
+        function switchTab(tabId, btn) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(el => {
+                el.classList.remove('active');
+                el.classList.add('bg-white/5', 'text-zinc-400');
+            });
+            document.getElementById(tabId).classList.remove('hidden');
+            btn.classList.add('active');
+            btn.classList.remove('bg-white/5', 'text-zinc-400');
+        }
+
+        // Example switching
+        function showExample(num, btn) {
+            document.querySelectorAll('.example-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.example-btn').forEach(el => {
+                el.classList.remove('bg-brand-yellow', 'text-brand-dark');
+                el.classList.add('bg-white/5', 'text-zinc-400');
+            });
+            document.getElementById(`example-${num}`).classList.remove('hidden');
+            btn.classList.add('bg-brand-yellow', 'text-brand-dark');
+            btn.classList.remove('bg-white/5', 'text-zinc-400');
+        }
+
+        // Schema switching
+        function showSchema(name, btn) {
+            document.querySelectorAll('.schema-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.schema-btn').forEach(el => {
+                el.classList.remove('bg-brand-yellow', 'text-brand-dark');
+                el.classList.add('bg-white/5', 'text-zinc-400');
+            });
+            document.getElementById(`schema-${name}`).classList.remove('hidden');
+            btn.classList.add('bg-brand-yellow', 'text-brand-dark');
+            btn.classList.remove('bg-white/5', 'text-zinc-400');
+        }
+
+        // Collapsible sections
+        function toggleCollapsible(id) {
+            const content = document.getElementById(id);
+            const icon = document.getElementById(`${id}-icon`);
+            content.classList.toggle('expanded');
+            if (content.classList.contains('expanded')) {
+                icon.style.transform = 'rotate(180deg)';
+            } else {
+                icon.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        // Copy code
+        function copyCode(btn) {
+            const codeBlock = btn.closest('.code-block');
+            const code = codeBlock.querySelector('code').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                showToast('Code copied to clipboard!');
+            });
+        }
+
+        // Toast notification
+        function showToast(message) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast bg-brand-card border border-white/10 rounded-lg px-4 py-3 flex items-center gap-2 shadow-xl';
+            toast.innerHTML = `
+                <i data-lucide="check-circle" class="w-4 h-4 text-green-400"></i>
+                <span class="text-sm">${message}</span>
+            `;
+            container.appendChild(toast);
+            lucide.createIcons();
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Download HTML
+        function downloadHTML() {
+            const html = document.documentElement.outerHTML;
+            const blob = new Blob([`<!DOCTYPE html>\n${html}`], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'reference-fields-documentation.html';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('HTML file downloaded!');
+        }
+
+        // Print page
+        function printPage() {
+            window.print();
+        }
+
+        // Search functionality
+        function handleSearch(query) {
+            // Remove existing highlights
+            document.querySelectorAll('.search-highlight').forEach(el => {
+                el.outerHTML = el.textContent;
+            });
+
+            if (!query.trim()) return;
+
+            const searchIn = document.querySelectorAll('p, h1, h2, h3, li, td, code');
+            const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+
+            searchIn.forEach(el => {
+                if (el.textContent.toLowerCase().includes(query.toLowerCase())) {
+                    el.innerHTML = el.innerHTML.replace(regex, '<span class="search-highlight">$1</span>');
+                }
+            });
+        }
+
+        // Keyboard shortcut for search
+        document.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                document.getElementById('search-input').focus();
+            }
+            if (e.key === 'Escape') {
+                document.getElementById('search-input').blur();
+                document.getElementById('search-input').value = '';
+                handleSearch('');
+            }
+        });
+    </script>
+</body>
+</html>
