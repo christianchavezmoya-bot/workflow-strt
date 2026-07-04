@@ -564,6 +564,7 @@ export const assetWorkflowRunService = {
       technicianUserId: technicianUserId ?? null,
     };
     try {
+      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
       const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", body);
       return await cacheServerRun(res.data);
     } catch (error) {
@@ -653,6 +654,7 @@ export const assetWorkflowRunService = {
       status: status ?? null,
     };
     try {
+      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}`, requestBody);
       return await cacheServerRun(res.data);
@@ -725,6 +727,7 @@ export const assetWorkflowRunService = {
       bomActualJson: bomActualJson ?? null,
     };
     try {
+      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/complete`, requestBody);
       const cachedRun = await cacheServerRun(res.data);
@@ -822,6 +825,7 @@ export const assetWorkflowRunService = {
     const resolvedRunId = await resolveRunId(runId);
     const body = { issuesJson };
     try {
+      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/issues`, requestBody);
       const updatedRun = await cacheServerRun(res.data);
@@ -976,6 +980,7 @@ export const assetWorkflowRunService = {
 
     const resolvedRunId = await resolveRunId(runId);
     try {
+      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entry`, body);
       return await cacheServerRun(res.data);
     } catch (error) {
