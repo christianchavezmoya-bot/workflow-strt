@@ -17,13 +17,15 @@ Interactive, customer-facing sales demonstration for Commtrac field operations p
 
 ### Download ready-to-use build (no install)
 
-Download and unzip **`commtrac-sales-presentation.zip`** from the `sales-presentation/` folder, then open **`index.html`** in any browser. Fully offline — no Node.js required.
+Download and unzip **`commtrac-sales-presentation.zip`**, then:
 
-```bash
-# Or from a git clone:
-cd sales-presentation/dist-ready
-# unzip commtrac-sales-presentation.zip, open index.html
-```
+1. **Windows:** double-click **`Start-Presentation.bat`**
+2. **Mac/Linux:** double-click **`Start-Presentation.sh`** (or run `bash Start-Presentation.sh`)
+3. **Or** open **`index.html`** directly in Chrome or Edge
+
+Your browser opens at `http://localhost:8765` when using the launcher. Fully offline — no Node.js required.
+
+> **Blank white screen?** Browsers often block local HTML apps. Use `Start-Presentation.bat` / `.sh` instead of double-clicking `index.html`.
 
 ### Run from source
 

@@ -1,23 +1,29 @@
-# Ready-to-use build
+Commtrac Sales Presentation — ready to use
+============================================
 
-Download **`commtrac-sales-presentation.zip`** from this folder — no install required.
+OPTION 1 — Double-click (simplest)
+----------------------------------
+Open index.html in Chrome or Edge.
 
-## Use it
+OPTION 2 — If you see a blank white screen
+------------------------------------------
+Some browsers block local files. Use a launcher instead:
 
-1. Unzip anywhere on your computer.
-2. Open **`index.html`** in Chrome, Edge, Firefox, or Safari.
-3. Click **Start Presentation** (or **Start without audio**).
+  Windows: double-click Start-Presentation.bat
+  Mac/Linux: double-click Start-Presentation.sh
+             (or run: bash Start-Presentation.sh)
 
-Works fully offline after unzip. No Node.js, no server, no internet needed.
+Your browser opens at http://localhost:8765
 
-## Contents
+OPTION 3 — Manual local server
+------------------------------
+From this folder:
 
-- `index.html` — open this file
-- `assets/` — styles and app code
-- `audio/` — 12 narration MP3 files (~2.7 min total)
+  python -m http.server 8765
 
-## Tips
+Then open http://localhost:8765
 
-- For trade-show kiosks, use **Start without audio** or full-screen mode (F11).
-- If narration does not play, click **Start Presentation** once (browser autoplay rule).
-- To rebuild from source: `npm run build` then re-zip the `dist/` folder.
+IN THE BROWSER
+--------------
+Click "Start Presentation" (with voice) or "Start without audio".
+Works fully offline — no internet needed after unzip.

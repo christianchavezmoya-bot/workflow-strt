@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/postbuild.mjs",
+    "pack": "npm run build && cd dist && zip -r ../commtrac-sales-presentation.zip . && cp ../commtrac-sales-presentation.zip ../dist-ready/",
     "preview": "vite preview",
     "narration": "node scripts/generate-narration.mjs"
   },
