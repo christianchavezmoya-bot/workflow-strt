@@ -34,7 +34,7 @@ export const SCENES: Scene[] = [
   {
     id: 1,
     audio: "audio/scene-01.mp3",
-    title: "Commtrac",
+    title: "Strata Workflow App",
     subtitle: "Field Operations, Unified",
     tag: "Welcome",
     visual: "hero",

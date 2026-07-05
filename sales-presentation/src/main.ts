@@ -62,6 +62,14 @@ function mount(): void {
   bindHotspots();
 }
 
+function hideEndOverlay(): void {
+  document.getElementById("end-overlay")!.classList.remove("is-visible");
+}
+
+function showEndOverlay(): void {
+  document.getElementById("end-overlay")!.classList.add("is-visible");
+}
+
 function bindOpening(): void {
   document.getElementById("btn-start")!.addEventListener("click", () => start("audio"));
   document.getElementById("btn-start-muted")!.addEventListener("click", () => start("muted"));
@@ -79,7 +87,7 @@ function start(mode: StartMode): void {
   document.getElementById("opening-screen")!.hidden = true;
   document.getElementById("presentation-screen")!.hidden = false;
   document.getElementById("controls")!.hidden = false;
-  document.getElementById("end-overlay")!.hidden = true;
+  document.getElementById("end-overlay")!.classList.remove("is-visible");
 
   updateMuteButton();
   showScene(0, true);
@@ -107,7 +115,7 @@ function bindControls(): void {
   document.getElementById("btn-replay")!.addEventListener("click", restart);
   document.getElementById("btn-explore")!.addEventListener("click", () => {
     state.ended = false;
-    document.getElementById("end-overlay")!.hidden = true;
+    hideEndOverlay();
     state.playing = false;
     updatePlayButton();
   });
@@ -184,7 +192,7 @@ function showScene(index: number, autoplay: boolean): void {
 
   state.sceneIndex = index;
   state.ended = false;
-  document.getElementById("end-overlay")!.hidden = true;
+  hideEndOverlay();
 
   const scene = currentScene();
   const stage = document.getElementById("stage")!;
@@ -282,14 +290,14 @@ function finishPresentation(): void {
   stopAudio();
   setProgress(1);
   updatePlayButton();
-  document.getElementById("end-overlay")!.hidden = false;
+  showEndOverlay();
 }
 
 function restart(): void {
   state.ended = false;
   state.playing = true;
   state.userPaused = false;
-  document.getElementById("end-overlay")!.hidden = true;
+  hideEndOverlay();
   updatePlayButton();
   showScene(0, true);
 }

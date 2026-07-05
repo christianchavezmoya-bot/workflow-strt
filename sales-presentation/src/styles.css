@@ -23,6 +23,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -54,6 +58,9 @@ button {
 /* ── Opening ── */
 
 .screen--opening {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -567,12 +574,16 @@ button {
 .end-overlay {
   position: fixed;
   inset: 0;
-  z-index: 20;
-  display: grid;
+  z-index: 50;
+  display: none;
   place-items: center;
   padding: 24px;
   background: rgba(4, 8, 16, 0.72);
   backdrop-filter: blur(10px);
+}
+
+.end-overlay.is-visible {
+  display: grid;
   animation: fadeIn 0.4s ease;
 }
 

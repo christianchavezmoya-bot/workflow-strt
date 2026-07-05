@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-echo Commtrac Sales Presentation
+echo Strata Workflow App — Sales Presentation
 echo.
 
 REM Prefer local server — most reliable across browsers

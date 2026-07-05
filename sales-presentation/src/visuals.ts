@@ -31,7 +31,7 @@ function visualExtras(visual: SceneVisual): string {
     case "enterprise":
       return `<div class="viz-pills"><span>Permissions</span><span>Audit trail</span><span>Secure API</span></div>`;
     case "cta":
-      return `<div class="viz-cta-contact"><span>commtrac.com</span><span>Schedule a demo</span></div>`;
+      return `<div class="viz-cta-contact"><span>strataworkflow.com</span><span>Schedule a demo</span></div>`;
     default:
       return "";
   }
@@ -79,9 +79,9 @@ export function renderOpening(): string {
     <section class="screen screen--opening" id="opening-screen">
       <div class="opening-bg"></div>
       <div class="opening-content">
-        <div class="brand-mark">C</div>
+        <div class="brand-mark">S</div>
         <p class="eyebrow">Customer Presentation</p>
-        <h1 class="opening-title">Commtrac</h1>
+        <h1 class="opening-title">Strata Workflow App</h1>
         <p class="opening-lead">Field operations platform for telecom &amp; utility teams</p>
         <div class="opening-actions">
           <button type="button" class="btn btn-primary" id="btn-start">Start Presentation</button>
@@ -116,7 +116,7 @@ export function renderPresentationShell(): string {
   return `
     <section class="screen screen--presentation" id="presentation-screen" hidden>
       <header class="topbar">
-        <div class="topbar-brand"><span class="brand-dot"></span> Commtrac</div>
+        <div class="topbar-brand"><span class="brand-dot"></span> Strata Workflow App</div>
         <div class="topbar-meta">Sales Demonstration</div>
       </header>
       <main class="stage" id="stage"></main>
@@ -126,10 +126,10 @@ export function renderPresentationShell(): string {
 
 export function renderEndOverlay(): string {
   return `
-    <div class="end-overlay" id="end-overlay" hidden>
+    <div class="end-overlay" id="end-overlay">
       <div class="end-card">
         <h3>Thank you</h3>
-        <p>Commtrac connects your office and field teams—from project planning to signed deliverables.</p>
+        <p>Strata Workflow App connects your office and field teams—from project planning to signed deliverables.</p>
         <div class="end-actions">
           <button type="button" class="btn btn-primary" id="btn-replay">Replay Presentation</button>
           <button type="button" class="btn btn-secondary" id="btn-explore">Explore Scenes</button>

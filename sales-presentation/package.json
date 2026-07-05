@@ -1,14 +1,15 @@
 {
-  "name": "commtrac-sales-presentation",
+  "name": "strata-workflow-presentation",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/postbuild.mjs",
-    "pack": "npm run build && cd dist && zip -r ../commtrac-sales-presentation.zip . && cp ../commtrac-sales-presentation.zip ../dist-ready/",
+    "pack": "npm run build && cd dist && zip -r ../strata-workflow-presentation.zip . && cp ../strata-workflow-presentation.zip ../dist-ready/",
     "preview": "vite preview",
-    "narration": "node scripts/generate-narration.mjs"
+    "narration": "node scripts/generate-narration.mjs",
+    "narration:force": "node scripts/generate-narration.mjs --force"
   },
   "devDependencies": {
     "typescript": "^5.8.3",

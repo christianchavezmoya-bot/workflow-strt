@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 PORT="${PORT:-8765}"
-echo "Starting Commtrac Sales Presentation..."
+echo "Starting Strata Workflow App presentation..."
 echo "Open http://localhost:${PORT} in your browser"
 echo "Press Ctrl+C to stop."
 if command -v python3 >/dev/null 2>&1; then
