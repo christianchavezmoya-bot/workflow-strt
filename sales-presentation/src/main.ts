@@ -13,6 +13,7 @@ interface State {
   started: boolean;
   mode: StartMode;
   sceneIndex: number;
+  currentSceneId: number;
   playing: boolean;
   muted: boolean;
   ended: boolean;
@@ -23,6 +24,7 @@ const state: State = {
   started: false,
   mode: "audio",
   sceneIndex: 0,
+  currentSceneId: 0,
   playing: false,
   muted: false,
   ended: false,
@@ -33,8 +35,40 @@ let audio: HTMLAudioElement | null = null;
 let advanceTimer: ReturnType<typeof setTimeout> | null = null;
 let progressRaf = 0;
 let touchStartX = 0;
+const audioReady = new Map<number, Promise<void>>();
 
 const app = document.getElementById("app")!;
+
+function resolveAssetUrl(relativePath: string): string {
+  try {
+    return new URL(relativePath, document.baseURI).href;
+  } catch {
+    return relativePath;
+  }
+}
+
+function warmAudio(scene: Scene): Promise<void> {
+  const existing = audioReady.get(scene.id);
+  if (existing) return existing;
+
+  const promise = new Promise<void>((resolve) => {
+    const el = new Audio(resolveAssetUrl(scene.audio));
+    el.preload = "auto";
+    const finish = () => resolve();
+    el.addEventListener("canplaythrough", finish, { once: true });
+    el.addEventListener("error", finish, { once: true });
+    el.load();
+    // Safety timeout so a bad file never blocks the deck
+    setTimeout(finish, 4000);
+  });
+
+  audioReady.set(scene.id, promise);
+  return promise;
+}
+
+function preloadAllAudio(): Promise<void> {
+  return Promise.all(SCENES.map((s) => warmAudio(s))).then(() => undefined);
+}
 
 function clearAdvanceTimer(): void {
   if (advanceTimer) {
@@ -71,11 +105,11 @@ function showEndOverlay(): void {
 }
 
 function bindOpening(): void {
-  document.getElementById("btn-start")!.addEventListener("click", () => start("audio"));
-  document.getElementById("btn-start-muted")!.addEventListener("click", () => start("muted"));
+  document.getElementById("btn-start")!.addEventListener("click", () => void start("audio"));
+  document.getElementById("btn-start-muted")!.addEventListener("click", () => void start("muted"));
 }
 
-function start(mode: StartMode): void {
+async function start(mode: StartMode): Promise<void> {
   state.started = true;
   state.mode = mode;
   state.muted = mode === "muted";
@@ -87,7 +121,11 @@ function start(mode: StartMode): void {
   document.getElementById("opening-screen")!.hidden = true;
   document.getElementById("presentation-screen")!.hidden = false;
   document.getElementById("controls")!.hidden = false;
-  document.getElementById("end-overlay")!.classList.remove("is-visible");
+  hideEndOverlay();
+
+  if (mode === "audio" && !state.muted) {
+    await preloadAllAudio();
+  }
 
   updateMuteButton();
   showScene(0, true);
@@ -195,6 +233,7 @@ function showScene(index: number, autoplay: boolean): void {
   hideEndOverlay();
 
   const scene = currentScene();
+  state.currentSceneId = scene.id;
   const stage = document.getElementById("stage")!;
   stage.innerHTML = renderSceneContent(scene);
   stage.dataset.visual = scene.visual;
@@ -221,27 +260,34 @@ function playScene(scene: Scene): void {
   const duration = FALLBACK_DURATIONS_MS[scene.id] ?? 14000;
 
   if (state.mode === "audio" && !state.muted) {
-    audio = new Audio(scene.audio);
-    audio.volume = 1;
-    audio.preload = "auto";
+    void warmAudio(scene).then(() => {
+      if (state.currentSceneId !== scene.id) return;
 
-    const onDone = () => {
-      scheduleAdvance(600);
-    };
+      audio = new Audio(resolveAssetUrl(scene.audio));
+      audio.volume = 1;
+      audio.preload = "auto";
 
-    audio.onended = onDone;
-    audio.onerror = () => {
-      animateProgressFor(duration, onDone);
-    };
+      const onDone = () => scheduleAdvance(600);
 
-    audio
-      .play()
-      .then(() => {
-        animateProgressFromAudio(audio!);
-      })
-      .catch(() => {
-        animateProgressFor(duration, onDone);
-      });
+      audio.onended = onDone;
+      audio.onerror = () => animateProgressFor(duration, onDone);
+
+      const tryPlay = () => {
+        if (!audio) return;
+        audio
+          .play()
+          .then(() => animateProgressFromAudio(audio!))
+          .catch(() => animateProgressFor(duration, onDone));
+      };
+
+      if (audio.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
+        tryPlay();
+      } else {
+        audio.addEventListener("canplaythrough", tryPlay, { once: true });
+        audio.addEventListener("error", () => animateProgressFor(duration, onDone), { once: true });
+        audio.load();
+      }
+    });
   } else {
     animateProgressFor(duration, () => scheduleAdvance(400));
   }
@@ -370,13 +416,3 @@ function setProgress(ratio: number): void {
 }
 
 mount();
-
-// Preload audio after idle (optional optimization)
-if ("requestIdleCallback" in window) {
-  (window as Window & { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback(() => {
-    SCENES.forEach((s) => {
-      const a = new Audio(s.audio);
-      a.preload = "auto";
-    });
-  });
-}

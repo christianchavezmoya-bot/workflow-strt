@@ -291,7 +291,118 @@ button {
   line-height: 1.6;
 }
 
-/* ── Visual panel ── */
+/* ── Real app screenshots ── */
+
+.scene-visual--app {
+  min-height: 320px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 30% 20%, var(--accent-soft), transparent 45%),
+    linear-gradient(180deg, var(--bg-elevated), var(--bg-panel));
+}
+
+.app-preview {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  position: relative;
+  z-index: 1;
+}
+
+.app-preview--split {
+  flex-wrap: wrap;
+}
+
+.app-preview--phone-center {
+  justify-content: center;
+}
+
+.app-preview--desktop {
+  justify-content: center;
+}
+
+.app-shot {
+  margin: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  background: #0b1118;
+  flex: 1 1 280px;
+  max-width: 100%;
+}
+
+.app-shot--desktop {
+  max-width: min(620px, 100%);
+}
+
+.app-shot--phone {
+  max-width: 220px;
+  flex: 0 0 220px;
+}
+
+.app-shot-chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-shot-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.app-shot-dot:first-child { background: #ff5f57; }
+.app-shot-dot:nth-child(2) { background: #febc2e; }
+.app-shot-dot:nth-child(3) { background: #28c840; }
+
+.app-shot-label {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.app-shot-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(52vh, 420px);
+  object-fit: cover;
+  object-position: top center;
+}
+
+.app-shot--phone .app-shot-img {
+  max-height: min(56vh, 460px);
+}
+
+@media (max-width: 899px) {
+  .app-preview--split {
+    flex-direction: column;
+  }
+
+  .app-shot--phone {
+    max-width: min(240px, 72vw);
+    flex-basis: auto;
+  }
+}
+
+.scene-visual--app .hotspots {
+  z-index: 4;
+}
+
+/* ── Visual panel (legacy fallback) ── */
 
 .scene-visual {
   position: relative;

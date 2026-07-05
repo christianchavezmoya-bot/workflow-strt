@@ -1,6 +1,6 @@
 # Strata Workflow App — Sales Presentation Narration Script
 
-**Voice:** es-AR-ElenaNeural (female, Argentine accent, English script)  
+**Voice:** en-US-JennyNeural (native US English female, conversational)  
 **Total scenes:** 12  
 **Target duration:** ~3 minutes  
 **Speaking style:** Business consultant — confident, warm, clear, benefit-focused

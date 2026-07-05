@@ -1,64 +1,84 @@
 import type { Scene, SceneVisual } from "./scenes";
 
+function fallbackImage(primary: string, secondary?: string): string {
+  return secondary ?? primary.replace("workflow-runner", "assets").replace("desktop-workflow-runner", "desktop-assets");
+}
+
+function renderScreenshotFrame(src: string, label: string, variant: "desktop" | "phone"): string {
+  const cls = variant === "phone" ? "app-shot app-shot--phone" : "app-shot app-shot--desktop";
+  return `
+    <figure class="${cls}">
+      <div class="app-shot-chrome">
+        <span class="app-shot-dot"></span><span class="app-shot-dot"></span><span class="app-shot-dot"></span>
+        <span class="app-shot-label">${label}</span>
+      </div>
+      <img class="app-shot-img" src="${src}" alt="${label}" loading="eager" decoding="async"
+           onerror="this.dataset.fallback&&(this.src=this.dataset.fallback)"
+           data-fallback="${fallbackImage(src)}" />
+    </figure>`;
+}
+
+function renderScreens(scene: Scene): string {
+  const screens = scene.screens;
+  if (!screens?.primary) return renderLegacyVisual(scene);
+
+  if (screens.layout === "split-platforms" && screens.secondary) {
+    return `
+      <div class="app-preview app-preview--split">
+        ${renderScreenshotFrame(screens.primary, "Desktop web app", "desktop")}
+        ${renderScreenshotFrame(screens.secondary, "Mobile app", "phone")}
+      </div>`;
+  }
+
+  if (screens.layout === "phone") {
+    return `
+      <div class="app-preview app-preview--phone-center">
+        ${renderScreenshotFrame(screens.primary, "Mobile field app", "phone")}
+      </div>`;
+  }
+
+  return `
+    <div class="app-preview app-preview--desktop">
+      ${renderScreenshotFrame(screens.primary, "Strata Workflow App", "desktop")}
+    </div>`;
+}
+
 function iconSvg(type: string): string {
   const icons: Record<string, string> = {
-    hero: `<svg viewBox="0 0 120 120" class="viz-icon"><circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" stroke-width="3" opacity=".3"/><path d="M36 72 L60 36 L84 72 Z" fill="currentColor" opacity=".9"/><rect x="44" y="72" width="32" height="18" rx="3" fill="currentColor"/></svg>`,
-    challenge: `<svg viewBox="0 0 120 120" class="viz-icon"><path d="M30 85 L45 55 L60 70 L75 40 L90 85 Z" fill="none" stroke="currentColor" stroke-width="3"/><line x1="25" y1="90" x2="95" y2="90" stroke="currentColor" stroke-width="3" opacity=".5"/></svg>`,
-    platforms: `<svg viewBox="0 0 120 120" class="viz-icon"><rect x="12" y="28" width="42" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="2.5"/><rect x="66" y="38" width="28" height="48" rx="6" fill="none" stroke="currentColor" stroke-width="2.5"/><rect x="74" y="44" width="12" height="2" rx="1" fill="currentColor" opacity=".6"/></svg>`,
-    projects: `<svg viewBox="0 0 120 120" class="viz-icon"><rect x="22" y="30" width="76" height="58" rx="6" fill="none" stroke="currentColor" stroke-width="2.5"/><line x1="22" y1="48" x2="98" y2="48" stroke="currentColor" stroke-width="2" opacity=".4"/><rect x="32" y="58" width="24" height="6" rx="2" fill="currentColor" opacity=".7"/><rect x="32" y="70" width="40" height="6" rx="2" fill="currentColor" opacity=".4"/></svg>`,
-    assets: `<svg viewBox="0 0 120 120" class="viz-icon"><rect x="28" y="35" width="64" height="50" rx="5" fill="none" stroke="currentColor" stroke-width="2.5"/><circle cx="60" cy="55" r="12" fill="currentColor" opacity=".25"/><path d="M48 78 L60 62 L72 78" fill="none" stroke="currentColor" stroke-width="2.5"/></svg>`,
-    workflow: `<svg viewBox="0 0 120 120" class="viz-icon"><circle cx="30" cy="60" r="10" fill="currentColor"/><circle cx="60" cy="60" r="10" fill="currentColor" opacity=".6"/><circle cx="90" cy="60" r="10" fill="currentColor" opacity=".3"/><line x1="40" y1="60" x2="50" y2="60" stroke="currentColor" stroke-width="2"/><line x1="70" y1="60" x2="80" y2="60" stroke="currentColor" stroke-width="2"/></svg>`,
-    dashboard: `<svg viewBox="0 0 120 120" class="viz-icon"><rect x="20" y="25" width="35" height="30" rx="4" fill="currentColor" opacity=".5"/><rect x="65" y="25" width="35" height="30" rx="4" fill="currentColor" opacity=".35"/><rect x="20" y="65" width="80" height="30" rx="4" fill="currentColor" opacity=".2"/></svg>`,
-    signatures: `<svg viewBox="0 0 120 120" class="viz-icon"><path d="M25 75 Q40 55 55 70 T85 60" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><line x1="25" y1="85" x2="95" y2="85" stroke="currentColor" stroke-width="2" opacity=".4"/></svg>`,
-    documents: `<svg viewBox="0 0 120 120" class="viz-icon"><rect x="30" y="22" width="50" height="66" rx="4" fill="none" stroke="currentColor" stroke-width="2.5"/><line x1="40" y1="40" x2="70" y2="40" stroke="currentColor" stroke-width="2" opacity=".5"/><line x1="40" y1="52" x2="65" y2="52" stroke="currentColor" stroke-width="2" opacity=".35"/><line x1="40" y1="64" x2="68" y2="64" stroke="currentColor" stroke-width="2" opacity=".35"/></svg>`,
-    offline: `<svg viewBox="0 0 120 120" class="viz-icon"><circle cx="60" cy="55" r="28" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M38 38 L82 72" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M45 85 Q60 75 75 85" fill="none" stroke="currentColor" stroke-width="2" opacity=".5"/></svg>`,
-    enterprise: `<svg viewBox="0 0 120 120" class="viz-icon"><path d="M60 25 L85 40 V75 L60 90 L35 75 V40 Z" fill="none" stroke="currentColor" stroke-width="2.5"/><polyline points="48,58 56,66 74,48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>`,
-    cta: `<svg viewBox="0 0 120 120" class="viz-icon"><circle cx="60" cy="60" r="40" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M48 60 L58 70 L76 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    hero: `<svg viewBox="0 0 120 120" class="viz-icon viz-icon--fallback"><circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" stroke-width="3" opacity=".3"/><path d="M36 72 L60 36 L84 72 Z" fill="currentColor" opacity=".9"/></svg>`,
+    cta: `<svg viewBox="0 0 120 120" class="viz-icon viz-icon--fallback"><circle cx="60" cy="60" r="40" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M48 60 L58 70 L76 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>`,
   };
   return icons[type] ?? icons.hero;
 }
 
-function visualExtras(visual: SceneVisual): string {
-  switch (visual) {
-    case "hero":
-      return `<div class="viz-orbit"><span></span><span></span><span></span></div>`;
-    case "platforms":
-      return `<div class="viz-labels"><span>Desktop</span><span>Mobile</span></div>`;
-    case "workflow":
-      return `<div class="viz-steps"><span>Capture</span><span>Verify</span><span>Sign off</span></div>`;
-    case "offline":
-      return `<div class="viz-sync-flow"><div class="sync-node online">Online</div><div class="sync-arrow">→</div><div class="sync-node offline">Offline queue</div></div>`;
-    case "enterprise":
-      return `<div class="viz-pills"><span>Permissions</span><span>Audit trail</span><span>Secure API</span></div>`;
-    case "cta":
-      return `<div class="viz-cta-contact"><span>strataworkflow.com</span><span>Schedule a demo</span></div>`;
-    default:
-      return "";
-  }
-}
-
-export function renderSceneVisual(scene: Scene): string {
+function renderLegacyVisual(scene: Scene): string {
   return `
     <div class="scene-visual scene-visual--${scene.visual}" data-visual="${scene.visual}">
       <div class="viz-glow"></div>
       ${iconSvg(scene.visual)}
-      ${visualExtras(scene.visual)}
-      ${
-        scene.hotspots
-          ? `<div class="hotspots">${scene.hotspots
-              .map(
-                (h) => `
-            <button type="button" class="hotspot" style="left:${h.x}%;top:${h.y}%" data-hotspot="${h.id}" aria-label="${h.label}">
-              <span class="hotspot-dot"></span>
-              <span class="hotspot-card">
-                <strong>${h.label}</strong>
-                <em>${h.detail}</em>
-              </span>
-            </button>`
-              )
-              .join("")}</div>`
-          : ""
-      }
+    </div>`;
+}
+
+export function renderSceneVisual(scene: Scene): string {
+  const hotspots = scene.hotspots
+    ? `<div class="hotspots">${scene.hotspots
+        .map(
+          (h) => `
+          <button type="button" class="hotspot" style="left:${h.x}%;top:${h.y}%" data-hotspot="${h.id}" aria-label="${h.label}">
+            <span class="hotspot-dot"></span>
+            <span class="hotspot-card">
+              <strong>${h.label}</strong>
+              <em>${h.detail}</em>
+            </span>
+          </button>`
+        )
+        .join("")}</div>`
+    : "";
+
+  return `
+    <div class="scene-visual scene-visual--${scene.visual} scene-visual--app" data-visual="${scene.visual}">
+      ${renderScreens(scene)}
+      ${hotspots}
     </div>`;
 }
 

@@ -24,6 +24,7 @@ npm run pack    # creates strata-workflow-presentation.zip
 
 ## Narration
 
-- Voice: **es-AR-ElenaNeural** (female, Argentine accent, English script)
+- Voice: **en-US-JennyNeural** (native US English female, conversational)
 - Script: [`NARRATION_SCRIPT.md`](./NARRATION_SCRIPT.md)
-- Regenerate: `npm run narration:force`
+- Real app screenshots: `public/screenshots/` (recapture with Playwright — see `scripts/capture-screenshots.spec.ts`)
+- Regenerate audio: `npm run narration:force`

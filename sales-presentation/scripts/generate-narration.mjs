@@ -13,10 +13,10 @@ const root = join(__dirname, "..");
 const outDir = join(root, "public", "audio");
 const force = process.argv.includes("--force");
 
-// Argentine female voice — natural conversational delivery (English script, Rioplatense accent)
-const voice = "es-AR-ElenaNeural";
-const rate = "-12%";
-const pitch = "-1Hz";
+// Native English female voice — warm conversational delivery (Jenny, US English)
+const voice = "en-US-JennyNeural";
+const rate = "-8%";
+const pitch = "+0Hz";
 
 const scenes = [
   {
