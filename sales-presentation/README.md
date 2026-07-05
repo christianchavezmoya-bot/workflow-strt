@@ -15,6 +15,18 @@ Interactive, customer-facing sales demonstration for Commtrac field operations p
 
 ## Quick start
 
+### Download ready-to-use build (no install)
+
+Download and unzip **`commtrac-sales-presentation.zip`** from the `sales-presentation/` folder, then open **`index.html`** in any browser. Fully offline — no Node.js required.
+
+```bash
+# Or from a git clone:
+cd sales-presentation/dist-ready
+# unzip commtrac-sales-presentation.zip, open index.html
+```
+
+### Run from source
+
 ```bash
 cd sales-presentation
 npm install
