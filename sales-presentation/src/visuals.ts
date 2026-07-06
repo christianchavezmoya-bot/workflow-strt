@@ -1,84 +1,134 @@
 import type { Scene, SceneView } from "./scenes";
-import { VIEWS_PER_SCENE } from "./scenes";
+import { SECTION_LABELS, VIEWS_PER_SCENE } from "./scenes";
 
-function fallbackSrc(src: string, views: SceneView[]): string {
-  const base = src.replace(/scenes\/(\d+)-v\d+\.png/, (_, id) => {
-    const fallbacks: Record<string, string> = {
-      "01": "desktop-dashboard.png",
-      "02": "desktop-assets.png",
-      "03": "desktop-work-instructions.png",
-      "04": "desktop-projects.png",
-      "05": "desktop-assets.png",
-      "06": "desktop-work-instructions.png",
-      "07": "desktop-dashboard.png",
-      "08": "desktop-issues.png",
-      "09": "desktop-documents.png",
-      "10": "mobile-dashboard.png",
-      "11": "desktop-admin.png",
-      "12": "desktop-admin.png",
-      "13": "desktop-project-detail.png",
-    };
-    return fallbacks[id] ?? "desktop-dashboard.png";
-  });
-  return `screenshots/${base.replace("screenshots/", "")}`;
+function fallbackSrc(src: string): string {
+  const id = src.match(/scenes\/(\d+)-/)?.[1] ?? "01";
+  const fallbacks: Record<string, string> = {
+    "01": "desktop-dashboard.png", "02": "desktop-work-instructions.png", "03": "desktop-projects.png",
+    "04": "desktop-assets.png", "05": "desktop-work-instructions.png", "06": "desktop-dashboard.png",
+    "07": "desktop-issues.png", "08": "desktop-documents.png", "09": "desktop-projects.png",
+    "10": "desktop-assets.png", "11": "desktop-assets.png", "12": "desktop-work-instructions.png",
+    "13": "desktop-work-instructions.png", "14": "desktop-issues.png", "15": "mobile-dashboard.png",
+    "16": "desktop-work-instructions.png", "17": "mobile-dashboard.png", "18": "desktop-admin.png",
+    "19": "desktop-admin.png", "20": "desktop-project-detail.png",
+  };
+  return `screenshots/${fallbacks[id] ?? "desktop-dashboard.png"}`;
 }
 
-function renderViewPanel(view: SceneView, index: number, sceneId: number, allViews: SceneView[]): string {
+function renderBullets(scene: Scene): string {
+  if (!scene.bullets?.length) return "";
+  return `<ul class="scene-bullets">${scene.bullets.map((b) => `<li>${b}</li>`).join("")}</ul>`;
+}
+
+function renderViewPanel(view: SceneView, index: number, allViews: SceneView[]): string {
   const variant = view.variant ?? "desktop";
-  const fb = fallbackSrc(view.src, allViews);
+  const fb = fallbackSrc(view.src);
   const active = index === 0 ? " is-active" : "";
   return `
     <button type="button" class="view-panel${active}" data-view-index="${index}" aria-label="${view.label}" aria-pressed="${index === 0}">
       <span class="view-panel-badge">${index + 1}</span>
       <span class="view-panel-label">${view.label}</span>
       <figure class="view-panel-frame view-panel-frame--${variant}">
-        <img
-          class="view-panel-img"
-          src="${view.src}"
-          alt="${view.label}"
-          loading="eager"
-          decoding="async"
-          data-fallback="${fb}"
-          onerror="if(this.dataset.fallback){this.src=this.dataset.fallback;this.dataset.fallback=''}"
-        />
+        <img class="view-panel-img" src="${view.src}" alt="${view.label}" loading="eager" decoding="async"
+             data-fallback="${fb}" onerror="if(this.dataset.fallback){this.src=this.dataset.fallback;this.dataset.fallback=''}" />
       </figure>
     </button>`;
 }
 
-function renderViewGrid(scene: Scene): string {
-  const panels = scene.views
-    .slice(0, VIEWS_PER_SCENE)
-    .map((v, i) => renderViewPanel(v, i, scene.id, scene.views))
-    .join("");
-
-  const dots = scene.views
-    .slice(0, VIEWS_PER_SCENE)
-    .map((_, i) => `<span class="view-dot${i === 0 ? " is-active" : ""}" data-view-dot="${i}"></span>`)
-    .join("");
-
+function renderViewGrid(scene: Scene, compact = false): string {
+  const panels = scene.views.slice(0, VIEWS_PER_SCENE).map((v, i) => renderViewPanel(v, i, scene.views)).join("");
+  const dots = scene.views.slice(0, VIEWS_PER_SCENE).map((_, i) =>
+    `<span class="view-dot${i === 0 ? " is-active" : ""}" data-view-dot="${i}"></span>`).join("");
+  const gridCls = compact ? "view-grid view-grid--compact" : "view-grid";
   return `
-    <div class="view-grid-wrap" data-scene-id="${scene.id}">
-      <div class="view-grid" id="view-grid">
-        ${panels}
-      </div>
+    <div class="view-grid-wrap">
+      <div class="${gridCls}">${panels}</div>
       <div class="view-grid-meta">
-        <div class="view-dots" id="view-dots">${dots}</div>
-        <p class="view-hint">Click a panel to focus · views auto-advance with narration</p>
+        <div class="view-dots">${dots}</div>
+        <p class="view-hint">Click a panel · auto-advances with narration</p>
       </div>
     </div>`;
 }
 
-export function renderSceneContent(scene: Scene): string {
+function renderArchitectureDiagram(): string {
   return `
-    <div class="scene-inner" data-scene-id="${scene.id}">
+    <div class="arch-diagram" aria-label="System architecture">
+      <div class="arch-row arch-row--clients">
+        <div class="arch-node">Web Browser</div>
+        <div class="arch-node">Capacitor Android</div>
+        <div class="arch-node">Capacitor iOS</div>
+      </div>
+      <div class="arch-connector">▼</div>
+      <div class="arch-box arch-box--react">
+        <strong>React App</strong>
+        <span>features/ pages · services/ · repositories/ · Redux · IndexedDB</span>
+      </div>
+      <div class="arch-connector">▼ REST + SSE</div>
+      <div class="arch-box arch-box--api">
+        <strong>ASP.NET Core API</strong>
+        <span>Flat controllers · EF Core + SQLite · JWT auth · port 4000</span>
+      </div>
+      <div class="arch-row arch-row--offline">
+        <div class="arch-chip">Offline queue (native)</div>
+        <div class="arch-chip">mediaStore photos</div>
+        <div class="arch-chip">Biometric lock</div>
+      </div>
+    </div>`;
+}
+
+function renderJourneyStepper(scene: Scene): string {
+  if (!scene.journeyStep) return "";
+  const { current, total } = scene.journeyStep;
+  const steps = Array.from({ length: total }, (_, i) => {
+    const n = i + 1;
+    const cls = n < current ? "is-done" : n === current ? "is-active" : "";
+    return `<span class="journey-step ${cls}" title="Step ${n}"><span>${n}</span></span>`;
+  }).join("");
+  return `
+    <div class="journey-stepper" aria-label="User journey step ${current} of ${total}">
+      <span class="journey-stepper-label">Live journey · Step ${current} of ${total}</span>
+      <div class="journey-stepper-track">${steps}</div>
+    </div>`;
+}
+
+function renderVisual(scene: Scene): string {
+  const layout = scene.layout ?? "grid";
+
+  if (layout === "architecture") {
+    return `
+      <div class="scene-visual-split">
+        <div class="scene-info-panel">${renderArchitectureDiagram()}${renderBullets(scene)}</div>
+        <div class="scene-visual scene-visual--app scene-visual--half">${renderViewGrid(scene, true)}</div>
+      </div>`;
+  }
+
+  if (layout === "info" || layout === "journey") {
+    return `
+      <div class="scene-visual-split">
+        <div class="scene-info-panel">
+          ${layout === "journey" ? renderJourneyStepper(scene) : ""}
+          ${renderBullets(scene)}
+        </div>
+        <div class="scene-visual scene-visual--app scene-visual--half">${renderViewGrid(scene, true)}</div>
+      </div>`;
+  }
+
+  return `<div class="scene-visual scene-visual--app">${renderViewGrid(scene)}</div>`;
+}
+
+export function renderSceneContent(scene: Scene): string {
+  const sectionLabel = SECTION_LABELS[scene.section] ?? scene.section;
+  return `
+    <div class="scene-inner scene-inner--${scene.layout ?? "grid"}" data-scene-id="${scene.id}" data-section="${scene.section}">
       <header class="scene-copy">
-        <span class="scene-tag">${scene.tag}</span>
+        <div class="scene-copy-tags">
+          <span class="scene-section">${sectionLabel}</span>
+          <span class="scene-tag">${scene.tag}</span>
+        </div>
         <h2 class="scene-title">${scene.title}</h2>
         <p class="scene-subtitle">${scene.subtitle}</p>
       </header>
-      <div class="scene-visual scene-visual--app" data-visual="${scene.id}">
-        ${renderViewGrid(scene)}
-      </div>
+      ${renderVisual(scene)}
     </div>`;
 }
 
@@ -88,14 +138,18 @@ export function renderOpening(): string {
       <div class="opening-bg"></div>
       <div class="opening-content">
         <div class="brand-mark">S</div>
-        <p class="eyebrow">Customer Presentation · v3</p>
+        <p class="eyebrow">Customer Presentation · v4</p>
         <h1 class="opening-title">Strata Workflow App</h1>
-        <p class="opening-lead">Field operations for telecom &amp; utility teams — projects, assets, workflows, and reports in one platform.</p>
+        <p class="opening-lead">Product overview + live user journey — create a project, run a workflow, capture photos, log issues, and upload from phone.</p>
+        <div class="opening-toc">
+          <span>Welcome</span><span>Overview</span><span>8-step journey</span><span>Architecture</span>
+        </div>
         <div class="opening-actions">
           <button type="button" class="btn btn-primary" id="btn-start">Start Presentation</button>
           <button type="button" class="btn btn-secondary" id="btn-start-muted">Start without audio</button>
+          <button type="button" class="btn btn-secondary" id="btn-journey">Jump to User Journey</button>
         </div>
-        <p class="opening-note">Each scene shows four live app views matched to the narration.<br/>Best in full screen · use Start-Presentation.bat if the page is blank.</p>
+        <p class="opening-note">20 scenes · narration + interactive views · use Start-Presentation.bat if blank</p>
       </div>
     </section>`;
 }
@@ -113,7 +167,7 @@ export function renderControls(): string {
         <div class="scene-dots" id="scene-dots"></div>
       </div>
       <div class="controls-right">
-        <span class="scene-counter" id="scene-counter">1 / 13</span>
+        <span class="scene-counter" id="scene-counter">1 / 20</span>
         <button type="button" class="ctrl-btn ctrl-btn--text" id="btn-mute" aria-label="Mute narration">Mute</button>
         <button type="button" class="ctrl-btn ctrl-btn--text" id="btn-restart" aria-label="Restart">Restart</button>
       </div>
@@ -125,7 +179,7 @@ export function renderPresentationShell(): string {
     <section class="screen screen--presentation" id="presentation-screen" hidden>
       <header class="topbar">
         <div class="topbar-brand"><span class="brand-dot"></span> Strata Workflow App</div>
-        <div class="topbar-meta">Sales Demonstration</div>
+        <div class="topbar-meta" id="topbar-section">Sales Demonstration</div>
       </header>
       <main class="stage" id="stage"></main>
       ${renderControls()}
@@ -137,7 +191,7 @@ export function renderEndOverlay(): string {
     <div class="end-overlay" id="end-overlay">
       <div class="end-card">
         <h3>Thank you</h3>
-        <p>Strata Workflow App connects office planners and field technicians — from project setup through signed deliverables and audit-ready reports.</p>
+        <p>Strata Workflow App connects office planners and field technicians — from project creation through workflow completion, photo capture, issue resolution, and signed deliverables.</p>
         <div class="end-actions">
           <button type="button" class="btn btn-primary" id="btn-replay">Replay Presentation</button>
           <button type="button" class="btn btn-secondary" id="btn-explore">Explore Scenes</button>
@@ -147,13 +201,16 @@ export function renderEndOverlay(): string {
 }
 
 export function setActiveView(index: number): void {
-  const panels = document.querySelectorAll<HTMLElement>(".view-panel");
-  panels.forEach((el, i) => {
-    const active = i === index;
-    el.classList.toggle("is-active", active);
-    el.setAttribute("aria-pressed", String(active));
+  document.querySelectorAll<HTMLElement>(".view-panel").forEach((el, i) => {
+    el.classList.toggle("is-active", i === index);
+    el.setAttribute("aria-pressed", String(i === index));
   });
   document.querySelectorAll<HTMLElement>(".view-dot").forEach((el, i) => {
     el.classList.toggle("is-active", i === index);
   });
+}
+
+export function updateTopbarSection(label: string): void {
+  const el = document.getElementById("topbar-section");
+  if (el) el.textContent = label;
 }

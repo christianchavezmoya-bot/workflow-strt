@@ -12,64 +12,31 @@ const root = join(__dirname, "..");
 const outDir = join(root, "public", "audio");
 const force = process.argv.includes("--force");
 
-// Native English male, neutral business tone — medium natural pace
 const voice = "en-US-AndrewNeural";
 const rate = "-2%";
 const pitch = "+0Hz";
 
 const scenes = [
-  {
-    id: "01",
-    text: "Welcome to Strata Workflow App. A field-operations platform for telecom and utility project management. Track projects, install assets on site, run workflows, capture photos and signatures, log issues, and produce reports — all in one place.",
-  },
-  {
-    id: "02",
-    text: "Technicians and project managers use Strata every day. Install and inspect assets with guided work instructions. Replace lost checklists, scattered photos, and spreadsheets with one trusted system your teams can rely on.",
-  },
-  {
-    id: "03",
-    text: "One React web bundle ships three ways. Desktop web for planners — built with React, TypeScript, and Material UI. The same experience on Android and iOS through Capacitor. And a secure ASP.NET Core API with SQLite and JWT authentication.",
-  },
-  {
-    id: "04",
-    text: "Projects are your top-level container. Each project holds assets, contacts, inspections, documents, and delivery profiles. Browse the projects list, open a detail page, and manage status, inspections, and linked assets from one command center.",
-  },
-  {
-    id: "05",
-    text: "The Assets workspace is where field work happens. Every project asset has workflow assignments, live status from Not Started through Complete, documents, and run history. Technicians select a project, find their equipment, and press Start Run.",
-  },
-  {
-    id: "06",
-    text: "Guided workflows are the heart of on-site work. Step-by-step checklists capture photos and video, text and QR inputs, productive and downtime hours, issues, and signatures. Blocking issues prevent completion until they are resolved. Reports generate automatically.",
-  },
-  {
-    id: "07",
-    text: "The operations dashboard gives managers office-scoped visibility. See open issues, pending signatures, technician workload, evidence completeness, and workflow health. Resume runs or upload missing photos with a single click.",
-  },
-  {
-    id: "08",
-    text: "The Issues Board is a cross-project view of every asset issue. Track, assign, and resolve blocking and non-blocking problems in a kanban-style layout — so nothing falls through the cracks between projects or teams.",
-  },
-  {
-    id: "09",
-    text: "Supporting modules keep teams equipped. A document library for project and asset files. Work instructions and tips for field staff. Admin for users and sites. Settings, profile, two-factor recovery, and a standalone mobile upload flow.",
-  },
-  {
-    id: "10",
-    text: "On mobile, Strata is offline-first. After login, the app prefetches projects, assets, workflow configs, assignments, and config media. Writes queue locally when disconnected, then sync on reconnect with conflict detection. Photos and signatures stay safe on device storage.",
-  },
-  {
-    id: "11",
-    text: "Under the hood, the frontend layers pages, services, repositories, and a Redux store. The backend exposes flat REST controllers with project identifiers as query parameters. JWT authentication and a two-tier permission model protect every action. Native apps add biometric lock and secure token storage.",
-  },
-  {
-    id: "12",
-    text: "Enterprise features include user management, brand settings, audit-ready records, and role-based access. The API runs on ASP.NET Core with Entity Framework migrations, SQLite in WAL mode, and server-sent events for live updates across connected clients.",
-  },
-  {
-    id: "13",
-    text: "Strata Workflow App connects your office and field teams — from project planning through signed deliverables. Ready to see it on your projects? Let's schedule a conversation and walk through your workflows together.",
-  },
+  { id: "01", text: "Welcome to Strata Workflow App — field operations for telecom and utility project management. Technicians and project managers track projects, install assets, run workflows, capture photos and signatures, log issues, and produce reports. One React bundle ships on web, Android, and iOS, backed by a secure ASP.NET Core API." },
+  { id: "02", text: "One React web bundle ships three ways. Desktop web uses React eighteen, TypeScript, Material UI, Vite, Redux, and React Router. Mobile wraps the same bundle in Capacitor eight for Android and iOS. The backend is ASP.NET Core eight with Entity Framework, SQLite, and JWT authentication on port four thousand." },
+  { id: "03", text: "Projects are the top-level container. Each project holds assets, contacts, inspections, documents, and delivery profiles. Browse the projects list, open a detail page, and manage status, inspections, and linked assets from one command center." },
+  { id: "04", text: "The Assets workspace at slash installations slash assets is where field work happens. Every asset has workflow assignments, status from Not Started through Complete, documents, and run history. Technicians select a project, find their equipment, and press Start Run." },
+  { id: "05", text: "Guided workflows in WorkOrderRunner are the heart of on-site work. Step-by-step checklists capture photos and video, text and QR inputs, time tracking, issues, and signatures. Blocking issues prevent completion until resolved. PDF reports generate automatically." },
+  { id: "06", text: "The operations dashboard gives managers office-scoped visibility. See open issues, pending signatures, technician workload, evidence completeness, and workflow health. Resume runs or upload missing photos with a single click." },
+  { id: "07", text: "The Issues Board is a cross-project kanban-style view of asset issues. Track, assign, and resolve blocking and non-blocking problems so nothing falls through the cracks between projects or teams." },
+  { id: "08", text: "Supporting modules include a document library, work instructions, tips for field staff, admin for users and sites, settings with two-factor recovery, and a standalone mobile upload flow at slash mobile-upload for QR-based photo upload from any phone." },
+  { id: "09", text: "Let's walk through a live user journey. Step one: create a project. Open Projects and click Create project. Enter the job number, customer, site, and workflow mode. Save — your new project appears in the portfolio, ready for assets and field work." },
+  { id: "10", text: "Step two: add assets and assign workflows. Open the Assets page and filter by your project. Register equipment with asset tag, serial, and location. Link workflow assignments so each asset knows which work instructions apply." },
+  { id: "11", text: "Step three: start a run. The technician finds their asset and clicks Start Run. Confirm the workflow setup dialog, then WorkOrderRunner opens on the first step — ready for guided field work." },
+  { id: "12", text: "Step four: complete workflow steps. Each step shows instructions, reference media, and capture fields. Check boxes, enter readings, scan QR codes, and navigate forward. Progress saves automatically as the technician works." },
+  { id: "13", text: "Step five: capture photos and video. On any step that requires media, tap the photo or video button. Use the device camera or gallery. Attached files stay with the run, and missing captures are flagged before completion." },
+  { id: "14", text: "Step six: log an issue. Flag an issue on any step — blocking, observation, or scope deviation. Add a description, severity, and optional photo. Blocking issues must be resolved before the run can complete — the server returns four twenty-two if they are not." },
+  { id: "15", text: "Step seven: add a photo from a phone. Generate a QR code from the dashboard or workflow runner. The technician scans it with their phone camera — no app install needed. The upload page at slash mobile-upload sends the photo directly to the pending run." },
+  { id: "16", text: "Step eight: complete and sign off. Review the run summary — captures, issues, and time entries. Collect installer and customer signatures on-device or via email link. The run locks, a PDF report generates, and the dashboard updates." },
+  { id: "17", text: "On mobile, Strata is offline-first. After login, the app prefetches projects, assets, workflow configs, assignments, and media into IndexedDB. Writes queue locally when disconnected, then sync on reconnect with conflict detection. Photos stay safe on device storage." },
+  { id: "18", text: "Under the hood, the frontend layers features pages, services, repositories, and a Redux store. The backend exposes flat REST controllers with project identifiers as query parameters. JWT authentication and a two-tier permission model protect every action. Native apps add biometric lock and secure token storage." },
+  { id: "19", text: "Enterprise-ready with user management, brand settings, audit records, and role-based access. Developers run npm run dev on port fifty-one seventy-three, dotnet run for the API on port four thousand with Swagger, and Playwright end-to-end tests. SQLite runs in WAL mode with server-sent events for live updates." },
+  { id: "20", text: "Strata Workflow App connects your office and field teams — from creating a project through running workflows, capturing evidence, resolving issues, and signed deliverables. Ready to see it on your projects? Let's schedule a live walkthrough together." },
 ];
 
 function findEdgeTts() {
@@ -122,5 +89,4 @@ for (const scene of scenes) {
   }
 }
 
-// Remove stale scene-12+ if we had old 12-scene deck only — keep scene-13
 console.log("Done. Audio in public/audio/");

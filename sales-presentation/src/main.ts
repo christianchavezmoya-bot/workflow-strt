@@ -1,4 +1,4 @@
-import { SCENES, SCENE_COUNT, FALLBACK_DURATIONS_MS, VIEWS_PER_SCENE, type Scene } from "./scenes";
+import { SCENES, SCENE_COUNT, FALLBACK_DURATIONS_MS, SECTION_LABELS, VIEWS_PER_SCENE, type Scene } from "./scenes";
 import { narration } from "./audioEngine";
 import "./styles.css";
 import {
@@ -7,7 +7,10 @@ import {
   renderEndOverlay,
   renderSceneContent,
   setActiveView,
+  updateTopbarSection,
 } from "./visuals";
+
+const JOURNEY_SCENE_INDEX = SCENES.findIndex((s) => s.section === "journey");
 
 type StartMode = "audio" | "muted";
 
@@ -86,6 +89,11 @@ function bindOpening(): void {
     startBtn.textContent = "Start Presentation";
   });
   mutedBtn.addEventListener("click", () => void start("muted"));
+  document.getElementById("btn-journey")?.addEventListener("click", () => {
+    void start("muted").then(() => {
+      if (JOURNEY_SCENE_INDEX >= 0) goToScene(JOURNEY_SCENE_INDEX, true);
+    });
+  });
 }
 
 async function start(mode: StartMode): Promise<void> {
@@ -231,6 +239,7 @@ function showScene(index: number, autoplay: boolean): void {
 
   updateDots();
   updateCounter();
+  updateTopbarSection(SECTION_LABELS[scene.section] ?? "Sales Demonstration");
   resetProgress();
 
   requestAnimationFrame(() => stage.querySelector(".scene-inner")?.classList.add("is-visible"));
