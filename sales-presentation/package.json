@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/postbuild.mjs",
-    "pack": "npm run build && cd dist && zip -r ../strata-workflow-presentation.zip . && cp ../strata-workflow-presentation.zip ../dist-ready/",
+    "pack": "npm run build && rm -f strata-workflow-presentation.zip dist-ready/strata-workflow-presentation.zip && cd dist && zip -r ../strata-workflow-presentation.zip . && cp ../strata-workflow-presentation.zip ../dist-ready/",
     "preview": "vite preview",
     "narration": "node scripts/generate-narration.mjs",
     "narration:force": "node scripts/generate-narration.mjs --force"

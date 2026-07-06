@@ -1,28 +1,21 @@
-# Download Strata Workflow Presentation (v4 · 20 scenes)
+# Download Strata Workflow Presentation (v5 · 20 scenes + videos)
 
-## ⚠️ Still seeing 13 scenes?
+## ⚠️ Seeing an old version (13 scenes / cropped images)?
 
 You are running an **old copy**. Do this:
 
 1. **Delete** your old unzipped folder and any old ZIP files
-2. **Do not** use `commtrac-sales-presentation.zip` (that is the ancient 13-scene build)
-3. Download **v4 only** (~12 MB):
+2. Download **v5 only** (~7 MB):
 
-**[presentation-v4 release](https://github.com/christianchavezmoya-bot/workflow-strt/releases/download/presentation-v4/strata-workflow-presentation.zip)**
+**[presentation-v5 release](https://github.com/christianchavezmoya-bot/workflow-strt/releases/download/presentation-v5/strata-workflow-presentation.zip)**
 
-4. Unzip to a **new folder** (e.g. `Strata-Presentation-v4`)
-5. Run `Start-Presentation.bat` or `.sh`
-6. Confirm opening screen says **"v4"** and counter shows **"1 / 20"**
-
-| File | Size | Scenes |
-|------|------|--------|
-| `commtrac-sales-presentation.zip` | ~1.2 MB | ❌ OLD — 13 |
-| `strata-workflow-presentation.zip` (v3) | ~7.8 MB | ❌ OLD — 13 |
-| **v4 release ZIP** | **~12 MB** | ✅ **20** |
+3. Unzip to a **new folder** (e.g. `Strata-Presentation-v5`)
+4. Run `Start-Presentation.bat` or `.sh`
+5. Confirm opening screen says **"v5"**, counter shows **"1 / 20"**, and journey scenes play videos
 
 ## Option A — GitHub Release (recommended)
 
-https://github.com/christianchavezmoya-bot/workflow-strt/releases/tag/presentation-v4
+https://github.com/christianchavezmoya-bot/workflow-strt/releases/tag/presentation-v5
 
 Download **`strata-workflow-presentation.zip`** under Assets.
 

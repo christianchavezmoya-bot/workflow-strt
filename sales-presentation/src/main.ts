@@ -1,4 +1,4 @@
-import { SCENES, SCENE_COUNT, FALLBACK_DURATIONS_MS, SECTION_LABELS, VIEWS_PER_SCENE, type Scene } from "./scenes";
+import { SCENES, SCENE_COUNT, FALLBACK_DURATIONS_MS, SECTION_LABELS, type Scene } from "./scenes";
 import { narration } from "./audioEngine";
 import "./styles.css";
 import {
@@ -6,11 +6,8 @@ import {
   renderPresentationShell,
   renderEndOverlay,
   renderSceneContent,
-  setActiveView,
   updateTopbarSection,
 } from "./visuals";
-
-const JOURNEY_SCENE_INDEX = SCENES.findIndex((s) => s.section === "journey");
 
 type StartMode = "audio" | "muted";
 
@@ -18,47 +15,34 @@ interface State {
   started: boolean;
   mode: StartMode;
   sceneIndex: number;
-  viewIndex: number;
   playing: boolean;
   muted: boolean;
   ended: boolean;
   userPaused: boolean;
   playToken: number;
-  userPinnedView: boolean;
 }
 
 const state: State = {
   started: false,
   mode: "audio",
   sceneIndex: 0,
-  viewIndex: 0,
   playing: false,
   muted: false,
   ended: false,
   userPaused: false,
   playToken: 0,
-  userPinnedView: false,
 };
 
+const JOURNEY_INDEX = SCENES.findIndex((s) => s.section === "journey");
+
 let advanceTimer: ReturnType<typeof setTimeout> | null = null;
-let viewCycleTimer: ReturnType<typeof setInterval> | null = null;
 let progressRaf = 0;
 let touchStartX = 0;
 
 const app = document.getElementById("app")!;
 
 function clearAdvanceTimer(): void {
-  if (advanceTimer) {
-    clearTimeout(advanceTimer);
-    advanceTimer = null;
-  }
-}
-
-function clearViewCycleTimer(): void {
-  if (viewCycleTimer) {
-    clearInterval(viewCycleTimer);
-    viewCycleTimer = null;
-  }
+  if (advanceTimer) { clearTimeout(advanceTimer); advanceTimer = null; }
 }
 
 function mount(): void {
@@ -69,18 +53,12 @@ function mount(): void {
   bindSwipe();
 }
 
-function hideEndOverlay(): void {
-  document.getElementById("end-overlay")!.classList.remove("is-visible");
-}
-
-function showEndOverlay(): void {
-  document.getElementById("end-overlay")!.classList.add("is-visible");
-}
+function hideEndOverlay(): void { document.getElementById("end-overlay")!.classList.remove("is-visible"); }
+function showEndOverlay(): void { document.getElementById("end-overlay")!.classList.add("is-visible"); }
 
 function bindOpening(): void {
   const startBtn = document.getElementById("btn-start") as HTMLButtonElement;
   const mutedBtn = document.getElementById("btn-start-muted") as HTMLButtonElement;
-
   startBtn.addEventListener("click", async () => {
     startBtn.disabled = true;
     startBtn.textContent = "Loading narration…";
@@ -89,10 +67,9 @@ function bindOpening(): void {
     startBtn.textContent = "Start Presentation";
   });
   mutedBtn.addEventListener("click", () => void start("muted"));
-  document.getElementById("btn-journey")?.addEventListener("click", () => {
-    void start("muted").then(() => {
-      if (JOURNEY_SCENE_INDEX >= 0) goToScene(JOURNEY_SCENE_INDEX, true);
-    });
+  document.getElementById("btn-journey")?.addEventListener("click", async () => {
+    await start("audio");
+    if (JOURNEY_INDEX >= 0) goToScene(JOURNEY_INDEX, true);
   });
 }
 
@@ -101,11 +78,9 @@ async function start(mode: StartMode): Promise<void> {
   state.mode = mode;
   state.muted = mode === "muted";
   state.sceneIndex = 0;
-  state.viewIndex = 0;
   state.playing = true;
   state.ended = false;
   state.userPaused = false;
-  state.userPinnedView = false;
   state.playToken++;
 
   document.getElementById("opening-screen")!.hidden = true;
@@ -113,9 +88,7 @@ async function start(mode: StartMode): Promise<void> {
   document.getElementById("controls")!.hidden = false;
   hideEndOverlay();
 
-  if (mode === "audio" && !state.muted) {
-    await narration.loadAll(SCENES);
-  }
+  if (mode === "audio" && !state.muted) await narration.loadAll(SCENES);
 
   updateMuteButton();
   showScene(0, true);
@@ -139,31 +112,24 @@ function bindControls(): void {
   document.getElementById("btn-restart")!.addEventListener("click", restart);
   document.getElementById("btn-replay")!.addEventListener("click", restart);
   document.getElementById("btn-explore")!.addEventListener("click", () => {
-    state.ended = false;
-    hideEndOverlay();
-    state.playing = false;
-    updatePlayButton();
+    state.ended = false; hideEndOverlay(); state.playing = false; updatePlayButton();
   });
 
   window.addEventListener("keydown", (e) => {
     if (!state.started) return;
     if (e.key === "ArrowRight" || e.key === " ") {
       e.preventDefault();
-      if (state.ended) restart();
-      else goToScene(state.sceneIndex + 1, true);
+      if (state.ended) restart(); else goToScene(state.sceneIndex + 1, true);
     } else if (e.key === "ArrowLeft") goToScene(state.sceneIndex - 1, true);
-    else if (e.key === "ArrowDown") cycleView(1, true);
-    else if (e.key === "ArrowUp") cycleView(-1, true);
     else if (e.key === "p" || e.key === "P") togglePause();
     else if (e.key === "m" || e.key === "M") toggleMute();
   });
 }
 
 function bindSwipe(): void {
-  document.getElementById("stage")!.addEventListener("touchstart", (e) => {
-    touchStartX = e.changedTouches[0]?.clientX ?? 0;
-  }, { passive: true });
-  document.getElementById("stage")!.addEventListener("touchend", (e) => {
+  const stage = document.getElementById("stage")!;
+  stage.addEventListener("touchstart", (e) => { touchStartX = e.changedTouches[0]?.clientX ?? 0; }, { passive: true });
+  stage.addEventListener("touchend", (e) => {
     if (!state.started) return;
     const dx = (e.changedTouches[0]?.clientX ?? 0) - touchStartX;
     if (Math.abs(dx) < 50) return;
@@ -171,110 +137,81 @@ function bindSwipe(): void {
   }, { passive: true });
 }
 
-function bindViewGrid(): void {
-  document.querySelectorAll<HTMLElement>(".view-panel").forEach((panel) => {
-    panel.addEventListener("click", () => {
-      const idx = Number(panel.dataset.viewIndex ?? 0);
-      state.viewIndex = idx;
-      state.userPinnedView = true;
-      setActiveView(idx);
+/** Clickable work-tree nodes jump to the matching journey scene. */
+function bindSceneInteractions(): void {
+  document.querySelectorAll<HTMLElement>(".wt-node").forEach((node) => {
+    node.addEventListener("click", () => {
+      const step = Number(node.dataset.journeyStep);
+      const idx = SCENES.findIndex((s) => s.journeyStep === step);
+      if (idx >= 0) goToScene(idx, true);
+    });
+  });
+  // Architecture node click = subtle emphasis
+  document.querySelectorAll<HTMLElement>(".arch-node, .arch-box").forEach((n) => {
+    n.addEventListener("click", () => {
+      document.querySelectorAll(".arch-node, .arch-box").forEach((x) => x.classList.remove("is-focus"));
+      n.classList.add("is-focus");
     });
   });
 }
 
-function cycleView(delta: number, userInitiated = false): void {
-  if (userInitiated) state.userPinnedView = true;
-  const next = (state.viewIndex + delta + VIEWS_PER_SCENE) % VIEWS_PER_SCENE;
-  state.viewIndex = next;
-  setActiveView(next);
+function playSceneVideo(): void {
+  const v = document.querySelector<HTMLVideoElement>(".shot-video");
+  if (v) { v.currentTime = 0; v.play().catch(() => {}); }
+}
+function stopSceneVideo(): void {
+  document.querySelectorAll<HTMLVideoElement>(".shot-video").forEach((v) => v.pause());
 }
 
-function startViewAutoCycle(durationMs: number, token: number): void {
-  clearViewCycleTimer();
-  if (state.userPinnedView) return;
-
-  state.viewIndex = 0;
-  setActiveView(0);
-
-  const stepMs = Math.max(2800, Math.floor(durationMs / VIEWS_PER_SCENE));
-  viewCycleTimer = setInterval(() => {
-    if (token !== state.playToken || state.userPinnedView || !state.playing || state.userPaused) return;
-    const next = (state.viewIndex + 1) % VIEWS_PER_SCENE;
-    state.viewIndex = next;
-    setActiveView(next);
-  }, stepMs);
-}
-
-function currentScene(): Scene {
-  return SCENES[state.sceneIndex]!;
-}
+function currentScene(): Scene { return SCENES[state.sceneIndex]!; }
 
 function goToScene(index: number, userInitiated = false): void {
   if (index < 0) return;
-  if (index >= SCENE_COUNT) {
-    finishPresentation();
-    return;
-  }
+  if (index >= SCENE_COUNT) { finishPresentation(); return; }
   if (userInitiated) state.userPaused = !state.playing;
   showScene(index, userInitiated || state.playing);
 }
 
 function showScene(index: number, autoplay: boolean): void {
   clearAdvanceTimer();
-  clearViewCycleTimer();
   narration.stop();
+  stopSceneVideo();
   cancelAnimationFrame(progressRaf);
   state.playToken++;
 
   state.sceneIndex = index;
-  state.viewIndex = 0;
-  state.userPinnedView = false;
   state.ended = false;
   hideEndOverlay();
 
   const scene = currentScene();
   const stage = document.getElementById("stage")!;
   stage.innerHTML = renderSceneContent(scene);
-  bindViewGrid();
+  bindSceneInteractions();
 
   updateDots();
   updateCounter();
   updateTopbarSection(SECTION_LABELS[scene.section] ?? "Sales Demonstration");
-  resetProgress();
+  setProgress(0);
 
   requestAnimationFrame(() => stage.querySelector(".scene-inner")?.classList.add("is-visible"));
+  playSceneVideo();
 
-  if (autoplay && state.playing && !state.userPaused) {
-    void playScene(scene, state.playToken);
-  } else {
-    setProgress(0);
-    setActiveView(0);
-  }
+  if (autoplay && state.playing && !state.userPaused) void playScene(scene, state.playToken);
 }
 
 async function playScene(scene: Scene, token: number): Promise<void> {
   clearAdvanceTimer();
-  clearViewCycleTimer();
   narration.stop();
-
   const duration = FALLBACK_DURATIONS_MS[scene.id] ?? 16000;
-  startViewAutoCycle(duration, token);
-
-  const onDone = () => {
-    if (token !== state.playToken) return;
-    scheduleAdvance(500);
-  };
+  const onDone = () => { if (token === state.playToken) scheduleAdvance(500); };
 
   if (state.mode === "audio" && !state.muted) {
     const el = await narration.play(scene.id);
     if (token !== state.playToken) return;
-
     if (el) {
       el.onended = onDone;
       el.onerror = () => animateProgressFor(duration, onDone, token);
       animateProgressFromAudio(el, token);
-      const audioDuration = Number.isFinite(el.duration) && el.duration > 0 ? el.duration * 1000 : duration;
-      startViewAutoCycle(audioDuration, token);
     } else {
       animateProgressFor(duration, onDone, token);
     }
@@ -297,14 +234,10 @@ function animateProgressFor(ms: number, onComplete: () => void, token: number): 
   const start = performance.now();
   const tick = (now: number) => {
     if (token !== state.playToken) return;
-    if (!state.playing || state.userPaused) {
-      progressRaf = requestAnimationFrame(tick);
-      return;
-    }
+    if (!state.playing || state.userPaused) { progressRaf = requestAnimationFrame(tick); return; }
     const p = Math.min(1, (now - start) / ms);
     setProgress(p);
-    if (p >= 1) onComplete();
-    else progressRaf = requestAnimationFrame(tick);
+    if (p >= 1) onComplete(); else progressRaf = requestAnimationFrame(tick);
   };
   progressRaf = requestAnimationFrame(tick);
 }
@@ -319,24 +252,14 @@ function scheduleAdvance(delayMs: number): void {
 }
 
 function finishPresentation(): void {
-  state.ended = true;
-  state.playing = false;
-  clearAdvanceTimer();
-  clearViewCycleTimer();
-  narration.stop();
-  setProgress(1);
-  updatePlayButton();
-  showEndOverlay();
+  state.ended = true; state.playing = false;
+  clearAdvanceTimer(); narration.stop(); stopSceneVideo();
+  setProgress(1); updatePlayButton(); showEndOverlay();
 }
 
 function restart(): void {
-  state.ended = false;
-  state.playing = true;
-  state.userPaused = false;
-  state.userPinnedView = false;
-  hideEndOverlay();
-  updatePlayButton();
-  showScene(0, true);
+  state.ended = false; state.playing = true; state.userPaused = false;
+  hideEndOverlay(); updatePlayButton(); showScene(0, true);
 }
 
 function togglePause(): void {
@@ -345,24 +268,18 @@ function togglePause(): void {
   state.userPaused = !state.playing;
   updatePlayButton();
   if (state.playing) {
+    playSceneVideo();
     const el = narration.active;
     if (el && !state.muted) void el.play().catch(() => playScene(currentScene(), ++state.playToken));
     else void playScene(currentScene(), ++state.playToken);
   } else {
-    clearAdvanceTimer();
-    clearViewCycleTimer();
-    narration.stop();
-    cancelAnimationFrame(progressRaf);
+    clearAdvanceTimer(); narration.stop(); stopSceneVideo(); cancelAnimationFrame(progressRaf);
   }
 }
 
 function toggleMute(): void {
-  if (state.mode === "muted") {
-    state.mode = "audio";
-    state.muted = false;
-  } else {
-    state.muted = !state.muted;
-  }
+  if (state.mode === "muted") { state.mode = "audio"; state.muted = false; }
+  else state.muted = !state.muted;
   updateMuteButton();
   if (state.muted) narration.stop();
   else if (state.playing && !state.userPaused) void playScene(currentScene(), ++state.playToken);
@@ -370,8 +287,9 @@ function toggleMute(): void {
 
 function updateMuteButton(): void {
   const btn = document.getElementById("btn-mute")!;
-  btn.textContent = state.mode === "muted" || state.muted ? "Unmute" : "Mute";
-  btn.classList.toggle("is-muted", state.mode === "muted" || state.muted);
+  const muted = state.mode === "muted" || state.muted;
+  btn.textContent = muted ? "Unmute" : "Mute";
+  btn.classList.toggle("is-muted", muted);
 }
 
 function updatePlayButton(): void {
@@ -387,10 +305,6 @@ function updateDots(): void {
 
 function updateCounter(): void {
   document.getElementById("scene-counter")!.textContent = `${state.sceneIndex + 1} / ${SCENE_COUNT}`;
-}
-
-function resetProgress(): void {
-  setProgress(0);
 }
 
 function setProgress(ratio: number): void {

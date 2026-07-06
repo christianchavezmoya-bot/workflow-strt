@@ -1,11 +1,17 @@
-export interface SceneView {
+export type SceneSection = "welcome" | "overview" | "journey" | "platform" | "cta";
+export type SceneLayout =
+  | "hero"        // one large screenshot (object-fit: contain)
+  | "compare"     // desktop + phone side by side
+  | "grid"        // 2×2 contain screenshots
+  | "video"       // mp4 primary (journey)
+  | "architecture"// interactive arch graph
+  | "journey";    // work-tree + (video or screenshot)
+
+export interface Shot {
   src: string;
   label: string;
   variant?: "desktop" | "phone";
 }
-
-export type SceneSection = "welcome" | "overview" | "journey" | "platform" | "cta";
-export type SceneLayout = "grid" | "info" | "architecture" | "journey";
 
 export interface Scene {
   id: number;
@@ -14,328 +20,275 @@ export interface Scene {
   subtitle: string;
   tag: string;
   section: SceneSection;
-  layout?: SceneLayout;
-  journeyStep?: { current: number; total: number };
+  layout: SceneLayout;
   bullets?: string[];
-  views: SceneView[];
+  shots?: Shot[];
+  video?: string;
+  videoVariant?: "desktop" | "phone";
+  /** journey step (1..8) — drives the work-tree highlight */
+  journeyStep?: number;
 }
 
-const S = "screenshots/scenes";
+const H = "screenshots/hero";
+const M = "screenshots/mobile";
+const V = "videos";
 
-function views(
-  sceneId: number,
-  labels: [string, string, string, string],
-  variants?: [SceneView["variant"], SceneView["variant"], SceneView["variant"], SceneView["variant"]]
-): SceneView[] {
-  const id = String(sceneId).padStart(2, "0");
-  return labels.map((label, i) => ({
-    src: `${S}/${id}-v${i + 1}.png`,
-    label,
-    variant: variants?.[i] ?? "desktop",
-  }));
-}
+export const JOURNEY_STEPS = [
+  "Create Project",
+  "Add Assets",
+  "Start Run",
+  "Complete Steps",
+  "Capture Photos",
+  "Log Issue",
+  "Phone Upload",
+  "Sign Off",
+];
 
 export const SCENES: Scene[] = [
   {
-    id: 1,
-    section: "welcome",
-    layout: "info",
-    audio: "audio/scene-01.mp3",
-    title: "Strata Workflow App",
+    id: 1, section: "welcome", layout: "hero", audio: "audio/scene-01.mp3",
+    tag: "Welcome", title: "Strata Workflow App",
     subtitle: "Field operations for telecom & utility project management",
-    tag: "Welcome",
     bullets: [
-      "Track projects, install and inspect assets on site",
-      "Run step-by-step workflows with photos, signatures & issues",
+      "Track projects · install & inspect assets on site",
+      "Guided workflows with photos, signatures, issues & reports",
       "One React bundle — web, Android, iOS — plus ASP.NET Core API",
-      "Demo login: admin@commtrac.local / Admin123!",
     ],
-    views: views(1, ["Operations dashboard", "Projects portfolio", "Asset registry", "Mobile field home"], ["desktop", "desktop", "desktop", "phone"]),
+    shots: [{ src: `${H}/dashboard.png`, label: "Operations dashboard" }],
   },
   {
-    id: 2,
-    section: "overview",
-    layout: "info",
-    audio: "audio/scene-02.mp3",
-    title: "One App, Three Deployments",
+    id: 2, section: "overview", layout: "architecture", audio: "audio/scene-02.mp3",
+    tag: "Platform", title: "One App, Three Deployments",
     subtitle: "Same experience everywhere your teams work",
-    tag: "Platform",
     bullets: [
-      "Web — React 18 + TypeScript + MUI v5, Vite, Redux, React Router",
+      "Web — React 18 + TypeScript + MUI v5, Vite, Redux",
       "Mobile — same bundle in Capacitor 8 (Android + iOS)",
-      "Backend — ASP.NET Core 8 + EF Core + SQLite, JWT on port 4000",
+      "Backend — ASP.NET Core 8 + EF Core + SQLite, JWT :4000",
     ],
-    views: views(2, ["Sidebar navigation", "Work instructions", "Admin console", "Mobile tab bar"], ["desktop", "desktop", "desktop", "phone"]),
   },
   {
-    id: 3,
-    section: "overview",
-    audio: "audio/scene-03.mp3",
-    title: "Projects",
+    id: 3, section: "overview", layout: "compare", audio: "audio/scene-03.mp3",
+    tag: "Projects", title: "Projects",
     subtitle: "Top-level container for every job",
-    tag: "Projects",
     bullets: [
       "Assets, contacts, inspections, documents & delivery profiles",
-      "Browse /projects, open detail, manage status & linked assets",
+      "Browse, open a detail page, manage status & linked assets",
     ],
-    views: views(3, ["Projects list", "Expanded project row", "Project snapshot", "Workflow actions"]),
+    shots: [
+      { src: `${H}/projects.png`, label: "Projects list", variant: "desktop" },
+      { src: `${M}/projects.png`, label: "Mobile projects", variant: "phone" },
+    ],
   },
   {
-    id: 4,
-    section: "overview",
-    audio: "audio/scene-04.mp3",
-    title: "Assets & Installations",
+    id: 4, section: "overview", layout: "hero", audio: "audio/scene-04.mp3",
+    tag: "Assets", title: "Assets & Installations",
     subtitle: "The main field-work surface",
-    tag: "Assets",
     bullets: [
-      "Workflow assignments, status (Not Started → Complete), documents & run history",
-      "Technicians pick a project, find their asset, press Start Run",
+      "Workflow assignments · status Not Started → Complete",
+      "Documents, inspection history, run history per asset",
+      "Technicians pick a project, find equipment, press Start Run",
     ],
-    views: views(4, ["Project filter", "Asset columns", "Asset row", "Expanded asset / Start Run"]),
+    shots: [{ src: `${H}/assets-expanded.png`, label: "Project assets — expanded row" }],
   },
   {
-    id: 5,
-    section: "overview",
-    audio: "audio/scene-05.mp3",
-    title: "Guided Workflows",
-    subtitle: "WorkOrderRunner — heart of on-site work",
-    tag: "Workflows",
+    id: 5, section: "overview", layout: "compare", audio: "audio/scene-05.mp3",
+    tag: "Workflows", title: "Guided Workflows",
+    subtitle: "WorkOrderRunner — the heart of on-site work",
     bullets: [
-      "Photos/video, text/checkbox/QR, time tracking, issues & signatures",
-      "Blocking issues prevent completion (HTTP 422) · PDF reports auto-generate",
+      "Photos/video, text, checkbox, QR, time tracking",
+      "Blocking issues prevent completion (HTTP 422)",
+      "Signatures on-device or via email link · PDF reports",
     ],
-    views: views(5, ["Work instructions", "Run workflow setup", "Step-by-step runner", "Workflow builder"]),
+    shots: [
+      { src: `${H}/work-instructions.png`, label: "Work instructions", variant: "desktop" },
+      { src: `${H}/runner-step.png`, label: "Step-by-step runner", variant: "desktop" },
+    ],
   },
   {
-    id: 6,
-    section: "overview",
-    audio: "audio/scene-06.mp3",
-    title: "Operations Dashboard",
-    subtitle: "Office-scoped visibility",
-    tag: "Dashboard",
+    id: 6, section: "overview", layout: "hero", audio: "audio/scene-06.mp3",
+    tag: "Dashboard", title: "Operations Dashboard",
+    subtitle: "Office-scoped visibility & quick actions",
     bullets: [
       "Open issues, pending signatures, technician workload",
-      "Evidence completeness, workflow health, quick resume & photo upload",
+      "Evidence completeness & workflow health",
+      "Resume runs or upload missing photos in one click",
     ],
-    views: views(6, ["Needs attention", "Evidence completeness", "Technician workload", "Dashboard tabs"]),
+    shots: [{ src: `${H}/dashboard.png`, label: "Operations dashboard" }],
   },
   {
-    id: 7,
-    section: "overview",
-    audio: "audio/scene-07.mp3",
-    title: "Issues Board",
+    id: 7, section: "overview", layout: "hero", audio: "audio/scene-07.mp3",
+    tag: "Issues", title: "Issues Board",
     subtitle: "Cross-project issue tracking",
-    tag: "Issues",
     bullets: [
-      "Kanban-style view of asset issues across all projects",
+      "Kanban-style view of every asset issue",
       "Track, assign & resolve blocking and non-blocking problems",
     ],
-    views: views(7, ["Issues board", "Blocking KPIs", "Issue filters", "Dashboard alerts"]),
+    shots: [{ src: `${H}/issues.png`, label: "Issues board" }],
   },
   {
-    id: 8,
-    section: "overview",
-    audio: "audio/scene-08.mp3",
-    title: "Supporting Modules",
+    id: 8, section: "overview", layout: "grid", audio: "audio/scene-08.mp3",
+    tag: "Supporting", title: "Supporting Modules",
     subtitle: "Documents, admin, mobile upload & more",
-    tag: "Supporting",
     bullets: [
-      "Documents library · Tips & tricks · Admin (users, sites, registry)",
-      "Settings, 2FA, brand · Mobile Upload (/mobile-upload) QR flow · BOM module (flagged)",
+      "Documents · Tips & tricks · Admin (users, sites, registry)",
+      "Settings, 2FA · Mobile Upload QR flow · BOM module (flagged)",
     ],
-    views: views(8, ["Document library", "Work instructions", "Admin console", "Tips & tricks"]),
+    shots: [
+      { src: `${H}/documents.png`, label: "Documents" },
+      { src: `${H}/admin.png`, label: "Admin console" },
+      { src: `${H}/settings.png`, label: "Settings" },
+      { src: `${H}/tips.png`, label: "Tips & tricks" },
+    ],
   },
-  // ── Live user journey walkthrough ──
+
+  // ── Live user journey (steps 1–8) ──
   {
-    id: 9,
-    section: "journey",
-    layout: "journey",
-    journeyStep: { current: 1, total: 8 },
-    audio: "audio/scene-09.mp3",
-    title: "Create a Project",
-    subtitle: "Step 1 — set up the job container",
-    tag: "User Journey",
+    id: 9, section: "journey", layout: "video", audio: "audio/scene-09.mp3",
+    tag: "User Journey", title: "Step 1 — Create a Project",
+    subtitle: "Set up the top-level job container",
+    journeyStep: 1,
     bullets: [
       "Open Projects → Create project",
       "Enter job number, customer, site & workflow mode",
-      "Save — project appears in the portfolio ready for assets",
+      "Save — the project is ready for assets",
     ],
-    views: views(9, ["Create project button", "New project form", "Project fields", "Saved project row"]),
+    video: `${V}/journey-create-project.mp4`,
   },
   {
-    id: 10,
-    section: "journey",
-    layout: "journey",
-    journeyStep: { current: 2, total: 8 },
-    audio: "audio/scene-10.mp3",
-    title: "Add Assets & Assign Workflows",
-    subtitle: "Step 2 — register equipment on the project",
-    tag: "User Journey",
+    id: 10, section: "journey", layout: "journey", audio: "audio/scene-10.mp3",
+    tag: "User Journey", title: "Step 2 — Add Assets",
+    subtitle: "Register equipment on the project",
+    journeyStep: 2,
     bullets: [
-      "Open Assets, filter by your new project",
-      "Add assets with tag, serial, location & product config",
-      "Workflow assignments link work instructions to each asset",
+      "Open Assets, filter by your project",
+      "Add assets with tag, serial, model & location",
+      "Assign the workflow that applies to each asset",
     ],
-    views: views(10, ["Project filter", "Add asset", "Asset table row", "Workflow assignment"]),
+    shots: [{ src: `${H}/assets.png`, label: "Project assets" }],
   },
   {
-    id: 11,
-    section: "journey",
-    layout: "journey",
-    journeyStep: { current: 3, total: 8 },
-    audio: "audio/scene-11.mp3",
-    title: "Start Run on an Asset",
-    subtitle: "Step 3 — launch the workflow runner",
-    tag: "User Journey",
+    id: 11, section: "journey", layout: "video", audio: "audio/scene-11.mp3",
+    tag: "User Journey", title: "Step 3 — Start Run",
+    subtitle: "Launch the guided workflow",
+    journeyStep: 3,
     bullets: [
-      "Technician finds their asset in the registry",
-      "Click Start Run — choose workflow & confirm setup",
-      "WorkOrderRunner opens with the first step",
+      "Find the asset and click Start Run",
+      "Confirm the Run workflow setup dialog",
+      "WorkOrderRunner opens on the first step",
     ],
-    views: views(11, ["Start Run button", "Run setup dialog", "Workflow selection", "Runner opens"]),
+    video: `${V}/journey-workflow-run.mp4`,
   },
   {
-    id: 12,
-    section: "journey",
-    layout: "journey",
-    journeyStep: { current: 4, total: 8 },
-    audio: "audio/scene-12.mp3",
-    title: "Complete Workflow Steps",
-    subtitle: "Step 4 — follow the guided checklist",
-    tag: "User Journey",
+    id: 12, section: "journey", layout: "journey", audio: "audio/scene-12.mp3",
+    tag: "User Journey", title: "Step 4 — Complete Steps",
+    subtitle: "Follow the guided checklist",
+    journeyStep: 4,
     bullets: [
-      "Each step shows instructions, reference media & capture fields",
-      "Check boxes, enter readings, scan QR codes as required",
-      "Navigate forward — progress saves automatically",
+      "Each step shows instructions & capture fields",
+      "Tick checkboxes, enter readings, scan QR codes",
+      "Time tracking runs; progress saves automatically",
     ],
-    views: views(12, ["Runner step view", "Capture fields", "Step navigation", "Progress indicator"]),
+    shots: [{ src: `${H}/runner-step.png`, label: "Runner — Step 1 of 4" }],
   },
   {
-    id: 13,
-    section: "journey",
-    layout: "journey",
-    journeyStep: { current: 5, total: 8 },
-    audio: "audio/scene-13.mp3",
-    title: "Capture Photos & Video",
-    subtitle: "Step 5 — evidence on every step",
-    tag: "User Journey",
+    id: 13, section: "journey", layout: "journey", audio: "audio/scene-13.mp3",
+    tag: "User Journey", title: "Step 5 — Capture Photos",
+    subtitle: "Evidence on every step",
+    journeyStep: 5,
     bullets: [
-      "Tap Photo/Video on any step that requires media",
-      "Use camera or gallery — files attach to the run",
-      "Missing captures flagged before completion",
+      "Tap Photo / Video on steps that require media",
+      "Use the camera or gallery — files attach to the run",
+      "Missing captures are flagged before completion",
     ],
-    views: views(13, ["Photo capture button", "Camera / gallery", "Attached media", "Missing capture alert"]),
+    shots: [{ src: `${H}/runner-step.png`, label: "Photo capture step" }],
   },
   {
-    id: 14,
-    section: "journey",
-    layout: "journey",
-    journeyStep: { current: 6, total: 8 },
-    audio: "audio/scene-14.mp3",
-    title: "Log an Issue",
-    subtitle: "Step 6 — flag blocking or observation issues",
-    tag: "User Journey",
+    id: 14, section: "journey", layout: "journey", audio: "audio/scene-14.mp3",
+    tag: "User Journey", title: "Step 6 — Log an Issue",
+    subtitle: "Flag blocking or observation issues",
+    journeyStep: 6,
     bullets: [
-      "Flag issue on any step — blocking, observation, or scope deviation",
-      "Add description, severity & optional photo attachment",
-      "Blocking issues must be resolved before the run can complete",
+      "Flag issue on any step — blocking, observation, scope deviation",
+      "Add description, severity & optional photo",
+      "Blocking issues must be resolved before completion",
     ],
-    views: views(14, ["Flag issue button", "Issue type & description", "Issue on step", "Issues board entry"]),
+    shots: [{ src: `${H}/issues.png`, label: "Issues board entry" }],
   },
   {
-    id: 15,
-    section: "journey",
-    layout: "journey",
-    journeyStep: { current: 7, total: 8 },
-    audio: "audio/scene-15.mp3",
-    title: "Add Photo from Phone",
-    subtitle: "Step 7 — QR mobile upload flow",
-    tag: "User Journey",
+    id: 15, section: "journey", layout: "video", audio: "audio/scene-15.mp3",
+    tag: "User Journey", title: "Step 7 — Add Photo from Phone",
+    subtitle: "QR mobile upload flow",
+    journeyStep: 7,
     bullets: [
-      "Generate QR from dashboard or workflow — opens /mobile-upload",
-      "Technician scans with phone camera, no app install needed",
-      "Photo uploads directly to the pending run or missing-media slot",
+      "Generate a QR code from the dashboard or runner",
+      "Scan with any phone — no app install needed",
+      "The photo uploads straight to the pending run",
     ],
-    views: views(15, ["QR upload button", "QR code dialog", "Mobile upload page", "Upload confirmation"], ["desktop", "desktop", "phone", "phone"]),
+    video: `${V}/journey-mobile-upload.mp4`,
+    videoVariant: "phone",
   },
   {
-    id: 16,
-    section: "journey",
-    layout: "journey",
-    journeyStep: { current: 8, total: 8 },
-    audio: "audio/scene-16.mp3",
-    title: "Complete & Sign Off",
-    subtitle: "Step 8 — finish the run",
-    tag: "User Journey",
+    id: 16, section: "journey", layout: "journey", audio: "audio/scene-16.mp3",
+    tag: "User Journey", title: "Step 8 — Complete & Sign Off",
+    subtitle: "Finish the run",
+    journeyStep: 8,
     bullets: [
       "Review summary — captures, issues & time entries",
-      "Installer & customer signatures (on-device or email link /sign/:token)",
+      "Installer & customer signatures (device or email link)",
       "Run locks · PDF report generates · dashboard updates",
     ],
-    views: views(16, ["Run summary", "Signature capture", "Completed run", "Generated report"]),
+    shots: [{ src: `${H}/project-detail.png`, label: "Project detail & sign-off" }],
   },
+
   // ── Platform depth ──
   {
-    id: 17,
-    section: "platform",
-    audio: "audio/scene-17.mp3",
-    title: "Offline-First Mobile",
+    id: 17, section: "platform", layout: "compare", audio: "audio/scene-17.mp3",
+    tag: "Offline", title: "Offline-First Mobile",
     subtitle: "Built for real field conditions",
-    tag: "Offline",
     bullets: [
-      "Prefetch projects, assets, configs, assignments & media into IndexedDB",
-      "Writes queue offline · sync on reconnect with 409/412 conflict detection",
-      "Photos/signatures on Capacitor Filesystem via mediaStore",
+      "Prefetch projects, assets, configs & media into IndexedDB",
+      "Writes queue offline · sync on reconnect (409/412 conflicts)",
+      "Photos & signatures on Capacitor Filesystem via mediaStore",
     ],
-    views: views(17, ["Mobile sync bar", "Offline assets", "Mobile projects", "Desktop sync status"], ["phone", "phone", "phone", "desktop"]),
+    shots: [
+      { src: `${M}/dashboard.png`, label: "Mobile dashboard", variant: "phone" },
+      { src: `${M}/assets.png`, label: "Mobile assets", variant: "phone" },
+    ],
   },
   {
-    id: 18,
-    section: "platform",
-    layout: "architecture",
-    audio: "audio/scene-18.mp3",
-    title: "Architecture",
+    id: 18, section: "platform", layout: "architecture", audio: "audio/scene-18.mp3",
+    tag: "Architecture", title: "Architecture",
     subtitle: "How the system fits together",
-    tag: "Architecture",
     bullets: [
       "features/ → services/ → repositories/ → Redux store",
-      "Flat REST controllers · projectId as query param · ~98 EF migrations",
-      "JWT short claims · two-tier permissions · biometric lock on native",
+      "Flat REST controllers · projectId query param · ~98 migrations",
+      "JWT short claims · two-tier permissions · biometric on native",
     ],
-    views: views(18, ["User management", "Role permissions", "Settings", "Secure login"]),
   },
   {
-    id: 19,
-    section: "platform",
-    layout: "info",
-    audio: "audio/scene-19.mp3",
-    title: "Enterprise & Dev Stack",
+    id: 19, section: "platform", layout: "hero", audio: "audio/scene-19.mp3",
+    tag: "Enterprise", title: "Enterprise & Dev Stack",
     subtitle: "Secure, scalable, audit-ready",
-    tag: "Enterprise",
     bullets: [
-      "npm run dev (:5173) · npm run build · npm run test:e2e",
-      "dotnet run in server/Commtrac.Api (:4000, Swagger /swagger)",
-      "SSE live updates · SQLite WAL · role-based access · audit records",
+      "User management, brand settings, role-based access, audit records",
+      "npm run dev :5173 · dotnet run :4000 (Swagger) · Playwright e2e",
+      "SQLite WAL · SSE live updates across connected clients",
     ],
-    views: views(19, ["Roles configuration", "Permission matrix", "Workflow templates", "Document control"]),
+    shots: [{ src: `${H}/admin.png`, label: "Admin & user management" }],
   },
   {
-    id: 20,
-    section: "cta",
-    audio: "audio/scene-20.mp3",
-    title: "Transform Field Operations",
+    id: 20, section: "cta", layout: "hero", audio: "audio/scene-20.mp3",
+    tag: "Next Steps", title: "Transform Field Operations",
     subtitle: "From first project to final sign-off",
-    tag: "Next Steps",
     bullets: [
       "Office planners & field technicians in one trusted system",
-      "Ready to walk through your workflows on a live demo?",
+      "Ready for a live walkthrough on your projects?",
     ],
-    views: views(20, ["Active project", "Asset progress", "Regional snapshot", "Mobile projects"], ["desktop", "desktop", "desktop", "phone"]),
+    shots: [{ src: `${H}/project-detail.png`, label: "Active project" }],
   },
 ];
 
 export const SCENE_COUNT = SCENES.length;
-export const VIEWS_PER_SCENE = 4;
 
 export const SECTION_LABELS: Record<SceneSection, string> = {
   welcome: "Welcome",
@@ -346,7 +299,7 @@ export const SECTION_LABELS: Record<SceneSection, string> = {
 };
 
 export const FALLBACK_DURATIONS_MS: Record<number, number> = {
-  1: 18000, 2: 16500, 3: 16000, 4: 15500, 5: 17500, 6: 15000, 7: 14000, 8: 16500,
-  9: 15500, 10: 16000, 11: 15000, 12: 16000, 13: 15000, 14: 16500, 15: 17000, 16: 16000,
-  17: 19000, 18: 20000, 19: 17500, 20: 14000,
+  1: 17000, 2: 17000, 3: 15000, 4: 16000, 5: 17000, 6: 15000, 7: 13000, 8: 15000,
+  9: 16000, 10: 15000, 11: 17000, 12: 15000, 13: 15000, 14: 16000, 15: 16000, 16: 16000,
+  17: 18000, 18: 19000, 19: 17000, 20: 13000,
 };

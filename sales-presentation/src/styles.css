@@ -1081,3 +1081,194 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ════════════════════════════════════════════════════════════
+   v5 layout — hero / compare / grid / video, work-tree, arch
+   (appended last so it overrides legacy rules)
+   ════════════════════════════════════════════════════════════ */
+
+.opening-toc {
+  display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 22px;
+}
+.opening-toc span {
+  padding: 6px 12px; border-radius: 999px; font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text-muted);
+}
+
+.scene-inner {
+  height: calc(100dvh - 108px);
+  max-height: calc(100dvh - 108px);
+  display: flex; flex-direction: column; gap: 8px;
+}
+
+.scene-copy { flex: 0 0 auto; max-height: none; overflow: visible; padding: 2px 6px 0; }
+.scene-title { margin: 0 0 2px; font-size: clamp(1.2rem, 2.6vw, 1.9rem); }
+.scene-subtitle { margin: 0; font-size: clamp(0.8rem, 1.5vw, 0.98rem); }
+
+.scene-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 30%) 1fr;
+  gap: 12px;
+}
+
+.scene-left {
+  min-height: 0;
+  display: flex; flex-direction: column; gap: 12px;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+
+.scene-left .scene-bullets {
+  font-size: clamp(0.78rem, 1.15vw, 0.95rem);
+  line-height: 1.55;
+  padding-left: 18px;
+}
+.scene-left .scene-bullets li { margin-bottom: 8px; }
+
+.scene-right { min-height: 0; display: flex; }
+
+/* When there are no bullets (rare), let visual span full width */
+.scene-inner--architecture .scene-body { grid-template-columns: minmax(260px, 32%) 1fr; }
+
+.visual {
+  flex: 1; min-height: 0; width: 100%;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(circle at 30% 15%, var(--accent-soft), transparent 45%),
+    linear-gradient(180deg, var(--bg-elevated), var(--bg-panel));
+  padding: 12px;
+}
+
+/* Screenshot / video frame */
+.shot {
+  margin: 0; display: flex; flex-direction: column;
+  border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--border); background: #0b1118;
+  max-height: 100%; max-width: 100%;
+}
+.shot--desktop { width: 100%; height: 100%; }
+.shot--phone { height: 100%; width: auto; }
+
+.shot-chrome {
+  display: flex; align-items: center; gap: 6px; padding: 7px 12px; flex: 0 0 auto;
+  background: rgba(255,255,255,0.05); border-bottom: 1px solid var(--border);
+}
+.shot-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.18); }
+.shot-dot:first-child { background: #ff5f57; }
+.shot-dot:nth-child(2) { background: #febc2e; }
+.shot-dot:nth-child(3) { background: #28c840; }
+.shot-label {
+  margin-left: auto; font-size: 0.68rem; color: var(--text-muted);
+  letter-spacing: 0.04em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.shot-body {
+  flex: 1 1 auto; min-height: 0; background: #060a10;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.shot-img, .shot-video {
+  display: block; width: 100%; height: 100%;
+  object-fit: contain; object-position: center; background: #060a10;
+}
+
+/* Hero — single big screenshot */
+.visual--hero .shot--hero { width: 100%; height: 100%; }
+
+/* Compare — desktop + phone */
+.visual--compare { gap: 12px; }
+.visual--compare .shot--desktop { flex: 1 1 auto; }
+.visual--compare .shot--phone { flex: 0 0 auto; }
+
+/* Grid — 2×2 */
+.visual--grid {
+  display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px;
+  align-items: stretch; justify-items: stretch;
+}
+.visual--grid .shot { width: 100%; height: 100%; }
+
+/* Video */
+.visual--video .shot--video { }
+.visual--video-phone { }
+.visual--video-phone .shot--phone { max-width: 46%; }
+
+/* Work tree */
+.work-tree {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  padding: 12px; border-radius: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(244,162,97,0.06), rgba(12,24,41,0.4));
+}
+.wt-node {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.04);
+  color: var(--text-muted); font-size: 0.72rem; font-weight: 600;
+  transition: all var(--transition); cursor: pointer;
+}
+.wt-node .wt-num {
+  width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 0.66rem; font-weight: 800; background: rgba(255,255,255,0.08); flex: 0 0 auto;
+}
+.wt-node.is-done { color: var(--accent); border-color: rgba(0,180,216,0.4); }
+.wt-node.is-done .wt-num { background: rgba(0,180,216,0.3); color: var(--accent); }
+.wt-node.is-active {
+  color: #1a1208; background: var(--gold); border-color: transparent;
+  box-shadow: 0 0 16px rgba(244,162,97,0.45); transform: scale(1.04);
+}
+.wt-node.is-active .wt-num { background: rgba(0,0,0,0.25); color: #1a1208; }
+.wt-node.is-pending { opacity: 0.55; }
+.wt-node:hover { opacity: 1; border-color: var(--accent); }
+.wt-link { width: 10px; height: 2px; background: var(--border); flex: 0 0 auto; }
+
+/* Architecture graph */
+.visual--arch { padding: 16px; overflow: auto; }
+.arch { width: 100%; max-width: 720px; margin: 0 auto; text-align: center; }
+.arch-tier { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.arch-tier--offline { margin-top: 12px; }
+.arch-node {
+  display: flex; flex-direction: column; gap: 2px; align-items: center;
+  padding: 10px 16px; border-radius: 12px; cursor: pointer;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  color: var(--text); font-size: 0.82rem; font-weight: 700;
+  transition: all var(--transition);
+}
+.arch-node span { font-size: 0.62rem; font-weight: 500; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
+.arch-flow { margin: 8px 0; color: var(--accent); font-size: 0.8rem; letter-spacing: 0.1em; }
+.arch-box {
+  width: 100%; max-width: 560px; margin: 0 auto; cursor: pointer;
+  padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  transition: all var(--transition);
+}
+.arch-box strong { font-size: 0.95rem; }
+.arch-box span { font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; }
+.arch-box .arch-sub { color: var(--accent); }
+.arch-box--react { background: rgba(0,180,216,0.1); border-color: rgba(0,180,216,0.35); }
+.arch-box--react strong { color: var(--accent); }
+.arch-box--api { background: rgba(244,162,97,0.08); border-color: rgba(244,162,97,0.3); }
+.arch-box--api strong { color: var(--gold); }
+.arch-chip {
+  padding: 5px 10px; border-radius: 999px; font-size: 0.64rem; font-weight: 600;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text-muted);
+}
+.arch-node:hover, .arch-box:hover { border-color: var(--accent); }
+.arch-node.is-focus, .arch-box.is-focus {
+  border-color: var(--gold); box-shadow: 0 0 16px rgba(244,162,97,0.35);
+}
+.arch--compact { transform: scale(0.9); }
+
+/* Compact arch inside split scenes */
+.scene-inner--architecture .visual--arch { padding: 12px; }
+
+@media (max-width: 900px) {
+  .scene-body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .scene-left { max-height: 30%; }
+  .visual--compare { flex-direction: column; }
+  .visual--video-phone .shot--phone { max-width: 70%; }
+}

@@ -1,32 +1,38 @@
-# Strata Workflow App — Sales Presentation v3
+# Strata Workflow App — Sales Presentation v5
 
-Interactive customer demo: **4 views per scene**, **region-specific screenshots**, **13-scene narration**.
+State-of-the-art interactive demo: **full-view screenshots**, **recorded journey videos**, **interactive architecture & work-tree diagrams**, **20-scene narration**.
 
 ## Download
 
-See **[DOWNLOAD.md](./DOWNLOAD.md)** for all options. Quick links:
+**[Release presentation-v5](https://github.com/christianchavezmoya-bot/workflow-strt/releases/tag/presentation-v5)** → `strata-workflow-presentation.zip` (~7 MB)
 
-| Method | Link |
-|--------|------|
-| **GitHub Actions artifact** | Repo → Actions → **Presentation pack** → Artifacts |
-| **Direct ZIP** (PR branch) | [strata-workflow-presentation.zip](https://github.com/christianchavezmoya-bot/workflow-strt/raw/cursor/sales-presentation-7022/sales-presentation/dist-ready/strata-workflow-presentation.zip) (~7.8 MB) |
-| **Local build** | `npm run pack` in this folder |
+Unzip, then run **`Start-Presentation.bat`** (Windows) or **`Start-Presentation.sh`** (Mac/Linux). See [DOWNLOAD.md](./DOWNLOAD.md).
 
-Unzip, then run **`Start-Presentation.bat`** (Windows) or **`Start-Presentation.sh`** (Mac/Linux).
+## What's new in v5
 
-## What's new in v3
+- **Journey videos** — real screen recordings: create a project, run a workflow (Start Run → runner steps), mobile QR upload
+- **Interactive work-tree** — 8-step journey diagram; the active step glows, click any node to jump
+- **Architecture graph** — clickable layered diagram (Web/Android/iOS → React → API → SQLite + offline branch)
+- **Full-view screenshots** with `object-fit: contain` (no cropped, blurry tiles)
+- **20 scenes** across Welcome · Product Overview · Live User Journey · Platform & Architecture · Next Steps
+- Hero, compare (desktop + phone), and 2×2 grid layouts per scene
 
-- **4 interactive panels per scene** — auto-cycle with narration; click to focus
-- **Region clips** — dashboard cards, asset rows, workflow builder, mobile tabs (not just page headers)
-- **52 scene screenshots** under `public/screenshots/scenes/`
-- Male English narrator (Andrew), reliable pre-loaded audio
+## Regenerate assets (API :4000 + Vite :5173 running)
 
-## What's in v2
+```bash
+# 1. Seed a workflow + assignments so Start Run works
+node scripts/seed-workflow.mjs
 
-- **13 scenes** covering projects, assets, workflows, dashboard, issues, offline, architecture, and enterprise
-- **Real screenshots** captured from today's app data (JOB-4021 project, live assets)
-- **Screenshot panel = 75%** of the presentation viewport
-- **Reliable audio** — pre-loaded tracks fix silent scene 2/3 transitions
+# 2. Record the journey MP4 videos
+node scripts/record-videos.mjs          # ONLY=run|create|mobile to redo one
+
+# 3. Capture full-view hero screenshots
+npx playwright test --config playwright.hero.config.ts
+
+# 4. Narration + package
+npm run narration:force
+npm run pack   # → dist-ready/strata-workflow-presentation.zip
+```
 
 ## Run from source
 
