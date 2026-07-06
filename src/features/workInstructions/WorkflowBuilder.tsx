@@ -319,6 +319,21 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   featureSelectionsRef.current = featureSelections;
   const featureSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    setFeatureSelections((prev) => {
+      if (productFeatures.length === 0) return prev;
+      const prevMap = new Map(prev.map((sel) => [sel.featureId, sel]));
+      const merged = productFeatures.map((feature) => prevMap.get(feature.id) ?? { featureId: feature.id, included: false, activeCount: 0 });
+      const unchanged =
+        merged.length === prev.length &&
+        merged.every((sel, idx) => {
+          const current = prev[idx];
+          return current && current.featureId === sel.featureId && current.included === sel.included && current.activeCount === sel.activeCount;
+        });
+      return unchanged ? prev : merged;
+    });
+  }, [productFeatures]);
+
   const [publishSaving, setPublishSaving] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [publishForm, setPublishForm] = useState<PublishForm>({ name: "", configType: "", workflowTypeId: "", notes: "", featureSelections: [] });
@@ -3414,3 +3429,4 @@ function InputPreview({ inp }: { inp: StepInput }) {
 }
 
 export default WorkflowBuilder;
+

@@ -522,6 +522,7 @@ const WorkInstructions = () => {
     if (products.length === 0) return;
     const productIdFromUrl = searchParams.get("product");
     const viewFromUrl = searchParams.get("view");
+    const configIdFromUrl = searchParams.get("config");
 
     let resolvedTabIdx = 0;
     if (productIdFromUrl) {
@@ -547,6 +548,7 @@ const WorkInstructions = () => {
     const params: Record<string, string> = {};
     if (productId) params.product = productId;
     params.view = resolvedView;
+    if (configIdFromUrl) params.config = configIdFromUrl;
     setSearchParams(params, { replace: true });
   }, [products]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -584,6 +586,14 @@ const WorkInstructions = () => {
     if (!activeProduct?.id) { setConfigs([]); return; }
     loadConfigs(activeProduct.id);
   }, [activeProduct?.id, loadConfigs]);
+
+  useEffect(() => {
+    const configIdFromUrl = searchParams.get("config");
+    if (!configIdFromUrl) return;
+    if (!configs.some((cfg) => cfg.id === configIdFromUrl)) return;
+    setSelectedConfigId((current) => (current === configIdFromUrl ? current : configIdFromUrl));
+    setViewMode("builder");
+  }, [configs, searchParams]);
 
   const selectedConfig = useMemo(
     () => configs.find((c) => c.id === selectedConfigId) ?? null,
@@ -743,6 +753,9 @@ const WorkInstructions = () => {
   function openBuilder(cfg: WorkflowConfig) {
     setSelectedConfigId(cfg.id);
     setViewMode("builder");
+    const params: Record<string, string> = { view: "builder", config: cfg.id };
+    if (activeProduct?.id) params.product = activeProduct.id;
+    setSearchParams(params, { replace: true });
   }
 
   function handleConfigSaved(updated: WorkflowConfig) {
@@ -759,6 +772,9 @@ const WorkInstructions = () => {
     });
     setSelectedConfigId(updated.id);
     setViewMode("instructions");
+    const params: Record<string, string> = { view: "instructions" };
+    if (activeProduct?.id) params.product = activeProduct.id;
+    setSearchParams(params, { replace: true });
   }
 
   // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

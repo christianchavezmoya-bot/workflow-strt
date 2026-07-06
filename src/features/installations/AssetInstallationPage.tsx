@@ -766,17 +766,19 @@ const AssetInstallationPage = () => {
     try {
       const existingConfigs = await workflowConfigService.listByProduct(activeProduct.id);
       const nextNumber = nextDraftConfigNumber(existingConfigs, activeProduct.name);
+      const productFeatures = await featureService.getByProduct(activeProduct.id);
+      const inventoryFeatureIds = new Set(productFeatures.filter((feature) => feature.isInventory).map((feature) => feature.id));
+      const inventorySelections = (activeProduct.features ?? []).filter((feature) => inventoryFeatureIds.has(feature.id));
       const created = await workflowConfigService.create({
         name: `${activeProduct.name} Config ${nextNumber}`,
         productId: activeProduct.id,
         configType: "Version 1",
         featureSelectionsJson: JSON.stringify(
-          (activeProduct.features ?? [])
-            .map((feature) => ({
-              featureId: feature.id,
-              included: false,
-              activeCount: 0,
-            }))
+          inventorySelections.map((feature) => ({
+            featureId: feature.id,
+            included: false,
+            activeCount: 0,
+          }))
         ),
       });
       navigate(`/work-instructions?product=${encodeURIComponent(activeProduct.id)}&view=builder&config=${encodeURIComponent(created.id)}`);
