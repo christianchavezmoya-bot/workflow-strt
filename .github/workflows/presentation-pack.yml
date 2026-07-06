@@ -1,0 +1,51 @@
+name: Presentation pack
+
+on:
+  push:
+    branches: [main, "cursor/sales-presentation-7022"]
+    paths:
+      - "sales-presentation/**"
+      - ".github/workflows/presentation-pack.yml"
+  pull_request:
+    paths:
+      - "sales-presentation/**"
+      - ".github/workflows/presentation-pack.yml"
+  workflow_dispatch:
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: sales-presentation/package-lock.json
+
+      - name: Install & pack
+        working-directory: sales-presentation
+        run: |
+          npm ci
+          npm run pack
+
+      - name: Upload presentation ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: strata-workflow-presentation
+          path: sales-presentation/dist-ready/strata-workflow-presentation.zip
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload launcher bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: strata-workflow-presentation-with-launchers
+          path: |
+            sales-presentation/dist-ready/strata-workflow-presentation.zip
+            sales-presentation/dist-ready/Start-Presentation.bat
+            sales-presentation/dist-ready/Start-Presentation.sh
+            sales-presentation/dist-ready/README.txt
+          retention-days: 90
+          if-no-files-found: error

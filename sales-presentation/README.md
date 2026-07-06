@@ -1,17 +1,31 @@
-# Strata Workflow App — Sales Presentation v2
+# Strata Workflow App — Sales Presentation v3
 
-Interactive customer demo with **real app screenshots**, **13-scene narration**, and a **75% screenshot layout**.
+Interactive customer demo: **4 views per scene**, **region-specific screenshots**, **13-scene narration**.
 
 ## Download
 
-Unzip **`strata-workflow-presentation.zip`**, then run **`Start-Presentation.bat`** (Windows) or **`Start-Presentation.sh`** (Mac/Linux).
+See **[DOWNLOAD.md](./DOWNLOAD.md)** for all options. Quick links:
 
-## What's new in v2
+| Method | Link |
+|--------|------|
+| **GitHub Actions artifact** | Repo → Actions → **Presentation pack** → Artifacts |
+| **Direct ZIP** (PR branch) | [strata-workflow-presentation.zip](https://github.com/christianchavezmoya-bot/workflow-strt/raw/cursor/sales-presentation-7022/sales-presentation/dist-ready/strata-workflow-presentation.zip) (~7.8 MB) |
+| **Local build** | `npm run pack` in this folder |
+
+Unzip, then run **`Start-Presentation.bat`** (Windows) or **`Start-Presentation.sh`** (Mac/Linux).
+
+## What's new in v3
+
+- **4 interactive panels per scene** — auto-cycle with narration; click to focus
+- **Region clips** — dashboard cards, asset rows, workflow builder, mobile tabs (not just page headers)
+- **52 scene screenshots** under `public/screenshots/scenes/`
+- Male English narrator (Andrew), reliable pre-loaded audio
+
+## What's in v2
 
 - **13 scenes** covering projects, assets, workflows, dashboard, issues, offline, architecture, and enterprise
 - **Real screenshots** captured from today's app data (JOB-4021 project, live assets)
 - **Screenshot panel = 75%** of the presentation viewport
-- **Male English narrator** (Andrew, neutral, medium pace)
 - **Reliable audio** — pre-loaded tracks fix silent scene 2/3 transitions
 
 ## Run from source
