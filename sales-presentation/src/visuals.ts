@@ -1,31 +1,38 @@
-import type { Scene, SceneVisual } from "./scenes";
+import type { Scene } from "./scenes";
 
-function fallbackImage(primary: string, secondary?: string): string {
-  return secondary ?? primary.replace("workflow-runner", "assets").replace("desktop-workflow-runner", "desktop-assets");
+function fallbackSrc(src: string, alt?: string): string {
+  if (src.includes("workflow-runner")) return src.replace("workflow-runner", "assets");
+  if (src.includes("project-detail")) return src.replace("project-detail", "projects");
+  return alt ?? src;
 }
 
 function renderScreenshotFrame(src: string, label: string, variant: "desktop" | "phone"): string {
   const cls = variant === "phone" ? "app-shot app-shot--phone" : "app-shot app-shot--desktop";
+  const fb = fallbackSrc(src);
   return `
     <figure class="${cls}">
       <div class="app-shot-chrome">
         <span class="app-shot-dot"></span><span class="app-shot-dot"></span><span class="app-shot-dot"></span>
         <span class="app-shot-label">${label}</span>
       </div>
-      <img class="app-shot-img" src="${src}" alt="${label}" loading="eager" decoding="async"
-           onerror="this.dataset.fallback&&(this.src=this.dataset.fallback)"
-           data-fallback="${fallbackImage(src)}" />
+      <div class="app-shot-body">
+        <img class="app-shot-img" src="${src}" alt="${label}" loading="eager" decoding="async"
+             onerror="if(this.dataset.fallback){this.src=this.dataset.fallback;this.dataset.fallback=''}"
+             data-fallback="${fb}" />
+      </div>
     </figure>`;
 }
 
 function renderScreens(scene: Scene): string {
   const screens = scene.screens;
-  if (!screens?.primary) return renderLegacyVisual(scene);
+  if (!screens?.primary) {
+    return `<div class="app-preview app-preview--empty"><p>Live app preview</p></div>`;
+  }
 
   if (screens.layout === "split-platforms" && screens.secondary) {
     return `
       <div class="app-preview app-preview--split">
-        ${renderScreenshotFrame(screens.primary, "Desktop web app", "desktop")}
+        ${renderScreenshotFrame(screens.primary, "Desktop web", "desktop")}
         ${renderScreenshotFrame(screens.secondary, "Mobile app", "phone")}
       </div>`;
   }
@@ -43,54 +50,26 @@ function renderScreens(scene: Scene): string {
     </div>`;
 }
 
-function iconSvg(type: string): string {
-  const icons: Record<string, string> = {
-    hero: `<svg viewBox="0 0 120 120" class="viz-icon viz-icon--fallback"><circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" stroke-width="3" opacity=".3"/><path d="M36 72 L60 36 L84 72 Z" fill="currentColor" opacity=".9"/></svg>`,
-    cta: `<svg viewBox="0 0 120 120" class="viz-icon viz-icon--fallback"><circle cx="60" cy="60" r="40" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M48 60 L58 70 L76 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>`,
-  };
-  return icons[type] ?? icons.hero;
-}
-
-function renderLegacyVisual(scene: Scene): string {
+function renderBullets(scene: Scene): string {
+  if (!scene.bullets?.length) return "";
   return `
-    <div class="scene-visual scene-visual--${scene.visual}" data-visual="${scene.visual}">
-      <div class="viz-glow"></div>
-      ${iconSvg(scene.visual)}
-    </div>`;
-}
-
-export function renderSceneVisual(scene: Scene): string {
-  const hotspots = scene.hotspots
-    ? `<div class="hotspots">${scene.hotspots
-        .map(
-          (h) => `
-          <button type="button" class="hotspot" style="left:${h.x}%;top:${h.y}%" data-hotspot="${h.id}" aria-label="${h.label}">
-            <span class="hotspot-dot"></span>
-            <span class="hotspot-card">
-              <strong>${h.label}</strong>
-              <em>${h.detail}</em>
-            </span>
-          </button>`
-        )
-        .join("")}</div>`
-    : "";
-
-  return `
-    <div class="scene-visual scene-visual--${scene.visual} scene-visual--app" data-visual="${scene.visual}">
-      ${renderScreens(scene)}
-      ${hotspots}
-    </div>`;
+    <ul class="scene-bullets">
+      ${scene.bullets.map((b) => `<li>${b.text}</li>`).join("")}
+    </ul>`;
 }
 
 export function renderSceneContent(scene: Scene): string {
   return `
     <div class="scene-inner" data-scene-id="${scene.id}">
-      <div class="scene-copy">
+      <header class="scene-copy">
         <span class="scene-tag">${scene.tag}</span>
         <h2 class="scene-title">${scene.title}</h2>
         <p class="scene-subtitle">${scene.subtitle}</p>
+        ${renderBullets(scene)}
+      </header>
+      <div class="scene-visual scene-visual--app" data-visual="${scene.id}">
+        ${renderScreens(scene)}
       </div>
-      ${renderSceneVisual(scene)}
     </div>`;
 }
 
@@ -100,14 +79,14 @@ export function renderOpening(): string {
       <div class="opening-bg"></div>
       <div class="opening-content">
         <div class="brand-mark">S</div>
-        <p class="eyebrow">Customer Presentation</p>
+        <p class="eyebrow">Customer Presentation · v2</p>
         <h1 class="opening-title">Strata Workflow App</h1>
-        <p class="opening-lead">Field operations platform for telecom &amp; utility teams</p>
+        <p class="opening-lead">Field operations for telecom &amp; utility teams — projects, assets, workflows, and reports in one platform.</p>
         <div class="opening-actions">
           <button type="button" class="btn btn-primary" id="btn-start">Start Presentation</button>
           <button type="button" class="btn btn-secondary" id="btn-start-muted">Start without audio</button>
         </div>
-        <p class="opening-note">Tap Start to enable narration and automatic scene progression.<br/>Best experienced in full screen.</p>
+        <p class="opening-note">Narration uses a professional male English voice at natural pace.<br/>Best in full screen · use Start-Presentation.bat if the page is blank.</p>
       </div>
     </section>`;
 }
@@ -125,7 +104,7 @@ export function renderControls(): string {
         <div class="scene-dots" id="scene-dots"></div>
       </div>
       <div class="controls-right">
-        <span class="scene-counter" id="scene-counter">1 / 12</span>
+        <span class="scene-counter" id="scene-counter">1 / 13</span>
         <button type="button" class="ctrl-btn ctrl-btn--text" id="btn-mute" aria-label="Mute narration">Mute</button>
         <button type="button" class="ctrl-btn ctrl-btn--text" id="btn-restart" aria-label="Restart">Restart</button>
       </div>
@@ -149,7 +128,7 @@ export function renderEndOverlay(): string {
     <div class="end-overlay" id="end-overlay">
       <div class="end-card">
         <h3>Thank you</h3>
-        <p>Strata Workflow App connects your office and field teams—from project planning to signed deliverables.</p>
+        <p>Strata Workflow App connects office planners and field technicians — from project setup through signed deliverables and audit-ready reports.</p>
         <div class="end-actions">
           <button type="button" class="btn btn-primary" id="btn-replay">Replay Presentation</button>
           <button type="button" class="btn btn-secondary" id="btn-explore">Explore Scenes</button>

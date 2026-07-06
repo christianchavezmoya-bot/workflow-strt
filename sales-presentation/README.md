@@ -1,16 +1,18 @@
-# Strata Workflow App — Sales Presentation
+# Strata Workflow App — Sales Presentation v2
 
-Interactive, customer-facing sales demonstration for the Strata Workflow App field operations platform.
+Interactive customer demo with **real app screenshots**, **13-scene narration**, and a **75% screenshot layout**.
 
-## Download ready-to-use build
+## Download
 
-Download and unzip **`strata-workflow-presentation.zip`**, then:
+Unzip **`strata-workflow-presentation.zip`**, then run **`Start-Presentation.bat`** (Windows) or **`Start-Presentation.sh`** (Mac/Linux).
 
-1. **Windows:** double-click **`Start-Presentation.bat`**
-2. **Mac/Linux:** double-click **`Start-Presentation.sh`**
-3. Click **Start Presentation** on the opening screen
+## What's new in v2
 
-> If you see a blank page, use the launcher instead of opening `index.html` directly.
+- **13 scenes** covering projects, assets, workflows, dashboard, issues, offline, architecture, and enterprise
+- **Real screenshots** captured from today's app data (JOB-4021 project, live assets)
+- **Screenshot panel = 75%** of the presentation viewport
+- **Male English narrator** (Andrew, neutral, medium pace)
+- **Reliable audio** — pre-loaded tracks fix silent scene 2/3 transitions
 
 ## Run from source
 
@@ -18,13 +20,20 @@ Download and unzip **`strata-workflow-presentation.zip`**, then:
 cd sales-presentation
 npm install
 npm run dev
-npm run build
-npm run pack    # creates strata-workflow-presentation.zip
+npm run pack
+```
+
+## Refresh screenshots (API + Vite must be running)
+
+```bash
+# From repo root — seed data first if assets table is empty
+npx playwright test --config sales-presentation/playwright.capture.config.ts
+npm run narration:force --prefix sales-presentation
+npm run pack --prefix sales-presentation
 ```
 
 ## Narration
 
-- Voice: **en-US-JennyNeural** (native US English female, conversational)
+- Voice: **en-US-AndrewNeural**
 - Script: [`NARRATION_SCRIPT.md`](./NARRATION_SCRIPT.md)
-- Real app screenshots: `public/screenshots/` (recapture with Playwright — see `scripts/capture-screenshots.spec.ts`)
-- Regenerate audio: `npm run narration:force`
+- Regenerate: `npm run narration:force`
