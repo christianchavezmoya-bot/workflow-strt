@@ -1,11 +1,8 @@
-export interface SceneBullet {
-  text: string;
-}
-
-export interface SceneScreens {
-  primary?: string;
-  secondary?: string;
-  layout?: "single" | "split-platforms" | "phone";
+export interface SceneView {
+  /** e.g. screenshots/scenes/01-v1.png */
+  src: string;
+  label: string;
+  variant?: "desktop" | "phone";
 }
 
 export interface Scene {
@@ -14,11 +11,24 @@ export interface Scene {
   title: string;
   subtitle: string;
   tag: string;
-  bullets?: SceneBullet[];
-  screens?: SceneScreens;
+  /** Exactly four views — matched to narration topics */
+  views: SceneView[];
 }
 
-const S = "screenshots";
+const S = "screenshots/scenes";
+
+function views(
+  sceneId: number,
+  labels: [string, string, string, string],
+  variants?: [SceneView["variant"], SceneView["variant"], SceneView["variant"], SceneView["variant"]]
+): SceneView[] {
+  const id = String(sceneId).padStart(2, "0");
+  return labels.map((label, i) => ({
+    src: `${S}/${id}-v${i + 1}.png`,
+    label,
+    variant: variants?.[i] ?? (i === 3 && sceneId === 10 ? "phone" : "desktop"),
+  }));
+}
 
 export const SCENES: Scene[] = [
   {
@@ -27,11 +37,7 @@ export const SCENES: Scene[] = [
     title: "Strata Workflow App",
     subtitle: "Field operations for telecom and utility project management",
     tag: "Welcome",
-    bullets: [
-      { text: "Track projects, assets, and field workflows in one place" },
-      { text: "Capture photos, signatures, issues, and reports on site" },
-    ],
-    screens: { primary: `${S}/desktop-dashboard.png`, layout: "single" },
+    views: views(1, ["Operations dashboard", "Projects portfolio", "Project assets table", "Mobile field home"], ["desktop", "desktop", "desktop", "phone"]),
   },
   {
     id: 2,
@@ -39,11 +45,7 @@ export const SCENES: Scene[] = [
     title: "Built for Field Teams",
     subtitle: "Technicians and project managers, aligned end to end",
     tag: "Overview",
-    bullets: [
-      { text: "Install and inspect assets with guided work instructions" },
-      { text: "Replace scattered checklists, photos, and spreadsheets" },
-    ],
-    screens: { primary: `${S}/desktop-project-detail.png`, secondary: `${S}/desktop-projects.png`, layout: "single" },
+    views: views(2, ["Asset health overview", "Start Run on asset", "Project snapshot", "Mobile assets"], ["desktop", "desktop", "desktop", "phone"]),
   },
   {
     id: 3,
@@ -51,16 +53,7 @@ export const SCENES: Scene[] = [
     title: "One App, Three Deployments",
     subtitle: "React web · Capacitor mobile · ASP.NET Core API",
     tag: "Platform",
-    bullets: [
-      { text: "Web: React 18, TypeScript, MUI, Vite, Redux" },
-      { text: "Mobile: same bundle on Android and iOS via Capacitor 8" },
-      { text: "Backend: ASP.NET Core 8, EF Core, SQLite, JWT auth" },
-    ],
-    screens: {
-      primary: `${S}/desktop-dashboard.png`,
-      secondary: `${S}/mobile-dashboard.png`,
-      layout: "split-platforms",
-    },
+    views: views(3, ["Navigation & modules", "Work instructions", "Admin & users", "Mobile tab bar"], ["desktop", "desktop", "desktop", "phone"]),
   },
   {
     id: 4,
@@ -68,11 +61,7 @@ export const SCENES: Scene[] = [
     title: "Projects",
     subtitle: "Your top-level operational container",
     tag: "Projects",
-    bullets: [
-      { text: "Assets, contacts, inspections, documents, delivery profiles" },
-      { text: "Browse, open detail, and manage status from /projects" },
-    ],
-    screens: { primary: `${S}/desktop-projects.png`, layout: "single" },
+    views: views(4, ["Projects list", "Expanded project row", "Project detail", "Workflow actions"]),
   },
   {
     id: 5,
@@ -80,11 +69,7 @@ export const SCENES: Scene[] = [
     title: "Assets & Installations",
     subtitle: "The main field-work surface",
     tag: "Assets",
-    bullets: [
-      { text: "Workflow assignments, live status, documents, and run history" },
-      { text: "Pick a project, find your asset, and Start Run" },
-    ],
-    screens: { primary: `${S}/desktop-assets.png`, layout: "single" },
+    views: views(5, ["Project filter", "Asset registry columns", "Asset row detail", "Inline asset expand"]),
   },
   {
     id: 6,
@@ -92,11 +77,7 @@ export const SCENES: Scene[] = [
     title: "Guided Workflows",
     subtitle: "WorkOrderRunner — the heart of on-site work",
     tag: "Workflows",
-    bullets: [
-      { text: "Photos, QR inputs, time tracking, issues, and signatures" },
-      { text: "Blocking issues prevent sign-off; reports generate automatically" },
-    ],
-    screens: { primary: `${S}/desktop-workflow-runner.png`, secondary: `${S}/desktop-assets.png`, layout: "single" },
+    views: views(6, ["Work instructions library", "Run workflow setup", "Step-by-step runner", "Workflow builder"]),
   },
   {
     id: 7,
@@ -104,11 +85,7 @@ export const SCENES: Scene[] = [
     title: "Operations Dashboard",
     subtitle: "Office-scoped visibility and quick actions",
     tag: "Dashboard",
-    bullets: [
-      { text: "Open issues, pending signatures, technician workload" },
-      { text: "Evidence completeness, workflow health, resume runs" },
-    ],
-    screens: { primary: `${S}/desktop-dashboard.png`, layout: "single" },
+    views: views(7, ["Needs attention", "Evidence completeness", "Technician workload", "Dashboard tabs"]),
   },
   {
     id: 8,
@@ -116,11 +93,7 @@ export const SCENES: Scene[] = [
     title: "Issues Board",
     subtitle: "Cross-project issue tracking",
     tag: "Issues",
-    bullets: [
-      { text: "Kanban-style view of blocking and non-blocking problems" },
-      { text: "Assign, resolve, and audit across every project" },
-    ],
-    screens: { primary: `${S}/desktop-issues.png`, layout: "single" },
+    views: views(8, ["Issues board", "Blocking KPIs", "Issue filters & list", "Dashboard alerts"]),
   },
   {
     id: 9,
@@ -128,11 +101,7 @@ export const SCENES: Scene[] = [
     title: "Documents & More",
     subtitle: "Knowledge, admin, and mobile upload",
     tag: "Supporting",
-    bullets: [
-      { text: "Document library, work instructions, tips for field staff" },
-      { text: "Admin, settings, profile, and QR mobile upload flows" },
-    ],
-    screens: { primary: `${S}/desktop-documents.png`, layout: "single" },
+    views: views(9, ["Document library", "Work instructions", "Admin console", "Tips & tricks"]),
   },
   {
     id: 10,
@@ -140,11 +109,7 @@ export const SCENES: Scene[] = [
     title: "Offline-First Mobile",
     subtitle: "Built for real field conditions",
     tag: "Offline",
-    bullets: [
-      { text: "Login prefetch: projects, assets, workflows, and config media" },
-      { text: "Queued writes sync on reconnect with conflict detection" },
-    ],
-    screens: { primary: `${S}/mobile-assets.png`, layout: "phone" },
+    views: views(10, ["Mobile sync bar", "Offline assets", "Mobile projects", "Desktop sync status"], ["phone", "phone", "phone", "desktop"]),
   },
   {
     id: 11,
@@ -152,11 +117,7 @@ export const SCENES: Scene[] = [
     title: "Architecture & Security",
     subtitle: "Layered frontend, flat REST API, role-based auth",
     tag: "Architecture",
-    bullets: [
-      { text: "features → services → repositories → Redux store" },
-      { text: "JWT auth, permissions, biometric lock on native apps" },
-    ],
-    screens: { primary: `${S}/desktop-admin.png`, layout: "single" },
+    views: views(11, ["User management", "Role permissions", "Settings & brand", "Secure login"]),
   },
   {
     id: 12,
@@ -164,11 +125,7 @@ export const SCENES: Scene[] = [
     title: "Enterprise Ready",
     subtitle: "Secure, scalable, audit-ready",
     tag: "Enterprise",
-    bullets: [
-      { text: "User management, brand settings, two-factor recovery" },
-      { text: "SQLite with migrations; SSE push for live updates" },
-    ],
-    screens: { primary: `${S}/desktop-work-instructions.png`, layout: "single" },
+    views: views(12, ["Roles configuration", "Permission matrix", "Workflow templates", "Document control"]),
   },
   {
     id: 13,
@@ -176,28 +133,14 @@ export const SCENES: Scene[] = [
     title: "Transform Field Operations",
     subtitle: "From first install to final sign-off",
     tag: "Next Steps",
-    bullets: [
-      { text: "One connected workflow for office and field teams" },
-      { text: "Ready to see Strata Workflow App on your projects?" },
-    ],
-    screens: { primary: `${S}/desktop-project-detail.png`, layout: "single" },
+    views: views(13, ["Active project", "Asset progress", "Regional snapshot", "Mobile projects"], ["desktop", "desktop", "desktop", "phone"]),
   },
 ];
 
 export const SCENE_COUNT = SCENES.length;
+export const VIEWS_PER_SCENE = 4;
 
 export const FALLBACK_DURATIONS_MS: Record<number, number> = {
-  1: 17200,
-  2: 15300,
-  3: 19250,
-  4: 17800,
-  5: 15950,
-  6: 18450,
-  7: 15700,
-  8: 14250,
-  9: 17050,
-  10: 19750,
-  11: 21550,
-  12: 19350,
-  13: 13300,
+  1: 17200, 2: 15300, 3: 19250, 4: 17800, 5: 15950, 6: 18450, 7: 15700,
+  8: 14250, 9: 17050, 10: 19750, 11: 21550, 12: 19350, 13: 13300,
 };

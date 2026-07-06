@@ -1,4 +1,4 @@
-import { SCENES, SCENE_COUNT, FALLBACK_DURATIONS_MS, type Scene } from "./scenes";
+import { SCENES, SCENE_COUNT, FALLBACK_DURATIONS_MS, VIEWS_PER_SCENE, type Scene } from "./scenes";
 import { narration } from "./audioEngine";
 import "./styles.css";
 import {
@@ -6,6 +6,7 @@ import {
   renderPresentationShell,
   renderEndOverlay,
   renderSceneContent,
+  setActiveView,
 } from "./visuals";
 
 type StartMode = "audio" | "muted";
@@ -14,25 +15,30 @@ interface State {
   started: boolean;
   mode: StartMode;
   sceneIndex: number;
+  viewIndex: number;
   playing: boolean;
   muted: boolean;
   ended: boolean;
   userPaused: boolean;
   playToken: number;
+  userPinnedView: boolean;
 }
 
 const state: State = {
   started: false,
   mode: "audio",
   sceneIndex: 0,
+  viewIndex: 0,
   playing: false,
   muted: false,
   ended: false,
   userPaused: false,
   playToken: 0,
+  userPinnedView: false,
 };
 
 let advanceTimer: ReturnType<typeof setTimeout> | null = null;
+let viewCycleTimer: ReturnType<typeof setInterval> | null = null;
 let progressRaf = 0;
 let touchStartX = 0;
 
@@ -42,6 +48,13 @@ function clearAdvanceTimer(): void {
   if (advanceTimer) {
     clearTimeout(advanceTimer);
     advanceTimer = null;
+  }
+}
+
+function clearViewCycleTimer(): void {
+  if (viewCycleTimer) {
+    clearInterval(viewCycleTimer);
+    viewCycleTimer = null;
   }
 }
 
@@ -80,9 +93,11 @@ async function start(mode: StartMode): Promise<void> {
   state.mode = mode;
   state.muted = mode === "muted";
   state.sceneIndex = 0;
+  state.viewIndex = 0;
   state.playing = true;
   state.ended = false;
   state.userPaused = false;
+  state.userPinnedView = false;
   state.playToken++;
 
   document.getElementById("opening-screen")!.hidden = true;
@@ -129,6 +144,8 @@ function bindControls(): void {
       if (state.ended) restart();
       else goToScene(state.sceneIndex + 1, true);
     } else if (e.key === "ArrowLeft") goToScene(state.sceneIndex - 1, true);
+    else if (e.key === "ArrowDown") cycleView(1, true);
+    else if (e.key === "ArrowUp") cycleView(-1, true);
     else if (e.key === "p" || e.key === "P") togglePause();
     else if (e.key === "m" || e.key === "M") toggleMute();
   });
@@ -144,6 +161,40 @@ function bindSwipe(): void {
     if (Math.abs(dx) < 50) return;
     goToScene(state.sceneIndex + (dx < 0 ? 1 : -1), true);
   }, { passive: true });
+}
+
+function bindViewGrid(): void {
+  document.querySelectorAll<HTMLElement>(".view-panel").forEach((panel) => {
+    panel.addEventListener("click", () => {
+      const idx = Number(panel.dataset.viewIndex ?? 0);
+      state.viewIndex = idx;
+      state.userPinnedView = true;
+      setActiveView(idx);
+    });
+  });
+}
+
+function cycleView(delta: number, userInitiated = false): void {
+  if (userInitiated) state.userPinnedView = true;
+  const next = (state.viewIndex + delta + VIEWS_PER_SCENE) % VIEWS_PER_SCENE;
+  state.viewIndex = next;
+  setActiveView(next);
+}
+
+function startViewAutoCycle(durationMs: number, token: number): void {
+  clearViewCycleTimer();
+  if (state.userPinnedView) return;
+
+  state.viewIndex = 0;
+  setActiveView(0);
+
+  const stepMs = Math.max(2800, Math.floor(durationMs / VIEWS_PER_SCENE));
+  viewCycleTimer = setInterval(() => {
+    if (token !== state.playToken || state.userPinnedView || !state.playing || state.userPaused) return;
+    const next = (state.viewIndex + 1) % VIEWS_PER_SCENE;
+    state.viewIndex = next;
+    setActiveView(next);
+  }, stepMs);
 }
 
 function currentScene(): Scene {
@@ -162,17 +213,21 @@ function goToScene(index: number, userInitiated = false): void {
 
 function showScene(index: number, autoplay: boolean): void {
   clearAdvanceTimer();
+  clearViewCycleTimer();
   narration.stop();
   cancelAnimationFrame(progressRaf);
   state.playToken++;
 
   state.sceneIndex = index;
+  state.viewIndex = 0;
+  state.userPinnedView = false;
   state.ended = false;
   hideEndOverlay();
 
   const scene = currentScene();
   const stage = document.getElementById("stage")!;
   stage.innerHTML = renderSceneContent(scene);
+  bindViewGrid();
 
   updateDots();
   updateCounter();
@@ -184,14 +239,18 @@ function showScene(index: number, autoplay: boolean): void {
     void playScene(scene, state.playToken);
   } else {
     setProgress(0);
+    setActiveView(0);
   }
 }
 
 async function playScene(scene: Scene, token: number): Promise<void> {
   clearAdvanceTimer();
+  clearViewCycleTimer();
   narration.stop();
 
   const duration = FALLBACK_DURATIONS_MS[scene.id] ?? 16000;
+  startViewAutoCycle(duration, token);
+
   const onDone = () => {
     if (token !== state.playToken) return;
     scheduleAdvance(500);
@@ -205,6 +264,8 @@ async function playScene(scene: Scene, token: number): Promise<void> {
       el.onended = onDone;
       el.onerror = () => animateProgressFor(duration, onDone, token);
       animateProgressFromAudio(el, token);
+      const audioDuration = Number.isFinite(el.duration) && el.duration > 0 ? el.duration * 1000 : duration;
+      startViewAutoCycle(audioDuration, token);
     } else {
       animateProgressFor(duration, onDone, token);
     }
@@ -252,6 +313,7 @@ function finishPresentation(): void {
   state.ended = true;
   state.playing = false;
   clearAdvanceTimer();
+  clearViewCycleTimer();
   narration.stop();
   setProgress(1);
   updatePlayButton();
@@ -262,6 +324,7 @@ function restart(): void {
   state.ended = false;
   state.playing = true;
   state.userPaused = false;
+  state.userPinnedView = false;
   hideEndOverlay();
   updatePlayButton();
   showScene(0, true);
@@ -278,6 +341,7 @@ function togglePause(): void {
     else void playScene(currentScene(), ++state.playToken);
   } else {
     clearAdvanceTimer();
+    clearViewCycleTimer();
     narration.stop();
     cancelAnimationFrame(progressRaf);
   }
