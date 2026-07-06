@@ -1,34 +1,40 @@
-# Download Strata Workflow Presentation
+# Download Strata Workflow Presentation (v4 · 20 scenes)
 
-## Option A — GitHub Actions artifact (recommended)
+## ⚠️ Still seeing 13 scenes?
 
-1. Open the repo on GitHub → **Actions** tab.
-2. Click the latest **Presentation pack** workflow run (green check).
-3. Scroll to **Artifacts** at the bottom of the run page.
-4. Download **`strata-workflow-presentation-with-launchers`** (ZIP + `Start-Presentation.bat` / `.sh`).
+You are running an **old copy**. Do this:
 
-## Option B — Direct file link (feature branch)
+1. **Delete** your old unzipped folder and any old ZIP files
+2. **Do not** use `commtrac-sales-presentation.zip` (that is the ancient 13-scene build)
+3. Download **v4 only** (~12 MB):
 
-While [PR #5](https://github.com/christianchavezmoya-bot/workflow-strt/pull/5) is open, download the committed ZIP:
+**[presentation-v4 release](https://github.com/christianchavezmoya-bot/workflow-strt/releases/download/presentation-v4/strata-workflow-presentation.zip)**
 
-**[strata-workflow-presentation.zip](https://github.com/christianchavezmoya-bot/workflow-strt/raw/cursor/sales-presentation-7022/sales-presentation/dist-ready/strata-workflow-presentation.zip)**
+4. Unzip to a **new folder** (e.g. `Strata-Presentation-v4`)
+5. Run `Start-Presentation.bat` or `.sh`
+6. Confirm opening screen says **"v4"** and counter shows **"1 / 20"**
 
-Also grab the launchers from the same folder:
+| File | Size | Scenes |
+|------|------|--------|
+| `commtrac-sales-presentation.zip` | ~1.2 MB | ❌ OLD — 13 |
+| `strata-workflow-presentation.zip` (v3) | ~7.8 MB | ❌ OLD — 13 |
+| **v4 release ZIP** | **~12 MB** | ✅ **20** |
 
-- [Start-Presentation.bat](https://github.com/christianchavezmoya-bot/workflow-strt/raw/cursor/sales-presentation-7022/sales-presentation/dist-ready/Start-Presentation.bat)
-- [Start-Presentation.sh](https://github.com/christianchavezmoya-bot/workflow-strt/raw/cursor/sales-presentation-7022/sales-presentation/dist-ready/Start-Presentation.sh)
+## Option A — GitHub Release (recommended)
 
-## Option C — GitHub Releases
+https://github.com/christianchavezmoya-bot/workflow-strt/releases/tag/presentation-v4
 
-Check **Releases** on the repo for a tagged build with the presentation ZIP attached.
+Download **`strata-workflow-presentation.zip`** under Assets.
+
+## Option B — GitHub Actions artifact
+
+Repo → Actions → **Presentation pack** → Artifacts → `strata-workflow-presentation-with-launchers`
 
 ## After download
 
-1. Unzip everything into one folder.
-2. Run **`Start-Presentation.bat`** (Windows) or **`Start-Presentation.sh`** (Mac/Linux).
-3. Click **Start Presentation** in the browser.
-
-If the page is blank, use the launcher scripts — do not rely on double-clicking `index.html` alone.
+1. Unzip to a **new** folder (delete any old folder first)
+2. Run **`Start-Presentation.bat`** (Windows) or **`Start-Presentation.sh`** (Mac/Linux)
+3. Click **Start Presentation** or **Jump to User Journey**
 
 ## Build locally
 
@@ -36,5 +42,5 @@ If the page is blank, use the launcher scripts — do not rely on double-clickin
 cd sales-presentation
 npm install
 npm run pack
-# Output: dist-ready/strata-workflow-presentation.zip
+# Output: dist-ready/strata-workflow-presentation.zip (~12 MB, 20 scenes)
 ```

@@ -149,7 +149,7 @@ export function renderOpening(): string {
           <button type="button" class="btn btn-secondary" id="btn-start-muted">Start without audio</button>
           <button type="button" class="btn btn-secondary" id="btn-journey">Jump to User Journey</button>
         </div>
-        <p class="opening-note">20 scenes · narration + interactive views · use Start-Presentation.bat if blank</p>
+        <p class="opening-note"><strong>v4 · 20 scenes</strong> — If you see "1 / 13", delete this folder and download v4 from GitHub Releases.<br/>Use Start-Presentation.bat if the page is blank.</p>
       </div>
     </section>`;
 }
