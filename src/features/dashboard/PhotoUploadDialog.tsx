@@ -589,7 +589,7 @@ export default function PhotoUploadDialog({
 
             {/* Add from phone — web browser only */}
             {!isPM && isWebBrowser && (
-              <Accordion defaultExpanded disableGutters elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+              <Accordion disableGutters elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
                 <AccordionSummary expandIcon={<ExpandMoreOutlined />}>
                   <Stack direction="row" spacing={1} alignItems="center">
                     <SmartphoneOutlined sx={{ fontSize: 18, color: "info.main" }} />
@@ -611,7 +611,7 @@ export default function PhotoUploadDialog({
                       color={phoneQrDone ? "success" : "info"}
                       variant="outlined"
                     />
-                    {!!qrUrl && <QRCodeSVG value={qrUrl} size={180} />}
+                    {!!qrUrl && <QRCodeSVG value={qrUrl} size={120} />}
                     <Typography variant="caption" color="text.secondary">
                       {phoneQrDone
                         ? "Desktop updated automatically after the phone upload completed."
