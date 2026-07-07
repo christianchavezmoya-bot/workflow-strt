@@ -1202,6 +1202,13 @@ const AssetInstallationPage = () => {
   // trigger another network fetch, which fires repo:assets:updated again → infinite loop.
   useEffect(() => {
     const handler = async (e: Event) => {
+      // Mobile only. This event signals that AssetRepository's background refresh
+      // wrote fresh data into local IndexedDB. On web there IS no IndexedDB asset
+      // store (web uses webCachedGet), so listLocalByProject/Product would return
+      // [] and setAssets([]) would wipe the whole list — the "asset list vanishes
+      // after editing on web" bug. Web keeps its own state via the optimistic
+      // setAssets in saveEditAsset + webCachedGet invalidation, so it must skip.
+      if (!isMobileNativePlatform()) return;
       const { productId, projectId } = (e as CustomEvent<{ productId?: string; projectId?: string }>).detail;
       const productIds = new Set(products.map((p) => p.id));
       if (
