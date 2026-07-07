@@ -42,7 +42,7 @@ const navItems = [
   { label: "Projects",          icon: <AssignmentOutlinedIcon />,                 to: "/projects",                          tourKey: "nav-projects" },
   { label: "Issues Board",      icon: <ErrorOutlineOutlinedIcon />,               to: "/issues",                            tourKey: "nav-issues" },
   { label: "Assets",            icon: <TableChartOutlinedIcon />,                 to: "/installations/assets",              tourKey: "nav-installations" },
-  { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,                   to: "/work-instructions",                 tourKey: "nav-work-instructions" },
+  { label: "Workflows", icon: <MenuBookOutlinedIcon />,                   to: "/work-instructions",                 tourKey: "nav-work-instructions" },
   { label: "Documents",         icon: <FolderOutlinedIcon />,                     to: "/documents",                         tourKey: "nav-documents" },
   { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,                  to: "/tips",                              tourKey: "nav-tips" },
   ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project", tourKey: "nav-bom" }] : []),

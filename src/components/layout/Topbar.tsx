@@ -50,7 +50,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/": "Dashboard",
   "/projects": "Projects",
   "/installations/assets": "Assets",
-  "/work-instructions": "Work Instructions",
+  "/work-instructions": "Workflows",
   "/documents": "Documents",
   "/admin": "Admin",
   "/admin/asset-registry": "Asset Registry",

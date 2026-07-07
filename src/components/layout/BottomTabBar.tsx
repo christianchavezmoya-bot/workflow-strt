@@ -30,7 +30,7 @@ const PRIMARY_TABS = [
 ];
 
 const MORE_ITEMS = [
-  { label: "Work Instructions", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
+  { label: "Workflows", icon: <MenuBookOutlinedIcon />,           to: "/work-instructions" },
   { label: "Documents",         icon: <FolderOutlinedIcon />,             to: "/documents" },
   { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,          to: "/tips" },
   { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,      to: "/profile" },

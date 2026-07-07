@@ -63,7 +63,6 @@ import QRUploadButton from "../../components/QRUploadButton";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
-import { useAuth } from "../../hooks/useAuth";
 import { getMissingWorkflowItems, getRunMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
 
 // Types
@@ -316,14 +315,6 @@ export default function WorkOrderRunner({
   const [custNotes,     setCustNotes]     = useState("");
   const [custSaving,    setCustSaving]    = useState(false);
   const [custError,     setCustError]     = useState<string | null>(null);
-  // Customer email-link request is Admin/PM only (backend enforces via
-  // [Authorize(Roles="Admin,Project Manager")] on POST /signature-tokens).
-  // Installers keep the in-person "Sign now" path (backend allows it). We keep
-  // the "Send link" option visible but show a clear message on click for
-  // non-admin/PM instead of letting them hit a confusing 403.
-  const { user: authUser } = useAuth();
-  const canSendCustomerLink = authUser.role === "Admin" || authUser.role === "Project Manager";
-  const [showSendLinkDenied, setShowSendLinkDenied] = useState(false);
   // send-link form
   const [linkEmail,     setLinkEmail]     = useState("");
   const [linkName,      setLinkName]      = useState("");
@@ -2876,7 +2867,7 @@ export default function WorkOrderRunner({
                 </Button>
                 <Button fullWidth variant="outlined" size="large"
                   startIcon={<EmailOutlined />}
-                  onClick={() => canSendCustomerLink ? setCustMode("send-link") : setShowSendLinkDenied(true)}
+                  onClick={() => setCustMode("send-link")}
                   sx={{ justifyContent: "flex-start", textTransform: "none", py: 1.5 }}>
                   <Box sx={{ textAlign: "left" }}>
                     <Typography variant="body2" fontWeight={600}>Send signature link</Typography>
@@ -3111,21 +3102,6 @@ export default function WorkOrderRunner({
           >
             Save modification
           </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={showSendLinkDenied} onClose={() => setShowSendLinkDenied(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Permission required</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ mt: 1 }}>
-            Only an Admin or Project Manager can request a customer signature by email.
-          </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-            You can still capture the customer's signature in person using "Sign here now".
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowSendLinkDenied(false)}>Close</Button>
         </DialogActions>
       </Dialog>
     </>

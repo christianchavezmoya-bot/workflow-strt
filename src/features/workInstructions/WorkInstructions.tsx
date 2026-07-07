@@ -785,10 +785,10 @@ const WorkInstructions = () => {
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
         <Box>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-            Work Instructions
+            Workflows
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Create and manage work instructions by product.
+            Create and manage workflows by product.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center">
@@ -1049,7 +1049,7 @@ const WorkInstructions = () => {
 
       {/* Settings menu */}
       <Menu anchorEl={settingsMenu} open={settingsMenuOpen} onClose={() => setSettingsMenuOpen(false)}>
-        <MenuItem onClick={() => setSettingsMenuOpen(false)}>Work Instructions</MenuItem>
+        <MenuItem onClick={() => setSettingsMenuOpen(false)}>Workflows</MenuItem>
       </Menu>
 
       {/* Export dropdown */}

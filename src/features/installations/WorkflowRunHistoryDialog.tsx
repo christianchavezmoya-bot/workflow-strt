@@ -71,6 +71,8 @@ interface Props {
   workflowConfigId: string;
   workflowConfigName: string;
   currentUserName: string;
+  canRequestCustomerSignature?: boolean;
+  entryMode?: "default" | "customer-sign";
   onRerun: (
     prefillValues: Record<string, Record<string, string>>,
     latestRun: AssetWorkflowRun
@@ -219,6 +221,9 @@ export default function WorkflowRunHistoryDialog({
   asset,
   workflowConfigId,
   workflowConfigName,
+  currentUserName,
+  canRequestCustomerSignature = false,
+  entryMode = "default",
   onRerun,
   onContinue,
   onAddMissingMedia,
@@ -256,6 +261,7 @@ export default function WorkflowRunHistoryDialog({
   };
 
   const openTokenDialog = async (run: AssetWorkflowRun) => {
+    if (!canRequestCustomerSignature) return;
     setTokenLink(null);
     setTokenError(null);
     setTokenWarning(null);
@@ -387,6 +393,10 @@ export default function WorkflowRunHistoryDialog({
   }, [open, asset.id, workflowConfigId]);
 
   const latestRunNumber = runs.reduce((max, run) => Math.max(max, run.runNumber ?? 0), 0);
+  const showEntryRestrictionWarning =
+    entryMode === "customer-sign"
+    && !canRequestCustomerSignature
+    && runs.some((run) => run.isLocked && run.signatureStatus === "PendingCustomer");
   const latestLockedRun = runs.find((r) => r.isLocked) ?? null;
   const latestInProgressRun = runs.find((r) => !r.isLocked && r.status === "InProgress") ?? null;
 
@@ -522,6 +532,11 @@ export default function WorkflowRunHistoryDialog({
         </DialogTitle>
 
         <DialogContent dividers sx={{ px: 0, pb: isPhone ? 1.5 : 2, overflowX: "hidden" }}>
+          {showEntryRestrictionWarning && (
+            <Alert severity="warning" sx={{ mx: isPhone ? 1.5 : 3, mt: 1.5 }}>
+              Only an Admin or Project Manager can request a customer signature by email from this follow-up sign-off flow. Installers should capture the signature onsite during the live workflow run when the customer is present.
+            </Alert>
+          )}
           {loading ? (
             <Stack alignItems="center" sx={{ p: 4 }}>
               <CircularProgress size={28} />
@@ -775,7 +790,7 @@ export default function WorkflowRunHistoryDialog({
                           </Tooltip>
                         )}
                         {run.isLocked && run.signatureStatus === "PendingCustomer" && (
-                          <Tooltip title={signatureActionBlocked ? `Run superseded by Run #${latestRunNumber}` : "Generate secure link for customer signature"}>
+                          <Tooltip title={signatureActionBlocked ? `Run superseded by Run #${latestRunNumber}` : !canRequestCustomerSignature ? "Only an Admin or Project Manager can request a customer signature by email" : "Generate secure link for customer signature"}>
                             <span>
                               <Button
                                 size="small"

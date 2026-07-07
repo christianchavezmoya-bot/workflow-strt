@@ -530,6 +530,7 @@ const AssetInstallationPage = () => {
   const [runHistoryConfigName, setRunHistoryConfigName] = useState("");
   // False when the run was created synthetically from a JSON import (no point re-running)
   const [runHistoryAllowRerun, setRunHistoryAllowRerun] = useState(true);
+  const [runHistoryEntryMode, setRunHistoryEntryMode] = useState<"default" | "customer-sign">("default");
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
   // Workflow type mismatch confirmation
   const [wfMismatchConfirm, setWfMismatchConfirm] = useState<{
@@ -2316,7 +2317,7 @@ const AssetInstallationPage = () => {
     void openRunHistory(asset);
   }
 
-  async function openRunHistory(asset: ProjectAsset, wfConfigId?: string, wfConfigName?: string) {
+  async function openRunHistory(asset: ProjectAsset, wfConfigId?: string, wfConfigName?: string, entryMode: "default" | "customer-sign" = "default") {
     // If a specific config was requested, open immediately
     if (wfConfigId) {
       const cached = wfConfigMap.get(wfConfigId);
@@ -2325,6 +2326,7 @@ const AssetInstallationPage = () => {
       setRunHistoryConfigId(wfConfigId);
       setRunHistoryConfigName(cfgName);
       setRunHistoryAllowRerun(true);
+      setRunHistoryEntryMode(entryMode);
       _openRunHistoryProjectContext(asset);
       setRunHistoryOpen(true);
       return;
@@ -2362,6 +2364,7 @@ const AssetInstallationPage = () => {
     setRunHistoryConfigId(configId);
     setRunHistoryConfigName(cfgName);
     setRunHistoryAllowRerun(!isSyntheticRun);
+    setRunHistoryEntryMode(entryMode);
     _openRunHistoryProjectContext(asset);
     setRunHistoryOpen(true);
   }
@@ -3003,9 +3006,9 @@ const AssetInstallationPage = () => {
         return { ...base, icon: <ReportProblemOutlined />, onClick: () => summary.latestRun ? openBlockingIssue(asset) : void startAssetFromBestWorkflowSource(asset), variant: "outlined" };
       case "installer-sign":
       case "customer-sign":
-        return { ...base, icon: <DrawOutlined />, onClick: () => openRunHistory(asset), variant: "outlined" };
+        return { ...base, icon: <DrawOutlined />, onClick: () => openRunHistory(asset, undefined, undefined, "customer-sign"), variant: "outlined" };
       case "run-details":
-        return { ...base, icon: <HistoryOutlined />, onClick: () => summary.latestRun ? openRunHistory(asset) : openImportDialog(), variant: "text" };
+        return { ...base, icon: <HistoryOutlined />, onClick: () => openRunHistory(asset), variant: "text" };
       case "no-workflow":
         return null;
       default:
@@ -3340,10 +3343,20 @@ const AssetInstallationPage = () => {
         return <Typography variant="body2" color="text.secondary">{tech ? tech.fullName : "-"}</Typography>;
       case "features":
         return featureCompletenessChip(asset);
-      case "status":
+      case "status": {
         const status = asset.status as ProjectAssetStatus;
         const baseColor = STATUS_COLORS[status] ?? "default";
-        const issueHealth = computeAssetHealth(asset, runsMap[asset.id] ?? []);
+        const runs = runsMap[asset.id] ?? [];
+        const issueHealth = computeAssetHealth(asset, runs);
+        const rowDisplayState = getWorkflowDisplayState(asset, runs, {
+          paused: Boolean(pausedProgress[asset.id]),
+          inspectionMode: projectHasInspection(proj?.workflowMode),
+          hasRunnableWorkflowSource:
+            (assignmentsMap[asset.id]?.length ?? 0) > 0
+            || !!asset.productConfigId
+            || !!asset.workflowTemplateId
+            || !!asset.workflowSummary?.hasWorkflow,
+        });
         const chipColor =
           issueHealth === "red"   ? "error"   :
           issueHealth === "amber" ? "warning" :
@@ -3352,7 +3365,7 @@ const AssetInstallationPage = () => {
         return (
           <Chip
             size="small"
-            label={STATUS_LABELS[status] ?? asset.status}
+            label={rowDisplayState.status.label}
             color={chipColor}
             icon={
               asset.status === "InProgress" ? <HourglassEmptyOutlined sx={{ fontSize: "0.9rem !important" }} /> :
@@ -3362,6 +3375,7 @@ const AssetInstallationPage = () => {
             }
           />
         );
+      }
       default:
         return null;
     }
@@ -5511,6 +5525,7 @@ const AssetInstallationPage = () => {
           onClose={() => setDocsOpen(false)}
           asset={docsAsset}
           currentUserName={currentUser?.fullName ?? ""}
+
           onDocsChanged={handleDocsChanged}
           products={products}
         />
@@ -5524,6 +5539,8 @@ const AssetInstallationPage = () => {
           workflowConfigId={runHistoryConfigId}
           workflowConfigName={runHistoryConfigName}
           currentUserName={currentUser?.fullName ?? ""}
+          canRequestCustomerSignature={currentUser.role === "Admin" || currentUser.role === "Project Manager"}
+          entryMode={runHistoryEntryMode}
           onRerun={handleRerun}
           onContinue={handleContinueRun}
           onAddMissingMedia={(run) => openMissingMediaDialog(runHistoryAsset, run)}
