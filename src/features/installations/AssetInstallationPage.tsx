@@ -104,6 +104,7 @@ import { assetDocumentLinkService } from "../../services/assetDocumentLinkServic
 import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, entityReplaceIssuesForAsset } from "../../services/localDB";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
+import { getWorkflowDisplayState } from "../../utils/workflowDisplayState";
 import {
   generateAssetListReport,
   ALL_PRINT_COLUMNS,
@@ -2906,142 +2907,59 @@ const AssetInstallationPage = () => {
   }
 
   function getPrimaryAction(asset: ProjectAsset, projectWorkflowMode?: string | null): AssetPrimaryAction {
+    // PHASE 2: the DECISION (which action) now comes from the shared
+    // getWorkflowDisplayState so the Assets page, Dashboard and Run History
+    // dialog can converge on one implementation. This adapter maps the shared
+    // function's action.kind back to the local onClick/icon/variant (which
+    // close over component state and must stay here). getAssetAttentionSummary
+    // is retained as the source for the `hasRunnableWorkflowSource` /
+    // inspection inputs and is NOT removed until all three surfaces are on the
+    // shared function (staged deletion, Phase 5).
     const loading = runnerLoading === asset.id;
     const assignments = assignmentsMap[asset.id];
     const summary = getAssetAttentionSummary(asset);
-    const latestRun = summary.latestRun;
     const inspectionEnabled = projectHasInspection(projectWorkflowMode);
     const hasRunnableWorkflowSource = assignments !== undefined
       ? (assignments.length > 0 || !!asset.productConfigId || !!asset.workflowTemplateId)
       : (!!asset.productConfigId || !!asset.workflowTemplateId || !!asset.workflowSummary?.hasWorkflow);
-    const canViewCompletedRun = asset.status === "Complete"
-      || asset.status === "Closed"
-      || (asset.workflowSummary?.latestRunStatus === "Complete" && !asset.workflowSummary?.hasOpenIssues);
     const openImportDialog = () => setImportDialogAsset(asset);
 
-    if (inspectionEnabled && (asset.status === "Complete" || asset.status === "Closed") && !latestRun && !hasRunnableWorkflowSource) {
-      return {
-        label: "Run Details",
-        tooltip: "View or edit linked external inspection JSON",
-        color: "inherit",
-        icon: <HistoryOutlined />,
-        onClick: openImportDialog,
-        variant: "text",
-      };
+    const runs = getSortedRuns(asset.id);
+    const ds = getWorkflowDisplayState(asset, runs, {
+      paused: summary.paused,
+      inspectionMode: inspectionEnabled,
+      hasRunnableWorkflowSource,
+    });
+
+    if (!ds.action || ds.action.kind === "none") return null;
+
+    const playIcon = loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />;
+    // Map action.kind → local handler + icon + variant. Labels/tooltips/colors
+    // come straight from the shared function.
+    const base = { label: ds.action.label, tooltip: ds.action.tooltip, color: ds.action.color };
+    switch (ds.action.kind) {
+      case "upload-json":
+        return { ...base, icon: <FileUploadOutlined />, onClick: openImportDialog, variant: "outlined" };
+      case "start":
+        return { ...base, icon: playIcon, onClick: () => checkAssignmentThenStart(asset), variant: "outlined" };
+      case "resume":
+        return { ...base, icon: playIcon, onClick: () => checkAssignmentThenStart(asset), variant: "outlined" };
+      case "continue":
+        return { ...base, icon: playIcon, onClick: () => checkAssignmentThenStart(asset), variant: "outlined" };
+      case "add-missing-photos":
+        return { ...base, icon: <PhotoCameraOutlined />, onClick: () => openMissingMediaDialog(asset, summary.latestRun), variant: "outlined" };
+      case "resolve-blocking":
+        return { ...base, icon: <ReportProblemOutlined />, onClick: () => summary.latestRun ? openRunHistory(asset) : void startAssetFromBestWorkflowSource(asset), variant: "outlined" };
+      case "installer-sign":
+      case "customer-sign":
+        return { ...base, icon: <DrawOutlined />, onClick: () => openRunHistory(asset), variant: "outlined" };
+      case "run-details":
+        return { ...base, icon: <HistoryOutlined />, onClick: () => summary.latestRun ? openRunHistory(asset) : openImportDialog(), variant: "text" };
+      case "no-workflow":
+        return null;
+      default:
+        return null;
     }
-    if (!hasRunnableWorkflowSource) {
-      if (inspectionEnabled) {
-        return {
-          label: "Upload JSON",
-          tooltip: "Upload external inspection JSON for this asset",
-          color: "info",
-          icon: <FileUploadOutlined />,
-          onClick: openImportDialog,
-          variant: "outlined",
-        };
-      }
-      return null;
-    }
-    if (summary.paused) {
-      return {
-        label: "Resume Run",
-        tooltip: "Resume the paused workflow run",
-        color: "success",
-        icon: loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />,
-        onClick: () => checkAssignmentThenStart(asset),
-        variant: "outlined",
-      };
-    }
-    if (summary.needsMissingMediaRepair && summary.latestRun) {
-      return {
-        label: "Add Missing Photos",
-        tooltip: "Open the missing media repair flow for this run",
-        color: "warning",
-        icon: <PhotoCameraOutlined />,
-        onClick: () => openMissingMediaDialog(asset, summary.latestRun),
-        variant: "outlined",
-      };
-    }
-    if (asset.status === "InProgress") {
-      return {
-        label: "Continue Run",
-        tooltip: "Continue workflow",
-        color: "success",
-        icon: loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />,
-        onClick: () => checkAssignmentThenStart(asset),
-        variant: "outlined",
-      };
-    }
-    if (summary.blockingIssueCount > 0) {
-      return {
-        label: summary.blockingIssueCount === 1 ? "Resolve Blocking Issue" : `Resolve ${summary.blockingIssueCount} Blocking Issues`,
-        tooltip: "Open this asset to review and close blocking issues",
-        color: "error",
-        icon: <ReportProblemOutlined />,
-        onClick: () => summary.latestRun ? openRunHistory(asset) : void startAssetFromBestWorkflowSource(asset),
-        variant: "outlined",
-      };
-    }
-    if (summary.missingMediaCount > 0 && summary.latestRun) {
-      return {
-        label: "Add Missing Photos",
-        tooltip: "Open the missing media repair flow for this run",
-        color: "warning",
-        icon: <PhotoCameraOutlined />,
-        onClick: () => openMissingMediaDialog(asset, summary.latestRun),
-        variant: "outlined",
-      };
-    }
-    if (summary.awaitingInstallerSig || summary.awaitingCustomerSig) {
-      return {
-        label: summary.awaitingInstallerSig ? "Installer Sign-off" : "Customer Sign-off",
-        tooltip: summary.awaitingInstallerSig
-          ? "Open run history to complete installer sign-off"
-          : "Open run history to complete customer sign-off",
-        color: "warning",
-        icon: <DrawOutlined />,
-        onClick: () => openRunHistory(asset),
-        variant: "outlined",
-      };
-    }
-    if (summary.highObservationCount > 0) {
-      return {
-        label: summary.highObservationCount === 1 ? "Review High Observation" : `Review ${summary.highObservationCount} High Observations`,
-        tooltip: "Review high-severity observation issues for this asset",
-        color: "warning",
-        icon: <InfoOutlined />,
-        onClick: () => summary.latestRun ? openRunHistory(asset) : void startAssetFromBestWorkflowSource(asset),
-        variant: "outlined",
-      };
-    }
-    if (asset.status === "NotStarted") {
-      return {
-        label: "Start Run",
-        tooltip: "Start workflow",
-        color: "success",
-        icon: loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />,
-        onClick: () => checkAssignmentThenStart(asset),
-        variant: "outlined",
-      };
-    }
-    if (canViewCompletedRun) {
-      return {
-        label: "Run Details",
-        tooltip: "View run history, download report, or re-run workflow",
-        color: "inherit",
-        icon: <HistoryOutlined />,
-        onClick: () => openRunHistory(asset),
-        variant: "text",
-      };
-    }
-    return {
-      label: summary.openIssueCount > 0 ? "Review Issues" : "Review Run",
-      tooltip: "Open run details to review this asset",
-      color: "error",
-      icon: <ErrorOutlined />,
-      onClick: () => void startAssetFromBestWorkflowSource(asset),
-      variant: "outlined",
-    };
   }
 
   function actionButton(asset: ProjectAsset, projectWorkflowMode?: string | null) {
@@ -3156,13 +3074,47 @@ const AssetInstallationPage = () => {
 
     const inventoryColor = total > 0 && filled === total ? "success" : filled > 0 ? "warning" : "default";
     const inventoryVariant = total > 0 ? "filled" : "outlined";
+
+    // Feature widgets (Phase 2): issue/observation/missing-media indicators from
+    // the shared display state. Stacked; resolved ones render dimmed so the
+    // record stays visible (R1). Colors: yellow(camera/medium), grey(low),
+    // red(blocking), orange(high-observation).
+    const dsWidgets = getWorkflowDisplayState(asset, runsMap[asset.id] ?? [], {
+      paused,
+      inspectionMode: false,
+      hasRunnableWorkflowSource: true,
+    }).feature.widgets;
+
+    const widgetColorHex: Record<string, string> = {
+      yellow: "#d79b24", grey: "#8a9ba8", red: "#d32f2f", orange: "#e8833a",
+    };
+
     return (
       <Tooltip title={`${total === 0 ? "No inventory features selected on this workflow." : `Inventory features ${filled}/${total}.`} ${evidenceTitle}.`}>
-        <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+        <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" alignItems="center">
           <Chip size="small" label={`${filled}/${total} inv`}
             color={inventoryColor as "success" | "warning" | "default"}
             variant={inventoryVariant} />
           <Chip size="small" label={evidenceLabel} color={evidenceColor} variant="outlined" />
+          {dsWidgets.map((w) => {
+            const totalCount = w.openCount + w.resolvedCount;
+            const allResolved = w.openCount === 0 && w.resolvedCount > 0;
+            const Icon = w.icon === "camera" ? PhotoCameraOutlined : ReportProblemOutlined;
+            const hex = widgetColorHex[w.color] ?? "#8a9ba8";
+            const title = w.kind === "missing-photo" ? `${totalCount} missing photo${totalCount !== 1 ? "s" : ""}`
+              : w.kind === "issue-high-blocking" ? `${w.openCount} open / ${w.resolvedCount} resolved blocking issue(s)`
+              : w.kind === "high-observation" ? `${w.openCount} open / ${w.resolvedCount} resolved high observation(s)`
+              : w.kind === "issue-medium" ? `${w.openCount} open / ${w.resolvedCount} resolved medium issue(s)`
+              : `${w.openCount} open / ${w.resolvedCount} resolved low issue(s)`;
+            return (
+              <Tooltip key={w.kind} title={title}>
+                <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.25, opacity: allResolved ? 0.4 : 1 }}>
+                  <Icon sx={{ fontSize: 15, color: hex }} />
+                  {totalCount > 1 && <Typography component="span" sx={{ fontSize: 10, fontWeight: 700, color: hex }}>{totalCount}</Typography>}
+                </Box>
+              </Tooltip>
+            );
+          })}
         </Stack>
       </Tooltip>
     );
@@ -4190,6 +4142,11 @@ const AssetInstallationPage = () => {
             const isExpanded = expandedAssetId === asset.id;
             const runs = runsMap[asset.id] ?? [];
             const healthColor = computeAssetHealth(asset, runs);
+            const cardWidgets = getWorkflowDisplayState(asset, runs, {
+              paused: Boolean(pausedProgress[asset.id]),
+              inspectionMode: false,
+              hasRunnableWorkflowSource: true,
+            }).feature.widgets;
 
             // Signature check — same logic as web status column
             const latestLocked = runs.find(r => r.isLocked);
@@ -4342,6 +4299,22 @@ const AssetInstallationPage = () => {
 
                   {/* Status area: sub-status badge + smart main chip */}
                   <Stack alignItems="flex-end" spacing={0.5} sx={{ flexShrink: 0 }}>
+                    {cardWidgets.length > 0 && (
+                      <Stack direction="row" spacing={0.25} alignItems="center">
+                        {cardWidgets.map((w) => {
+                          const totalCount = w.openCount + w.resolvedCount;
+                          const allResolved = w.openCount === 0 && w.resolvedCount > 0;
+                          const Icon = w.icon === "camera" ? PhotoCameraOutlined : ReportProblemOutlined;
+                          const hex = w.color === "yellow" ? "#d79b24" : w.color === "grey" ? "#8a9ba8" : w.color === "red" ? "#d32f2f" : "#e8833a";
+                          return (
+                            <Box key={w.kind} sx={{ display: "inline-flex", alignItems: "center", gap: 0.15, opacity: allResolved ? 0.4 : 1 }}>
+                              <Icon sx={{ fontSize: 14, color: hex }} />
+                              {totalCount > 1 && <Typography component="span" sx={{ fontSize: 9, fontWeight: 700, color: hex }}>{totalCount}</Typography>}
+                            </Box>
+                          );
+                        })}
+                      </Stack>
+                    )}
                     {subLabel && (
                       <Chip
                         size="small"
