@@ -226,7 +226,6 @@ export default function WorkOrderRunner({
   );
 
   const [stage, setStage] = useState<Stage>("setup");
-  const [jobReference, setJobReference] = useState("");
   const [currentStepId, setCurrentStepId] = useState<string | null>(stepsSorted[0]?.id ?? null);
   const [history, setHistory] = useState<string[]>([]);
   // values[stepId][inputId] = string value
@@ -422,7 +421,6 @@ export default function WorkOrderRunner({
 
   function reset() {
     setStage("setup");
-    setJobReference("");
     setCurrentStepId(stepsSorted[0]?.id ?? null);
     setHistory([]);
     setValues(prefillValues ?? {});
@@ -1405,16 +1403,6 @@ export default function WorkOrderRunner({
                 {blockingIssues.length} unresolved blocking issue{blockingIssues.length === 1 ? "" : "s"} must be resolved before completing.
               </Alert>
             )}
-            <Divider />
-            <TextField
-              label="Job reference (optional)"
-              size="small"
-              fullWidth
-              placeholder="e.g. serial number, job ID, batch..."
-              value={jobReference}
-              onChange={(e) => setJobReference(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-            />
             {startError && <Alert severity="error" sx={{ fontSize: 12 }}>{startError}</Alert>}
           </Stack>
         </DialogContent>
@@ -1478,7 +1466,6 @@ export default function WorkOrderRunner({
               Step {currentIndex + 1} of {stepsSorted.length}
             </Typography>
             <Stack direction="row" spacing={0.75} alignItems="center">
-              {jobReference && <Chip label={jobReference} size="small" variant="outlined" />}
               {issues.length > 0 && (
                 <Tooltip title="Right-click for details">
                   <Chip
@@ -2207,7 +2194,6 @@ export default function WorkOrderRunner({
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {stepsSorted.length} step{stepsSorted.length === 1 ? "" : "s"} completed.
-                  {jobReference ? ` Job reference: ${jobReference}.` : ""}
                 </Typography>
                 <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
                   <Chip size="small" color="success" variant="outlined" label={`${stepsSorted.length} steps completed`} />
