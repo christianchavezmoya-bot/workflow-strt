@@ -115,15 +115,36 @@ function isOpenInspectionStatus(status?: string | null) {
   return value === "notstarted" || value === "inprogress" || value === "paused" || value === "onhold";
 }
 
-function displayRunState(asset: { runStatus?: string | null; status?: string | null; signatureStatus?: string | null; evidenceStatus?: string | null }) {
-  // Check for Issue status first (highest priority for attention)
-  if (isIssueAsset(asset.status) || isIssueAsset(asset.runStatus)) return "Issue";
-  if ((asset.evidenceStatus ?? "").toLowerCase() === "missingdata") return "Missing";
-  if (isPausedAsset(asset.runStatus)) return "Paused";
-  if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) return "In Progress";
-  if (isNotStartedAsset(asset.status)) return "Not Started";
-  if (isPendingAsset(asset.status)) return "Pending";
-  return asset.runStatus || asset.status || "Unknown";
+// Phase 3a: unified status chip for the Dashboard lists, aligned with the shared
+// display-state vocabulary (getWorkflowDisplayState / the Assets page card), so
+// the Dashboard and Assets page agree on status labels and colors.
+//
+// The Dashboard lists work off lightweight summary fields (runStatus/status/
+// evidenceStatus/signatureStatus) and do NOT load full runs, so this derives
+// from those fields rather than the full shared function. Vocabulary matches the
+// shared model:
+//   - raw "Issue"  -> label "In Progress", color "error" (Option A: the label
+//     matches the Assets page R2 rule, but the chip stays RED so a blocking
+//     issue is still visible on the Dashboard even without the widget row).
+//   - "Pending"    -> "Pending sign"
+//   - "Paused"     -> "Paused by user"
+//
+// UPGRADE SEAM (Option 1, future): when the Dashboard loads full runs per listed
+// asset, replace this with getWorkflowDisplayState(asset, runs, opts).status and
+// render its feature.widgets alongside — the label/color vocabulary already
+// matches, so only the data source changes.
+function dashboardStatusChip(asset: { runStatus?: string | null; status?: string | null; signatureStatus?: string | null; evidenceStatus?: string | null }): {
+  label: string;
+  color: "default" | "primary" | "success" | "error" | "warning" | "info";
+} {
+  const hasIssue = isIssueAsset(asset.status) || isIssueAsset(asset.runStatus);
+  if (hasIssue) return { label: "In Progress", color: "error" }; // Option A: red chip, In Progress label
+  if ((asset.evidenceStatus ?? "").toLowerCase() === "missingdata") return { label: "Missing", color: "error" };
+  if (isPausedAsset(asset.runStatus)) return { label: "Paused by user", color: "warning" };
+  if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) return { label: "In Progress", color: "primary" };
+  if (isNotStartedAsset(asset.status)) return { label: "Not Started", color: "default" };
+  if (isPendingAsset(asset.status)) return { label: "Pending sign", color: "info" };
+  return { label: asset.runStatus || asset.status || "Unknown", color: "default" };
 }
 
 function workflowModeLabel(workflowMode?: string | null) {
@@ -2049,8 +2070,8 @@ const Dashboard = () => {
                   <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
                     {asset.jobNumber}
                   </Typography>
-                  <Chip label={displayRunState(asset)} size="small" variant="outlined"
-                    color={isPausedAsset(asset.runStatus) ? "warning" : isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status) ? "primary" : "default"}
+                  <Chip label={dashboardStatusChip(asset).label} size="small" variant="outlined"
+                    color={dashboardStatusChip(asset).color}
                     sx={{ alignSelf: "flex-start", height: 16, fontSize: "0.58rem" }} />
                 </Stack>
               </Paper>
@@ -2869,7 +2890,7 @@ const Dashboard = () => {
                     {asset.assetTag || asset.assetName || asset.id}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" noWrap display="block">
-                    {asset.jobNumber} - {displayRunState(asset)}
+                    {asset.jobNumber} - {dashboardStatusChip(asset).label}
                   </Typography>
                   <Typography variant="caption" color={projectPmLabel(asset.projectId) === "No PM assigned" ? "warning.main" : "text.secondary"} noWrap display="block">
                     PM: {projectPmLabel(asset.projectId)}
@@ -3662,9 +3683,9 @@ const Dashboard = () => {
                           </Typography>
                         </Box>
                         <Chip
-                          label={displayRunState(asset)}
+                          label={dashboardStatusChip(asset).label}
                           size="small"
-                          color={isPausedAsset(asset.runStatus) ? "warning" : isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status) ? "primary" : isIssueAsset(asset.status) ? "error" : isPendingAsset(asset.status) ? "info" : "default"}
+                          color={dashboardStatusChip(asset).color}
                           variant="outlined"
                           sx={{ height: 18, fontSize: "0.62rem" }}
                         />
@@ -3793,7 +3814,7 @@ const Dashboard = () => {
                               {a.assetTag || a.assetName || a.id}
                             </Typography>
                             <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                              {a.jobNumber} - {displayRunState(a)}
+                              {a.jobNumber} - {dashboardStatusChip(a).label}
                             </Typography>
                           </Box>
                           <Chip label={isPausedAsset(a.runStatus) ? "Paused" : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "Active" : "Queued"}
@@ -4626,9 +4647,9 @@ const Dashboard = () => {
                               <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
                                 {a.jobNumber}
                               </Typography>
-                              <Chip label={displayRunState(a)}
+                              <Chip label={dashboardStatusChip(a).label}
                                 size="small" variant="outlined"
-                                color={isInProgressAsset(a.runStatus) ? "primary" : isPausedAsset(a.runStatus) ? "warning" : "default"}
+                                color={dashboardStatusChip(a).color}
                                 sx={{ alignSelf: "flex-start", height: 16, fontSize: "0.58rem" }} />
                             </Stack>
                           </Paper>
@@ -4931,7 +4952,7 @@ const Dashboard = () => {
               </Typography>
             </Box>
             <Chip
-              label={quickActionAsset ? displayRunState(quickActionAsset) : ""}
+              label={quickActionAsset ? dashboardStatusChip(quickActionAsset).label : ""}
               size="small"
               color={quickActionAsset && (isInProgressAsset(quickActionAsset.runStatus) || isInProgressAsset(quickActionAsset.status)) ? "primary" : quickActionAsset && isPausedAsset(quickActionAsset.runStatus) ? "warning" : "default"}
               variant="outlined"
