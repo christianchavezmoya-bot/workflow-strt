@@ -9,6 +9,7 @@ export type SyncOpType =
   | "RUN_CREATE"
   | "RUN_UPDATE"
   | "RUN_COMPLETE"
+  | "STEP_RESULTS"
   | "ISSUE_CREATE"
   | "ISSUE_UPDATE"
   | "ISSUE_CLOSE"

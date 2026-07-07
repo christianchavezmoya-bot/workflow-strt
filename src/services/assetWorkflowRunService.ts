@@ -357,8 +357,8 @@ function refreshRunByIdInBackground(resolvedId: string): void {
 async function enqueueRunMutation(
   runId: string,
   input: {
-    opType: "RUN_UPDATE" | "RUN_COMPLETE";
-    method: "PUT" | "POST";
+    opType: "RUN_UPDATE" | "RUN_COMPLETE" | "STEP_RESULTS";
+    method: "PUT" | "POST" | "PATCH";
     url: string;
     body: Record<string, unknown>;
     optimisticPatch: Record<string, unknown>;
@@ -916,16 +916,57 @@ export const assetWorkflowRunService = {
     }
 
     const resolvedRunId = await resolveRunId(runId);
-    const requestBody = await mediaStore.resolveUploadPayload({
+    const amendedAt = new Date().toISOString();
+    const body = {
       stepResultsJson,
       amendedByName: amendedByName ?? null,
-      amendedAt: new Date().toISOString(),
-    });
-    const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/step-results`, requestBody);
-    const updatedRun = await cacheServerRun(res.data);
-    window.dispatchEvent(new Event("notifications:run-state-changed"));
-    window.dispatchEvent(new Event("notifications:refresh"));
-    return updatedRun;
+      amendedAt,
+    };
+    try {
+      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
+      const requestBody = await mediaStore.resolveUploadPayload(body);
+      const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/step-results`, requestBody);
+      const updatedRun = await cacheServerRun(res.data);
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return updatedRun;
+    } catch (error) {
+      if (!isOfflineNetworkError(error)) throw error;
+
+      // Offline: persist the amended step results locally and queue the PATCH.
+      // Media (base64 photos) in stepResultsJson is resolved by the sync engine's
+      // generic replay path (mediaStore.resolveUploadPayload at send time), so
+      // photos survive the queue and upload on reconnect — matching the rest of
+      // the run lifecycle instead of failing outright.
+      const cachedRun = await getCachedRun(runId);
+      if (!cachedRun) throw error;
+
+      const now = new Date().toISOString();
+      const offlineRun: OfflineRun = {
+        ...cachedRun,
+        stepResultsJson,
+        updatedAt: now,
+        lastLocalSavedAt: now,
+        dirty: true,
+        localStatus: "PendingSync",
+        syncError: undefined,
+      };
+      await offlineStore.saveRun(offlineRun);
+
+      await enqueueRunMutation(resolvedRunId, {
+        opType: "STEP_RESULTS",
+        method: "PATCH",
+        url: `/asset-workflow-runs/${resolvedRunId}/step-results`,
+        body,
+        optimisticPatch: {
+          stepResultsJson,
+          updatedAt: now,
+        },
+      });
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return offlineRun;
+    }
   },
 
   /** Replace the full time-entries array and recompute metrics. Works on locked runs. */
