@@ -33,6 +33,7 @@ import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { settingsService } from "../../services/settingsService";
+import { getFallbackPublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import api from "../../services/api";
 import { isMobileNativePlatform } from "../../utils/platform";
 
@@ -389,7 +390,7 @@ export default function PhotoUploadDialog({
             setPublicFrontendBaseUrl((settings.frontendBaseUrl || "").trim().replace(/\/+$/, ""));
           })
           .catch(() => {
-            setPublicFrontendBaseUrl(window.location.origin.replace(/\/+$/, ""));
+            setPublicFrontendBaseUrl(getFallbackPublicFrontendBaseUrl());
           });
       });
   }, [open, isPM, isWebBrowser]);
@@ -530,7 +531,7 @@ export default function PhotoUploadDialog({
   const liveCaptured = allPhotoSteps.length - liveMissingCount;
   const totalExpected = allPhotoSteps.length;
   const progress = totalExpected > 0 ? Math.round((liveCaptured / totalExpected) * 100) : 0;
-  const frontendBaseUrl = (publicFrontendBaseUrl || window.location.origin).replace(/\/+$/, "");
+  const frontendBaseUrl = (publicFrontendBaseUrl || getFallbackPublicFrontendBaseUrl()).replace(/\/+$/, "");
   const qrUrl = phoneQrToken ? `${frontendBaseUrl}/mobile-upload?token=${phoneQrToken}` : "";
   const installerSteps = isWebBrowser ? allPhotoSteps : effectiveMissingSteps;
 

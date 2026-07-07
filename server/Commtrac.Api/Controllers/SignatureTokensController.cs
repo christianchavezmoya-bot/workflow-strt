@@ -4,6 +4,9 @@ using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Claims;
 
 namespace Commtrac.Api.Controllers;
@@ -15,13 +18,13 @@ public class SignatureTokensController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IEmailSender _email;
-    private readonly IConfiguration _config;
+    private readonly NotificationSettingsService _notificationSettings;
 
-    public SignatureTokensController(AppDbContext db, IEmailSender email, IConfiguration config)
+    public SignatureTokensController(AppDbContext db, IEmailSender email, NotificationSettingsService notificationSettings)
     {
         _db = db;
         _email = email;
-        _config = config;
+        _notificationSettings = notificationSettings;
     }
 
     // GET /api/signature-tokens?runId=xxx
@@ -58,7 +61,16 @@ public class SignatureTokensController : ControllerBase
         var recipientName = req.RecipientName?.Trim();
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
         var assetLabel = asset?.AssetTag ?? asset?.AssetName ?? asset?.SerialNumber ?? "Asset";
-        var baseUrl = _config["Email:FrontendBaseUrl"]?.TrimEnd('/') ?? "http://localhost:5173";
+        var detectedLanBaseUrl = DetectLanFrontendBaseUrl(Request.Scheme);
+        var baseUrl = (await _notificationSettings.GetFrontendBaseUrlAsync()).TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(baseUrl) || ShouldPreferDetectedLanBaseUrl(baseUrl, detectedLanBaseUrl))
+        {
+            baseUrl = detectedLanBaseUrl;
+        }
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            baseUrl = "http://localhost:5173";
+        }
 
         var token = new SignatureTokenEntity
         {
@@ -134,4 +146,81 @@ public class SignatureTokensController : ControllerBase
         t.ExpiresAtUtc < DateTime.UtcNow,
         true
     );
+
+    private static string DetectLanFrontendBaseUrl(string requestScheme)
+    {
+        var detectedIp = DetectLanIpv4Address();
+        if (string.IsNullOrWhiteSpace(detectedIp))
+        {
+            return "";
+        }
+
+        var scheme = string.IsNullOrWhiteSpace(requestScheme) ? "http" : requestScheme;
+        return $"{scheme}://{detectedIp}:5173";
+    }
+
+    private static bool ShouldPreferDetectedLanBaseUrl(string configuredBaseUrl, string detectedLanBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(detectedLanBaseUrl))
+        {
+            return false;
+        }
+
+        if (!Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configuredUri) ||
+            !Uri.TryCreate(detectedLanBaseUrl, UriKind.Absolute, out var detectedUri))
+        {
+            return false;
+        }
+
+        return IsPrivateIpv4Host(configuredUri.Host) &&
+               !string.Equals(configuredUri.Host, detectedUri.Host, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DetectLanIpv4Address()
+    {
+        try
+        {
+            var interfaces = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic =>
+                    nic.OperationalStatus == OperationalStatus.Up &&
+                    nic.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
+                    nic.NetworkInterfaceType != NetworkInterfaceType.Tunnel);
+
+            foreach (var nic in interfaces)
+            {
+                var candidate = nic.GetIPProperties().UnicastAddresses
+                    .Select(addr => addr.Address)
+                    .FirstOrDefault(IsPrivateIpv4Address);
+
+                if (candidate is not null)
+                {
+                    return candidate.ToString();
+                }
+            }
+        }
+        catch
+        {
+            // Fall back to an empty result.
+        }
+
+        return "";
+    }
+
+    private static bool IsPrivateIpv4Address(IPAddress address)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetwork)
+        {
+            return false;
+        }
+
+        var bytes = address.GetAddressBytes();
+        return bytes[0] == 10
+            || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+            || (bytes[0] == 192 && bytes[1] == 168);
+    }
+
+    private static bool IsPrivateIpv4Host(string host)
+    {
+        return IPAddress.TryParse(host, out var address) && IsPrivateIpv4Address(address);
+    }
 }

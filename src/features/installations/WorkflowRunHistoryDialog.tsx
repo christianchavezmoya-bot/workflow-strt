@@ -22,6 +22,7 @@ import SignatureBadge from "../../components/ui/SignatureBadge";
 import SignatureDialog from "../../components/ui/SignatureDialog";
 import { signatureService, type CreateTokenPayload } from "../../services/signatureService";
 import { projectContactService } from "../../services/projectContactService";
+import { resolvePublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import type { ProjectContact } from "../../types/projectContact";
 import {
   Alert,
@@ -317,7 +318,7 @@ export default function WorkflowRunHistoryDialog({
         customMessage: tokenMessage.trim() || undefined
       };
       const token = await signatureService.createToken(payload);
-      const baseUrl = window.location.origin;
+      const baseUrl = await resolvePublicFrontendBaseUrl();
       setTokenLink(`${baseUrl}/sign/${token.id}`);
 
       // Save as new contact (Customer 2) if requested

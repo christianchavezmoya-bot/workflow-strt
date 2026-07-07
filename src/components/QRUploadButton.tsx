@@ -8,7 +8,7 @@ import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import { QRCodeSVG } from "qrcode.react";
 import api from "../services/api";
 import { documentService, type DocumentRecord } from "../services/documentService";
-import { settingsService } from "../services/settingsService";
+import { getFallbackPublicFrontendBaseUrl, resolvePublicFrontendBaseUrl } from "../services/publicFrontendBase";
 
 interface QRUploadButtonProps {
   /** Document type to store (e.g. "tips") */
@@ -85,10 +85,9 @@ export default function QRUploadButton({
 
   const loadPublicFrontendBaseUrl = async () => {
     try {
-      const settings = await settingsService.getPublicAppSettings();
-      setPublicFrontendBaseUrl((settings.frontendBaseUrl || "").trim().replace(/\/+$/, ""));
+      setPublicFrontendBaseUrl(await resolvePublicFrontendBaseUrl());
     } catch {
-      setPublicFrontendBaseUrl("");
+      setPublicFrontendBaseUrl(getFallbackPublicFrontendBaseUrl());
     }
   };
 
@@ -164,7 +163,7 @@ export default function QRUploadButton({
 
   // Build the URL the phone will open
   const uploadUrl = token
-    ? `${(publicFrontendBaseUrl || window.location.origin).replace(/\/+$/, "")}/mobile-upload?token=${token}`
+    ? `${(publicFrontendBaseUrl || getFallbackPublicFrontendBaseUrl()).replace(/\/+$/, "")}/mobile-upload?token=${token}`
     : "";
 
   const minutesLeft = Math.floor(secondsLeft / 60);

@@ -52,6 +52,7 @@ import { productService } from "../../services/productService";
 import type { Product } from "../../types/product";
 import api from "../../services/api";
 import { settingsService } from "../../services/settingsService";
+import { getFallbackPublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/settings";
 import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
 import { useAuth } from "../../hooks/useAuth";
@@ -378,7 +379,7 @@ const Settings = () => {
     smtpPass: "",
     smtpFrom: "",
     smtpUseSsl: true,
-    frontendBaseUrl: window.location.origin,
+    frontendBaseUrl: getFallbackPublicFrontendBaseUrl(),
     smsProvider: "",
     smsApiKey: "",
     smsSender: ""
@@ -1219,7 +1220,7 @@ const Settings = () => {
         smtpUser: String(notifySettings.smtpUser || ""),
         smtpPass: String(notifySettings.smtpPass || ""),
         smtpFrom: String(notifySettings.smtpFrom || ""),
-        frontendBaseUrl: String(notifySettings.frontendBaseUrl || window.location.origin),
+        frontendBaseUrl: String(notifySettings.frontendBaseUrl || getFallbackPublicFrontendBaseUrl()),
         smsProvider: String(notifySettings.smsProvider || ""),
         smsApiKey: String(notifySettings.smsApiKey || ""),
         smsSender: String(notifySettings.smsSender || "")
@@ -1656,7 +1657,7 @@ const Settings = () => {
           smtpUser: s.smtpUser ?? "",
           smtpPass: s.smtpPass ?? "",
           smtpFrom: s.smtpFrom ?? "",
-          frontendBaseUrl: s.frontendBaseUrl ?? window.location.origin,
+          frontendBaseUrl: s.frontendBaseUrl ?? getFallbackPublicFrontendBaseUrl(),
           smsProvider: s.smsProvider ?? "",
           smsApiKey: s.smsApiKey ?? "",
           smsSender: s.smsSender ?? ""
