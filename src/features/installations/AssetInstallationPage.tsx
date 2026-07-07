@@ -4193,11 +4193,12 @@ const AssetInstallationPage = () => {
             const isExpanded = expandedAssetId === asset.id;
             const runs = runsMap[asset.id] ?? [];
             const healthColor = computeAssetHealth(asset, runs);
-            const cardWidgets = getWorkflowDisplayState(asset, runs, {
+            const cardDisplayState = getWorkflowDisplayState(asset, runs, {
               paused: Boolean(pausedProgress[asset.id]),
               inspectionMode: false,
               hasRunnableWorkflowSource: true,
-            }).feature.widgets;
+            });
+            const cardWidgets = cardDisplayState.feature.widgets;
 
             // Signature check — same logic as web status column
             const latestLocked = runs.find(r => r.isLocked);
@@ -4211,8 +4212,12 @@ const AssetInstallationPage = () => {
               healthColor === "red" ? "error" :
               healthColor === "amber" ? "warning" :
               healthColor === "green" ? "success" :
-              STATUS_COLORS[asset.status as ProjectAssetStatus];
-            const smartChipLabel = STATUS_LABELS[asset.status as ProjectAssetStatus];
+              cardDisplayState.status.color;
+            // Use the shared display-state label so it matches widgets/action
+            // (e.g. raw "Issue" status displays as "In Progress"; the red widget
+            // carries the issue signal). Previously read STATUS_LABELS directly,
+            // which could show "Issue" while the shared model showed In Progress.
+            const smartChipLabel = cardDisplayState.status.label;
 
             // Evidence/workflow sub-status badge
             const latestRun = [...runs].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
