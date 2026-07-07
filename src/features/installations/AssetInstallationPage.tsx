@@ -2272,6 +2272,50 @@ const AssetInstallationPage = () => {
   // Run history + re-run
   // ------------------------------------------------------------------
 
+  // Open the specific blocking issue directly (like the Dashboard does) rather
+  // than dumping the user into the whole run. Finds the first OPEN blocking
+  // issue across the asset's own issues and its runs, and opens IssueDetailDialog
+  // on it. Falls back to run history only if no blocking issue can be located.
+  async function openBlockingIssue(asset: ProjectAsset) {
+    // 1) asset-level issues
+    try {
+      const assetIssues: AssetIssue[] = JSON.parse(asset.issuesJson || "[]");
+      const blk = assetIssues.find((i) => i.isBlocking && !i.resolved);
+      if (blk) {
+        setIssueDetailAsset(asset);
+        setIssueDetailIssueId(blk.id);
+        setIssueDetailRunId(null);
+        return;
+      }
+    } catch { /* ignore parse */ }
+
+    // 2) run-level issues (load runs if needed)
+    let assetRuns = runsMap[asset.id];
+    if (!assetRuns) {
+      try {
+        assetRuns = await assetWorkflowRunService.listByAsset(asset.id);
+        setRunsMap((prev) => ({ ...prev, [asset.id]: assetRuns! }));
+      } catch { assetRuns = []; }
+    }
+    const sortedRuns = [...(assetRuns ?? [])].sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    );
+    for (const run of sortedRuns) {
+      let runIssues: RunIssue[] = [];
+      try { runIssues = JSON.parse(run.issuesJson || "[]"); } catch { runIssues = []; }
+      const blk = runIssues.find((i) => i.isBlocking && !i.resolved);
+      if (blk) {
+        setIssueDetailAsset(asset);
+        setIssueDetailIssueId(blk.id);
+        setIssueDetailRunId(run.id);
+        return;
+      }
+    }
+
+    // 3) fallback — no blocking issue found, open run history as before
+    void openRunHistory(asset);
+  }
+
   async function openRunHistory(asset: ProjectAsset, wfConfigId?: string, wfConfigName?: string) {
     // If a specific config was requested, open immediately
     if (wfConfigId) {
@@ -2956,7 +3000,7 @@ const AssetInstallationPage = () => {
       case "add-missing-photos":
         return { ...base, icon: <PhotoCameraOutlined />, onClick: () => openMissingMediaDialog(asset, summary.latestRun), variant: "outlined" };
       case "resolve-blocking":
-        return { ...base, icon: <ReportProblemOutlined />, onClick: () => summary.latestRun ? openRunHistory(asset) : void startAssetFromBestWorkflowSource(asset), variant: "outlined" };
+        return { ...base, icon: <ReportProblemOutlined />, onClick: () => summary.latestRun ? openBlockingIssue(asset) : void startAssetFromBestWorkflowSource(asset), variant: "outlined" };
       case "installer-sign":
       case "customer-sign":
         return { ...base, icon: <DrawOutlined />, onClick: () => openRunHistory(asset), variant: "outlined" };
