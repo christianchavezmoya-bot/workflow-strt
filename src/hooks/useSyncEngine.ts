@@ -178,6 +178,10 @@ async function processRunCreateAction(action: PendingAction, responseData: unkno
     await syncQueue.replaceRunIdReferences(action.entityId, serverRun.id);
     await offlineStore.deleteRun(action.entityId);
   }
+  // Refresh the display after a created run syncs (mergeById preserves siblings).
+  window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+    detail: { assetId: mergedRun.assetId, runs: [mergedRun], mergeById: true },
+  }));
 }
 
 async function processWorkInstructionCreateAction(action: PendingAction, responseData: unknown): Promise<void> {
@@ -292,16 +296,21 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
     const payload = action.body as { signerRole?: "Installer" | "Customer" } | undefined;
     if (cachedRun && payload?.signerRole) {
       const signedAt = signature?.signedAtUtc ?? new Date().toISOString();
-      await offlineStore.saveRun({
+      const syncedSignedRun = {
         ...cachedRun,
         installerSignedAt: payload.signerRole === "Installer" ? signedAt : cachedRun.installerSignedAt,
         customerSignedAt: payload.signerRole === "Customer" ? signedAt : cachedRun.customerSignedAt,
         signatureStatus: payload.signerRole === "Customer" ? "Signed" : (cachedRun.customerSignedAt ? "Signed" : "PendingCustomer"),
-        localStatus: "Synced",
+        localStatus: "Synced" as const,
         dirty: false,
         syncError: undefined,
         lastLocalSavedAt: signedAt,
-      });
+      };
+      await offlineStore.saveRun(syncedSignedRun);
+      // Refresh the display after a signature syncs (mergeById preserves siblings).
+      window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+        detail: { assetId: syncedSignedRun.assetId, runs: [syncedSignedRun], mergeById: true },
+      }));
     }
     return;
   }

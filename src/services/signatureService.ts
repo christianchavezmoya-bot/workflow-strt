@@ -95,7 +95,7 @@ export const signatureService = {
         };
         await offlineStore.saveRun(updatedRun);
         window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
-          detail: { assetId: updatedRun.assetId, runs: [updatedRun] },
+          detail: { assetId: updatedRun.assetId, runs: [updatedRun], mergeById: true },
         }));
       }
       window.dispatchEvent(new Event("notifications:run-state-changed"));
