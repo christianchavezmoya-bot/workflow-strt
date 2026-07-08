@@ -169,6 +169,19 @@ export const workflowConfigService = {
     try {
       const res = await api.get<WorkflowConfig>(`/workflow-configs/${id}`);
       await offlineStore.saveCache(CACHE_ID_KEY(id), res.data);
+      // Also persist to localStorage so the next `getById` (and `lsReadAll` callers
+      // in `openQuickActionOrStart`) can find the config even if the IndexedDB
+      // cache entry was evicted. `lsRead` is keyed by productId; the response
+      // includes it. (Bug 2 — first open was waiting the full axios 10 s
+      // timeout for an uncached GET; persisting locally removes that wait for
+      // every subsequent open.)
+      if (res.data.productId) {
+        const list = lsRead(res.data.productId);
+        const existingIdx = list.findIndex((c) => c.id === id);
+        if (existingIdx >= 0) list[existingIdx] = res.data;
+        else list.unshift(res.data);
+        lsWrite(res.data.productId, list);
+      }
       return res.data;
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
