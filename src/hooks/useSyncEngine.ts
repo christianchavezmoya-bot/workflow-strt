@@ -332,7 +332,7 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
       }
     }
     window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
-      detail: { assetId: syncedRun.assetId, runs: [syncedRun] },
+      detail: { assetId: syncedRun.assetId, runs: [syncedRun], mergeById: true },
     }));
     return;
   }

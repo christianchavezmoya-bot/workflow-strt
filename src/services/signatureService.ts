@@ -128,16 +128,24 @@ export const signatureService = {
 
       const cachedRun = await offlineStore.getRun(runId) ?? await offlineStore.getRun(resolvedRunId);
       if (cachedRun) {
-        await offlineStore.saveRun({
+        const updatedRun = {
           ...cachedRun,
           installerSignedAt: payload.signerRole === "Installer" ? now : cachedRun.installerSignedAt,
           customerSignedAt: payload.signerRole === "Customer" ? now : cachedRun.customerSignedAt,
           signatureStatus: payload.signerRole === "Customer" ? "Signed" : (cachedRun.customerSignedAt ? "Signed" : "PendingCustomer"),
-          localStatus: "PendingSync",
+          localStatus: "PendingSync" as const,
           dirty: true,
           syncError: undefined,
           lastLocalSavedAt: now,
-        });
+        };
+        await offlineStore.saveRun(updatedRun);
+        // Mirror the offline-run-write refresh signal from assetWorkflowRunService
+        // so the Assets page updates immediately when a signature is captured
+        // offline. mergeById: true replaces this run by id and keeps sibling
+        // runs intact, matching the Finding-2 fix.
+        window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+          detail: { assetId: updatedRun.assetId, runs: [updatedRun], mergeById: true },
+        }));
       }
 
       window.dispatchEvent(new Event("notifications:run-state-changed"));
