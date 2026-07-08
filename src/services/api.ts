@@ -2,7 +2,7 @@ import axios from "axios";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
-import { shouldSkipBlockingFetch } from "./connectivityMonitor";
+import { shouldSkipBlockingFetch, getNativeNetworkConnected } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 
 export const API_BASE_URL: string = getApiBaseUrl();
@@ -109,13 +109,23 @@ const silentRefresh = async () => {
 api.interceptors.request.use(async (config) => {
   const url = config.url ?? "";
 
-  // Non-auth requests: bail instantly when we already know the device is
-  // unreachable, so the UI never waits the full axios 10 s timeout on a
-  // doomed call. Auth calls are exempt (login must work to recover; the
-  // refresh path has its own try/catch). The thrown error matches the shape
-  // of a real network error so isOfflineNetworkError() in every service
-  // recognises it and routes to the offline path.
-  if (!url.includes("/auth/") && shouldSkipBlockingFetch()) {
+  // Non-auth requests: bail instantly ONLY when the device radio is
+  // definitively off — a stale `/health` ping must NOT block all data
+  // traffic. (A single slow ping previously flipped `getServerReachable()`
+  // false and held for up to 30 s, blocking every fetch and serving stale
+  // local cache. `connectivityMonitor.startConnectivityMonitor` clears the
+  // flag within milliseconds via the `api-server-reachable` event listener,
+  // so a momentary false-offline never causes a sustained stall.)
+  //
+  // Note: `getServerReachable()` is intentionally NOT consulted here. A
+  // genuinely-down server now costs the full axios 10 s timeout per
+  // uncached call (accepted trade-off); cache hits still return instantly
+  // via the response-interceptor cache fallback.
+  //
+  // The thrown error keeps the same shape as a real network error so every
+  // service's `isOfflineNetworkError()` still routes to the offline path.
+  // Auth calls are exempt — login must keep working to recover.
+  if (!url.includes("/auth/") && isMobileNativePlatform() && getNativeNetworkConnected() === false) {
     const err = new Error("offline-skip") as Error & { code?: string; isOfflineSkip?: boolean };
     err.code = "ERR_NETWORK";
     err.isOfflineSkip = true;

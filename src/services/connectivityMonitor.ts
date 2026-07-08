@@ -94,6 +94,18 @@ export function startConnectivityMonitor(): void {
   startForegroundTracking();
   void runPingIfForeground();
   intervalId = setInterval(() => { void runPingIfForeground(); }, PING_INTERVAL_MS);
+
+  // Clear the false-offline flag on any successful API response, not just on
+  // the next 30 s ping. `api.ts:228-232` dispatches `api-server-reachable`
+  // on every real server response; treating that as a reachability signal
+  // closes the up-to-30 s window where a single slow `/health` ping would
+  // otherwise false-flag the app into stale-cache serving. Listener is
+  // registered once at singleton startup so the cost is amortised.
+  if (typeof window !== "undefined") {
+    window.addEventListener("api-server-reachable", () => {
+      if (currentValue !== true) notify(true);
+    });
+  }
 }
 
 /**
