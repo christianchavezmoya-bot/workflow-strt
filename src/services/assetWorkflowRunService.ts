@@ -354,6 +354,19 @@ function refreshRunByIdInBackground(resolvedId: string): void {
     });
 }
 
+// Signal that a run was updated LOCALLY (offline write path). The Assets page's
+// workflow-runs-cache-updated listener refreshes its runsMap from this, so
+// status/features/actions update offline WITHOUT a network round-trip. This is
+// the offline counterpart to refreshRuns*InBackground, which only dispatch after
+// a successful network GET (they early-return when offline) — so without this,
+// offline pause/issue/missing-photo writes persisted locally but the UI never
+// re-rendered until the app went back online.
+function signalLocalRunUpdate(run: AssetWorkflowRun): void {
+  window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+    detail: { assetId: run.assetId, runs: [run], mergeById: true },
+  }));
+}
+
 async function enqueueRunMutation(
   runId: string,
   input: {
@@ -617,6 +630,7 @@ export const assetWorkflowRunService = {
       };
 
       await offlineStore.saveRun(offlineRun);
+      signalLocalRunUpdate(offlineRun);
       await syncQueue.enqueue({
         opType: "RUN_CREATE",
         url: "/asset-workflow-runs",
@@ -678,6 +692,7 @@ export const assetWorkflowRunService = {
       };
 
       await offlineStore.saveRun(offlineRun);
+      signalLocalRunUpdate(offlineRun);
       // Sync issues store so Issues Board reflects any issue changes from progress saves.
       // Fix: must call this even when openRecords is empty — entityReplaceIssuesForAsset
       // correctly removes stale closed entries, unlike the old entityPutIssues-only call.
@@ -783,6 +798,7 @@ export const assetWorkflowRunService = {
       };
 
       await offlineStore.saveRun(offlineRun);
+      signalLocalRunUpdate(offlineRun);
       // Sync issues store so Issues Board reflects any issue changes from completion.
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
       await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);
@@ -855,6 +871,7 @@ export const assetWorkflowRunService = {
       };
 
       await offlineStore.saveRun(offlineRun);
+      signalLocalRunUpdate(offlineRun);
       // Sync issues store so Issues Board reflects the change immediately, offline.
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
       await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);
@@ -952,6 +969,7 @@ export const assetWorkflowRunService = {
         syncError: undefined,
       };
       await offlineStore.saveRun(offlineRun);
+      signalLocalRunUpdate(offlineRun);
 
       await enqueueRunMutation(resolvedRunId, {
         opType: "STEP_RESULTS",
@@ -1043,6 +1061,7 @@ export const assetWorkflowRunService = {
       );
 
       await offlineStore.saveRun(offlineRun);
+      signalLocalRunUpdate(offlineRun);
       await enqueueTimeEntry(resolvedRunId, body, {
         timeTrackingJson: offlineRun.timeTrackingJson,
         productiveSeconds: offlineRun.productiveSeconds,

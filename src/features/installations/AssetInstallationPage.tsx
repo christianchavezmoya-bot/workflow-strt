@@ -1307,14 +1307,24 @@ const AssetInstallationPage = () => {
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const { assetId, projectId, runs } = (e as CustomEvent<{
-        assetId?: string; projectId?: string; runs: AssetWorkflowRun[];
+      const { assetId, projectId, runs, mergeById } = (e as CustomEvent<{
+        assetId?: string; projectId?: string; runs: AssetWorkflowRun[]; mergeById?: boolean;
       }>).detail ?? {};
       if (!Array.isArray(runs) || runs.length === 0) return;
       setRunsMap((prev) => {
         const next = { ...prev };
         if (assetId) {
-          next[assetId] = runs;
+          if (mergeById && prev[assetId] && prev[assetId].length > 0) {
+            // Local offline update of a single run — replace that run by id and
+            // keep the rest of the asset's run history intact.
+            const existing = prev[assetId];
+            const merged = existing.map((r) => runs.find((u) => u.id === r.id) ?? r);
+            // include any updated run not already present (e.g. a brand-new run)
+            runs.forEach((u) => { if (!merged.some((r) => r.id === u.id)) merged.push(u); });
+            next[assetId] = merged;
+          } else {
+            next[assetId] = runs;
+          }
         } else if (projectId) {
           const byAsset: Record<string, AssetWorkflowRun[]> = {};
           runs.forEach((r) => {
