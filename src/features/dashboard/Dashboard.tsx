@@ -44,6 +44,7 @@ import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
+import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { AssetIssue } from "../../types/projectAsset";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
@@ -1392,14 +1393,30 @@ const Dashboard = () => {
     setRunnerLoading(asset.id);
     setDocsLoading(true);
     try {
+      // Runs come from listByAsset (offline-safe — local cache + background
+      // refresh) instead of a direct api.get that would fail offline and
+      // give us no chance to resume a paused run on the device.
       const [assignments, runs, docs, fullAsset] = await Promise.all([
         assetWorkflowAssignmentService.listByAsset(asset.id),
-        api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${asset.id}`).then((r) => r.data).catch(() => []),
+        assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
         api.get(`/asset-documents/by-asset/${asset.id}`).then((res) => res.data).catch(() => []),
         projectAssetService.getById(asset.id).catch(() => null),
       ]);
 
       const resolvedProductWorkflow = await resolveProductWorkflowForAsset(fullAsset, assignments);
+
+      // Option B: if there's an active (paused / in-progress) run, resume it
+      // directly — matches the web assets-page UX (one tap → runner opens,
+      // no Quick Action Dialog). Works the same way online and offline
+      // because both the run (listByAsset) and the config (getById has an
+      // offline short-circuit) are served from local cache.
+      const attention = getQuickActionAttentionForAsset(asset, runs);
+      if (attention.activeRun && !attention.activeRun.isLocked) {
+        const launched = await resumeActiveRunFromDashboard(asset, attention.activeRun);
+        if (launched) return;
+        // If launch failed (config not cached, no steps, etc.) fall through
+        // so the dialog still opens and the user at least sees the options.
+      }
 
       if (canStartDirectlyFromDashboard({
         asset,
@@ -1595,6 +1612,45 @@ const Dashboard = () => {
       setRunnerOpen(true);
       closeQuickActionDialog();
     } catch { alert("Failed to load workflow."); } finally {
+      setRunnerLoading(null);
+    }
+  }
+
+  /**
+   * Resume a paused or in-progress run directly from the dashboard — no
+   * Quick Action Dialog shown. Mirrors the web assets-page
+   * `case "resume"` flow (`AssetInstallationPage.tsx:3010`). Works the same
+   * online and offline: the run is read from local cache via
+   * `assetWorkflowRunService.listByAsset`, the config via
+   * `workflowConfigService.getById` (which has an offline short-circuit),
+   * and the runner reads the run from local cache and writes back to it
+   * via `offlineStore.saveRun`. Returns true if the runner was opened,
+   * false if it fell through (caller should still open the dialog so the
+   * user at least sees the options).
+   */
+  async function resumeActiveRunFromDashboard(asset: QuickActionAsset, run: AssetWorkflowRun): Promise<boolean> {
+    setRunnerLoading(asset.id);
+    try {
+      const cfg: WorkflowConfig | null = await workflowConfigService.getById(run.workflowConfigId);
+      if (!cfg) return false;
+      let wf: Workflow | null = null;
+      try {
+        const parsed = JSON.parse(cfg.stepsJson);
+        if (parsed?.steps) wf = parsed as Workflow;
+        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
+      } catch {}
+      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return false; }
+
+      setRunnerExistingRunId(run.id);
+      setRunnerAsset(asset);
+      setRunnerWorkflow(wf);
+      setRunnerWorkflowConfigId(run.workflowConfigId);
+      setRunnerOpen(true);
+      closeQuickActionDialog();
+      return true;
+    } catch {
+      return false;
+    } finally {
       setRunnerLoading(null);
     }
   }
