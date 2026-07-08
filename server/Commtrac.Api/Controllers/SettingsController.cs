@@ -96,7 +96,11 @@ public class SettingsController : ControllerBase
             ? "5173"
             : frontendPort.Trim();
 
-        var detectedIp = DetectLanIpv4Address();
+        var requestHostIp = GetRequestHostPrivateIpv4();
+        var detectedIp = !string.IsNullOrWhiteSpace(requestHostIp)
+            ? requestHostIp
+            : DetectLanIpv4Address();
+
         if (string.IsNullOrWhiteSpace(detectedIp))
         {
             return Ok(new
@@ -119,6 +123,19 @@ public class SettingsController : ControllerBase
         return Ok(await _notificationSettings.SaveAsync(request));
     }
 
+    private string GetRequestHostPrivateIpv4()
+    {
+        var host = Request.Host.Host?.Trim();
+        if (string.IsNullOrWhiteSpace(host))
+            return "";
+
+        if (!IPAddress.TryParse(host, out var address))
+            return "";
+
+        return IsPrivateIpv4Address(address)
+            ? address.ToString()
+            : "";
+    }
     private static string DetectLanIpv4Address()
     {
         try
