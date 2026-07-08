@@ -2,6 +2,7 @@ import axios from "axios";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 
 export const API_BASE_URL: string = getApiBaseUrl();
@@ -180,6 +181,13 @@ export async function cachedGet<T>(url: string, params?: Record<string, unknown>
   }
 
   // No cache yet — wait for network normally
+  // Fast-bail when we already know the server is unreachable: skip the doomed
+  // request instead of waiting the full axios 10 s timeout before failing.
+  // The connectivity monitor, native radio, and navigator.onLine are all
+  // already consulted by shouldSkipBlockingFetch().
+  if (shouldSkipBlockingFetch()) {
+    throw new Error("offline-cache-miss");
+  }
   const res = await api.get<T>(url, { params });
   return res.data;
 }

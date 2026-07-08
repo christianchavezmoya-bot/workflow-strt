@@ -1,7 +1,7 @@
 import api from "./api";
 import { IssueRepository } from "../repositories/IssueRepository";
 import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
-import type { ProjectAsset } from "../types/projectAsset";
+import type { ProjectAsset, ProjectAssetStatus } from "../types/projectAsset";
 import offlineStore, { type OfflineRun } from "./offlineStore";
 import syncQueue from "./syncQueue";
 import { entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset } from "./localDB";
@@ -444,6 +444,49 @@ async function deriveOpenIssuesFromRun(run: AssetWorkflowRun): Promise<Array<{
     }));
 }
 
+/**
+ * After an offline write that changes a run's effective state, also update the
+ * parent asset's `status` field in IndexedDB and dispatch `repo:assets:updated`
+ * so the assets page / dashboard reflect the new state immediately.
+ *
+ * Without this, `computeAction` in workflowDisplayState.ts reads `asset.status`
+ * (which stays at its pre-write value) instead of the freshly-saved run state,
+ * and shows the wrong action button / sub-label until the next server refresh
+ * (e.g. on reconnect).
+ *
+ * Best-effort: never throws. Asset updates are non-fatal — the run itself is
+ * the source of truth and will reconcile with the server on next sync.
+ */
+export async function applyOfflineAssetStatusUpdate(
+  assetId: string,
+  newStatus: ProjectAssetStatus,
+): Promise<void> {
+  try {
+    const existing = await entityGetAsset(assetId);
+    if (!existing) return;
+    const data = (existing.data as ProjectAsset | null) ?? null;
+    if (!data) return;
+    if (data.status === newStatus) return;
+    const updated: ProjectAsset = { ...data, status: newStatus };
+    await entityPutAsset({
+      id: existing.id,
+      productId: existing.productId,
+      projectId: existing.projectId,
+      data: updated,
+      dirty: true,
+    });
+    window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+      detail: {
+        assetId,
+        productId: existing.productId,
+        projectId: existing.projectId,
+      },
+    }));
+  } catch {
+    // non-fatal
+  }
+}
+
 export const assetWorkflowRunService = {
   /** IndexedDB runs for an asset — native only; no network. */
   async listLocalByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
@@ -586,7 +629,11 @@ export const assetWorkflowRunService = {
       const existingRunId = await offlineStore.getPreviousRunRef(assetId, workflowConfigId);
       if (existingRunId) {
         const cachedExisting = await getCachedRun(existingRunId);
-        if (cachedExisting && !cachedExisting.isLocked) return cachedExisting;
+        // Return ANY existing run (locked or not) so we never silently create
+        // a duplicate when an asset already has a Complete/locked run. The UI
+        // routes the user to Run Details / Re-run in that case (via the
+        // asset.status = "Complete" cascade from applyOfflineAssetStatusUpdate).
+        if (cachedExisting) return cachedExisting;
       }
 
       const config = await workflowConfigService.getById(workflowConfigId);
@@ -631,6 +678,10 @@ export const assetWorkflowRunService = {
 
       await offlineStore.saveRun(offlineRun);
       signalLocalRunUpdate(offlineRun);
+      // Update the parent asset's status so the dashboard / asset page reflect
+      // the new InProgress state immediately, instead of waiting for the next
+      // server refresh (which won't happen until the device reconnects).
+      await applyOfflineAssetStatusUpdate(assetId, "InProgress");
       await syncQueue.enqueue({
         opType: "RUN_CREATE",
         url: "/asset-workflow-runs",
@@ -799,6 +850,9 @@ export const assetWorkflowRunService = {
 
       await offlineStore.saveRun(offlineRun);
       signalLocalRunUpdate(offlineRun);
+      // Update the parent asset so the dashboard reflects "Pending" (awaiting
+      // installer signature) immediately, instead of waiting for reconnect.
+      await applyOfflineAssetStatusUpdate(offlineRun.assetId, "Pending");
       // Sync issues store so Issues Board reflects any issue changes from completion.
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
       await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);

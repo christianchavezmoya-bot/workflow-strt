@@ -4,6 +4,8 @@ import syncQueue from "./syncQueue";
 import offlineStore from "./offlineStore";
 import { mediaStore } from "./mediaStore";
 import { isMobileNativePlatform } from "../utils/platform";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
+import { applyOfflineAssetStatusUpdate } from "./assetWorkflowRunService";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
 export interface SubmitSignaturePayload {
@@ -75,6 +77,10 @@ export const signatureService = {
     const queuedPayload: SubmitSignaturePayload = { ...payload, signatureData };
 
     try {
+      // Fast-bail when we already know the server is unreachable — avoids the
+      // full axios 10 s timeout on the doomed network call before falling into
+      // the offline branch. Same pattern as assetWorkflowRunService.startRun.
+      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
       const requestPayload = await mediaStore.resolveUploadPayload(queuedPayload);
       const r = await api.post<SignatureEvent>("/signature-events", requestPayload, { params: { runId: resolvedRunId } });
       const now = r.data.signedAtUtc ?? new Date().toISOString();
@@ -146,6 +152,13 @@ export const signatureService = {
         window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
           detail: { assetId: updatedRun.assetId, runs: [updatedRun], mergeById: true },
         }));
+        // Update the parent asset's status so the dashboard / asset page
+        // reflect the new lifecycle state immediately:
+        //   - Customer signs (final step) → asset.status = "Complete"
+        //   - Installer signs (intermediate) → asset.status = "Pending"
+        //     (still waiting for the customer signature)
+        const nextAssetStatus = payload.signerRole === "Customer" ? "Complete" : "Pending";
+        await applyOfflineAssetStatusUpdate(updatedRun.assetId, nextAssetStatus);
       }
 
       window.dispatchEvent(new Event("notifications:run-state-changed"));
