@@ -109,6 +109,19 @@ const silentRefresh = async () => {
 api.interceptors.request.use(async (config) => {
   const url = config.url ?? "";
 
+  // Non-auth requests: bail instantly when we already know the device is
+  // unreachable, so the UI never waits the full axios 10 s timeout on a
+  // doomed call. Auth calls are exempt (login must work to recover; the
+  // refresh path has its own try/catch). The thrown error matches the shape
+  // of a real network error so isOfflineNetworkError() in every service
+  // recognises it and routes to the offline path.
+  if (!url.includes("/auth/") && shouldSkipBlockingFetch()) {
+    const err = new Error("offline-skip") as Error & { code?: string; isOfflineSkip?: boolean };
+    err.code = "ERR_NETWORK";
+    err.isOfflineSkip = true;
+    throw err;
+  }
+
   // Skip refresh for the refresh call itself and for login-related endpoints
   if (!url.includes("/auth/refresh") && !url.includes("/auth/login")) {
     await silentRefresh();

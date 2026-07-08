@@ -29,6 +29,12 @@ export interface CreateTokenPayload {
 }
 
 function isOfflineNetworkError(error: unknown): boolean {
+  // Mirrors assetWorkflowRunService.isOfflineNetworkError: trust the
+  // connectivity state FIRST. Otherwise a synthetic "skip-network-offline"
+  // throw (or a stale-but-offline condition) would not be recognized and the
+  // catch handler would re-throw as a non-offline error, surfacing as
+  // "failed to submit signature" in the UI.
+  if (shouldSkipBlockingFetch()) return true;
   if (!error || typeof error !== "object") return !navigator.onLine;
   const candidate = error as { response?: unknown; code?: string; message?: string };
   if (candidate.response) return false;

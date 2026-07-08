@@ -3,6 +3,7 @@ import type { WorkInstruction, WorkInstructionInput } from "../types/workInstruc
 import syncQueue, { type SyncQueueOp } from "./syncQueue";
 import offlineStore from "./offlineStore";
 import { isMobileNativePlatform } from "../utils/platform";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 // ------------------------------------------------------------------
@@ -83,6 +84,7 @@ function getLocalByEitherId(id: string, alternateId?: string): WorkInstruction |
 }
 
 function isOfflineNetworkError(error: unknown): boolean {
+  if (shouldSkipBlockingFetch()) return true;
   if (!error || typeof error !== "object") return !navigator.onLine;
   const candidate = error as { response?: unknown; code?: string; message?: string };
   if (candidate.response) return false;
