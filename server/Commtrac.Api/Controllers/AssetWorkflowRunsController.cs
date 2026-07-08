@@ -787,8 +787,15 @@ public class AssetWorkflowRunsController : ControllerBase
                 return ParseIssues(json).Any(i =>
                     i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean());
             });
+            // Only consider actually-LOCKED runs. The previous query
+            // (`r.IsLocked || r.Id == id`) included the current run even
+            // when it was just paused, which then hit the switch's default
+            // arm (SignatureStatus = "None" → "Complete") and wrongly
+            // flipped the asset to Complete. Reproduced on the phone's
+            // offline-issue-close → sync path AND the web's close-issue
+            // path. (Bug 1.)
             var latestLocked = allRuns
-                .Where(r => r.IsLocked || r.Id == id)
+                .Where(r => r.IsLocked)
                 .OrderByDescending(r => r.CompletedAt ?? r.UpdatedAt)
                 .FirstOrDefault();
             if (latestLocked is not null)
@@ -804,6 +811,11 @@ public class AssetWorkflowRunsController : ControllerBase
                     };
                 asset.UpdatedAt = DateTime.UtcNow;
             }
+            // If no locked run exists, leave asset.Status unchanged — the
+            // run is still in progress (or paused) and the asset's status
+            // is whatever was set when the run started. (Previously this
+            // block fell through into the default arm above, marking the
+            // asset Complete while the run was still paused.)
         }
 
         await _db.SaveChangesAsync();
