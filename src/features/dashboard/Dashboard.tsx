@@ -1393,12 +1393,14 @@ const Dashboard = () => {
     setRunnerLoading(asset.id);
     setDocsLoading(true);
     try {
-      // Runs come from listByAsset (offline-safe — local cache + background
-      // refresh) instead of a direct api.get that would fail offline and
-      // give us no chance to resume a paused run on the device.
+      // Runs come from listByAssetFresh (always a live server fetch with
+      // local-cache fallback) instead of listByAsset (which returns local
+      // cache immediately + fire-and-forget refresh). The previous behaviour
+      // let the phone open the runner at the stale local step (e.g. step 1)
+      // while the server was already at step 3 — Bug 3.
       const [assignments, runs, docs, fullAsset] = await Promise.all([
         assetWorkflowAssignmentService.listByAsset(asset.id),
-        assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
+        assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => []),
         api.get(`/asset-documents/by-asset/${asset.id}`).then((res) => res.data).catch(() => []),
         projectAssetService.getById(asset.id).catch(() => null),
       ]);
