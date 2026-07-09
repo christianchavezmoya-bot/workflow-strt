@@ -43,10 +43,10 @@ import syncQueue from "../services/syncQueue";
 import { isMobileNativePlatform } from "../utils/platform";
 import { subscribeServerReachable, pingNow, getServerReachable } from "../services/connectivityMonitor";
 import {
-  API_DEFAULT_TIMEOUT_MS,
   buildSyncAttemptDiagnostics,
   measurePayload,
 } from "../utils/syncDiagnostics";
+import { getSyncOpTimeoutMs } from "../utils/syncPolicy";
 import {
   fromWorkInstructionDto,
   removeLocalWorkInstruction,
@@ -443,6 +443,7 @@ export function useSyncEngine(): SyncState {
       let mappedRunId: string | null = null;
       let requestUrl = action.url;
       let requestData: unknown = action.body;
+      const timeoutMs = getSyncOpTimeoutMs(action.opType);
 
       try {
         await pendingSetStatus(action.id, "uploading");
@@ -461,6 +462,7 @@ export function useSyncEngine(): SyncState {
           url: requestUrl,
           method: action.method,
           data: requestData,
+          timeout: timeoutMs,
           syncMeta: {
             source: "sync-engine",
             opType: action.opType,
@@ -472,6 +474,9 @@ export function useSyncEngine(): SyncState {
         await syncMetaSet(action.entityType);
       } catch (e: unknown) {
         const httpStatus = (e as { response?: { status?: number } }).response?.status;
+        const errorCode = (e as { code?: string } | null)?.code;
+        const timedOutAgainstReachableServer =
+          errorCode === "ECONNABORTED" && getServerReachable();
         if (httpStatus === 409 || httpStatus === 412) {
           // Server confirmed a conflict — mark and let user resolve
           await pendingMarkConflict(action.id);
@@ -491,7 +496,7 @@ export function useSyncEngine(): SyncState {
             mappedRunId,
             requestData,
             durationMs: Date.now() - attemptStartedAt,
-            timeoutMs: API_DEFAULT_TIMEOUT_MS,
+            timeoutMs,
             error: e,
             serverReachable: getServerReachable(),
             connectivity: connectivityRef.current,
@@ -502,6 +507,9 @@ export function useSyncEngine(): SyncState {
           }
           anyError = true;
           if (isNetworkLikeError(e)) {
+            if (timedOutAgainstReachableServer) {
+              continue;
+            }
             setConnectivity(navigator.onLine ? "server-unreachable" : "offline");
             break;
           }

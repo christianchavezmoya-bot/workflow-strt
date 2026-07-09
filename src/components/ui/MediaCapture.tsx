@@ -11,6 +11,7 @@ import VideocamOutlinedIcon from "@mui/icons-material/VideocamOutlined";
 import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import PlayCircleOutlineOutlinedIcon from "@mui/icons-material/PlayCircleOutlineOutlined";
 import QRUploadButton from "../QRUploadButton";
+import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
 
 interface Props {
   media: string[];
@@ -29,15 +30,6 @@ function isVideo(dataUrl: string) {
   return dataUrl.startsWith("data:video");
 }
 
-function toBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 export default function MediaCapture({ media, onChange, label, disabled = false, qrDocType, qrLinkedTo }: Props) {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -47,7 +39,8 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
     const results: string[] = [];
     for (const file of Array.from(files)) {
       try {
-        results.push(await toBase64(file));
+        const prepared = await prepareWorkflowMediaFile(file);
+        results.push(await fileToDataUrl(prepared));
       } catch {
         // skip unreadable files
       }

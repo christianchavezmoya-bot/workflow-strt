@@ -62,8 +62,8 @@ function isPausedAsset(status?: string | null) {
 }
 
 function isInProgressAsset(status?: string | null) {
-  const value = (status ?? "").toLowerCase();
-  return value === "inprogress" || value === "in progress";
+  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+  return value === "inprogress" || value === "issue" || value === "hasissue";
 }
 
 function isNotStartedAsset(status?: string | null) {
@@ -134,13 +134,14 @@ function isOpenInspectionStatus(status?: string | null) {
 // asset, replace this with getWorkflowDisplayState(asset, runs, opts).status and
 // render its feature.widgets alongside — the label/color vocabulary already
 // matches, so only the data source changes.
-function dashboardStatusChip(asset: { runStatus?: string | null; status?: string | null; signatureStatus?: string | null; evidenceStatus?: string | null }): {
+function dashboardStatusChip(asset: { runStatus?: string | null; status?: string | null; signatureStatus?: string | null; evidenceStatus?: string | null; hasOpenIssues?: boolean }): {
   label: string;
   color: "default" | "primary" | "success" | "error" | "warning" | "info";
 } {
   const hasIssue = isIssueAsset(asset.status) || isIssueAsset(asset.runStatus);
-  if (hasIssue) return { label: "In Progress", color: "error" }; // Option A: red chip, In Progress label
+  if (asset.hasOpenIssues === true) return { label: "In Progress", color: "error" };
   if ((asset.evidenceStatus ?? "").toLowerCase() === "missingdata") return { label: "Missing", color: "error" };
+  if (hasIssue) return { label: "In Progress", color: asset.hasOpenIssues === false ? "primary" : "error" };
   if (isPausedAsset(asset.runStatus)) return { label: "Paused by user", color: "warning" };
   if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) return { label: "In Progress", color: "primary" };
   if (isNotStartedAsset(asset.status)) return { label: "Not Started", color: "default" };
@@ -1140,6 +1141,39 @@ const Dashboard = () => {
   // Product-based workflow for assets without explicit assignment
   const [productWorkflow, setProductWorkflow] = useState<{ configId: string; configName: string; workflowTypeId?: string } | null>(null);
 
+  const buildFallbackMissingMediaFlag = useCallback((asset: QuickActionAsset, latestRun: AssetWorkflowRun | null) => {
+    if (!latestRun || !runHasCompletedAllSteps(latestRun)) return null;
+    const missingCount = countMissingWorkflowItems(latestRun);
+    if (missingCount <= 0) return null;
+    return {
+      id: `run-missing-${latestRun.id}`,
+      runId: latestRun.id,
+      assetId: asset.id,
+      assetTag: asset.assetTag || asset.assetName || asset.id,
+      jobNumber: asset.jobNumber,
+      workflowName: "Workflow",
+      technicianUserId: asset.assignedUserId ?? "",
+      technicianName: user.fullName ?? "",
+      completedAt: latestRun.completedAt ?? latestRun.updatedAt ?? latestRun.startedAt,
+      missingSteps: [],
+      totalExpected: 0,
+      totalCaptured: 0,
+    };
+  }, [user.fullName]);
+
+  const resolveMissingMediaForAsset = useCallback((asset: QuickActionAsset, runs: AssetWorkflowRun[]) => {
+    const sortedRuns = [...runs].sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    );
+    const latestRun = sortedRuns[0] ?? null;
+    const latestRunFlag = latestRun
+      ? missingMediaFlags.find((flag) => flag.runId === latestRun.id) ?? null
+      : null;
+    const fallbackMissingMedia = buildFallbackMissingMediaFlag(asset, latestRun);
+    const assetLevelFlag = missingMediaFlags.find((flag) => flag.assetId === asset.id) ?? null;
+    return latestRunFlag ?? fallbackMissingMedia ?? assetLevelFlag;
+  }, [buildFallbackMissingMediaFlag, missingMediaFlags]);
+
   const quickActionAttention = useMemo(() => {
     if (!quickActionAsset) {
       return {
@@ -1156,23 +1190,6 @@ const Dashboard = () => {
       (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
     );
     const latestRun = sortedRuns[0] ?? null;
-    const fallbackMissingMedia =
-      latestRun && runHasCompletedAllSteps(latestRun) && countMissingWorkflowItems(latestRun) > 0
-        ? {
-            id: `run-missing-${latestRun.id}`,
-            runId: latestRun.id,
-            assetId: quickActionAsset.id,
-            assetTag: quickActionAsset.assetTag || quickActionAsset.assetName || quickActionAsset.id,
-            jobNumber: quickActionAsset.jobNumber,
-            workflowName: "Workflow",
-            technicianUserId: quickActionAsset.assignedUserId ?? "",
-            technicianName: user.fullName ?? "",
-            completedAt: latestRun.completedAt ?? latestRun.updatedAt ?? latestRun.startedAt,
-            missingSteps: [],
-            totalExpected: 0,
-            totalCaptured: 0,
-          }
-        : null;
     const assetIssues = openIssues.filter((issue) => issue.assetId === quickActionAsset.id);
 
     return {
@@ -1187,14 +1204,11 @@ const Dashboard = () => {
         pendingSigs.find(
           (sig) => sig.assetId === quickActionAsset.id
         ) ?? null,
-      missingMedia:
-        missingMediaFlags.find(
-          (flag) => flag.assetId === quickActionAsset.id || flag.runId === sortedRuns[0]?.id
-        ) ?? fallbackMissingMedia,
+      missingMedia: resolveMissingMediaForAsset(quickActionAsset, quickActionRuns),
       activeRun: sortedRuns.find((run) => !run.isLocked) ?? null,
       latestRun,
     };
-  }, [missingMediaFlags, openIssues, pendingSigs, quickActionAsset, quickActionRuns, user.fullName]);
+  }, [openIssues, pendingSigs, quickActionAsset, quickActionRuns, resolveMissingMediaForAsset]);
 
   const getMyJobsCardAction = useCallback((asset: QuickActionAsset) => {
     const isActive = isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status);
@@ -1209,18 +1223,20 @@ const Dashboard = () => {
 
     if (missingMediaFlag || hasMissingMediaFallback) {
       return {
+        actionKind: "missing-media" as const,
         chipLabel: "Missing",
         chipColor: "warning" as const,
-        buttonLabel: "Add Missing Pictures",
+        buttonLabel: "Add Missing Photos",
         buttonColor: "warning" as const,
         helperText: effectiveMissingCount > 0
-          ? `${effectiveMissingCount} missing picture${effectiveMissingCount === 1 ? "" : "s"}`
+          ? `${effectiveMissingCount} missing photo${effectiveMissingCount === 1 ? "" : "s"}`
           : "Required workflow captures are still missing",
       };
     }
 
     if (pendingSignature) {
       return {
+        actionKind: "default" as const,
         chipLabel: pendingSignature.signatureStatus === "PendingCustomer" ? "Cust. Sig" : "Inst. Sig",
         chipColor: "warning" as const,
         buttonLabel: pendingSignatureStageLabel(pendingSignature.signatureStatus),
@@ -1231,6 +1247,7 @@ const Dashboard = () => {
 
     if (isPaused) {
       return {
+        actionKind: "default" as const,
         chipLabel: "Paused",
         chipColor: "warning" as const,
         buttonLabel: "Resume",
@@ -1243,6 +1260,7 @@ const Dashboard = () => {
 
     if (isActive) {
       return {
+        actionKind: "default" as const,
         chipLabel: "Active",
         chipColor: "primary" as const,
         buttonLabel: "Resume",
@@ -1254,6 +1272,7 @@ const Dashboard = () => {
     }
 
     return {
+      actionKind: "default" as const,
       chipLabel: isPendingAsset(asset.status) ? "Pending" : "Queued",
       chipColor: isPendingAsset(asset.status) ? ("info" as const) : ("default" as const),
       buttonLabel: "Start",
@@ -1289,23 +1308,6 @@ const Dashboard = () => {
       (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
     );
     const latestRun = sortedRuns[0] ?? null;
-    const fallbackMissingMedia =
-      latestRun && runHasCompletedAllSteps(latestRun) && countMissingWorkflowItems(latestRun) > 0
-        ? {
-            id: `run-missing-${latestRun.id}`,
-            runId: latestRun.id,
-            assetId: asset.id,
-            assetTag: asset.assetTag || asset.assetName || asset.id,
-            jobNumber: asset.jobNumber,
-            workflowName: "Workflow",
-            technicianUserId: asset.assignedUserId ?? "",
-            technicianName: user.fullName ?? "",
-            completedAt: latestRun.completedAt ?? latestRun.updatedAt ?? latestRun.startedAt,
-            missingSteps: [],
-            totalExpected: 0,
-            totalCaptured: 0,
-          }
-        : null;
     const assetIssues = openIssues.filter((issue) => issue.assetId === asset.id);
 
     return {
@@ -1320,10 +1322,7 @@ const Dashboard = () => {
         pendingSigs.find(
           (sig) => sig.assetId === asset.id
         ) ?? null,
-      missingMedia:
-        missingMediaFlags.find(
-          (flag) => flag.assetId === asset.id || flag.runId === sortedRuns[0]?.id
-        ) ?? fallbackMissingMedia,
+      missingMedia: resolveMissingMediaForAsset(asset, runs),
       activeRun: sortedRuns.find((run) => !run.isLocked) ?? null,
       latestRun,
     };
@@ -1386,6 +1385,22 @@ const Dashboard = () => {
     setQuickActionAsset(null);
     setQuickActionAssignments([]);
     setQuickActionRuns([]);
+  }
+
+  async function openMissingMediaFromDashboardAsset(asset: QuickActionAsset) {
+    setRunnerLoading(asset.id);
+    try {
+      const runs = await assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => assetWorkflowRunService.listByAsset(asset.id));
+      const missingMedia = resolveMissingMediaForAsset(asset, runs);
+      if (!missingMedia) {
+        await openQuickActionOrStart(asset);
+        return;
+      }
+      setPhotoUploadMode("installer");
+      setPhotoUploadTarget(missingMedia);
+    } finally {
+      setRunnerLoading((current) => (current === asset.id ? null : current));
+    }
   }
 
   async function openQuickActionOrStart(asset: QuickActionAsset) {
@@ -4009,7 +4024,14 @@ const Dashboard = () => {
                             </Stack>
                             <Button size="small" variant="outlined"
                               color={cardAction.buttonColor}
-                              onClick={(e) => { e.stopPropagation(); void openQuickActionOrStart(a); }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (cardAction.actionKind === "missing-media") {
+                                  void openMissingMediaFromDashboardAsset(a);
+                                  return;
+                                }
+                                void openQuickActionOrStart(a);
+                              }}
                               sx={{ alignSelf: "flex-start", height: 22, fontSize: "0.68rem", py: 0 }}>
                               {cardAction.buttonLabel}
                             </Button>
@@ -4991,6 +5013,8 @@ const Dashboard = () => {
           open={!!issueDetailTarget}
           issue={issueDetailTarget.issue}
           currentUser={user.fullName ?? user.email ?? "User"}
+          hideComments
+          hideResolutionMedia
           onClose={() => setIssueDetailTarget(null)}
           onSave={(updated) => void handleDashboardIssueSave(updated as AssetIssue | RunIssue)}
         />
@@ -5012,7 +5036,7 @@ const Dashboard = () => {
             <Chip
               label={quickActionAsset ? dashboardStatusChip(quickActionAsset).label : ""}
               size="small"
-              color={quickActionAsset && (isInProgressAsset(quickActionAsset.runStatus) || isInProgressAsset(quickActionAsset.status)) ? "primary" : quickActionAsset && isPausedAsset(quickActionAsset.runStatus) ? "warning" : "default"}
+              color={quickActionAsset ? dashboardStatusChip(quickActionAsset).color : "default"}
               variant="outlined"
             />
           </Stack>

@@ -64,6 +64,9 @@ import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
 import { getMissingWorkflowItems, getRunMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
+import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
+import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
+import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 
 // Types
 
@@ -122,7 +125,10 @@ type Stage = "setup" | "running" | "summary" | "bom" | "consumables" | "installe
 type ValidationDialogMode = "blocking" | "warning";
 type PendingStepAction =
   | { type: "next" }
-  | { type: "decision"; targetId: string | null };
+  | { type: "decision"; targetId: string | null }
+  | { type: "review"; stepId: string | null; iterationIndex?: number };
+
+type MissingCaptureTarget = MissingWorkflowItem & { stepId: string; iterationIndex?: number };
 
 interface UnlistedConsumable {
   id: string;
@@ -749,6 +755,35 @@ export default function WorkOrderRunner({
     }
   }
 
+  function isMissingCaptureItem(item: MissingWorkflowItem) {
+    return item.kind === "capture" || item.kind === "photo" || item.kind === "video";
+  }
+
+  function getMissingCaptureTargets(stepData: StepCapture[] = buildStepsData()): MissingCaptureTarget[] {
+    return stepData
+      .filter((sc) => sc.stepId !== "__nav__")
+      .flatMap((sc) => {
+        const step = stepsSorted.find((candidate) => candidate.id === sc.stepId);
+        if (!step) return [];
+        return getMissingWorkflowItems(step, sc.values)
+          .filter(isMissingCaptureItem)
+          .map((item) => ({ ...item, stepId: step.id, iterationIndex: sc.iterationIndex }));
+      });
+  }
+
+  function jumpToWorkflowStep(stepId: string | null, iterationIndex?: number) {
+    if (!stepId) return;
+    const stepIndex = stepsSorted.findIndex((step) => step.id === stepId);
+    setHistory(stepIndex > 0 ? stepsSorted.slice(0, stepIndex).map((step) => step.id) : []);
+    setCurrentStepId(stepId);
+    if (iterationIndex != null) {
+      setRepeatIter((prev) => ({ ...prev, [stepId]: iterationIndex }));
+    }
+    setFlagOpen(false);
+    setFlagSubmitted(false);
+    setStage("running");
+  }
+
   function proceedToNextStep() {
     if (!currentStep) return;
 
@@ -797,7 +832,19 @@ export default function WorkOrderRunner({
       proceedToNextStep();
       return;
     }
-    proceedWithDecision(action.targetId);
+    if (action.type === "decision") {
+      proceedWithDecision(action.targetId);
+      return;
+    }
+    jumpToWorkflowStep(action.stepId, action.iterationIndex);
+  }
+
+  function reviewValidationBlocking() {
+    const action = pendingStepAction;
+    closeValidationDialog();
+    if (action?.type === "review") {
+      jumpToWorkflowStep(action.stepId, action.iterationIndex);
+    }
   }
 
   function handleNext() {
@@ -955,9 +1002,16 @@ export default function WorkOrderRunner({
           issuesJson,
           bomActualJson: bomJson,
         };
+        const missingCaptureTargets = getMissingCaptureTargets();
         const missingCompletionItems = getRunMissingWorkflowItems(pendingCompletionRun);
         if (missingCompletionItems.length > 0) {
-          openValidationDialog("blocking", missingCompletionItems, null);
+          openValidationDialog(
+            "blocking",
+            missingCompletionItems,
+            missingCaptureTargets.length > 0
+              ? { type: "review", stepId: missingCaptureTargets[0].stepId, iterationIndex: missingCaptureTargets[0].iterationIndex }
+              : null,
+          );
           return;
         }
       }
@@ -1237,9 +1291,11 @@ export default function WorkOrderRunner({
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                const reader = new FileReader();
-                reader.onload = () => { onChange(JSON.stringify([...media, reader.result as string])); };
-                reader.readAsDataURL(file);
+                void (async () => {
+                  const prepared = await prepareWorkflowMediaFile(file);
+                  const dataUrl = await fileToDataUrl(prepared);
+                  onChange(JSON.stringify([...media, dataUrl]));
+                })();
                 e.target.value = "";
               }}
             />
@@ -2048,13 +2104,17 @@ export default function WorkOrderRunner({
 
         <Dialog open={validationDialogOpen} onClose={closeValidationDialog} maxWidth="xs" fullWidth>
           <DialogTitle>
-            {validationDialogMode === "blocking" ? "Required fields missing" : "Capture missing"}
+            {validationDialogMode === "blocking"
+              ? validationDialogItems.every(isMissingCaptureItem) ? "Missing captures" : "Required fields missing"
+              : "Capture missing"}
           </DialogTitle>
           <DialogContent>
             <Stack spacing={1.25} sx={{ mt: 0.5 }}>
               <Alert severity={validationDialogMode === "blocking" ? "error" : "warning"} sx={{ fontSize: 12 }}>
                 {validationDialogMode === "blocking"
-                  ? "You cannot proceed until all required fields on this step are completed."
+                  ? validationDialogItems.every(isMissingCaptureItem)
+                    ? "Missing workflow captures must be completed before the run can be locked."
+                    : "You cannot proceed until all required fields on this step are completed."
                   : "Some captures are still missing on this step. You can still proceed if you want."}
               </Alert>
               <Stack spacing={0.5}>
@@ -2070,6 +2130,11 @@ export default function WorkOrderRunner({
             <Button onClick={closeValidationDialog}>
               {validationDialogMode === "blocking" ? "Back to step" : "Stay on step"}
             </Button>
+            {validationDialogMode === "blocking" && pendingStepAction?.type === "review" && validationDialogItems.every(isMissingCaptureItem) && (
+              <Button variant="contained" color="warning" onClick={reviewValidationBlocking}>
+                Review Missing Photos
+              </Button>
+            )}
             {validationDialogMode === "warning" && (
               <Button variant="contained" onClick={confirmValidationWarning}>
                 Proceed anyway
@@ -2151,20 +2216,15 @@ export default function WorkOrderRunner({
   // ---------------------------------------------------------------
   function renderSummary() {
     const stepsData = buildStepsData();
-    const totalCaptured = stepsData.reduce((acc, sc) => acc + Object.keys(sc.values).length, 0);
+    const summaryStepResultsJson = JSON.stringify(stepsData);
     const blockingIssues = issues.filter((i) => i.isBlocking && !i.resolved);
     const hasBlockingIssues = blockingIssues.length > 0;
     const qtyModificationCount = Object.keys(qtyModifications).length;
+    const payloadEstimate = measurePayload({ stepResultsJson: summaryStepResultsJson });
+    const showLargePayloadWarning = payloadEstimate.payloadBytes > API_LARGE_PAYLOAD_WARNING_BYTES;
 
-    const completedStepResults = stepsData.filter((sc) => sc.stepId !== "__nav__");
-    const missingCaptureItems = completedStepResults.flatMap((sc) => {
-      const step = stepsSorted.find((candidate) => candidate.id === sc.stepId);
-      if (!step) return [];
-      return getMissingWorkflowItems(step, sc.values).filter(
-        (item) => item.kind === "capture" || item.kind === "photo" || item.kind === "video",
-      );
-    });
-    const missingCaptureCount = missingCaptureItems.length;
+    const missingCaptureTargets = getMissingCaptureTargets(stepsData);
+    const missingCaptureCount = missingCaptureTargets.length;
     const hasMissingCaptures = missingCaptureCount > 0;
 
     return (
@@ -2219,7 +2279,13 @@ export default function WorkOrderRunner({
 
             {hasMissingCaptures && (
               <Alert severity="warning" icon={<PhotoCameraOutlined />}>
-                {missingCaptureCount} capture{missingCaptureCount === 1 ? "" : "s"} still missing. You can review details below or lock the run anyway.
+                {missingCaptureCount} capture{missingCaptureCount === 1 ? "" : "s"} still missing. Add the missing photos before locking the run.
+              </Alert>
+            )}
+
+            {showLargePayloadWarning && (
+              <Alert severity="info" icon={<SyncOutlined />}>
+                This run is carrying about {formatPayloadSize(payloadEstimate.payloadBytes)} of step-result data. Large photo payloads can take longer to sync on the phone.
               </Alert>
             )}
 
@@ -2408,6 +2474,17 @@ export default function WorkOrderRunner({
           </Button>
           {!saved && (
             <Stack direction="row" spacing={1}>
+              {hasMissingCaptures && (
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  disabled={saving}
+                  startIcon={<PhotoCameraOutlined />}
+                  onClick={() => jumpToWorkflowStep(missingCaptureTargets[0]?.stepId ?? null, missingCaptureTargets[0]?.iterationIndex)}
+                >
+                  Add Missing Photos
+                </Button>
+              )}
               {hasBlockingIssues && Boolean(activeRunId) && (
                 <Button
                   variant="outlined"

@@ -41,6 +41,12 @@ public class AssetWorkflowRunsController : ControllerBase
         public string? Reason { get; set; }
     }
 
+    private sealed class StepMediaUploadItem
+    {
+        public string StepId { get; set; } = string.Empty;
+        public string InputId { get; set; } = string.Empty;
+    }
+
     private static readonly JsonSerializerOptions _caseInsensitive = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -860,6 +866,90 @@ public class AssetWorkflowRunsController : ControllerBase
         return Ok(ToDto(run));
     }
 
+    // POST api/asset-workflow-runs/{id}/step-media — append uploaded files into step results without replaying the full JSON blob
+    [HttpPost("{id}/step-media")]
+    [RequestFormLimits(MultipartBodyLengthLimit = 250_000_000)]
+    [RequestSizeLimit(250_000_000)]
+    public async Task<IActionResult> UploadStepMedia(
+        string id,
+        [FromForm] string itemsJson,
+        [FromForm] List<IFormFile> files,
+        [FromForm] string? amendedByName,
+        [FromForm] string? amendedAt)
+    {
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
+        if (run is null) return NotFound();
+
+        List<StepMediaUploadItem> items;
+        try
+        {
+            items = JsonSerializer.Deserialize<List<StepMediaUploadItem>>(itemsJson, _caseInsensitive) ?? [];
+        }
+        catch
+        {
+            return BadRequest(new { message = "Invalid itemsJson payload." });
+        }
+
+        if (items.Count == 0 || files.Count == 0 || items.Count != files.Count)
+        {
+            return BadRequest(new { message = "itemsJson/files count mismatch." });
+        }
+
+        var stepResults = ParseWorkflowStepResults(run.StepResultsJson);
+        for (var index = 0; index < items.Count; index++)
+        {
+            var item = items[index];
+            var file = files[index];
+            if (string.IsNullOrWhiteSpace(item.StepId) || string.IsNullOrWhiteSpace(item.InputId))
+            {
+                return BadRequest(new { message = "Each upload item must include stepId and inputId." });
+            }
+
+            await using var stream = file.OpenReadStream();
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+
+            var mimeType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
+            var dataUrl = $"data:{mimeType};base64,{Convert.ToBase64String(ms.ToArray())}";
+
+            var result = stepResults.FirstOrDefault(r =>
+                string.Equals(r.StepId, item.StepId, StringComparison.OrdinalIgnoreCase));
+
+            if (result is null)
+            {
+                result = new WorkflowStepResultSummary
+                {
+                    StepId = item.StepId,
+                    Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                };
+                stepResults.Add(result);
+            }
+
+            result.Values ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var existing = ParseCaptureValues(
+                result.Values.TryGetValue(item.InputId, out var currentRaw)
+                    ? currentRaw
+                    : null
+            );
+            existing.Add(dataUrl);
+            result.Values[item.InputId] = JsonSerializer.Serialize(existing, _caseInsensitive);
+            result.CompletedAt = amendedAt ?? DateTime.UtcNow.ToString("O");
+        }
+
+        run.StepResultsJson = JsonSerializer.Serialize(stepResults, _caseInsensitive);
+        run.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        await NotifyRunEventAsync(
+            run,
+            "workflow-media-updated",
+            "info",
+            "Workflow media updated",
+            $"{amendedByName ?? ResolveActorName()} uploaded or amended workflow media for asset {{asset}} on job {{job}}.",
+            notifyInstaller: false);
+        return Ok(ToDto(run));
+    }
+
     // PATCH api/asset-workflow-runs/{id}/time-entries — replace time entries (works on locked runs for retroactive correction)
     [HttpPatch("{id}/time-entries")]
     public async Task<IActionResult> PatchTimeEntries(string id, [FromBody] PatchTimeEntriesRequest req)
@@ -1020,6 +1110,39 @@ public class AssetWorkflowRunsController : ControllerBase
         catch
         {
             return 0;
+        }
+    }
+
+    private static List<WorkflowStepResultSummary> ParseWorkflowStepResults(string? stepResultsJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<WorkflowStepResultSummary>>(stepResultsJson ?? "[]", _caseInsensitive) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static List<string> ParseCaptureValues(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(raw, _caseInsensitive)?
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .ToList() ?? [];
+        }
+        catch
+        {
+            return raw.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                ? [raw]
+                : [];
         }
     }
 

@@ -36,6 +36,9 @@ import { settingsService } from "../../services/settingsService";
 import { getFallbackPublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import api from "../../services/api";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
+import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
+import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -123,20 +126,6 @@ interface PhotoUploadDialogProps {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-async function readFilesAsBase64(files: FileList): Promise<string[]> {
-  return Promise.all(
-    Array.from(files).map(
-      (f) =>
-        new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(f);
-        })
-    )
-  );
-}
 
 function acceptForInputType(inputType: "photo" | "video"): string {
   return inputType === "video" ? "video/*" : "image/*";
@@ -268,6 +257,7 @@ export default function PhotoUploadDialog({
 
   // Editable captures keyed by a delimiter-safe composite key.
   const [editedCaptures, setEditedCaptures] = useState<Record<string, string[]>>({});
+  const [stagedFiles, setStagedFiles] = useState<Record<string, File[]>>({});
   const photoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const videoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const isNativePlatform = isMobileNativePlatform();
@@ -305,6 +295,7 @@ export default function PhotoUploadDialog({
     setAllPhotoSteps(allSteps);
     setEffectiveMissingSteps(missingSteps);
     setEditedCaptures(seededCaptures);
+    setStagedFiles({});
     setLoading(false);
     return { allSteps, missingSteps };
   }
@@ -429,58 +420,118 @@ export default function PhotoUploadDialog({
     return editedCaptures[key] ?? getExistingCaptures(stepId, inputId);
   }
 
+  function buildPatchedStepResultsJson(): string {
+    const merged: Record<string, Record<string, string>> = { ...runValues };
+    for (const [key, captures] of Object.entries(editedCaptures)) {
+      const parsedKey = parseCaptureKey(key);
+      if (!parsedKey) continue;
+      const { stepId, inputId } = parsedKey;
+      if (!merged[stepId]) merged[stepId] = {};
+      merged[stepId][inputId] = JSON.stringify(captures);
+    }
+
+    const navEntries = stepCaptures.filter((capture) => capture.stepId === "__nav__");
+    const preservedEntries = stepCaptures.filter((capture) => capture.stepId !== "__nav__");
+    const updatedCaptures = Object.entries(merged).map(([stepId, values]) => {
+      const existingCapture = preservedEntries.find((capture) => capture.stepId === stepId);
+      return {
+        stepId,
+        values,
+        completedAt: existingCapture?.completedAt ?? new Date().toISOString(),
+        ...(existingCapture?.iterationIndex !== undefined ? { iterationIndex: existingCapture.iterationIndex } : {}),
+      };
+    });
+
+    return JSON.stringify([...updatedCaptures, ...navEntries]);
+  }
+
+  function analyzeCaptureChanges(): {
+    appendOnly: boolean;
+    uploads: Array<{ stepId: string; inputId: string; file: File }>;
+  } {
+    const uploads: Array<{ stepId: string; inputId: string; file: File }> = [];
+
+    for (const step of allPhotoSteps) {
+      const key = buildCaptureKey(step.stepId, step.inputId);
+      const existing = getExistingCaptures(step.stepId, step.inputId);
+      const current = editedCaptures[key] ?? existing;
+
+      if (current.length < existing.length) {
+        return { appendOnly: false, uploads: [] };
+      }
+
+      for (let index = 0; index < existing.length; index += 1) {
+        if (existing[index] !== current[index]) {
+          return { appendOnly: false, uploads: [] };
+        }
+      }
+
+      const appendedCount = current.length - existing.length;
+      if (appendedCount === 0) continue;
+
+      const files = stagedFiles[key] ?? [];
+      if (files.length !== appendedCount) {
+        return { appendOnly: false, uploads: [] };
+      }
+
+      for (const file of files) {
+        uploads.push({ stepId: step.stepId, inputId: step.inputId, file });
+      }
+    }
+
+    return { appendOnly: true, uploads };
+  }
+
   async function handleFilesSelected(
     stepId: string,
     inputId: string,
     files: FileList | null,
   ) {
     if (!files || files.length === 0) return;
-    const base64s = await readFilesAsBase64(files);
     const key = buildCaptureKey(stepId, inputId);
-    setEditedCaptures((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), ...base64s] }));
+    const preparedFiles = await Promise.all(Array.from(files).map((file) => prepareWorkflowMediaFile(file)));
+    const dataUrls = await Promise.all(preparedFiles.map((file) => fileToDataUrl(file)));
+    setEditedCaptures((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), ...dataUrls] }));
+    setStagedFiles((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), ...preparedFiles] }));
   }
 
   function handleRemoveCapture(stepId: string, inputId: string, index: number) {
     const key = buildCaptureKey(stepId, inputId);
+    const existingCount = getExistingCaptures(stepId, inputId).length;
     setEditedCaptures((prev) => ({
       ...prev,
       [key]: (prev[key] ?? []).filter((_, itemIndex) => itemIndex !== index),
     }));
+    if (index >= existingCount) {
+      const stagedIndex = index - existingCount;
+      setStagedFiles((prev) => ({
+        ...prev,
+        [key]: (prev[key] ?? []).filter((_, itemIndex) => itemIndex !== stagedIndex),
+      }));
+    }
   }
 
   async function handleSave() {
     setSaving(true);
     setError(null);
     try {
-      const merged: Record<string, Record<string, string>> = { ...runValues };
-      for (const [key, captures] of Object.entries(editedCaptures)) {
-        const parsedKey = parseCaptureKey(key);
-        if (!parsedKey) continue;
-        const { stepId, inputId } = parsedKey;
-        if (!merged[stepId]) merged[stepId] = {};
-        merged[stepId][inputId] = JSON.stringify(captures);
+      const newStepResultsJson = buildPatchedStepResultsJson();
+      const uploadPlan = analyzeCaptureChanges();
+      if (uploadPlan.appendOnly && uploadPlan.uploads.length > 0) {
+        try {
+          await assetWorkflowRunService.uploadStepMedia(flag.runId, uploadPlan.uploads, currentUserName);
+        } catch {
+          await assetWorkflowRunService.patchStepResults(flag.runId, newStepResultsJson, currentUserName);
+        }
+      } else {
+        await assetWorkflowRunService.patchStepResults(flag.runId, newStepResultsJson, currentUserName);
       }
-
-      const navEntries = stepCaptures.filter((capture) => capture.stepId === "__nav__");
-      const preservedEntries = stepCaptures.filter((capture) => capture.stepId !== "__nav__");
-      const updatedCaptures = Object.entries(merged).map(([stepId, values]) => {
-        const existingCapture = preservedEntries.find((capture) => capture.stepId === stepId);
-        return {
-          stepId,
-          values,
-          completedAt: existingCapture?.completedAt ?? new Date().toISOString(),
-          ...(existingCapture?.iterationIndex !== undefined ? { iterationIndex: existingCapture.iterationIndex } : {}),
-        };
-      });
-      const newStepResultsJson = JSON.stringify([...updatedCaptures, ...navEntries]);
-      await assetWorkflowRunService.patchStepResults(flag.runId, newStepResultsJson, currentUserName);
 
       // Re-derive which steps are still missing after save
       const stillMissing = effectiveMissingSteps.filter(({ stepId, inputId }) => {
         return getCurrentCaptures(stepId, inputId).length === 0;
       });
       const allDone = stillMissing.length === 0;
-      const newTotalCaptured = allPhotoSteps.length - stillMissing.length;
 
       // PM notification
       const notification: PhotoUpdateNotification = {
@@ -503,6 +554,7 @@ export default function PhotoUploadDialog({
     } catch (err) {
       console.error(err);
       setError("Failed to save photos. Please try again.");
+    } finally {
       setSaving(false);
     }
   }
@@ -531,6 +583,16 @@ export default function PhotoUploadDialog({
   const liveCaptured = allPhotoSteps.length - liveMissingCount;
   const totalExpected = allPhotoSteps.length;
   const progress = totalExpected > 0 ? Math.round((liveCaptured / totalExpected) * 100) : 0;
+  const pendingStepResultsJson = buildPatchedStepResultsJson();
+  const uploadPlan = analyzeCaptureChanges();
+  const pendingPayloadEstimate = measurePayload({
+    stepResultsJson: pendingStepResultsJson,
+    amendedByName: currentUserName ?? null,
+    amendedAt: new Date().toISOString(),
+  });
+  const showLargePayloadWarning =
+    !uploadPlan.appendOnly &&
+    pendingPayloadEstimate.payloadBytes > API_LARGE_PAYLOAD_WARNING_BYTES;
   const frontendBaseUrl = (publicFrontendBaseUrl || getFallbackPublicFrontendBaseUrl()).replace(/\/+$/, "");
   const qrUrl = phoneQrToken ? `${frontendBaseUrl}/mobile-upload?token=${phoneQrToken}` : "";
   const installerSteps = isWebBrowser ? allPhotoSteps : effectiveMissingSteps;
@@ -570,6 +632,18 @@ export default function PhotoUploadDialog({
         {!loading && (
           <Stack spacing={2}>
             {error && <Alert severity="error">{error}</Alert>}
+
+            {uploadPlan.appendOnly && uploadPlan.uploads.length > 0 && (
+              <Alert severity="info">
+                New photos will upload directly as files instead of resending the full workflow payload.
+              </Alert>
+            )}
+
+            {showLargePayloadWarning && (
+              <Alert severity="warning">
+                This change would resend about {formatPayloadSize(pendingPayloadEstimate.payloadBytes)} of workflow data. Direct file upload is only available for newly appended captures.
+              </Alert>
+            )}
 
             {/* Progress */}
             {totalExpected > 0 && (

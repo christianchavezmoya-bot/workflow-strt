@@ -31,6 +31,8 @@ interface Props {
   issue: AnyIssue;
   currentUser: string;
   readOnly?: boolean;
+  hideComments?: boolean;
+  hideResolutionMedia?: boolean;
   onClose: () => void;
   onSave: (updated: AnyIssue) => void | Promise<void>;
 }
@@ -61,7 +63,16 @@ function initials(name: string) {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
-export default function IssueDetailDialog({ open, issue, currentUser, readOnly = false, onClose, onSave }: Props) {
+export default function IssueDetailDialog({
+  open,
+  issue,
+  currentUser,
+  readOnly = false,
+  hideComments = false,
+  hideResolutionMedia = false,
+  onClose,
+  onSave,
+}: Props) {
   const [commentText, setCommentText] = useState("");
   const [resolutionNote, setResolutionNote] = useState(issue.resolutionNote ?? "");
   const [resolutionError, setResolutionError] = useState(false);
@@ -260,13 +271,15 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
                   error={resolutionError}
                   helperText={resolutionError ? "Resolution note is required to close this issue." : undefined}
                 />
-                <MediaCapture
-                  media={resolutionMedia}
-                  onChange={setResolutionMedia}
-                  label="Resolution Evidence — Photo / Video (optional)"
-                  qrDocType="issue-photo"
-                  qrLinkedTo={issue.id}
-                />
+                {!hideResolutionMedia && (
+                  <MediaCapture
+                    media={resolutionMedia}
+                    onChange={setResolutionMedia}
+                    label="Resolution Evidence — Photo / Video (optional)"
+                    qrDocType="issue-photo"
+                    qrLinkedTo={issue.id}
+                  />
+                )}
                 <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                   <Button
                     variant="contained"
@@ -284,63 +297,65 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
         )}
 
         {/* Comments thread */}
-        <Box sx={{ px: 2.5, pt: issue.resolved ? 2 : 0.5, pb: 1 }}>
-          <Typography variant="caption" fontWeight={700} sx={{ textTransform: "uppercase", letterSpacing: 0.8, color: "text.secondary" }}>
-            Comments
-          </Typography>
-          <Box
-            sx={{
-              mt: 1,
-              maxHeight: 260,
-              overflowY: "auto",
-              display: "flex",
-              flexDirection: "column",
-              gap: 1.25,
-            }}
-          >
-            {comments.length === 0 ? (
-              <Typography variant="body2" color="text.disabled" sx={{ fontStyle: "italic" }}>
-                No comments yet.
-              </Typography>
-            ) : (
-              comments.map((c) => (
-                <Stack key={c.id} direction="row" spacing={1.25} alignItems="flex-start">
-                  <Tooltip title={c.author}>
-                    <Avatar
-                      sx={{
-                        width: 28,
-                        height: 28,
-                        fontSize: "0.7rem",
-                        bgcolor: "#2dd4bf",
-                        color: "#0b1d24",
-                        flexShrink: 0,
-                        mt: 0.25,
-                      }}
-                    >
-                      {initials(c.author)}
-                    </Avatar>
-                  </Tooltip>
-                  <Box sx={{ flex: 1 }}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                      <Typography variant="caption" fontWeight={700}>
-                        {c.author}
+        {!hideComments && (
+          <Box sx={{ px: 2.5, pt: issue.resolved ? 2 : 0.5, pb: 1 }}>
+            <Typography variant="caption" fontWeight={700} sx={{ textTransform: "uppercase", letterSpacing: 0.8, color: "text.secondary" }}>
+              Comments
+            </Typography>
+            <Box
+              sx={{
+                mt: 1,
+                maxHeight: 260,
+                overflowY: "auto",
+                display: "flex",
+                flexDirection: "column",
+                gap: 1.25,
+              }}
+            >
+              {comments.length === 0 ? (
+                <Typography variant="body2" color="text.disabled" sx={{ fontStyle: "italic" }}>
+                  No comments yet.
+                </Typography>
+              ) : (
+                comments.map((c) => (
+                  <Stack key={c.id} direction="row" spacing={1.25} alignItems="flex-start">
+                    <Tooltip title={c.author}>
+                      <Avatar
+                        sx={{
+                          width: 28,
+                          height: 28,
+                          fontSize: "0.7rem",
+                          bgcolor: "#2dd4bf",
+                          color: "#0b1d24",
+                          flexShrink: 0,
+                          mt: 0.25,
+                        }}
+                      >
+                        {initials(c.author)}
+                      </Avatar>
+                    </Tooltip>
+                    <Box sx={{ flex: 1 }}>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <Typography variant="caption" fontWeight={700}>
+                          {c.author}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {formatDate(c.createdAt)}
+                        </Typography>
+                      </Stack>
+                      <Typography variant="body2" sx={{ mt: 0.25, whiteSpace: "pre-wrap" }}>
+                        {c.text}
                       </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {formatDate(c.createdAt)}
-                      </Typography>
-                    </Stack>
-                    <Typography variant="body2" sx={{ mt: 0.25, whiteSpace: "pre-wrap" }}>
-                      {c.text}
-                    </Typography>
-                  </Box>
-                </Stack>
-              ))
-            )}
+                    </Box>
+                  </Stack>
+                ))
+              )}
+            </Box>
           </Box>
-        </Box>
+        )}
 
         {/* Add comment form */}
-        {!readOnly && !issue.resolved && (
+        {!hideComments && !readOnly && !issue.resolved && (
           <Box sx={{ px: 2.5, pb: 2 }}>
             <Stack spacing={1}>
               <TextField
@@ -370,7 +385,7 @@ export default function IssueDetailDialog({ open, issue, currentUser, readOnly =
         )}
 
         {/* Reopen hint for read-only resolved issues */}
-        {issue.resolved && !readOnly && (
+        {issue.resolved && !readOnly && !hideComments && (
           <Box sx={{ px: 2.5, pb: 2 }}>
             <Alert severity="info" icon={<ErrorOutlined />} sx={{ fontSize: "0.78rem" }}>
               This issue is closed. Add a comment above if further follow-up is needed.

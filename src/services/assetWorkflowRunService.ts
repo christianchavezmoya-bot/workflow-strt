@@ -10,7 +10,8 @@ import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
-import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
+import { webCachedGet, invalidateWebCache } from "./webFreshCache";
+import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 
 export interface PendingSignatureRecord {
   runId:        string;
@@ -707,7 +708,9 @@ export const assetWorkflowRunService = {
         issuesJson: issuesJson ?? null,
         status: status ?? null,
       });
-      const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${runId}`, requestBody);
+      const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${runId}`, requestBody, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
       return res.data;
     }
@@ -721,7 +724,9 @@ export const assetWorkflowRunService = {
     try {
       if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
       const requestBody = await mediaStore.resolveUploadPayload(body);
-      const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}`, requestBody);
+      const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}`, requestBody, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
       return await cacheServerRun(res.data);
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
@@ -774,7 +779,9 @@ export const assetWorkflowRunService = {
         completedByName: completedByName ?? null,
         bomActualJson: bomActualJson ?? null,
       });
-      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/complete`, requestBody);
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/complete`, requestBody, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
       // Completing a run also changes the asset's own status server-side
       // (see AssetWorkflowRunsController.CompleteRun) — invalidate both so
       // the very next read of either is guaranteed live, not a stale
@@ -795,7 +802,9 @@ export const assetWorkflowRunService = {
     try {
       if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
       const requestBody = await mediaStore.resolveUploadPayload(body);
-      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/complete`, requestBody);
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/complete`, requestBody, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
       const cachedRun = await cacheServerRun(res.data);
       // Fix: the server's /complete response only contains the run, but completing
       // a run also changes the asset's own status server-side (e.g. to "Pending"
@@ -979,7 +988,9 @@ export const assetWorkflowRunService = {
         amendedByName: amendedByName ?? null,
         amendedAt: new Date().toISOString(),
       });
-      const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/step-results`, requestBody);
+      const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/step-results`, requestBody, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
@@ -996,7 +1007,9 @@ export const assetWorkflowRunService = {
     try {
       if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
       const requestBody = await mediaStore.resolveUploadPayload(body);
-      const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/step-results`, requestBody);
+      const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/step-results`, requestBody, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
       const updatedRun = await cacheServerRun(res.data);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
@@ -1039,6 +1052,49 @@ export const assetWorkflowRunService = {
       window.dispatchEvent(new Event("notifications:refresh"));
       return offlineRun;
     }
+  },
+
+  async uploadStepMedia(
+    runId: string,
+    uploads: Array<{ stepId: string; inputId: string; file: File }>,
+    amendedByName?: string,
+  ): Promise<AssetWorkflowRun> {
+    const resolvedRunId = await resolveRunId(runId);
+    const amendedAt = new Date().toISOString();
+    const formData = new FormData();
+    formData.append(
+      "itemsJson",
+      JSON.stringify(uploads.map(({ stepId, inputId }) => ({ stepId, inputId }))),
+    );
+    formData.append("amendedAt", amendedAt);
+    if (amendedByName) {
+      formData.append("amendedByName", amendedByName);
+    }
+    for (const upload of uploads) {
+      formData.append("files", upload.file, upload.file.name);
+    }
+
+    if (!isMobileNativePlatform()) {
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/step-media`, formData, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
+      invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return res.data;
+    }
+
+    if (shouldSkipBlockingFetch()) {
+      throw new Error("skip-network-offline");
+    }
+
+    const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/step-media`, formData, {
+      timeout: RUN_MUTATION_TIMEOUT_MS,
+    });
+    const updatedRun = await cacheServerRun(res.data);
+    window.dispatchEvent(new Event("notifications:run-state-changed"));
+    window.dispatchEvent(new Event("notifications:refresh"));
+    return updatedRun;
   },
 
   /** Replace the full time-entries array and recompute metrics. Works on locked runs. */
