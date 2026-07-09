@@ -4,8 +4,12 @@ import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
 import { shouldSkipBlockingFetch, getNativeNetworkConnected } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
+import { formatPayloadSize } from "../utils/syncDiagnostics";
 
 export const API_BASE_URL: string = getApiBaseUrl();
+
+/** Matches axios default on the shared api instance below. */
+export const API_DEFAULT_TIMEOUT_MS = 10_000;
 
 if (
   isMobileNativePlatform() &&
@@ -27,10 +31,16 @@ const api = axios.create({
   // matters for genuine "was reachable a moment ago but this request stalls" cases.
   // Avoid going lower (e.g. 5s) because slow-but-valid requests on weak field
   // connections can take 6–8s.
-  timeout: 10000,
+  timeout: API_DEFAULT_TIMEOUT_MS,
 });
 
-type DebugLog = {
+export type ApiDebugSyncMeta = {
+  source?: string;
+  opType?: string;
+  payloadBytes?: number;
+};
+
+export type ApiDebugLog = {
   id: string;
   time: string;
   method?: string;
@@ -38,10 +48,19 @@ type DebugLog = {
   status?: number;
   durationMs?: number;
   error?: string;
+  payloadBytes?: number;
+  payloadSizeFormatted?: string;
+  opType?: string;
+  source?: string;
 };
 
-const pushDebugLog = (log: DebugLog) => {
-  const anyWindow = window as typeof window & { __apiDebugLogs?: DebugLog[] };
+type AxiosConfigWithMeta = {
+  metadata?: { start: number };
+  syncMeta?: ApiDebugSyncMeta;
+};
+
+const pushDebugLog = (log: ApiDebugLog) => {
+  const anyWindow = window as typeof window & { __apiDebugLogs?: ApiDebugLog[] };
   if (!anyWindow.__apiDebugLogs) {
     anyWindow.__apiDebugLogs = [];
   }
@@ -149,7 +168,7 @@ api.interceptors.request.use(async (config) => {
   }
 
   config.baseURL = getApiBaseUrl();
-  (config as typeof config & { metadata?: { start: number } }).metadata = { start: Date.now() };
+  (config as typeof config & AxiosConfigWithMeta).metadata = { start: Date.now() };
   return config;
 });
 
@@ -217,7 +236,9 @@ export async function cachedGet<T>(url: string, params?: Record<string, unknown>
 
 api.interceptors.response.use(
   (response) => {
-    const meta = (response.config as typeof response.config & { metadata?: { start: number } }).metadata;
+    const cfg = response.config as typeof response.config & AxiosConfigWithMeta;
+    const meta = cfg.metadata;
+    const syncMeta = cfg.syncMeta;
     const durationMs = meta?.start ? Date.now() - meta.start : undefined;
     pushDebugLog({
       id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2),
@@ -225,7 +246,13 @@ api.interceptors.response.use(
       method: response.config.method?.toUpperCase(),
       url: response.config.url,
       status: response.status,
-      durationMs
+      durationMs,
+      payloadBytes: syncMeta?.payloadBytes,
+      payloadSizeFormatted: syncMeta?.payloadBytes != null
+        ? formatPayloadSize(syncMeta.payloadBytes)
+        : undefined,
+      opType: syncMeta?.opType,
+      source: syncMeta?.source,
     });
 
     // Persist every fresh GET response so the cache stays warm
@@ -244,7 +271,9 @@ api.interceptors.response.use(
   async (error) => {
     const status = error?.response?.status;
     const config = error?.config || {};
-    const meta = (config as typeof config & { metadata?: { start: number } }).metadata;
+    const cfg = config as typeof config & AxiosConfigWithMeta;
+    const meta = cfg.metadata;
+    const syncMeta = cfg.syncMeta;
     const durationMs = meta?.start ? Date.now() - meta.start : undefined;
     pushDebugLog({
       id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2),
@@ -253,7 +282,13 @@ api.interceptors.response.use(
       url: config.url,
       status,
       durationMs,
-      error: error?.message
+      error: error?.message,
+      payloadBytes: syncMeta?.payloadBytes,
+      payloadSizeFormatted: syncMeta?.payloadBytes != null
+        ? formatPayloadSize(syncMeta.payloadBytes)
+        : undefined,
+      opType: syncMeta?.opType,
+      source: syncMeta?.source,
     });
 
     // Last-resort fallback: if a network request fails (cache miss path) try cache

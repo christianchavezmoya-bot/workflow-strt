@@ -41,7 +41,12 @@ import type { SignatureEvent } from "../types/signature";
 import { mediaStore } from "../services/mediaStore";
 import syncQueue from "../services/syncQueue";
 import { isMobileNativePlatform } from "../utils/platform";
-import { subscribeServerReachable, pingNow } from "../services/connectivityMonitor";
+import { subscribeServerReachable, pingNow, getServerReachable } from "../services/connectivityMonitor";
+import {
+  API_DEFAULT_TIMEOUT_MS,
+  buildSyncAttemptDiagnostics,
+  measurePayload,
+} from "../utils/syncDiagnostics";
 import {
   fromWorkInstructionDto,
   removeLocalWorkInstruction,
@@ -434,22 +439,33 @@ export function useSyncEngine(): SyncState {
         }
       }
 
+      const attemptStartedAt = Date.now();
+      let mappedRunId: string | null = null;
+      let requestUrl = action.url;
+      let requestData: unknown = action.body;
+
       try {
         await pendingSetStatus(action.id, "uploading");
         if (action.entityType === "workflow-run") {
           await markRunSyncing(action.entityId);
         }
-        const mappedRunId = action.entityType === "workflow-run"
+        mappedRunId = action.entityType === "workflow-run"
           ? await offlineStore.getMappedId("workflow-run", action.entityId)
           : null;
-        const requestUrl = mappedRunId
+        requestUrl = mappedRunId
           ? remapRunIdInUrl(action.url, action.entityId, mappedRunId)
           : action.url;
-        const requestData = await mediaStore.resolveUploadPayload(action.body);
+        requestData = await mediaStore.resolveUploadPayload(action.body);
+        const { payloadBytes } = measurePayload(requestData);
         const response = await api.request({
           url: requestUrl,
           method: action.method,
           data: requestData,
+          syncMeta: {
+            source: "sync-engine",
+            opType: action.opType,
+            payloadBytes,
+          },
         });
         await processSyncedAction(action, response.data);
         await pendingRemove(action.id);
@@ -468,7 +484,19 @@ export function useSyncEngine(): SyncState {
           await pendingRemove(action.id);
         } else {
           const msg = e instanceof Error ? e.message : String(e);
-          await pendingMarkRetry(action.id, msg);
+          const diagnostics = buildSyncAttemptDiagnostics({
+            action,
+            requestUrl,
+            requestMethod: action.method,
+            mappedRunId,
+            requestData,
+            durationMs: Date.now() - attemptStartedAt,
+            timeoutMs: API_DEFAULT_TIMEOUT_MS,
+            error: e,
+            serverReachable: getServerReachable(),
+            connectivity: connectivityRef.current,
+          });
+          await pendingMarkRetry(action.id, msg, diagnostics);
           if (action.entityType === "workflow-run") {
             await markRunSyncFailed(action.entityId, msg);
           }

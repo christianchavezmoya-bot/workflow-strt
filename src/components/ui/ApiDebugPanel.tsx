@@ -15,16 +15,8 @@ import {
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import { useEffect, useState } from "react";
-
-interface DebugLog {
-  id: string;
-  time: string;
-  method?: string;
-  url?: string;
-  status?: number;
-  durationMs?: number;
-  error?: string;
-}
+import type { ApiDebugLog } from "../../services/api";
+import { formatPayloadSize } from "../../utils/syncDiagnostics";
 
 function statusColor(status?: number): "success" | "warning" | "error" | "default" {
   if (!status) return "error";
@@ -39,10 +31,10 @@ interface Props {
 }
 
 export default function ApiDebugPanel({ open, onClose }: Props) {
-  const [logs, setLogs] = useState<DebugLog[]>([]);
+  const [logs, setLogs] = useState<ApiDebugLog[]>([]);
 
   const refresh = () => {
-    const anyWindow = window as typeof window & { __apiDebugLogs?: DebugLog[] };
+    const anyWindow = window as typeof window & { __apiDebugLogs?: ApiDebugLog[] };
     setLogs([...(anyWindow.__apiDebugLogs ?? [])].reverse());
   };
 
@@ -87,8 +79,26 @@ export default function ApiDebugPanel({ open, onClose }: Props) {
                   variant="outlined"
                   sx={{ fontSize: "0.65rem", height: 20 }}
                 />
+                {log.source && (
+                  <Chip
+                    label={log.source}
+                    size="small"
+                    variant="outlined"
+                    color="info"
+                    sx={{ fontSize: "0.62rem", height: 20 }}
+                  />
+                )}
+                {log.opType && (
+                  <Chip
+                    label={log.opType}
+                    size="small"
+                    variant="outlined"
+                    sx={{ fontSize: "0.62rem", height: 20 }}
+                  />
+                )}
                 <Typography variant="caption" color="text.disabled" sx={{ ml: "auto !important" }}>
                   {log.time} · {log.durationMs ?? "?"}ms
+                  {log.payloadBytes != null ? ` · ${log.payloadSizeFormatted ?? formatPayloadSize(log.payloadBytes)}` : ""}
                 </Typography>
               </Stack>
               <Typography

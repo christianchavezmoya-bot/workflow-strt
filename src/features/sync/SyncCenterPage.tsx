@@ -9,6 +9,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Collapse,
   Dialog,
   DialogContent,
   DialogTitle,
@@ -18,6 +19,7 @@ import {
   Typography,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useEffect, useState } from "react";
@@ -37,6 +39,11 @@ import ApiDebugPanel from "../../components/ui/ApiDebugPanel";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { AssetWorkflowRun, RunIssue, StepResult } from "../../types/assetWorkflowRun";
 import offlineStore from "../../services/offlineStore";
+import {
+  formatPayloadSize,
+  formatSyncDiagnosticSummary,
+  toAllowlistedDiagnostics,
+} from "../../utils/syncDiagnostics";
 
 interface Props {
   open: boolean;
@@ -412,6 +419,32 @@ async function buildConflictDetail(action: PendingAction): Promise<ConflictDetai
   };
 }
 
+function diagnosticDetailRows(action: PendingAction): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = [];
+  if (action.lastOpType) rows.push({ label: "Op type", value: action.lastOpType });
+  if (action.lastPayloadBytes != null) rows.push({ label: "Payload", value: formatPayloadSize(action.lastPayloadBytes) });
+  if (action.lastStepResultsBytes != null) rows.push({ label: "stepResultsJson", value: formatPayloadSize(action.lastStepResultsBytes) });
+  if (action.lastPhotoCount != null) rows.push({ label: "Inline photos", value: String(action.lastPhotoCount) });
+  if (action.lastDurationMs != null) rows.push({ label: "Duration", value: `${action.lastDurationMs.toLocaleString()} ms` });
+  if (action.lastTimeoutMs) rows.push({ label: "Timeout", value: `${action.lastTimeoutMs.toLocaleString()} ms` });
+  if (action.lastHttpStatus != null) rows.push({ label: "HTTP status", value: String(action.lastHttpStatus) });
+  else if (action.lastErrorCode) rows.push({ label: "Error code", value: action.lastErrorCode });
+  if (action.lastMappedRunId) rows.push({ label: "Mapped run ID", value: action.lastMappedRunId });
+  if (action.lastIsOfflineRunId) rows.push({ label: "Offline run ID", value: "yes" });
+  if (action.lastServerReachable != null) rows.push({ label: "Server reachable (ping)", value: action.lastServerReachable ? "yes" : "no" });
+  if (action.lastConnectivity) rows.push({ label: "Connectivity", value: action.lastConnectivity });
+  if (action.lastApiHost) rows.push({ label: "API host", value: action.lastApiHost });
+  if (action.lastAttemptAt) rows.push({ label: "Last attempt", value: new Date(action.lastAttemptAt).toLocaleString() });
+  return rows;
+}
+
+async function copyDiagnostics(action: PendingAction): Promise<void> {
+  const json = JSON.stringify(toAllowlistedDiagnostics(action), null, 2);
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(json);
+  }
+}
+
 export default function SyncCenterPage({ open, onClose }: Props) {
   const { status, pendingCount, conflictCount, lastSyncAt, syncing, triggerSync, resolveConflictKeep, resolveConflictDiscard } = useSyncEngine();
   const [queue, setQueue]         = useState<PendingAction[]>([]);
@@ -419,6 +452,8 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   const [droppedActions, setDroppedActions] = useState<DroppedAction[]>([]);
   const [conflictDetails, setConflictDetails] = useState<Record<string, ConflictDetail>>({});
   const [loadingConflictIds, setLoadingConflictIds] = useState<Record<string, boolean>>({});
+  const [expandedDiagIds, setExpandedDiagIds] = useState<Record<string, boolean>>({});
+  const [copiedDiagId, setCopiedDiagId] = useState<string | null>(null);
 
   const loadQueue = async () => setQueue(await pendingGetAll());
   const loadDropped = async () => setDroppedActions(await droppedActionsGetAll());
@@ -787,6 +822,53 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                         >
                           {action.lastError}
                         </Typography>
+                      )}
+
+                      {formatSyncDiagnosticSummary(action) && (
+                        <Typography
+                          variant="caption"
+                          sx={{ color: "text.secondary", fontSize: "0.63rem", fontFamily: "monospace" }}
+                        >
+                          {formatSyncDiagnosticSummary(action)}
+                        </Typography>
+                      )}
+
+                      {(action.status === "failed" || action.lastPayloadBytes != null) && diagnosticDetailRows(action).length > 0 && (
+                        <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+                          <Stack direction="row" alignItems="center" spacing={0.5}>
+                            <Button
+                              size="small"
+                              variant="text"
+                              sx={{ fontSize: "0.62rem", py: 0, minWidth: 0, textTransform: "none" }}
+                              onClick={() => setExpandedDiagIds(prev => ({ ...prev, [action.id]: !prev[action.id] }))}
+                            >
+                              {expandedDiagIds[action.id] ? "Hide diagnostics" : "Show diagnostics"}
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="text"
+                              startIcon={<ContentCopyIcon sx={{ fontSize: 12 }} />}
+                              sx={{ fontSize: "0.62rem", py: 0, minWidth: 0, textTransform: "none" }}
+                              onClick={() => {
+                                void copyDiagnostics(action).then(() => {
+                                  setCopiedDiagId(action.id);
+                                  setTimeout(() => setCopiedDiagId(prev => (prev === action.id ? null : prev)), 2000);
+                                });
+                              }}
+                            >
+                              {copiedDiagId === action.id ? "Copied" : "Copy diagnostics"}
+                            </Button>
+                          </Stack>
+                          <Collapse in={!!expandedDiagIds[action.id]}>
+                            <Stack spacing={0.25} sx={{ pl: 0.5 }}>
+                              {diagnosticDetailRows(action).map(row => (
+                                <Typography key={row.label} variant="caption" sx={{ fontSize: "0.62rem", color: "text.secondary" }}>
+                                  <Box component="span" sx={{ fontWeight: 600 }}>{row.label}:</Box> {row.value}
+                                </Typography>
+                              ))}
+                            </Stack>
+                          </Collapse>
+                        </Stack>
                       )}
                     </Stack>
 

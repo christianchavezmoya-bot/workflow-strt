@@ -42,6 +42,23 @@ export interface PendingAction {
   // Conflict detection fields
   snapshotUpdatedAt?: string;  // entity's updatedAt at queue time
   conflictDetected?: boolean;  // true when server refreshed a newer version after we queued
+  // Last failed flush attempt (diagnostics only — does not affect sync behavior)
+  lastAttemptAt?: string;
+  lastDurationMs?: number;
+  lastPayloadBytes?: number;
+  lastStepResultsBytes?: number;
+  lastPhotoCount?: number;
+  lastRequestMethod?: string;
+  lastRequestUrl?: string;
+  lastMappedRunId?: string;
+  lastIsOfflineRunId?: boolean;
+  lastTimeoutMs?: number;
+  lastHttpStatus?: number;
+  lastErrorCode?: string;
+  lastServerReachable?: boolean;
+  lastConnectivity?: string;
+  lastOpType?: string;
+  lastApiHost?: string;
 }
 
 /** A sync action that permanently failed after exhausting all retries. */
@@ -348,7 +365,28 @@ const MAX_RETRIES = 20;
  *  Drops the action after MAX_RETRIES to prevent unbounded queue growth,
  *  persisting it to `dropped_actions` so it survives reload and can be
  *  displayed app-wide rather than only in Sync Center at the moment it drops. */
-export async function pendingMarkRetry(id: string, error: string): Promise<void> {
+export async function pendingMarkRetry(
+  id: string,
+  error: string,
+  diagnostics?: Partial<Pick<PendingAction,
+    | "lastAttemptAt"
+    | "lastDurationMs"
+    | "lastPayloadBytes"
+    | "lastStepResultsBytes"
+    | "lastPhotoCount"
+    | "lastRequestMethod"
+    | "lastRequestUrl"
+    | "lastMappedRunId"
+    | "lastIsOfflineRunId"
+    | "lastTimeoutMs"
+    | "lastHttpStatus"
+    | "lastErrorCode"
+    | "lastServerReachable"
+    | "lastConnectivity"
+    | "lastOpType"
+    | "lastApiHost"
+  >>,
+): Promise<void> {
   try {
     const db = await getDB();
     const item = await db.get("pending_actions", id);
@@ -361,7 +399,7 @@ export async function pendingMarkRetry(id: string, error: string): Promise<void>
         opType: item.opType ?? item.method,
         entityType: item.entityType,
         entityId: item.entityId,
-        lastError: item.lastError,
+        lastError: error || item.lastError,
         createdAt: item.createdAt,
         droppedAt: new Date().toISOString(),
       };
@@ -375,6 +413,7 @@ export async function pendingMarkRetry(id: string, error: string): Promise<void>
     }
     await db.put("pending_actions", {
       ...item,
+      ...diagnostics,
       retries: newRetries,
       lastError: error,
       nextRetryAt: calcNextRetryAt(newRetries),
