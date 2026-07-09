@@ -1,11 +1,13 @@
 import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
-import { entityDeleteAsset, entityGetAllAssets, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll } from "./localDB";
+import type { Project } from "../types/project";
+import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
+import { userService } from "./userService";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -202,7 +204,62 @@ export const projectAssetService = {
       const res = await api.get<TechnicianWorkloadSummaryItem[]>("/project-assets/technician-workload-summary");
       return res.data;
     } catch {
-      return [];
+      // Offline fallback: grouped from cached assets. paused/inProgress/
+      // notStarted/totalAssigned/jobNumbers/hasIssues/startedAt come straight
+      // from each asset's own cached record (including workflowSummary,
+      // already synced per-asset), so these are accurate. completedSteps/
+      // totalSteps are summed from workflowSummary.completedItems/requiredItems
+      // across the technician's assigned assets — a reasonable approximation,
+      // not a re-derivation of the server's own step-level aggregation.
+      if (!isMobileNativePlatform()) return [];
+      try {
+        const [cached, users, projects] = await Promise.all([
+          entityGetAllAssets() as Promise<ProjectAsset[]>,
+          userService.getUsers(),
+          entityGetAllProjects() as Promise<Project[]>,
+        ]);
+        const projectById = new Map(projects.map((p) => [p.id, p]));
+        const byUser = new Map<string, TechnicianWorkloadSummaryItem & { jobNumberSet: Set<string> }>();
+        for (const asset of cached) {
+          const userId = asset.assignedUserId;
+          if (!userId) continue;
+          let bucket = byUser.get(userId);
+          if (!bucket) {
+            const user = users.find((u) => u.id === userId);
+            bucket = {
+              userId,
+              fullName: user?.fullName ?? "Unknown",
+              paused: 0,
+              inProgress: 0,
+              notStarted: 0,
+              totalAssigned: 0,
+              jobNumbers: [],
+              jobNumberSet: new Set<string>(),
+              hasIssues: false,
+              completedSteps: 0,
+              totalSteps: 0,
+              startedAt: undefined,
+            };
+            byUser.set(userId, bucket);
+          }
+          bucket.totalAssigned += 1;
+          if (asset.status === "Paused") bucket.paused += 1;
+          else if (asset.status === "NotStarted") bucket.notStarted += 1;
+          else if (asset.status !== "Complete" && asset.status !== "Closed") bucket.inProgress += 1;
+          const summary = asset.workflowSummary;
+          if (summary?.hasOpenIssues) bucket.hasIssues = true;
+          bucket.completedSteps += summary?.completedItems ?? 0;
+          bucket.totalSteps += summary?.requiredItems ?? 0;
+          if (summary?.latestRunStartedAt && (!bucket.startedAt || summary.latestRunStartedAt < bucket.startedAt)) {
+            bucket.startedAt = summary.latestRunStartedAt;
+          }
+          const project = projectById.get(asset.projectId);
+          if (project?.jobNumber) bucket.jobNumberSet.add(project.jobNumber);
+        }
+        return [...byUser.values()].map(({ jobNumberSet, ...rest }) => ({ ...rest, jobNumbers: [...jobNumberSet] }));
+      } catch {
+        return [];
+      }
     }
   },
 
@@ -211,7 +268,28 @@ export const projectAssetService = {
       const res = await api.get<ProjectAssetSummaryItem[]>("/project-assets/active-summary");
       return res.data;
     } catch {
-      return [];
+      // Offline fallback: derive per-project status counts from cached assets,
+      // same source listOpen() already falls back to below. Previously this
+      // went blank offline instead of reading it.
+      if (!isMobileNativePlatform()) return [];
+      try {
+        const cached = (await entityGetAllAssets()) as ProjectAsset[];
+        const byProject = new Map<string, ProjectAssetSummaryItem>();
+        for (const asset of cached) {
+          let bucket = byProject.get(asset.projectId);
+          if (!bucket) {
+            bucket = { projectId: asset.projectId, notStarted: 0, inProgress: 0, complete: 0, total: 0 };
+            byProject.set(asset.projectId, bucket);
+          }
+          bucket.total += 1;
+          if (asset.status === "Complete" || asset.status === "Closed") bucket.complete += 1;
+          else if (asset.status === "NotStarted") bucket.notStarted += 1;
+          else bucket.inProgress += 1; // InProgress | Paused | Pending | Issue
+        }
+        return [...byProject.values()];
+      } catch {
+        return [];
+      }
     }
   },
 

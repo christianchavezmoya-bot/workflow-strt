@@ -807,6 +807,14 @@ export async function entityGetWorkflowRunsByProject(projectId: string): Promise
   } catch { return []; }
 }
 
+export async function entityGetAllWorkflowRuns(): Promise<unknown[]> {
+  try {
+    const db = await getDB();
+    const records = await db.getAll("workflow_runs");
+    return records.map((r) => r.data);
+  } catch { return []; }
+}
+
 export async function entityGetIssue(id: string): Promise<{ data: unknown } | null> {
   try {
     const db = await getDB();

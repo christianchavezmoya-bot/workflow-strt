@@ -2,9 +2,17 @@ import api from "./api";
 import { IssueRepository } from "../repositories/IssueRepository";
 import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
 import type { ProjectAsset, ProjectAssetStatus } from "../types/projectAsset";
+import type { Project } from "../types/project";
 import offlineStore, { type OfflineRun } from "./offlineStore";
 import syncQueue from "./syncQueue";
-import { entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset } from "./localDB";
+import {
+  entityGetAsset,
+  entityPutAsset,
+  entityReplaceIssuesForAsset,
+  entityGetAllWorkflowRuns,
+  entityGetAllAssets,
+  entityGetAllProjects,
+} from "./localDB";
 import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
@@ -1191,7 +1199,46 @@ export const assetWorkflowRunService = {
       });
       return res.data;
     } catch {
-      return [];
+      // Offline fallback: the Assets page already derives the same
+      // "awaiting installer/customer sign-off" state from locally cached
+      // runs (AssetInstallationPage.getAssetAttentionSummary), so the data
+      // exists on-device — this endpoint previously just went blank offline
+      // instead of reading it, giving two different answers for the same
+      // asset depending which screen you looked at.
+      if (!isMobileNativePlatform()) return [];
+      try {
+        const [runs, assets, projects] = await Promise.all([
+          entityGetAllWorkflowRuns(),
+          entityGetAllAssets(),
+          entityGetAllProjects(),
+        ]);
+        const assetById = new Map((assets as ProjectAsset[]).map((a) => [a.id, a]));
+        const projectById = new Map((projects as Project[]).map((p) => [p.id, p]));
+        const records: PendingSignatureRecord[] = [];
+        for (const run of runs as AssetWorkflowRun[]) {
+          if (!run.isLocked) continue;
+          if (run.signatureStatus !== "PendingInstaller" && run.signatureStatus !== "PendingCustomer") continue;
+          const asset = assetById.get(run.assetId);
+          if (!asset) continue;
+          if (userId && asset.assignedUserId !== userId) continue;
+          const project = projectById.get(asset.projectId);
+          records.push({
+            runId: run.id,
+            assetId: run.assetId,
+            assetTag: asset.assetTag,
+            assetName: asset.assetName ?? "",
+            projectId: asset.projectId,
+            jobNumber: project?.jobNumber ?? "",
+            customerName: project?.customerName ?? "",
+            completedAt: run.completedAt ?? "",
+            completedBy: run.completedByName ?? "",
+            signatureStatus: run.signatureStatus,
+          });
+        }
+        return records;
+      } catch {
+        return [];
+      }
     }
   },
 
