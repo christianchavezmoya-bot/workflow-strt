@@ -8,6 +8,25 @@ import {
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet } from "../services/webFreshCache";
+import { workflowConfigService } from "../services/workflowConfigService";
+
+/**
+ * Ensure each assignment's workflow config (steps + reference media, via
+ * workflowConfigService.getById's own caching) is on the device the moment
+ * the assignment itself becomes known — not only when the technician opens
+ * or starts that specific run. Without this, a workflow assigned from the
+ * web while the phone never happens to fetch that product's full config
+ * list (e.g. bootstrap hasn't re-run since) stays invisible/unusable offline
+ * even though the assignment record itself is cached. Fire-and-forget,
+ * idempotent (getById/prefetchConfig both skip already-cached work).
+ */
+function prefetchAssignedConfigs(assignments: WorkflowAssignment[]): void {
+  if (!isMobileNativePlatform()) return;
+  const configIds = [...new Set(assignments.map((a) => a.workflowConfigId).filter(Boolean))];
+  for (const configId of configIds) {
+    workflowConfigService.getById(configId).catch(() => {});
+  }
+}
 
 /**
  * WorkflowAssignmentRepository — local-first access to asset → workflow config
@@ -30,6 +49,7 @@ export const WorkflowAssignmentRepository = {
       assetId,
       assignments.map((a) => ({ id: a.id, assetId: a.assetId, data: a }))
     );
+    prefetchAssignedConfigs(assignments);
   },
 
   async listByAsset(assetId: string): Promise<WorkflowAssignment[]> {

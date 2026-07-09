@@ -1,18 +1,30 @@
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import type { WorkflowConfig } from "../types/workflowConfig";
-import type { MediaItem } from "../types/workflow";
+import type { MediaItem, Workflow } from "../types/workflow";
 import { configMediaGet, configMediaGetByConfig, configMediaPut } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
 import { getApiBaseUrl } from "./apiBase";
 
 /**
- * configMediaCache — downloads a workflow config's reference media (step photos,
- * diagrams) to the device filesystem during login bootstrap so the WorkOrder
- * runner and PDF reports render correctly while offline.
+ * configMediaCache — downloads a workflow config's (or legacy workflow
+ * template's) reference media (step photos, diagrams) to the device
+ * filesystem so the WorkOrder runner and PDF reports render correctly while
+ * offline.
  *
  * Config media that is already a data: URL is left untouched (it is already
  * embedded in the cached config). Only remote http(s) URLs are downloaded.
+ *
+ * `prefetchConfig`/`hydrateConfig` work with anything shaped like
+ * { id, mediaJson } — this covers both WorkflowConfig and the raw
+ * WorkflowTemplateDto returned by workflowTemplateService, so both the
+ * modern config path and the legacy template path share one cache.
  */
+
+/** Minimal shape prefetchConfig needs — satisfied by WorkflowConfig and WorkflowTemplateDto. */
+export interface MediaSource {
+  id: string;
+  mediaJson: string;
+}
 
 const CONFIG_MEDIA_ROOT = "offline-config-media";
 
@@ -52,13 +64,30 @@ function toAbsoluteUrl(url: string): string | null {
   }
 }
 
-function parseMedia(config: WorkflowConfig): MediaItem[] {
+function parseMedia(source: MediaSource): MediaItem[] {
   try {
-    const parsed = JSON.parse(config.mediaJson || "[]");
+    const parsed = JSON.parse(source.mediaJson || "[]");
     return Array.isArray(parsed) ? (parsed as MediaItem[]) : [];
   } catch {
     return [];
   }
+}
+
+/** Shared by hydrateConfig (mediaJson string) and hydrateWorkflowMedia (media array). */
+async function hydrateMediaItems(sourceId: string, media: MediaItem[]): Promise<{ items: MediaItem[]; changed: boolean }> {
+  let changed = false;
+  const items = await Promise.all(
+    media.map(async (item) => {
+      if (!item?.id || !isCacheableUrl(item.url)) return item;
+      const dataUrl = await configMediaCache.getLocalDataUrl(sourceId, item.id);
+      if (dataUrl) {
+        changed = true;
+        return { ...item, url: dataUrl };
+      }
+      return item;
+    })
+  );
+  return { items, changed };
 }
 
 async function ensureDir(configId: string): Promise<void> {
@@ -87,10 +116,11 @@ function blobToBase64(blob: Blob): Promise<{ base64: string; mime: string }> {
 
 export const configMediaCache = {
   /**
-   * Download all remote media for a workflow config to the filesystem.
-   * Safe to call repeatedly — already-cached items are skipped.
+   * Download all remote media for a workflow config (or legacy workflow
+   * template DTO — anything shaped like { id, mediaJson }) to the
+   * filesystem. Safe to call repeatedly — already-cached items are skipped.
    */
-  async prefetchConfig(config: WorkflowConfig): Promise<void> {
+  async prefetchConfig(config: MediaSource): Promise<void> {
     if (!isMobileNativePlatform()) return;
     const media = parseMedia(config);
     if (media.length === 0) return;
@@ -153,21 +183,25 @@ export const configMediaCache = {
     const media = parseMedia(config);
     if (media.length === 0) return config;
 
-    let changed = false;
-    const hydrated = await Promise.all(
-      media.map(async (item) => {
-        if (!item?.id || !isCacheableUrl(item.url)) return item;
-        const dataUrl = await this.getLocalDataUrl(config.id, item.id);
-        if (dataUrl) {
-          changed = true;
-          return { ...item, url: dataUrl };
-        }
-        return item;
-      })
-    );
-
+    const { items, changed } = await hydrateMediaItems(config.id, media);
     if (!changed) return config;
-    return { ...config, mediaJson: JSON.stringify(hydrated) };
+    return { ...config, mediaJson: JSON.stringify(items) };
+  },
+
+  /**
+   * Same as hydrateConfig, but for a legacy Workflow template object whose
+   * media is already a parsed array (not a mediaJson string). Returns the
+   * workflow unchanged when nothing is cached yet.
+   */
+  async hydrateWorkflowMedia(workflow: Workflow): Promise<Workflow> {
+    if (!isMobileNativePlatform()) return workflow;
+    if (!workflow.media || workflow.media.length === 0) return workflow;
+    const cachedForWorkflow = await configMediaGetByConfig(workflow.id);
+    if (cachedForWorkflow.length === 0) return workflow;
+
+    const { items, changed } = await hydrateMediaItems(workflow.id, workflow.media);
+    if (!changed) return workflow;
+    return { ...workflow, media: items };
   },
 };
 

@@ -4,6 +4,7 @@ import offlineStore from "./offlineStore";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCacheByPrefix } from "./webFreshCache";
+import { configMediaCache } from "./configMediaCache";
 
 // Shape returned by the backend
 export interface WorkflowTemplateDto {
@@ -71,6 +72,18 @@ async function cacheWorkflows(productId: string, workflows: Workflow[]): Promise
   await Promise.all(workflows.map((workflow) => cacheWorkflow(workflow)));
 }
 
+/**
+ * Fire-and-forget reference-media download for legacy workflow templates.
+ * Templates previously had no media-caching path at all — their reference
+ * photos were always broken offline. Mirrors workflowConfigService's
+ * prefetchPublishedMedia; no-ops on web.
+ */
+function prefetchTemplateMedia(dtos: WorkflowTemplateDto[]): void {
+  for (const dto of dtos) {
+    configMediaCache.prefetchConfig(dto).catch(() => {});
+  }
+}
+
 export const workflowTemplateService = {
   /**
    * Loads all workflow templates for a product (returns array).
@@ -86,7 +99,7 @@ export const workflowTemplateService = {
 
     if (shouldSkipBlockingFetch()) {
       const cached = await offlineStore.getCache<Workflow[]>(CACHE_PRODUCT_KEY(productId));
-      if (cached && cached.length > 0) return cached;
+      if (cached && cached.length > 0) return Promise.all(cached.map((wf) => configMediaCache.hydrateWorkflowMedia(wf)));
       try {
         const raw = localStorage.getItem(LS_LIST_KEY(productId));
         if (raw) return (JSON.parse(raw) as WorkflowTemplateDto[]).map(toWorkflow);
@@ -102,11 +115,12 @@ export const workflowTemplateService = {
       // Keep LS cache for the most-recently-updated template for backward compat
       if (workflows.length > 0) lsWrite(workflows[0]);
       await cacheWorkflows(productId, workflows);
+      prefetchTemplateMedia(res.data);
       return workflows;
     } catch (err: unknown) {
       console.warn("[workflowTemplateService] API unavailable, falling back to localStorage", err);
       const cached = await offlineStore.getCache<Workflow[]>(CACHE_PRODUCT_KEY(productId));
-      if (cached && cached.length > 0) return cached;
+      if (cached && cached.length > 0) return Promise.all(cached.map((wf) => configMediaCache.hydrateWorkflowMedia(wf)));
       try {
         const raw = localStorage.getItem(LS_LIST_KEY(productId));
         if (raw) return (JSON.parse(raw) as WorkflowTemplateDto[]).map(toWorkflow);
@@ -137,7 +151,7 @@ export const workflowTemplateService = {
 
     if (shouldSkipBlockingFetch()) {
       const cached = await offlineStore.getCache<Workflow>(CACHE_ID_KEY(id));
-      if (cached) return cached;
+      if (cached) return configMediaCache.hydrateWorkflowMedia(cached);
       try {
         const raw = localStorage.getItem(`wf_builder_v2_${id}`);
         if (raw) return JSON.parse(raw) as Workflow;
@@ -150,12 +164,13 @@ export const workflowTemplateService = {
       const wf = toWorkflow(res.data);
       lsWrite(wf);
       await cacheWorkflow(wf);
+      prefetchTemplateMedia([res.data]);
       return wf;
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) return null;
       const cached = await offlineStore.getCache<Workflow>(CACHE_ID_KEY(id));
-      if (cached) return cached;
+      if (cached) return configMediaCache.hydrateWorkflowMedia(cached);
       try {
         const raw = localStorage.getItem(`wf_builder_v2_${id}`);
         if (raw) return JSON.parse(raw) as Workflow;

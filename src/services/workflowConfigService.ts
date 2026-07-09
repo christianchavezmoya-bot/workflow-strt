@@ -48,6 +48,23 @@ async function cacheConfigs(configs: WorkflowConfig[]): Promise<void> {
   await Promise.all(configs.map((config) => offlineStore.saveCache(CACHE_ID_KEY(config.id), config)));
 }
 
+/**
+ * Fire-and-forget reference-media download for Published configs, called
+ * right after their steps/text data is cached. Without this, media only
+ * ever downloaded via the periodic offlineBootstrapService sweep — leaving a
+ * window where a config a technician just viewed/started/was-assigned has
+ * working steps offline but missing reference photos, because nothing had
+ * downloaded them yet. Draft configs are skipped since they aren't
+ * assignable/runnable and their media may still change before publish.
+ * No-ops on web (configMediaCache.prefetchConfig itself is native-only).
+ */
+function prefetchPublishedMedia(configs: WorkflowConfig[]): void {
+  for (const config of configs) {
+    if (config.status !== "Published") continue;
+    configMediaCache.prefetchConfig(config).catch(() => {});
+  }
+}
+
 export const workflowConfigService = {
   async getAll(status?: WorkflowConfigStatus): Promise<WorkflowConfig[]> {
     if (!isMobileNativePlatform()) {
@@ -103,14 +120,18 @@ export const workflowConfigService = {
           lsWrite(productId, res.data);
           await offlineStore.saveCache(CACHE_PRODUCT_KEY(productId), res.data);
           await cacheConfigs(res.data);
+          prefetchPublishedMedia(res.data);
         })
         .catch(() => {});
     }
 
     if (cached && cached.length > 0) {
       // Ensure per-ID cache entries exist so getById() works offline even
-      // if the background refresh hasn't completed yet.
+      // if the background refresh hasn't completed yet. Also opportunistically
+      // catch up on any media that a prior pass didn't get to (idempotent —
+      // prefetchConfig skips already-downloaded items).
       cacheConfigs(cached).catch(() => {});
+      prefetchPublishedMedia(cached);
       return status ? cached.filter((c) => c.status === status) : cached;
     }
 
@@ -127,6 +148,7 @@ export const workflowConfigService = {
       lsWrite(productId, res.data);
       await offlineStore.saveCache(CACHE_PRODUCT_KEY(productId), res.data);
       await cacheConfigs(res.data);
+      prefetchPublishedMedia(res.data);
       return status ? res.data.filter((c) => c.status === status) : res.data;
     } catch (err: unknown) {
       console.warn("[workflowConfigService] API unavailable, falling back to localStorage", err);
@@ -169,6 +191,7 @@ export const workflowConfigService = {
     try {
       const res = await api.get<WorkflowConfig>(`/workflow-configs/${id}`);
       await offlineStore.saveCache(CACHE_ID_KEY(id), res.data);
+      prefetchPublishedMedia([res.data]);
       // Also persist to localStorage so the next `getById` (and `lsReadAll` callers
       // in `openQuickActionOrStart`) can find the config even if the IndexedDB
       // cache entry was evicted. `lsRead` is keyed by productId; the response

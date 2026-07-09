@@ -242,6 +242,19 @@ function workflowTypeMismatchMessage(typeName: string | undefined, configType: s
   return null;
 }
 
+/**
+ * The Assign Workflow dialog only asks for a config now (workflow type is
+ * redundant — every config already implies its own type). This derives the
+ * workflowTypeId the create() call still needs from the chosen config itself:
+ * its own workflowTypeId FK when set, else matched by configType name.
+ */
+function resolveConfigWorkflowTypeId(config: WorkflowConfig, types: WorkflowType[]): string {
+  if (config.workflowTypeId) return config.workflowTypeId;
+  const normalized = config.configType?.trim().toLowerCase();
+  if (!normalized) return "";
+  return types.find((t) => t.name.trim().toLowerCase() === normalized)?.id ?? "";
+}
+
 // ------------------------------------------------------------------
 // Health tracking
 // ------------------------------------------------------------------
@@ -1458,17 +1471,6 @@ const AssetInstallationPage = () => {
       `${a.configType ?? ""}${a.name}`.localeCompare(`${b.configType ?? ""}${b.name}`)
     );
   }, [publishedWfConfigs]);
-  const selectedAssignWorkflowType = useMemo(
-    () => workflowTypes.find((type) => type.id === assignForm.workflowTypeId) ?? null,
-    [workflowTypes, assignForm.workflowTypeId],
-  );
-  const filteredAssignWorkflowConfigs = useMemo(() => {
-    if (!selectedAssignWorkflowType) return workflowConfigs;
-    return workflowConfigs.filter((config) =>
-      config.workflowTypeId === selectedAssignWorkflowType.id ||
-      config.configType === selectedAssignWorkflowType.name
-    );
-  }, [workflowConfigs, selectedAssignWorkflowType]);
   const selectedBulkWorkflowType = useMemo(
     () => workflowTypes.find((type) => type.id === bulkWfTypeId) ?? null,
     [workflowTypes, bulkWfTypeId],
@@ -2093,7 +2095,8 @@ const AssetInstallationPage = () => {
     setAssignDialogAsset(asset);
     setAssignForm({ workflowTypeId: "", workflowConfigId: "" });
     setAssignDialogOpen(true);
-    // Load workflow types + published configs for this product
+    // Load workflow types (needed only to resolve a config's type id for the
+    // create() call — the dialog itself only shows Published configs) + configs.
     try {
       const [types, cfgs] = await Promise.all([
         workflowTypeService.list(),
@@ -2108,9 +2111,10 @@ const AssetInstallationPage = () => {
             config.configType?.trim().toLowerCase() === requestedWorkflowType?.trim().toLowerCase()
           )
         : [];
+      const preselected = matchingConfigs.length === 1 ? matchingConfigs[0] : null;
       setAssignForm({
-        workflowTypeId: requestedWorkflowTypeId,
-        workflowConfigId: matchingConfigs.length === 1 ? matchingConfigs[0].id : "",
+        workflowTypeId: preselected ? resolveConfigWorkflowTypeId(preselected, types) : "",
+        workflowConfigId: preselected?.id ?? "",
       });
     } catch { console.warn("[AssetInstallationPage] failed to load workflow types/configs"); }
   }
@@ -2156,11 +2160,16 @@ const AssetInstallationPage = () => {
   }
 
   async function resolvePreferredAssignment(asset: ProjectAsset): Promise<WorkflowAssignment | null> {
-    const existing = assignmentsMap[asset.id];
-    if (existing !== undefined) {
-      return pickPreferredAssignment(asset, existing) ?? null;
-    }
-
+    // Always defer to the service's own local-first + background-refresh
+    // pattern rather than short-circuiting on assignmentsMap directly — that
+    // in-memory map is only ever populated once per asset per page session
+    // (e.g. from the mobile offline-cache priming pass) and never
+    // invalidated, so a short-circuit here meant a newly-assigned or
+    // reassigned workflow made server-side (e.g. from the web) stayed
+    // invisible until something else happened to force a refetch (expanding
+    // the row, reopening run history, etc.) — even while fully online.
+    // listByAsset is cheap to call repeatedly: it resolves from local cache
+    // instantly and only awaits the network when there's truly nothing local.
     try {
       const assignments = await assetWorkflowAssignmentService.listByAsset(asset.id);
       setAssignmentsMap((prev) => ({ ...prev, [asset.id]: assignments }));
@@ -5216,28 +5225,22 @@ const AssetInstallationPage = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl size="small" fullWidth required>
-              <InputLabel shrink>Workflow Type *</InputLabel>
-              <Select
-                label="Workflow Type *"
-                value={assignForm.workflowTypeId}
-                onChange={(e) => setAssignForm({ workflowTypeId: e.target.value, workflowConfigId: "" })}
-              >
-                {workflowTypes.map((t) => (
-                  <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl size="small" fullWidth required>
               <InputLabel shrink>Workflow Config (Published) *</InputLabel>
               <Select
                 label="Workflow Config (Published) *"
                 value={assignForm.workflowConfigId}
-                onChange={(e) => setAssignForm((p) => ({ ...p, workflowConfigId: e.target.value }))}
+                onChange={(e) => {
+                  const cfg = workflowConfigs.find((c) => c.id === e.target.value);
+                  setAssignForm({
+                    workflowConfigId: e.target.value,
+                    workflowTypeId: cfg ? resolveConfigWorkflowTypeId(cfg, workflowTypes) : "",
+                  });
+                }}
               >
-                {filteredAssignWorkflowConfigs.length === 0 && (
+                {workflowConfigs.length === 0 && (
                   <MenuItem value="" disabled>No published configs available</MenuItem>
                 )}
-                {filteredAssignWorkflowConfigs.map((c) => (
+                {workflowConfigs.map((c) => (
                   <MenuItem key={c.id} value={c.id}>
                     {c.name}
                     {c.configType ? ` - ${c.configType}` : ""}
@@ -5246,16 +5249,6 @@ const AssetInstallationPage = () => {
                 ))}
               </Select>
             </FormControl>
-            {(() => {
-              const selType = workflowTypes.find((t) => t.id === assignForm.workflowTypeId);
-              const selCfg  = workflowConfigs.find((c) => c.id === assignForm.workflowConfigId);
-              const msg = assignForm.workflowTypeId && assignForm.workflowConfigId
-                ? workflowTypeMismatchMessage(selType?.name, selCfg?.configType)
-                : null;
-              return msg ? (
-                <Alert severity="warning" sx={{ fontSize: "0.8rem" }}>{msg}</Alert>
-              ) : null;
-            })()}
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -5263,7 +5256,7 @@ const AssetInstallationPage = () => {
           <Button
             variant="contained"
             onClick={saveAssignment}
-            disabled={assignSaving || !assignForm.workflowTypeId || !assignForm.workflowConfigId}
+            disabled={assignSaving || !assignForm.workflowConfigId}
             startIcon={assignSaving ? <CircularProgress size={14} /> : undefined}
           >
             {assignSaving ? "Saving..." : "Assign"}
