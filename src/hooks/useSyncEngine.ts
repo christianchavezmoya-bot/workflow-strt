@@ -427,6 +427,10 @@ export function useSyncEngine(): SyncState {
     setHasError(false);
 
     let anyError = false;
+    // Run entityIds whose op was rejected by the server this pass — dependent
+    // ops for the SAME run (e.g. signatures after a rejected RUN_COMPLETE)
+    // must not proceed against a run the server never actually completed.
+    const droppedRunEntityIds = new Set<string>();
 
     for (const action of due) {
       // Skip if the action this depends on hasn't been synced yet
@@ -436,6 +440,13 @@ export function useSyncEngine(): SyncState {
           (a) => a.id === action.dependsOnOpId && a.status !== "uploading"
         );
         if (depStillPending) continue;
+      }
+
+      // If an earlier op for this run was rejected this pass, don't run
+      // dependent ops (e.g. signatures after a rejected RUN_COMPLETE)
+      // against a bad state.
+      if (action.entityType === "workflow-run" && droppedRunEntityIds.has(action.entityId)) {
+        continue;
       }
 
       // ── Conflict detection (PATCH / PUT only) ─────────────────────────────
@@ -508,8 +519,24 @@ export function useSyncEngine(): SyncState {
           }));
           anyError = true;
         } else if (httpStatus && httpStatus !== 429 && httpStatus >= 400 && httpStatus < 500) {
-          // Other 4xx: drop — entity deleted or request malformed
-          await pendingRemove(action.id);
+          const isWorkflowRunOp = action.entityType === "workflow-run";
+          const isRejectableStatus = httpStatus === 422 || httpStatus === 400;
+          if (isWorkflowRunOp && isRejectableStatus) {
+            // Server rejected a workflow op (e.g. RUN_COMPLETE with open blocking
+            // issues). This is NOT "malformed/deleted" — it's a rejection the user
+            // must see, and dependent ops (signatures after a rejected complete)
+            // must not proceed against a run the server never completed.
+            await pendingMarkConflict(action.id);
+            await markRunSyncFailed(action.entityId, `Server rejected (${httpStatus})`);
+            window.dispatchEvent(new CustomEvent("sync-conflict-detected", {
+              detail: { actionId: action.id, entityId: action.entityId, entityType: action.entityType, httpStatus },
+            }));
+            droppedRunEntityIds.add(action.entityId);
+            anyError = true;
+          } else {
+            // Other 4xx: drop — entity deleted or request malformed
+            await pendingRemove(action.id);
+          }
         } else {
           const msg = e instanceof Error ? e.message : String(e);
           const diagnostics = buildSyncAttemptDiagnostics({
