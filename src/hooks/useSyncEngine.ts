@@ -415,14 +415,27 @@ export function useSyncEngine(): SyncState {
     const conn = connectivityRef.current;
     if (_flushing || conn === "offline" || conn === "server-unreachable" || conn === "token-expired") return;
 
+    // Claim the lock BEFORE the first await. flush() is called from four
+    // independent listeners (window "online", Capacitor Network status
+    // change, Capacitor App foreground, visibility change) that can all fire
+    // within the same tick when a phone regains signal. The old code set
+    // _flushing = true only after `await pendingGetDue()` returned, leaving a
+    // window where a second concurrent call could pass the guard above,
+    // read the same due actions, and send the same request twice — e.g. two
+    // RUN_COMPLETE POSTs for the same run, where the first succeeds and the
+    // second gets rejected by the server as a spurious "someone else edited
+    // this" conflict, even though nothing actually conflicted.
+    _flushing = true;
+
     const due = await pendingGetDue();
     if (due.length === 0) {
+      // Nothing to do — release the lock so a later real flush can proceed.
+      _flushing = false;
       // Nothing due — but there may be future-scheduled items; let scheduleRetry handle them
       await scheduleRetryRef.current?.();
       return;
     }
 
-    _flushing = true;
     setSyncing(true);
     setHasError(false);
 
