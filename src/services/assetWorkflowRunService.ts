@@ -376,6 +376,31 @@ function signalLocalRunUpdate(run: AssetWorkflowRun): void {
   }));
 }
 
+function parseRunIssues(issuesJson: string | undefined): RunIssue[] {
+  if (!issuesJson) return [];
+  try {
+    const parsed = JSON.parse(issuesJson) as RunIssue[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function deriveOfflineAssetStatusFromRun(run: Pick<AssetWorkflowRun, "status" | "isLocked" | "issuesJson" | "signatureStatus" | "customerSignedAt">): ProjectAssetStatus {
+  const hasOpenBlockingIssue = parseRunIssues(run.issuesJson)
+    .some((issue) => issue.isBlocking && !issue.resolved);
+
+  if (!run.isLocked) {
+    if (run.status === "Paused") return "Paused";
+    if (hasOpenBlockingIssue) return "Issue";
+    return "InProgress";
+  }
+
+  if (run.signatureStatus === "PendingInstaller") return "Pending";
+  if (run.signatureStatus === "PendingCustomer" && !run.customerSignedAt) return "Pending";
+  return "Complete";
+}
+
 async function enqueueRunMutation(
   runId: string,
   input: {
@@ -946,6 +971,10 @@ export const assetWorkflowRunService = {
       // Sync issues store so Issues Board reflects the change immediately, offline.
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
       await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);
+      await applyOfflineAssetStatusUpdate(
+        offlineRun.assetId,
+        deriveOfflineAssetStatusFromRun(offlineRun),
+      );
       const existing = (await syncQueue.listByEntityId(resolvedRunId))
         .filter((op) => op.opType === "ISSUE_UPDATE" && op.url === `/asset-workflow-runs/${resolvedRunId}/issues`)
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];

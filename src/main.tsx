@@ -11,6 +11,7 @@ import { ViewModeProvider } from "./contexts/ViewModeContext";
 import { AccessModeProvider } from "./contexts/AccessModeContext";
 import { NotificationInboxProvider } from "./contexts/NotificationInboxContext";
 import { ComplexViewProvider } from "./contexts/ComplexViewContext";
+import { OfflineModeProvider } from "./contexts/OfflineModeContext";
 import "./index.css";
 import { defineCustomElements } from "@ionic/pwa-elements/loader";
 
@@ -29,9 +30,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <AccessModeProvider>
               <NotificationInboxProvider>
                 <ViewModeProvider>
-                  <FieldNotificationProvider>
-                    <App />
-                  </FieldNotificationProvider>
+                  <OfflineModeProvider>
+                    <FieldNotificationProvider>
+                      <App />
+                    </FieldNotificationProvider>
+                  </OfflineModeProvider>
                 </ViewModeProvider>
               </NotificationInboxProvider>
             </AccessModeProvider>

@@ -1,0 +1,139 @@
+From d4e66dad202aabcef463bf83e0638f6a79a2aa3e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 8 Jul 2026 04:39:43 +0000
+Subject: [PATCH] fix(offline): update status/features/actions after offline
+ run writes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Offline, pausing a run / creating an issue / capturing a missing photo persisted
+locally (offlineStore.saveRun) but the Assets page never re-rendered — status,
+feature widgets and the action button kept showing the pre-change state until the
+app went back online. Online it worked.
+
+Root cause: the Assets page refreshes its runsMap on the
+"workflow-runs-cache-updated" event, but that event was only dispatched by
+refreshRunsInBackground / refreshRunByIdInBackground, which both early-return on
+shouldSkipBlockingFetch() (offline) and only fire after a successful network GET.
+So offline writes produced no refresh signal.
+
+Added signalLocalRunUpdate(run): dispatched on every offline write path (after
+offlineStore.saveRun in saveProgress, patchIssues, patchStepResults/A1,
+completeRun, time-entry, and run-create) with { assetId, runs:[run], mergeById }.
+The Assets page listener now, when mergeById is set, replaces that one run by id and
+keeps the rest of the asset's run history intact (instead of clobbering the
+list) — so status/features/actions update immediately offline without a network
+round-trip, and run history is preserved.
+
+Client-only, no backend, no api.ts change. Two files. tsc -b + build clean.
+Note: needs device verification (offline pause/issue/photo → display updates).
+---
+ .../installations/AssetInstallationPage.tsx   | 16 +++++++++++++---
+ src/services/assetWorkflowRunService.ts       | 19 +++++++++++++++++++
+ 2 files changed, 32 insertions(+), 3 deletions(-)
+
+diff --git a/src/features/installations/AssetInstallationPage.tsx b/src/features/installations/AssetInstallationPage.tsx
+index 94c51c4..d7cb51a 100644
+--- a/src/features/installations/AssetInstallationPage.tsx
++++ b/src/features/installations/AssetInstallationPage.tsx
+@@ -1307,14 +1307,24 @@ const AssetInstallationPage = () => {
+
+   useEffect(() => {
+     const handler = (e: Event) => {
+-      const { assetId, projectId, runs } = (e as CustomEvent<{
+-        assetId?: string; projectId?: string; runs: AssetWorkflowRun[];
++      const { assetId, projectId, runs, mergeById } = (e as CustomEvent<{
++        assetId?: string; projectId?: string; runs: AssetWorkflowRun[]; mergeById?: boolean;
+       }>).detail ?? {};
+       if (!Array.isArray(runs) || runs.length === 0) return;
+       setRunsMap((prev) => {
+         const next = { ...prev };
+         if (assetId) {
+-          next[assetId] = runs;
++          if (mergeById && prev[assetId] && prev[assetId].length > 0) {
++            // Local offline update of a single run — replace that run by id and
++            // keep the rest of the asset's run history intact.
++            const existing = prev[assetId];
++            const merged = existing.map((r) => runs.find((u) => u.id === r.id) ?? r);
++            // include any updated run not already present (e.g. a brand-new run)
++            runs.forEach((u) => { if (!merged.some((r) => r.id === u.id)) merged.push(u); });
++            next[assetId] = merged;
++          } else {
++            next[assetId] = runs;
++          }
+         } else if (projectId) {
+           const byAsset: Record<string, AssetWorkflowRun[]> = {};
+           runs.forEach((r) => {
+diff --git a/src/services/assetWorkflowRunService.ts b/src/services/assetWorkflowRunService.ts
+index c8fb0be..440a83e 100644
+--- a/src/services/assetWorkflowRunService.ts
++++ b/src/services/assetWorkflowRunService.ts
+@@ -354,6 +354,19 @@ function refreshRunByIdInBackground(resolvedId: string): void {
+     });
+ }
+
++// Signal that a run was updated LOCALLY (offline write path). The Assets page's
++// workflow-runs-cache-updated listener refreshes its runsMap from this, so
++// status/features/actions update offline WITHOUT a network round-trip. This is
++// the offline counterpart to refreshRuns*InBackground, which only dispatch after
++// a successful network GET (they early-return when offline) — so without this,
++// offline pause/issue/missing-photo writes persisted locally but the UI never
++// re-rendered until the app went back online.
++function signalLocalRunUpdate(run: AssetWorkflowRun): void {
++  window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
++    detail: { assetId: run.assetId, runs: [run], mergeById: true },
++  }));
++}
++
+ async function enqueueRunMutation(
+   runId: string,
+   input: {
+@@ -617,6 +630,7 @@ export const assetWorkflowRunService = {
+       };
+
+       await offlineStore.saveRun(offlineRun);
++      signalLocalRunUpdate(offlineRun);
+       await syncQueue.enqueue({
+         opType: "RUN_CREATE",
+         url: "/asset-workflow-runs",
+@@ -678,6 +692,7 @@ export const assetWorkflowRunService = {
+       };
+
+       await offlineStore.saveRun(offlineRun);
++      signalLocalRunUpdate(offlineRun);
+       // Sync issues store so Issues Board reflects any issue changes from progress saves.
+       // Fix: must call this even when openRecords is empty — entityReplaceIssuesForAsset
+       // correctly removes stale closed entries, unlike the old entityPutIssues-only call.
+@@ -783,6 +798,7 @@ export const assetWorkflowRunService = {
+       };
+
+       await offlineStore.saveRun(offlineRun);
++      signalLocalRunUpdate(offlineRun);
+       // Sync issues store so Issues Board reflects any issue changes from completion.
+       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
+@@ -855,6 +871,7 @@ export const assetWorkflowRunService = {
+       };
+
+       await offlineStore.saveRun(offlineRun);
++      signalLocalRunUpdate(offlineRun);
+       // Sync issues store so Issues Board reflects the change immediately, offline.
+       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
+@@ -952,6 +969,7 @@ export const assetWorkflowRunService = {
+         syncError: undefined,
+       };
+       await offlineStore.saveRun(offlineRun);
++      signalLocalRunUpdate(offlineRun);
+
+       await enqueueRunMutation(resolvedRunId, {
+         opType: "STEP_RESULTS",
+@@ -1043,6 +1061,7 @@ export const assetWorkflowRunService = {
+       );
+
+       await offlineStore.saveRun(offlineRun);
++      signalLocalRunUpdate(offlineRun);
+       await enqueueTimeEntry(resolvedRunId, body, {
+         timeTrackingJson: offlineRun.timeTrackingJson,
+         productiveSeconds: offlineRun.productiveSeconds,
+--
+2.43.0

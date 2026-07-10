@@ -2,7 +2,7 @@ import axios from "axios";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
-import { shouldSkipBlockingFetch, getNativeNetworkConnected } from "./connectivityMonitor";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { formatPayloadSize } from "../utils/syncDiagnostics";
 
@@ -128,23 +128,16 @@ const silentRefresh = async () => {
 api.interceptors.request.use(async (config) => {
   const url = config.url ?? "";
 
-  // Non-auth requests: bail instantly ONLY when the device radio is
-  // definitively off — a stale `/health` ping must NOT block all data
-  // traffic. (A single slow ping previously flipped `getServerReachable()`
-  // false and held for up to 30 s, blocking every fetch and serving stale
-  // local cache. `connectivityMonitor.startConnectivityMonitor` clears the
-  // flag within milliseconds via the `api-server-reachable` event listener,
-  // so a momentary false-offline never causes a sustained stall.)
-  //
-  // Note: `getServerReachable()` is intentionally NOT consulted here. A
-  // genuinely-down server now costs the full axios 10 s timeout per
-  // uncached call (accepted trade-off); cache hits still return instantly
-  // via the response-interceptor cache fallback.
+  // Non-auth requests: bail instantly when the app is in offline mode.
+  // The single authority is connectivityMonitor.shouldSkipBlockingFetch(),
+  // which now reads the OfflineModeContext-backed module flag instead of the
+  // raw server-reachable ping state directly. This keeps request skipping
+  // aligned with the app's shared offline-mode decision.
   //
   // The thrown error keeps the same shape as a real network error so every
   // service's `isOfflineNetworkError()` still routes to the offline path.
   // Auth calls are exempt — login must keep working to recover.
-  if (!url.includes("/auth/") && isMobileNativePlatform() && getNativeNetworkConnected() === false) {
+  if (!url.includes("/auth/") && isMobileNativePlatform() && shouldSkipBlockingFetch()) {
     const err = new Error("offline-skip") as Error & { code?: string; isOfflineSkip?: boolean };
     err.code = "ERR_NETWORK";
     err.isOfflineSkip = true;

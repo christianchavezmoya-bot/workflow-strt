@@ -376,6 +376,17 @@ export function useSyncEngine(): SyncState {
   const connectivityRef = useRef(connectivity);
   connectivityRef.current = connectivity;
 
+  const setConnectivityState = useCallback((next: ConnectivityState) => {
+    connectivityRef.current = next;
+    setConnectivity(next);
+  }, []);
+
+  const setConnectivityUnlessTokenExpired = useCallback((next: Exclude<ConnectivityState, "token-expired">) => {
+    if (connectivityRef.current === "token-expired") return;
+    connectivityRef.current = next;
+    setConnectivity(next);
+  }, []);
+
   // Refresh badge count and conflict count from IndexedDB
   const refreshPending = useCallback(async () => {
     setPending(await pendingCount());
@@ -510,7 +521,7 @@ export function useSyncEngine(): SyncState {
             if (timedOutAgainstReachableServer) {
               continue;
             }
-            setConnectivity(navigator.onLine ? "server-unreachable" : "offline");
+            setConnectivityState(navigator.onLine ? "server-unreachable" : "offline");
             break;
           }
         }
@@ -525,7 +536,7 @@ export function useSyncEngine(): SyncState {
 
     // Schedule next retry if there are still items with future nextRetryAt
     await scheduleRetryRef.current?.();
-  }, [refreshPending]);
+  }, [refreshPending, setConnectivityState]);
 
   // ── Scheduled retry timer ─────────────────────────────────────────────────
   const scheduleRetry = useCallback(async () => {
@@ -550,18 +561,18 @@ export function useSyncEngine(): SyncState {
   // ── Online / offline events ────────────────────────────────────────────────
   useEffect(() => {
     const handleOnline  = () => {
-      setConnectivity(prev => prev === "token-expired" ? prev : "online");
+      setConnectivityUnlessTokenExpired("online");
       if (isMobileNativePlatform()) pingNow();
       void flush();
     };
-    const handleOffline = () => setConnectivity("offline");
+    const handleOffline = () => setConnectivityState("offline");
     window.addEventListener("online",  handleOnline);
     window.addEventListener("offline", handleOffline);
     return () => {
       window.removeEventListener("online",  handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [flush]);
+  }, [flush, setConnectivityState, setConnectivityUnlessTokenExpired]);
 
   // Native mobile connectivity events are more reliable than window online/offline.
   useEffect(() => {
@@ -572,11 +583,11 @@ export function useSyncEngine(): SyncState {
     void Network.addListener("networkStatusChange", (status) => {
       if (!active) return;
       if (status.connected) {
-        setConnectivity((prev) => prev === "token-expired" ? prev : "online");
+        setConnectivityUnlessTokenExpired("online");
         if (isMobileNativePlatform()) pingNow();
         void flush();
       } else {
-        setConnectivity("offline");
+        setConnectivityState("offline");
       }
     }).then((listener) => {
       remove = () => { void listener.remove(); };
@@ -586,7 +597,7 @@ export function useSyncEngine(): SyncState {
       active = false;
       remove?.();
     };
-  }, [flush]);
+  }, [flush, setConnectivityState, setConnectivityUnlessTokenExpired]);
 
   // iOS app foreground - appStateChange is more reliable than visibilitychange in WKWebView.
   // Flushes pending writes when the app comes to the foreground on a native platform.
@@ -596,7 +607,13 @@ export function useSyncEngine(): SyncState {
     let listenerHandle: { remove: () => void } | undefined;
     App.addListener("appStateChange", ({ isActive }) => {
       if (!isActive) return; // going to background - nothing to do here
-      if (navigator.onLine) void flush();
+      pingNow();
+      if (navigator.onLine) {
+        setConnectivityUnlessTokenExpired("online");
+        void flush();
+      } else {
+        setConnectivityState("offline");
+      }
       window.dispatchEvent(new CustomEvent("app-foregrounded", {
         detail: { timestamp: Date.now() },
       }));
@@ -606,7 +623,7 @@ export function useSyncEngine(): SyncState {
     return () => {
       listenerHandle?.remove();
     };
-  }, [flush]);
+  }, [flush, setConnectivityState, setConnectivityUnlessTokenExpired]);
 
   // ── Visibility change (phone unlock / tab switch) ──────────────────────────
   useEffect(() => {
@@ -626,17 +643,24 @@ export function useSyncEngine(): SyncState {
 
   // ── Server reachability / auth error state machine ────────────────────────
   useEffect(() => {
-    const handleUnreachable = () => setConnectivity("server-unreachable");
+    const handleUnreachable = () => setConnectivityState("server-unreachable");
     const handleReachable   = () => {
-      setConnectivity("online");
+      setConnectivityState("online");
       setLastSyncAt(new Date());
       void flush();
     };
-    const handleAuthError   = () => setConnectivity("token-expired");
+    const handleAuthError = () => setConnectivityState("token-expired");
+    const handleAuthRecovered = () => {
+      setConnectivityState("online");
+      setLastSyncAt(new Date());
+      void flush();
+    };
 
     window.addEventListener("api-serving-cache",        handleUnreachable);
+    window.addEventListener("offline-mode-online",      handleReachable);
     window.addEventListener("api-server-reachable",     handleReachable);
     window.addEventListener("api-auth-error",           handleAuthError);
+    window.addEventListener("auth-change",              handleAuthRecovered);
     // Background read failures from repositories — these fire on every screen's
     // data refresh, not just on writes, so they catch "server is down but I have
     // nothing queued" which the write-only paths below can never detect.
@@ -645,13 +669,15 @@ export function useSyncEngine(): SyncState {
     window.addEventListener("repo:issues:fetch-failed",   handleUnreachable);
     return () => {
       window.removeEventListener("api-serving-cache",        handleUnreachable);
+      window.removeEventListener("offline-mode-online",      handleReachable);
       window.removeEventListener("api-server-reachable",     handleReachable);
       window.removeEventListener("api-auth-error",           handleAuthError);
+      window.removeEventListener("auth-change",              handleAuthRecovered);
       window.removeEventListener("repo:assets:fetch-failed",   handleUnreachable);
       window.removeEventListener("repo:projects:fetch-failed", handleUnreachable);
       window.removeEventListener("repo:issues:fetch-failed",   handleUnreachable);
     };
-  }, [flush]);
+  }, [flush, setConnectivityState]);
 
   // ── Server reachability via dedicated background ping ─────────────────────
   // Subscribes to the singleton ping in services/connectivityMonitor.ts.
