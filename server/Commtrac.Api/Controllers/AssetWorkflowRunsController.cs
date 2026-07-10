@@ -817,11 +817,21 @@ public class AssetWorkflowRunsController : ControllerBase
                     };
                 asset.UpdatedAt = DateTime.UtcNow;
             }
-            // If no locked run exists, leave asset.Status unchanged — the
-            // run is still in progress (or paused) and the asset's status
-            // is whatever was set when the run started. (Previously this
-            // block fell through into the default arm above, marking the
-            // asset Complete while the run was still paused.)
+            else if (asset.Status != "NotStarted")
+            {
+                // No locked run yet — the workflow is still active (in
+                // progress or paused). Mirror SaveProgress's symmetric
+                // handling (PUT {id}) so this endpoint can both set AND
+                // clear "Issue" for an active run, instead of only ever
+                // being able to set it here — previously, closing the last
+                // open issue on a still-active run left asset.Status stuck
+                // on "Issue" until the run was eventually locked/completed,
+                // since the block above never ran for an unlocked run.
+                asset.Status = anyOpenIssue
+                    ? "Issue"
+                    : (run.Status == "Paused" ? "Paused" : "InProgress");
+                asset.UpdatedAt = DateTime.UtcNow;
+            }
         }
 
         await _db.SaveChangesAsync();
