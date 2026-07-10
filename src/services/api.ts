@@ -128,11 +128,9 @@ const silentRefresh = async () => {
 api.interceptors.request.use(async (config) => {
   const url = config.url ?? "";
 
-  // Non-auth requests: bail instantly when the app is in offline mode.
-  // The single authority is connectivityMonitor.shouldSkipBlockingFetch(),
-  // which now reads the OfflineModeContext-backed module flag instead of the
-  // raw server-reachable ping state directly. This keeps request skipping
-  // aligned with the app's shared offline-mode decision.
+  // Non-auth requests: bail instantly only when the device truly has no
+  // signal or the user explicitly forced manual offline mode.
+  // A failed reachability ping must not suppress normal online reads.
   //
   // The thrown error keeps the same shape as a real network error so every
   // service's `isOfflineNetworkError()` still routes to the offline path.

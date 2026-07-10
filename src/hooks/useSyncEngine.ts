@@ -41,7 +41,12 @@ import type { SignatureEvent } from "../types/signature";
 import { mediaStore } from "../services/mediaStore";
 import syncQueue from "../services/syncQueue";
 import { isMobileNativePlatform } from "../utils/platform";
-import { subscribeServerReachable, pingNow, getServerReachable } from "../services/connectivityMonitor";
+import {
+  subscribeServerReachable,
+  pingNow,
+  getNativeNetworkConnected,
+  getServerReachable,
+} from "../services/connectivityMonitor";
 import {
   buildSyncAttemptDiagnostics,
   measurePayload,
@@ -112,12 +117,19 @@ export interface QueueOrSendOpts {
 // ── Singleton flush lock so multiple hook instances don't double-flush ────────
 let _flushing = false;
 
+function hasNetworkSignal(): boolean {
+  if (isMobileNativePlatform()) {
+    return getNativeNetworkConnected() !== false;
+  }
+  return typeof navigator === "undefined" || navigator.onLine;
+}
+
 function isNetworkLikeError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return !navigator.onLine;
+  if (!error || typeof error !== "object") return !hasNetworkSignal();
   const candidate = error as { response?: unknown; code?: string; message?: string };
   if (candidate.response) return false;
   return (
-    !navigator.onLine ||
+    !hasNetworkSignal() ||
     candidate.code === "ECONNABORTED" ||
     candidate.code === "ERR_NETWORK" ||
     candidate.message === "Network Error"
@@ -360,7 +372,7 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
 
 export function useSyncEngine(): SyncState {
   const [connectivity, setConnectivity] = useState<ConnectivityState>(
-    typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "online"
+    hasNetworkSignal() ? "online" : "offline"
   );
   const [syncing,       setSyncing]       = useState(false);
   const [pending,       setPending]       = useState(0);
@@ -521,7 +533,7 @@ export function useSyncEngine(): SyncState {
             if (timedOutAgainstReachableServer) {
               continue;
             }
-            setConnectivityState(navigator.onLine ? "server-unreachable" : "offline");
+            setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
             break;
           }
         }
@@ -608,7 +620,7 @@ export function useSyncEngine(): SyncState {
     App.addListener("appStateChange", ({ isActive }) => {
       if (!isActive) return; // going to background - nothing to do here
       pingNow();
-      if (navigator.onLine) {
+      if (hasNetworkSignal()) {
         setConnectivityUnlessTokenExpired("online");
         void flush();
       } else {
@@ -628,7 +640,7 @@ export function useSyncEngine(): SyncState {
   // ── Visibility change (phone unlock / tab switch) ──────────────────────────
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === "visible" && navigator.onLine) void flush();
+      if (document.visibilityState === "visible" && hasNetworkSignal()) void flush();
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
@@ -643,7 +655,9 @@ export function useSyncEngine(): SyncState {
 
   // ── Server reachability / auth error state machine ────────────────────────
   useEffect(() => {
-    const handleUnreachable = () => setConnectivityState("server-unreachable");
+    const handleUnreachable = () => {
+      setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
+    };
     const handleReachable   = () => {
       setConnectivityState("online");
       setLastSyncAt(new Date());
@@ -692,14 +706,14 @@ export function useSyncEngine(): SyncState {
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
     void refreshPending();
-    if (navigator.onLine) void flush();
+    if (hasNetworkSignal()) void flush();
   }, [flush, refreshPending]);
 
   // ── queueOrSend ───────────────────────────────────────────────────────────
   const queueOrSend = useCallback(async <T>(opts: QueueOrSendOpts): Promise<T | null> => {
     const { url, method, body, entityType, entityId, optimisticPatch = {} } = opts;
 
-    if (navigator.onLine) {
+    if (hasNetworkSignal()) {
       try {
         const requestBody = await mediaStore.resolveUploadPayload(body);
         const res = await api.request<T>({ url, method, data: requestBody });

@@ -14,6 +14,7 @@ import {
 } from "../services/connectivityMonitor";
 import {
   isOfflineModeActive,
+  setManualOfflineModeActive,
   setOfflineModeActive,
 } from "../services/offlineModeState";
 import { isMobileNativePlatform } from "../utils/platform";
@@ -91,10 +92,11 @@ export function OfflineModeProvider({ children }: { children: ReactNode }) {
     const wasOffline = offlineRef.current;
     offlineRef.current = isOfflineMode;
     setOfflineModeActive(isOfflineMode);
+    setManualOfflineModeActive(manualOffline);
     if (wasOffline && !isOfflineMode) {
       window.dispatchEvent(new Event("offline-mode-online"));
     }
-  }, [isOfflineMode]);
+  }, [isOfflineMode, manualOffline]);
 
   const goOffline = () => {
     setManualOffline(true);

@@ -1,12 +1,23 @@
 import CloudOffOutlinedIcon from "@mui/icons-material/CloudOffOutlined";
 import { Box, Stack, Typography } from "@mui/material";
+import { useEffect, useState } from "react";
 import { useOfflineMode } from "../../contexts/OfflineModeContext";
-import { useSyncEngine } from "../../hooks/useSyncEngine";
+import { pendingCount as getPendingCount } from "../../services/localDB";
 import { isMobileNativePlatform } from "../../utils/platform";
 
 export default function OfflineModeBanner() {
   const { isOfflineMode } = useOfflineMode();
-  const { pendingCount } = useSyncEngine();
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    const refreshPendingCount = () => {
+      void getPendingCount().then(setPendingCount).catch(() => {});
+    };
+
+    refreshPendingCount();
+    window.addEventListener("sync-pending-changed", refreshPendingCount);
+    return () => window.removeEventListener("sync-pending-changed", refreshPendingCount);
+  }, []);
 
   if (!isMobileNativePlatform() || !isOfflineMode) return null;
 

@@ -447,6 +447,18 @@ const Dashboard = () => {
     };
   }, [isManager, isViewer, selectedDashboardId]);
 
+  const refreshLiveDashboardData = useCallback(() => {
+    projectAssetService.listOpen().then(setOpenAssets);
+    projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
+    setWorkspaceLoading(true);
+    projectAssetService
+      .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
+      .then((data) => setDashboardWorkspace(data))
+      .finally(() => setWorkspaceLoading(false));
+    loadAttention();
+    setAnalyticsRefreshTick((t) => t + 1);
+  }, [isManager, loadAttention, selectedDashboardId]);
+
   // PM: listen for new auto-assign flags written by AssetInstallationPage
   useEffect(() => {
     if (!isManager) return;
@@ -497,30 +509,27 @@ const Dashboard = () => {
 
   // Notification-driven refresh: run state events → workspace + open assets + attention items + analytics
   useEffect(() => {
-    const refresh = () => {
-      projectAssetService.listOpen().then(setOpenAssets);
-      projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
-      setWorkspaceLoading(true);
-      projectAssetService
-        .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
-        .then((data) => setDashboardWorkspace(data))
-        .finally(() => setWorkspaceLoading(false));
-      loadAttention();
-      setAnalyticsRefreshTick((t) => t + 1);
-    };
-    window.addEventListener("notifications:run-state-changed", refresh);
-    window.addEventListener("notifications:refresh", refresh);
+    window.addEventListener("notifications:run-state-changed", refreshLiveDashboardData);
+    window.addEventListener("notifications:refresh", refreshLiveDashboardData);
     // Also listen for asset-level changes dispatched by AssetRepository (and
     // forwarded by offline issue mutations) so the workspace + attention
     // counts refresh live when assets change offline — not only when the
     // notifications:* events happen to be fired alongside.
-    window.addEventListener("repo:assets:updated", refresh);
+    window.addEventListener("repo:assets:updated", refreshLiveDashboardData);
     return () => {
-      window.removeEventListener("notifications:run-state-changed", refresh);
-      window.removeEventListener("notifications:refresh", refresh);
-      window.removeEventListener("repo:assets:updated", refresh);
+      window.removeEventListener("notifications:run-state-changed", refreshLiveDashboardData);
+      window.removeEventListener("notifications:refresh", refreshLiveDashboardData);
+      window.removeEventListener("repo:assets:updated", refreshLiveDashboardData);
     };
-  }, [isManager, selectedDashboardId, loadAttention]);
+  }, [refreshLiveDashboardData]);
+
+  useEffect(() => {
+    const handleServerAssetUpdate = () => {
+      refreshLiveDashboardData();
+    };
+    window.addEventListener("sse:assets:updated", handleServerAssetUpdate);
+    return () => window.removeEventListener("sse:assets:updated", handleServerAssetUpdate);
+  }, [refreshLiveDashboardData]);
 
   // Phase 4 - evidence completeness
   useEffect(() => {

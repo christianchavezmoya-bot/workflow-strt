@@ -21,7 +21,7 @@
 import { App } from "@capacitor/app";
 import { Network } from "@capacitor/network";
 import { isServerReachable } from "./networkService";
-import { isOfflineModeActive } from "./offlineModeState";
+import { isManualOfflineModeActive } from "./offlineModeState";
 import { isMobileNativePlatform } from "../utils/platform";
 
 const PING_INTERVAL_MS = 30_000;
@@ -132,15 +132,14 @@ export function getNativeNetworkConnected(): boolean | null {
 }
 
 /**
- * Skip blocking live fetches when the app is in offline mode.
- * The offline-mode flag is the single source of truth for "server confirmed
- * unreachable" so repositories and interceptors don't invent parallel logic.
- * Native radio-off and browser offline stay as immediate hard stops.
+ * Skip blocking live fetches only when the device really has no signal or the
+ * user explicitly forced manual offline mode. Do not fast-bail normal online
+ * traffic just because a recent server ping failed.
  */
 export function shouldSkipBlockingFetch(): boolean {
   if (isMobileNativePlatform() && nativeNetworkConnected === false) return true;
   if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
-  return isOfflineModeActive();
+  return isManualOfflineModeActive();
 }
 
 /**
