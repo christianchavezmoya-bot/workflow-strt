@@ -22,7 +22,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import api from "../../services/api";
 import {
@@ -484,8 +484,13 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   };
 
   const { label: connLabel, color: connColor } = connectivityLabel(status, pendingCount);
-  const conflicted   = queue.filter(a => a.conflictDetected);
-  const nonConflicted = queue.filter(a => !a.conflictDetected);
+  // Memoized on `queue` so these keep a stable reference across renders that
+  // don't actually change the queue (e.g. the syncing indicator ticking) —
+  // conflicted is a useEffect dependency below, and a fresh array on every
+  // render meant that effect re-ran constantly, restarting the comparison
+  // fetch before it could resolve and leaving "Loading comparison…" stuck.
+  const conflicted    = useMemo(() => queue.filter(a => a.conflictDetected), [queue]);
+  const nonConflicted = useMemo(() => queue.filter(a => !a.conflictDetected), [queue]);
   const hasFailed    = nonConflicted.some(a => a.status === "failed");
 
   useEffect(() => {
