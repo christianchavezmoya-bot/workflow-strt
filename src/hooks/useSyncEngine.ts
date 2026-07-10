@@ -427,6 +427,7 @@ export function useSyncEngine(): SyncState {
     setHasError(false);
 
     let anyError = false;
+    let syncedAny = false;
     // Run entityIds whose op was rejected by the server this pass — dependent
     // ops for the SAME run (e.g. signatures after a rejected RUN_COMPLETE)
     // must not proceed against a run the server never actually completed.
@@ -506,6 +507,7 @@ export function useSyncEngine(): SyncState {
         await processSyncedAction(action, response.data);
         await pendingRemove(action.id);
         await syncMetaSet(action.entityType);
+        syncedAny = true;
       } catch (e: unknown) {
         const httpStatus = (e as { response?: { status?: number } }).response?.status;
         const errorCode = (e as { code?: string } | null)?.code;
@@ -565,6 +567,16 @@ export function useSyncEngine(): SyncState {
           }
         }
       }
+    }
+
+    // Poke the Dashboard + notifications to reconcile after a successful sync
+    // pass — they don't listen to workflow-runs-cache-updated (that's the
+    // Assets page's event), so without this they can stay stale post-sync
+    // until something else happens to trigger a refresh. Fired once per pass,
+    // not per-op, since the Dashboard has no in-flight guard of its own.
+    if (syncedAny) {
+      window.dispatchEvent(new Event("notifications:refresh"));
+      window.dispatchEvent(new Event("repo:assets:updated"));
     }
 
     await refreshPending();
