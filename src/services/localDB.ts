@@ -338,7 +338,13 @@ export async function pendingGetDue(): Promise<PendingAction[]> {
   try {
     const all = await pendingGetAll();
     const now = new Date();
-    return all.filter(a => !a.nextRetryAt || new Date(a.nextRetryAt) <= now);
+    return all
+      .filter(a => !a.nextRetryAt || new Date(a.nextRetryAt) <= now)
+      // Replay in the order the user performed the actions. IndexedDB getAll()
+      // returns by primary-key order, NOT createdAt order, so without this sort a
+      // stacked offline sequence (e.g. RUN_UPDATE -> RUN_COMPLETE -> SIGNATURE_SUBMIT)
+      // could flush out of order and break dependent ops.
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   } catch { return []; }
 }
 
