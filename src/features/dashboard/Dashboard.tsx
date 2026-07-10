@@ -51,6 +51,7 @@ import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/gener
 import { isMobileNativePlatform } from "../../utils/platform";
 import { mediaStore } from "../../services/mediaStore";
 import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
+import { get as dcGet, put as dcPut, DASHBOARD_CACHE_KEYS } from "../../services/dashboardCache";
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -351,6 +352,7 @@ const Dashboard = () => {
     inspectionHistory: [],
   });
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [cacheHydrated, setCacheHydrated] = useState(false);
 
   // Admin: view another user's dashboard
   type DashboardUserEntry = { id: string; fullName: string; role: string; office: string };
@@ -366,7 +368,12 @@ const Dashboard = () => {
   useEffect(() => {
     officesService.getAll().then((offices) => {
       setGlobalOffices(offices);
-      setAvailableCountries(Array.from(new Set(offices.map((o) => o.country).filter(Boolean))).sort());
+      const countries = Array.from(new Set(offices.map((o) => o.country).filter(Boolean))).sort();
+      setAvailableCountries(countries);
+      if (isNativePlatform) {
+        dcPut(DASHBOARD_CACHE_KEYS.globalOffices, offices);
+        dcPut(DASHBOARD_CACHE_KEYS.availableCountries, countries);
+      }
     });
   }, []);
 
@@ -392,20 +399,52 @@ const Dashboard = () => {
     }
   }, [isManager, user.id]);
 
+  // ── Native cache hydration: show last-known data instantly on mount ──
+  useEffect(() => {
+    if (!isNativePlatform) return;
+    const cOpenIssues = dcGet<OpenIssueRecord[]>(DASHBOARD_CACHE_KEYS.openIssues);
+    const cPendingSigs = dcGet<PendingSignatureRecord[]>(DASHBOARD_CACHE_KEYS.pendingSigs);
+    const cOpenAssets = dcGet<OpenAssetItem[]>(DASHBOARD_CACHE_KEYS.openAssets);
+    const cSummary = dcGet<ProjectAssetSummaryItem[]>(DASHBOARD_CACHE_KEYS.projectAssetSummary);
+    const cWorkload = dcGet<TechnicianWorkloadSummaryItem[]>(DASHBOARD_CACHE_KEYS.workload);
+    const cWorkspace = dcGet<DashboardWorkspace>(DASHBOARD_CACHE_KEYS.dashboardWorkspace);
+    const cOffices = dcGet<Office[]>(DASHBOARD_CACHE_KEYS.globalOffices);
+    const cCountries = dcGet<string[]>(DASHBOARD_CACHE_KEYS.availableCountries);
+    if (cOpenIssues) setOpenIssues(cOpenIssues);
+    if (cPendingSigs) setPendingSigs(cPendingSigs);
+    if (cOpenAssets) setOpenAssets(cOpenAssets);
+    if (cSummary) setProjectAssetSummary(cSummary);
+    if (cWorkload) setWorkload(cWorkload);
+    if (cWorkspace) setDashboardWorkspace(cWorkspace);
+    if (cOffices) setGlobalOffices(cOffices);
+    if (cCountries) setAvailableCountries(cCountries);
+    // Mark cache as hydrated so loading spinners don't override cached data
+    if (cOpenIssues || cPendingSigs || cOpenAssets || cSummary || cWorkload || cWorkspace || cOffices || cCountries) {
+      setCacheHydrated(true);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     dispatch(fetchProjects());
     dispatch(fetchProducts());
     loadAttention();
     setWorkloadLoading(true);
-    projectAssetService.technicianWorkloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
-    projectAssetService.listOpen().then(setOpenAssets);
-    projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
+    projectAssetService.technicianWorkloadSummary().then((w) => { setWorkload(w); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.workload, w); }).finally(() => setWorkloadLoading(false));
+    projectAssetService.listOpen().then((a) => { setOpenAssets(a); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.openAssets, a); });
+    projectAssetService.activeSummary().then((s) => { setProjectAssetSummary(s); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, s); }).catch(() => setProjectAssetSummary([]));
     if (isEngineer) {
       workflowConfigService.getAll().then((configs) => {
         setDraftConfigs(configs.filter((c: any) => c.status === "Draft" || c.status === "draft"));
       }).catch(() => {});
     }
   }, [dispatch, loadAttention, isEngineer]);
+
+  // ── Native cache: persist state to cache whenever it changes ──
+  useEffect(() => {
+    if (!isNativePlatform) return;
+    if (openIssues.length > 0) dcPut(DASHBOARD_CACHE_KEYS.openIssues, openIssues);
+    if (pendingSigs.length > 0) dcPut(DASHBOARD_CACHE_KEYS.pendingSigs, pendingSigs);
+  }, [isNativePlatform, openIssues, pendingSigs]);
 
   // When the background project refresh completes, apply the authoritative list directly to
   // Redux state — avoids a second API round-trip while still evicting any ghost projects.
@@ -436,7 +475,10 @@ const Dashboard = () => {
     projectAssetService
       .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
       .then((data) => {
-        if (!cancelled) setDashboardWorkspace(data);
+        if (!cancelled) {
+          setDashboardWorkspace(data);
+          if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.dashboardWorkspace, data);
+        }
       })
       .finally(() => {
         if (!cancelled) setWorkspaceLoading(false);
@@ -2103,7 +2145,7 @@ const Dashboard = () => {
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
         <AssessmentOutlined sx={{ color: "primary.main", fontSize: 20 }} />
         <Typography variant="h6" sx={{ fontFamily: "Sora" }}>{isAdmin ? "Inspections" : "My Inspections"}</Typography>
-        {workspaceLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
+        {workspaceLoading && !cacheHydrated && <CircularProgress size={14} sx={{ ml: 1 }} />}
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
         {isAdmin ? "Inspection activity across the current dashboard scope, grouped with PM ownership." : "Current inspection work plus your recent inspection history."}
@@ -3248,7 +3290,7 @@ const Dashboard = () => {
           )}
         </Stack>
       </Stack>
-      {workloadLoading ? <LinearProgress /> : scopedWorkload.length === 0 ? (
+      {workloadLoading && !cacheHydrated ? <LinearProgress /> : scopedWorkload.length === 0 ? (
         <Typography variant="body2" color="text.secondary">No open assets currently assigned to technicians in this scope.</Typography>
       ) : (
         <Stack spacing={1.5}>
@@ -3873,7 +3915,7 @@ const Dashboard = () => {
                 </Typography>
               ) : myAssets.length === 0 ? (
                 <Typography variant="caption" color="text.disabled">
-                  {workspaceLoading
+                  {workspaceLoading && !cacheHydrated
                     ? "Loading your assigned assets..."
                     : myInstallHistory.length > 0 || myInspectionHistory.length > 0
                       ? "No active assets right now. Use the history cards below to review completed or closed work."
