@@ -59,6 +59,22 @@ export async function isServerReachable(): Promise<boolean> {
     clearTimeout(timeoutId);
     return response.ok || response.status < 500;
   } catch {
+    // On native, the first CapacitorHttp call can fail on cold start
+    // before the plugin is fully initialised. Retry once after a brief delay.
+    if (isMobileNativePlatform()) {
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const response = await CapacitorHttp.get({
+          url: `${getApiBaseUrl()}/health`,
+          connectTimeout: 5000,
+          readTimeout: 5000,
+          responseType: "json",
+        });
+        return response.status >= 200 && response.status < 500;
+      } catch {
+        return false;
+      }
+    }
     return false;
   }
 }
