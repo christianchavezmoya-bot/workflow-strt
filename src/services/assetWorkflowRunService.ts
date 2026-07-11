@@ -61,6 +61,8 @@ export interface ClosedIssueRecord extends OpenIssueRecord {
   resolutionNote:  string | null;
 }
 
+const CLOSED_ISSUES_CACHE_KEY = "asset-workflow-closed-issues-v1";
+
 function parseTimeEntries(json: string): RunTimeEntry[] {
   try {
     const parsed = JSON.parse(json) as RunTimeEntry[];
@@ -476,6 +478,67 @@ async function deriveOpenIssuesFromRun(run: AssetWorkflowRun): Promise<Array<{
         source: "run" as const,
       } satisfies OpenIssueRecord,
     }));
+}
+
+function sortClosedIssues(records: ClosedIssueRecord[]): ClosedIssueRecord[] {
+  return [...records].sort((a, b) => {
+    const aTime = a.resolvedAt ? Date.parse(a.resolvedAt) : 0;
+    const bTime = b.resolvedAt ? Date.parse(b.resolvedAt) : 0;
+    return bTime - aTime;
+  });
+}
+
+async function deriveClosedIssuesLocally(): Promise<ClosedIssueRecord[]> {
+  const [runs, assets, projects] = await Promise.all([
+    entityGetAllWorkflowRuns(),
+    entityGetAllAssets(),
+    entityGetAllProjects(),
+  ]);
+
+  const assetById = new Map((assets as ProjectAsset[]).map((asset) => [asset.id, asset]));
+  const projectById = new Map((projects as Project[]).map((project) => [project.id, project]));
+  const records: ClosedIssueRecord[] = [];
+
+  for (const run of runs as AssetWorkflowRun[]) {
+    let issues: RunIssue[] = [];
+    try {
+      issues = JSON.parse(run.issuesJson ?? "[]") as RunIssue[];
+    } catch {
+      issues = [];
+    }
+
+    const asset = assetById.get(run.assetId);
+    const projectId = asset?.projectId ?? "";
+    const project = projectById.get(projectId);
+
+    for (const issue of issues) {
+      if (!issue.resolved) continue;
+      records.push({
+        issueId: issue.id,
+        description: issue.description,
+        issueType: issue.issueType,
+        severity: issue.severity,
+        isBlocking: issue.isBlocking,
+        reportedAt: issue.reportedAt,
+        createdBy: issue.createdBy ?? null,
+        stepTitle: issue.stepTitle ?? null,
+        runId: run.id,
+        assetId: run.assetId,
+        assetTag: asset?.assetTag ?? "",
+        assetName: asset?.assetName ?? "",
+        assetLocation: asset?.location ?? "",
+        projectId,
+        jobNumber: project?.jobNumber ?? "",
+        customerName: project?.customerName ?? "",
+        source: "run",
+        resolvedAt: issue.resolvedAt ?? null,
+        resolvedBy: issue.resolvedBy ?? null,
+        resolutionNote: issue.resolutionNote ?? issue.resolvedNote ?? null,
+      });
+    }
+  }
+
+  return sortClosedIssues(records);
 }
 
 /**
@@ -1277,9 +1340,40 @@ export const assetWorkflowRunService = {
   },
 
   async listClosedIssues(): Promise<ClosedIssueRecord[]> {
+    if (!isMobileNativePlatform()) {
+      try {
+        const res = await api.get<ClosedIssueRecord[]>("/asset-workflow-runs/resolved-issues");
+        return sortClosedIssues(res.data);
+      } catch {
+        return [];
+      }
+    }
+
     try {
+      const local = await deriveClosedIssuesLocally();
+      const cached = await offlineStore.getCache<ClosedIssueRecord[]>(CLOSED_ISSUES_CACHE_KEY);
+
+      if (!shouldSkipBlockingFetch()) {
+        api.get<ClosedIssueRecord[]>("/asset-workflow-runs/resolved-issues")
+          .then(async (res) => {
+            await offlineStore.saveCache(CLOSED_ISSUES_CACHE_KEY, sortClosedIssues(res.data));
+            window.dispatchEvent(new Event("repo:closed-issues:updated"));
+          })
+          .catch(() => {
+            window.dispatchEvent(new Event("repo:issues:fetch-failed"));
+          });
+      }
+
+      if (local.length > 0) return local;
+      if (cached && cached.length > 0) return sortClosedIssues(cached);
+      if (shouldSkipBlockingFetch()) return [];
+
       const res = await api.get<ClosedIssueRecord[]>("/asset-workflow-runs/resolved-issues");
-      return res.data;
-    } catch { return []; }
+      const sorted = sortClosedIssues(res.data);
+      await offlineStore.saveCache(CLOSED_ISSUES_CACHE_KEY, sorted);
+      return sorted;
+    } catch {
+      return [];
+    }
   },
 };
