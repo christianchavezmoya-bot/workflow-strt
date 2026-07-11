@@ -2,7 +2,9 @@ import api from "./api";
 import { cacheGet, cachePut } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
-import { shouldSkipBlockingFetch } from "./connectivityMonitor";
+import { getServerReachable, shouldSkipBlockingFetch } from "./connectivityMonitor";
+import offlineStore from "./offlineStore";
+import { mediaStore } from "./mediaStore";
 
 export interface DocumentRecord {
   id: string;
@@ -26,6 +28,21 @@ export interface DocumentConfig {
   fieldsJson: string;
 }
 
+interface CachedDocumentFile {
+  downloadUrl: string;
+  storedValue: string;
+  contentType: string;
+  fileSize?: number | null;
+  cachedAt: string;
+}
+
+const DOCUMENT_FILE_CACHE_PREFIX = "document-file:";
+const DOCUMENT_PREFETCH_CONCURRENCY = 2;
+const OFFLINE_DOCUMENT_MESSAGE = "Not available offline";
+const queuedPrefetchKeys = new Set<string>();
+const prefetchQueue: DocumentRecord[] = [];
+let activePrefetches = 0;
+
 /** Parse customValuesJson into the customValues map (in-place mutation for convenience). */
 export function hydrateCustomValues(doc: DocumentRecord): DocumentRecord {
   if (doc.customValuesJson && !doc.customValues) {
@@ -36,6 +53,108 @@ export function hydrateCustomValues(doc: DocumentRecord): DocumentRecord {
 
 export function isBackendDocumentUrl(downloadUrl: string): boolean {
   return /\/api\/documents\/[^/]+\/download(?:\?|$)/.test(downloadUrl);
+}
+
+function documentFileCacheKey(downloadUrl: string): string {
+  return `${DOCUMENT_FILE_CACHE_PREFIX}${encodeURIComponent(downloadUrl)}`;
+}
+
+function shouldSkipNativeDocumentFetch(): boolean {
+  return shouldSkipBlockingFetch() || getServerReachable() === false;
+}
+
+async function blobFromStoredValue(storedValue: string, mimeType: string): Promise<Blob> {
+  const dataUrl = await mediaStore.resolveMediaValue(storedValue);
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  if (blob.type || !mimeType) return blob;
+  return new Blob([await blob.arrayBuffer()], { type: mimeType });
+}
+
+async function getCachedDocumentBlob(downloadUrl: string): Promise<Blob | null> {
+  const cached = await offlineStore.getCache<CachedDocumentFile>(documentFileCacheKey(downloadUrl));
+  if (!cached?.storedValue) return null;
+  try {
+    return await blobFromStoredValue(cached.storedValue, cached.contentType);
+  } catch {
+    return null;
+  }
+}
+
+async function cacheDocumentBlob(downloadUrl: string, blob: Blob, record?: Pick<DocumentRecord, "contentType" | "fileSize">): Promise<Blob> {
+  const contentType = blob.type || record?.contentType || "application/octet-stream";
+  const storedValue = await mediaStore.persistMediaValue(
+    new Blob([await blob.arrayBuffer()], { type: contentType }),
+    "document",
+    "document",
+    downloadUrl,
+  );
+  await offlineStore.saveCache(documentFileCacheKey(downloadUrl), {
+    downloadUrl,
+    storedValue,
+    contentType,
+    fileSize: record?.fileSize ?? blob.size,
+    cachedAt: new Date().toISOString(),
+  } satisfies CachedDocumentFile);
+  return blob;
+}
+
+async function fetchAndCacheDocumentBlob(downloadUrl: string, record?: Pick<DocumentRecord, "contentType" | "fileSize">): Promise<Blob> {
+  const response = await api.get<Blob>(downloadUrl, { responseType: "blob" });
+  const blob = response.data instanceof Blob
+    ? response.data
+    : new Blob([response.data], { type: record?.contentType ?? "application/octet-stream" });
+  return await cacheDocumentBlob(downloadUrl, blob, record);
+}
+
+async function loadDocumentBlob(downloadUrl: string, record?: Pick<DocumentRecord, "contentType" | "fileSize">): Promise<Blob> {
+  const cached = await getCachedDocumentBlob(downloadUrl);
+  if (cached) return cached;
+  if (shouldSkipNativeDocumentFetch()) {
+    throw new Error(OFFLINE_DOCUMENT_MESSAGE);
+  }
+  return await fetchAndCacheDocumentBlob(downloadUrl, record);
+}
+
+async function prefetchDocumentRecord(record: DocumentRecord): Promise<void> {
+  const downloadUrl = record.downloadUrl;
+  if (!downloadUrl || !isBackendDocumentUrl(downloadUrl)) return;
+  if (shouldSkipNativeDocumentFetch()) return;
+  const cached = await offlineStore.getCache<CachedDocumentFile>(documentFileCacheKey(downloadUrl));
+  if (cached?.storedValue) return;
+  await fetchAndCacheDocumentBlob(downloadUrl, record);
+}
+
+function drainDocumentPrefetchQueue(): void {
+  while (activePrefetches < DOCUMENT_PREFETCH_CONCURRENCY && prefetchQueue.length > 0) {
+    const next = prefetchQueue.shift();
+    if (!next?.downloadUrl) continue;
+    const cacheKey = documentFileCacheKey(next.downloadUrl);
+    activePrefetches += 1;
+    window.setTimeout(() => {
+      void prefetchDocumentRecord(next)
+        .catch(() => {})
+        .finally(() => {
+          activePrefetches -= 1;
+          queuedPrefetchKeys.delete(cacheKey);
+          drainDocumentPrefetchQueue();
+        });
+    }, 0);
+  }
+}
+
+function queueDocumentPrefetch(records: DocumentRecord[]): void {
+  if (!isMobileNativePlatform()) return;
+  if (shouldSkipNativeDocumentFetch()) return;
+  for (const record of records) {
+    const downloadUrl = record.downloadUrl;
+    if (!downloadUrl || !isBackendDocumentUrl(downloadUrl)) continue;
+    const cacheKey = documentFileCacheKey(downloadUrl);
+    if (queuedPrefetchKeys.has(cacheKey)) continue;
+    queuedPrefetchKeys.add(cacheKey);
+    prefetchQueue.push(record);
+  }
+  drainDocumentPrefetchQueue();
 }
 
 export const documentService = {
@@ -54,13 +173,16 @@ export const documentService = {
     if (!shouldSkipBlockingFetch()) {
       api.get<DocumentRecord[]>("/documents")
         .then((res) => {
+          queueDocumentPrefetch(res.data);
           cachePut(cacheKey, res.data).catch(() => {});
         })
         .catch(() => {});
     }
 
     if (cached !== null) {
-      return cached.map(hydrateCustomValues);
+      const hydrated = cached.map(hydrateCustomValues);
+      queueDocumentPrefetch(hydrated);
+      return hydrated;
     }
 
     // No cache yet — if offline, return empty instead of hanging
@@ -68,7 +190,9 @@ export const documentService = {
 
     const response = await api.get<DocumentRecord[]>("/documents");
     await cachePut(cacheKey, response.data);
-    return response.data.map(hydrateCustomValues);
+    const hydrated = response.data.map(hydrateCustomValues);
+    queueDocumentPrefetch(hydrated);
+    return hydrated;
   },
 
   async createDocument(payload: DocumentRecord) {
@@ -120,14 +244,24 @@ export const documentService = {
 
   /** Fetch a document file with the auth token and return a Blob object URL. */
   async openDocument(downloadUrl: string): Promise<string> {
-    const response = await api.get<Blob>(downloadUrl, { responseType: "blob" });
-    return URL.createObjectURL(response.data);
+    if (!isMobileNativePlatform() || !isBackendDocumentUrl(downloadUrl)) {
+      const response = await api.get<Blob>(downloadUrl, { responseType: "blob" });
+      return URL.createObjectURL(response.data);
+    }
+
+    const blob = await loadDocumentBlob(downloadUrl);
+    return URL.createObjectURL(blob);
   },
 
   /** Fetch a document file with the auth token and return the raw ArrayBuffer (for client-side parsing). */
   async openDocumentAsBuffer(downloadUrl: string): Promise<ArrayBuffer> {
-    const response = await api.get<ArrayBuffer>(downloadUrl, { responseType: "arraybuffer" });
-    return response.data;
+    if (!isMobileNativePlatform() || !isBackendDocumentUrl(downloadUrl)) {
+      const response = await api.get<ArrayBuffer>(downloadUrl, { responseType: "arraybuffer" });
+      return response.data;
+    }
+
+    const blob = await loadDocumentBlob(downloadUrl);
+    return await blob.arrayBuffer();
   },
 
   /** Download a document while preserving auth for backend-hosted files. */
@@ -137,8 +271,10 @@ export const documentService = {
       return;
     }
 
-    const response = await api.get<Blob>(downloadUrl, { responseType: "blob" });
-    const objectUrl = URL.createObjectURL(response.data);
+    const blob = isMobileNativePlatform()
+      ? await loadDocumentBlob(downloadUrl)
+      : (await api.get<Blob>(downloadUrl, { responseType: "blob" })).data;
+    const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
     if (fileName) anchor.download = fileName;

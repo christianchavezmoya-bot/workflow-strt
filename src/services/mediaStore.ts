@@ -175,7 +175,7 @@ export const mediaStore = {
     return value.startsWith(MEDIA_REF_PREFIX);
   },
 
-  getMediaKind(value: string): "photo" | "video" | "signature" {
+  getMediaKind(value: string): "photo" | "video" | "signature" | "document" {
     const ref = parseStoredMediaValue(value);
     if (ref) return ref.kind;
     return value.startsWith("data:video") ? "video" : "photo";
@@ -189,7 +189,7 @@ export const mediaStore = {
 
   async persistMediaValue(
     source: string | Blob,
-    kind: "photo" | "video" | "signature",
+    kind: "photo" | "video" | "signature" | "document",
     linkedToType: OfflineMediaRef["linkedToType"],
     linkedToId: string,
     fileName?: string,
@@ -204,7 +204,9 @@ export const mediaStore = {
       ? await this.savePhoto(source, linkedToType, linkedToId, fileName)
       : kind === "video"
         ? await this.saveVideo(source, linkedToType, linkedToId, fileName)
-        : await this.saveSignature(source, linkedToId, fileName);
+        : kind === "signature"
+          ? await this.saveSignature(source, linkedToId, fileName)
+          : await writeMedia("document", source, linkedToType, linkedToId, fileName);
     return toStoredMediaValue(ref);
   },
 

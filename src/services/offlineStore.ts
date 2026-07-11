@@ -19,12 +19,12 @@ export type OfflineEntitySyncStatus =
 
 export interface OfflineMediaRef {
   mediaId: string;
-  kind: "photo" | "video" | "signature";
+  kind: "photo" | "video" | "signature" | "document";
   path: string;
   mimeType: string;
   fileName: string;
   size?: number;
-  linkedToType: "run-step" | "issue-report" | "issue-resolution" | "signature";
+  linkedToType: "run-step" | "issue-report" | "issue-resolution" | "signature" | "document";
   linkedToId: string;
   createdAt: string;
   uploaded: boolean;
