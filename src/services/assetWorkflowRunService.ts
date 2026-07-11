@@ -17,7 +17,7 @@ import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
-import { shouldSkipBlockingFetch } from "./connectivityMonitor";
+import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 
@@ -227,7 +227,7 @@ async function enqueueTimeEntry(
 }
 
 function isOfflineNetworkError(error: unknown): boolean {
-  if (shouldSkipBlockingFetch()) return true;
+  if (shouldSkipRunMutation()) return true;
   if (!error || typeof error !== "object") return !navigator.onLine;
   const candidate = error as { code?: string; message?: string; response?: unknown };
   if (candidate.response) return false;
@@ -654,7 +654,7 @@ export const assetWorkflowRunService = {
       technicianUserId: technicianUserId ?? null,
     };
     try {
-      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", body);
       return await cacheServerRun(res.data);
     } catch (error) {
@@ -755,7 +755,7 @@ export const assetWorkflowRunService = {
       status: status ?? null,
     };
     try {
-      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}`, requestBody, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
@@ -833,7 +833,7 @@ export const assetWorkflowRunService = {
       bomActualJson: bomActualJson ?? null,
     };
     try {
-      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/complete`, requestBody, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
@@ -937,7 +937,7 @@ export const assetWorkflowRunService = {
     const resolvedRunId = await resolveRunId(runId);
     const body = { issuesJson };
     try {
-      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/issues`, requestBody);
       const updatedRun = await cacheServerRun(res.data);
@@ -1042,7 +1042,7 @@ export const assetWorkflowRunService = {
       amendedAt,
     };
     try {
-      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/step-results`, requestBody, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
@@ -1186,7 +1186,7 @@ export const assetWorkflowRunService = {
 
     const resolvedRunId = await resolveRunId(runId);
     try {
-      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entry`, body);
       return await cacheServerRun(res.data);
     } catch (error) {

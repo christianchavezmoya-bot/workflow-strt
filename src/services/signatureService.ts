@@ -4,7 +4,7 @@ import syncQueue from "./syncQueue";
 import offlineStore from "./offlineStore";
 import { mediaStore } from "./mediaStore";
 import { isMobileNativePlatform } from "../utils/platform";
-import { shouldSkipBlockingFetch } from "./connectivityMonitor";
+import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
 import { applyOfflineAssetStatusUpdate } from "./assetWorkflowRunService";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
@@ -34,7 +34,7 @@ function isOfflineNetworkError(error: unknown): boolean {
   // throw (or a stale-but-offline condition) would not be recognized and the
   // catch handler would re-throw as a non-offline error, surfacing as
   // "failed to submit signature" in the UI.
-  if (shouldSkipBlockingFetch()) return true;
+  if (shouldSkipRunMutation()) return true;
   if (!error || typeof error !== "object") return !navigator.onLine;
   const candidate = error as { response?: unknown; code?: string; message?: string };
   if (candidate.response) return false;
@@ -86,7 +86,7 @@ export const signatureService = {
       // Fast-bail when we already know the server is unreachable — avoids the
       // full axios 10 s timeout on the doomed network call before falling into
       // the offline branch. Same pattern as assetWorkflowRunService.startRun.
-      if (shouldSkipBlockingFetch()) throw new Error("skip-network-offline");
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const requestPayload = await mediaStore.resolveUploadPayload(queuedPayload);
       const r = await api.post<SignatureEvent>("/signature-events", requestPayload, { params: { runId: resolvedRunId } });
       const now = r.data.signedAtUtc ?? new Date().toISOString();

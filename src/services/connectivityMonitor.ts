@@ -143,6 +143,25 @@ export function shouldSkipBlockingFetch(): boolean {
 }
 
 /**
+ * Fast-bail guard for NATIVE write paths (runs, signatures, document links).
+ *
+ * Same as shouldSkipBlockingFetch(), plus: also skip when the health monitor has
+ * positively confirmed the server unreachable. This stops the phone burning a
+ * full timeout on a call we already know will fail before falling into the
+ * offline queue.
+ *
+ * Deliberately NOT used by shouldSkipBlockingFetch() callers — that guard stays
+ * untouched so web behavior does not change.
+ *
+ * SAFETY: only a confirmed false skips. null (never checked yet, e.g. cold
+ * start) must NOT skip.
+ */
+export function shouldSkipRunMutation(): boolean {
+  if (shouldSkipBlockingFetch()) return true;
+  return getServerReachable() === false;
+}
+
+/**
  * Force an immediate check outside the regular interval — e.g. right after
  * the app comes back online, so the bar doesn't wait up to 30s to confirm.
  */
