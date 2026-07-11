@@ -40,6 +40,12 @@ import type { ProjectAsset } from "../types/projectAsset";
 import type { SignatureEvent } from "../types/signature";
 import { mediaStore } from "../services/mediaStore";
 import syncQueue from "../services/syncQueue";
+import {
+  removeCachedLinkById,
+  replaceCachedLink,
+  type AssetDocumentLink,
+  type AssetDocumentLinkUploadBody,
+} from "../services/assetDocumentLinkService";
 import { isMobileNativePlatform } from "../utils/platform";
 import {
   subscribeServerReachable,
@@ -287,6 +293,23 @@ async function markAssetSyncedFromServer(asset: ProjectAsset): Promise<void> {
 }
 
 async function processSyncedAction(action: PendingAction, responseData: unknown): Promise<void> {
+  if (action.opType === "ASSET_DOCUMENT_LINK_ATTACH" || action.opType === "ASSET_DOCUMENT_LINK_UPLOAD") {
+    const syncedLink = responseData as AssetDocumentLink | undefined;
+    const assetId = (action.body as { assetId?: string } | undefined)?.assetId ?? syncedLink?.assetId;
+    if (syncedLink && assetId) {
+      await replaceCachedLink(assetId, action.entityId, syncedLink);
+    }
+    return;
+  }
+
+  if (action.opType === "ASSET_DOCUMENT_LINK_DETACH") {
+    const assetId = (action.body as { assetId?: string } | undefined)?.assetId;
+    if (assetId) {
+      await removeCachedLinkById(assetId, action.entityId);
+    }
+    return;
+  }
+
   if (action.opType === "RUN_CREATE") {
     await processRunCreateAction(action, responseData);
     return;
@@ -366,6 +389,29 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
   if (action.entityType === "asset" && responseData && typeof responseData === "object") {
     await markAssetSyncedFromServer(responseData as ProjectAsset);
   }
+}
+
+async function buildAssetDocumentLinkUploadRequest(body: unknown): Promise<FormData> {
+  const payload = body as AssetDocumentLinkUploadBody;
+  const fileDataUrl = await mediaStore.resolveMediaValue(payload.fileData);
+  const response = await fetch(fileDataUrl);
+  const fileBlob = await response.blob();
+  const form = new FormData();
+  form.append("assetId", payload.assetId);
+  form.append(
+    "file",
+    new Blob([await fileBlob.arrayBuffer()], {
+      type: payload.fileType || fileBlob.type || "application/octet-stream",
+    }),
+    payload.fileName,
+  );
+  form.append("type", payload.type);
+  if (payload.name) form.append("name", payload.name);
+  if (payload.linkedTo) form.append("linkedTo", payload.linkedTo);
+  if (payload.notes) form.append("notes", payload.notes);
+  if (payload.attachedBy) form.append("attachedBy", payload.attachedBy);
+  if (payload.customValuesJson) form.append("customValuesJson", payload.customValuesJson);
+  return form;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -504,7 +550,9 @@ export function useSyncEngine(): SyncState {
         requestUrl = mappedRunId
           ? remapRunIdInUrl(action.url, action.entityId, mappedRunId)
           : action.url;
-        requestData = await mediaStore.resolveUploadPayload(action.body);
+        requestData = action.opType === "ASSET_DOCUMENT_LINK_UPLOAD"
+          ? await buildAssetDocumentLinkUploadRequest(action.body)
+          : await mediaStore.resolveUploadPayload(action.body);
         const { payloadBytes } = measurePayload(requestData);
         const response = await api.request({
           url: requestUrl,

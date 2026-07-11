@@ -99,6 +99,24 @@ async function cacheDocumentBlob(downloadUrl: string, blob: Blob, record?: Pick<
   return blob;
 }
 
+export async function seedDocumentFileCache(
+  downloadUrl: string,
+  blob: Blob,
+  record?: Pick<DocumentRecord, "contentType" | "fileSize">,
+): Promise<void> {
+  await cacheDocumentBlob(downloadUrl, blob, record);
+}
+
+export async function copyDocumentFileCache(fromDownloadUrl: string, toDownloadUrl: string): Promise<void> {
+  const cached = await offlineStore.getCache<CachedDocumentFile>(documentFileCacheKey(fromDownloadUrl));
+  if (!cached?.storedValue) return;
+  await offlineStore.saveCache(documentFileCacheKey(toDownloadUrl), {
+    ...cached,
+    downloadUrl: toDownloadUrl,
+    cachedAt: new Date().toISOString(),
+  } satisfies CachedDocumentFile);
+}
+
 async function fetchAndCacheDocumentBlob(downloadUrl: string, record?: Pick<DocumentRecord, "contentType" | "fileSize">): Promise<Blob> {
   const response = await api.get<Blob>(downloadUrl, { responseType: "blob" });
   const blob = response.data instanceof Blob
