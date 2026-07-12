@@ -9,10 +9,12 @@ import { workflowConfigService } from "./workflowConfigService";
 import { workflowTypeService } from "./workflowTypeService";
 import { workflowTemplateService } from "./workflowTemplateService";
 import { productConfigService } from "./productConfigService";
+import { productService } from "./productService";
 import { featureService } from "./featureService";
 import { userService } from "./userService";
 import { brandSettingsService } from "./brandSettingsService";
 import { configMediaCache } from "./configMediaCache";
+import { documentService } from "./documentService";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { User } from "../types/user";
 import type { WorkflowConfig } from "../types/workflowConfig";
@@ -129,8 +131,12 @@ export const offlineBootstrapService = {
       await Promise.allSettled([
         workflowTypeService.list(),
         userService.getUsers(),
+        productService.getProducts(),
         brandSettingsService.get(),
         featureService.getAll(),
+        // Warm the document index so Tips/Documents can browse offline without
+        // forcing a full file-library download during bootstrap.
+        documentService.refreshDocumentsCache({ prefetchFiles: false }),
         workflowConfigService.getAll("Published").catch(() => []),
       ]);
 

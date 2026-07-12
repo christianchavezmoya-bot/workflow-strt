@@ -36,6 +36,7 @@ interface CachedDocumentFile {
   cachedAt: string;
 }
 
+const DOCUMENTS_CACHE_KEY = "documents_v1_all";
 const DOCUMENT_FILE_CACHE_PREFIX = "document-file:";
 const DOCUMENT_PREFETCH_CONCURRENCY = 2;
 const OFFLINE_DOCUMENT_MESSAGE = "Not available offline";
@@ -61,6 +62,25 @@ function documentFileCacheKey(downloadUrl: string): string {
 
 function shouldSkipNativeDocumentFetch(): boolean {
   return shouldSkipBlockingFetch() || getServerReachable() === false;
+}
+
+function hydrateDocumentRecords(
+  records: DocumentRecord[],
+  options?: { prefetchFiles?: boolean },
+): DocumentRecord[] {
+  const hydrated = records.map(hydrateCustomValues);
+  if (options?.prefetchFiles !== false) {
+    queueDocumentPrefetch(hydrated);
+  }
+  return hydrated;
+}
+
+async function refreshDocumentIndex(
+  options?: { prefetchFiles?: boolean },
+): Promise<DocumentRecord[]> {
+  const response = await api.get<DocumentRecord[]>("/documents");
+  await cachePut(DOCUMENTS_CACHE_KEY, response.data);
+  return hydrateDocumentRecords(response.data, options);
 }
 
 async function blobFromStoredValue(storedValue: string, mimeType: string): Promise<Blob> {
@@ -180,37 +200,55 @@ export const documentService = {
     if (!isMobileNativePlatform()) {
       return webCachedGet("/documents", async () => {
         const response = await api.get<DocumentRecord[]>("/documents");
-        return response.data.map(hydrateCustomValues);
+        return hydrateDocumentRecords(response.data);
       });
     }
 
-    const cacheKey = "documents_v1_all";
-    const cached = await cacheGet<DocumentRecord[]>(cacheKey);
+    const cached = await cacheGet<DocumentRecord[] | unknown>(DOCUMENTS_CACHE_KEY);
+    const cachedRecords = Array.isArray(cached) ? cached : null;
 
-    // Background refresh — skip when offline to avoid doomed requests
-    if (!shouldSkipBlockingFetch()) {
+    // Background refresh — skip when the native app is offline from the API.
+    if (!shouldSkipNativeDocumentFetch()) {
       api.get<DocumentRecord[]>("/documents")
         .then((res) => {
-          queueDocumentPrefetch(res.data);
-          cachePut(cacheKey, res.data).catch(() => {});
+          const hydrated = hydrateDocumentRecords(res.data);
+          cachePut(DOCUMENTS_CACHE_KEY, res.data).catch(() => {});
+          return hydrated;
         })
         .catch(() => {});
     }
 
-    if (cached !== null) {
-      const hydrated = cached.map(hydrateCustomValues);
-      queueDocumentPrefetch(hydrated);
-      return hydrated;
+    if (cachedRecords !== null) {
+      return hydrateDocumentRecords(cachedRecords);
     }
 
-    // No cache yet — if offline, return empty instead of hanging
-    if (shouldSkipBlockingFetch()) return [];
+    // No cache yet — if offline from the API, return empty instead of hanging.
+    if (shouldSkipNativeDocumentFetch()) return [];
 
-    const response = await api.get<DocumentRecord[]>("/documents");
-    await cachePut(cacheKey, response.data);
-    const hydrated = response.data.map(hydrateCustomValues);
-    queueDocumentPrefetch(hydrated);
-    return hydrated;
+    try {
+      return await refreshDocumentIndex();
+    } catch {
+      return [];
+    }
+  },
+
+  async refreshDocumentsCache(options?: { prefetchFiles?: boolean }) {
+    if (!isMobileNativePlatform()) {
+      return await this.getDocuments();
+    }
+
+    const cached = await cacheGet<DocumentRecord[] | unknown>(DOCUMENTS_CACHE_KEY);
+    const cachedRecords = Array.isArray(cached) ? cached : null;
+
+    if (shouldSkipNativeDocumentFetch()) {
+      return cachedRecords ? hydrateDocumentRecords(cachedRecords, options) : [];
+    }
+
+    try {
+      return await refreshDocumentIndex(options);
+    } catch {
+      return cachedRecords ? hydrateDocumentRecords(cachedRecords, options) : [];
+    }
   },
 
   async createDocument(payload: DocumentRecord) {
