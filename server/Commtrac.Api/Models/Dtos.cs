@@ -875,6 +875,7 @@ public record BulkCreateProjectAssetsRequest(
 );
 
 public record PatchIssuesRequest(string? IssuesJson);
+public record PatchAssignmentRequest(string? AssignedUserId);
 
 // ─── v2 Workflow Config Unification DTOs ──────────────────────────────────────
 

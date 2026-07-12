@@ -2272,13 +2272,28 @@ const AssetInstallationPage = () => {
     if (!autoAssignConfirm) return;
     const { asset, assignment } = autoAssignConfirm;
     setAutoAssignConfirm(null);
+
+    // Persist the assignment via the narrow, installer-permitted endpoint.
+    //
+    // This previously called projectAssetService.update() (the broad PUT), which is
+    // Admin/PM-only — so an Installer's claim/takeover 403'd, the failure was swallowed
+    // by an empty catch, and the run started anyway from an in-memory object carrying
+    // the new user. Net effect: the RUN recorded the new owner (correct in the report)
+    // while the ASSET kept the old one. Because asset.assignedUserId is what the Assets
+    // installer column AND the Dashboard "My Jobs Today" query both read, the new owner
+    // never saw the job in their dashboard and the previous owner still did.
+    //
+    // We now use patchAssignment() (permitted for installers, self-assign only) and do
+    // NOT continue if it fails: a run whose ownership didn't persist is a job that never
+    // appears in the owner's queue, which is exactly the failure we're fixing.
     try {
-      // Auto-assign to current user
-      await projectAssetService.update(asset.id, { assignedUserId: currentUser.id });
-      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, assignedUserId: currentUser.id } : a));
+      const saved = await projectAssetService.patchAssignment(asset.id, currentUser.id);
+      setAssets((prev) => prev.map((a) => a.id === asset.id ? { ...a, assignedUserId: saved.assignedUserId } : a));
     } catch {
-      // Non-fatal - continue with start even if update fails
+      setInlineSaveError("Could not assign this asset to you. The run was not started — please try again.");
+      return;
     }
+
     const updated = { ...asset, assignedUserId: currentUser.id };
     if (assignment) {
       await handleStartAssignmentRun(updated, assignment);

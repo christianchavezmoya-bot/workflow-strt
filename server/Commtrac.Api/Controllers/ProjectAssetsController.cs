@@ -766,6 +766,54 @@ public class ProjectAssetsController : ControllerBase
         return Ok(await ToDtoAsync(asset));
     }
 
+    // PATCH api/project-assets/{id}/assignment — update AssignedUserId ONLY.
+    // Open to all authenticated users (like {id}/issues) so an Installer can claim an
+    // unassigned asset or take over one assigned to someone else. This is deliberately
+    // narrow: it can change nothing but the assignee, so the broad Admin/PM-only PUT
+    // stays locked down.
+    //
+    // AssignedUserId is the single source of truth for work assignment across the whole
+    // product — the Assets installer column AND the Dashboard "My Jobs Today" query
+    // (which filters `.Where(a => a.AssignedUserId == effectiveUserId)`). Without this
+    // endpoint an installer's takeover could never persist, so the job never appeared in
+    // the new owner's dashboard and stayed in the previous owner's.
+    [HttpPatch("{id}/assignment")]
+    public async Task<ActionResult<ProjectAssetDto>> PatchAssignment(string id, [FromBody] PatchAssignmentRequest request)
+    {
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == id);
+        if (asset is null) return NotFound();
+
+        var callerId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value;
+        if (string.IsNullOrWhiteSpace(callerId)) return Forbid();
+
+        var isAdminOrPm = User.IsInRole("Admin") || User.IsInRole("Project Manager");
+        var target = string.IsNullOrWhiteSpace(request.AssignedUserId) ? null : request.AssignedUserId;
+
+        // SECURITY: a non-Admin/PM may only assign the asset to THEMSELVES. This is what
+        // makes an open endpoint safe — an installer can claim work, but cannot push work
+        // onto a colleague or unassign someone else. Admin/PM keep full freedom.
+        if (!isAdminOrPm && !string.Equals(target, callerId, StringComparison.OrdinalIgnoreCase))
+            return Forbid();
+
+        var previousAssignedUserId = asset.AssignedUserId;
+        asset.AssignedUserId = target;
+        asset.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        // Reuse the existing notification + SSE broadcast so PMs/admins still see
+        // assignment changes exactly as they do from the PUT path today.
+        if (!string.Equals(previousAssignedUserId, asset.AssignedUserId, StringComparison.OrdinalIgnoreCase))
+        {
+            await NotifyAssetAssignmentChangeAsync(asset, previousAssignedUserId, asset.AssignedUserId, "asset-assignment-updated");
+        }
+        await _sse.BroadcastExceptAsync(callerId, "assets:updated",
+            new { productId = asset.ProductId, projectId = asset.ProjectId });
+
+        return Ok(await ToDtoAsync(asset));
+    }
+
     // DELETE api/project-assets/{id}
     [HttpDelete("{id}")]
     [Authorize(Roles = "Admin,Project Manager")]

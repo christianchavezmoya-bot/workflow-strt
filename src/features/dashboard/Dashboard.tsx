@@ -1,6 +1,6 @@
 ﻿import {
   Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, Grid,
-  IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Tab, Tabs, TextField, Tooltip, Typography,
+  IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Snackbar, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from "@mui/material";
 import {
   AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined, CloseOutlined,
@@ -1173,6 +1173,10 @@ const Dashboard = () => {
   const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>();
   const [runnerExistingRunId, setRunnerExistingRunId] = useState<string | undefined>();
   const [runnerLoading, setRunnerLoading] = useState<string | null>(null);
+  // Surfaced when a take-over/self-assign fails to persist (see
+  // confirmAutoAssignAndStartFromDashboard) — the run is deliberately NOT started in
+  // that case, so the user must be told rather than left with a silently-missing job.
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
   // Inspection import dialog
   const [importDialogAsset, setImportDialogAsset] = useState<{ id: string; assetTag?: string; assetName?: string; projectId: string } | null>(null);
   // Inspection import dialog open state
@@ -1728,13 +1732,21 @@ const Dashboard = () => {
     const { asset, assignment } = autoAssignConfirm;
     setAutoAssignConfirm(null);
     // Persist the take-over / auto-assign so the asset actually changes hands.
-    // Previously this only opened the runner, so assignedUserId never changed
-    // (server or client) and the asset's assigned technician stayed the original.
+    //
+    // Must use patchAssignment() (narrow, installer-permitted) rather than update()
+    // (the broad PUT, which is Admin/PM-only and 403s for installers — the failure was
+    // then swallowed here, so the asset never changed hands). assignedUserId is what
+    // this very Dashboard's "My Jobs Today" query filters on
+    // (.Where(a => a.AssignedUserId == effectiveUserId)), so a failed assignment means
+    // the job never appears for the new owner and stays with the previous one.
     try {
-      await projectAssetService.update(asset.id, { assignedUserId: user.id });
+      await projectAssetService.patchAssignment(asset.id, user.id);
       projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
     } catch {
-      // Offline (native): the reassignment is queued and will sync on reconnect.
+      // Do not start the run: an unpersisted assignment means the job would never show
+      // up in the new owner's "My Jobs Today".
+      setDashboardError("Could not assign this asset to you. The run was not started — please try again.");
+      return;
     }
     if (assignment) {
       void startWorkflowFromDashboard(asset, assignment);
@@ -5529,6 +5541,17 @@ const Dashboard = () => {
           products={products}
         />
       )}
+
+      <Snackbar
+        open={!!dashboardError}
+        autoHideDuration={6000}
+        onClose={() => setDashboardError(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert severity="error" onClose={() => setDashboardError(null)} sx={{ width: "100%" }}>
+          {dashboardError}
+        </Alert>
+      </Snackbar>
 
     </Stack>
   );

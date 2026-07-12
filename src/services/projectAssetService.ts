@@ -156,6 +156,27 @@ export const projectAssetService = {
     return asset;
   },
 
+  // Assign/claim an asset via the narrow, installer-permitted endpoint.
+  // The broad update() (PUT) is Admin/PM-only, so an installer's takeover used to
+  // 403. AssignedUserId drives BOTH the Assets installer column AND the Dashboard
+  // "My Jobs Today" query, so this must persist for the job to appear in the new
+  // owner's dashboard.
+  async patchAssignment(id: string, assignedUserId: string | null): Promise<ProjectAsset> {
+    const res = await api.patch<ProjectAsset>(`/project-assets/${id}/assignment`, { assignedUserId });
+    const asset = fromDto(res.data);
+    if (isMobileNativePlatform()) {
+      await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+      window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+        detail: { productId: asset.productId, projectId: asset.projectId },
+      }));
+    } else {
+      invalidateWebCache(`/project-assets/${id}`);
+    }
+    window.dispatchEvent(new Event("notifications:run-state-changed"));
+    window.dispatchEvent(new Event("notifications:refresh"));
+    return asset;
+  },
+
   async remove(id: string): Promise<void> {
     if (!isMobileNativePlatform()) {
       await api.delete(`/project-assets/${id}`);
