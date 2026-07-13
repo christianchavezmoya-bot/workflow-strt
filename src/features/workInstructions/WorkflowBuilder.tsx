@@ -302,9 +302,36 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   const [libFeatures, setLibFeatures] = useState<Feature[]>([]);
   const libFeaturesRef = useRef<Feature[]>([]);
   libFeaturesRef.current = libFeatures;
+
+  // Feature DEPENDENCIES for the active product's features.
+  //
+  // This is the real model for "what data do we capture about this feature" — a
+  // dependency like "Serial Number" / "Firmware" becomes one capture field. Previously
+  // buildAutoSteps() never received these (it only got Feature.captureFields, which is an
+  // empty-by-default hand-maintained list, and ProductFeatureDefinition.subProperties), so
+  // an inventory feature WITH dependencies but WITHOUT captureFields generated a Data
+  // Collection step with ZERO capture fields — no text boxes to record serial/firmware.
+  const [libFeatureDeps, setLibFeatureDeps] = useState<Record<string, FeatureDependency[]>>({});
+  const libFeatureDepsRef = useRef<Record<string, FeatureDependency[]>>({});
+  libFeatureDepsRef.current = libFeatureDeps;
+
   useEffect(() => {
     if (!productId) return;
-    featureService.getByProduct(productId).then(setLibFeatures).catch(() => {});
+    let cancelled = false;
+    featureService.getByProduct(productId).then(async (feats) => {
+      if (cancelled) return;
+      setLibFeatures(feats);
+      const lists = await Promise.all(
+        feats.map((f) =>
+          featureDependencyService.getByFeature(f.id).catch(() => [] as FeatureDependency[]),
+        ),
+      );
+      if (cancelled) return;
+      const map: Record<string, FeatureDependency[]> = {};
+      feats.forEach((f, i) => { map[f.id] = lists[i] ?? []; });
+      setLibFeatureDeps(map);
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, [productId]);
 
   useEffect(() => {
@@ -406,7 +433,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           } catch {}
           // Auto-populate steps when config is brand new (empty)
           if (wf.steps.length === 0 && parsedSels.some((s) => s.activeCount > 0)) {
-            const autoSteps = buildAutoSteps(parsedSels, productFeaturesRef.current, libFeaturesRef.current);
+            const autoSteps = buildAutoSteps(parsedSels, productFeaturesRef.current, libFeaturesRef.current, libFeatureDepsRef.current);
             wf = { ...wf, steps: enforceSequentialNextSteps(normalizeOrders(autoSteps)) };
           }
           justLoadedRef.current = true;
@@ -1140,7 +1167,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
                   onClick={() => {
                     const hasSteps = workflow.steps.length > 0;
                     if (!hasSteps) {
-                      const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current);
+                      const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current, libFeatureDepsRef.current);
                       importedRef.current = true;
                       updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
                       importedRef.current = false;
@@ -1149,7 +1176,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
                     setConfirmDialog({
                       message: "This will replace all current steps with a new auto-generated workflow. Continue?",
                       onConfirm: () => {
-                        const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current);
+                        const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current, libFeatureDepsRef.current);
                         importedRef.current = true;
                         updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
                         importedRef.current = false;
@@ -1220,6 +1247,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               onUpdateCaptureField={(fId, patch) => updateCaptureField(selectedStep.id, fId, patch)}
               onDeleteCaptureField={(fId) => deleteCaptureField(selectedStep.id, fId)}
               libFeatures={libFeatures}
+              depsByFeature={libFeatureDeps}
               onAddCaptureFieldsFromLib={(fieldNames) => {
                 updateWorkflow((wf) => {
                   const s = wf.steps.find((x) => x.id === selectedStep.id);
@@ -1673,6 +1701,7 @@ interface StepEditorPanelProps {
   onDeleteCaptureField: (id: string) => void;
   onAddCaptureFieldsFromLib: (fieldNames: string[]) => void;
   libFeatures: Feature[];
+  depsByFeature?: Record<string, FeatureDependency[]>;
   onWorkflowUpdate: (wf: Workflow) => void;
 }
 
@@ -1698,6 +1727,7 @@ function StepEditorPanel({
   onDeleteCaptureField,
   onAddCaptureFieldsFromLib,
   libFeatures,
+  depsByFeature,
   onWorkflowUpdate,
 }: StepEditorPanelProps) {
   const [editorTab, setEditorTab] = useState(0);
@@ -1986,6 +2016,7 @@ function StepEditorPanel({
               productFeatures={productFeatures}
               featureSelections={featureSelections}
               libFeatures={libFeatures}
+              depsByFeature={depsByFeature}
               onAddCaptureField={onAddCaptureField}
               onUpdateCaptureField={onUpdateCaptureField}
               onDeleteCaptureField={onDeleteCaptureField}
@@ -2311,10 +2342,18 @@ function labelToKey(label: string): string {
 }
 
 /** Build the full standard step set from feature selections. Called when a new config is opened empty. */
+function captureTypeForValueType(valueType?: string): CaptureFieldType {
+  const v = (valueType ?? "").trim().toLowerCase();
+  if (v === "number") return "number" as CaptureFieldType;
+  if (v === "date") return "date" as CaptureFieldType;
+  return "text" as CaptureFieldType;
+}
+
 function buildAutoSteps(
   featureSelections: FeatureSelection[],
   productFeatures: ProductFeatureDefinition[],
   libFeatures: Feature[] = [],
+  depsByFeature: Record<string, FeatureDependency[]> = {},
 ): WorkflowStep[] {
   const u = uid;
   const mkCheck = (label: string, fid?: string): StepInput =>
@@ -2372,14 +2411,54 @@ function buildAutoSteps(
   }
 
   // 3 — Data Collection steps (one per feature × unit)
-  // captureFields sourced from Feature.captureFields in the library (serial, firmware, IP, etc.)
+  //
+  // Capture fields come from the feature's DEPENDENCIES first — that is the real model for
+  // "what do we record about this feature" (Serial Number, Firmware, MAC Address…). The two
+  // legacy sources are kept as fallbacks for products configured the old way.
+  //
+  // Rule (per product owner):
+  //   inventory feature WITH dependencies  -> one TEXT capture field per dependency
+  //   inventory feature WITHOUT dependencies -> tick box only, no capture fields
   for (const { sel, feat } of activeFeatures) {
     for (let unit = 1; unit <= sel.activeCount; unit++) {
       const libFeat = libMap.get(feat.id);
-      // Use library captureFields (["Serial No", "Firmware", ...]) if available, fall back to subProperties
-      const captureFieldNames: string[] = libFeat?.captureFields && libFeat.captureFields.length > 0
+      const deps = depsByFeature[feat.id] ?? [];
+
+      // Dependency-typed capture fields (honour each dependency's valueType).
+      const depCaptureFields = deps
+        .slice()
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+        .map((dep) => ({
+          id: u(),
+          key: labelToKey(`${feat.name}_${unit}_${dep.name}`),
+          label: dep.name,
+          type: captureTypeForValueType((dep as unknown as { valueType?: string }).valueType),
+          required: true,
+          featureId: feat.id,
+        }));
+
+      // Fallbacks for products that never defined dependencies.
+      const fallbackNames: string[] = libFeat?.captureFields && libFeat.captureFields.length > 0
         ? libFeat.captureFields
         : (feat.subProperties ?? []).map((d) => d.name);
+
+      const captureFields = depCaptureFields.length > 0
+        ? depCaptureFields
+        : fallbackNames.map((fieldName) => ({
+            id: u(),
+            key: labelToKey(`${feat.name}_${unit}_${fieldName}`),
+            label: fieldName,
+            type: "text" as CaptureFieldType,
+            required: true,
+            featureId: feat.id,
+          }));
+
+      // No capture fields at all (inventory feature with no dependencies and no legacy
+      // capture config) -> a tick box to confirm, rather than an empty data step.
+      const confirmTick = captureFields.length === 0
+        ? [mkCheck(`${feat.name} ${unit} — Data recorded / nothing to capture`, feat.id)]
+        : [];
+
       steps.push({
         ...base, id: u(), order: order++,
         stepType: "data-collection", stepFeatureId: feat.id, stepUnitIndex: unit,
@@ -2387,15 +2466,9 @@ function buildAutoSteps(
         description: `Record all required technical data for ${feat.name} ${unit}. Capture serial numbers, model numbers, firmware versions and measured values. Photograph the installed unit showing nameplate and installed condition. Ensure all fields are completed accurately as this forms the as-built record.`,
         inputs: [
           { id: u(), type: "photo", label: `${feat.name} ${unit} — Installed unit photograph`, required: true },
+          ...confirmTick,
         ],
-        captureFields: captureFieldNames.map((fieldName) => ({
-          id: u(),
-          key: labelToKey(`${feat.name}_${unit}_${fieldName}`),
-          label: fieldName,
-          type: "text" as CaptureFieldType,
-          required: true,
-          featureId: feat.id,
-        })),
+        captureFields,
       });
     }
   }
@@ -2463,6 +2536,7 @@ function CaptureFieldsSection({
   onUpdateCaptureField,
   onDeleteCaptureField,
   onAddCaptureFieldsFromLib,
+  depsByFeature = {},
 }: {
   step: WorkflowStep;
   productFeatures: ProductFeatureDefinition[];
@@ -2472,11 +2546,27 @@ function CaptureFieldsSection({
   onUpdateCaptureField: (id: string, patch: Partial<CaptureField>) => void;
   onDeleteCaptureField: (id: string) => void;
   onAddCaptureFieldsFromLib?: (fieldNames: string[]) => void;
+  depsByFeature?: Record<string, FeatureDependency[]>;
 }) {
   const fields = step.captureFields || [];
 
-  // Inventory features that have captureFields defined — shown as quick-add chips
-  const inventoryLibFeatures = libFeatures.filter((f) => f.isInventory && (f.captureFields ?? []).length > 0);
+  // Quick-add chips. A feature's capture fields come from its DEPENDENCIES (the real model)
+  // and fall back to the legacy Feature.captureFields list. Previously this required
+  // captureFields to be non-empty, so inventory features that had dependencies but no
+  // hand-maintained captureFields never appeared here at all.
+  const captureNamesForFeature = (f: Feature): string[] => {
+    const deps = depsByFeature[f.id] ?? [];
+    if (deps.length > 0) {
+      return deps
+        .slice()
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+        .map((d) => d.name);
+    }
+    return f.captureFields ?? [];
+  };
+  const inventoryLibFeatures = libFeatures.filter(
+    (f) => f.isInventory && captureNamesForFeature(f).length > 0,
+  );
 
   return (
     <Stack spacing={2}>
@@ -2506,8 +2596,8 @@ function CaptureFieldsSection({
                 color="primary"
                 variant="outlined"
                 clickable
-                onClick={() => onAddCaptureFieldsFromLib?.(f.captureFields ?? [])}
-                title={`Add: ${(f.captureFields ?? []).join(", ")}`}
+                onClick={() => onAddCaptureFieldsFromLib?.(captureNamesForFeature(f))}
+                title={`Add: ${captureNamesForFeature(f).join(", ")}`}
               />
             ))}
           </Stack>
