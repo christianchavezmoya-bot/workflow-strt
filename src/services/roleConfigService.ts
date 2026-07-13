@@ -6,7 +6,17 @@ export type EditScope = "own" | "all" | "none";
 // ── Tier 2: per-domain action flags ─────────────────────────────────────────
 export interface DomainPermissions {
   projects:             { view: boolean; viewScope: ViewScope; edit: boolean; editScope: EditScope; approve: boolean; delete: boolean };
-  installationAssets:   { view: boolean; viewScope: ViewScope; edit: boolean; editScope: EditScope; runWorkflow: boolean; delete: boolean };
+  installationAssets:   {
+    view: boolean;
+    viewScope: ViewScope;
+    edit: boolean;
+    editScope: EditScope;
+    runWorkflow: boolean;
+    delete: boolean;
+    viewCapture?: boolean;
+    editCapture?: boolean;
+    editCaptureScope?: EditScope;
+  };
   workInstructionsBuilder: { view: boolean; viewScope: ViewScope; build: boolean; publish: boolean; archive: boolean };
   documents:            { view: boolean; viewScope: ViewScope; upload: boolean; delete: boolean };
   settings:             { view: boolean; edit: boolean };
@@ -37,7 +47,7 @@ export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermi
   if (p.viewOnly) {
     return {
       projects:                { view: true,  viewScope: "all", edit: false, editScope: "none", approve: false,      delete: false },
-      installationAssets:      { view: true,  viewScope: "all", edit: false, editScope: "none", runWorkflow: false,  delete: false },
+      installationAssets:      { view: true,  viewScope: "all", edit: false, editScope: "none", runWorkflow: false,  delete: false, viewCapture: true, editCapture: false, editCaptureScope: "none" },
       workInstructionsBuilder: { view: true,  viewScope: "all", build: false, publish: false,   archive: false },
       documents:               { view: true,  viewScope: "all", upload: false, delete: false },
       settings:                { view: false, edit: false },
@@ -52,7 +62,17 @@ export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermi
   const editAll: EditScope  = p.createDeleteTables ? "all" : (canEdit ? "own" : "none");
   return {
     projects:                { view: true, viewScope: viewAll, edit: canEdit,   editScope: editAll, approve: p.modifyData,    delete: canDelete },
-    installationAssets:      { view: true, viewScope: viewAll, edit: canEdit,   editScope: editAll, runWorkflow: p.editForms, delete: canDelete },
+    installationAssets:      {
+      view: true,
+      viewScope: viewAll,
+      edit: canEdit,
+      editScope: editAll,
+      runWorkflow: p.editForms,
+      delete: canDelete,
+      viewCapture: true,
+      editCapture: p.modifyData || p.createDeleteTables,
+      editCaptureScope: p.createDeleteTables ? "all" : (canEdit ? "own" : "none"),
+    },
     workInstructionsBuilder: { view: true, viewScope: viewAll, build: canBuild, publish: p.modifyData, archive: p.modifyData },
     documents:               { view: true, viewScope: viewAll, upload: canEdit, delete: canDelete },
     settings:                { view: p.createDeleteTables, edit: p.createDeleteTables },

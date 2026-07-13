@@ -18,6 +18,7 @@ import {
   FileDownloadOutlined,
   FileUploadOutlined,
   FolderOutlined,
+  GridOnOutlined,
   HistoryOutlined,
   HourglassEmptyOutlined,
   InfoOutlined,
@@ -136,6 +137,16 @@ import { WorkflowAssignmentRepository } from "../../repositories/WorkflowAssignm
 import { mediaStore } from "../../services/mediaStore";
 import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { deriveOpenIssuesFromAsset } from "../../utils/issueDerivation";
+import type { Feature as LibFeature } from "../../types/feature";
+import type { FeatureDependency } from "../../types/featureDependency";
+import CaptureSpreadsheetDialog from "./CaptureSpreadsheetDialog";
+import {
+  buildAssetCaptureSearchBlob,
+  buildCaptureColumns,
+  buildCaptureRow,
+  computeMaxUnitsByFeature,
+} from "../../utils/captureSpreadsheet";
+import type { FeatureSelection } from "../../services/productConfigService";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 
 // Reference media lives on the config's mediaJson, separate from stepsJson.
@@ -406,6 +417,8 @@ const AssetInstallationPage = () => {
   const canEditInstallationAssets = !!can.installationAssets?.edit;
   const canDeleteInstallationAssets = !!can.installationAssets?.delete;
   const canRunAssetWorkflow = !!can.installationAssets?.runWorkflow;
+  const canViewCaptureMatrix = !!can.installationAssets?.viewCapture;
+  const canEditCaptureData = !!can.installationAssets?.editCapture;
   const deepLinkHandledRef = useRef<string | null>(null);
 
   // Stale-load guard: incremented every time activeProduct changes so that
@@ -577,6 +590,13 @@ const AssetInstallationPage = () => {
   const [bulkDocsName, setBulkDocsName] = useState("");
   const [bulkDocsSaving, setBulkDocsSaving] = useState(false);
   const [bulkDocsResult, setBulkDocsResult] = useState<string | null>(null);
+  // Capture spreadsheet view
+  const [assetTableViewMode, setAssetTableViewMode] = useState<"operations" | "capture">("operations");
+  const [capturePopupOpen, setCapturePopupOpen] = useState(false);
+  const [libFeatures, setLibFeatures] = useState<LibFeature[]>([]);
+  const [depsByFeature, setDepsByFeature] = useState<Record<string, FeatureDependency[]>>({});
+  const [captureSearchByAsset, setCaptureSearchByAsset] = useState<Record<string, string>>({});
+  const [exportViewMode, setExportViewMode] = useState<"operations" | "capture">("operations");
   // Print / PDF dialog
   const [printOpen, setPrintOpen]         = useState(false);
   const [printScope, setPrintScope]       = useState<"selection" | "visible" | "custom">("visible");
@@ -802,6 +822,57 @@ const AssetInstallationPage = () => {
     }
   }, [activeProduct, navigate]);
   const activeFeatures = useMemo(() => (activeProduct?.features ?? []) as FeatureDef[], [activeProduct]);
+
+  useEffect(() => {
+    if (!activeProduct?.id) {
+      setLibFeatures([]);
+      setDepsByFeature({});
+      return;
+    }
+    let cancelled = false;
+    featureService.getByProduct(activeProduct.id).then(async (feats) => {
+      if (cancelled) return;
+      setLibFeatures(feats);
+      const depLists = await Promise.all(
+        feats.map((f) => featureDependencyService.getByFeature(f.id).catch(() => [] as FeatureDependency[])),
+      );
+      if (cancelled) return;
+      const map: Record<string, FeatureDependency[]> = {};
+      feats.forEach((f, i) => { map[f.id] = depLists[i] ?? []; });
+      setDepsByFeature(map);
+    }).catch(() => {
+      if (!cancelled) {
+        setLibFeatures([]);
+        setDepsByFeature({});
+      }
+    });
+    return () => { cancelled = true; };
+  }, [activeProduct?.id]);
+
+  const featureSelectionsByConfig = useMemo((): FeatureSelection[][] => {
+    return publishedWfConfigs.map((c) => {
+      try {
+        return JSON.parse(c.featureSelectionsJson || "[]") as FeatureSelection[];
+      } catch {
+        return [];
+      }
+    });
+  }, [publishedWfConfigs]);
+
+  const captureMaxUnits = useMemo(
+    () => computeMaxUnitsByFeature(featureSelectionsByConfig),
+    [featureSelectionsByConfig],
+  );
+
+  const getActiveCountForAsset = useCallback((asset: ProjectAsset): Record<string, number> => {
+    const sels = parseFeatureSelectionsForConfig(asset.productConfigId);
+    if (!sels?.length) return captureMaxUnits;
+    const out: Record<string, number> = {};
+    for (const s of sels) {
+      if (s.activeCount > 0) out[s.featureId] = s.activeCount;
+    }
+    return out;
+  }, [captureMaxUnits, publishedWfConfigs]);
   const requestedWorkflowType = searchParams.get("workflowType");
   const resolveRequestedWorkflowTypeId = useCallback((types: WorkflowType[]) => {
     if (!requestedWorkflowType) return "";
@@ -1433,10 +1504,11 @@ const AssetInstallationPage = () => {
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
         if (showNoWorkflow && assetHasConfiguredWorkflow(a)) return false;
       }
-      if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q)))) return false;
+      if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q))
+        || (captureSearchByAsset[a.id]?.includes(q) ?? false))) return false;
       return true;
     });
-  }, [assets, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode]);
+  }, [assets, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode, captureSearchByAsset]);
 
   // Projects linked to the active product (used in add/edit dialogs and the project selector).
   const productProjects = useMemo(
@@ -1454,6 +1526,32 @@ const AssetInstallationPage = () => {
     if (manageableProjectIds.has(asset.projectId)) return true;
     return asset.assignedUserId === currentUser.id;
   }, [can.installationAssets?.editScope, currentUser.id, manageableProjectIds]);
+
+  const canEditCaptureForAsset = useCallback((asset: ProjectAsset) => {
+    if (!canEditCaptureData) return false;
+    const scope = can.installationAssets?.editCaptureScope ?? "none";
+    if (scope === "all") return true;
+    if (scope !== "own") return false;
+    if (manageableProjectIds.has(asset.projectId)) return true;
+    return asset.assignedUserId === currentUser.id;
+  }, [canEditCaptureData, can.installationAssets?.editCaptureScope, currentUser.id, manageableProjectIds]);
+
+  useEffect(() => {
+    if (!libFeatures.length) {
+      setCaptureSearchByAsset({});
+      return;
+    }
+    const hidden = new Set<string>();
+    const cols = buildCaptureColumns(libFeatures, depsByFeature, captureMaxUnits, hidden);
+    const next: Record<string, string> = {};
+    for (const asset of assets) {
+      const runs = runsMap[asset.id] ?? [];
+      const run = runs.slice().sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+      const row = buildCaptureRow(asset.id, run, cols, libFeatures, getActiveCountForAsset(asset));
+      next[asset.id] = buildAssetCaptureSearchBlob(asset.assetTag, asset.assetName ?? "", asset.serialNumber, row, libFeatures);
+    }
+    setCaptureSearchByAsset(next);
+  }, [assets, runsMap, libFeatures, depsByFeature, captureMaxUnits, getActiveCountForAsset]);
 
   const canManageAssetDocuments = can.documents.view || can.documents.upload || can.documents.delete;
 
@@ -3861,6 +3959,17 @@ const AssetInstallationPage = () => {
             >
               <SearchOutlined sx={{ fontSize: 20 }} />
             </IconButton>
+            {canViewCaptureMatrix && activeProduct && (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<GridOnOutlined sx={{ fontSize: 16 }} />}
+                onClick={() => setCapturePopupOpen(true)}
+                sx={{ flexShrink: 0, fontSize: 11, whiteSpace: "nowrap" }}
+              >
+                Table view
+              </Button>
+            )}
           </Stack>
           {/* Row 2: My/All scope toggle */}
           <ToggleButtonGroup
@@ -3950,7 +4059,7 @@ const AssetInstallationPage = () => {
               <MenuItem value="Issue">Issue</MenuItem>
             </Select>
           </FormControl>
-          <Tooltip title="Search by asset tag, serial number, or installer">
+          <Tooltip title="Search by asset tag, serial, part #, captures, or installer">
             <IconButton
               size="small"
               onClick={() => { setAssetSearchQuery(""); setAssetSearchOpen(true); }}
@@ -3965,6 +4074,17 @@ const AssetInstallationPage = () => {
               <SearchOutlined sx={{ fontSize: 20 }} />
             </IconButton>
           </Tooltip>
+          {canViewCaptureMatrix && activeProduct && (
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={assetTableViewMode}
+              onChange={(_, v) => { if (v) setAssetTableViewMode(v as "operations" | "capture"); }}
+            >
+              <ToggleButton value="operations" sx={{ fontSize: 11, py: 0.5, px: 1.25 }}>Operations</ToggleButton>
+              <ToggleButton value="capture" sx={{ fontSize: 11, py: 0.5, px: 1.25 }}>Capture</ToggleButton>
+            </ToggleButtonGroup>
+          )}
         </Stack>
       )}
 
@@ -4054,12 +4174,39 @@ const AssetInstallationPage = () => {
             Upload documents
           </Button>
 
-          {/* Export CSV */}
+            {/* Export CSV */}
           <Button
             size="small"
             variant="outlined"
             onClick={() => {
               const selected = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
+              if (exportViewMode === "capture" && canViewCaptureMatrix && libFeatures.length > 0) {
+                const hidden = new Set<string>();
+                const cols = buildCaptureColumns(libFeatures, depsByFeature, captureMaxUnits, hidden);
+                const headers = ["assetTag", "assetName", "status", ...cols.map((c) => c.sortLabel)];
+                const csv = [
+                  headers.map((h) => `"${h.replace(/"/g, '""')}"`).join(","),
+                  ...selected.map((a) => {
+                    const runs = runsMap[a.id] ?? [];
+                    const run = runs.slice().sort((x, y) => new Date(y.startedAt).getTime() - new Date(x.startedAt).getTime())[0];
+                    const row = buildCaptureRow(a.id, run, cols, libFeatures, getActiveCountForAsset(a));
+                    const cells = cols.map((c) => {
+                      const cell = row.cells[c.id];
+                      const v = cell?.applicable === false ? "N/A" : (cell?.value ?? "");
+                      return `"${String(v).replace(/"/g, '""')}"`;
+                    });
+                    return [`"${a.assetTag}"`, `"${(a.assetName ?? "").replace(/"/g, '""')}"`, `"${a.status}"`, ...cells].join(",");
+                  }),
+                ].join("\n");
+                const blob = new Blob([csv], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `assets-capture-export-${new Date().toISOString().slice(0, 10)}.csv`;
+                link.click();
+                URL.revokeObjectURL(url);
+                return;
+              }
               const headers = ["assetTag", "assetName", "serialNumber", "assetModel", "manufacturer", "location", "status"];
               const csv = [
                 headers.join(","),
@@ -4119,6 +4266,7 @@ const AssetInstallationPage = () => {
                   variant="outlined"
                   startIcon={<PrintOutlined fontSize="small" />}
                   onClick={() => {
+                    setExportViewMode(assetTableViewMode);
                     setPrintScope(selectedAssetIds.size > 0 ? "selection" : "visible");
                     setPrintOpen(true);
                   }}
@@ -4127,6 +4275,17 @@ const AssetInstallationPage = () => {
                   Print / PDF
                 </Button>
               </Tooltip>
+              {canViewCaptureMatrix && (
+                <ToggleButtonGroup
+                  size="small"
+                  exclusive
+                  value={exportViewMode}
+                  onChange={(_, v) => { if (v) setExportViewMode(v as "operations" | "capture"); }}
+                >
+                  <ToggleButton value="operations" sx={{ fontSize: 10, py: 0.25, px: 0.75 }}>Ops export</ToggleButton>
+                  <ToggleButton value="capture" sx={{ fontSize: 10, py: 0.25, px: 0.75 }}>Capture export</ToggleButton>
+                </ToggleButtonGroup>
+              )}
             </Stack>
           )}
           <Stack direction="row" spacing={1} alignItems="center">
@@ -4464,6 +4623,37 @@ const AssetInstallationPage = () => {
             );
           })}
         </Stack>
+      ) : assetTableViewMode === "capture" && canViewCaptureMatrix && activeProduct ? (
+        <CaptureSpreadsheetDialog
+          embedded
+          open
+          onClose={() => setAssetTableViewMode("operations")}
+          assets={displayAssets}
+          runsMap={runsMap}
+          features={libFeatures}
+          depsByFeature={depsByFeature}
+          featureSelectionsByConfig={featureSelectionsByConfig}
+          activeCountForAsset={getActiveCountForAsset}
+          readOnly={false}
+          canEditCapture={canEditCaptureData}
+          canEditAsset={canEditCaptureForAsset}
+          onRunUpdated={(run) => {
+            setRunsMap((prev) => {
+              const list = prev[run.assetId] ?? [];
+              const next = list.some((r) => r.id === run.id)
+                ? list.map((r) => (r.id === run.id ? run : r))
+                : [...list, run];
+              return { ...prev, [run.assetId]: next };
+            });
+          }}
+          renderStatus={(asset) => featureCompletenessChip(asset)}
+          renderActions={(asset) => {
+            const proj = projectMap.get(asset.projectId);
+            return (canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed")
+              ? actionButton(asset, proj?.workflowMode)
+              : null;
+          }}
+        />
       ) : (
         <Paper className="glass-card" sx={{ overflow: "hidden" }}>
           <Box sx={{ overflowX: "auto" }}>
@@ -5311,7 +5501,8 @@ const AssetInstallationPage = () => {
                 return (
                   a.assetTag?.toLowerCase().includes(q) ||
                   a.serialNumber?.toLowerCase().includes(q) ||
-                  installerName.includes(q)
+                  installerName.includes(q) ||
+                  (captureSearchByAsset[a.id]?.includes(q) ?? false)
                 );
               })
               .slice(0, 50);
@@ -6287,6 +6478,32 @@ const AssetInstallationPage = () => {
         open={!!inspectionDialogAsset}
         onClose={() => setInspectionDialogAsset(null)}
       />
+
+      {isNativePlatform && (
+        <CaptureSpreadsheetDialog
+          open={capturePopupOpen}
+          onClose={() => setCapturePopupOpen(false)}
+          fullScreen
+          assets={mobileAssets}
+          runsMap={runsMap}
+          features={libFeatures}
+          depsByFeature={depsByFeature}
+          featureSelectionsByConfig={featureSelectionsByConfig}
+          activeCountForAsset={getActiveCountForAsset}
+          readOnly
+          canEditCapture={false}
+          onRunUpdated={(run) => {
+            setRunsMap((prev) => {
+              const list = prev[run.assetId] ?? [];
+              const next = list.some((r) => r.id === run.id)
+                ? list.map((r) => (r.id === run.id ? run : r))
+                : [...list, run];
+              return { ...prev, [run.assetId]: next };
+            });
+          }}
+          renderStatus={(asset) => featureCompletenessChip(asset)}
+        />
+      )}
 
       <Snackbar
         open={!!inlineSaveError}

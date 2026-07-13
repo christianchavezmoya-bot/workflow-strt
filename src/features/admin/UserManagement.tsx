@@ -722,7 +722,7 @@ export const UserManagement: React.FC = () => {
 
   const emptyDomains = (): DomainPermissions => ({
     projects:                { view: false, viewScope: "own", edit: false, editScope: "none", approve: false, delete: false },
-    installationAssets:      { view: false, viewScope: "own", edit: false, editScope: "none", runWorkflow: false, delete: false },
+    installationAssets:      { view: false, viewScope: "own", edit: false, editScope: "none", runWorkflow: false, delete: false, viewCapture: false, editCapture: false, editCaptureScope: "none" },
     workInstructionsBuilder: { view: false, viewScope: "own", build: false, publish: false, archive: false },
     documents:               { view: false, viewScope: "own", upload: false, delete: false },
     settings:                { view: false, edit: false },
@@ -4315,6 +4315,41 @@ export const UserManagement: React.FC = () => {
                           onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, installationAssets: { ...prev.domains.installationAssets, delete: e.target.checked } } }))} />
                         <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>delete</Typography>
                       </Stack>
+                    </TableCell>
+                  </TableRow>
+
+                  {/* Assets — Capture matrix */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Assets — Capture</Typography></TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.installationAssets.viewCapture}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, installationAssets: { ...prev.domains.installationAssets, viewCapture: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>view matrix</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Typography variant="caption" color="text.secondary">—</Typography>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.installationAssets.editCapture}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, installationAssets: { ...prev.domains.installationAssets, editCapture: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>edit deps</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Select size="small" value={roleForm.domains.installationAssets.editCaptureScope ?? "none"}
+                        disabled={!roleForm.domains.installationAssets.editCapture}
+                        onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, installationAssets: { ...prev.domains.installationAssets, editCaptureScope: e.target.value as "own" | "all" | "none" } } }))}
+                        sx={{ fontSize: "0.7rem", height: 24, minWidth: 78 }}>
+                        <MenuItem value="own">Own</MenuItem>
+                        <MenuItem value="all">All</MenuItem>
+                        <MenuItem value="none">None</MenuItem>
+                      </Select>
+                    </TableCell>
+                    <TableCell align="center" colSpan={2}>
+                      <Typography variant="caption" color="text.secondary">Web only · workflow captures</Typography>
                     </TableCell>
                   </TableRow>
 

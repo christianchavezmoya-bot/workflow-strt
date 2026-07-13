@@ -862,6 +862,19 @@ public class AssetWorkflowRunsController : ControllerBase
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
 
+        if (req.CaptureDataAmend)
+        {
+            var finalized = run.CustomerSignedAt.HasValue
+                || run.SignatureStatus is "Signed" or "Declined" or "WaivedCustomer";
+            if (finalized)
+            {
+                return UnprocessableEntity(new
+                {
+                    message = "This workflow run was customer-signed. Start a new workflow run to change captured data.",
+                });
+            }
+        }
+
         run.StepResultsJson = req.StepResultsJson;
         run.UpdatedAt       = DateTime.UtcNow;
 

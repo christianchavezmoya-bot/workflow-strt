@@ -99,8 +99,14 @@ public class SearchController : ControllerBase
         }
 
         var assets = await _db.ProjectAssets.AsNoTracking().ToListAsync();
+        var allRuns = await _db.AssetWorkflowRuns.AsNoTracking().ToListAsync();
+        var latestRunByAsset = allRuns
+            .GroupBy(r => r.AssetId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.StartedAt).First());
+
         foreach (var a in assets)
         {
+            latestRunByAsset.TryGetValue(a.Id, out var latestRun);
             TryAddResult(
                 results,
                 terms,
@@ -108,7 +114,7 @@ public class SearchController : ControllerBase
                 entityId: a.Id,
                 title: string.IsNullOrWhiteSpace(a.AssetTag) ? "(Unlabeled Asset)" : a.AssetTag,
                 subtitle: a.AssetName,
-                route: "/admin/asset-registry",
+                route: $"/installations/assets?project={Uri.EscapeDataString(a.ProjectId)}&asset={Uri.EscapeDataString(a.Id)}",
                 fields: new Dictionary<string, string?>
                 {
                     ["Asset Tag"] = a.AssetTag,
@@ -117,7 +123,10 @@ public class SearchController : ControllerBase
                     ["Model"] = a.AssetModel,
                     ["Manufacturer"] = a.Manufacturer,
                     ["Location"] = a.Location,
-                    ["Notes"] = a.Notes
+                    ["Notes"] = a.Notes,
+                    ["Feature Values"] = a.FeatureValuesJson,
+                    ["As-Built Captures"] = a.AsBuiltJson,
+                    ["Workflow Step Results"] = latestRun?.StepResultsJson
                 });
         }
 

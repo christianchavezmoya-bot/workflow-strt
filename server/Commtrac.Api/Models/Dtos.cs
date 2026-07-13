@@ -688,7 +688,17 @@ public record CustomFieldDefinitionDto(
 );
 
 public record ProjectDomainPermissions(bool View, string ViewScope = "own", bool Edit = false, string EditScope = "none", bool Approve = false, bool Delete = false);
-public record InstallationAssetsDomainPermissions(bool View, string ViewScope = "own", bool Edit = false, string EditScope = "none", bool RunWorkflow = false, bool Delete = false);
+public record InstallationAssetsDomainPermissions(
+    bool View,
+    string ViewScope = "own",
+    bool Edit = false,
+    string EditScope = "none",
+    bool RunWorkflow = false,
+    bool Delete = false,
+    bool ViewCapture = true,
+    bool EditCapture = false,
+    string EditCaptureScope = "none"
+);
 public record WorkInstructionsBuilderDomainPermissions(bool View, string ViewScope = "own", bool Build = false, bool Publish = false, bool Archive = false);
 public record DocumentsDomainPermissions(bool View, string ViewScope = "own", bool Upload = false, bool Delete = false);
 public record SettingsDomainPermissions(bool View, bool Edit);
@@ -1006,7 +1016,7 @@ public record CompleteRunRequest(
 );
 
 public record PatchTimeEntriesRequest(string TimeEntriesJson);
-public record PatchStepResultsRequest(string StepResultsJson, string? AmendedByName, string? AmendedAt);
+public record PatchStepResultsRequest(string StepResultsJson, string? AmendedByName, string? AmendedAt, bool CaptureDataAmend = false);
 public record TrackRunTimeRequest(
     string Action,
     string? Reason,

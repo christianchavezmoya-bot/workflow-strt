@@ -1081,12 +1081,13 @@ export const assetWorkflowRunService = {
   },
 
   /** Patch step results on a locked/complete run — used to add missing photos after completion. */
-  async patchStepResults(runId: string, stepResultsJson: string, amendedByName?: string): Promise<AssetWorkflowRun> {
+  async patchStepResults(runId: string, stepResultsJson: string, amendedByName?: string, captureDataAmend = false): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
       const requestBody = await mediaStore.resolveUploadPayload({
         stepResultsJson,
         amendedByName: amendedByName ?? null,
         amendedAt: new Date().toISOString(),
+        captureDataAmend,
       });
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/step-results`, requestBody, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
@@ -1103,6 +1104,7 @@ export const assetWorkflowRunService = {
       stepResultsJson,
       amendedByName: amendedByName ?? null,
       amendedAt,
+      captureDataAmend,
     };
     try {
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
