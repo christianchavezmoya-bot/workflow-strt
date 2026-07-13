@@ -21,6 +21,7 @@ import {
 import SignatureBadge from "../../components/ui/SignatureBadge";
 import SignatureDialog from "../../components/ui/SignatureDialog";
 import { signatureService, type CreateTokenPayload } from "../../services/signatureService";
+import type { SignatureEvent } from "../../types/signature";
 import { projectContactService } from "../../services/projectContactService";
 import { resolvePublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import type { ProjectContact } from "../../types/projectContact";
@@ -406,7 +407,19 @@ export default function WorkflowRunHistoryDialog({
       const [brandSettings, resolvedCustLogo, signatureEvents] = await Promise.all([
         brandSettingsService.get(),
         customerLogoBase64 ? resolveImageToDataUrl(customerLogoBase64) : Promise.resolve(null),
-        run.isLocked ? signatureService.listEvents(run.id) : Promise.resolve([]),
+        // Signature events are a network-only read (no local store), so offline this
+        // REJECTS and used to take the whole Promise.all down with it — "Failed to
+        // generate PDF report" even though everything else was available offline
+        // (brandSettingsService deliberately caches its logo "so offline PDF reports
+        // render with branding"). A locked/signed run always hits this path, which is
+        // exactly when a technician wants the report.
+        //
+        // Degrade instead of failing: if the events can't be fetched, generate the report
+        // without the per-event detail. The run record itself still carries the signature
+        // status/timestamps, so the report remains accurate — just without the event list.
+        run.isLocked
+          ? signatureService.listEvents(run.id).catch(() => [] as SignatureEvent[])
+          : Promise.resolve([] as SignatureEvent[]),
       ]);
       const bizLogoResolved = brandSettings.logoBase64
         ? await resolveImageToDataUrl(brandSettings.logoBase64)
