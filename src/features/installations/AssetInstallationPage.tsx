@@ -2218,13 +2218,37 @@ const AssetInstallationPage = () => {
   }
 
   async function saveAssignment() {
-    if (!assignDialogAsset || !assignForm.workflowTypeId || !assignForm.workflowConfigId) return;
+    if (!assignDialogAsset || !assignForm.workflowConfigId) return;
+
+    // Resolve the workflow type id. resolveConfigWorkflowTypeId() returns "" when the
+    // config has no explicit workflowTypeId AND its configType can't be matched against
+    // the workflowTypes list — which is exactly what happens OFFLINE if that list failed
+    // to load. Previously saveAssignment() guarded on `!assignForm.workflowTypeId` and
+    // silently RETURNED: the user picked a config, pressed Save, and nothing happened at
+    // all — no save, no error, no closed dialog.
+    //
+    // Recover instead: re-resolve here (the list may have loaded since the dialog opened),
+    // and fall back to the config's own workflowTypeId. Only if we still have nothing do
+    // we tell the user — rather than doing nothing at all.
+    let workflowTypeId = assignForm.workflowTypeId;
+    if (!workflowTypeId) {
+      const cfg = workflowConfigs.find((c) => c.id === assignForm.workflowConfigId);
+      workflowTypeId = cfg ? resolveConfigWorkflowTypeId(cfg, workflowTypes) || (cfg.workflowTypeId ?? "") : "";
+    }
+    if (!workflowTypeId) {
+      setInlineSaveError("Could not determine the workflow type for this config. Reconnect and try again.");
+      return;
+    }
+
     setAssignSaving(true);
     try {
-      await assetWorkflowAssignmentService.create(assignDialogAsset.id, assignForm.workflowConfigId, assignForm.workflowTypeId);
+      await assetWorkflowAssignmentService.create(assignDialogAsset.id, assignForm.workflowConfigId, workflowTypeId);
       await loadAssignmentsForAsset(assignDialogAsset.id);
       setAssignDialogOpen(false);
-    } catch { console.warn("[AssetInstallationPage] saveAssignment failed"); } finally {
+    } catch (err) {
+      console.warn("[AssetInstallationPage] saveAssignment failed", err);
+      setInlineSaveError("Could not assign the workflow. Please try again.");
+    } finally {
       setAssignSaving(false);
     }
   }
