@@ -70,6 +70,11 @@ const CAPTURE_FIELD_LABELS: Record<string, string> = {
 
 export function labelForCaptureField(key: string): string {
   if (CAPTURE_FIELD_LABELS[key]) return CAPTURE_FIELD_LABELS[key];
+  // Capture-column keys can now be dependency NAMES ("Serial Number", "MAC Address"),
+  // which are already human-readable. Running those through the camelCase splitter below
+  // mangles them ("MAC Address" -> "M A C  Address"), so leave them alone: if the key
+  // already contains a space, treat it as a finished label.
+  if (/\s/.test(key)) return key.trim();
   return key
     .replace(/([A-Z])/g, " $1")
     .replace(/[_-]+/g, " ")
@@ -139,6 +144,13 @@ export function buildCaptureColumns(
   depsByFeature: Record<string, FeatureDependency[]>,
   maxUnitsByFeature: Record<string, number>,
   hiddenGroupKeys: Set<string>,
+  /**
+   * Emit the legacy BOM-style `dependency-capture` columns. These only resolve for steps
+   * carrying `bomSource`, which WorkflowBuilder does not produce, so they default OFF —
+   * otherwise the grid fills with permanently-empty duplicate columns. Pass true if a
+   * BOM-driven workflow shape is ever introduced.
+   */
+  emitDependencyColumns = false,
 ): CaptureColumnDef[] {
   const cols: CaptureColumnDef[] = [];
   const inventoryFeatures = features
@@ -147,7 +159,35 @@ export function buildCaptureColumns(
 
   for (const feat of inventoryFeatures) {
     const maxUnits = Math.max(1, maxUnitsByFeature[feat.id] ?? 1);
-    const captureKeys = (feat.captureFields?.length ? feat.captureFields : ["serialNo", "firmware"]).map(String);
+
+    // Capture columns are derived from the feature's DEPENDENCIES — because that is how
+    // WorkflowBuilder actually models captured data. Its `data-collection` step does:
+    //
+    //   captureFields: deps.map((dep) => ({
+    //     key:   labelToKey(`${featName}_${unitIndex}_${dep.name}`),   // e.g. acmeRelay1serialNumber
+    //     label: dep.name,                                             // e.g. "Serial Number"
+    //     ...
+    //   }))
+    //
+    // So each dependency of a feature becomes one capture field, and its LABEL is the
+    // dependency's name. Previously this fell back to a hardcoded guess of
+    // ["serialNo", "firmware"] whenever feat.captureFields was empty (which it is by
+    // default — it's a hand-maintained list in Settings). Those literal keys match
+    // neither the generated key nor the dependency label, so every lookup missed and the
+    // cells rendered empty even though the values were present in the run.
+    //
+    // Deriving from dependencies means: no manual configuration, and it works for ANY
+    // dependency (MAC address, torque, calibration date…), not just serial/firmware.
+    // feat.captureFields, when explicitly set, is still honoured as an override.
+    const featureDeps = (depsByFeature[feat.id] ?? [])
+      .slice()
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+
+    const captureKeys = feat.captureFields?.length
+      ? feat.captureFields.map(String)                 // explicit override, unchanged
+      : featureDeps.length
+        ? featureDeps.map((d) => d.name)               // derived: dependency names == capture field labels
+        : ["serialNo", "firmware"];                    // last-resort legacy fallback
 
     for (let unit = 1; unit <= maxUnits; unit++) {
       const groupKey = `feat:${feat.id}:${unit}`;
@@ -200,9 +240,20 @@ export function buildCaptureColumns(
         });
       }
 
-      const deps = (depsByFeature[feat.id] ?? [])
-        .filter((d) => d.isInventory)
-        .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+      // Dependency-capture columns are only meaningful for steps carrying `bomSource`
+      // (a BOM-generated shape). WorkflowBuilder never sets bomSource — nothing in the
+      // codebase does — so findDependencyCaptureValue can never match and these columns
+      // were rendering permanently empty, AND duplicating the real per-dependency columns
+      // that the feature-capture path (above) now produces correctly.
+      //
+      // Emit them only when a step in this asset's run actually has bomSource, so a future
+      // BOM-driven workflow still works while builder-created workflows don't get a grid
+      // full of dead "Serial" columns.
+      const deps = emitDependencyColumns
+        ? (depsByFeature[feat.id] ?? [])
+            .filter((d) => d.isInventory)
+            .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+        : [];
 
       for (const dep of deps) {
         const depGroup = `dep:${feat.id}:${dep.id}:${unit}`;
@@ -238,18 +289,45 @@ function findFeatureCaptureValue(
   unitIndex: number,
   fieldKey: string,
 ): { value: string; binding?: CaptureCellBinding } {
+  const wanted = fieldKey.trim().toLowerCase();
   for (const step of steps) {
     if (step.stepFeatureId !== featureId || step.stepUnitIndex !== unitIndex) continue;
     const fields = step.captureFields ?? [];
-    const field = fields.find((f) => f.key === fieldKey || f.label === fieldKey);
+
+    // Match on key OR label, case-insensitively.
+    //
+    // WorkflowBuilder generates capture fields whose `label` is the dependency name
+    // ("Serial Number") and whose `key` is a derived camelCase string
+    // ("acmeRelay1serialNumber"). Columns are now built from dependency names, so the
+    // LABEL is the reliable join. The extra normalised comparisons keep older workflows
+    // (and explicit feat.captureFields overrides like "serialNo") working.
+    const field =
+      fields.find((f) => f.key === fieldKey || f.label === fieldKey) ??
+      fields.find(
+        (f) =>
+          f.key?.trim().toLowerCase() === wanted ||
+          f.label?.trim().toLowerCase() === wanted ||
+          labelForCaptureField(f.key ?? "").trim().toLowerCase() === labelForCaptureField(fieldKey).trim().toLowerCase(),
+      );
     if (!field) continue;
-    const result = results.find((r) => r.stepId === step.id && (r.iterationIndex ?? 0) === 0);
-    const raw = result?.values?.[field.id];
-    if (raw) {
-      return {
-        value: raw,
-        binding: { stepId: step.id, captureFieldId: field.id, iterationIndex: 0 },
-      };
+
+    // Iteration index. Previously hardcoded to 0, which silently dropped every value
+    // captured in a repeated step's 2nd+ iteration. A step bound to a specific unit
+    // normally records that unit at iteration 0, but steps that repeat per unit record
+    // unit N at iteration N-1 (this is exactly what findDependencyCaptureValue already
+    // assumes). Try the per-unit iteration first, then fall back to iteration 0, so both
+    // shapes resolve instead of one of them losing data.
+    const perUnitIter = Math.max(0, unitIndex - 1);
+    const candidates = perUnitIter === 0 ? [0] : [perUnitIter, 0];
+    for (const iter of candidates) {
+      const result = results.find((r) => r.stepId === step.id && (r.iterationIndex ?? 0) === iter);
+      const raw = result?.values?.[field.id];
+      if (raw) {
+        return {
+          value: raw,
+          binding: { stepId: step.id, captureFieldId: field.id, iterationIndex: iter },
+        };
+      }
     }
   }
   return { value: "" };
