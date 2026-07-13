@@ -4,6 +4,7 @@ import {
   AddOutlined,
   ArticleOutlined,
   ArrowBackOutlined,
+  ArchiveOutlined,
   BuildOutlined,
   ContentCopyOutlined,
   DeleteOutline,
@@ -18,6 +19,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -495,6 +497,14 @@ const WorkInstructions = () => {
   const [exportMenu, setExportMenu] = useState<{ el: HTMLElement; cfg: WorkflowConfig } | null>(null);
   const [deleteConfig, setDeleteConfig] = useState<WorkflowConfig | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Archive. The backend has always supported POST /workflow-configs/{id}/archive, and
+  // workflowConfigService.archive() existed — but nothing ever called it, so the app told
+  // users to "archive it instead of deleting" while offering no way to do so.
+  // Archived configs are hidden from the list by default (they stay retrievable via the
+  // toggle) and are already excluded from asset assignment, which only offers Published.
+  const [archiveConfig, setArchiveConfig] = useState<WorkflowConfig | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [cloningId, setCloningId] = useState<string | null>(null);
@@ -603,10 +613,22 @@ const WorkInstructions = () => {
   // Roles with viewScope="own" see only Published configs (Option B).
   const canViewAllWI = (can.workInstructionsBuilder?.viewScope ?? "own") === "all";
 
+  // Drives the "Show archived (N)" toggle — only worth showing if any exist.
+  const archivedCount = useMemo(
+    () => configs.filter((c) => c.status === "Archived").length,
+    [configs],
+  );
+
   const filteredConfigs = useMemo(() => {
     const q = configSearch.trim().toLowerCase();
     const scopeFiltered = canViewAllWI ? configs : configs.filter((c) => c.status === "Published");
-    const filtered = !q ? scopeFiltered : scopeFiltered.filter(
+    // Archived configs are hidden by default — "archive" should get a workflow out of the
+    // working list without destroying it. They remain reachable via the "Show archived"
+    // toggle. (Users restricted to Published already never see them.)
+    const archiveFiltered = showArchived
+      ? scopeFiltered
+      : scopeFiltered.filter((c) => c.status !== "Archived");
+    const filtered = !q ? archiveFiltered : archiveFiltered.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         (c.configType ?? "").toLowerCase().includes(q) ||
@@ -634,7 +656,7 @@ const WorkInstructions = () => {
       if (aVal > bVal) return 1 * multiplier;
       return 0;
     });
-  }, [canViewAllWI, configs, configSearch, sortBy, sortDir]);
+  }, [canViewAllWI, configs, configSearch, sortBy, sortDir, showArchived]);
 
   // â”€â”€â”€ Config CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -723,6 +745,24 @@ const WorkInstructions = () => {
       alert(msg ?? "Delete failed. If this workflow has existing runs, archive it instead of deleting.");
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function confirmArchive() {
+    if (!archiveConfig) return;
+    setArchiving(true);
+    try {
+      const updated = await workflowConfigService.archive(archiveConfig.id);
+      // Update in place rather than removing: the config still exists, it's just Archived.
+      // The list filter hides it unless "Show archived" is on.
+      setConfigs((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      if (selectedConfigId === archiveConfig.id) setSelectedConfigId(null);
+      setArchiveConfig(null);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      alert(msg ?? "Archive failed. Please try again.");
+    } finally {
+      setArchiving(false);
     }
   }
 
@@ -896,6 +936,21 @@ const WorkInstructions = () => {
                       <MenuItem value="desc">Descending</MenuItem>
                     </Select>
                   </FormControl>
+                  {/* Archived configs are hidden by default; this reveals them. Only shown
+                      to users who can actually see non-Published configs. */}
+                  {canViewAllWI && archivedCount > 0 && (
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={showArchived}
+                          onChange={(e) => setShowArchived(e.target.checked)}
+                        />
+                      }
+                      label={<Typography variant="body2">Show archived ({archivedCount})</Typography>}
+                      sx={{ whiteSpace: "nowrap" }}
+                    />
+                  )}
                 </Stack>
                 {can.editForms && (
                   <Button variant="contained" size="small" onClick={openNewConfig}>
@@ -991,6 +1046,20 @@ const WorkInstructions = () => {
                               <Tooltip title="Edit details">
                                 <IconButton size="small" onClick={() => openEditConfig(cfg)}>
                                   <SettingsOutlined fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                            {/* Archive — the alternative the delete error tells users to use.
+                                Hidden for configs that are already Archived. A config with
+                                runs cannot be deleted (the server refuses, to avoid
+                                orphaning run history), so this is the correct way to retire
+                                a workflow: it stays in the database and out of the working
+                                list, and the assign dialog only offers Published configs so
+                                it can no longer be assigned to new assets. */}
+                            {can.editForms && cfg.status !== "Archived" && (
+                              <Tooltip title="Archive (retire this workflow)">
+                                <IconButton size="small" onClick={() => setArchiveConfig(cfg)}>
+                                  <ArchiveOutlined fontSize="small" />
                                 </IconButton>
                               </Tooltip>
                             )}
@@ -1205,7 +1274,7 @@ const WorkInstructions = () => {
         <DialogContent>
           {deleteConfig?.status === "Published" && (
             <Alert severity="warning" sx={{ mb: 1.5 }}>
-              This instruction is <strong>Published</strong> and may be assigned to assets. Deleting it will fail if any workflow runs reference it.
+              This instruction is <strong>Published</strong> and may be assigned to assets. Deleting it will fail if any workflow runs reference it — use <strong>Archive</strong> instead to retire it without losing run history.
             </Alert>
           )}
           <Typography>
@@ -1216,6 +1285,29 @@ const WorkInstructions = () => {
           <Button onClick={() => setDeleteConfig(null)} disabled={deleting}>Cancel</Button>
           <Button variant="contained" color="error" onClick={confirmDelete} disabled={deleting}>
             {deleting ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(archiveConfig)}
+        onClose={() => !archiving && setArchiveConfig(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Archive Work Instruction?</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 1.5 }}>
+            Archiving keeps the workflow and all its run history, but retires it: it can no longer be assigned to new assets, and it's hidden from this list unless you tick <strong>Show archived</strong>. Existing runs are unaffected.
+          </Alert>
+          <Typography>
+            Archive <strong>{archiveConfig?.name}</strong>?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setArchiveConfig(null)} disabled={archiving}>Cancel</Button>
+          <Button variant="contained" onClick={confirmArchive} disabled={archiving}>
+            {archiving ? "Archiving…" : "Archive"}
           </Button>
         </DialogActions>
       </Dialog>
