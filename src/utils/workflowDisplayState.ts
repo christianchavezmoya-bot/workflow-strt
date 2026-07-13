@@ -302,6 +302,26 @@ interface ActionInput {
 function computeAction(i: ActionInput): WorkflowDisplayState["action"] {
   const { asset, opts } = i;
 
+  // 0. Awaiting signatures — checked FIRST, before the workflow-source check.
+  //
+  // A locked run awaiting a signature is a real, actionable state that does NOT depend
+  // on the asset still resolving a *runnable* workflow source: the run already exists,
+  // and the only thing left to do is sign it. Previously this was checked AFTER the
+  // "no runnable workflow source" branch below, which returns early — so whenever
+  // hasRunnableWorkflowSource was false, an asset genuinely pending customer sign-off
+  // rendered as "No workflow" and the signature action was unreachable.
+  //
+  // That happened on the phone but not the web: hasRunnableWorkflowSource is derived
+  // from assignmentsMap, which on native is primed from the offline cache and can come
+  // up empty, while the web fetches assignments fresh. Reordering fixes the symptom on
+  // both platforms and makes the cascade correct regardless of why the flag is false.
+  if (i.awaitingCustomerSig) {
+    return { kind: "customer-sign", label: "Customer Sign-off", tooltip: "Capture the customer signature", color: "warning" };
+  }
+  if (i.awaitingInstallerSig) {
+    return { kind: "installer-sign", label: "Installer Sign-off", tooltip: "Capture the installer signature", color: "warning" };
+  }
+
   // 1. No runnable workflow source.
   if (!opts.hasRunnableWorkflowSource) {
     if (opts.inspectionMode) {
@@ -312,14 +332,6 @@ function computeAction(i: ActionInput): WorkflowDisplayState["action"] {
       return { kind: "run-details", label: "Run Details", tooltip: "View run history", color: "inherit" };
     }
     return { kind: "no-workflow", label: "no workflow", tooltip: "Assign a workflow to this asset first", color: "inherit" };
-  }
-
-  // 2. Awaiting signatures (customer stage first, then installer).
-  if (i.awaitingCustomerSig) {
-    return { kind: "customer-sign", label: "Customer Sign-off", tooltip: "Capture the customer signature", color: "warning" };
-  }
-  if (i.awaitingInstallerSig) {
-    return { kind: "installer-sign", label: "Installer Sign-off", tooltip: "Capture the installer signature", color: "warning" };
   }
 
   // 3. Steps complete, pre-sign-off gates (R3 priority: photos first, then blocking).

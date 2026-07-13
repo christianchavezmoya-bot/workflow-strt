@@ -2,7 +2,7 @@ import axios from "axios";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
-import { shouldSkipBlockingFetch } from "./connectivityMonitor";
+import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { formatPayloadSize } from "../utils/syncDiagnostics";
 
@@ -128,14 +128,28 @@ const silentRefresh = async () => {
 api.interceptors.request.use(async (config) => {
   const url = config.url ?? "";
 
-  // Non-auth requests: bail instantly only when the device truly has no
-  // signal or the user explicitly forced manual offline mode.
-  // A failed reachability ping must not suppress normal online reads.
+  // Non-auth requests: bail instantly when the request is doomed, so callers
+  // fall through to their local-first cache immediately instead of burning a
+  // full 8-10s timeout first.
+  //
+  // NATIVE uses shouldSkipRunMutation(), which bails when the radio is off, when
+  // manual offline mode is on, AND when the health monitor has positively
+  // confirmed the server unreachable. That last case is the real field scenario:
+  // the phone has WiFi/cell signal but no route to the server (server down, off
+  // the site network, wrong LAN IP). Previously reads only checked the radio, so
+  // this case burned the full timeout on EVERY read — and opening a run makes
+  // several sequential reads, which is why offline opens took 10-30s.
+  //
+  // WEB keeps shouldSkipBlockingFetch() unchanged: a failed reachability ping
+  // must not suppress normal online reads in the browser.
   //
   // The thrown error keeps the same shape as a real network error so every
   // service's `isOfflineNetworkError()` still routes to the offline path.
   // Auth calls are exempt — login must keep working to recover.
-  if (!url.includes("/auth/") && isMobileNativePlatform() && shouldSkipBlockingFetch()) {
+  const skipDoomedRequest = isMobileNativePlatform()
+    ? shouldSkipRunMutation()
+    : shouldSkipBlockingFetch();
+  if (!url.includes("/auth/") && isMobileNativePlatform() && skipDoomedRequest) {
     const err = new Error("offline-skip") as Error & { code?: string; isOfflineSkip?: boolean };
     err.code = "ERR_NETWORK";
     err.isOfflineSkip = true;
