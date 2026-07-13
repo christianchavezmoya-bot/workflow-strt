@@ -60,6 +60,8 @@ import { workflowTypeService } from "../../services/workflowTypeService";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
+import type { Feature } from "../../types/feature";
+import type { ProductFeatureDefinition } from "../../types/product";
 import type { Workflow } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowType } from "../../types/workflowType";
@@ -98,6 +100,30 @@ function downloadJson(cfg: WorkflowConfig, productName: string) {
   a.download = `work-instruction-${cfg.name.replace(/\s+/g, "-").toLowerCase()}.json`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+type WorkflowFeatureDefinition = ProductFeatureDefinition & { isInventory?: boolean };
+
+function toWorkflowFeatureDefinition(
+  feature: Feature,
+  legacy?: ProductFeatureDefinition,
+): WorkflowFeatureDefinition {
+  return {
+    id: feature.id,
+    name: feature.name,
+    valueType: (feature.valueType || legacy?.valueType || "text") as ProductFeatureDefinition["valueType"],
+    options: feature.options ?? legacy?.options,
+    // Keep legacy sub-properties only as a compatibility fallback. Builder capture data
+    // comes from Feature Dependencies, but older draft behavior still expects this shape.
+    subProperties: legacy?.subProperties ?? feature.subProperties?.map((subProperty) => ({
+      id: subProperty.id,
+      name: subProperty.name,
+      valueType: "text" as const,
+      isInventory: subProperty.isInventory,
+      unit: subProperty.unit,
+    })),
+    isInventory: feature.isInventory ?? false,
+  };
 }
 
 function printPdf(cfg: WorkflowConfig, productName: string) {
@@ -563,19 +589,40 @@ const WorkInstructions = () => {
   }, [products]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeProduct = products[tab];
-  const activeFeatures = activeProduct?.features ?? [];
+  const [workflowFeatures, setWorkflowFeatures] = useState<WorkflowFeatureDefinition[]>([]);
 
-  // Track which feature IDs are inventory (from the feature library)
-  const [inventoryFeatureIds, setInventoryFeatureIds] = useState<Set<string>>(new Set());
   useEffect(() => {
-    if (!activeProduct?.id) { setInventoryFeatureIds(new Set()); return; }
-    featureService.getByProduct(activeProduct.id).then((libFeatures) => {
-      setInventoryFeatureIds(new Set(libFeatures.filter(f => f.isInventory).map(f => f.id)));
-    }).catch(() => setInventoryFeatureIds(new Set()));
-  }, [activeProduct?.id]);
+    const productId = activeProduct?.id;
+    if (!productId) {
+      setWorkflowFeatures([]);
+      return;
+    }
 
-  // Only pass inventory features to the workflow builder — consumables confirmed at end of run
-  const inventoryFeatures = activeFeatures.filter(f => inventoryFeatureIds.has(f.id));
+    let cancelled = false;
+    const legacyById = new Map((activeProduct?.features ?? []).map((feature) => [feature.id, feature]));
+
+    featureService.getByProduct(productId).then((libFeatures) => {
+      if (cancelled) return;
+      setWorkflowFeatures(libFeatures.map((feature) => toWorkflowFeatureDefinition(feature, legacyById.get(feature.id))));
+    }).catch(() => {
+      if (cancelled) return;
+      setWorkflowFeatures(
+        (activeProduct?.features ?? []).map((feature) => ({
+          ...feature,
+          isInventory: (feature as { isInventory?: boolean }).isInventory ?? false,
+        })),
+      );
+    });
+
+    return () => { cancelled = true; };
+  }, [activeProduct]);
+
+  // Builder feature selection is sourced from the Features library. Only inventory
+  // features are installable units; non-inventory items flow through dependencies/BOM.
+  const inventoryFeatures = useMemo(
+    () => workflowFeatures.filter((feature) => feature.isInventory),
+    [workflowFeatures],
+  );
 
   useEffect(() => {
     setSelectedConfigId(null);

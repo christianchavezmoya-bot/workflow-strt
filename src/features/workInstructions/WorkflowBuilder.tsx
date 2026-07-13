@@ -519,11 +519,25 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   // Generic confirm dialog
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
 
+  function getTemplateFeatureDeps(featureId: string) {
+    const libDeps = libFeatureDepsRef.current[featureId] ?? [];
+    if (libDeps.length > 0) {
+      return libDeps.map((dep) => ({
+        id: dep.id,
+        name: dep.name,
+        valueType: "text",
+        isInventory: dep.isInventory,
+        unit: dep.unit,
+      }));
+    }
+    return productFeatures.find((feature) => feature.id === featureId)?.subProperties ?? [];
+  }
+
   // Build a step patch from a type template
   function buildStepTemplate(type: StepType, featureId: string, unitIndex: number, selectedDepIds?: string[]): Partial<WorkflowStep> {
     const feat = productFeatures.find((f) => f.id === featureId);
     const featName = feat?.name ?? "Unit";
-    const allDeps = feat?.subProperties ?? [];
+    const allDeps = getTemplateFeatureDeps(featureId);
     const deps = selectedDepIds ? allDeps.filter((d) => selectedDepIds.includes(d.id)) : allDeps;
     const u = uid;
     const mkCheck = (label: string, fid?: string): StepInput =>
@@ -1279,6 +1293,8 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           <RightPanel
             workflow={workflow}
             stepsSorted={stepsSorted}
+            selectedStepId={selectedStepId}
+            onSelectStep={setSelectedStepId}
             isReadOnly={isReadOnly}
             onWorkflowUpdate={(wf) => { justLoadedRef.current = true; setWorkflow(wf); }}
             productFeatures={productFeatures}
@@ -1758,19 +1774,26 @@ function StepEditorPanel({
   // For data-collection: which deps to include
   const [selectedDepIds, setSelectedDepIds] = useState<Set<string>>(new Set());
   const pendingFeatureDeps = pendingType === "data-collection" && pendingFeatureId
-    ? (productFeatures.find((f) => f.id === pendingFeatureId)?.subProperties ?? [])
+    ? ((depsByFeature?.[pendingFeatureId] ?? []).length > 0
+        ? (depsByFeature?.[pendingFeatureId] ?? []).map((dep) => ({
+            id: dep.id,
+            name: dep.name,
+            valueType: "text",
+            isInventory: dep.isInventory,
+            unit: dep.unit,
+          }))
+        : (productFeatures.find((f) => f.id === pendingFeatureId)?.subProperties ?? []))
     : [];
 
   // When feature changes in data-collection mode, select all deps by default
   useEffect(() => {
     if (pendingType === "data-collection" && pendingFeatureId) {
-      const deps = productFeatures.find((f) => f.id === pendingFeatureId)?.subProperties ?? [];
-      setSelectedDepIds(new Set(deps.map((d) => d.id)));
+      setSelectedDepIds(new Set(pendingFeatureDeps.map((d) => d.id)));
     } else {
       setSelectedDepIds(new Set());
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingType, pendingFeatureId]);
+  }, [pendingType, pendingFeatureId, pendingFeatureDeps]);
 
   function handleApply() {
     if (!pendingType) return;
@@ -2765,29 +2788,33 @@ function ReportPreviewInline({ step }: { step: WorkflowStep }) {
 // WorkerPreviewPanel
 // ------------------------------------------------------------------
 
-function WorkerPreviewPanel({ workflow, stepsSorted }: { workflow: Workflow; stepsSorted: WorkflowStep[] }) {
-  const [currentStepId, setCurrentStepId] = useState<string | null>(() => stepsSorted[0]?.id || null);
+function WorkerPreviewPanel({
+  workflow,
+  stepsSorted,
+  selectedStepId,
+  onSelectStep,
+}: {
+  workflow: Workflow;
+  stepsSorted: WorkflowStep[];
+  selectedStepId: string | null;
+  onSelectStep: (stepId: string | null) => void;
+}) {
   const [history, setHistory] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (!currentStepId || !workflow.steps.some((s) => s.id === currentStepId)) {
-      setCurrentStepId(stepsSorted[0]?.id || null);
-      setHistory([]);
-    }
-  }, [workflow.steps, stepsSorted, currentStepId]);
-
+  const currentStepId = selectedStepId && workflow.steps.some((s) => s.id === selectedStepId)
+    ? selectedStepId
+    : (stepsSorted[0]?.id || null);
   const step = stepsSorted.find((s) => s.id === currentStepId) || null;
 
   function goTo(stepId: string | null) {
     if (!stepId) return;
     setHistory((prev) => (currentStepId ? [...prev, currentStepId] : prev));
-    setCurrentStepId(stepId);
+    onSelectStep(stepId);
   }
 
   function goBack() {
     setHistory((prev) => {
       if (!prev.length) return prev;
-      setCurrentStepId(prev[prev.length - 1]);
+      onSelectStep(prev[prev.length - 1]);
       return prev.slice(0, -1);
     });
   }
@@ -2886,7 +2913,10 @@ function WorkerPreviewPanel({ workflow, stepsSorted }: { workflow: Workflow; ste
               <Button
                 variant="outlined"
                 size="small"
-                onClick={() => { setHistory([]); setCurrentStepId(stepsSorted[0]?.id || null); }}
+                onClick={() => {
+                  setHistory([]);
+                  onSelectStep(stepsSorted[0]?.id || null);
+                }}
               >
                 Start over
               </Button>
@@ -2904,9 +2934,11 @@ function WorkerPreviewPanel({ workflow, stepsSorted }: { workflow: Workflow; ste
 
 const uid2 = () => typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `id_${Math.random().toString(16).slice(2)}`;
 
-function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, productFeatures, featureSelections, onFeatureSelectionsChange, configId }: {
+function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isReadOnly, onWorkflowUpdate, productFeatures, featureSelections, onFeatureSelectionsChange, configId }: {
   workflow: Workflow;
   stepsSorted: WorkflowStep[];
+  selectedStepId: string | null;
+  onSelectStep: (stepId: string | null) => void;
   isReadOnly: boolean;
   onWorkflowUpdate: (wf: Workflow) => void;
   productFeatures?: ProductFeatureDefinition[];
@@ -3009,7 +3041,14 @@ function RightPanel({ workflow, stepsSorted, isReadOnly, onWorkflowUpdate, produ
         {features.length > 0 && <Tab label={`Features${includedCount > 0 ? ` (${includedCount})` : ""}`} />}
       </Tabs>
 
-      {tab === 0 && <WorkerPreviewPanel workflow={workflow} stepsSorted={stepsSorted} />}
+      {tab === 0 && (
+        <WorkerPreviewPanel
+          workflow={workflow}
+          stepsSorted={stepsSorted}
+          selectedStepId={selectedStepId}
+          onSelectStep={onSelectStep}
+        />
+      )}
 
       {tab === 1 && (
         <Paper className="glass-card" sx={{ p: 2 }}>
