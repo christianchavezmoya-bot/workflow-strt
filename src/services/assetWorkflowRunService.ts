@@ -18,7 +18,7 @@ import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
 import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
-import { webCachedGet, invalidateWebCache } from "./webFreshCache";
+import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 
 export interface PendingSignatureRecord {
@@ -378,6 +378,17 @@ function signalLocalRunUpdate(run: AssetWorkflowRun): void {
   }));
 }
 
+function invalidateWebRunReadCaches(assetId?: string): void {
+  if (assetId) {
+    invalidateWebCache(`/asset-workflow-runs/by-asset/${assetId}`);
+    invalidateWebCache(`/project-assets/${assetId}`);
+  }
+  invalidateWebCacheByPrefix("/asset-workflow-runs/by-asset/");
+  invalidateWebCacheByPrefix("/asset-workflow-runs/by-project/");
+  invalidateWebCacheByPrefix("/project-assets/by-product/");
+  invalidateWebCacheByPrefix("/project-assets/by-project/");
+}
+
 function parseRunIssues(issuesJson: string | undefined): RunIssue[] {
   if (!issuesJson) return [];
   try {
@@ -708,6 +719,7 @@ export const assetWorkflowRunService = {
         technicianUserId: technicianUserId ?? null,
       });
       invalidateWebCache(`/asset-workflow-runs/by-asset/${assetId}`);
+      invalidateWebRunReadCaches(assetId);
       return res.data;
     }
 
@@ -719,7 +731,9 @@ export const assetWorkflowRunService = {
     try {
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", body);
-      return await cacheServerRun(res.data);
+      const updatedRun = await cacheServerRun(res.data);
+      signalLocalRunUpdate(updatedRun);
+      return updatedRun;
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
 
@@ -808,6 +822,7 @@ export const assetWorkflowRunService = {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      invalidateWebRunReadCaches(res.data.assetId);
       return res.data;
     }
 
@@ -823,7 +838,9 @@ export const assetWorkflowRunService = {
       const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}`, requestBody, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
-      return await cacheServerRun(res.data);
+      const updatedRun = await cacheServerRun(res.data);
+      signalLocalRunUpdate(updatedRun);
+      return updatedRun;
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
 
@@ -883,8 +900,7 @@ export const assetWorkflowRunService = {
       // the very next read of either is guaranteed live, not a stale
       // pre-completion snapshot.
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebCache(`/project-assets/${res.data.assetId}`);
-      invalidateWebCache(`/asset-workflow-runs/by-asset/${res.data.assetId}`);
+      invalidateWebRunReadCaches(res.data.assetId);
       return res.data;
     }
 
@@ -902,6 +918,7 @@ export const assetWorkflowRunService = {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
       const cachedRun = await cacheServerRun(res.data);
+      signalLocalRunUpdate(cachedRun);
       // Fix: the server's /complete response only contains the run, but completing
       // a run also changes the asset's own status server-side (e.g. to "Pending"
       // awaiting signature). Without this refetch, the locally cached asset stays
@@ -992,6 +1009,7 @@ export const assetWorkflowRunService = {
       const requestBody = await mediaStore.resolveUploadPayload({ issuesJson });
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/issues`, requestBody);
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      invalidateWebRunReadCaches(res.data.assetId);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return res.data;
@@ -1004,6 +1022,7 @@ export const assetWorkflowRunService = {
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/issues`, requestBody);
       const updatedRun = await cacheServerRun(res.data);
+      signalLocalRunUpdate(updatedRun);
       // Sync issues store so Issues Board reflects the change immediately,
       // without waiting for IssueRepository's own background refresh.
       const openRecords = await deriveOpenIssuesFromRun(updatedRun);
@@ -1093,6 +1112,7 @@ export const assetWorkflowRunService = {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      invalidateWebRunReadCaches(res.data.assetId);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return res.data;
@@ -1113,6 +1133,7 @@ export const assetWorkflowRunService = {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
       const updatedRun = await cacheServerRun(res.data);
+      signalLocalRunUpdate(updatedRun);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return updatedRun;
@@ -1181,6 +1202,7 @@ export const assetWorkflowRunService = {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      invalidateWebRunReadCaches(res.data.assetId);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return res.data;
@@ -1194,6 +1216,7 @@ export const assetWorkflowRunService = {
       timeout: RUN_MUTATION_TIMEOUT_MS,
     });
     const updatedRun = await cacheServerRun(res.data);
+    signalLocalRunUpdate(updatedRun);
     window.dispatchEvent(new Event("notifications:run-state-changed"));
     window.dispatchEvent(new Event("notifications:refresh"));
     return updatedRun;
@@ -1204,12 +1227,15 @@ export const assetWorkflowRunService = {
     if (!isMobileNativePlatform()) {
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entries`, { timeEntriesJson });
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      invalidateWebRunReadCaches(res.data.assetId);
       return res.data;
     }
 
     const resolvedRunId = await resolveRunId(runId);
     const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entries`, { timeEntriesJson });
-    return res.data;
+    const updatedRun = await cacheServerRun(res.data);
+    signalLocalRunUpdate(updatedRun);
+    return updatedRun;
   },
 
   /** Mark customer signature as waived — run stays complete but skips customer sign-off. */
@@ -1217,6 +1243,7 @@ export const assetWorkflowRunService = {
     if (!isMobileNativePlatform()) {
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/waive-customer-signature`);
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      invalidateWebRunReadCaches(res.data.assetId);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return res.data;
@@ -1225,6 +1252,7 @@ export const assetWorkflowRunService = {
     const resolvedRunId = await resolveRunId(runId);
     const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/waive-customer-signature`);
     const updatedRun = await cacheServerRun(res.data);
+    signalLocalRunUpdate(updatedRun);
     window.dispatchEvent(new Event("notifications:run-state-changed"));
     window.dispatchEvent(new Event("notifications:refresh"));
     return updatedRun;
@@ -1246,6 +1274,8 @@ export const assetWorkflowRunService = {
 
     if (!isMobileNativePlatform()) {
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entry`, body);
+      invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      invalidateWebRunReadCaches(res.data.assetId);
       return res.data;
     }
 
@@ -1253,7 +1283,9 @@ export const assetWorkflowRunService = {
     try {
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entry`, body);
-      return await cacheServerRun(res.data);
+      const updatedRun = await cacheServerRun(res.data);
+      signalLocalRunUpdate(updatedRun);
+      return updatedRun;
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
 

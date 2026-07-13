@@ -6,7 +6,7 @@ import { mediaStore } from "./mediaStore";
 import { isMobileNativePlatform } from "../utils/platform";
 import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
 import { applyOfflineAssetStatusUpdate } from "./assetWorkflowRunService";
-import { webCachedGet, invalidateWebCache } from "./webFreshCache";
+import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 export interface SubmitSignaturePayload {
   signerRole: "Installer" | "Customer";
@@ -71,6 +71,10 @@ export const signatureService = {
       const r = await api.post<SignatureEvent>("/signature-events", payload, { params: { runId } });
       invalidateWebCache(`/signature-events?runId=${runId}`);
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      invalidateWebCacheByPrefix("/asset-workflow-runs/by-asset/");
+      invalidateWebCacheByPrefix("/asset-workflow-runs/by-project/");
+      invalidateWebCacheByPrefix("/project-assets/by-product/");
+      invalidateWebCacheByPrefix("/project-assets/by-project/");
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return r.data;

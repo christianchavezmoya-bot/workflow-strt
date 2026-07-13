@@ -15,6 +15,8 @@
 import { useEffect, useRef } from "react";
 import { secureGet } from "../services/secureStorage";
 import { getApiBaseUrl } from "../services/apiBase";
+import { invalidateWebCacheByPrefix } from "../services/webFreshCache";
+import { isMobileNativePlatform } from "../utils/platform";
 
 const BASE_RETRY_MS = 3_000;
 const MAX_RETRY_MS  = 30_000;
@@ -59,6 +61,10 @@ export function useSseEvents() {
       es.addEventListener("assets:updated", (e: MessageEvent) => {
         try {
           const detail = JSON.parse((e as MessageEvent).data as string) as Record<string, unknown>;
+          if (!isMobileNativePlatform()) {
+            invalidateWebCacheByPrefix("/project-assets/");
+            invalidateWebCacheByPrefix("/asset-workflow-runs/");
+          }
           window.dispatchEvent(new CustomEvent("sse:assets:updated", { detail }));
         } catch { /* malformed JSON — ignore */ }
       });
