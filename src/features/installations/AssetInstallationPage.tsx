@@ -142,8 +142,8 @@ import type { FeatureDependency } from "../../types/featureDependency";
 import CaptureSpreadsheetDialog from "./CaptureSpreadsheetDialog";
 import {
   buildAssetCaptureSearchBlob,
-  buildCaptureColumns,
   buildCaptureRow,
+  buildProjectCaptureColumns,
   computeMaxUnitsByFeature,
   pickCaptureRun,
 } from "../../utils/captureSpreadsheet";
@@ -875,15 +875,24 @@ const AssetInstallationPage = () => {
     [featureSelectionsByConfig],
   );
 
+  const captureSnapshotRuns = useMemo(
+    () => Object.values(runsMap).flat(),
+    [runsMap],
+  );
+
   const getActiveCountForAsset = useCallback((asset: ProjectAsset): Record<string, number> => {
-    const sels = parseFeatureSelectionsForConfig(asset.productConfigId);
+    let configId = asset.productConfigId;
+    if (!configId) {
+      configId = assignmentsMap[asset.id]?.[0]?.workflowConfigId;
+    }
+    const sels = parseFeatureSelectionsForConfig(configId);
     if (!sels?.length) return captureMaxUnits;
     const out: Record<string, number> = {};
     for (const s of sels) {
       if (s.activeCount > 0) out[s.featureId] = s.activeCount;
     }
     return out;
-  }, [captureMaxUnits, publishedWfConfigs]);
+  }, [captureMaxUnits, publishedWfConfigs, assignmentsMap]);
   const requestedWorkflowType = searchParams.get("workflowType");
   const resolveRequestedWorkflowTypeId = useCallback((types: WorkflowType[]) => {
     if (!requestedWorkflowType) return "";
@@ -1056,10 +1065,20 @@ const AssetInstallationPage = () => {
             });
             setRunsMap((prev) => {
               const merged = { ...runMap };
-              // Only preserve entries that were fully loaded via loadAssignmentsForAsset
-              // (those have ALL runs, not just the latest). Batch load always wins otherwise.
               Object.keys(prev).forEach((id) => {
-                if (prev[id].length > 1) merged[id] = prev[id];
+                const prevRuns = prev[id];
+                if (!prevRuns?.length) return;
+                const freshRuns = merged[id] ?? [];
+                if (!freshRuns.length) {
+                  merged[id] = prevRuns;
+                  return;
+                }
+                const freshById = new Map(freshRuns.map((r) => [r.id, r]));
+                const mergedRuns = prevRuns.map((r) => freshById.get(r.id) ?? r);
+                freshRuns.forEach((u) => {
+                  if (!mergedRuns.some((r) => r.id === u.id)) mergedRuns.push(u);
+                });
+                merged[id] = mergedRuns;
               });
               return merged;
             });
@@ -1257,20 +1276,6 @@ const AssetInstallationPage = () => {
           setRunsMap((prev) => {
             const merged = { ...runMap };
             Object.keys(prev).forEach((id) => {
-              // Fix: previously only preserved an asset's locally-known runs when
-              // there was more than one cached run — a heuristic that didn't cover
-              // the common case of an asset with exactly one run. The real signal
-              // that matters is whether the locally-known run is actually MORE
-              // RECENT than what this fresh network fetch returned. submitSignature
-              // writes synchronously to the local run cache before this
-              // fire-and-forget fetch resolves; if the fetch reflects a moment
-              // before that write was visible server-side (read-after-write lag,
-              // or the write is still queued offline), it would otherwise silently
-              // overwrite the newer local state — exactly the "installer sign-off
-              // reverts after closing the window" bug. A dirty=true run (still
-              // queued, unsynced) is always preserved outright, since the network
-              // fetch cannot possibly reflect a change that hasn't reached the
-              // server yet.
               const prevRuns = prev[id];
               if (!prevRuns) return;
               const freshRuns = merged[id] ?? [];
@@ -1281,7 +1286,19 @@ const AssetInstallationPage = () => {
                 if (!freshMatch) return false;
                 return new Date(localRun.updatedAt).getTime() > new Date(freshMatch.updatedAt).getTime();
               });
-              if (anyLocalIsNewerOrUnsynced || prevRuns.length > 1) merged[id] = prevRuns;
+              const mergedRuns = prevRuns.map((r) => {
+                if ((r as AssetWorkflowRun & { dirty?: boolean }).dirty) return r;
+                const fresh = freshById.get(r.id);
+                if (!fresh) return r;
+                if (anyLocalIsNewerOrUnsynced && new Date(r.updatedAt).getTime() > new Date(fresh.updatedAt).getTime()) {
+                  return r;
+                }
+                return fresh;
+              });
+              freshRuns.forEach((u) => {
+                if (!mergedRuns.some((r) => r.id === u.id)) mergedRuns.push(u);
+              });
+              merged[id] = mergedRuns;
             });
             return merged;
           });
@@ -1576,7 +1593,13 @@ const AssetInstallationPage = () => {
       return;
     }
     const hidden = new Set<string>();
-    const cols = buildCaptureColumns(libFeatures, depsByFeature, captureMaxUnits, hidden);
+    const cols = buildProjectCaptureColumns({
+      publishedConfigs: publishedWfConfigs,
+      features: libFeatures,
+      depsByFeature,
+      hiddenGroupKeys: hidden,
+      snapshotRuns: captureSnapshotRuns,
+    });
     const next: Record<string, string> = {};
     for (const asset of assets) {
       const runs = runsMap[asset.id] ?? [];
@@ -1585,7 +1608,7 @@ const AssetInstallationPage = () => {
       next[asset.id] = buildAssetCaptureSearchBlob(asset.assetTag, asset.assetName ?? "", asset.serialNumber, row, libFeatures);
     }
     setCaptureSearchByAsset(next);
-  }, [assets, runsMap, libFeatures, depsByFeature, captureMaxUnits, getActiveCountForAsset]);
+  }, [assets, runsMap, libFeatures, depsByFeature, captureSnapshotRuns, publishedWfConfigs, getActiveCountForAsset]);
 
   const canManageAssetDocuments = can.documents.view || can.documents.upload || can.documents.delete;
 
@@ -1948,7 +1971,9 @@ const AssetInstallationPage = () => {
 
   function parseFeatureSelectionsForConfig(configId: string | undefined) {
     if (!configId) return undefined;
-    const cfg = workflowConfigs.find((c) => c.id === configId);
+    const cfg =
+      publishedWfConfigs.find((c) => c.id === configId)
+      ?? workflowConfigs.find((c) => c.id === configId);
     if (!cfg?.featureSelectionsJson) return undefined;
     try { return JSON.parse(cfg.featureSelectionsJson) as import("../../services/productConfigService").FeatureSelection[]; } catch { return undefined; }
   }
@@ -4261,7 +4286,13 @@ const AssetInstallationPage = () => {
               const selected = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
               if (exportViewMode === "capture" && canViewCaptureMatrix && libFeatures.length > 0) {
                 const hidden = new Set<string>();
-                const cols = buildCaptureColumns(libFeatures, depsByFeature, captureMaxUnits, hidden);
+                const cols = buildProjectCaptureColumns({
+                  publishedConfigs: publishedWfConfigs,
+                  features: libFeatures,
+                  depsByFeature,
+                  hiddenGroupKeys: hidden,
+                  snapshotRuns: captureSnapshotRuns,
+                });
                 const headers = ["assetTag", "assetName", "status", ...cols.map((c) => c.sortLabel)];
                 const csv = [
                   headers.map((h) => `"${h.replace(/"/g, '""')}"`).join(","),
@@ -4711,7 +4742,7 @@ const AssetInstallationPage = () => {
           runsMap={runsMap}
           features={libFeatures}
           depsByFeature={depsByFeature}
-          featureSelectionsByConfig={featureSelectionsByConfig}
+          publishedWfConfigs={publishedWfConfigs}
           activeCountForAsset={getActiveCountForAsset}
           readOnly={false}
           canEditCapture={canEditCaptureData}
@@ -6567,7 +6598,7 @@ const AssetInstallationPage = () => {
           runsMap={runsMap}
           features={libFeatures}
           depsByFeature={depsByFeature}
-          featureSelectionsByConfig={featureSelectionsByConfig}
+          publishedWfConfigs={publishedWfConfigs}
           activeCountForAsset={getActiveCountForAsset}
           readOnly
           canEditCapture={false}
