@@ -1427,7 +1427,30 @@ const AssetInstallationPage = () => {
             byAsset[r.assetId].push(r);
           });
           Object.entries(byAsset).forEach(([id, fresh]) => {
-            if (!prev[id] || prev[id].length <= 1) next[id] = fresh;
+            const existing = prev[id];
+            if (!existing || existing.length === 0) {
+              next[id] = fresh;
+              return;
+            }
+            // MERGE BY ID — do not replace, and do not bail out.
+            //
+            // This previously read:
+            //     if (!prev[id] || prev[id].length <= 1) next[id] = fresh;
+            // i.e. the project-scoped background refresh only updated an asset that had
+            // 0 or 1 runs. Any asset with TWO OR MORE local runs silently DISCARDED the
+            // fresh server data — so a run performed on the WEB never appeared on the
+            // phone, and a re-run or a deleted-and-reused asset (which stack multiple
+            // runs) got permanently stuck on stale local state.
+            //
+            // The bail-out existed for a real reason: /by-project returns a SUBSET
+            // (the newest run, plus the newest completed run, per asset+config), so
+            // replacing wholesale would TRUNCATE the phone's local run history.
+            // Merging by id gets both: server runs are applied, local-only runs survive.
+            // This mirrors the `mergeById` branch above, which already does it correctly
+            // for asset-scoped updates.
+            const merged = existing.map((r) => fresh.find((u) => u.id === r.id) ?? r);
+            fresh.forEach((u) => { if (!merged.some((r) => r.id === u.id)) merged.push(u); });
+            next[id] = merged;
           });
         }
         return next;
