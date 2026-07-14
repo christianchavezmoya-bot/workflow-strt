@@ -32,16 +32,15 @@ import type { ProjectAsset } from "../../types/projectAsset";
 import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 import type { Feature } from "../../types/feature";
 import type { FeatureDependency } from "../../types/featureDependency";
+import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { CaptureColumnDef, CaptureAssetRow } from "../../utils/captureSpreadsheet";
 import {
-  buildCaptureColumns,
   buildCaptureRow,
-  computeMaxUnitsByFeature,
+  buildProjectCaptureColumns,
   listColumnGroups,
   patchStepResultValue,
   pickCaptureRun,
 } from "../../utils/captureSpreadsheet";
-import type { FeatureSelection } from "../../services/productConfigService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { STATUS_LABELS, STATUS_COLORS } from "./assetStatusDisplay";
 
@@ -55,7 +54,7 @@ export type CaptureSpreadsheetDialogProps = {
   runsMap: Record<string, AssetWorkflowRun[]>;
   features: Feature[];
   depsByFeature: Record<string, FeatureDependency[]>;
-  featureSelectionsByConfig: FeatureSelection[][];
+  publishedWfConfigs: WorkflowConfig[];
   activeCountForAsset: (asset: ProjectAsset) => Record<string, number>;
   readOnly?: boolean;
   canEditCapture?: boolean;
@@ -84,7 +83,7 @@ export default function CaptureSpreadsheetDialog({
   runsMap,
   features,
   depsByFeature,
-  featureSelectionsByConfig,
+  publishedWfConfigs,
   activeCountForAsset,
   readOnly = false,
   canEditCapture = false,
@@ -108,19 +107,30 @@ export default function CaptureSpreadsheetDialog({
     }
   }, [open]);
 
-  const maxUnits = useMemo(
-    () => computeMaxUnitsByFeature(featureSelectionsByConfig),
-    [featureSelectionsByConfig],
-  );
+  const snapshotRuns = useMemo(() => Object.values(runsMap).flat(), [runsMap]);
 
   const allColumns = useMemo(
-    () => buildCaptureColumns(features, depsByFeature, maxUnits, new Set()),
-    [features, depsByFeature, maxUnits],
+    () =>
+      buildProjectCaptureColumns({
+        publishedConfigs: publishedWfConfigs,
+        features,
+        depsByFeature,
+        hiddenGroupKeys: new Set(),
+        snapshotRuns,
+      }),
+    [publishedWfConfigs, features, depsByFeature, snapshotRuns],
   );
 
   const visibleColumns = useMemo(
-    () => buildCaptureColumns(features, depsByFeature, maxUnits, hiddenGroups),
-    [features, depsByFeature, maxUnits, hiddenGroups],
+    () =>
+      buildProjectCaptureColumns({
+        publishedConfigs: publishedWfConfigs,
+        features,
+        depsByFeature,
+        hiddenGroupKeys: hiddenGroups,
+        snapshotRuns,
+      }),
+    [publishedWfConfigs, features, depsByFeature, hiddenGroups, snapshotRuns],
   );
 
   const columnGroups = useMemo(() => listColumnGroups(allColumns), [allColumns]);

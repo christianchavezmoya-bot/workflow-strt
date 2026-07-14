@@ -6,7 +6,8 @@
 import type { AssetWorkflowRun, StepResult } from "../types/assetWorkflowRun";
 import type { Feature } from "../types/feature";
 import type { FeatureDependency } from "../types/featureDependency";
-import type { WorkflowStep } from "../types/workflow";
+import type { CaptureField, WorkflowStep } from "../types/workflow";
+import type { WorkflowConfig } from "../types/workflowConfig";
 import type { FeatureSelection } from "../services/productConfigService";
 
 export type CaptureColumnKind =
@@ -137,6 +138,267 @@ export function computeMaxUnitsByFeature(
     }
   }
   return max;
+}
+
+/** Parse workflow steps from a config's stepsJson (array or { steps: [] }). */
+export function parseStepsFromStepsJson(stepsJson: string): SnapshotStep[] {
+  try {
+    const parsed = JSON.parse(stepsJson || "[]") as unknown;
+    if (Array.isArray(parsed)) return parsed as SnapshotStep[];
+    if (parsed && typeof parsed === "object" && Array.isArray((parsed as { steps?: unknown }).steps)) {
+      return (parsed as { steps: SnapshotStep[] }).steps;
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+type ColumnSeed = {
+  kind: "feature-capture" | "dependency-capture";
+  featureId: string;
+  unitIndex: number;
+  fieldKey: string;
+  fieldLabel: string;
+  dependencyId?: string;
+  dependencyName?: string;
+};
+
+function columnSeedKey(seed: ColumnSeed): string {
+  return `${seed.kind}|${seed.featureId}|${seed.unitIndex}|${seed.fieldKey}|${seed.dependencyId ?? ""}`;
+}
+
+/** Prefer label for WorkflowBuilder-generated fields (dependency names). */
+function fieldKeyForColumn(field: CaptureField): string {
+  return (field.label?.trim() || field.key).trim();
+}
+
+function collectSeedsFromSteps(
+  steps: SnapshotStep[],
+  maxUnitsByFeature: Record<string, number>,
+  depNameById: Map<string, string>,
+): ColumnSeed[] {
+  const seeds: ColumnSeed[] = [];
+  const seen = new Set<string>();
+
+  const add = (seed: ColumnSeed) => {
+    const key = columnSeedKey(seed);
+    if (seen.has(key)) return;
+    seen.add(key);
+    seeds.push(seed);
+  };
+
+  for (const step of steps) {
+    const fields = step.captureFields ?? [];
+    if (fields.length === 0) continue;
+
+    const bom = step.bomSource;
+    if (bom?.dependencyId && bom.featureId) {
+      const featureId = bom.featureId;
+      const maxUnits = Math.max(1, maxUnitsByFeature[featureId] ?? 1);
+      const depName = depNameById.get(bom.dependencyId);
+      for (let unit = 1; unit <= maxUnits; unit++) {
+        for (const field of fields) {
+          add({
+            kind: "dependency-capture",
+            featureId,
+            unitIndex: unit,
+            fieldKey: field.key,
+            fieldLabel: field.label || labelForCaptureField(field.key),
+            dependencyId: bom.dependencyId,
+            dependencyName: depName,
+          });
+        }
+      }
+      continue;
+    }
+
+    const featureId =
+      step.stepFeatureId
+      ?? step.repeatFeatureId
+      ?? fields.find((f) => f.featureId)?.featureId;
+    if (!featureId) continue;
+
+    if (step.stepFeatureId && step.stepUnitIndex) {
+      for (const field of fields) {
+        add({
+          kind: "feature-capture",
+          featureId,
+          unitIndex: step.stepUnitIndex,
+          fieldKey: fieldKeyForColumn(field),
+          fieldLabel: field.label || labelForCaptureField(field.key),
+        });
+      }
+      continue;
+    }
+
+    const maxUnits = Math.max(1, maxUnitsByFeature[featureId] ?? 1);
+    const units = step.stepUnitIndex
+      ? [step.stepUnitIndex]
+      : Array.from({ length: maxUnits }, (_, i) => i + 1);
+    for (const unit of units) {
+      for (const field of fields) {
+        add({
+          kind: "feature-capture",
+          featureId,
+          unitIndex: unit,
+          fieldKey: fieldKeyForColumn(field),
+          fieldLabel: field.label || labelForCaptureField(field.key),
+        });
+      }
+    }
+  }
+
+  return seeds;
+}
+
+function seedsToColumns(
+  seeds: ColumnSeed[],
+  features: Feature[],
+  hiddenGroupKeys: Set<string>,
+): CaptureColumnDef[] {
+  const featMap = new Map(features.map((f) => [f.id, f]));
+  const cols: CaptureColumnDef[] = [];
+  const unitsWithCapture = new Set<string>();
+
+  for (const seed of seeds) {
+    unitsWithCapture.add(`${seed.featureId}:${seed.unitIndex}`);
+    const feat = featMap.get(seed.featureId);
+    const featureName = feat?.name ?? seed.featureId;
+    const groupKey =
+      seed.kind === "dependency-capture" && seed.dependencyId
+        ? `dep:${seed.featureId}:${seed.dependencyId}:${seed.unitIndex}`
+        : `feat:${seed.featureId}:${seed.unitIndex}`;
+
+    if (hiddenGroupKeys.has(groupKey) || hiddenGroupKeys.has(`feat:${seed.featureId}`)) continue;
+
+    const colId =
+      seed.kind === "dependency-capture"
+        ? `${groupKey}:${seed.fieldKey}`
+        : `${groupKey}:fc:${seed.fieldKey}`;
+    if (hiddenGroupKeys.has(colId)) continue;
+
+    cols.push({
+      id: colId,
+      kind: seed.kind,
+      featureId: seed.featureId,
+      featureName,
+      dependencyId: seed.dependencyId,
+      dependencyName: seed.dependencyName,
+      unitIndex: seed.unitIndex,
+      fieldKey: seed.fieldKey,
+      fieldLabel: seed.fieldLabel,
+      groupKey,
+      sortLabel:
+        seed.kind === "dependency-capture" && seed.dependencyName
+          ? `${featureName} ${seed.unitIndex} — ${seed.dependencyName} ${seed.fieldLabel}`
+          : `${featureName} ${seed.unitIndex} ${seed.fieldLabel}`,
+    });
+  }
+
+  for (const unitKey of unitsWithCapture) {
+    const [featureId, unitStr] = unitKey.split(":");
+    const unitIndex = Number(unitStr);
+    const feat = featMap.get(featureId);
+    if (!feat?.isInventory) continue;
+
+    const groupKey = `feat:${featureId}:${unitIndex}`;
+    if (hiddenGroupKeys.has(groupKey) || hiddenGroupKeys.has(`feat:${featureId}`)) continue;
+
+    const pnMfrId = `${groupKey}:pn-mfr`;
+    if (!hiddenGroupKeys.has(pnMfrId) && !cols.some((c) => c.id === pnMfrId)) {
+      cols.push({
+        id: pnMfrId,
+        kind: "feature-pn-mfr",
+        featureId,
+        featureName: feat.name,
+        unitIndex,
+        fieldKey: "mfrPn",
+        fieldLabel: "Mfr P/N",
+        groupKey,
+        sortLabel: `${feat.name} ${unitIndex} Mfr P/N`,
+      });
+    }
+
+    const pnAltId = `${groupKey}:pn-alt`;
+    if (!hiddenGroupKeys.has(pnAltId) && !cols.some((c) => c.id === pnAltId)) {
+      cols.push({
+        id: pnAltId,
+        kind: "feature-pn-alt",
+        featureId,
+        featureName: feat.name,
+        unitIndex,
+        fieldKey: "altPn",
+        fieldLabel: "Bus P/N",
+        groupKey,
+        sortLabel: `${feat.name} ${unitIndex} Bus P/N`,
+      });
+    }
+  }
+
+  return cols.sort((a, b) => a.sortLabel.localeCompare(b.sortLabel));
+}
+
+function featureSelectionsFromSnapshot(snapshotJson: string): FeatureSelection[] {
+  try {
+    const doc = JSON.parse(snapshotJson || "{}") as Record<string, unknown>;
+    const raw = doc.featureSelectionsJson;
+    if (typeof raw === "string") return parseFeatureSelections(raw);
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+/**
+ * Build capture columns from published workflow definitions (union across configs).
+ * Falls back to run snapshots, then legacy Features-page schema.
+ * P/N columns always come from the Features library.
+ */
+export function buildProjectCaptureColumns(options: {
+  publishedConfigs: WorkflowConfig[];
+  features: Feature[];
+  depsByFeature: Record<string, FeatureDependency[]>;
+  hiddenGroupKeys: Set<string>;
+  snapshotRuns?: AssetWorkflowRun[];
+}): CaptureColumnDef[] {
+  const { publishedConfigs, features, depsByFeature, hiddenGroupKeys, snapshotRuns } = options;
+
+  const depNameById = new Map<string, string>();
+  for (const deps of Object.values(depsByFeature)) {
+    for (const dep of deps) depNameById.set(dep.id, dep.name);
+  }
+
+  const featureSelectionsList: FeatureSelection[][] = publishedConfigs.map((c) =>
+    parseFeatureSelections(c.featureSelectionsJson),
+  );
+  for (const run of snapshotRuns ?? []) {
+    const fromSnap = featureSelectionsFromSnapshot(run.workflowSnapshotJson);
+    if (fromSnap.length > 0) featureSelectionsList.push(fromSnap);
+  }
+
+  const maxUnitsByFeature = computeMaxUnitsByFeature(
+    featureSelectionsList.filter((s) => s.length > 0),
+  );
+
+  let seeds: ColumnSeed[] = [];
+  for (const config of publishedConfigs) {
+    seeds.push(...collectSeedsFromSteps(parseStepsFromStepsJson(config.stepsJson), maxUnitsByFeature, depNameById));
+  }
+
+  if (seeds.length === 0 && snapshotRuns?.length) {
+    for (const run of snapshotRuns) {
+      seeds.push(
+        ...collectSeedsFromSteps(parseSnapshotSteps(run.workflowSnapshotJson), maxUnitsByFeature, depNameById),
+      );
+    }
+  }
+
+  if (seeds.length === 0) {
+    return buildCaptureColumns(features, depsByFeature, maxUnitsByFeature, hiddenGroupKeys, false);
+  }
+
+  return seedsToColumns(seeds, features, hiddenGroupKeys);
 }
 
 export function buildCaptureColumns(
@@ -383,11 +645,25 @@ function findDependencyCaptureValue(
  * which would otherwise mask the completed run's data and blank every cell. Prefer the
  * latest completed/locked run; fall back to the latest run only when none is completed.
  */
+function runHasCaptureValues(run: AssetWorkflowRun): boolean {
+  const results = parseStepResults(run.stepResultsJson);
+  return results.some((r) =>
+    Object.values(r.values ?? {}).some((v) => typeof v === "string" && v.trim().length > 0),
+  );
+}
+
 export function pickCaptureRun(runs: AssetWorkflowRun[]): AssetWorkflowRun | undefined {
+  if (runs.length === 0) return undefined;
   const byRecent = (a: AssetWorkflowRun, b: AssetWorkflowRun) =>
     new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
-  const completed = runs.filter((r) => r.isLocked || r.status === "Complete");
-  return (completed.length ? completed : runs).slice().sort(byRecent)[0];
+
+  const completed = runs.filter((r) => r.isLocked || r.status === "Complete").sort(byRecent);
+  if (completed.length > 0) return completed[0];
+
+  const withData = runs.filter(runHasCaptureValues).sort(byRecent);
+  if (withData.length > 0) return withData[0];
+
+  return [...runs].sort(byRecent)[0];
 }
 
 export function buildCaptureRow(
