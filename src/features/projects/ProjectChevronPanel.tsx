@@ -525,7 +525,18 @@ export default function ProjectChevronPanel({
       }
       setInstallAssets(assets);
       const runs = await assetWorkflowRunService.listLatestByProject(projectId);
-      setLatestRuns(runs);
+      // by-project may now return an extra completed run per asset (so the capture
+      // table on the installations page can source as-built data even when a newer
+      // in-progress run masks it). This panel's stats want ONE representative run
+      // per asset, so collapse to the newest run per asset to preserve prior counts.
+      const newestByAsset = new Map<string, AssetWorkflowRun>();
+      for (const r of runs) {
+        const cur = newestByAsset.get(r.assetId);
+        if (!cur || new Date(r.startedAt).getTime() > new Date(cur.startedAt).getTime()) {
+          newestByAsset.set(r.assetId, r);
+        }
+      }
+      setLatestRuns([...newestByAsset.values()]);
     } catch { /* silently fail */ }
     finally { setInstallAssetsLoading(false); }
   }, [projectId, productId]);

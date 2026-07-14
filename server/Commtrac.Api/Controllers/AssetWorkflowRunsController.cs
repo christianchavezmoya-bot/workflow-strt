@@ -191,7 +191,7 @@ public class AssetWorkflowRunsController : ControllerBase
         return Ok(items.ToList());
     }
 
-    // GET api/asset-workflow-runs/by-project/{projectId} — latest run per asset for a project
+    // GET api/asset-workflow-runs/by-project/{projectId} — representative run(s) per asset for a project
     [HttpGet("by-project/{projectId}")]
     public async Task<IActionResult> ListByProject(string projectId)
     {
@@ -208,13 +208,36 @@ public class AssetWorkflowRunsController : ControllerBase
                 .AsNoTracking()
                 .ToListAsync();
 
-            // Return only the latest run per asset per workflow config
-            var latest = runs
-                .GroupBy(r => new { r.AssetId, r.WorkflowConfigId })
-                .Select(g => g.First())
-                .ToList();
+            // Per (asset, workflow config): the newest run drives status, action
+            // buttons and signature chips. But the CAPTURE table sources its as-built
+            // values from the newest COMPLETED run — and when a newer in-progress run
+            // sits on top of a completed one, that newest run carries no capture data.
+            // Returning only the newest run therefore blanks the web capture table
+            // (the phone is unaffected: it keeps every run in its local store). So we
+            // ALSO include the newest completed run when it differs, letting the client
+            // (pickCaptureRun) show as-built data while the newest run still drives
+            // status. `runs` is ordered newest-started first, so First()/FirstOrDefault
+            // over each group already resolve "newest" and "newest completed".
+            static bool HasAsBuiltData(AssetWorkflowRunEntity r) =>
+                r.IsLocked || string.Equals(r.Status, "Complete", StringComparison.OrdinalIgnoreCase);
 
-            return Ok(latest.Select(ToDto));
+            var selected = new List<AssetWorkflowRunEntity>();
+            foreach (var group in runs.GroupBy(r => new { r.AssetId, r.WorkflowConfigId }))
+            {
+                var newest = group.First();
+                selected.Add(newest);
+
+                if (!HasAsBuiltData(newest))
+                {
+                    var newestCompleted = group.FirstOrDefault(HasAsBuiltData);
+                    if (newestCompleted is not null && newestCompleted.Id != newest.Id)
+                    {
+                        selected.Add(newestCompleted);
+                    }
+                }
+            }
+
+            return Ok(selected.Select(ToDto));
         }
         catch (Exception ex)
         {
