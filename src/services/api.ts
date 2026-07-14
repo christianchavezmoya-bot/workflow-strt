@@ -2,7 +2,7 @@ import axios from "axios";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
-import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { formatPayloadSize } from "../utils/syncDiagnostics";
 
@@ -130,26 +130,29 @@ api.interceptors.request.use(async (config) => {
 
   // Non-auth requests: bail instantly when the request is doomed, so callers
   // fall through to their local-first cache immediately instead of burning a
-  // full 8-10s timeout first.
+  // full timeout first.
   //
-  // NATIVE uses shouldSkipRunMutation(), which bails when the radio is off, when
-  // manual offline mode is on, AND when the health monitor has positively
-  // confirmed the server unreachable. That last case is the real field scenario:
-  // the phone has WiFi/cell signal but no route to the server (server down, off
-  // the site network, wrong LAN IP). Previously reads only checked the radio, so
-  // this case burned the full timeout on EVERY read — and opening a run makes
-  // several sequential reads, which is why offline opens took 10-30s.
+  // IMPORTANT — this guard is deliberately conservative. It bails ONLY when the
+  // device truly has no radio, or the user forced manual offline mode. It must
+  // NOT bail merely because the health monitor's /health ping failed.
   //
-  // WEB keeps shouldSkipBlockingFetch() unchanged: a failed reachability ping
-  // must not suppress normal online reads in the browser.
+  // A previous version used shouldSkipRunMutation() here (which also bails on
+  // getServerReachable() === false) to speed up offline reads. That was a
+  // mistake and caused a total app blackout: a single failing /health ping (bad
+  // base URL, a 5xx, a 5s timeout) flipped serverReachable to false, which made
+  // EVERY non-auth native read fast-bail. Login still worked — /auth/ is exempt
+  // below — so the app opened normally and then every page came up empty while
+  // the server was in fact perfectly reachable.
+  //
+  // Reads must fail OPEN: if we're unsure, attempt the request. A slow read is
+  // recoverable; a blanket refusal to read is not. WRITES keep the stricter
+  // shouldSkipRunMutation() guard, because they have an offline queue to fall
+  // into and losing a write is worse than delaying one.
   //
   // The thrown error keeps the same shape as a real network error so every
   // service's `isOfflineNetworkError()` still routes to the offline path.
   // Auth calls are exempt — login must keep working to recover.
-  const skipDoomedRequest = isMobileNativePlatform()
-    ? shouldSkipRunMutation()
-    : shouldSkipBlockingFetch();
-  if (!url.includes("/auth/") && isMobileNativePlatform() && skipDoomedRequest) {
+  if (!url.includes("/auth/") && isMobileNativePlatform() && shouldSkipBlockingFetch()) {
     const err = new Error("offline-skip") as Error & { code?: string; isOfflineSkip?: boolean };
     err.code = "ERR_NETWORK";
     err.isOfflineSkip = true;
