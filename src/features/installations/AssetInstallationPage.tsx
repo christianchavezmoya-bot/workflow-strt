@@ -145,6 +145,7 @@ import {
   buildCaptureColumns,
   buildCaptureRow,
   computeMaxUnitsByFeature,
+  pickCaptureRun,
 } from "../../utils/captureSpreadsheet";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
@@ -178,6 +179,7 @@ const CONFIGURABLE_COLUMNS: ColumnDef[] = [
   { id: "assetModel",    label: "Asset Model" },
   { id: "manufacturer",  label: "Manufacturer" },
   { id: "configType",    label: "Config Type" },
+  { id: "configName",    label: "Workflow Configuration Name" },
   { id: "project",       label: "Project" },
   { id: "siteName",      label: "Site Name" },
   { id: "location",      label: "Location" },
@@ -193,7 +195,16 @@ const ARCHIVE_COL_IDS = ["serialNumber", "assetModel", "manufacturer", "project"
 function loadColumnConfig(): { order: string[]; hidden: string[] } {
   try {
     const raw = localStorage.getItem(LS_COL_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { order?: string[]; hidden?: string[] };
+      const knownIds = new Set(CONFIGURABLE_COLUMNS.map((column) => column.id));
+      const savedOrder = Array.isArray(parsed.order) ? parsed.order.filter((id) => knownIds.has(id)) : [];
+      const missingIds = DEFAULT_COL_ORDER.filter((id) => !savedOrder.includes(id));
+      return {
+        order: [...savedOrder, ...missingIds],
+        hidden: Array.isArray(parsed.hidden) ? parsed.hidden.filter((id) => knownIds.has(id)) : [],
+      };
+    }
   } catch {}
   return { order: DEFAULT_COL_ORDER, hidden: [] };
 }
@@ -1546,7 +1557,7 @@ const AssetInstallationPage = () => {
     const next: Record<string, string> = {};
     for (const asset of assets) {
       const runs = runsMap[asset.id] ?? [];
-      const run = runs.slice().sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+      const run = pickCaptureRun(runs);
       const row = buildCaptureRow(asset.id, run, cols, libFeatures, getActiveCountForAsset(asset));
       next[asset.id] = buildAssetCaptureSearchBlob(asset.assetTag, asset.assetName ?? "", asset.serialNumber, row, libFeatures);
     }
@@ -1591,6 +1602,7 @@ const AssetInstallationPage = () => {
       assetModel:  (a: ProjectAsset) => n(a.assetModel),
       manufacturer:(a: ProjectAsset) => n(a.manufacturer),
       configType:  (a: ProjectAsset) => n(a.productConfigId ? (configMap.get(a.productConfigId)?.configType ?? wfConfigMap.get(a.productConfigId)?.configType) : ""),
+      configName:  (a: ProjectAsset) => n(a.productConfigId ? (configMap.get(a.productConfigId)?.name ?? wfConfigMap.get(a.productConfigId)?.name) : ""),
       project:     (a: ProjectAsset) => n(projectMap.get(a.projectId)?.jobNumber ?? a.projectId.slice(0, 8)),
       siteName:    (a: ProjectAsset) => n(projectMap.get(a.projectId)?.siteName),
       location:    (a: ProjectAsset) => n(a.location),
@@ -3489,6 +3501,11 @@ const AssetInstallationPage = () => {
           || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.configType : undefined);
         return <Typography variant="body2" color="text.secondary">{cfgType || "-"}</Typography>;
       }
+      case "configName": {
+        const cfgName = cfg?.name
+          || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.name : undefined);
+        return <Typography variant="body2" color="text.secondary">{cfgName || "-"}</Typography>;
+      }
       case "project":
         return <Typography variant="body2" color="text.secondary">{proj ? proj.jobNumber : asset.projectId.slice(0, 8)}</Typography>;
       case "siteName":
@@ -4227,7 +4244,7 @@ const AssetInstallationPage = () => {
                   headers.map((h) => `"${h.replace(/"/g, '""')}"`).join(","),
                   ...selected.map((a) => {
                     const runs = runsMap[a.id] ?? [];
-                    const run = runs.slice().sort((x, y) => new Date(y.startedAt).getTime() - new Date(x.startedAt).getTime())[0];
+                    const run = pickCaptureRun(runs);
                     const row = buildCaptureRow(a.id, run, cols, libFeatures, getActiveCountForAsset(a));
                     const cells = cols.map((c) => {
                       const cell = row.cells[c.id];

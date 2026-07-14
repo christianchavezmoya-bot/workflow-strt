@@ -374,6 +374,22 @@ function findDependencyCaptureValue(
   return { value: "" };
 }
 
+/**
+ * Select the run whose captured data should drive the capture spreadsheet.
+ *
+ * The as-built record lives in the most recent COMPLETED (locked) run. Picking the
+ * latest run by startedAt regardless of status is wrong: opening/starting a workflow
+ * again after completion creates a fresh in-progress run with an empty stepResultsJson,
+ * which would otherwise mask the completed run's data and blank every cell. Prefer the
+ * latest completed/locked run; fall back to the latest run only when none is completed.
+ */
+export function pickCaptureRun(runs: AssetWorkflowRun[]): AssetWorkflowRun | undefined {
+  const byRecent = (a: AssetWorkflowRun, b: AssetWorkflowRun) =>
+    new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+  const completed = runs.filter((r) => r.isLocked || r.status === "Complete");
+  return (completed.length ? completed : runs).slice().sort(byRecent)[0];
+}
+
 export function buildCaptureRow(
   assetId: string,
   run: AssetWorkflowRun | undefined,

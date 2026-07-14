@@ -39,6 +39,7 @@ import {
   computeMaxUnitsByFeature,
   listColumnGroups,
   patchStepResultValue,
+  pickCaptureRun,
 } from "../../utils/captureSpreadsheet";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
@@ -127,7 +128,7 @@ export default function CaptureSpreadsheetDialog({
   const rows = useMemo((): { asset: ProjectAsset; capture: CaptureAssetRow }[] => {
     return assets.map((asset) => {
       const runs = runsMap[asset.id] ?? [];
-      const run = runs.slice().sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+      const run = pickCaptureRun(runs);
       const capture = buildCaptureRow(
         asset.id,
         run,
