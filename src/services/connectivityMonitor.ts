@@ -47,6 +47,10 @@ function startNativeNetworkTracking(): void {
     // When the radio comes back online after being down, ping immediately
     // so reconnect is detected instantly rather than waiting up to 30s.
     if (wasOff && status.connected) {
+      // Clear stale negative state before the advisory ping runs. Otherwise the
+      // first write after reconnect can still be skipped even though the radio is
+      // back and the server may be reachable.
+      if (currentValue === false) currentValue = null;
       pingNow();
     }
   });
@@ -59,14 +63,16 @@ function notify(value: boolean) {
 
 async function runPingIfForeground() {
   if (!isForeground) return;
-  // If Capacitor already reports no radio, skip the guaranteed-to-fail HTTP
-  // call and report unreachable directly — saves battery + noise.
+  // Native radio-off is authoritative: nothing can succeed without a link.
   if (isMobileNativePlatform() && nativeNetworkConnected === false) {
     notify(false);
     return;
   }
+
+  // The /health ping is advisory only. It may confirm reachable, but it must
+  // never declare unreachable because it uses a different transport.
   const reachable = await isServerReachable();
-  notify(reachable);
+  if (reachable) notify(true);
 }
 
 function startForegroundTracking() {
@@ -105,6 +111,12 @@ export function startConnectivityMonitor(): void {
   if (typeof window !== "undefined") {
     window.addEventListener("api-server-reachable", () => {
       if (currentValue !== true) notify(true);
+    });
+
+    // Only a real API request failing with a genuine network error may mark the
+    // server unreachable. This keeps native write suppression outcome-based.
+    window.addEventListener("api-server-unreachable", () => {
+      if (currentValue !== false) notify(false);
     });
   }
 }

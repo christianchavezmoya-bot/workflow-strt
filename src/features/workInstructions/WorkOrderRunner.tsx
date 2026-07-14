@@ -917,14 +917,59 @@ export default function WorkOrderRunner({
 
   function extractFeatureValues(): Record<string, string> {
     const result: Record<string, string> = {};
+    // Component features are stored as JSON objects keyed by subProperty.id,
+    // which is the shape AssetInstallationPage already reads.
+    const componentAcc: Record<string, Record<string, string>> = {};
+
+    const featureDef = (featureId: string): ProductFeatureDefinition | undefined =>
+      (productFeatures ?? []).find((f) => f.id === featureId);
+
+    const isComponentFeature = (featureId: string): boolean => {
+      const f = featureDef(featureId);
+      return !!f && f.valueType === "component" && (f.subProperties ?? []).length > 0;
+    };
+
+    // Capture fields keep the sub-property name in label, not the original
+    // subProperty.id, so the join back to the component schema is by name.
+    const subPropertyIdForLabel = (featureId: string, label?: string): string | undefined => {
+      if (!label) return undefined;
+      const wanted = label.trim().toLowerCase();
+      return (featureDef(featureId)?.subProperties ?? [])
+        .find((sp) => sp.name.trim().toLowerCase() === wanted)?.id;
+    };
+
+    const assign = (featureId: string, label: string | undefined, val: string) => {
+      if (isComponentFeature(featureId)) {
+        const spId = subPropertyIdForLabel(featureId, label);
+        const key = spId ?? (label ?? "").trim();
+        if (!key) return;
+        (componentAcc[featureId] ??= {})[key] = val;
+      } else {
+        result[featureId] = val;
+      }
+    };
+
     for (const step of stepsSorted) {
+      // Inputs tied to a feature.
       for (const inp of step.inputs ?? []) {
         if (inp.featureId) {
           const val = values[step.id]?.[inp.id];
-          if (val !== undefined && val !== "") result[inp.featureId] = val;
+          if (val !== undefined && val !== "") assign(inp.featureId, inp.label, val);
+        }
+      }
+      // Data-collection values live in captureFields, not only in step.inputs.
+      for (const cf of step.captureFields ?? []) {
+        if (cf.featureId) {
+          const val = values[step.id]?.[cf.id];
+          if (val !== undefined && val !== "") assign(cf.featureId, cf.label, val);
         }
       }
     }
+
+    for (const [featureId, sub] of Object.entries(componentAcc)) {
+      if (Object.keys(sub).length > 0) result[featureId] = JSON.stringify(sub);
+    }
+
     return result;
   }
 

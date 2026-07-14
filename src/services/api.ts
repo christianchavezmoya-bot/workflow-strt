@@ -279,6 +279,15 @@ api.interceptors.response.use(
   async (error) => {
     const status = error?.response?.status;
     const config = error?.config || {};
+
+    // Outcome-based reachability signal.
+    //
+    // Only a real request failing with a genuine network error should mark the
+    // server unreachable. HTTP responses like 403/404/500 prove the server
+    // answered, so those do not count as unreachable.
+    if (!(error as { isOfflineSkip?: boolean })?.isOfflineSkip && isNetworkOrTimeoutError(error)) {
+      window.dispatchEvent(new Event("api-server-unreachable"));
+    }
     const cfg = config as typeof config & AxiosConfigWithMeta;
     const meta = cfg.metadata;
     const syncMeta = cfg.syncMeta;
