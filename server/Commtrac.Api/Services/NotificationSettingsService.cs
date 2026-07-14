@@ -1,6 +1,7 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Net;
 
 namespace Commtrac.Api.Services;
 
@@ -123,6 +124,29 @@ public sealed class NotificationSettingsService
         return host == "localhost" || host == "127.0.0.1" || host == "::1";
     }
 
+    private static bool IsPrivateIpv4Url(string url)
+    {
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri) && IsPrivateIpv4Host(uri.Host);
+    }
+
+    private static bool IsPrivateIpv4Host(string host)
+    {
+        return IPAddress.TryParse(host, out var address) && IsPrivateIpv4Address(address);
+    }
+
+    private static bool IsPrivateIpv4Address(IPAddress address)
+    {
+        if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return false;
+        }
+
+        var bytes = address.GetAddressBytes();
+        return bytes[0] == 10
+            || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+            || (bytes[0] == 192 && bytes[1] == 168);
+    }
+
     private string ResolveFrontendBaseUrl(string? configuredUrl)
     {
         var fallbackFrontendBaseUrl = (_fallbackEmail.FrontendBaseUrl ?? "").Trim().TrimEnd('/');
@@ -134,6 +158,13 @@ public sealed class NotificationSettingsService
             {
                 effectiveFrontendBaseUrl = fallbackFrontendBaseUrl;
             }
+        }
+        else if (!string.IsNullOrWhiteSpace(fallbackFrontendBaseUrl)
+                 && IsPrivateIpv4Url(effectiveFrontendBaseUrl)
+                 && IsPrivateIpv4Url(fallbackFrontendBaseUrl)
+                 && !string.Equals(effectiveFrontendBaseUrl, fallbackFrontendBaseUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            effectiveFrontendBaseUrl = fallbackFrontendBaseUrl;
         }
 
         return effectiveFrontendBaseUrl;

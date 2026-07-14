@@ -61,11 +61,18 @@ public class SignatureTokensController : ControllerBase
         var recipientName = req.RecipientName?.Trim();
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
         var assetLabel = asset?.AssetTag ?? asset?.AssetName ?? asset?.SerialNumber ?? "Asset";
-        var detectedLanBaseUrl = DetectLanFrontendBaseUrl(Request.Scheme);
         var baseUrl = (await _notificationSettings.GetFrontendBaseUrlAsync()).TrimEnd('/');
-        if (string.IsNullOrWhiteSpace(baseUrl) || ShouldPreferDetectedLanBaseUrl(baseUrl, detectedLanBaseUrl))
+        var requestHostBaseUrl = GetRequestHostFrontendBaseUrl(Request.Scheme);
+        var detectedLanBaseUrl = DetectLanFrontendBaseUrl(Request.Scheme);
+        if (string.IsNullOrWhiteSpace(baseUrl))
         {
-            baseUrl = detectedLanBaseUrl;
+            baseUrl = !string.IsNullOrWhiteSpace(requestHostBaseUrl)
+                ? requestHostBaseUrl
+                : detectedLanBaseUrl;
+        }
+        else if (ShouldPreferRequestHostBaseUrl(baseUrl, requestHostBaseUrl))
+        {
+            baseUrl = requestHostBaseUrl;
         }
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
@@ -159,21 +166,51 @@ public class SignatureTokensController : ControllerBase
         return $"{scheme}://{detectedIp}:5173";
     }
 
-    private static bool ShouldPreferDetectedLanBaseUrl(string configuredBaseUrl, string detectedLanBaseUrl)
+    private string GetRequestHostFrontendBaseUrl(string requestScheme)
     {
-        if (string.IsNullOrWhiteSpace(detectedLanBaseUrl))
+        var requestHostIp = GetRequestHostPrivateIpv4();
+        if (string.IsNullOrWhiteSpace(requestHostIp))
+        {
+            return "";
+        }
+
+        var scheme = string.IsNullOrWhiteSpace(requestScheme) ? "http" : requestScheme;
+        return $"{scheme}://{requestHostIp}:5173";
+    }
+
+    private string GetRequestHostPrivateIpv4()
+    {
+        var host = Request.Host.Host?.Trim();
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return "";
+        }
+
+        if (!IPAddress.TryParse(host, out var address))
+        {
+            return "";
+        }
+
+        return IsPrivateIpv4Address(address)
+            ? address.ToString()
+            : "";
+    }
+
+    private static bool ShouldPreferRequestHostBaseUrl(string configuredBaseUrl, string requestHostBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(requestHostBaseUrl))
         {
             return false;
         }
 
         if (!Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configuredUri) ||
-            !Uri.TryCreate(detectedLanBaseUrl, UriKind.Absolute, out var detectedUri))
+            !Uri.TryCreate(requestHostBaseUrl, UriKind.Absolute, out var requestHostUri))
         {
             return false;
         }
 
         return IsPrivateIpv4Host(configuredUri.Host) &&
-               !string.Equals(configuredUri.Host, detectedUri.Host, StringComparison.OrdinalIgnoreCase);
+               !string.Equals(configuredUri.Host, requestHostUri.Host, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string DetectLanIpv4Address()
