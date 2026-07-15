@@ -38,7 +38,7 @@ interface AsBuiltField {
   allOptions?: string[];
 }
 
-interface CapturedFieldExport {
+export interface CapturedFieldExport {
   stepId: string;
   stepTitle?: string;
   iterationIndex?: number;
@@ -143,7 +143,7 @@ function parseStepResults(json: string): StepResult[] {
   }
 }
 
-function buildCapturedFields(context: WorkflowReportExportContext): CapturedFieldExport[] {
+export function buildCapturedFields(context: WorkflowReportExportContext): CapturedFieldExport[] {
   const steps = parseWorkflowSteps(context.run.workflowSnapshotJson);
   const stepResults = parseStepResults(context.run.stepResultsJson);
   const featureMap = new Map((context.productFeatures ?? []).map((feature) => [feature.id, feature]));
@@ -376,5 +376,3 @@ export async function createWorkflowReportDocx(context: WorkflowReportExportCont
 
   return Packer.toBlob(doc);
 }
-
-

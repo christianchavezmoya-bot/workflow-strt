@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AddOutlined,
   ArrowDropDown,
@@ -143,12 +143,12 @@ import type { Feature as LibFeature } from "../../types/feature";
 import type { FeatureDependency } from "../../types/featureDependency";
 import CaptureSpreadsheetDialog from "./CaptureSpreadsheetDialog";
 import {
-  buildAssetCaptureSearchBlob,
   buildCaptureColumns,
   buildCaptureRow,
   computeMaxUnitsByFeature,
   pickCaptureRun,
 } from "../../utils/captureSpreadsheet";
+import { buildProjectCaptureTable } from "../../utils/projectCaptureTable";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 
@@ -1620,17 +1620,15 @@ const AssetInstallationPage = () => {
       setCaptureSearchByAsset({});
       return;
     }
-    const hidden = new Set<string>();
-    const cols = buildCaptureColumns(libFeatures, depsByFeature, captureMaxUnits, hidden);
+    const table = buildProjectCaptureTable(assets, runsMap, libFeatures);
     const next: Record<string, string> = {};
     for (const asset of assets) {
-      const runs = runsMap[asset.id] ?? [];
-      const run = pickCaptureRun(runs);
-      const row = buildCaptureRow(asset.id, run, cols, libFeatures, getActiveCountForAsset(asset));
-      next[asset.id] = buildAssetCaptureSearchBlob(asset.assetTag, asset.assetName ?? "", asset.serialNumber, row, libFeatures);
+      const row = table.rows.find((item) => item.assetId === asset.id);
+      next[asset.id] = row?.searchText ?? [asset.assetTag, asset.assetName ?? "", asset.serialNumber ?? ""].join(" ").toLowerCase();
     }
     setCaptureSearchByAsset(next);
-  }, [assets, runsMap, libFeatures, depsByFeature, captureMaxUnits, getActiveCountForAsset]);
+  }, [assets, runsMap, libFeatures]);
+
 
   const canManageAssetDocuments = can.documents.view || can.documents.upload || can.documents.delete;
 
@@ -6790,4 +6788,3 @@ const AssetInstallationPage = () => {
 };
 
 export default AssetInstallationPage;
-
