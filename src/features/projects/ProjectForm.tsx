@@ -95,7 +95,8 @@ const schema = z
       .optional(),
     workflowMode: z.enum(["INSTALLATION_ONLY", "INSPECTION_ONLY", "MIXED"]).default("INSTALLATION_ONLY"),
     isInstallationProject: z.boolean(),
-    productIds: z.array(z.string()).optional()
+    productIds: z.array(z.string()).optional(),
+    teamMemberIds: z.array(z.string()).optional()
   });
 
 type FormValues = z.infer<typeof schema>;
@@ -198,7 +199,8 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       approvalDecision: "",
       workflowMode: "INSTALLATION_ONLY",
       isInstallationProject: false,
-      productIds: []
+      productIds: [],
+      teamMemberIds: []
     }
   });
 
@@ -239,7 +241,8 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         approvalDecision: "",
         workflowMode: "INSTALLATION_ONLY",
         isInstallationProject: false,
-        productIds: []
+        productIds: [],
+        teamMemberIds: []
       });
       return;
     }
@@ -263,7 +266,8 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         approvalDecision: localProject.approvalDecision || "",
         workflowMode: localProject.workflowMode || (localProject.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
         isInstallationProject: localProject.isInstallationProject,
-        productIds: localProject.productIds ?? []
+        productIds: localProject.productIds ?? [],
+        teamMemberIds: localProject.teamMemberIds ?? []
       });
       setProductFeatureValues(localProject.productFeatureValues || {});
     }
@@ -286,7 +290,8 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         approvalDecision: project.approvalDecision || "",
         workflowMode: project.workflowMode || (project.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
         isInstallationProject: project.isInstallationProject,
-        productIds: project.productIds ?? []
+        productIds: project.productIds ?? [],
+        teamMemberIds: project.teamMemberIds ?? []
       });
       setProductFeatureValues(project.productFeatureValues || {});
     });
@@ -638,6 +643,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       isInstallationProject: INSTALLATION_ENABLED_MODES.includes(data.workflowMode as WorkflowMode),
       projectManager: data.projectManager,
       productIds: data.productIds ?? [],
+      teamMemberIds: data.teamMemberIds ?? [],
       productFeatureValues
     };
 
@@ -703,6 +709,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       office: labelOffice,
       region: labelRegion,
       projectManager: labelProjectManager,
+      teamMemberIds: labelTeamMembers,
       projectType: labelProjectType,
       status: labelStatus,
       workflowMode: "Workflow mode",
@@ -854,6 +861,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   const labelOffice = builtInLabel("office", "Office");
   const labelRegion = builtInLabel("region", "Country");
   const labelProjectManager = builtInLabel("projectManager", "Project Manager");
+  const labelTeamMembers = builtInLabel("teamMembers", "Project Team Members");
   const labelDescription = builtInLabel("description", "Description");
   const labelStartDate = builtInLabel("startDate", "Start Date");
   const labelFinishDate = builtInLabel("finishDate", "Finish Date");
@@ -870,6 +878,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       "office",
       "region",
       "projectManager",
+      "teamMembers",
       "description",
       "startDate",
       "finishDate",
@@ -895,6 +904,11 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
     return Array.from(new Set(userNames)).sort((a, b) =>
       a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
     );
+  }, [usersState.items]);
+  const activeUserOptions = useMemo(() => {
+    return [...usersState.items]
+      .filter((user) => user.isActive && !!String(user.fullName || "").trim())
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: "base", numeric: true }));
   }, [usersState.items]);
   const selectedProductId = watch("productIds")?.[0] || "";
   const selectedProduct = useMemo(
@@ -1234,6 +1248,44 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
             />
           </Grid>
         );
+      case "teamMembers":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="teamMemberIds"
+              control={control}
+              render={({ field }) => (
+                <FormControl fullWidth error={!!errors.teamMemberIds}>
+                  <InputLabel>{labelWithRequired("teamMembers", labelTeamMembers)}</InputLabel>
+                  <Select
+                    multiple
+                    value={field.value ?? []}
+                    label={labelWithRequired("teamMembers", labelTeamMembers)}
+                    onChange={(event) => field.onChange(event.target.value as string[])}
+                    renderValue={(selected) => {
+                      const ids = selected as string[];
+                      if (ids.length === 0) return "";
+                      return activeUserOptions
+                        .filter((user) => ids.includes(user.id))
+                        .map((user) => user.fullName)
+                        .join(", ");
+                    }}
+                  >
+                    {activeUserOptions.map((user) => (
+                      <MenuItem key={user.id} value={user.id}>
+                        <Checkbox checked={(field.value ?? []).includes(user.id)} />
+                        <ListItemText primary={user.fullName} secondary={`${user.role}${user.office ? ` - ${user.office}` : ""}`} />
+                      </MenuItem>
+                    ))}
+                  </Select>
+                  <FormHelperText>
+                    {errors.teamMemberIds?.message || "Nominate users who can be selected in workflow team-member steps."}
+                  </FormHelperText>
+                </FormControl>
+              )}
+            />
+          </Grid>
+        );
       case "description":
         return (
           <Grid item xs={12} md={6} key={fieldId}>
@@ -1476,8 +1528,8 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
             {visibleIdSet.has("projectManager") && renderFormField("projectManager")}
             {visibleIdSet.has("office") ? renderFormField("office") : <Grid item xs={12} md={6} />}
 
-            {visibleIdSet.has("region") && renderFormField("region")}
-            <Grid item xs={12} md={6} />
+            {visibleIdSet.has("teamMembers") && renderFormField("teamMembers")}
+            {visibleIdSet.has("region") ? renderFormField("region") : <Grid item xs={12} md={6} />}
 
             {visibleIdSet.has("startDate") && renderFormField("startDate")}
             {visibleIdSet.has("finishDate") ? renderFormField("finishDate") : <Grid item xs={12} md={6} />}
@@ -1637,6 +1689,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
           { id: "office", name: "Office", type: "text", required: true },
           { id: "region", name: "Country/State", type: "text", required: false },
           { id: "projectManager", name: "Project Manager", type: "text", required: false },
+          { id: "teamMembers", name: "Project Team Members", type: "multi-select", required: false },
           { id: "description", name: "Description", type: "text", required: true },
           { id: "startDate", name: "Start Date", type: "date", required: true },
           { id: "finishDate", name: "Finish Date", type: "date", required: true },

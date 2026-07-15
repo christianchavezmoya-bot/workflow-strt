@@ -4,7 +4,7 @@ import { Project, ProjectStatus, ProjectType } from "../types/project";
 import { ProjectRepository } from "../repositories/ProjectRepository";
 import { entityDeleteProject, entityPutProject } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
-import { webCachedGet, invalidateWebCache } from "./webFreshCache";
+import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 export interface ProjectFilters {
   office?: string;
@@ -50,6 +50,8 @@ export const projectService = {
     const response = await api.post<Project>("/projects", payload);
     if (isMobileNativePlatform()) {
       await entityPutProject({ id: response.data.id, data: response.data });
+    } else {
+      invalidateWebCacheByPrefix("/projects");
     }
     return response.data;
   },
@@ -59,6 +61,7 @@ export const projectService = {
       await entityPutProject({ id: response.data.id, data: response.data });
     } else {
       invalidateWebCache(`/projects/${id}`);
+      invalidateWebCacheByPrefix("/projects");
     }
     return response.data;
   },
@@ -69,6 +72,7 @@ export const projectService = {
         await entityPutProject({ id: response.data.id, data: response.data });
       } else {
         invalidateWebCache(`/projects/${id}`);
+        invalidateWebCacheByPrefix("/projects");
       }
       return response.data;
     } catch (error) {
@@ -87,12 +91,17 @@ export const projectService = {
       await entityDeleteProject(id);
     } else {
       invalidateWebCache(`/projects/${id}`);
+      invalidateWebCacheByPrefix("/projects");
     }
     return id;
   },
 
   async restoreProject(id: string) {
     const res = await api.post<Project>(`/projects/${id}/restore`);
+    if (!isMobileNativePlatform()) {
+      invalidateWebCache(`/projects/${id}`);
+      invalidateWebCacheByPrefix("/projects");
+    }
     return res.data;
   },
 
@@ -100,6 +109,9 @@ export const projectService = {
     await api.delete(`/projects/${id}/purge`);
     if (isMobileNativePlatform()) {
       await entityDeleteProject(id);
+    } else {
+      invalidateWebCache(`/projects/${id}`);
+      invalidateWebCacheByPrefix("/projects");
     }
     return id;
   },

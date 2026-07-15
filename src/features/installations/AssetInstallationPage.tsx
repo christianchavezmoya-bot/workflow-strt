@@ -104,10 +104,8 @@ import { brandSettingsService } from "../../services/brandSettingsService";
 import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, entityReplaceIssuesForAsset } from "../../services/localDB";
-import mammoth from "mammoth";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { buildWorkflowReportJson, createWorkflowReportDocx, workflowReportBaseFileName, type WorkflowReportExportContext } from "../../utils/workflowReportExport";
-import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { getWorkflowDisplayState } from "../../utils/workflowDisplayState";
 import {
@@ -510,6 +508,7 @@ const AssetInstallationPage = () => {
     otherName?: string;
   } | null>(null);
   const [runnerWorkflow, setRunnerWorkflow] = useState<Workflow | null>(null);
+  const [runnerProductFeatures, setRunnerProductFeatures] = useState<LibFeature[]>([]);
   const [runnerLoading, setRunnerLoading] = useState<string | null>(null);
   const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>(undefined);
   const [runnerExistingRunId, setRunnerExistingRunId] = useState<string | undefined>(undefined);
@@ -637,8 +636,11 @@ const AssetInstallationPage = () => {
   const [reportGenerating, setReportGenerating] = useState<string | null>(null);
   const [reportExportOpen, setReportExportOpen] = useState(false);
   const [reportExportAsset, setReportExportAsset] = useState<ProjectAsset | null>(null);
-  const [reportExportFormat, setReportExportFormat] = useState<"pdf" | "json" | "docx">("pdf");
-  const [reportPreviewedKey, setReportPreviewedKey] = useState<string | null>(null);
+  const [reportPreviewUrl, setReportPreviewUrl] = useState<string | null>(null);
+  const [reportPreviewLoading, setReportPreviewLoading] = useState(false);
+  const [reportPreviewError, setReportPreviewError] = useState<string | null>(null);
+  const [reportPreviewContext, setReportPreviewContext] = useState<WorkflowReportExportContext | null>(null);
+  const [reportPreviewFileBase, setReportPreviewFileBase] = useState<string | null>(null);
   // Extra context passed into WorkflowRunHistoryDialog for the PDF download
   const [runHistoryProject, setRunHistoryProject] = useState<{ customerName: string; jobNumber: string; siteName?: string } | null>(null);
   const [runHistoryCustomerLogo, setRunHistoryCustomerLogo] = useState<string | null>(null);
@@ -675,6 +677,41 @@ const AssetInstallationPage = () => {
     () => (runnerAsset ? products.find((p) => p.id === runnerAsset.productId) : undefined),
     [runnerAsset, products],
   );
+  useEffect(() => {
+    if (!runnerOpen || !runnerAsset?.productId) {
+      setRunnerProductFeatures([]);
+      return;
+    }
+
+    let cancelled = false;
+    featureService.getByProduct(runnerAsset.productId)
+      .then((features) => {
+        if (!cancelled) setRunnerProductFeatures(features);
+      })
+      .catch(() => {
+        if (!cancelled) setRunnerProductFeatures([]);
+      });
+
+    return () => { cancelled = true; };
+  }, [runnerAsset?.productId, runnerOpen]);
+  const runnerTeamMembers = useMemo(() => {
+    if (!runnerAsset?.projectId) return [];
+    const project = projects.find((item) => item.id === runnerAsset.projectId);
+    if (!project?.teamMemberIds?.length) return [];
+    return users
+      .filter((item) => item.isActive && project.teamMemberIds?.includes(item.id))
+      .map((item) => ({ id: item.id, fullName: item.fullName }));
+  }, [projects, runnerAsset?.projectId, users]);
+  const runnerAllUsers = useMemo(
+    () => users.filter((item) => item.isActive).map((item) => ({ id: item.id, fullName: item.fullName })),
+    [users],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (reportPreviewUrl) URL.revokeObjectURL(reportPreviewUrl);
+    };
+  }, [reportPreviewUrl]);
 
   // Trigger a background pull when asset data is more than 15 minutes old.
   // Uses the stable useCallback identity of the pull function to avoid re-registration.
@@ -2593,28 +2630,45 @@ const AssetInstallationPage = () => {
     window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
   }
 
-  function buildJsonPreviewHtml(title: string, rawJson: string): string {
-    return `<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>
-      body{font-family:Consolas,Menlo,monospace;padding:24px;background:#f6f8fb;color:#1f2937;margin:0}
-      h1{font:600 18px/1.4 Arial,sans-serif;margin:0 0 16px}
-      pre{white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid #d7deea;border-radius:8px;padding:16px}
-    </style></head><body><h1>${escapeHtml(title)}</h1><pre>${escapeHtml(rawJson)}</pre></body></html>`;
+  function closeReportExportDialog() {
+    setReportExportOpen(false);
+    setReportExportAsset(null);
+    setReportPreviewContext(null);
+    setReportPreviewFileBase(null);
+    setReportPreviewError(null);
+    setReportPreviewLoading(false);
+    if (reportPreviewUrl) URL.revokeObjectURL(reportPreviewUrl);
+    setReportPreviewUrl(null);
   }
 
-  function buildDocxPreviewHtml(title: string, bodyHtml: string): string {
-    return `<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>
-      body{font-family:Arial,sans-serif;padding:24px;line-height:1.6;background:#fff;color:#111827;margin:0 auto;max-width:960px}
-      table{border-collapse:collapse;width:100%}
-      td,th{border:1px solid #d1d5db;padding:6px 8px;vertical-align:top}
-      img{max-width:100%;height:auto}
-    </style></head><body>${bodyHtml}</body></html>`;
-  }
-
-  function openReportExportDialog(asset: ProjectAsset) {
+  async function openReportExportDialog(asset: ProjectAsset) {
     setReportExportAsset(asset);
-    setReportExportFormat("pdf");
-    setReportPreviewedKey(null);
+    setReportPreviewContext(null);
+    setReportPreviewFileBase(null);
+    setReportPreviewError(null);
+    setReportPreviewLoading(true);
+    if (reportPreviewUrl) URL.revokeObjectURL(reportPreviewUrl);
+    setReportPreviewUrl(null);
     setReportExportOpen(true);
+    try {
+      const reportContext = await buildAssetReportContext(asset);
+      const fileBase = workflowReportBaseFileName(reportContext.asset, reportContext.run);
+      const pdfBlob = await generateWorkflowReport({
+        ...reportContext,
+        outputMode: "blob",
+      });
+      if (!(pdfBlob instanceof Blob)) {
+        throw new Error("Failed to build PDF preview.");
+      }
+      setReportPreviewContext(reportContext);
+      setReportPreviewFileBase(fileBase);
+      setReportPreviewUrl(URL.createObjectURL(pdfBlob));
+    } catch (err) {
+      console.error("[AssetInstallationPage] Report preview failed", err);
+      setReportPreviewError("Failed to load PDF preview.");
+    } finally {
+      setReportPreviewLoading(false);
+    }
   }
 
   async function buildAssetReportContext(asset: ProjectAsset): Promise<WorkflowReportExportContext> {
@@ -2654,11 +2708,14 @@ const AssetInstallationPage = () => {
       } catch { /* ignore */ }
     }
 
-    const [brandSettings, signatureEvents] = await Promise.all([
+    const [brandSettings, signatureEvents, productFeatures] = await Promise.all([
       brandSettingsService.get(),
       effectiveRun.isLocked && effectiveRun.id
         ? signatureService.listEvents(effectiveRun.id).catch(() => [])
         : Promise.resolve([]),
+      asset.productId
+        ? featureService.getByProduct(asset.productId).catch(() => [] as LibFeature[])
+        : Promise.resolve([] as LibFeature[]),
     ]);
     const [bizLogoResolved, custLogoResolved] = await Promise.all([
       brandSettings.logoBase64 ? resolveImageToDataUrl(brandSettings.logoBase64) : Promise.resolve(null),
@@ -2682,57 +2739,37 @@ const AssetInstallationPage = () => {
       assignedTechnician: tech?.fullName,
       documentType: docType,
       signatureEvents,
+      productFeatures,
     };
   }
 
-  async function handleAssetReportAction(action: "view" | "download") {
+  async function handleAssetReportExport(format: "pdf" | "json" | "docx") {
     const asset = reportExportAsset;
     if (!asset) return;
-    const previewKey = `${asset.id}:${reportExportFormat}`;
-    if (action === "download" && reportPreviewedKey !== previewKey) {
-      alert("Preview the report before downloading it.");
-      return;
-    }
     setReportGenerating(asset.id);
     try {
-      const reportContext = await buildAssetReportContext(asset);
-      const fileBase = workflowReportBaseFileName(reportContext.asset, reportContext.run);
+      const reportContext = reportPreviewContext ?? await buildAssetReportContext(asset);
+      const fileBase = reportPreviewFileBase ?? workflowReportBaseFileName(reportContext.asset, reportContext.run);
 
-      if (reportExportFormat === "pdf") {
+      if (format === "pdf") {
         await generateWorkflowReport({
           ...reportContext,
-          outputMode: action === "view" ? "open" : "download",
-          allowDownloadFallback: action !== "view",
+          outputMode: "download",
         });
-        if (action === "view") setReportPreviewedKey(previewKey);
         return;
       }
 
-      if (reportExportFormat === "json") {
+      if (format === "json") {
         const rawJson = JSON.stringify(buildWorkflowReportJson(reportContext), null, 2);
-        const blob = new Blob([rawJson], { type: "application/json" });
-        if (action === "view") {
-          const opened = openPrintWindow(buildJsonPreviewHtml(`${fileBase}.json`, rawJson));
-          if (!opened) throw new Error("Report preview popup was blocked.");
-          setReportPreviewedKey(previewKey);
-        } else {
-          downloadBlob(blob, `${fileBase}.json`);
-        }
+        downloadBlob(new Blob([rawJson], { type: "application/json" }), `${fileBase}.json`);
         return;
       }
 
       const docxBlob = await createWorkflowReportDocx(reportContext);
-      if (action === "view") {
-        const preview = await mammoth.convertToHtml({ arrayBuffer: await docxBlob.arrayBuffer() });
-        const opened = openPrintWindow(buildDocxPreviewHtml(`${fileBase}.docx`, preview.value));
-        if (!opened) throw new Error("Report preview popup was blocked.");
-        setReportPreviewedKey(previewKey);
-      } else {
-        downloadBlob(docxBlob, `${fileBase}.docx`);
-      }
+      downloadBlob(docxBlob, `${fileBase}.docx`);
     } catch (err) {
       console.error("[AssetInstallationPage] Report export failed", err);
-      alert(action === "view" ? "Failed to preview report." : "Failed to export report.");
+      alert("Failed to export report.");
     } finally {
       setReportGenerating(null);
     }
@@ -4958,7 +4995,7 @@ const AssetInstallationPage = () => {
                             </Tooltip>
                           )}
                           {canViewInstallationAssets && (
-                            <Tooltip title="Generate/Export report">
+                            <Tooltip title="View/Export report">
                               <span>
                                 <IconButton
                                   size="small"
@@ -5095,7 +5132,7 @@ const AssetInstallationPage = () => {
                   startIcon={reportGenerating === a.id ? <CircularProgress size={14} /> : <ArticleOutlined fontSize="small" />}
                   disabled={reportGenerating === a.id}
                   onClick={() => { openReportExportDialog(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
-                  Generate/Export Report
+                  View/Export Report
                 </Button>
               )}
               {canEditInstallationAssets && canEditAssetFromWebTable(a) && !archiveMode && (
@@ -5857,58 +5894,68 @@ const AssetInstallationPage = () => {
 
       <Dialog
         open={reportExportOpen}
-        onClose={() => { setReportExportOpen(false); setReportPreviewedKey(null); }}
-        maxWidth="xs"
+        onClose={closeReportExportDialog}
+        maxWidth="lg"
         fullWidth
+        PaperProps={{ sx: { height: "92vh" } }}
       >
-        <DialogTitle>Generate/Export Report</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <Alert severity="info" sx={{ py: 0.5 }}>
-              View the report first, then use Download to export the selected format.
-            </Alert>
-            <TextField
-              label="Asset"
-              size="small"
-              fullWidth
-              value={reportExportAsset ? `${reportExportAsset.assetTag}${reportExportAsset.assetName ? ` - ${reportExportAsset.assetName}` : ""}` : ""}
-              InputProps={{ readOnly: true }}
-            />
-            <FormControl size="small" fullWidth>
-              <InputLabel id="asset-report-format-label">Format</InputLabel>
-              <Select
-                labelId="asset-report-format-label"
-                label="Format"
-                value={reportExportFormat}
-                onChange={(e) => {
-                  setReportExportFormat(e.target.value as "pdf" | "json" | "docx");
-                  setReportPreviewedKey(null);
-                }}
-              >
-                <MenuItem value="pdf">PDF</MenuItem>
-                <MenuItem value="json">JSON</MenuItem>
-                <MenuItem value="docx">Word (.docx)</MenuItem>
-              </Select>
-            </FormControl>
-          </Stack>
+        <DialogTitle>View/Export Report</DialogTitle>
+        <DialogContent sx={{ p: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <Box sx={{ px: 3, py: 1.5, borderBottom: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
+            <Typography variant="body2" fontWeight={600}>
+              {reportExportAsset ? `${reportExportAsset.assetTag}${reportExportAsset.assetName ? ` - ${reportExportAsset.assetName}` : ""}` : "Report preview"}
+            </Typography>
+          </Box>
+          <Box sx={{ flex: 1, minHeight: 0, bgcolor: "#525659" }}>
+            {reportPreviewLoading ? (
+              <Stack alignItems="center" justifyContent="center" spacing={2} sx={{ height: "100%", color: "common.white" }}>
+                <CircularProgress color="inherit" />
+                <Typography variant="body2">Loading PDF preview...</Typography>
+              </Stack>
+            ) : reportPreviewError ? (
+              <Box sx={{ p: 2 }}>
+                <Alert severity="error">{reportPreviewError}</Alert>
+              </Box>
+            ) : reportPreviewUrl ? (
+              <Box
+                component="iframe"
+                title="Report PDF Preview"
+                src={reportPreviewUrl}
+                sx={{ width: "100%", height: "100%", border: 0, bgcolor: "common.white" }}
+              />
+            ) : (
+              <Stack alignItems="center" justifyContent="center" sx={{ height: "100%", color: "common.white" }}>
+                <Typography variant="body2">No preview available.</Typography>
+              </Stack>
+            )}
+          </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => { setReportExportOpen(false); setReportPreviewedKey(null); }}>Close</Button>
-          <Button
-            variant="outlined"
-            disabled={!reportExportAsset || reportGenerating === reportExportAsset?.id}
-            onClick={() => void handleAssetReportAction("view")}
-          >
-            {reportGenerating === reportExportAsset?.id ? "Generating..." : "View"}
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={reportGenerating === reportExportAsset?.id ? <CircularProgress size={14} /> : <FileDownloadOutlined fontSize="small" />}
-            disabled={!reportExportAsset || reportGenerating === reportExportAsset?.id || reportPreviewedKey !== (reportExportAsset ? `${reportExportAsset.id}:${reportExportFormat}` : null)}
-            onClick={() => void handleAssetReportAction("download")}
-          >
-            {reportGenerating === reportExportAsset?.id ? "Generating..." : "Download"}
-          </Button>
+        <DialogActions sx={{ px: 3, py: 1.5, borderTop: "1px solid", borderColor: "divider", justifyContent: "space-between", flexWrap: "nowrap" }}>
+          <Button onClick={closeReportExportDialog}>Close</Button>
+          <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+            <Button
+              variant="outlined"
+              startIcon={reportGenerating === reportExportAsset?.id ? <CircularProgress size={14} /> : <FileDownloadOutlined fontSize="small" />}
+              disabled={!reportExportAsset || reportPreviewLoading || reportGenerating === reportExportAsset?.id}
+              onClick={() => void handleAssetReportExport("pdf")}
+            >
+              Export PDF
+            </Button>
+            <Button
+              variant="outlined"
+              disabled={!reportExportAsset || reportPreviewLoading || reportGenerating === reportExportAsset?.id}
+              onClick={() => void handleAssetReportExport("json")}
+            >
+              Export JSON
+            </Button>
+            <Button
+              variant="contained"
+              disabled={!reportExportAsset || reportPreviewLoading || reportGenerating === reportExportAsset?.id}
+              onClick={() => void handleAssetReportExport("docx")}
+            >
+              Export Word
+            </Button>
+          </Stack>
         </DialogActions>
       </Dialog>
 
@@ -6114,8 +6161,10 @@ const AssetInstallationPage = () => {
           currentUserId={currentUser.id}
           assetTag={runnerAsset.assetTag || (runnerAsset as any).assetName || ""}
           jobNumber={(runnerAsset as any).jobNumber || ""}
-          productFeatures={runnerProduct.features}
+          productFeatures={runnerProductFeatures}
           featureSelections={runnerFeatureSelections}
+          teamMembers={runnerTeamMembers}
+          allUsers={runnerAllUsers}
           onComplete={(vals) => {
             // Clear paused progress badge on completion
             if (runnerAsset) setPausedProgress((prev) => { const n = { ...prev }; delete n[runnerAsset.id]; return n; });

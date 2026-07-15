@@ -51,11 +51,11 @@ import {
 } from "@mui/material";
 import type { BomActualItem, BomItem, CaptureField, StepInput, Workflow, WorkflowStep } from "../../types/workflow";
 import type { ProductFeatureDefinition } from "../../types/product";
+import type { Feature } from "../../types/feature";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { signatureService } from "../../services/signatureService";
 import { featureService } from "../../services/featureService";
-import type { Feature } from "../../types/feature";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
@@ -69,6 +69,13 @@ import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProces
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 
 // Types
+
+type RunnerProductFeature = Pick<ProductFeatureDefinition, "id" | "name" | "options"> & {
+  valueType: string;
+  subProperties?: Feature["subProperties"];
+  isInventory?: boolean;
+  manufacturerPartNumber?: string;
+};
 
 interface StepCapture {
   stepId: string;
@@ -112,7 +119,7 @@ interface WorkOrderRunnerProps {
   /** Job number shown in dashboard flags. */
   jobNumber?: string;
   /** Product feature definitions â€" used to look up feature names for repeatFeatureId steps. */
-  productFeatures?: ProductFeatureDefinition[];
+  productFeatures?: RunnerProductFeature[];
   /** Feature selections from the workflow config â€" provides expected qty per feature. */
   featureSelections?: FeatureSelection[];
   /** Project team members for user-select inputs. Falls back to allUsers when empty. */
@@ -921,7 +928,7 @@ export default function WorkOrderRunner({
     // which is the shape AssetInstallationPage already reads.
     const componentAcc: Record<string, Record<string, string>> = {};
 
-    const featureDef = (featureId: string): ProductFeatureDefinition | undefined =>
+    const featureDef = (featureId: string): RunnerProductFeature | undefined =>
       (productFeatures ?? []).find((f) => f.id === featureId);
 
     const isComponentFeature = (featureId: string): boolean => {

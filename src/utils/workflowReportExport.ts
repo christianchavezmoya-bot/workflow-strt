@@ -1,7 +1,9 @@
 import { Document, HeadingLevel, ImageRun, Packer, Paragraph, TextRun } from "docx";
-import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
+import type { AssetWorkflowRun, RunIssue, StepResult } from "../types/assetWorkflowRun";
+import type { Feature } from "../types/feature";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { SignatureEvent } from "../types/signature";
+import type { WorkflowStep } from "../types/workflow";
 
 export interface WorkflowReportExportContext {
   run: AssetWorkflowRun;
@@ -16,6 +18,7 @@ export interface WorkflowReportExportContext {
   assignedTechnician?: string;
   documentType?: string;
   signatureEvents: SignatureEvent[];
+  productFeatures?: Feature[];
 }
 
 interface AsBuiltField {
@@ -26,6 +29,30 @@ interface AsBuiltField {
   stepTitle?: string;
   capturedAt?: string;
   iterationIndex?: number;
+  featureId?: string;
+  featureName?: string;
+  manufacturerPartNumber?: string;
+  businessPartNumber?: string;
+  fieldKey?: string;
+  selectedValue?: string;
+  allOptions?: string[];
+}
+
+interface CapturedFieldExport {
+  stepId: string;
+  stepTitle?: string;
+  iterationIndex?: number;
+  inputId: string;
+  inputLabel: string;
+  inputType: string;
+  featureId?: string;
+  featureName?: string;
+  manufacturerPartNumber?: string;
+  businessPartNumber?: string;
+  fieldKey?: string;
+  selectedValue: string;
+  allOptions?: string[];
+  capturedAt?: string;
 }
 
 interface WorkflowReportJson {
@@ -67,6 +94,7 @@ interface WorkflowReportJson {
     completedAt?: string;
     fields: AsBuiltField[];
   };
+  capturedFields: CapturedFieldExport[];
   issues: RunIssue[];
   signatures: SignatureEvent[];
 }
@@ -90,6 +118,91 @@ function parseIssues(json: string): RunIssue[] {
   } catch {
     return [];
   }
+}
+
+function parseWorkflowSteps(snapshotJson: string): WorkflowStep[] {
+  try {
+    const snapshot = JSON.parse(snapshotJson) as { stepsJson?: string; steps?: WorkflowStep[] };
+    if (snapshot?.stepsJson) {
+      const parsed = JSON.parse(snapshot.stepsJson) as WorkflowStep[] | { steps?: WorkflowStep[] };
+      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed?.steps)) return parsed.steps;
+    }
+    if (Array.isArray(snapshot?.steps)) return snapshot.steps;
+  } catch {
+    // ignore malformed snapshot
+  }
+  return [];
+}
+
+function parseStepResults(json: string): StepResult[] {
+  try {
+    return (JSON.parse(json || "[]") as StepResult[]).filter((item) => item.stepId !== "__nav__");
+  } catch {
+    return [];
+  }
+}
+
+function buildCapturedFields(context: WorkflowReportExportContext): CapturedFieldExport[] {
+  const steps = parseWorkflowSteps(context.run.workflowSnapshotJson);
+  const stepResults = parseStepResults(context.run.stepResultsJson);
+  const featureMap = new Map((context.productFeatures ?? []).map((feature) => [feature.id, feature]));
+  const rows: CapturedFieldExport[] = [];
+
+  for (const result of stepResults) {
+    const step = steps.find((item) => item.id === result.stepId);
+    const values = result.values ?? {};
+    for (const [inputId, rawValue] of Object.entries(values)) {
+      const inputDef = step?.inputs?.find((item) => item.id === inputId);
+      const captureDef = inputDef ? undefined : step?.captureFields?.find((item) => item.id === inputId);
+      const featureId = inputDef?.featureId ?? captureDef?.featureId ?? step?.stepFeatureId;
+      const feature = featureId ? featureMap.get(featureId) : undefined;
+      rows.push({
+        stepId: result.stepId,
+        stepTitle: step?.title,
+        iterationIndex: result.iterationIndex,
+        inputId,
+        inputLabel: inputDef?.label ?? captureDef?.label ?? inputId,
+        inputType: inputDef?.type ?? (captureDef ? `capture:${captureDef.type}` : "unknown"),
+        featureId,
+        featureName: feature?.name,
+        manufacturerPartNumber: feature?.manufacturerPartNumber,
+        businessPartNumber: feature?.alternativePartNumber,
+        fieldKey: captureDef?.key ?? inputDef?.id ?? inputId,
+        selectedValue: rawValue,
+        allOptions: inputDef?.type === "choice" ? (inputDef.options ?? []) : undefined,
+        capturedAt: result.completedAt,
+      });
+    }
+  }
+
+  return rows;
+}
+
+function enrichAsBuiltFields(fields: AsBuiltField[], capturedFields: CapturedFieldExport[]): AsBuiltField[] {
+  return fields.map((field) => {
+    const match = capturedFields.find((item) => {
+      if (field.featureId && item.featureId === field.featureId) {
+        if (field.key && item.fieldKey) return item.fieldKey === field.key;
+        return true;
+      }
+      if (field.key && item.fieldKey === field.key) return true;
+      const sameStep = field.stepTitle && item.stepTitle && field.stepTitle === item.stepTitle;
+      const sameLabel = field.label && item.inputLabel && field.label === item.inputLabel;
+      return Boolean(sameStep && sameLabel);
+    });
+
+    return {
+      ...field,
+      featureId: field.featureId ?? match?.featureId,
+      featureName: field.featureName ?? match?.featureName,
+      manufacturerPartNumber: field.manufacturerPartNumber ?? match?.manufacturerPartNumber,
+      businessPartNumber: field.businessPartNumber ?? match?.businessPartNumber,
+      fieldKey: field.fieldKey ?? field.key ?? match?.fieldKey,
+      selectedValue: field.selectedValue ?? field.value ?? match?.selectedValue,
+      allOptions: field.allOptions ?? match?.allOptions,
+    };
+  });
 }
 
 function parseImageDataUrl(dataUrl?: string): { data: Uint8Array; type: "png" | "jpg" | "gif" | "bmp" } | null {
@@ -136,7 +249,9 @@ export function workflowReportBaseFileName(asset: ProjectAsset, run: AssetWorkfl
 
 export function buildWorkflowReportJson(context: WorkflowReportExportContext): WorkflowReportJson {
   const { asset, run, workflowConfigName, customerName, jobNumber, siteName, siteLocation, assignedTechnician, documentType, signatureEvents } = context;
+  const capturedFields = buildCapturedFields(context);
   const asBuilt = parseAsBuiltJson(asset.asBuiltJson);
+  const enrichedAsBuilt = { ...asBuilt, fields: enrichAsBuiltFields(asBuilt.fields, capturedFields) };
   return {
     generatedAt: new Date().toISOString(),
     documentType: documentType ?? "installation",
@@ -172,7 +287,8 @@ export function buildWorkflowReportJson(context: WorkflowReportExportContext): W
       downtimeEvents: run.downtimeEvents,
       completedByName: run.completedByName,
     },
-    asBuilt,
+    asBuilt: enrichedAsBuilt,
+    capturedFields,
     issues: parseIssues(run.issuesJson),
     signatures: signatureEvents,
   };

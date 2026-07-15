@@ -17,6 +17,7 @@ import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProjects, setProjects, updateProjectStatus } from "../../store/projectSlice";
 import { fetchProducts } from "../../store/productsSlice";
+import { fetchUsers } from "../../store/usersSlice";
 import { officesService } from "../../services/officesService";
 import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
 import {
@@ -250,6 +251,7 @@ const Dashboard = () => {
   const dispatch      = useAppDispatch();
   const projects      = useAppSelector((s) => s.projects.items);
   const products      = useAppSelector((s) => s.products.items);
+  const users         = useAppSelector((s) => s.users.items);
 
   const [globalOffices,      setGlobalOffices]      = useState<Office[]>([]);
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
@@ -427,6 +429,7 @@ const Dashboard = () => {
   useEffect(() => {
     dispatch(fetchProjects());
     dispatch(fetchProducts());
+    dispatch(fetchUsers());
     loadAttention();
     setWorkloadLoading(true);
     projectAssetService.technicianWorkloadSummary().then((w) => { setWorkload(w); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.workload, w); }).finally(() => setWorkloadLoading(false));
@@ -1172,6 +1175,13 @@ const Dashboard = () => {
   const [runnerWorkflow, setRunnerWorkflow] = useState<Workflow | null>(null);
   const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>();
   const [runnerExistingRunId, setRunnerExistingRunId] = useState<string | undefined>();
+  const runnerTeamMembers = useMemo(() => {
+    const project = runnerAsset?.projectId ? projectById.get(runnerAsset.projectId) : undefined;
+    if (!project?.teamMemberIds?.length) return [];
+    return users
+      .filter((item) => item.isActive && project.teamMemberIds?.includes(item.id))
+      .map((item) => ({ id: item.id, fullName: item.fullName }));
+  }, [projectById, runnerAsset?.projectId, users]);
   const [runnerLoading, setRunnerLoading] = useState<string | null>(null);
   // Surfaced when a take-over/self-assign fails to persist (see
   // confirmAutoAssignAndStartFromDashboard) — the run is deliberately NOT started in
@@ -5500,6 +5510,7 @@ const Dashboard = () => {
           currentUserId={user.id}
           assetTag={runnerAsset.assetTag}
           jobNumber={runnerAsset.jobNumber}
+          teamMembers={runnerTeamMembers}
           onComplete={() => {
             // Refresh the workspace after workflow completion
             setWorkspaceLoading(true);

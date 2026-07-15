@@ -185,6 +185,59 @@ function fmtTime(date: string | undefined): string {
   return new Date(date).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
+const CHOICE_ROW_PREFIX = "__choice_boxes__:";
+
+type ChoiceRowPayload = {
+  options: string[];
+  selectedValue?: string;
+  missing?: boolean;
+};
+
+function encodeChoiceRow(payload: ChoiceRowPayload): string {
+  return `${CHOICE_ROW_PREFIX}${JSON.stringify(payload)}`;
+}
+
+function decodeChoiceRow(raw: unknown): ChoiceRowPayload | null {
+  if (typeof raw !== "string" || !raw.startsWith(CHOICE_ROW_PREFIX)) return null;
+  try {
+    return JSON.parse(raw.slice(CHOICE_ROW_PREFIX.length)) as ChoiceRowPayload;
+  } catch {
+    return null;
+  }
+}
+
+function layoutChoiceBoxes(doc: jsPDF, payload: ChoiceRowPayload, maxWidth: number) {
+  const horizontalPadding = 3;
+  const boxHeight = 6;
+  const gap = 2;
+  const lineGap = 2;
+  const lines: Array<Array<{ label: string; width: number; selected: boolean }>> = [];
+  let currentLine: Array<{ label: string; width: number; selected: boolean }> = [];
+  let currentWidth = 0;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+
+  for (const option of payload.options) {
+    const width = Math.max(12, doc.getTextWidth(option) + horizontalPadding * 2 + 1);
+    const selected = option === (payload.selectedValue ?? "");
+    const requiredWidth = currentLine.length === 0 ? width : currentWidth + gap + width;
+    if (currentLine.length > 0 && requiredWidth > maxWidth) {
+      lines.push(currentLine);
+      currentLine = [];
+      currentWidth = 0;
+    }
+    currentLine.push({ label: option, width, selected });
+    currentWidth = currentLine.length === 1 ? width : currentWidth + gap + width;
+  }
+
+  if (currentLine.length > 0) lines.push(currentLine);
+
+  const contentHeight = Math.max(boxHeight, lines.length * boxHeight + Math.max(0, lines.length - 1) * lineGap);
+  const noteHeight = payload.missing ? 4.5 : 0;
+  return { lines, boxHeight, gap, lineGap, contentHeight: contentHeight + noteHeight };
+}
+
 // â”€â”€â”€ PDF generator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface GenerateReportParams {
@@ -205,13 +258,13 @@ export interface GenerateReportParams {
   signatureEvents?: SignatureEvent[];
   /** Optional document type tag (e.g. "inspection") for report labelling. */
   documentType?: string;
-  /** "download" saves the PDF; "open" opens it in a browser viewer/tab. */
-  outputMode?: "download" | "open";
+  /** "download" saves the PDF; "open" opens it in a browser viewer/tab; "blob" returns a Blob for in-app preview/export. */
+  outputMode?: "download" | "open" | "blob";
   /** If preview opening fails, optionally fall back to downloading the PDF. */
   allowDownloadFallback?: boolean;
 }
 
-export async function generateWorkflowReport(params: GenerateReportParams): Promise<void> {
+export async function generateWorkflowReport(params: GenerateReportParams): Promise<Blob | void> {
   const {
     run, asset, workflowConfigName,
     businessLogoBase64, customerLogoBase64, companyName = "Commtrac",
@@ -598,7 +651,6 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
 
             if (photos.length > 0) {
               stepMediaItems.push({ label, photos, isSig: inputDef.type === "signature" });
-              bodyRows.push([label, `(${photos.length} image${photos.length !== 1 ? "s" : ""} - see below)`]);
             } else {
               bodyRows.push([label, "MISSING - image not captured"]);
             }
@@ -617,6 +669,18 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
                 continue;
               }
             } catch { }
+          }
+
+          if (inputDef.type === "choice" && (inputDef.options?.length ?? 0) > 0) {
+            bodyRows.push([
+              label,
+              encodeChoiceRow({
+                options: inputDef.options ?? [],
+                selectedValue: val ?? "",
+                missing: Boolean(missing),
+              }),
+            ]);
+            continue;
           }
 
           if (missing) {
@@ -675,10 +739,54 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         body: bodyRows,
         didParseCell: (data) => {
           if (data.section !== "body") return;
+          const choicePayload = decodeChoiceRow(data.cell.raw);
+          if (choicePayload) {
+            data.cell.text = [""];
+            const layout = layoutChoiceBoxes(doc, choicePayload, Math.max(20, data.cell.width - 4));
+            data.cell.styles.minCellHeight = Math.max(data.cell.styles.minCellHeight ?? 0, layout.contentHeight + 4);
+            return;
+          }
           const raw = String(data.cell.raw ?? "");
           if (raw.startsWith("MISSING")) {
             data.cell.styles.textColor = RED;
             data.cell.styles.fontStyle = "bold";
+          }
+        },
+        didDrawCell: (data) => {
+          if (data.section !== "body" || data.column.index !== 1) return;
+          const choicePayload = decodeChoiceRow(data.cell.raw);
+          if (!choicePayload) return;
+          const layout = layoutChoiceBoxes(doc, choicePayload, Math.max(20, data.cell.width - 4));
+          let cursorY = data.cell.y + 2.2;
+          const startX = data.cell.x + 2;
+
+          for (const line of layout.lines) {
+            let cursorX = startX;
+            for (const option of line) {
+              doc.setDrawColor(...BORDER);
+              if (option.selected) {
+                doc.setFillColor(...BLUE);
+                doc.roundedRect(cursorX, cursorY, option.width, layout.boxHeight, 1.2, 1.2, "FD");
+                doc.setTextColor(...WHITE);
+                doc.setFont("helvetica", "bold");
+              } else {
+                doc.setFillColor(255, 255, 255);
+                doc.roundedRect(cursorX, cursorY, option.width, layout.boxHeight, 1.2, 1.2, "FD");
+                doc.setTextColor(...BLACK);
+                doc.setFont("helvetica", "normal");
+              }
+              doc.setFontSize(7.5);
+              doc.text(option.label, cursorX + option.width / 2, cursorY + 4.05, { align: "center" });
+              cursorX += option.width + layout.gap;
+            }
+            cursorY += layout.boxHeight + layout.lineGap;
+          }
+
+          if (choicePayload.missing) {
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7);
+            doc.setTextColor(...RED);
+            doc.text("No selection captured", startX, cursorY + 1.2);
           }
         },
         didDrawPage: (data) => { drawFooter(data.pageNumber); },
@@ -976,6 +1084,9 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   const safeName = (asset.assetTag ?? "asset").replace(/[^a-zA-Z0-9-_]/g, "_");
   const runNum   = run.runNumber ?? 1;
   const fileName = `installation-record_${safeName}_run${runNum}.pdf`;
+  if (outputMode === "blob") {
+    return doc.output("blob");
+  }
   if (outputMode === "open") {
     const blob = doc.output("blob");
     const blobUrl = URL.createObjectURL(blob);

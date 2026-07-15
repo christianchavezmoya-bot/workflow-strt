@@ -580,7 +580,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             ? `Record all required technical data for ${featName} ${unitIndex}. Capture serial numbers, model numbers, firmware versions and measured values. Photograph the installed unit showing nameplate and installed condition. Ensure all fields are completed accurately as this forms the as-built record.`
             : "Record all required technical data for the installed equipment. Capture serial numbers, model numbers, firmware versions and measured values. Photograph installed units and ensure all fields are completed accurately as this forms the as-built record.",
           inputs: [
-            { id: u(), type: "photo", label: featureId ? `${featName} ${unitIndex} — Installed unit photograph` : "Installed unit photograph", required: true },
+            { id: u(), type: "photo", label: featureId ? `${featName} ${unitIndex} — Installed unit photograph` : "Installed unit photograph", required: true, featureId: featureId || undefined },
           ],
           captureFields: deps.map((dep) => ({
             id: u(),

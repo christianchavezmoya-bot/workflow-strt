@@ -2,6 +2,8 @@ import { Alert, Box, Button, Dialog, DialogContent, DialogTitle, FormControl, In
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
+import { useAppDispatch, useAppSelector } from "../../store/hooks";
+import { fetchUsers } from "../../store/usersSlice";
 import { projectAssetService } from "../../services/projectAssetService";
 import { projectInspectionRunService } from "../../services/projectInspectionRunService";
 import { projectService } from "../../services/projectService";
@@ -23,6 +25,8 @@ function isInspectionConfig(config: WorkflowConfig) {
 export default function ProjectAssetInspectionPage() {
   const { id: projectId = "", assetId = "" } = useParams();
   const { user } = useAuth();
+  const dispatch = useAppDispatch();
+  const users = useAppSelector((state) => state.users.items);
   const [project, setProject] = useState<Project | null>(null);
   const [asset, setAsset] = useState<ProjectAsset | null>(null);
   const [runs, setRuns] = useState<AssetWorkflowRun[]>([]);
@@ -64,8 +68,9 @@ export default function ProjectAssetInspectionPage() {
   }
 
   useEffect(() => {
+    dispatch(fetchUsers());
     void load();
-  }, [assetId, projectId]);
+  }, [assetId, dispatch, projectId]);
 
   const selectedConfig = useMemo(
     () => configs.find((config) => config.id === selectedConfigId) ?? null,
@@ -86,6 +91,12 @@ export default function ProjectAssetInspectionPage() {
   }
 
   const workflow = selectedConfig ? parseWorkflowConfigToWorkflow(selectedConfig) : null;
+  const runnerTeamMembers = useMemo(() => {
+    if (!project?.teamMemberIds?.length) return [];
+    return users
+      .filter((item) => item.isActive && project.teamMemberIds?.includes(item.id))
+      .map((item) => ({ id: item.id, fullName: item.fullName }));
+  }, [project?.teamMemberIds, users]);
 
   if (!project || !asset) {
     return <Typography variant="body2" color="text.secondary">{error || "Loading inspection asset..."}</Typography>;
@@ -202,6 +213,7 @@ export default function ProjectAssetInspectionPage() {
               currentUserName={user.fullName}
               assetTag={asset.assetTag}
               jobNumber={project.jobNumber}
+              teamMembers={runnerTeamMembers}
             />
           </DialogContent>
         </Dialog>
