@@ -84,6 +84,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import * as XLSX from "xlsx";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -151,6 +152,7 @@ import {
 import { buildProjectCaptureTable } from "../../utils/projectCaptureTable";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
+import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 
 // Reference media lives on the config's mediaJson, separate from stepsJson.
 // Merge it into the workflow so step reference images render. Offline, the cfg
@@ -175,6 +177,15 @@ interface ColumnDef {
   label: string;
 }
 
+type AssetExportColumnOption = {
+  id: string;
+  label: string;
+  headerLabel?: string;
+  groupLabel: string;
+  noteLabel?: string;
+  valueFor: (asset: ProjectAsset) => string;
+};
+
 const CONFIGURABLE_COLUMNS: ColumnDef[] = [
   { id: "assetName",     label: "Asset Name" },
   { id: "serialNumber",  label: "Serial #" },
@@ -192,6 +203,7 @@ const CONFIGURABLE_COLUMNS: ColumnDef[] = [
 
 const DEFAULT_COL_ORDER = CONFIGURABLE_COLUMNS.map((c) => c.id);
 const LS_COL_KEY = "asset_installation_columns_v1";
+const CAPTURE_HIDDEN_GROUPS_KEY = "capture_spreadsheet_hidden_groups_v1";
 const ARCHIVE_COL_IDS = ["serialNumber", "assetModel", "manufacturer", "project", "siteName", "configType", "status"];
 
 function loadColumnConfig(): { order: string[]; hidden: string[] } {
@@ -610,7 +622,13 @@ const AssetInstallationPage = () => {
   const [libFeatures, setLibFeatures] = useState<LibFeature[]>([]);
   const [depsByFeature, setDepsByFeature] = useState<Record<string, FeatureDependency[]>>({});
   const [captureSearchByAsset, setCaptureSearchByAsset] = useState<Record<string, string>>({});
-  const [exportViewMode, setExportViewMode] = useState<"operations" | "capture">("operations");
+  const [assetExportDialogOpen, setAssetExportDialogOpen] = useState(false);
+  const [assetExportFormat, setAssetExportFormat] = useState<"pdf" | "json" | "excel">("pdf");
+  const [assetExportSelectedColumnIds, setAssetExportSelectedColumnIds] = useState<string[]>([]);
+  const [assetExportIncludeProjectMeta, setAssetExportIncludeProjectMeta] = useState(true);
+  const [assetExportIncludeBusinessLogo, setAssetExportIncludeBusinessLogo] = useState(true);
+  const [assetExportIncludeCustomerLogo, setAssetExportIncludeCustomerLogo] = useState(true);
+  const [assetExportRunning, setAssetExportRunning] = useState(false);
   // Print / PDF dialog
   const [printOpen, setPrintOpen]         = useState(false);
   const [printScope, setPrintScope]       = useState<"selection" | "visible" | "custom">("visible");
@@ -1089,7 +1107,9 @@ const AssetInstallationPage = () => {
       .then((localSlices) => {
         if (loadId !== assetLoadIdRef.current) return; // Stale
         const localAssets = localSlices.flatMap((s) => s.assets);
-        const uniqueProjectIds = [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
+        const uniqueProjectIds = selectedProjectId
+          ? [selectedProjectId]
+          : [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
         if (uniqueProjectIds.length === 0) return;
         Promise.all(uniqueProjectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
           .then((results) => {
@@ -1242,13 +1262,14 @@ const AssetInstallationPage = () => {
             .catch(() => ({ scope: s, assets: [] as ProjectAsset[] })),
         ),
       );
-      const runsPromise = localForRuns.then((localAssets) =>
-        Promise.all(
-          [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))].map((pid) =>
-            assetWorkflowRunService.listLatestByProject(pid),
-          ),
-        ),
-      );
+      const runsPromise = localForRuns.then((localAssets) => {
+        const projectIds = selectedProjectId
+          ? [selectedProjectId]
+          : [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
+        return Promise.all(
+          projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)),
+        );
+      });
 
       // Apply Tier 1 (local) to the UI immediately.
       const a = await localPromise;
@@ -1708,6 +1729,37 @@ const AssetInstallationPage = () => {
     return displayAssets.filter((a) => a.assignedUserId === currentUser.id);
   }, [displayAssets, isNativePlatform, mobileScope, currentUser.id]);
 
+  const captureExportTable = useMemo(
+    () => buildProjectCaptureTable(displayAssets, runsMap, libFeatures),
+    [displayAssets, runsMap, libFeatures],
+  );
+
+  const captureExportGroups = useMemo(() => {
+    const groups = captureExportTable.groups;
+    if (groups.length === 0) return groups;
+
+    let hidden = new Set<string>();
+    try {
+      hidden = new Set<string>(JSON.parse(localStorage.getItem(CAPTURE_HIDDEN_GROUPS_KEY) || "[]") as string[]);
+    } catch {
+      hidden = new Set<string>();
+    }
+
+    const filtered = groups
+      .map((group) => ({
+        ...group,
+        columns: group.columns.filter((column) => !hidden.has(group.key) && !hidden.has(column.id)),
+      }))
+      .filter((group) => group.columns.length > 0);
+
+    return filtered.length > 0 ? filtered : groups;
+  }, [captureExportTable.groups]);
+
+  const captureExportRowMap = useMemo(
+    () => new Map(captureExportTable.rows.map((row) => [row.assetId, row])),
+    [captureExportTable.rows],
+  );
+
   // Print scope computation (needs userMap / projectMap / configMap / runsMap)
   const printRows = useMemo((): PrintRow[] => {
     let pool = assets;
@@ -1789,6 +1841,186 @@ const AssetInstallationPage = () => {
       .map((id) => CONFIGURABLE_COLUMNS.find((c) => c.id === id))
       .filter((c): c is ColumnDef => !!c && !hiddenSet.has(c.id));
   }, [colConfig, archiveMode]);
+
+  const assetExportMode = useMemo<"operations" | "capture">(
+    () => (assetTableViewMode === "capture" && canViewCaptureMatrix && libFeatures.length > 0 ? "capture" : "operations"),
+    [assetTableViewMode, canViewCaptureMatrix, libFeatures.length],
+  );
+
+  const assetExportSingleProject = useMemo(() => {
+    if (selectedProject) return selectedProject;
+    const projectIds = Array.from(new Set(displayAssets.map((asset) => asset.projectId).filter(Boolean)));
+    if (projectIds.length !== 1) return null;
+    return projectMap.get(projectIds[0]) ?? null;
+  }, [displayAssets, projectMap, selectedProject]);
+
+  const assetExportColumnOptions = useMemo<AssetExportColumnOption[]>(() => {
+    if (assetExportMode === "capture") {
+      return [
+        {
+          id: "assetTag",
+          label: "Asset Tag",
+          headerLabel: "Asset Tag",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => asset.assetTag || "-",
+        },
+        {
+          id: "assetName",
+          label: "Asset Name",
+          headerLabel: "Asset Name",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => asset.assetName || "-",
+        },
+        {
+          id: "assetRecord",
+          label: "Asset Record",
+          headerLabel: "Asset Record",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => asset.assetTag || "-",
+        },
+        {
+          id: "location",
+          label: "Location",
+          headerLabel: "Location",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => asset.location || projectMap.get(asset.projectId)?.siteName || "-",
+        },
+        {
+          id: "status",
+          label: "Status",
+          headerLabel: "Status",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => getOperationsStatusLabel(asset, projectMap.get(asset.projectId)?.workflowMode),
+        },
+        {
+          id: "customer",
+          label: "Customer",
+          headerLabel: "Customer",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.customerName || "-",
+        },
+        {
+          id: "projectNumber",
+          label: "Project Number",
+          headerLabel: "Project Number",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.jobNumber || asset.projectId.slice(0, 8),
+        },
+        {
+          id: "siteName",
+          label: "Site Name",
+          headerLabel: "Site Name",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.siteName || "-",
+        },
+        {
+          id: "technician",
+          label: "Technician",
+          headerLabel: "Technician",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => userMap.get(asset.assignedUserId || "")?.fullName || asset.installedBy || "-",
+        },
+        {
+          id: "workflow",
+          label: "Workflow",
+          headerLabel: "Workflow",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => {
+            const assignments = assignmentsMap[asset.id] ?? [];
+            if (assignments.length > 0) return assignments.map((item) => item.workflowConfigName || item.workflowTypeName || "Workflow").join(", ");
+            return asset.workflowSummary?.hasWorkflow ? "Configured" : "No workflow";
+          },
+        },
+        {
+          id: "signature",
+          label: "Signature",
+          headerLabel: "Signature",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => {
+            const latestRun = (runsMap[asset.id] ?? [])[0];
+            const state = latestRun?.signatureStatus ?? "";
+            if (state === "Signed") return "Signed";
+            if (state === "PendingCustomer") return "Pending Customer";
+            if (state === "PendingInstaller") return "Pending Installer";
+            return "-";
+          },
+        },
+        {
+          id: "completed",
+          label: "Completed",
+          headerLabel: "Completed",
+          groupLabel: "ASSET & JOB",
+          valueFor: (asset: ProjectAsset) => (runsMap[asset.id] ?? [])[0]?.completedAt?.slice(0, 10) || "-",
+        },
+        ...captureExportGroups.flatMap((group) =>
+          group.columns.map((column) => ({
+            id: `capture:${column.id}`,
+            label: `${group.displayName} - ${column.displayLabel}`,
+            headerLabel: column.displayLabel,
+            groupLabel: group.displayName.toUpperCase(),
+            noteLabel: group.businessPartNumber ? `Business Part Number -> ${group.businessPartNumber}` : undefined,
+            valueFor: (asset: ProjectAsset) => {
+              const raw = captureExportRowMap.get(asset.id)?.cells[column.id] ?? "";
+              return raw.trim().length > 0 ? raw : "-";
+            },
+          })),
+        ),
+      ];
+    }
+
+    const exportColumns = visibleColumns.filter((column) => column.id !== "assetName" && column.id !== "status");
+    return [
+      {
+        id: "assetTag",
+        label: "Asset Tag",
+        headerLabel: "Asset Tag",
+        groupLabel: "ASSET & JOB",
+        valueFor: (asset: ProjectAsset) => asset.assetTag || "-",
+      },
+      {
+        id: "assetName",
+        label: "Asset Name",
+        headerLabel: "Asset Name",
+        groupLabel: "ASSET & JOB",
+        valueFor: (asset: ProjectAsset) => asset.assetName || "-",
+      },
+      ...exportColumns.map((column) => ({
+        id: column.id,
+        label: column.label,
+        headerLabel: column.label,
+        groupLabel: ["project", "siteName", "location"].includes(column.id) ? "ASSET & JOB" : "WORKFLOW",
+        valueFor: (asset: ProjectAsset) => {
+          const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
+          const proj = projectMap.get(asset.projectId);
+          const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
+          return getOperationsExportCellText(column.id, asset, cfg, proj, tech ?? undefined);
+        },
+      })),
+      {
+        id: "status",
+        label: "Status",
+        headerLabel: "Status",
+        groupLabel: "WORKFLOW",
+        valueFor: (asset: ProjectAsset) => getOperationsStatusLabel(asset, projectMap.get(asset.projectId)?.workflowMode),
+      },
+      {
+        id: "action",
+        label: "Action",
+        headerLabel: "Action",
+        groupLabel: "WORKFLOW",
+        valueFor: (asset: ProjectAsset) => getAssetActionLabel(asset, projectMap.get(asset.projectId)?.workflowMode),
+      },
+    ];
+  }, [assetExportMode, assignmentsMap, captureExportGroups, captureExportRowMap, configMap, projectMap, runsMap, userMap, visibleColumns]);
+
+  function openAssetExportDialog() {
+    setAssetExportFormat("pdf");
+    setAssetExportSelectedColumnIds(assetExportColumnOptions.map((column) => column.id));
+    setAssetExportIncludeProjectMeta(true);
+    setAssetExportIncludeBusinessLogo(true);
+    setAssetExportIncludeCustomerLogo(Boolean(assetExportSingleProject?.customerId));
+    setAssetExportDialogOpen(true);
+  }
 
   // ------------------------------------------------------------------
   // Add asset
@@ -2626,6 +2858,443 @@ const AssetInstallationPage = () => {
     a.download = filename;
     a.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
+
+  function getCaptureStatusSummary(asset: ProjectAsset): string {
+    let fv: Record<string, string> = {};
+    try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
+
+    const inventoryFeatures = activeFeatures.filter((feat) => feat.isInventory);
+    const workflowInventoryTotal = asset.workflowSummary?.totalInventoryFeatures ?? 0;
+    const workflowInventoryCompleted = asset.workflowSummary?.completedInventoryFeatures ?? 0;
+    const fallbackFilled = inventoryFeatures.filter((feat) => {
+      const raw = fv[feat.id];
+      if (!raw) return false;
+      if (feat.valueType === "component") {
+        try { return Object.values(JSON.parse(raw) as Record<string, string>).some(Boolean); } catch { return false; }
+      }
+      return true;
+    }).length;
+
+    const total = workflowInventoryTotal > 0 ? workflowInventoryTotal : inventoryFeatures.length;
+    const filled = workflowInventoryTotal > 0 ? Math.min(workflowInventoryCompleted, workflowInventoryTotal) : fallbackFilled;
+    const latestRun = [...(runsMap[asset.id] ?? [])]
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+    const paused = Boolean(pausedProgress[asset.id]);
+
+    let evidenceLabel = "Pending";
+    if (paused || latestRun?.status === "Paused" || asset.workflowSummary?.evidenceStatus === "Paused") {
+      evidenceLabel = "Paused";
+    } else if (asset.status === "InProgress" || latestRun?.status === "InProgress") {
+      evidenceLabel = "Running";
+    } else if (asset.workflowSummary?.hasWorkflow) {
+      if (asset.workflowSummary.evidenceStatus === "Running") evidenceLabel = "Running";
+      else if (asset.workflowSummary.evidenceStatus === "Complete") evidenceLabel = "Done";
+      else if (asset.workflowSummary.evidenceStatus === "MissingData") evidenceLabel = "Missing";
+    } else if (latestRun) {
+      if (!latestRun.isLocked) evidenceLabel = "Running";
+      else evidenceLabel = countMissingWorkflowItems(latestRun) > 0 ? "Missing" : "Done";
+    }
+
+    return `${filled}/${total} inv | ${evidenceLabel}`;
+  }
+
+  function getOperationsStatusLabel(asset: ProjectAsset, projectWorkflowMode?: string | null): string {
+    const runs = runsMap[asset.id] ?? [];
+    const displayState = getWorkflowDisplayState(asset, runs, {
+      paused: Boolean(pausedProgress[asset.id]),
+      inspectionMode: projectHasInspection(projectWorkflowMode),
+      hasRunnableWorkflowSource:
+        (assignmentsMap[asset.id]?.length ?? 0) > 0
+        || !!asset.productConfigId
+        || !!asset.workflowTemplateId
+        || !!asset.workflowSummary?.hasWorkflow,
+    });
+    return displayState.status.label;
+  }
+
+  function getAssetActionLabel(asset: ProjectAsset, projectWorkflowMode?: string | null): string {
+    return getPrimaryAction(asset, projectWorkflowMode)?.label ?? "No workflow";
+  }
+
+  function getOperationsExportCellText(
+    colId: string,
+    asset: ProjectAsset,
+    cfg: ProductConfig | null | undefined,
+    proj: ReturnType<typeof projectMap.get>,
+    tech: ReturnType<typeof userMap.get>,
+  ): string {
+    switch (colId) {
+      case "assetName":
+        return asset.assetName || "-";
+      case "serialNumber":
+        return asset.serialNumber || "-";
+      case "assetModel":
+        return asset.assetModel || "-";
+      case "manufacturer":
+        return asset.manufacturer || "-";
+      case "configType":
+        return cfg?.configType || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.configType : undefined) || "-";
+      case "configName":
+        return cfg?.name || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.name : undefined) || "-";
+      case "project":
+        return proj ? proj.jobNumber : asset.projectId.slice(0, 8);
+      case "siteName":
+        return proj?.siteName || "-";
+      case "location":
+        return asset.location || "-";
+      case "assignedTech":
+        return tech?.fullName || "-";
+      case "features":
+        return getCaptureStatusSummary(asset);
+      case "status":
+        return getOperationsStatusLabel(asset, proj?.workflowMode);
+      default:
+        return "-";
+    }
+  }
+
+  async function buildAssetExportPackage() {
+    const selectedColumns = assetExportColumnOptions.filter((column) => assetExportSelectedColumnIds.includes(column.id));
+    if (selectedColumns.length === 0) {
+      throw new Error("Select at least one column to export.");
+    }
+
+    const exportDate = new Date();
+    const exportDateDisplay = exportDate.toLocaleString();
+    const projectContext = assetExportSingleProject;
+    const productNames = Array.from(new Set(displayAssets.map((asset) => products.find((product) => product.id === asset.productId)?.name).filter(Boolean))) as string[];
+    const customerNames = Array.from(new Set(displayAssets.map((asset) => projectMap.get(asset.projectId)?.customerName).filter(Boolean))) as string[];
+    const filtersSummary = [
+      archiveMode ? "Archive view" : (showNoWorkflow ? "No workflow" : (statusFilter === "All" ? "All statuses" : `Status ${STATUS_LABELS[statusFilter] ?? statusFilter}`)),
+      search.trim() ? `Search: ${search.trim()}` : null,
+      assetExportMode === "capture" ? "Capture view" : "Operations view",
+    ].filter(Boolean).join(" | ");
+
+    let businessLogo: string | null = null;
+    let customerLogo: string | null = null;
+
+    if (assetExportIncludeBusinessLogo) {
+      const rawBusinessLogo = await brandSettingsService.get().then((settings) => settings?.logoBase64 ?? null).catch(() => null);
+      businessLogo = rawBusinessLogo ? await resolveImageToDataUrl(rawBusinessLogo) : null;
+    }
+
+    if (assetExportIncludeCustomerLogo && projectContext?.customerId) {
+      const rawCustomerLogo = await customerService.getCustomers()
+        .then((all) => all.find((customer) => customer.customerId === projectContext.customerId || customer.id === projectContext.customerId)?.logo ?? null)
+        .catch(() => null);
+      customerLogo = rawCustomerLogo ? await resolveImageToDataUrl(rawCustomerLogo) : null;
+    }
+
+    const metadata = assetExportIncludeProjectMeta
+      ? [
+          { label: "Customer", value: projectContext?.customerName || (customerNames.length === 1 ? customerNames[0] : customerNames.length > 1 ? "Multiple customers" : "-") },
+          { label: "Project Number", value: projectContext?.jobNumber || (displayAssets.length > 0 ? `${new Set(displayAssets.map((asset) => asset.projectId)).size} project(s)` : "-") },
+          { label: "Project Manager", value: projectContext?.projectManager || "-" },
+          { label: "Start Date", value: projectContext?.startDate || "-" },
+          { label: "Product", value: activeProduct?.name || (productNames.length === 1 ? productNames[0] : productNames.length > 1 ? productNames.join(", ") : "-") },
+          { label: "Export Date", value: exportDateDisplay },
+          { label: "Filters", value: filtersSummary || "Current view" },
+        ]
+      : [];
+
+    const rows = displayAssets.map((asset) => selectedColumns.map((column) => column.valueFor(asset)));
+    const modeLabel = assetExportMode === "capture" ? "Capture" : "Operations";
+
+    return {
+      filenameBase: `project-assets-${assetExportMode}-${exportDate.toISOString().slice(0, 10)}`,
+      title: `${modeLabel} Asset Export`,
+      subtitle: `${displayAssets.length} row(s) | ${filtersSummary || "Current view"}`,
+      exportDateDisplay,
+      columns: selectedColumns,
+      rows,
+      metadata,
+      businessLogo,
+      customerLogo,
+      modeLabel,
+    };
+  }
+
+  function normalizeExcelHeaderLabel(label: string) {
+    const clean = label.replace(/\s+/g, " ").trim();
+    if (!clean) return clean;
+    if (clean.includes(" - ")) {
+      const parts = clean.split(" - ");
+      if (parts.length >= 2) return `${parts[0]}
+${parts.slice(1).join(" - ")}`;
+    }
+    const words = clean.split(" ");
+    if (words.length <= 2) return clean;
+    const midpoint = Math.ceil(words.length / 2);
+    return `${words.slice(0, midpoint).join(" ")}
+${words.slice(midpoint).join(" ")}`;
+  }
+
+  function buildAssetExportGroupSpans(columns: Awaited<ReturnType<typeof buildAssetExportPackage>>["columns"]) {
+    const spans: { label: string; note: string; start: number; end: number }[] = [];
+    columns.forEach((column, index) => {
+      const label = column.groupLabel || "DATA";
+      const note = column.noteLabel || "";
+      const previous = spans[spans.length - 1];
+      if (previous && previous.label === label && previous.note === note) {
+        previous.end = index;
+      } else {
+        spans.push({ label, note, start: index, end: index });
+      }
+    });
+    return spans;
+  }
+
+  function exportGroupPalette(label: string, index: number) {
+    const normalized = label.trim().toUpperCase();
+    if (normalized.includes("ASSET") || normalized.includes("JOB")) {
+      return { header: "1F4E78", note: "DCE6F1", field: "2F75B5", body: "EEF5FB", bodyAlt: "E6F0F8", text: "163447" };
+    }
+    if (normalized.includes("WORKFLOW")) {
+      return { header: "1D6F68", note: "D9F0EC", field: "2B8C82", body: "ECF8F5", bodyAlt: "E2F3EF", text: "154C47" };
+    }
+    if (normalized.includes("GENERAL")) {
+      return { header: "5B6576", note: "E9EDF2", field: "758195", body: "F5F7FA", bodyAlt: "EDF1F5", text: "3E4A59" };
+    }
+    const palettes = [
+      { header: "2F5597", note: "E6ECF8", field: "4472C4", body: "EEF3FD", bodyAlt: "E4ECFA", text: "203864" },
+      { header: "287271", note: "E3F1F0", field: "2F8F9D", body: "ECF8FA", bodyAlt: "E2F1F4", text: "174B4A" },
+      { header: "7A5C2E", note: "F6EDDD", field: "A67C32", body: "FBF5E8", bodyAlt: "F7EFDF", text: "5E451E" },
+      { header: "556B7B", note: "E9EEF2", field: "6C7F90", body: "F2F6F9", bodyAlt: "EAF0F4", text: "394955" },
+    ];
+    return palettes[index % palettes.length];
+  }
+
+  function buildAssetExportWorkbook(report: Awaited<ReturnType<typeof buildAssetExportPackage>>) {
+    const workbook = XLSX.utils.book_new();
+    const normalizedHeaders = report.columns.map((column) => normalizeExcelHeaderLabel(column.headerLabel ?? column.label));
+    const noteLabels = report.columns.map((column) => column.noteLabel || "");
+    const groupSpans = buildAssetExportGroupSpans(report.columns).map((span, index) => ({
+      ...span,
+      palette: exportGroupPalette(span.label, index),
+    }));
+    const columnPalettes = report.columns.map((column, index) => {
+      const span = groupSpans.find((candidate) => index >= candidate.start && index <= candidate.end);
+      return span?.palette ?? exportGroupPalette(column.groupLabel || "DATA", index);
+    });
+    const metadataSummary = report.metadata.map((item) => `${item.label}: ${item.value}`).join(" | ");
+    const totalColumns = Math.max(report.columns.length, 1);
+
+    const sheetRows: (string | number)[][] = [
+      [report.title, ...Array.from({ length: totalColumns - 1 }, () => "")],
+      [report.subtitle, ...Array.from({ length: totalColumns - 1 }, () => "")],
+      [metadataSummary || `Generated ${report.exportDateDisplay}`, ...Array.from({ length: totalColumns - 1 }, () => "")],
+      report.columns.map(() => ""),
+      noteLabels,
+      normalizedHeaders,
+      ...report.rows,
+    ];
+
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: totalColumns - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: totalColumns - 1 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: totalColumns - 1 } },
+    ];
+
+    groupSpans.forEach((span) => {
+      worksheet[XLSX.utils.encode_cell({ r: 3, c: span.start })] = { t: "s", v: span.label };
+      if (span.start !== span.end) {
+        merges.push({ s: { r: 3, c: span.start }, e: { r: 3, c: span.end } });
+      }
+    });
+    worksheet["!merges"] = merges;
+
+    worksheet["!cols"] = normalizedHeaders.map((header, index) => {
+      const headerLines = header.split("\n");
+      const headerWidth = Math.max(...headerLines.map((line) => line.length));
+      const values = report.rows.map((row) => String(row[index] ?? ""));
+      const longestValue = values.reduce((max, value) => Math.max(max, value.length), headerWidth);
+      const minWidth = index < 12 ? 12 : 14;
+      return { wch: Math.min(Math.max(longestValue + 3, minWidth), 26) };
+    });
+
+    worksheet["!rows"] = [
+      { hpt: 24 },
+      { hpt: 18 },
+      { hpt: 20 },
+      { hpt: 22 },
+      { hpt: 18 },
+      { hpt: 42 },
+      ...report.rows.map(() => ({ hpt: 20 })),
+    ];
+    worksheet["!freeze"] = { xSplit: Math.min(2, totalColumns), ySplit: 6 };
+    worksheet["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 5, c: 0 }, e: { r: Math.max(sheetRows.length - 1, 5), c: totalColumns - 1 } }) };
+
+    const setCellStyle = (ref: string, style: Record<string, unknown>) => {
+      const cell = worksheet[ref];
+      if (!cell) return;
+      cell.s = style;
+    };
+
+    const applyBoxBorder = (rgb: string) => ({
+      top: { style: "thin", color: { rgb } },
+      bottom: { style: "thin", color: { rgb } },
+      left: { style: "thin", color: { rgb } },
+      right: { style: "thin", color: { rgb } },
+    });
+
+    setCellStyle(XLSX.utils.encode_cell({ r: 0, c: 0 }), {
+      font: { bold: true, sz: 16, color: { rgb: "FFFFFF" } },
+      fill: { fgColor: { rgb: "163447" } },
+      alignment: { horizontal: "center", vertical: "center" },
+    });
+    setCellStyle(XLSX.utils.encode_cell({ r: 1, c: 0 }), {
+      font: { bold: true, sz: 10, color: { rgb: "163447" } },
+      fill: { fgColor: { rgb: "DCE6F1" } },
+      alignment: { horizontal: "center", vertical: "center" },
+    });
+    setCellStyle(XLSX.utils.encode_cell({ r: 2, c: 0 }), {
+      font: { italic: true, sz: 9, color: { rgb: "587082" } },
+      fill: { fgColor: { rgb: "EEF4F7" } },
+      alignment: { horizontal: "left", vertical: "center" },
+    });
+
+    groupSpans.forEach((span) => {
+      setCellStyle(XLSX.utils.encode_cell({ r: 3, c: span.start }), {
+        font: { bold: true, color: { rgb: "FFFFFF" } },
+        fill: { fgColor: { rgb: span.palette.header } },
+        alignment: { horizontal: "center", vertical: "center" },
+        border: applyBoxBorder(span.palette.header),
+      });
+    });
+
+    for (let col = 0; col < totalColumns; col += 1) {
+      const palette = columnPalettes[col];
+      setCellStyle(XLSX.utils.encode_cell({ r: 4, c: col }), {
+        font: { italic: true, sz: 9, color: { rgb: noteLabels[col] ? palette.text : "8EA0AF" } },
+        fill: { fgColor: { rgb: palette.note } },
+        alignment: { horizontal: "center", vertical: "center", wrapText: true },
+        border: applyBoxBorder(palette.header),
+      });
+      setCellStyle(XLSX.utils.encode_cell({ r: 5, c: col }), {
+        font: { bold: true, color: { rgb: "FFFFFF" } },
+        fill: { fgColor: { rgb: palette.field } },
+        alignment: { horizontal: "center", vertical: "center", wrapText: true },
+        border: applyBoxBorder(palette.header),
+      });
+    }
+
+    for (let row = 6; row < sheetRows.length; row += 1) {
+      const isEven = (row - 6) % 2 === 0;
+      for (let col = 0; col < totalColumns; col += 1) {
+        const palette = columnPalettes[col];
+        setCellStyle(XLSX.utils.encode_cell({ r: row, c: col }), {
+          fill: { fgColor: { rgb: isEven ? palette.body : palette.bodyAlt } },
+          alignment: { vertical: "top", wrapText: true },
+          border: applyBoxBorder("D5DEE5"),
+        });
+      }
+    }
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, report.modeLabel === "Capture" ? "Capture Table" : "Asset Export");
+    const legendSheet = XLSX.utils.aoa_to_sheet([
+      ["Legend"],
+      ["Dark band", "Column group / feature group"],
+      ["Tinted note row", "Business part number or group note when available"],
+      ["Colored field row", "Field names"],
+    ]);
+    XLSX.utils.book_append_sheet(workbook, legendSheet, "Legend");
+    return workbook;
+  }
+
+  function buildAssetExportHtml(report: Awaited<ReturnType<typeof buildAssetExportPackage>>, options: { excel: boolean }) {
+    const logoCell = (src: string | null, fallback: string) => src
+      ? `<div class="logo-slot"><img src="${src}" alt="${escapeHtml(fallback)}" /></div>`
+      : `<div class="logo-slot logo-fallback">${escapeHtml(fallback)}</div>`;
+
+    const metadataHtml = report.metadata.length > 0
+      ? `<section class="meta-grid">${report.metadata.map((item) => `<div class="meta-card"><div class="meta-label">${escapeHtml(item.label)}</div><div class="meta-value">${escapeHtml(item.value)}</div></div>`).join("")}</section>`
+      : "";
+
+    const groupSpans = buildAssetExportGroupSpans(report.columns).map((span, index) => ({
+      ...span,
+      palette: exportGroupPalette(span.label, index),
+    }));
+    const columnPalettes = report.columns.map((column, index) => {
+      const span = groupSpans.find((candidate) => index >= candidate.start && index <= candidate.end);
+      return span?.palette ?? exportGroupPalette(column.groupLabel || "DATA", index);
+    });
+    const groupCells = groupSpans
+      .map((group) => `<th class="group-cell" colspan="${group.end - group.start + 1}" style="background:#${group.palette.header};border-color:#${group.palette.header};">${escapeHtml(group.label)}</th>`)
+      .join("");
+    const noteCells = groupSpans
+      .map((group) => `<th class="note-cell" colspan="${group.end - group.start + 1}" style="background:#${group.palette.note};border-color:#${group.palette.header};color:#${group.palette.text};">${group.note ? escapeHtml(group.note) : "&nbsp;"}</th>`)
+      .join("");
+    const headerCells = report.columns
+      .map((column, index) => `<th class="field-cell" style="background:#${columnPalettes[index].field};border-color:#${columnPalettes[index].header};">${escapeHtml(normalizeExcelHeaderLabel(column.headerLabel ?? column.label)).replace(/\n/g, "<br />")}</th>`)
+      .join("");
+    const rowsHtml = report.rows.map((row, rowIndex) => `<tr>${row.map((cell, index) => `<td style="background:#${rowIndex % 2 === 0 ? columnPalettes[index].body : columnPalettes[index].bodyAlt};color:#${columnPalettes[index].text};">${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
+
+    return `<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(report.title)}</title><style>
+      body{font-family:Segoe UI,Arial,sans-serif;margin:0;padding:20px;background:${options.excel ? "#ffffff" : "#f3f7fa"};color:#102027}
+      .sheet{max-width:1700px;margin:0 auto;background:#fff;border:1px solid #c7d1db;box-shadow:${options.excel ? "none" : "0 12px 40px rgba(16,32,39,0.12)"}}
+      .hero{display:grid;grid-template-columns:180px 1fr 180px;gap:16px;align-items:center;padding:20px 24px;background:linear-gradient(135deg,#163447 0%,#28536b 100%);color:#f5fbff;border-bottom:4px solid #2bb3a3}
+      .title-block h1{margin:0;font-size:24px;letter-spacing:.02em}
+      .title-block p{margin:6px 0 0;font-size:12px;color:#d6e5ee}
+      .logo-slot{height:72px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,0.2);border-radius:10px;background:rgba(255,255,255,0.08);overflow:hidden}
+      .logo-slot img{max-width:100%;max-height:64px;object-fit:contain}
+      .logo-fallback{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#d6e5ee}
+      .meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;padding:18px 24px;background:#eef4f7;border-bottom:1px solid #d5dee5}
+      .meta-card{padding:10px 12px;border:1px solid #d4dde5;border-radius:8px;background:#fff}
+      .meta-label{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#587082;margin-bottom:4px}
+      .meta-value{font-size:13px;font-weight:600;color:#102027;white-space:pre-wrap}
+      .table-wrap{padding:18px 24px 24px;overflow:auto}
+      table{border-collapse:collapse;width:100%;table-layout:auto;min-width:1200px}
+      th,td{border:1px solid #c7d1db;padding:7px 9px;font-size:11px;vertical-align:top;text-align:left;word-break:break-word}
+      .group-cell{color:#f4fbff;font-weight:700;text-align:center;font-size:13px}
+      .note-cell{font-style:italic;font-size:9px;text-align:center}
+      .field-cell{color:#fff;font-weight:700;line-height:1.35;text-align:center;min-width:92px}
+      td{color:#102027}
+      .footer-note{padding:0 24px 18px;color:#587082;font-size:11px}
+    </style></head><body><div class="sheet"><section class="hero">${logoCell(report.businessLogo, "Business Logo")}
+      <div class="title-block"><h1>${escapeHtml(report.title)}</h1><p>${escapeHtml(report.subtitle)}</p></div>
+      ${logoCell(report.customerLogo, "Customer Logo")}</section>${metadataHtml}<section class="table-wrap"><table><thead><tr>${groupCells}</tr><tr>${noteCells}</tr><tr>${headerCells}</tr></thead><tbody>${rowsHtml}</tbody></table></section><div class="footer-note">Generated ${escapeHtml(report.exportDateDisplay)}</div></div></body></html>`;
+  }
+
+  async function exportAssetDataset() {
+    if (assetExportSelectedColumnIds.length === 0) {
+      alert("Select at least one column to export.");
+      return;
+    }
+
+    setAssetExportRunning(true);
+    try {
+      const report = await buildAssetExportPackage();
+      if (assetExportFormat === "json") {
+        downloadBlob(
+          new Blob([JSON.stringify({
+            exportedAt: report.exportDateDisplay,
+            mode: report.modeLabel,
+            metadata: report.metadata,
+            logos: {
+              business: assetExportIncludeBusinessLogo ? report.businessLogo : null,
+              customer: assetExportIncludeCustomerLogo ? report.customerLogo : null,
+            },
+            columns: report.columns.map((column) => column.label),
+            rows: report.rows.map((row) => Object.fromEntries(report.columns.map((column, index) => [column.label, row[index] ?? ""]))),
+          }, null, 2)], { type: "application/json" }),
+          `${report.filenameBase}.json`,
+        );
+      } else if (assetExportFormat === "excel") {
+        const workbook = buildAssetExportWorkbook(report);
+        XLSX.writeFile(workbook, `${report.filenameBase}.xlsx`);
+      } else {
+        const pdfHtml = buildAssetExportHtml(report, { excel: false });
+        openPrintWindow(pdfHtml, true);
+      }
+      setAssetExportDialogOpen(false);
+    } catch (error) {
+      console.error("[AssetInstallationPage] asset export failed", error);
+      alert(error instanceof Error ? error.message : "Failed to export assets.");
+    } finally {
+      setAssetExportRunning(false);
+    }
   }
 
   function closeReportExportDialog() {
@@ -4373,58 +5042,6 @@ const AssetInstallationPage = () => {
             Upload documents
           </Button>
 
-            {/* Export CSV */}
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              const selected = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
-              if (exportViewMode === "capture" && canViewCaptureMatrix && libFeatures.length > 0) {
-                const hidden = new Set<string>();
-                const cols = buildCaptureColumns(libFeatures, depsByFeature, captureMaxUnits, hidden);
-                const headers = ["assetTag", "assetName", "status", ...cols.map((c) => c.sortLabel)];
-                const csv = [
-                  headers.map((h) => `"${h.replace(/"/g, '""')}"`).join(","),
-                  ...selected.map((a) => {
-                    const runs = runsMap[a.id] ?? [];
-                    const run = pickCaptureRun(runs);
-                    const row = buildCaptureRow(a.id, run, cols, libFeatures, getActiveCountForAsset(a));
-                    const cells = cols.map((c) => {
-                      const cell = row.cells[c.id];
-                      const v = cell?.applicable === false ? "N/A" : (cell?.value ?? "");
-                      return `"${String(v).replace(/"/g, '""')}"`;
-                    });
-                    return [`"${a.assetTag}"`, `"${(a.assetName ?? "").replace(/"/g, '""')}"`, `"${a.status}"`, ...cells].join(",");
-                  }),
-                ].join("\n");
-                const blob = new Blob([csv], { type: "text/csv" });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url;
-                link.download = `assets-capture-export-${new Date().toISOString().slice(0, 10)}.csv`;
-                link.click();
-                URL.revokeObjectURL(url);
-                return;
-              }
-              const headers = ["assetTag", "assetName", "serialNumber", "assetModel", "manufacturer", "location", "status"];
-              const csv = [
-                headers.join(","),
-                ...selected.map((a) =>
-                  headers.map((h) => `"${String((a as unknown as Record<string, unknown>)[h] ?? "").replace(/"/g, '""')}"`).join(",")
-                ),
-              ].join("\n");
-              const blob = new Blob([csv], { type: "text/csv" });
-              const url = URL.createObjectURL(blob);
-              const link = document.createElement("a");
-              link.href = url;
-              link.download = `assets-export-${new Date().toISOString().slice(0, 10)}.csv`;
-              link.click();
-              URL.revokeObjectURL(url);
-            }}
-          >
-            Export CSV
-          </Button>
-
           {!archiveMode && (
             <Button
               size="small"
@@ -4465,7 +5082,6 @@ const AssetInstallationPage = () => {
                   variant="outlined"
                   startIcon={<PrintOutlined fontSize="small" />}
                   onClick={() => {
-                    setExportViewMode(assetTableViewMode);
                     setPrintScope(selectedAssetIds.size > 0 ? "selection" : "visible");
                     setPrintOpen(true);
                   }}
@@ -4474,17 +5090,20 @@ const AssetInstallationPage = () => {
                   Print / PDF
                 </Button>
               </Tooltip>
-              {canViewCaptureMatrix && (
-                <ToggleButtonGroup
-                  size="small"
-                  exclusive
-                  value={exportViewMode}
-                  onChange={(_, v) => { if (v) setExportViewMode(v as "operations" | "capture"); }}
-                >
-                  <ToggleButton value="operations" sx={{ fontSize: 10, py: 0.25, px: 0.75 }}>Ops export</ToggleButton>
-                  <ToggleButton value="capture" sx={{ fontSize: 10, py: 0.25, px: 0.75 }}>Capture export</ToggleButton>
-                </ToggleButtonGroup>
-              )}
+              <Tooltip title="Export the current filtered asset view">
+                <span>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<FileDownloadOutlined fontSize="small" />}
+                    onClick={openAssetExportDialog}
+                    disabled={displayAssets.length === 0}
+                    sx={{ fontSize: 12 }}
+                  >
+                    Export
+                  </Button>
+                </span>
+              </Tooltip>
             </Stack>
           )}
           <Stack direction="row" spacing={1} alignItems="center">
@@ -4508,6 +5127,92 @@ const AssetInstallationPage = () => {
       )}
 
       {/* Fix 7 — Stale cache warning (mobile only) */}
+      <Dialog open={assetExportDialogOpen} onClose={() => !assetExportRunning && setAssetExportDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Export Assets</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Alert severity="info">
+              Export uses the current filtered view: {assetExportMode === "capture" ? "Capture" : "Operations"} | {displayAssets.length} row(s)
+            </Alert>
+
+            <Stack direction={{ xs: "column", md: "row" }} spacing={3}>
+              <FormControl sx={{ minWidth: 220 }}>
+                <FormLabel>Format</FormLabel>
+                <RadioGroup value={assetExportFormat} onChange={(event) => setAssetExportFormat(event.target.value as "pdf" | "json" | "excel") }>
+                  <FormControlLabel value="pdf" control={<Radio />} label="PDF" />
+                  <FormControlLabel value="excel" control={<Radio />} label="Excel (.xlsx)" />
+                  <FormControlLabel value="json" control={<Radio />} label="JSON" />
+                </RadioGroup>
+              </FormControl>
+
+              <FormControl sx={{ minWidth: 260 }}>
+                <FormLabel>Report options</FormLabel>
+                <FormGroup>
+                  <FormControlLabel
+                    control={<Checkbox checked={assetExportIncludeProjectMeta} onChange={(event) => setAssetExportIncludeProjectMeta(event.target.checked)} />}
+                    label="Include project/customer metadata"
+                  />
+                  <FormControlLabel
+                    control={<Checkbox checked={assetExportIncludeBusinessLogo} onChange={(event) => setAssetExportIncludeBusinessLogo(event.target.checked)} />}
+                    label="Include business logo"
+                  />
+                  <FormControlLabel
+                    control={<Checkbox checked={assetExportIncludeCustomerLogo} onChange={(event) => setAssetExportIncludeCustomerLogo(event.target.checked)} disabled={!assetExportSingleProject?.customerId} />}
+                    label="Include customer logo"
+                  />
+                </FormGroup>
+                {!assetExportSingleProject?.customerId && (
+                  <Typography variant="caption" color="text.secondary">
+                    Customer logo is available only when the export resolves to one project/customer.
+                  </Typography>
+                )}
+                {assetExportFormat === "excel" && (
+                  <Typography variant="caption" color="text.secondary">
+                    Excel export uses a real `.xlsx` workbook with project metadata, adjusted column widths, and no logo images.
+                  </Typography>
+                )}
+              </FormControl>
+            </Stack>
+
+            <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1.5 }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} mb={1}>
+                <Typography variant="subtitle2">Columns</Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" onClick={() => setAssetExportSelectedColumnIds(assetExportColumnOptions.map((column) => column.id))}>Select all</Button>
+                  <Button size="small" onClick={() => setAssetExportSelectedColumnIds([])}>Clear</Button>
+                </Stack>
+              </Stack>
+              <Box sx={{ maxHeight: 320, overflowY: "auto", pr: 1 }}>
+                <FormGroup>
+                  {assetExportColumnOptions.map((column) => (
+                    <FormControlLabel
+                      key={column.id}
+                      control={
+                        <Checkbox
+                          checked={assetExportSelectedColumnIds.includes(column.id)}
+                          onChange={(event) => {
+                            setAssetExportSelectedColumnIds((prev) => event.target.checked
+                              ? [...prev, column.id]
+                              : prev.filter((id) => id !== column.id));
+                          }}
+                        />
+                      }
+                      label={column.label}
+                    />
+                  ))}
+                </FormGroup>
+              </Box>
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAssetExportDialogOpen(false)} disabled={assetExportRunning}>Close</Button>
+          <Button variant="contained" onClick={() => void exportAssetDataset()} disabled={assetExportRunning || assetExportSelectedColumnIds.length === 0}>
+            {assetExportRunning ? "Exporting..." : `Export ${assetExportFormat.toUpperCase()}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {isNativePlatform && cacheStale && (
         <Alert
           severity={cacheStale === "hard" ? "error" : "warning"}
@@ -6788,3 +7493,4 @@ const AssetInstallationPage = () => {
 };
 
 export default AssetInstallationPage;
+

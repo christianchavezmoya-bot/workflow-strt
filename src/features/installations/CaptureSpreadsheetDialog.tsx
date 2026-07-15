@@ -4,6 +4,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Box,
   Button,
   Checkbox,
@@ -66,12 +67,14 @@ const STICKY_TOP_PN = 36;
 const STICKY_TOP_FIELDS = 72;
 const LEFT_TAG = 0;
 const LEFT_NAME = 132;
-const LEFT_STATUS = 304;
-const LEFT_ACTIONS = 416;
 const TAG_W = 132;
 const NAME_W = 172;
 const STATUS_W = 112;
 const ACTIONS_W = 132;
+const STATIC_HEADER_BG = "#1F4E78";
+const STATIC_HEADER_TEXT = "#F4FBFF";
+const STATIC_HEADER_BORDER = "#4F6F8B";
+const STATIC_CELL_BG = "#F7FAFC";
 
 function loadHiddenGroups(): Set<string> {
   try {
@@ -81,6 +84,14 @@ function loadHiddenGroups(): Set<string> {
     // ignore
   }
   return new Set();
+}
+
+function saveHiddenGroups(next: Set<string>) {
+  try {
+    localStorage.setItem(LS_HIDDEN_KEY, JSON.stringify([...next]));
+  } catch {
+    // ignore
+  }
 }
 
 function hexToRgba(hex: string, alpha: number) {
@@ -95,20 +106,57 @@ function hexToRgba(hex: string, alpha: number) {
 function groupPalette(group: ProjectCaptureGroup) {
   if (group.groupType === "general") {
     return {
-      header: "#5F6B7A",
-      subHeader: "#EEF1F4",
-      border: "#5F6B7A",
-      tint: hexToRgba("#5F6B7A", 0.05),
+      header: "#5B6576",
+      subHeader: "#EEF1F5",
+      border: "#5B6576",
+      tint: hexToRgba("#5B6576", 0.07),
     };
   }
 
-  const tint = group.tintIndex % 2 === 0 ? 0.05 : 0.095;
-  return {
-    header: "#1B4A86",
-    subHeader: group.tintIndex % 2 === 0 ? "#EAF0F8" : "#DDE8F6",
-    border: "#1B4A86",
-    tint: hexToRgba("#1B4A86", tint),
-  };
+  const featurePalettes = [
+    { header: "#1F4E78", subHeader: "#E7F0F8", border: "#1F4E78", tint: hexToRgba("#1F4E78", 0.08) },
+    { header: "#1D6F68", subHeader: "#E5F4F1", border: "#1D6F68", tint: hexToRgba("#1D6F68", 0.085) },
+    { header: "#556B7B", subHeader: "#EDF1F4", border: "#556B7B", tint: hexToRgba("#556B7B", 0.08) },
+    { header: "#8A6B2D", subHeader: "#F8F1E2", border: "#8A6B2D", tint: hexToRgba("#8A6B2D", 0.08) },
+  ];
+
+  return featurePalettes[Math.abs(group.tintIndex) % featurePalettes.length];
+}
+
+function statusTone(status: ProjectAsset["status"]) {
+  switch (status) {
+    case "Complete":
+      return { bg: "#E7F6EE", border: "#2E7D32", text: "#1B5E20" };
+    case "Closed":
+      return { bg: "#EAF4FB", border: "#1565C0", text: "#0D47A1" };
+    case "InProgress":
+      return { bg: "#E8F1FB", border: "#1976D2", text: "#0D47A1" };
+    case "Paused":
+    case "Pending":
+      return { bg: "#FFF4E5", border: "#ED6C02", text: "#9A4D00" };
+    case "Issue":
+      return { bg: "#FDECEC", border: "#D32F2F", text: "#8E1B1B" };
+    default:
+      return { bg: "#F3F6F9", border: "#78909C", text: "#455A64" };
+  }
+}
+
+function captureValueTone(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (["yes", "confirmed", "complete", "completed", "signed", "done", "pass", "passed", "ok"].includes(normalized)) {
+    return { bg: "#EAF7EE", text: "#1B5E20", border: "#A5D6A7" };
+  }
+  if (["no", "failed", "fail", "missing", "issue", "rejected"].includes(normalized)) {
+    return { bg: "#FDECEC", text: "#8E1B1B", border: "#F2B8B5" };
+  }
+  if (["pending", "paused", "hold", "awaiting"].some((token) => normalized.includes(token))) {
+    return { bg: "#FFF4E5", text: "#9A4D00", border: "#F7C98B" };
+  }
+  if (["ethernet", "wifi", "workbridge", "running"].some((token) => normalized.includes(token))) {
+    return { bg: "#E8F1FB", text: "#0D47A1", border: "#B7D1F1" };
+  }
+  return null;
 }
 
 function stickyCell(left: number, width: number, zIndex: number) {
@@ -123,10 +171,36 @@ function stickyCell(left: number, width: number, zIndex: number) {
   };
 }
 
+
 function rowSearchMatch(row: ProjectCaptureRow, asset: ProjectAsset, query: string) {
   if (!query) return true;
   const base = [asset.assetTag, asset.assetName ?? "", asset.serialNumber ?? "", asset.status].join(" ").toLowerCase();
   return base.includes(query) || row.searchText.includes(query);
+}
+
+function splitLabelIntoTwoLines(label: string) {
+  if (!label) return label;
+  const normalized = label.replace(/\s+/g, " ").trim();
+  const dashIndex = normalized.indexOf(" - ");
+  if (dashIndex > 0) return `${normalized.slice(0, dashIndex)}\n${normalized.slice(dashIndex + 3)}`;
+
+  const words = normalized.split(" ");
+  if (words.length < 3) return normalized;
+
+  const target = Math.floor(normalized.length / 2);
+  let bestIndex = 1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let current = words[0].length;
+  for (let i = 1; i < words.length; i += 1) {
+    const distance = Math.abs(target - current);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = i;
+    }
+    current += words[i].length + 1;
+  }
+
+  return `${words.slice(0, bestIndex).join(" ")}\n${words.slice(bestIndex).join(" ")}`;
 }
 
 export default function CaptureSpreadsheetDialog({
@@ -164,6 +238,47 @@ export default function CaptureSpreadsheetDialog({
 
   const visibleColumns = useMemo(() => visibleGroups.flatMap((group) => group.columns), [visibleGroups]);
 
+  const runDiagnostics = useMemo(() => {
+    const runs = Object.values(runsMap).flat();
+    return {
+      totalRuns: runs.length,
+      runsWithSnapshot: runs.filter((run) => (run.workflowSnapshotJson || '').length > 20).length,
+      runsWithResults: runs.filter((run) => (run.stepResultsJson || '').length > 20).length,
+    };
+  }, [runsMap]);
+
+  useEffect(() => {
+    if (table.groups.length === 0 || hiddenGroups.size === 0) return;
+
+    const validKeys = new Set<string>();
+    for (const group of table.groups) {
+      validKeys.add(group.key);
+      for (const column of group.columns) validKeys.add(column.id);
+    }
+
+    let changed = false;
+    const pruned = new Set<string>();
+    hiddenGroups.forEach((key) => {
+      if (validKeys.has(key)) {
+        pruned.add(key);
+      } else {
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      saveHiddenGroups(pruned);
+      setHiddenGroups(pruned);
+      return;
+    }
+
+    if (visibleGroups.length === 0 && table.columns.length > 0) {
+      const cleared = new Set<string>();
+      saveHiddenGroups(cleared);
+      setHiddenGroups(cleared);
+    }
+  }, [hiddenGroups, table.columns.length, table.groups, visibleGroups.length]);
+
   const rows = useMemo(() => {
     const rowMap = new Map(table.rows.map((row) => [row.assetId, row]));
     return assets.map((asset) => ({
@@ -189,7 +304,7 @@ export default function CaptureSpreadsheetDialog({
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      try { localStorage.setItem(LS_HIDDEN_KEY, JSON.stringify([...next])); } catch {}
+      saveHiddenGroups(next);
       return next;
     });
   }, []);
@@ -248,25 +363,28 @@ export default function CaptureSpreadsheetDialog({
   const renderValueCell = (capture: ProjectCaptureRow, column: ProjectCaptureColumn, group: ProjectCaptureGroup) => {
     const value = capture.cells[column.id] ?? "";
     const palette = groupPalette(group);
+    const tone = captureValueTone(value);
     const isBlank = value.trim().length === 0;
     return (
       <TableCell
         key={column.id}
         sx={{
-          minWidth: 124,
+          minWidth: 118,
           borderLeft: column === group.columns[0] ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
           borderRight: column === group.columns[group.columns.length - 1] ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
           borderBottom: "1px solid #D8DEE7",
-          bgcolor: palette.tint,
+          bgcolor: tone?.bg ?? palette.tint,
           verticalAlign: "top",
+          boxShadow: tone ? `inset 0 0 0 1px ${tone.border}` : undefined,
         }}
       >
         <Typography
           variant="caption"
-          color={isBlank ? "text.disabled" : "text.primary"}
+          color={isBlank ? "text.disabled" : (tone?.text ?? "text.primary")}
           fontStyle={isBlank ? "italic" : "normal"}
+          fontWeight={tone ? 700 : 500}
         >
-          {isBlank ? "—" : value}
+          {isBlank ? "-" : value}
         </Typography>
       </TableCell>
     );
@@ -306,14 +424,46 @@ export default function CaptureSpreadsheetDialog({
 
       {columnPickerOpen && renderGroupPicker()}
 
+      {visibleGroups.length === 0 && (
+        <Alert severity={table.columns.length > 0 ? 'warning' : 'info'}>
+          {table.columns.length > 0
+            ? 'Capture columns are currently hidden by saved column preferences. The page has reset invalid saved keys automatically; if you still only see the four fixed columns, hard-refresh this tab.'
+            : `No capture columns could be derived from the loaded runs. Loaded ${runDiagnostics.totalRuns} runs, ${runDiagnostics.runsWithSnapshot} with workflow snapshots, ${runDiagnostics.runsWithResults} with step results.`}
+        </Alert>
+      )}
+
       <Box sx={{ overflow: "auto", maxHeight: embedded ? undefined : (fullScreen ? "calc(100vh - 200px)" : "70vh") }}>
         <Table size="small" stickyHeader sx={{ minWidth: 760, borderCollapse: "separate", borderSpacing: 0 }}>
           <TableHead>
             <TableRow>
-              <TableCell rowSpan={3} sx={{ ...stickyCell(LEFT_TAG, TAG_W, 9), top: STICKY_TOP_NAME, fontWeight: 700, borderRight: "1px solid #D8DEE7" }}>Asset Tag</TableCell>
-              <TableCell rowSpan={3} sx={{ ...stickyCell(LEFT_NAME, NAME_W, 9), top: STICKY_TOP_NAME, fontWeight: 700, borderRight: "1px solid #D8DEE7" }}>Asset Name</TableCell>
-              <TableCell rowSpan={3} sx={{ ...stickyCell(LEFT_STATUS, STATUS_W, 9), top: STICKY_TOP_NAME, fontWeight: 700, borderRight: "1px solid #D8DEE7" }}>Status</TableCell>
-              <TableCell rowSpan={3} sx={{ ...stickyCell(LEFT_ACTIONS, ACTIONS_W, 9), top: STICKY_TOP_NAME, fontWeight: 700, borderRight: "1px solid #D8DEE7" }}>Actions</TableCell>
+              <TableCell
+                rowSpan={3}
+                sx={{
+                  ...stickyCell(LEFT_TAG, TAG_W, 9),
+                  top: STICKY_TOP_NAME,
+                  fontWeight: 700,
+                  bgcolor: STATIC_HEADER_BG,
+                  color: STATIC_HEADER_TEXT,
+                  borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
+                  borderBottom: `2px solid ${STATIC_HEADER_BORDER}`,
+                }}
+              >
+                Asset Tag
+              </TableCell>
+              <TableCell
+                rowSpan={3}
+                sx={{
+                  ...stickyCell(LEFT_NAME, NAME_W, 9),
+                  top: STICKY_TOP_NAME,
+                  fontWeight: 700,
+                  bgcolor: STATIC_HEADER_BG,
+                  color: STATIC_HEADER_TEXT,
+                  borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
+                  borderBottom: `2px solid ${STATIC_HEADER_BORDER}`,
+                }}
+              >
+                Asset Name
+              </TableCell>
               {visibleGroups.map((group) => {
                 const palette = groupPalette(group);
                 return (
@@ -336,6 +486,42 @@ export default function CaptureSpreadsheetDialog({
                   </TableCell>
                 );
               })}
+              <TableCell
+                rowSpan={3}
+                sx={{
+                  top: STICKY_TOP_NAME,
+                  position: "sticky",
+                  zIndex: 7,
+                  minWidth: STATUS_W,
+                  width: STATUS_W,
+                  maxWidth: STATUS_W,
+                  fontWeight: 700,
+                  bgcolor: STATIC_HEADER_BG,
+                  color: STATIC_HEADER_TEXT,
+                  borderLeft: `2px solid ${STATIC_HEADER_BORDER}`,
+                  borderBottom: `2px solid ${STATIC_HEADER_BORDER}`,
+                }}
+              >
+                Status
+              </TableCell>
+              <TableCell
+                rowSpan={3}
+                sx={{
+                  top: STICKY_TOP_NAME,
+                  position: "sticky",
+                  zIndex: 7,
+                  minWidth: ACTIONS_W,
+                  width: ACTIONS_W,
+                  maxWidth: ACTIONS_W,
+                  fontWeight: 700,
+                  bgcolor: STATIC_HEADER_BG,
+                  color: STATIC_HEADER_TEXT,
+                  borderLeft: `1px solid ${STATIC_HEADER_BORDER}`,
+                  borderBottom: `2px solid ${STATIC_HEADER_BORDER}`,
+                }}
+              >
+                Actions
+              </TableCell>
             </TableRow>
             <TableRow>
               {visibleGroups.map((group) => {
@@ -344,7 +530,7 @@ export default function CaptureSpreadsheetDialog({
                   ? "Shared fields"
                   : (group.businessPartNumber
                       ? `P/N: ${group.businessPartNumber}${group.manufacturerPartNumber && group.manufacturerPartNumber !== group.businessPartNumber ? ` | Mfr: ${group.manufacturerPartNumber}` : ""}`
-                      : (group.manufacturerPartNumber ? `Mfr: ${group.manufacturerPartNumber}` : "P/N: —"));
+                      : (group.manufacturerPartNumber ? `Mfr: ${group.manufacturerPartNumber}` : "P/N: -"));
                 return (
                   <TableCell
                     key={`${group.key}:pn`}
@@ -382,13 +568,23 @@ export default function CaptureSpreadsheetDialog({
                       color: "text.primary",
                       fontWeight: 700,
                       fontSize: 11,
-                      minWidth: 124,
+                      minWidth: 118,
                       borderLeft: index === 0 ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
                       borderRight: index === group.columns.length - 1 ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
                       borderBottom: `2px solid ${palette.border}`,
                     }}
                   >
-                    {column.displayLabel}
+                    <Typography
+                      component="span"
+                      sx={{
+                        display: "block",
+                        whiteSpace: "pre-line",
+                        lineHeight: 1.35,
+                        minHeight: 30,
+                      }}
+                    >
+                      {splitLabelIntoTwoLines(column.displayLabel)}
+                    </Typography>
                   </TableCell>
                 ));
               })}
@@ -404,23 +600,63 @@ export default function CaptureSpreadsheetDialog({
                 </TableCell>
               </TableRow>
             ) : (
-              filteredRows.map(({ asset, capture }) => (
-                <TableRow key={asset.id} hover>
-                  <TableCell sx={{ ...stickyCell(LEFT_TAG, TAG_W, 3), borderRight: "1px solid #D8DEE7" }}>
-                    <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
+              filteredRows.map(({ asset, capture }, rowIndex) => {
+                const palette = statusTone(asset.status);
+                return (
+                <TableRow
+                  key={asset.id}
+                  hover
+                  sx={{
+                    backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.98)" : "rgba(245,248,251,0.98)",
+                    "&:hover td": { backgroundColor: "rgba(31,78,120,0.06) !important" },
+                  }}
+                >
+                  <TableCell
+                    sx={{
+                      ...stickyCell(LEFT_TAG, TAG_W, 3),
+                      bgcolor: rowIndex % 2 === 0 ? "#FDFEFF" : "#F5F8FB",
+                      borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
+                      boxShadow: `inset 3px 0 0 ${palette.border}`,
+                    }}
+                  >
+                    <Typography variant="body2" fontWeight={700} color="#163447">{asset.assetTag}</Typography>
                   </TableCell>
-                  <TableCell sx={{ ...stickyCell(LEFT_NAME, NAME_W, 3), borderRight: "1px solid #D8DEE7" }}>
-                    <Typography variant="body2" color="text.secondary">{asset.assetName || "—"}</Typography>
-                  </TableCell>
-                  <TableCell sx={{ ...stickyCell(LEFT_STATUS, STATUS_W, 3), borderRight: "1px solid #D8DEE7" }}>
-                    {renderStatus ? renderStatus(asset) : defaultStatus(asset)}
-                  </TableCell>
-                  <TableCell sx={{ ...stickyCell(LEFT_ACTIONS, ACTIONS_W, 3), borderRight: "1px solid #D8DEE7" }}>
-                    {renderActions ? renderActions(asset) : <Typography variant="caption" color="text.disabled">—</Typography>}
+                  <TableCell
+                    sx={{
+                      ...stickyCell(LEFT_NAME, NAME_W, 3),
+                      bgcolor: rowIndex % 2 === 0 ? "#FDFEFF" : "#F5F8FB",
+                      borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
+                    }}
+                  >
+                    <Typography variant="body2" color="#274055" fontWeight={500}>{asset.assetName || "-"}</Typography>
                   </TableCell>
                   {visibleGroups.flatMap((group) => group.columns.map((column) => renderValueCell(capture, column, group)))}
+                  <TableCell
+                    sx={{
+                      minWidth: STATUS_W,
+                      width: STATUS_W,
+                      maxWidth: STATUS_W,
+                      bgcolor: palette.bg,
+                      borderLeft: `2px solid ${palette.border}`,
+                      borderRight: `1px solid ${palette.border}`,
+                    }}
+                  >
+                    {renderStatus ? renderStatus(asset) : defaultStatus(asset)}
+                  </TableCell>
+                  <TableCell
+                    sx={{
+                      minWidth: ACTIONS_W,
+                      width: ACTIONS_W,
+                      maxWidth: ACTIONS_W,
+                      bgcolor: hexToRgba(palette.border, 0.08),
+                      borderLeft: `1px solid ${palette.border}`,
+                    }}
+                  >
+                    {renderActions ? renderActions(asset) : <Typography variant="caption" color="text.disabled">-</Typography>}
+                  </TableCell>
                 </TableRow>
-              ))
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -456,3 +692,6 @@ export default function CaptureSpreadsheetDialog({
     </Dialog>
   );
 }
+
+
+
