@@ -48,6 +48,8 @@ import type { Workflow } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { AssetIssue } from "../../types/projectAsset";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import { featureService } from "../../services/featureService";
+import type { Feature as LibFeature } from "../../types/feature";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { mediaStore } from "../../services/mediaStore";
@@ -918,9 +920,12 @@ const Dashboard = () => {
       } catch {
         // Fall back to run label if config lookup fails.
       }
-      const [brandSettings, signatureEvents] = await Promise.all([
+      const [brandSettings, signatureEvents, productFeatures] = await Promise.all([
         brandSettingsService.get(),
         latestRun.isLocked ? import("../../services/signatureService").then(({ signatureService }) => signatureService.listEvents(latestRun.id)) : Promise.resolve([]),
+        asset.productId
+          ? featureService.getByProduct(asset.productId).catch(() => [] as LibFeature[])
+          : Promise.resolve([] as LibFeature[]),
       ]);
       const bizLogoResolved = brandSettings.logoBase64
         ? await resolveImageToDataUrl(brandSettings.logoBase64)
@@ -939,6 +944,7 @@ const Dashboard = () => {
         siteLocation: asset.location ?? undefined,
         assignedTechnician: user.fullName ?? undefined,
         signatureEvents,
+        productFeatures,
         outputMode: "open",
       });
     } finally {

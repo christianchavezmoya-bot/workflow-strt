@@ -14,6 +14,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { AssetWorkflowRun, RunIssue, RunTimeEntry, StepResult } from "../types/assetWorkflowRun";
+import type { Feature } from "../types/feature";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { WorkflowStep } from "../types/workflow";
 import type { SignatureEvent } from "../types/signature";
@@ -256,6 +257,8 @@ export interface GenerateReportParams {
   includeAllSteps?: boolean;
   /** Installer and/or customer signature events — used to render the sign-off block. */
   signatureEvents?: SignatureEvent[];
+  /** Product feature library used to enrich report rows with feature metadata like P/N. */
+  productFeatures?: Feature[];
   /** Optional document type tag (e.g. "inspection") for report labelling. */
   documentType?: string;
   /** "download" saves the PDF; "open" opens it in a browser viewer/tab; "blob" returns a Blob for in-app preview/export. */
@@ -271,6 +274,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     customerName, jobNumber, siteName, siteLocation, assignedTechnician,
     includeAllSteps = false,
     signatureEvents = [],
+    productFeatures = [],
     outputMode = "download",
     allowDownloadFallback = true,
   } = params;
@@ -280,6 +284,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
 
   const steps       = parseSteps(run.workflowSnapshotJson ?? "");
   const stepMap     = new Map(steps.map((s) => [s.id, s]));
+  const featureMap  = new Map(productFeatures.map((feature) => [feature.id, feature]));
   const stepResults = parseStepResults(run.stepResultsJson);
   const visitedStepIds = parseVisitedStepIds(run.stepResultsJson);
   const issues      = parseIssues(run.issuesJson);
@@ -573,6 +578,19 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       const bodyRows: string[][] = [];
       if (desc) bodyRows.push(["Description", desc]);
 
+      const seenPartRows = new Set<string>();
+      const pushPartRow = (featureId?: string) => {
+        if (!featureId || seenPartRows.has(featureId)) return;
+        const feature = featureMap.get(featureId);
+        const businessPartNumber = feature?.alternativePartNumber?.trim();
+        if (!feature || !businessPartNumber) return;
+        bodyRows.push([`${feature.name} P/N`, businessPartNumber]);
+        seenPartRows.add(featureId);
+      };
+      pushPartRow(step.stepFeatureId);
+      for (const inputDef of inputDefs) pushPartRow(inputDef.featureId);
+      for (const captureDef of step.captureFields ?? []) pushPartRow(captureDef.featureId);
+
       if (!isCompleted) {
         const missingItems = new Map(getMissingWorkflowItems(step, {}).map((item) => [item.id, item]));
         if (inputDefs.length > 0 || (step.captureFields?.length ?? 0) > 0) {
@@ -796,9 +814,9 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
 
       // â”€â”€ Render photo / signature images captured in this step â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (stepMediaItems.length > 0) {
-        const IMG_H = 28;           // mm height per image
+        const IMG_H = 36.4;         // mm height per image (30% larger than 28mm)
         const IMG_GAP = 2;          // mm gap between thumbnails
-        const COLS = 4;             // max images per row
+        const COLS = 3;             // fewer columns so report photos render visibly larger
         const imgW = (cardW - IMG_GAP * (COLS - 1)) / COLS;
 
         for (const media of stepMediaItems) {
@@ -821,7 +839,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
             if (!size) continue;
 
             const aspect = size.w / size.h;
-            const drawW  = media.isSig ? Math.min(60, IMG_H * aspect) : imgW;
+            const drawW  = media.isSig ? Math.min(78, IMG_H * aspect) : imgW;
             const drawH  = media.isSig ? Math.min(IMG_H, drawW / aspect) : IMG_H;
 
             y = ensureSpace(y, drawH + 4);

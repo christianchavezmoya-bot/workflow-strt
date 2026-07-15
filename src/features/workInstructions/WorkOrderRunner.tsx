@@ -1339,14 +1339,19 @@ export default function WorkOrderRunner({
             <input
               type="file"
               accept={acceptType}
+              multiple
               hidden
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
+                const files = Array.from(e.target.files ?? []);
+                if (files.length === 0) return;
                 void (async () => {
-                  const prepared = await prepareWorkflowMediaFile(file);
-                  const dataUrl = await fileToDataUrl(prepared);
-                  onChange(JSON.stringify([...media, dataUrl]));
+                  const nextMedia: string[] = [];
+                  for (const file of files) {
+                    const prepared = await prepareWorkflowMediaFile(file);
+                    const dataUrl = await fileToDataUrl(prepared);
+                    nextMedia.push(dataUrl);
+                  }
+                  onChange(JSON.stringify([...media, ...nextMedia]));
                 })();
                 e.target.value = "";
               }}

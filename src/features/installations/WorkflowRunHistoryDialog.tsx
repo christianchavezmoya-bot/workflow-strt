@@ -55,6 +55,7 @@ import {
 } from "@mui/material";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import { featureService } from "../../services/featureService";
 import { mediaStore } from "../../services/mediaStore";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
@@ -63,6 +64,7 @@ import type { AssetWorkflowRun, RunIssue, RunTimeEntry, StepResult } from "../..
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowStep, StepInput } from "../../types/workflow";
+import type { Feature as LibFeature } from "../../types/feature";
 import type { ProjectAsset } from "../../types/projectAsset";
 
 interface Props {
@@ -404,7 +406,7 @@ export default function WorkflowRunHistoryDialog({
   async function handleDownloadReport(run: AssetWorkflowRun, includeAllSteps = false) {
     setReportGenerating(run.id);
     try {
-      const [brandSettings, resolvedCustLogo, signatureEvents] = await Promise.all([
+      const [brandSettings, resolvedCustLogo, signatureEvents, productFeatures] = await Promise.all([
         brandSettingsService.get(),
         customerLogoBase64 ? resolveImageToDataUrl(customerLogoBase64) : Promise.resolve(null),
         // Signature events are a network-only read (no local store), so offline this
@@ -420,6 +422,9 @@ export default function WorkflowRunHistoryDialog({
         run.isLocked
           ? signatureService.listEvents(run.id).catch(() => [] as SignatureEvent[])
           : Promise.resolve([] as SignatureEvent[]),
+        asset.productId
+          ? featureService.getByProduct(asset.productId).catch(() => [] as LibFeature[])
+          : Promise.resolve([] as LibFeature[]),
       ]);
       const bizLogoResolved = brandSettings.logoBase64
         ? await resolveImageToDataUrl(brandSettings.logoBase64)
@@ -440,6 +445,7 @@ export default function WorkflowRunHistoryDialog({
         assignedTechnician,
         includeAllSteps,
         signatureEvents,
+        productFeatures,
       });
     } catch (err) {
       console.error("[WorkflowRunHistoryDialog] Report generation failed", err);
