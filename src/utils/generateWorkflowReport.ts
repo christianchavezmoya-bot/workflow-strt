@@ -207,6 +207,8 @@ export interface GenerateReportParams {
   documentType?: string;
   /** "download" saves the PDF; "open" opens it in a browser viewer/tab. */
   outputMode?: "download" | "open";
+  /** If preview opening fails, optionally fall back to downloading the PDF. */
+  allowDownloadFallback?: boolean;
 }
 
 export async function generateWorkflowReport(params: GenerateReportParams): Promise<void> {
@@ -217,6 +219,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     includeAllSteps = false,
     signatureEvents = [],
     outputMode = "download",
+    allowDownloadFallback = true,
   } = params;
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -979,6 +982,9 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     const opened = openObjectUrl(blobUrl);
     if (!opened) {
       URL.revokeObjectURL(blobUrl);
+      if (!allowDownloadFallback) {
+        throw new Error("Report preview popup was blocked.");
+      }
       doc.save(fileName);
     }
     return;

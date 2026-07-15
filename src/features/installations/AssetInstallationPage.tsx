@@ -98,12 +98,16 @@ import { workflowTemplateService } from "../../services/workflowTemplateService"
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { signatureService } from "../../services/signatureService";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, entityReplaceIssuesForAsset } from "../../services/localDB";
+import mammoth from "mammoth";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
+import { buildWorkflowReportJson, createWorkflowReportDocx, workflowReportBaseFileName, type WorkflowReportExportContext } from "../../utils/workflowReportExport";
+import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { getWorkflowDisplayState } from "../../utils/workflowDisplayState";
 import {
@@ -631,6 +635,10 @@ const AssetInstallationPage = () => {
 
   // PDF report
   const [reportGenerating, setReportGenerating] = useState<string | null>(null);
+  const [reportExportOpen, setReportExportOpen] = useState(false);
+  const [reportExportAsset, setReportExportAsset] = useState<ProjectAsset | null>(null);
+  const [reportExportFormat, setReportExportFormat] = useState<"pdf" | "json" | "docx">("pdf");
+  const [reportPreviewedKey, setReportPreviewedKey] = useState<string | null>(null);
   // Extra context passed into WorkflowRunHistoryDialog for the PDF download
   const [runHistoryProject, setRunHistoryProject] = useState<{ customerName: string; jobNumber: string; siteName?: string } | null>(null);
   const [runHistoryCustomerLogo, setRunHistoryCustomerLogo] = useState<string | null>(null);
@@ -2575,84 +2583,161 @@ const AssetInstallationPage = () => {
     }
   }
 
-  async function handleGeneratePdfReport(asset: ProjectAsset) {
+
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
+
+  function buildJsonPreviewHtml(title: string, rawJson: string): string {
+    return `<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>
+      body{font-family:Consolas,Menlo,monospace;padding:24px;background:#f6f8fb;color:#1f2937;margin:0}
+      h1{font:600 18px/1.4 Arial,sans-serif;margin:0 0 16px}
+      pre{white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid #d7deea;border-radius:8px;padding:16px}
+    </style></head><body><h1>${escapeHtml(title)}</h1><pre>${escapeHtml(rawJson)}</pre></body></html>`;
+  }
+
+  function buildDocxPreviewHtml(title: string, bodyHtml: string): string {
+    return `<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>
+      body{font-family:Arial,sans-serif;padding:24px;line-height:1.6;background:#fff;color:#111827;margin:0 auto;max-width:960px}
+      table{border-collapse:collapse;width:100%}
+      td,th{border:1px solid #d1d5db;padding:6px 8px;vertical-align:top}
+      img{max-width:100%;height:auto}
+    </style></head><body>${bodyHtml}</body></html>`;
+  }
+
+  function openReportExportDialog(asset: ProjectAsset) {
+    setReportExportAsset(asset);
+    setReportExportFormat("pdf");
+    setReportPreviewedKey(null);
+    setReportExportOpen(true);
+  }
+
+  async function buildAssetReportContext(asset: ProjectAsset): Promise<WorkflowReportExportContext> {
+    let runs = runsMap[asset.id];
+    if (!runs) {
+      try { runs = await assetWorkflowRunService.listByAsset(asset.id); } catch { runs = []; }
+    }
+
+    const sorted = [...(runs ?? [])].sort((a, b) => (b.runNumber ?? 0) - (a.runNumber ?? 0));
+    const run = sorted.find((r) => r.isLocked) ?? sorted[0] ?? null;
+
+    const effectiveRun: AssetWorkflowRun = run ?? {
+      id: "", assetId: asset.id,
+      workflowConfigId: asset.productConfigId ?? "",
+      workflowVersion: 1, workflowSnapshotJson: "{}",
+      status: "InProgress", isLocked: false,
+      stepResultsJson: "[]", issuesJson: "[]", timeTrackingJson: "[]",
+      productiveSeconds: 0, downtimeSeconds: 0, downtimeEvents: 0,
+      runNumber: 1, startedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      signatureStatus: "None",
+    };
+
+    const configId = effectiveRun.workflowConfigId || asset.productConfigId;
+    const wfCfg = configId ? wfConfigMap.get(configId) : null;
+    const configName = wfCfg?.displayName ?? wfCfg?.name ?? "Installation Record";
+    const cfgType = (wfCfg?.configType ?? "").trim().toLowerCase();
+    const docType = cfgType === "inspection" || cfgType === "wftype-inspection" ? "inspection" as const : "installation" as const;
+    const tech = users.find((u) => u.id === asset.assignedUserId);
+    const proj = projects.find((p) => p.id === asset.projectId);
+
+    let rawCustomerLogo: string | null = null;
+    if (proj?.customerId) {
+      try {
+        const allCustomers = await customerService.getCustomers();
+        rawCustomerLogo = allCustomers.find((c) => c.customerId === proj.customerId || c.id === proj.customerId)?.logo ?? null;
+      } catch { /* ignore */ }
+    }
+
+    const [brandSettings, signatureEvents] = await Promise.all([
+      brandSettingsService.get(),
+      effectiveRun.isLocked && effectiveRun.id
+        ? signatureService.listEvents(effectiveRun.id).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+    const [bizLogoResolved, custLogoResolved] = await Promise.all([
+      brandSettings.logoBase64 ? resolveImageToDataUrl(brandSettings.logoBase64) : Promise.resolve(null),
+      rawCustomerLogo ? resolveImageToDataUrl(rawCustomerLogo) : Promise.resolve(null),
+    ]);
+
+    const reportRun = isMobileNativePlatform()
+      ? await mediaStore.resolveUploadPayload(effectiveRun)
+      : effectiveRun;
+
+    return {
+      run: reportRun,
+      asset,
+      workflowConfigName: configName,
+      businessLogoBase64: bizLogoResolved,
+      customerLogoBase64: custLogoResolved,
+      customerName: proj?.customerName,
+      jobNumber: proj?.jobNumber,
+      siteName: proj?.siteName,
+      siteLocation: asset.location ?? undefined,
+      assignedTechnician: tech?.fullName,
+      documentType: docType,
+      signatureEvents,
+    };
+  }
+
+  async function handleAssetReportAction(action: "view" | "download") {
+    const asset = reportExportAsset;
+    if (!asset) return;
+    const previewKey = `${asset.id}:${reportExportFormat}`;
+    if (action === "download" && reportPreviewedKey !== previewKey) {
+      alert("Preview the report before downloading it.");
+      return;
+    }
     setReportGenerating(asset.id);
     try {
-      // Runs â€" use cached value or fetch
-      let runs = runsMap[asset.id];
-      if (!runs) {
-        try { runs = await assetWorkflowRunService.listByAsset(asset.id); } catch { runs = []; }
+      const reportContext = await buildAssetReportContext(asset);
+      const fileBase = workflowReportBaseFileName(reportContext.asset, reportContext.run);
+
+      if (reportExportFormat === "pdf") {
+        await generateWorkflowReport({
+          ...reportContext,
+          outputMode: action === "view" ? "open" : "download",
+          allowDownloadFallback: action !== "view",
+        });
+        if (action === "view") setReportPreviewedKey(previewKey);
+        return;
       }
 
-      // Prefer the latest locked (Complete) run; fall back to newest run
-      const sorted = [...(runs ?? [])].sort((a, b) => (b.runNumber ?? 0) - (a.runNumber ?? 0));
-      const run = sorted.find((r) => r.isLocked) ?? sorted[0] ?? null;
-
-      // Stub run if the asset has never been run
-      const effectiveRun: AssetWorkflowRun = run ?? {
-        id: "", assetId: asset.id,
-        workflowConfigId: asset.productConfigId ?? "",
-        workflowVersion: 1, workflowSnapshotJson: "{}",
-        status: "InProgress", isLocked: false,
-        stepResultsJson: "[]", issuesJson: "[]", timeTrackingJson: "[]",
-        productiveSeconds: 0, downtimeSeconds: 0, downtimeEvents: 0,
-        runNumber: 1, startedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      };
-
-      // Workflow config name
-      const configId = effectiveRun.workflowConfigId || asset.productConfigId;
-      const wfCfg = configId ? wfConfigMap.get(configId) : null;
-      const configName = wfCfg?.displayName ?? wfCfg?.name ?? "Installation Record";
-      const cfgType = (wfCfg?.configType ?? "").trim().toLowerCase();
-      const docType = cfgType === "inspection" || cfgType === "wftype-inspection" ? "inspection" as const : "installation" as const;
-
-      // Assigned technician
-      const tech = users.find((u) => u.id === asset.assignedUserId);
-
-      // Project + customer logo
-      const proj = projects.find((p) => p.id === asset.projectId);
-      let rawCustomerLogo: string | null = null;
-      if (proj?.customerId) {
-        try {
-          const allCustomers = await customerService.getCustomers();
-          rawCustomerLogo = allCustomers.find((c) => c.customerId === proj.customerId || c.id === proj.customerId)?.logo ?? null;
-        } catch { /* ignore */ }
+      if (reportExportFormat === "json") {
+        const rawJson = JSON.stringify(buildWorkflowReportJson(reportContext), null, 2);
+        const blob = new Blob([rawJson], { type: "application/json" });
+        if (action === "view") {
+          const opened = openPrintWindow(buildJsonPreviewHtml(`${fileBase}.json`, rawJson));
+          if (!opened) throw new Error("Report preview popup was blocked.");
+          setReportPreviewedKey(previewKey);
+        } else {
+          downloadBlob(blob, `${fileBase}.json`);
+        }
+        return;
       }
 
-      // Business logo + customer logo â€" resolve data URL regardless of source format
-      const brandSettings = await brandSettingsService.get();
-      const [bizLogoResolved, custLogoResolved] = await Promise.all([
-        brandSettings.logoBase64 ? resolveImageToDataUrl(brandSettings.logoBase64) : Promise.resolve(null),
-        rawCustomerLogo ? resolveImageToDataUrl(rawCustomerLogo) : Promise.resolve(null),
-      ]);
-
-      // Resolve any offline media refs (photos/signatures stored on the device
-      // filesystem) into data URLs so the PDF renders them while offline.
-      const reportRun = isMobileNativePlatform()
-        ? await mediaStore.resolveUploadPayload(effectiveRun)
-        : effectiveRun;
-
-      await generateWorkflowReport({
-        run: reportRun,
-        asset,
-        workflowConfigName: configName,
-        businessLogoBase64: bizLogoResolved,
-        customerLogoBase64: custLogoResolved,
-        customerName: proj?.customerName,
-        jobNumber: proj?.jobNumber,
-        siteName: proj?.siteName,
-        siteLocation: asset.location ?? undefined,
-        assignedTechnician: tech?.fullName,
-        documentType: docType,
-      });
+      const docxBlob = await createWorkflowReportDocx(reportContext);
+      if (action === "view") {
+        const preview = await mammoth.convertToHtml({ arrayBuffer: await docxBlob.arrayBuffer() });
+        const opened = openPrintWindow(buildDocxPreviewHtml(`${fileBase}.docx`, preview.value));
+        if (!opened) throw new Error("Report preview popup was blocked.");
+        setReportPreviewedKey(previewKey);
+      } else {
+        downloadBlob(docxBlob, `${fileBase}.docx`);
+      }
     } catch (err) {
-      console.error("[AssetInstallationPage] Report generation failed", err);
-      alert("Failed to generate PDF report.");
+      console.error("[AssetInstallationPage] Report export failed", err);
+      alert(action === "view" ? "Failed to preview report." : "Failed to export report.");
     } finally {
       setReportGenerating(null);
     }
   }
+
 
   async function handleRerun(
     prefillValues: Record<string, Record<string, string>>,
@@ -4873,12 +4958,12 @@ const AssetInstallationPage = () => {
                             </Tooltip>
                           )}
                           {canViewInstallationAssets && (
-                            <Tooltip title="Generate PDF report">
+                            <Tooltip title="Generate/Export report">
                               <span>
                                 <IconButton
                                   size="small"
                                   disabled={reportGenerating === asset.id}
-                                  onClick={() => handleGeneratePdfReport(asset)}
+                                  onClick={() => openReportExportDialog(asset)}
                                 >
                                   {reportGenerating === asset.id
                                     ? <CircularProgress size={16} />
@@ -5009,8 +5094,8 @@ const AssetInstallationPage = () => {
                 <Button size="small" fullWidth variant="outlined"
                   startIcon={reportGenerating === a.id ? <CircularProgress size={14} /> : <ArticleOutlined fontSize="small" />}
                   disabled={reportGenerating === a.id}
-                  onClick={() => { handleGeneratePdfReport(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
-                  PDF Report
+                  onClick={() => { openReportExportDialog(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
+                  Generate/Export Report
                 </Button>
               )}
               {canEditInstallationAssets && canEditAssetFromWebTable(a) && !archiveMode && (
@@ -5766,6 +5851,63 @@ const AssetInstallationPage = () => {
             startIcon={csvImporting ? <CircularProgress size={14} /> : <FileUploadOutlined />}
           >
             {csvImporting ? "Importing..." : `Import ${csvRows.filter((r) => r.asset_tag || r.assettag).length} asset${csvRows.filter((r) => r.asset_tag || r.assettag).length !== 1 ? "s" : ""}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={reportExportOpen}
+        onClose={() => { setReportExportOpen(false); setReportPreviewedKey(null); }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Generate/Export Report</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Alert severity="info" sx={{ py: 0.5 }}>
+              View the report first, then use Download to export the selected format.
+            </Alert>
+            <TextField
+              label="Asset"
+              size="small"
+              fullWidth
+              value={reportExportAsset ? `${reportExportAsset.assetTag}${reportExportAsset.assetName ? ` - ${reportExportAsset.assetName}` : ""}` : ""}
+              InputProps={{ readOnly: true }}
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel id="asset-report-format-label">Format</InputLabel>
+              <Select
+                labelId="asset-report-format-label"
+                label="Format"
+                value={reportExportFormat}
+                onChange={(e) => {
+                  setReportExportFormat(e.target.value as "pdf" | "json" | "docx");
+                  setReportPreviewedKey(null);
+                }}
+              >
+                <MenuItem value="pdf">PDF</MenuItem>
+                <MenuItem value="json">JSON</MenuItem>
+                <MenuItem value="docx">Word (.docx)</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setReportExportOpen(false); setReportPreviewedKey(null); }}>Close</Button>
+          <Button
+            variant="outlined"
+            disabled={!reportExportAsset || reportGenerating === reportExportAsset?.id}
+            onClick={() => void handleAssetReportAction("view")}
+          >
+            {reportGenerating === reportExportAsset?.id ? "Generating..." : "View"}
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={reportGenerating === reportExportAsset?.id ? <CircularProgress size={14} /> : <FileDownloadOutlined fontSize="small" />}
+            disabled={!reportExportAsset || reportGenerating === reportExportAsset?.id || reportPreviewedKey !== (reportExportAsset ? `${reportExportAsset.id}:${reportExportFormat}` : null)}
+            onClick={() => void handleAssetReportAction("download")}
+          >
+            {reportGenerating === reportExportAsset?.id ? "Generating..." : "Download"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -6599,3 +6741,4 @@ const AssetInstallationPage = () => {
 };
 
 export default AssetInstallationPage;
+
