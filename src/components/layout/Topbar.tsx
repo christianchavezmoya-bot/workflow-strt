@@ -22,10 +22,7 @@ import { searchIndexService, type SearchIndexStatus } from "../../services/searc
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { secureClearAuth } from "../../services/secureStorage";
 import strataLogo from "../../assets/strata_transparent.png";
-import SyncStatusBadge from "../ui/SyncStatusBadge";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
-import ConnectivityDebugBar from "./ConnectivityDebugBar";
-import SyncTelemetryPanel from "./SyncTelemetryPanel";
 
 function getRolesFromCache(): string[] {
   try {
@@ -103,8 +100,6 @@ const Topbar = () => {
   const isDesktopLike = isDesktopLikePlatform();
 
   const [appName, setAppName] = useState("Field Operations");
-  const [qbEnabled, setQbEnabled] = useState(false);
-  const [qbHost, setQbHost] = useState("");
 
   useEffect(() => {
     brandSettingsService.get().then((s) => {
@@ -117,18 +112,7 @@ const Topbar = () => {
     window.addEventListener("brand-name-changed", handler);
     return () => window.removeEventListener("brand-name-changed", handler);
   }, []);
-
   const isAdminUser = useMemo(() => /admin/i.test(user?.role ?? ""), [user?.role]);
-
-  useEffect(() => {
-    if (!isAdminUser) return;
-    import("../../services/settingsService").then(({ settingsService }) => {
-      settingsService.getQuickbaseSettings().then((s) => {
-        setQbEnabled(!!s?.enabled);
-        setQbHost(s?.realmHostname ?? "");
-      }).catch(() => {});
-    });
-  }, [isAdminUser]);
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [notificationsAnchor, setNotificationsAnchor] = useState<null | HTMLElement>(null);
@@ -380,7 +364,7 @@ const Topbar = () => {
 
   return (
     <Box className="topbar">
-      <Stack direction="row" spacing={2} alignItems="center">
+      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
         {isNativeMobile ? (
           <Box
             component="img"
@@ -409,11 +393,22 @@ const Topbar = () => {
                 "&:hover": { background: "rgba(45, 212, 191, 0.28)" }
               }}
             />
-            <Stack spacing={0.5}>
-              <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
+            <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+              <Typography
+                variant="h5"
+                className="topbar-app-title"
+                sx={{
+                  fontFamily: "Sora",
+                  fontSize: { xs: "1.2rem", md: "1.45rem" },
+                  lineHeight: 1.05,
+                  maxWidth: { xs: "8ch", md: "10ch" },
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                }}
+              >
                 {appName}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="text.secondary" noWrap sx={{ maxWidth: { xs: "36vw", md: "48vw" } }}>
                 {autoLabel}
               </Typography>
             </Stack>
@@ -421,19 +416,6 @@ const Topbar = () => {
         )}
       </Stack>
       <Stack direction="row" spacing={isNativeMobile ? 0.5 : 2} alignItems="center">
-        {isNativeMobile && <SyncStatusBadge />}
-        {isDesktopLike && qbEnabled && (() => {
-          const provider = qbHost.includes("quickbase") ? "Quickbase"
-            : qbHost.includes("salesforce") ? "Salesforce"
-            : qbHost ? ((() => { try { return new URL(`https://${qbHost}`).hostname.split(".").slice(-2, -1)[0] ?? "API"; } catch { return "API"; } })())
-            : "API";
-          return (
-            <Box className="status-chip">
-              <span className="status-dot" />
-              {provider} connected
-            </Box>
-          );
-        })()}
         {isDesktopLike && isAdminUser && (
           <>
             <Chip
@@ -763,9 +745,6 @@ const Topbar = () => {
           )}
         </Menu>
       </Stack>
-      {isNativeMobile && <ConnectivityDebugBar />}
-      {/* Sync telemetry: per-domain download/upload progress (always on; debug aid) */}
-      <SyncTelemetryPanel />
       {/* Test mode banner */}
       {isTestMode && (
         <Box sx={{

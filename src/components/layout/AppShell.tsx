@@ -74,12 +74,14 @@ const AppShell = () => {
             </Box>
           )}
           <Topbar />
-          <FieldNotificationBar />
-          <PullToRefresh>
-            <Box component="main" className="app-content">
+          <Box className="app-shell-scroll">
+            <FieldNotificationBar />
+            <PullToRefresh>
+              <Box component="main" className="app-content">
               <Outlet />
-            </Box>
-          </PullToRefresh>
+              </Box>
+            </PullToRefresh>
+          </Box>
         </Box>
         {/* Bottom tab bar: mobile only (shown via CSS) */}
         <BottomTabBar />

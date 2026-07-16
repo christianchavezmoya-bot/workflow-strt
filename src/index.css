@@ -39,9 +39,10 @@ body {
   flex-direction: column;
   flex: 1;
   min-height: 100vh;
+  height: 100vh;
   margin-left: 264px;
   transition: margin-left 0.3s ease;
-  overflow-x: hidden;
+  overflow: hidden;
   max-width: calc(100vw - 264px);
 }
 
@@ -50,11 +51,18 @@ body {
   max-width: 100vw;
 }
 
+.app-shell-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
 .app-content {
-  padding: 28px 32px 40px;
+  padding: 20px 28px 32px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
   overflow-x: hidden;
   max-width: 100%;
 }
@@ -134,28 +142,10 @@ body {
 
   /* Push page content below the fixed mobile topbar (main row ~80px + debug bar ~30px). */
   .app-main {
-    padding-top: 114px !important;
+    padding-top: 96px !important;
   }
 }
 
-.topbar .status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(45, 212, 191, 0.18);
-  color: #9df0e5;
-  font-size: 12px;
-  border: 1px solid rgba(45, 212, 191, 0.3);
-}
-
-.topbar .status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #2dd4bf;
-}
 
 .app-main.minimal-view .pagination-bar {
   left: 0 !important;
@@ -169,6 +159,7 @@ body {
   .app-main {
     margin-left: 210px;
     max-width: calc(100vw - 210px);
+    height: 100vh;
   }
   .app-main.minimal-view {
     margin-left: 0;
@@ -200,13 +191,18 @@ body {
     max-width: 100vw !important;
   }
 
+  .app-shell-scroll {
+    overflow-y: auto;
+  }
+
   .app-content {
-    padding: 16px 16px calc(64px + env(safe-area-inset-bottom));
+    padding: 14px 16px calc(64px + env(safe-area-inset-bottom));
     gap: 14px;
   }
 
   .topbar {
-    padding: 14px 16px;
+    padding: 10px 14px;
+    min-height: 68px;
   }
 
   .pagination-bar {
