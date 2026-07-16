@@ -142,7 +142,7 @@ import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { deriveOpenIssuesFromAsset } from "../../utils/issueDerivation";
 import type { Feature as LibFeature } from "../../types/feature";
 import type { FeatureDependency } from "../../types/featureDependency";
-import CaptureSpreadsheetDialog from "./CaptureSpreadsheetDialog";
+import CaptureSpreadsheetDialog, { type CaptureSpreadsheetAssetJobColumn } from "./CaptureSpreadsheetDialog";
 import {
   buildCaptureColumns,
   buildCaptureRow,
@@ -1854,6 +1854,80 @@ const AssetInstallationPage = () => {
     return projectMap.get(projectIds[0]) ?? null;
   }, [displayAssets, projectMap, selectedProject]);
 
+  const assetCaptureJobColumns = useMemo<CaptureSpreadsheetAssetJobColumn[]>(() => [
+    {
+      id: "assetName",
+      label: "Asset Name",
+      valueFor: (asset: ProjectAsset) => asset.assetName || "-",
+    },
+    {
+      id: "serialNumber",
+      label: "Serial #",
+      valueFor: (asset: ProjectAsset) => asset.serialNumber || "-",
+    },
+    {
+      id: "location",
+      label: "Location",
+      valueFor: (asset: ProjectAsset) => asset.location || projectMap.get(asset.projectId)?.siteName || "-",
+    },
+    {
+      id: "customer",
+      label: "Customer",
+      valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.customerName || "-",
+    },
+    {
+      id: "projectNumber",
+      label: "Job #",
+      valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.jobNumber || asset.projectId.slice(0, 8),
+    },
+    {
+      id: "siteName",
+      label: "Site",
+      valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.siteName || "-",
+    },
+    {
+      id: "technician",
+      label: "Technician",
+      valueFor: (asset: ProjectAsset) => userMap.get(asset.assignedUserId || "")?.fullName || asset.installedBy || "-",
+    },
+    {
+      id: "workflow",
+      label: "Workflow",
+      valueFor: (asset: ProjectAsset) => {
+        const assignments = assignmentsMap[asset.id] ?? [];
+        if (assignments.length > 0) return assignments.map((item) => item.workflowConfigName || item.workflowTypeName || "Workflow").join(", ");
+        return asset.workflowSummary?.hasWorkflow ? "Configured" : "No workflow";
+      },
+    },
+    {
+      id: "signature",
+      label: "Signature",
+      valueFor: (asset: ProjectAsset) => {
+        const latestRun = (runsMap[asset.id] ?? [])[0];
+        const state = latestRun?.signatureStatus ?? "";
+        if (state === "Signed") return "Signed";
+        if (state === "PendingCustomer") return "Pending Customer";
+        if (state === "PendingInstaller") return "Pending Installer";
+        return "-";
+      },
+    },
+    {
+      id: "completed",
+      label: "Completed",
+      valueFor: (asset: ProjectAsset) => (runsMap[asset.id] ?? [])[0]?.completedAt?.slice(0, 10) || "-",
+    },
+  ], [assignmentsMap, projectMap, runsMap, userMap]);
+
+  const captureComponentExportGroups = useMemo(
+    () => captureExportGroups.filter((group) => group.groupType !== "general"),
+    [captureExportGroups],
+  );
+
+  const captureSignOffExportGroups = useMemo(
+    () => captureExportGroups.filter((group) => group.groupType === "general"),
+    [captureExportGroups],
+  );
+
   const assetExportColumnOptions = useMemo<AssetExportColumnOption[]>(() => {
     if (assetExportMode === "capture") {
       return [
@@ -1861,98 +1935,17 @@ const AssetInstallationPage = () => {
           id: "assetTag",
           label: "Asset Tag",
           headerLabel: "Asset Tag",
-          groupLabel: "ASSET & JOB",
+          groupLabel: "ASSET TAG",
           valueFor: (asset: ProjectAsset) => asset.assetTag || "-",
         },
-        {
-          id: "assetName",
-          label: "Asset Name",
-          headerLabel: "Asset Name",
+        ...assetCaptureJobColumns.map((column) => ({
+          id: column.id,
+          label: column.label,
+          headerLabel: column.label,
           groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => asset.assetName || "-",
-        },
-        {
-          id: "assetRecord",
-          label: "Asset Record",
-          headerLabel: "Asset Record",
-          groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => asset.assetTag || "-",
-        },
-        {
-          id: "location",
-          label: "Location",
-          headerLabel: "Location",
-          groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => asset.location || projectMap.get(asset.projectId)?.siteName || "-",
-        },
-        {
-          id: "status",
-          label: "Status",
-          headerLabel: "Status",
-          groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => getOperationsStatusLabel(asset, projectMap.get(asset.projectId)?.workflowMode),
-        },
-        {
-          id: "customer",
-          label: "Customer",
-          headerLabel: "Customer",
-          groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.customerName || "-",
-        },
-        {
-          id: "projectNumber",
-          label: "Project Number",
-          headerLabel: "Project Number",
-          groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.jobNumber || asset.projectId.slice(0, 8),
-        },
-        {
-          id: "siteName",
-          label: "Site Name",
-          headerLabel: "Site Name",
-          groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.siteName || "-",
-        },
-        {
-          id: "technician",
-          label: "Technician",
-          headerLabel: "Technician",
-          groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => userMap.get(asset.assignedUserId || "")?.fullName || asset.installedBy || "-",
-        },
-        {
-          id: "workflow",
-          label: "Workflow",
-          headerLabel: "Workflow",
-          groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => {
-            const assignments = assignmentsMap[asset.id] ?? [];
-            if (assignments.length > 0) return assignments.map((item) => item.workflowConfigName || item.workflowTypeName || "Workflow").join(", ");
-            return asset.workflowSummary?.hasWorkflow ? "Configured" : "No workflow";
-          },
-        },
-        {
-          id: "signature",
-          label: "Signature",
-          headerLabel: "Signature",
-          groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => {
-            const latestRun = (runsMap[asset.id] ?? [])[0];
-            const state = latestRun?.signatureStatus ?? "";
-            if (state === "Signed") return "Signed";
-            if (state === "PendingCustomer") return "Pending Customer";
-            if (state === "PendingInstaller") return "Pending Installer";
-            return "-";
-          },
-        },
-        {
-          id: "completed",
-          label: "Completed",
-          headerLabel: "Completed",
-          groupLabel: "ASSET & JOB",
-          valueFor: (asset: ProjectAsset) => (runsMap[asset.id] ?? [])[0]?.completedAt?.slice(0, 10) || "-",
-        },
-        ...captureExportGroups.flatMap((group) =>
+          valueFor: column.valueFor,
+        })),
+        ...captureComponentExportGroups.flatMap((group) =>
           group.columns.map((column) => ({
             id: `capture:${column.id}`,
             label: `${group.displayName} - ${column.displayLabel}`,
@@ -1965,6 +1958,33 @@ const AssetInstallationPage = () => {
             },
           })),
         ),
+        ...captureSignOffExportGroups.flatMap((group) =>
+          group.columns.map((column) => ({
+            id: `capture:${column.id}`,
+            label: `${group.displayName} - ${column.displayLabel}`,
+            headerLabel: column.displayLabel,
+            groupLabel: group.displayName.toUpperCase(),
+            noteLabel: group.businessPartNumber ? `Business Part Number -> ${group.businessPartNumber}` : "Shared fields",
+            valueFor: (asset: ProjectAsset) => {
+              const raw = captureExportRowMap.get(asset.id)?.cells[column.id] ?? "";
+              return raw.trim().length > 0 ? raw : "-";
+            },
+          })),
+        ),
+        {
+          id: "status",
+          label: "Status",
+          headerLabel: "Status",
+          groupLabel: "WORKFLOW",
+          valueFor: (asset: ProjectAsset) => getOperationsStatusLabel(asset, projectMap.get(asset.projectId)?.workflowMode),
+        },
+        {
+          id: "action",
+          label: "Action",
+          headerLabel: "Action",
+          groupLabel: "WORKFLOW",
+          valueFor: (asset: ProjectAsset) => getAssetActionLabel(asset, projectMap.get(asset.projectId)?.workflowMode),
+        },
       ];
     }
 
@@ -2011,7 +2031,7 @@ const AssetInstallationPage = () => {
         valueFor: (asset: ProjectAsset) => getAssetActionLabel(asset, projectMap.get(asset.projectId)?.workflowMode),
       },
     ];
-  }, [assetExportMode, assignmentsMap, captureExportGroups, captureExportRowMap, configMap, projectMap, runsMap, userMap, visibleColumns]);
+  }, [assetCaptureJobColumns, assetExportMode, captureComponentExportGroups, captureExportRowMap, captureSignOffExportGroups, configMap, projectMap, runsMap, visibleColumns]);
 
   function openAssetExportDialog() {
     setAssetExportFormat("pdf");
@@ -4039,6 +4059,41 @@ ${words.slice(midpoint).join(" ")}`;
   // Feature values display (expandable row)
   // ------------------------------------------------------------------
 
+  function captureTableStatusChip(asset: ProjectAsset, projectWorkflowMode?: string | null) {
+    const status = asset.status as ProjectAssetStatus;
+    const baseColor = STATUS_COLORS[status] ?? "default";
+    const runs = runsMap[asset.id] ?? [];
+    const issueHealth = computeAssetHealth(asset, runs);
+    const rowDisplayState = getWorkflowDisplayState(asset, runs, {
+      paused: Boolean(pausedProgress[asset.id]),
+      inspectionMode: projectHasInspection(projectWorkflowMode),
+      hasRunnableWorkflowSource:
+        (assignmentsMap[asset.id]?.length ?? 0) > 0
+        || !!asset.productConfigId
+        || !!asset.workflowTemplateId
+        || !!asset.workflowSummary?.hasWorkflow,
+    });
+    const chipColor =
+      issueHealth === "red" ? "error"
+      : issueHealth === "amber" ? "warning"
+      : issueHealth === "green" ? "success"
+      : baseColor;
+
+    return (
+      <Chip
+        size="small"
+        label={rowDisplayState.status.label}
+        color={chipColor}
+        icon={
+          asset.status === "InProgress" ? <HourglassEmptyOutlined sx={{ fontSize: "0.9rem !important" }} />
+          : (asset.status === "Complete" || asset.status === "Closed") ? <CheckCircleOutlined sx={{ fontSize: "0.9rem !important" }} />
+          : asset.status === "Issue" ? <ErrorOutlined sx={{ fontSize: "0.9rem !important" }} />
+          : undefined
+        }
+      />
+    );
+  }
+
   function featureCompletenessChip(asset: ProjectAsset) {
     let fv: Record<string, string> = {};
     try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
@@ -4328,39 +4383,8 @@ ${words.slice(midpoint).join(" ")}`;
         return <Typography variant="body2" color="text.secondary">{tech ? tech.fullName : "-"}</Typography>;
       case "features":
         return featureCompletenessChip(asset);
-      case "status": {
-        const status = asset.status as ProjectAssetStatus;
-        const baseColor = STATUS_COLORS[status] ?? "default";
-        const runs = runsMap[asset.id] ?? [];
-        const issueHealth = computeAssetHealth(asset, runs);
-        const rowDisplayState = getWorkflowDisplayState(asset, runs, {
-          paused: Boolean(pausedProgress[asset.id]),
-          inspectionMode: projectHasInspection(proj?.workflowMode),
-          hasRunnableWorkflowSource:
-            (assignmentsMap[asset.id]?.length ?? 0) > 0
-            || !!asset.productConfigId
-            || !!asset.workflowTemplateId
-            || !!asset.workflowSummary?.hasWorkflow,
-        });
-        const chipColor =
-          issueHealth === "red"   ? "error"   :
-          issueHealth === "amber" ? "warning" :
-          issueHealth === "green" ? "success" :
-          baseColor;
-        return (
-          <Chip
-            size="small"
-            label={rowDisplayState.status.label}
-            color={chipColor}
-            icon={
-              asset.status === "InProgress" ? <HourglassEmptyOutlined sx={{ fontSize: "0.9rem !important" }} /> :
-              (asset.status === "Complete" || asset.status === "Closed") ? <CheckCircleOutlined sx={{ fontSize: "0.9rem !important" }} /> :
-              asset.status === "Issue" ? <ErrorOutlined sx={{ fontSize: "0.9rem !important" }} /> :
-              undefined
-            }
-          />
-        );
-      }
+      case "status":
+        return captureTableStatusChip(asset, proj?.workflowMode);
       default:
         return null;
     }
@@ -5550,7 +5574,27 @@ ${words.slice(midpoint).join(" ")}`;
               return { ...prev, [run.assetId]: next };
             });
           }}
-          renderStatus={(asset) => featureCompletenessChip(asset)}
+          assetJobColumns={assetCaptureJobColumns}
+          selectedAssetIds={selectedAssetIds}
+          onToggleAssetSelection={(assetId, checked) => {
+            setSelectedAssetIds((prev) => {
+              const next = new Set(prev);
+              if (checked) next.add(assetId);
+              else next.delete(assetId);
+              return next;
+            });
+          }}
+          onToggleVisibleAssetSelection={(assetIds, checked) => {
+            setSelectedAssetIds((prev) => {
+              const next = new Set(prev);
+              for (const assetId of assetIds) {
+                if (checked) next.add(assetId);
+                else next.delete(assetId);
+              }
+              return next;
+            });
+          }}
+          renderStatus={(asset) => captureTableStatusChip(asset, projectMap.get(asset.projectId)?.workflowMode)}
           renderActions={(asset) => {
             const proj = projectMap.get(asset.projectId);
             return (canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed")
@@ -7457,6 +7501,7 @@ ${words.slice(midpoint).join(" ")}`;
           open={capturePopupOpen}
           onClose={() => setCapturePopupOpen(false)}
           fullScreen
+          mobilePortraitMode
           assets={mobileAssets}
           runsMap={runsMap}
           features={libFeatures}
@@ -7474,7 +7519,8 @@ ${words.slice(midpoint).join(" ")}`;
               return { ...prev, [run.assetId]: next };
             });
           }}
-          renderStatus={(asset) => featureCompletenessChip(asset)}
+          assetJobColumns={assetCaptureJobColumns}
+          renderStatus={(asset) => captureTableStatusChip(asset, projectMap.get(asset.projectId)?.workflowMode)}
         />
       )}
 

@@ -42,11 +42,18 @@ import {
 } from "../../utils/projectCaptureTable";
 import { STATUS_LABELS, STATUS_COLORS } from "./assetStatusDisplay";
 
+export type CaptureSpreadsheetAssetJobColumn = {
+  id: string;
+  label: string;
+  valueFor: (asset: ProjectAsset) => string;
+};
+
 export type CaptureSpreadsheetDialogProps = {
   open: boolean;
   onClose: () => void;
   fullScreen?: boolean;
   embedded?: boolean;
+  mobilePortraitMode?: boolean;
   assets: ProjectAsset[];
   runsMap: Record<string, AssetWorkflowRun[]>;
   features: Feature[];
@@ -59,22 +66,36 @@ export type CaptureSpreadsheetDialogProps = {
   onRunUpdated?: (run: AssetWorkflowRun) => void;
   renderStatus?: (asset: ProjectAsset) => React.ReactNode;
   renderActions?: (asset: ProjectAsset) => React.ReactNode;
+  assetJobColumns?: CaptureSpreadsheetAssetJobColumn[];
+  selectedAssetIds?: Set<string>;
+  onToggleAssetSelection?: (assetId: string, checked: boolean) => void;
+  onToggleVisibleAssetSelection?: (assetIds: string[], checked: boolean) => void;
 };
 
 const LS_HIDDEN_KEY = "capture_spreadsheet_hidden_groups_v1";
 const STICKY_TOP_NAME = 0;
 const STICKY_TOP_PN = 36;
 const STICKY_TOP_FIELDS = 72;
-const LEFT_TAG = 0;
-const LEFT_NAME = 132;
-const TAG_W = 132;
-const NAME_W = 172;
+const CHECKBOX_W = 40;
+const TAG_W = 98;
+const ASSET_JOB_COL_W = 118;
+const CAPTURE_COL_W = 104;
 const STATUS_W = 112;
 const ACTIONS_W = 132;
 const STATIC_HEADER_BG = "#1F4E78";
 const STATIC_HEADER_TEXT = "#F4FBFF";
 const STATIC_HEADER_BORDER = "#4F6F8B";
-const STATIC_CELL_BG = "#F7FAFC";
+const ASSET_JOB_PALETTE = {
+  header: "#224F88",
+  subHeader: "#E6EEF8",
+  border: "#224F88",
+  tint: "#F7FAFD",
+  tintAlt: "#EFF5FB",
+  text: "#163447",
+};
+
+const ROW_HOVER_BG = "rgba(255,255,255,0.985)";
+const CELL_HOVER_BORDER = "rgba(34,79,136,0.32)";
 
 function loadHiddenGroups(): Set<string> {
   try {
@@ -123,40 +144,19 @@ function groupPalette(group: ProjectCaptureGroup) {
   return featurePalettes[Math.abs(group.tintIndex) % featurePalettes.length];
 }
 
-function statusTone(status: ProjectAsset["status"]) {
-  switch (status) {
-    case "Complete":
-      return { bg: "#E7F6EE", border: "#2E7D32", text: "#1B5E20" };
-    case "Closed":
-      return { bg: "#EAF4FB", border: "#1565C0", text: "#0D47A1" };
-    case "InProgress":
-      return { bg: "#E8F1FB", border: "#1976D2", text: "#0D47A1" };
-    case "Paused":
-    case "Pending":
-      return { bg: "#FFF4E5", border: "#ED6C02", text: "#9A4D00" };
-    case "Issue":
-      return { bg: "#FDECEC", border: "#D32F2F", text: "#8E1B1B" };
-    default:
-      return { bg: "#F3F6F9", border: "#78909C", text: "#455A64" };
-  }
-}
 
-function captureValueTone(value: string) {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return null;
-  if (["yes", "confirmed", "complete", "completed", "signed", "done", "pass", "passed", "ok"].includes(normalized)) {
-    return { bg: "#EAF7EE", text: "#1B5E20", border: "#A5D6A7" };
-  }
-  if (["no", "failed", "fail", "missing", "issue", "rejected"].includes(normalized)) {
-    return { bg: "#FDECEC", text: "#8E1B1B", border: "#F2B8B5" };
-  }
-  if (["pending", "paused", "hold", "awaiting"].some((token) => normalized.includes(token))) {
-    return { bg: "#FFF4E5", text: "#9A4D00", border: "#F7C98B" };
-  }
-  if (["ethernet", "wifi", "workbridge", "running"].some((token) => normalized.includes(token))) {
-    return { bg: "#E8F1FB", text: "#0D47A1", border: "#B7D1F1" };
-  }
-  return null;
+
+function bodyCellHoverSx(rowBg: string) {
+  return {
+    bgcolor: rowBg,
+    transition: "background-color 120ms ease, box-shadow 120ms ease",
+    "&:hover": {
+      bgcolor: `${ROW_HOVER_BG} !important`,
+      boxShadow: `inset 0 0 0 2px ${CELL_HOVER_BORDER}`,
+      position: "relative",
+      zIndex: 1,
+    },
+  } as const;
 }
 
 function stickyCell(left: number, width: number, zIndex: number) {
@@ -208,19 +208,40 @@ export default function CaptureSpreadsheetDialog({
   onClose,
   fullScreen = false,
   embedded = false,
+  mobilePortraitMode = false,
   assets,
   runsMap,
   features,
   renderStatus,
   renderActions,
+  assetJobColumns = [],
+  selectedAssetIds,
+  onToggleAssetSelection,
+  onToggleVisibleAssetSelection,
 }: CaptureSpreadsheetDialogProps) {
   const [search, setSearch] = useState("");
   const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(loadHiddenGroups);
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
+  const [isPortraitViewport, setIsPortraitViewport] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.innerHeight >= window.innerWidth;
+  });
 
   useEffect(() => {
     if (!open) setSearch("");
   }, [open]);
+
+  useEffect(() => {
+    if (!mobilePortraitMode) return;
+    const syncOrientation = () => setIsPortraitViewport(window.innerHeight >= window.innerWidth);
+    syncOrientation();
+    window.addEventListener("resize", syncOrientation);
+    window.addEventListener("orientationchange", syncOrientation);
+    return () => {
+      window.removeEventListener("resize", syncOrientation);
+      window.removeEventListener("orientationchange", syncOrientation);
+    };
+  }, [mobilePortraitMode]);
 
   const table = useMemo(
     () => buildProjectCaptureTable(assets, runsMap, features),
@@ -236,7 +257,10 @@ export default function CaptureSpreadsheetDialog({
       .filter((group) => group.columns.length > 0);
   }, [table.groups, hiddenGroups]);
 
-  const visibleColumns = useMemo(() => visibleGroups.flatMap((group) => group.columns), [visibleGroups]);
+  const componentGroups = useMemo(() => visibleGroups.filter((group) => group.groupType !== "general"), [visibleGroups]);
+  const signOffGroups = useMemo(() => visibleGroups.filter((group) => group.groupType === "general"), [visibleGroups]);
+  const orderedGroups = useMemo(() => [...componentGroups, ...signOffGroups], [componentGroups, signOffGroups]);
+  const visibleColumns = useMemo(() => orderedGroups.flatMap((group) => group.columns), [orderedGroups]);
 
   const runDiagnostics = useMemo(() => {
     const runs = Object.values(runsMap).flat();
@@ -291,6 +315,15 @@ export default function CaptureSpreadsheetDialog({
     const query = search.trim().toLowerCase();
     return rows.filter(({ asset, capture }) => rowSearchMatch(capture, asset, query));
   }, [rows, search]);
+
+  const selectionEnabled = !mobilePortraitMode && Boolean(selectedAssetIds && onToggleAssetSelection && onToggleVisibleAssetSelection);
+  const filteredAssetIds = useMemo(() => filteredRows.map(({ asset }) => asset.id), [filteredRows]);
+  const selectedVisibleCount = useMemo(
+    () => selectionEnabled ? filteredAssetIds.filter((id) => selectedAssetIds?.has(id) ?? false).length : 0,
+    [filteredAssetIds, selectedAssetIds, selectionEnabled],
+  );
+  const allVisibleSelected = selectionEnabled && filteredAssetIds.length > 0 && selectedVisibleCount == filteredAssetIds.length;
+  const partiallyVisibleSelected = selectionEnabled && selectedVisibleCount > 0 && selectedVisibleCount < filteredAssetIds.length;
 
   const columnGroups = useMemo(() => {
     return table.groups.map((group) => ({
@@ -360,29 +393,30 @@ export default function CaptureSpreadsheetDialog({
     </Box>
   );
 
-  const renderValueCell = (capture: ProjectCaptureRow, column: ProjectCaptureColumn, group: ProjectCaptureGroup) => {
+  const renderValueCell = (capture: ProjectCaptureRow, column: ProjectCaptureColumn, group: ProjectCaptureGroup, rowBg: string) => {
     const value = capture.cells[column.id] ?? "";
     const palette = groupPalette(group);
-    const tone = captureValueTone(value);
     const isBlank = value.trim().length === 0;
     return (
       <TableCell
         key={column.id}
         sx={{
-          minWidth: 118,
+          minWidth: CAPTURE_COL_W,
           borderLeft: column === group.columns[0] ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
           borderRight: column === group.columns[group.columns.length - 1] ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
           borderBottom: "1px solid #D8DEE7",
-          bgcolor: tone?.bg ?? palette.tint,
           verticalAlign: "top",
-          boxShadow: tone ? `inset 0 0 0 1px ${tone.border}` : undefined,
+          px: 0.75,
+          py: 0.45,
+          ...bodyCellHoverSx(rowBg),
         }}
       >
         <Typography
           variant="caption"
-          color={isBlank ? "text.disabled" : (tone?.text ?? "text.primary")}
+          color={isBlank ? "rgba(22,52,71,0.62)" : ASSET_JOB_PALETTE.text}
           fontStyle={isBlank ? "italic" : "normal"}
-          fontWeight={tone ? 700 : 500}
+          fontWeight={500}
+          sx={{ fontSize: 12, lineHeight: 1.25 }}
         >
           {isBlank ? "-" : value}
         </Typography>
@@ -424,6 +458,14 @@ export default function CaptureSpreadsheetDialog({
 
       {columnPickerOpen && renderGroupPicker()}
 
+      {mobilePortraitMode && (
+        <Alert severity={isPortraitViewport ? "info" : "warning"} sx={{ alignItems: "flex-start" }}>
+          {isPortraitViewport
+            ? "Phone capture view is simplified for portrait mode. Swipe sideways to review captured fields; selection checkboxes are intentionally hidden here."
+            : "Capture view is intentionally portrait-only on phone so the asset data stays readable. Rotate your device back to portrait to continue."}
+        </Alert>
+      )}
+
       {visibleGroups.length === 0 && (
         <Alert severity={table.columns.length > 0 ? 'warning' : 'info'}>
           {table.columns.length > 0
@@ -432,39 +474,75 @@ export default function CaptureSpreadsheetDialog({
         </Alert>
       )}
 
+      {(!mobilePortraitMode || isPortraitViewport) && (
       <Box sx={{ overflow: "auto", maxHeight: embedded ? undefined : (fullScreen ? "calc(100vh - 200px)" : "70vh") }}>
-        <Table size="small" stickyHeader sx={{ minWidth: 760, borderCollapse: "separate", borderSpacing: 0 }}>
+        <Table size="small" stickyHeader sx={{ minWidth: mobilePortraitMode ? 720 : 760, borderCollapse: "separate", borderSpacing: 0 }}>
           <TableHead>
             <TableRow>
+              {selectionEnabled && (
+                <TableCell
+                  rowSpan={3}
+                  padding="checkbox"
+                  sx={{
+                    ...stickyCell(0, CHECKBOX_W, 10),
+                    top: STICKY_TOP_NAME,
+                    fontWeight: 700,
+                    bgcolor: STATIC_HEADER_BG,
+                    color: STATIC_HEADER_TEXT,
+                    borderRight: `1px solid ${STATIC_HEADER_BORDER}`,
+                    borderBottom: `2px solid ${STATIC_HEADER_BORDER}`,
+                    minWidth: CHECKBOX_W,
+                    width: CHECKBOX_W,
+                    maxWidth: CHECKBOX_W,
+                  }}
+                >
+                  <Checkbox
+                    size="small"
+                    indeterminate={partiallyVisibleSelected}
+                    checked={allVisibleSelected}
+                    onChange={(event) => onToggleVisibleAssetSelection?.(filteredAssetIds, event.target.checked)}
+                    disabled={filteredAssetIds.length === 0}
+                    sx={{ color: STATIC_HEADER_TEXT, '&.Mui-checked, &.MuiCheckbox-indeterminate': { color: STATIC_HEADER_TEXT } }}
+                  />
+                </TableCell>
+              )}
               <TableCell
                 rowSpan={3}
                 sx={{
-                  ...stickyCell(LEFT_TAG, TAG_W, 9),
+                  ...stickyCell(selectionEnabled ? CHECKBOX_W : 0, TAG_W, 9),
                   top: STICKY_TOP_NAME,
                   fontWeight: 700,
                   bgcolor: STATIC_HEADER_BG,
                   color: STATIC_HEADER_TEXT,
                   borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
                   borderBottom: `2px solid ${STATIC_HEADER_BORDER}`,
+                  minWidth: TAG_W,
+                  width: TAG_W,
+                  maxWidth: TAG_W,
                 }}
               >
                 Asset Tag
               </TableCell>
-              <TableCell
-                rowSpan={3}
-                sx={{
-                  ...stickyCell(LEFT_NAME, NAME_W, 9),
-                  top: STICKY_TOP_NAME,
-                  fontWeight: 700,
-                  bgcolor: STATIC_HEADER_BG,
-                  color: STATIC_HEADER_TEXT,
-                  borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
-                  borderBottom: `2px solid ${STATIC_HEADER_BORDER}`,
-                }}
-              >
-                Asset Name
-              </TableCell>
-              {visibleGroups.map((group) => {
+              {assetJobColumns.length > 0 && (
+                <TableCell
+                  key="asset-job:name"
+                  align="center"
+                  colSpan={assetJobColumns.length}
+                  sx={{
+                    top: STICKY_TOP_NAME,
+                    position: "sticky",
+                    zIndex: 8,
+                    bgcolor: ASSET_JOB_PALETTE.header,
+                    color: "common.white",
+                    fontWeight: 700,
+                    border: `2px solid ${ASSET_JOB_PALETTE.border}`,
+                    minWidth: assetJobColumns.length * ASSET_JOB_COL_W,
+                  }}
+                >
+                  ASSET & JOB
+                </TableCell>
+              )}
+              {orderedGroups.map((group) => {
                 const palette = groupPalette(group);
                 return (
                   <TableCell
@@ -524,7 +602,27 @@ export default function CaptureSpreadsheetDialog({
               </TableCell>
             </TableRow>
             <TableRow>
-              {visibleGroups.map((group) => {
+              {assetJobColumns.length > 0 && (
+                <TableCell
+                  key="asset-job:pn"
+                  align="center"
+                  colSpan={assetJobColumns.length}
+                  sx={{
+                    top: STICKY_TOP_PN,
+                    position: "sticky",
+                    zIndex: 8,
+                    bgcolor: ASSET_JOB_PALETTE.subHeader,
+                    color: ASSET_JOB_PALETTE.text,
+                    fontWeight: 700,
+                    borderLeft: `2px solid ${ASSET_JOB_PALETTE.border}`,
+                    borderRight: `2px solid ${ASSET_JOB_PALETTE.border}`,
+                    borderBottom: `1px solid ${ASSET_JOB_PALETTE.border}`,
+                  }}
+                >
+                  Project and workflow context
+                </TableCell>
+              )}
+              {orderedGroups.map((group) => {
                 const palette = groupPalette(group);
                 const pnText = group.groupType === "general"
                   ? "Shared fields"
@@ -554,7 +652,40 @@ export default function CaptureSpreadsheetDialog({
               })}
             </TableRow>
             <TableRow>
-              {visibleGroups.map((group) => {
+              {assetJobColumns.map((column, index) => (
+                <TableCell
+                  key={column.id}
+                  align="center"
+                  sx={{
+                    top: STICKY_TOP_FIELDS,
+                    position: "sticky",
+                    zIndex: 8,
+                    bgcolor: ASSET_JOB_PALETTE.subHeader,
+                    color: ASSET_JOB_PALETTE.text,
+                    fontWeight: 700,
+                    fontSize: 11.5,
+                    minWidth: ASSET_JOB_COL_W,
+                    borderLeft: index === 0 ? `2px solid ${ASSET_JOB_PALETTE.border}` : "1px solid #D8DEE7",
+                    borderRight: index === assetJobColumns.length - 1 ? `2px solid ${ASSET_JOB_PALETTE.border}` : "1px solid #D8DEE7",
+                    borderBottom: `2px solid ${ASSET_JOB_PALETTE.border}`,
+                    px: 0.75,
+                    py: 0.5,
+                  }}
+                >
+                  <Typography
+                    component="span"
+                    sx={{
+                      display: "block",
+                      whiteSpace: "pre-line",
+                      lineHeight: 1.25,
+                      minHeight: 26,
+                    }}
+                  >
+                    {splitLabelIntoTwoLines(column.label)}
+                  </Typography>
+                </TableCell>
+              ))}
+              {orderedGroups.map((group) => {
                 const palette = groupPalette(group);
                 return group.columns.map((column, index) => (
                   <TableCell
@@ -567,8 +698,8 @@ export default function CaptureSpreadsheetDialog({
                       bgcolor: hexToRgba(palette.border, group.groupType === "general" ? 0.08 : 0.1),
                       color: "text.primary",
                       fontWeight: 700,
-                      fontSize: 11,
-                      minWidth: 118,
+                      fontSize: 11.5,
+                      minWidth: CAPTURE_COL_W,
                       borderLeft: index === 0 ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
                       borderRight: index === group.columns.length - 1 ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
                       borderBottom: `2px solid ${palette.border}`,
@@ -579,8 +710,8 @@ export default function CaptureSpreadsheetDialog({
                       sx={{
                         display: "block",
                         whiteSpace: "pre-line",
-                        lineHeight: 1.35,
-                        minHeight: 30,
+                        lineHeight: 1.2,
+                        minHeight: 24,
                       }}
                     >
                       {splitLabelIntoTwoLines(column.displayLabel)}
@@ -593,7 +724,7 @@ export default function CaptureSpreadsheetDialog({
           <TableBody>
             {filteredRows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length + 4}>
+                <TableCell colSpan={visibleColumns.length + assetJobColumns.length + (selectionEnabled ? 4 : 3)}>
                   <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
                     No assets match.
                   </Typography>
@@ -601,44 +732,82 @@ export default function CaptureSpreadsheetDialog({
               </TableRow>
             ) : (
               filteredRows.map(({ asset, capture }, rowIndex) => {
-                const palette = statusTone(asset.status);
+                const rowBg = rowIndex % 2 === 0 ? ASSET_JOB_PALETTE.tint : ASSET_JOB_PALETTE.tintAlt;
                 return (
                 <TableRow
                   key={asset.id}
                   hover
                   sx={{
-                    backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.98)" : "rgba(245,248,251,0.98)",
-                    "&:hover td": { backgroundColor: "rgba(31,78,120,0.06) !important" },
+                    backgroundColor: rowBg,
+                    transition: "transform 120ms ease, filter 120ms ease",
+                    '&:hover': {
+                      transform: 'translateY(-1px)',
+                      filter: 'brightness(1.01)',
+                    },
                   }}
                 >
+                  {selectionEnabled && (
+                    <TableCell
+                      padding="checkbox"
+                      sx={{
+                        ...stickyCell(0, CHECKBOX_W, 7),
+                        borderRight: '1px solid #D8DEE7',
+                        borderBottom: '1px solid #D8DEE7',
+                        px: 0.25,
+                        py: 0.35,
+                        ...bodyCellHoverSx(rowBg),
+                      }}
+                    >
+                      <Checkbox
+                        size="small"
+                        checked={selectedAssetIds?.has(asset.id) ?? false}
+                        onChange={(event) => onToggleAssetSelection?.(asset.id, event.target.checked)}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell
                     sx={{
-                      ...stickyCell(LEFT_TAG, TAG_W, 3),
-                      bgcolor: rowIndex % 2 === 0 ? "#FDFEFF" : "#F5F8FB",
+                      ...stickyCell(selectionEnabled ? CHECKBOX_W : 0, TAG_W, 6),
                       borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
-                      boxShadow: `inset 3px 0 0 ${palette.border}`,
+                      borderBottom: '1px solid #D8DEE7',
+                      px: 0.75,
+                      py: 0.45,
+                      ...bodyCellHoverSx(rowBg),
                     }}
                   >
-                    <Typography variant="body2" fontWeight={700} color="#163447">{asset.assetTag}</Typography>
+                    <Typography variant="body2" fontWeight={700} color={ASSET_JOB_PALETTE.text} sx={{ fontSize: 12, lineHeight: 1.2 }}>{asset.assetTag}</Typography>
                   </TableCell>
-                  <TableCell
-                    sx={{
-                      ...stickyCell(LEFT_NAME, NAME_W, 3),
-                      bgcolor: rowIndex % 2 === 0 ? "#FDFEFF" : "#F5F8FB",
-                      borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
-                    }}
-                  >
-                    <Typography variant="body2" color="#274055" fontWeight={500}>{asset.assetName || "-"}</Typography>
-                  </TableCell>
-                  {visibleGroups.flatMap((group) => group.columns.map((column) => renderValueCell(capture, column, group)))}
+                  {assetJobColumns.map((column, index) => (
+                    <TableCell
+                      key={`asset-job:${column.id}`}
+                      sx={{
+                        minWidth: ASSET_JOB_COL_W,
+                        borderLeft: index === 0 ? `2px solid ${ASSET_JOB_PALETTE.border}` : '1px solid #D8DEE7',
+                        borderRight: index === assetJobColumns.length - 1 ? `2px solid ${ASSET_JOB_PALETTE.border}` : '1px solid #D8DEE7',
+                        borderBottom: '1px solid #D8DEE7',
+                        px: 0.75,
+                        py: 0.45,
+                        verticalAlign: 'top',
+                        ...bodyCellHoverSx(rowBg),
+                      }}
+                    >
+                      <Typography sx={{ fontSize: 12, lineHeight: 1.25, color: ASSET_JOB_PALETTE.text, fontWeight: 500 }}>
+                        {column.valueFor(asset) || '-'}
+                      </Typography>
+                    </TableCell>
+                  ))}
+                  {orderedGroups.flatMap((group) => group.columns.map((column) => renderValueCell(capture, column, group, rowBg)))}
                   <TableCell
                     sx={{
                       minWidth: STATUS_W,
                       width: STATUS_W,
                       maxWidth: STATUS_W,
-                      bgcolor: palette.bg,
-                      borderLeft: `2px solid ${palette.border}`,
-                      borderRight: `1px solid ${palette.border}`,
+                      borderLeft: `2px solid ${STATIC_HEADER_BORDER}`,
+                      borderRight: `1px solid #D8DEE7`,
+                      borderBottom: '1px solid #D8DEE7',
+                      px: 0.6,
+                      py: 0.45,
+                      ...bodyCellHoverSx(rowBg),
                     }}
                   >
                     {renderStatus ? renderStatus(asset) : defaultStatus(asset)}
@@ -648,11 +817,14 @@ export default function CaptureSpreadsheetDialog({
                       minWidth: ACTIONS_W,
                       width: ACTIONS_W,
                       maxWidth: ACTIONS_W,
-                      bgcolor: hexToRgba(palette.border, 0.08),
-                      borderLeft: `1px solid ${palette.border}`,
+                      borderLeft: `1px solid #D8DEE7`,
+                      borderBottom: '1px solid #D8DEE7',
+                      px: 0.6,
+                      py: 0.45,
+                      ...bodyCellHoverSx(rowBg),
                     }}
                   >
-                    {renderActions ? renderActions(asset) : <Typography variant="caption" color="text.disabled">-</Typography>}
+                    {renderActions ? renderActions(asset) : <Typography variant="caption" color="rgba(22,52,71,0.62)">-</Typography>}
                   </TableCell>
                 </TableRow>
                 );
@@ -661,6 +833,7 @@ export default function CaptureSpreadsheetDialog({
           </TableBody>
         </Table>
       </Box>
+      )}
     </Stack>
   );
 
