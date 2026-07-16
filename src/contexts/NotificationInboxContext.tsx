@@ -85,16 +85,44 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, 15000);
 
-    const handleRefreshTrigger = () => {
-      void refresh();
+    // PERF: the notification poll (list includeRead=true take=50 → ~27kB, doubled by
+    // a CORS preflight on cross-origin dev) was firing far more than once per 15s,
+    // because sync activity dispatches "notifications:refresh" repeatedly (useSyncEngine,
+    // signatureService) and every dispatch triggered an immediate full fetch. On a busy
+    // screen that produced a storm of large requests competing for the connection pool.
+    //
+    // Two changes:
+    //   1) Debounce the EVENT-driven triggers so a burst collapses into a single fetch.
+    //   2) Pause the 15s interval while the tab is hidden; refresh once on becoming visible.
+    let debounceTimer: number | undefined;
+    const debouncedRefresh = () => {
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = undefined;
+        void refresh();
+      }, 1500);
     };
+
+    let timer: number | undefined;
+    const startPolling = () => {
+      if (timer !== undefined) return;
+      timer = window.setInterval(() => { void refresh(); }, 15000);
+    };
+    const stopPolling = () => {
+      if (timer !== undefined) { window.clearInterval(timer); timer = undefined; }
+    };
+    // Only poll while the tab is visible — a backgrounded tab doesn't need to keep
+    // hitting the server every 15s.
+    if (document.visibilityState === "visible") startPolling();
+
+    const handleRefreshTrigger = () => { debouncedRefresh(); };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void refresh();
+        void refresh();     // catch up immediately on return
+        startPolling();
+      } else {
+        stopPolling();
       }
     };
 
@@ -106,7 +134,8 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.clearInterval(timer);
+      stopPolling();
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       window.removeEventListener("focus", handleRefreshTrigger);
       window.removeEventListener("online", handleRefreshTrigger);
       window.removeEventListener("auth-change", handleRefreshTrigger);
