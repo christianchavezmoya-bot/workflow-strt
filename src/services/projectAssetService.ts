@@ -433,12 +433,13 @@ export const projectAssetService = {
 
         return { currentInstalls, currentInspections, installHistory, inspectionHistory };
       }
-      return {
-        currentInstalls: [],
-        currentInspections: [],
-        installHistory: [],
-        inspectionHistory: [],
-      };
+      // WEB: do NOT swallow the error into a fake-empty workspace. Returning empty
+      // here is indistinguishable from "you genuinely have no jobs", so a transient
+      // timeout (this endpoint parses run JSON per asset and can exceed the 10s
+      // request timeout under load) would silently wipe the user's jobs off the
+      // dashboard — and stick until a later call happened to succeed. Rethrow so the
+      // caller can keep the previously-loaded data and show a soft error instead.
+      throw new Error("dashboard-workspace-failed");
     }
   },
 

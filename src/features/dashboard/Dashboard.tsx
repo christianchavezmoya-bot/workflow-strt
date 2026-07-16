@@ -482,7 +482,24 @@ const Dashboard = () => {
       .then((data) => {
         if (!cancelled) {
           setDashboardWorkspace(data);
-          if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.dashboardWorkspace, data);
+          // Cache the last good workspace on every platform (in-memory; survives a
+          // re-mount within the session). Previously web cached nothing, so a later
+          // failed refresh had nothing to fall back to.
+          dcPut(DASHBOARD_CACHE_KEYS.dashboardWorkspace, data);
+        }
+      })
+      .catch(() => {
+        // The workspace endpoint parses run JSON per asset and can time out under load.
+        // On failure, DO NOT blank the dashboard: keep whatever is already on screen,
+        // and if this is a fresh mount with nothing shown yet, restore the last good
+        // cached workspace. This turns "jobs vanish on a slow refresh" into "jobs stay
+        // put; the refresh simply didn't update them this time".
+        if (cancelled) return;
+        const cached = dcGet<DashboardWorkspace>(DASHBOARD_CACHE_KEYS.dashboardWorkspace);
+        if (cached) {
+          setDashboardWorkspace((prev) =>
+            prev.currentInstalls.length || prev.installHistory.length ? prev : cached,
+          );
         }
       })
       .finally(() => {
@@ -500,7 +517,8 @@ const Dashboard = () => {
     setWorkspaceLoading(true);
     projectAssetService
       .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
-      .then((data) => setDashboardWorkspace(data))
+      .then((data) => { setDashboardWorkspace(data); dcPut(DASHBOARD_CACHE_KEYS.dashboardWorkspace, data); })
+      .catch(() => { /* keep last-good workspace on a failed manual refresh — never blank it */ })
       .finally(() => setWorkspaceLoading(false));
     loadAttention();
     setAnalyticsRefreshTick((t) => t + 1);
@@ -548,6 +566,7 @@ const Dashboard = () => {
       projectAssetService
         .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
         .then((data) => setDashboardWorkspace(data))
+        .catch(() => { /* keep last-good workspace on failure — never blank it */ })
         .finally(() => setWorkspaceLoading(false));
     };
     window.addEventListener("notifications:assignments-changed", refresh);
@@ -5523,6 +5542,7 @@ const Dashboard = () => {
             projectAssetService
               .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
               .then((data) => setDashboardWorkspace(data))
+              .catch(() => { /* keep last-good workspace on failure — never blank it */ })
               .finally(() => setWorkspaceLoading(false));
           }}
           onPause={() => {
@@ -5531,6 +5551,7 @@ const Dashboard = () => {
             projectAssetService
               .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
               .then((data) => setDashboardWorkspace(data))
+              .catch(() => { /* keep last-good workspace on failure — never blank it */ })
               .finally(() => setWorkspaceLoading(false));
           }}
         />
