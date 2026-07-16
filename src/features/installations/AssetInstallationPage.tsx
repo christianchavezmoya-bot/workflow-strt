@@ -904,16 +904,30 @@ const AssetInstallationPage = () => {
       return;
     }
     let cancelled = false;
-    featureService.getByProduct(activeProduct.id).then(async (feats) => {
+    featureService.getByProduct(activeProduct.id).then((feats) => {
       if (cancelled) return;
+      // Set features immediately — this is what the asset/capture table needs to
+      // render. Do NOT block on the per-feature dependency fetch here.
       setLibFeatures(feats);
-      const depLists = await Promise.all(
-        feats.map((f) => featureDependencyService.getByFeature(f.id).catch(() => [] as FeatureDependency[])),
-      );
-      if (cancelled) return;
-      const map: Record<string, FeatureDependency[]> = {};
-      feats.forEach((f, i) => { map[f.id] = depLists[i] ?? []; });
-      setDepsByFeature(map);
+
+      // PERF (web first paint): the dependency fetch is one request PER feature
+      // (getByFeature per feature). On a product with many features that is a burst
+      // of parallel round-trips that used to sit on the critical path, delaying the
+      // moment the table could paint. Dependencies are only needed for capture-column
+      // metadata, not to render the rows — so defer the whole storm to a background
+      // task that runs after the current paint. Nothing depends on it being present
+      // for the first render; depsByFeature simply fills in shortly after.
+      const loadDeps = async () => {
+        const depLists = await Promise.all(
+          feats.map((f) => featureDependencyService.getByFeature(f.id).catch(() => [] as FeatureDependency[])),
+        );
+        if (cancelled) return;
+        const map: Record<string, FeatureDependency[]> = {};
+        feats.forEach((f, i) => { map[f.id] = depLists[i] ?? []; });
+        setDepsByFeature(map);
+      };
+      // Yield first so the feature-driven render commits before the dependency burst.
+      setTimeout(() => { void loadDeps(); }, 0);
     }).catch(() => {
       if (!cancelled) {
         setLibFeatures([]);
@@ -1150,15 +1164,22 @@ const AssetInstallationPage = () => {
   useEffect(() => {
     if (assetsKey === "") return;
     const myLoadId = ++docCountLoadIdRef.current;
-    const snapshot = assetsRef.current;
-    const countMap: Record<string, number> = {};
-    Promise.all(snapshot.map(async (asset) => {
-      const docs = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
-      countMap[asset.id] = docs.length;
-    })).then(() => {
-      if (myLoadId !== docCountLoadIdRef.current) return; // Stale — a newer doc-count pass is in flight
-      setDocsCountMap(countMap);
-    });
+    // PERF (web first paint): document counts are cosmetic (badge only) and this
+    // is one request PER asset. Yield to the event loop first so the asset table
+    // commits to screen before this request burst starts, instead of the two
+    // competing for the browser's connection pool on cold load.
+    const timer = setTimeout(() => {
+      const snapshot = assetsRef.current;
+      const countMap: Record<string, number> = {};
+      Promise.all(snapshot.map(async (asset) => {
+        const docs = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
+        countMap[asset.id] = docs.length;
+      })).then(() => {
+        if (myLoadId !== docCountLoadIdRef.current) return; // Stale — a newer doc-count pass is in flight
+        setDocsCountMap(countMap);
+      });
+    }, 0);
+    return () => clearTimeout(timer);
     // assetsRef.current is intentionally read at run-time; only assetsKey
     // (the set of asset IDs) should trigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps

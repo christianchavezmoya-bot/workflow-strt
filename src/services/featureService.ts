@@ -9,6 +9,7 @@ import {
   syncMetaSet,
 } from "./localDB";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
+import { webCachedGet, webCacheKey, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 const ALL_FEATURES_KEY = "features_all";
 
@@ -43,23 +44,38 @@ export const featureService = {
 
   async create(payload: Omit<Feature, "id">): Promise<Feature> {
     const res = await api.post<Feature>("/features", payload);
+    invalidateWebCacheByPrefix("/features/by-product/");
     return res.data;
   },
 
   async update(id: string, payload: Partial<Omit<Feature, "id">>): Promise<Feature> {
     const res = await api.put<Feature>(`/features/${id}`, payload);
+    invalidateWebCacheByPrefix("/features/by-product/");
     return res.data;
   },
 
   async remove(id: string): Promise<void> {
     await api.delete(`/features/${id}`);
+    invalidateWebCacheByPrefix("/features/by-product/");
   },
 
   /** Features linked to a specific product (ordered by SortOrder) */
   async getByProduct(productId: string): Promise<Feature[]> {
     if (!isMobileNativePlatform()) {
-      const res = await api.get<Feature[]>(`/features/by-product/${productId}`);
-      return res.data;
+      // PERF (web): product features barely change within a session but the
+      // asset/capture screens re-request them on every visit. Previously this was
+      // a bare live api.get with no browser cache, so it was cold every time.
+      // Wrap it in the same short-TTL stale-while-revalidate cache the asset repos
+      // use: a repeat visit paints from cache instantly and revalidates in the
+      // background. (webCachedGet is in-memory only, so it never persists stale
+      // data across a reload.)
+      return webCachedGet(
+        webCacheKey(`/features/by-product/${productId}`),
+        async () => {
+          const res = await api.get<Feature[]>(`/features/by-product/${productId}`);
+          return res.data;
+        },
+      );
     }
 
     const local = await entityGetFeaturesByProduct(productId) as Feature[];
@@ -102,9 +118,11 @@ export const featureService = {
 
   async linkToProduct(productId: string, featureId: string): Promise<void> {
     await api.post(`/features/by-product/${productId}/link/${featureId}`);
+    invalidateWebCacheByPrefix(`/features/by-product/${productId}`);
   },
 
   async unlinkFromProduct(productId: string, featureId: string): Promise<void> {
     await api.delete(`/features/by-product/${productId}/unlink/${featureId}`);
+    invalidateWebCacheByPrefix(`/features/by-product/${productId}`);
   },
 };
