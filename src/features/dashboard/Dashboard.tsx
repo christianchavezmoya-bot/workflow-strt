@@ -429,20 +429,23 @@ const Dashboard = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (!user.id) return;
     dispatch(fetchProjects());
     dispatch(fetchProducts());
     dispatch(fetchUsers());
     loadAttention();
-    setWorkloadLoading(true);
-    projectAssetService.technicianWorkloadSummary().then((w) => { setWorkload(w); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.workload, w); }).finally(() => setWorkloadLoading(false));
+    if (isManager || isAdmin || isSupervisor) {
+      setWorkloadLoading(true);
+      projectAssetService.technicianWorkloadSummary().then((w) => { setWorkload(w); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.workload, w); }).finally(() => setWorkloadLoading(false));
+      projectAssetService.activeSummary().then((s) => { setProjectAssetSummary(s); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, s); }).catch(() => setProjectAssetSummary([]));
+    }
     projectAssetService.listOpen().then((a) => { setOpenAssets(a); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.openAssets, a); });
-    projectAssetService.activeSummary().then((s) => { setProjectAssetSummary(s); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, s); }).catch(() => setProjectAssetSummary([]));
     if (isEngineer) {
       workflowConfigService.getAll().then((configs) => {
         setDraftConfigs(configs.filter((c: any) => c.status === "Draft" || c.status === "draft"));
       }).catch(() => {});
     }
-  }, [dispatch, loadAttention, isEngineer]);
+  }, [dispatch, loadAttention, isEngineer, isManager, isAdmin, isSupervisor, user.id, isNativePlatform]);
 
   // ── Native cache: persist state to cache whenever it changes ──
   useEffect(() => {
