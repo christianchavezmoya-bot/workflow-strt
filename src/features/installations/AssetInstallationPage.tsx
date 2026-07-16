@@ -7501,7 +7501,7 @@ ${words.slice(midpoint).join(" ")}`;
           open={capturePopupOpen}
           onClose={() => setCapturePopupOpen(false)}
           fullScreen
-          mobilePortraitMode
+          hideSelectionColumn
           assets={mobileAssets}
           runsMap={runsMap}
           features={libFeatures}
@@ -7521,6 +7521,12 @@ ${words.slice(midpoint).join(" ")}`;
           }}
           assetJobColumns={assetCaptureJobColumns}
           renderStatus={(asset) => captureTableStatusChip(asset, projectMap.get(asset.projectId)?.workflowMode)}
+          renderActions={(asset) => {
+            const proj = projectMap.get(asset.projectId);
+            return (canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed")
+              ? actionButton(asset, proj?.workflowMode)
+              : null;
+          }}
         />
       )}
 

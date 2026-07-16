@@ -10,6 +10,8 @@ import {
   Checkbox,
   Chip,
   Dialog,
+  Menu,
+  MenuItem,
   DialogContent,
   DialogTitle,
   FormControlLabel,
@@ -29,6 +31,7 @@ import {
 import CloseOutlined from "@mui/icons-material/CloseOutlined";
 import SearchOutlined from "@mui/icons-material/SearchOutlined";
 import ViewColumnOutlined from "@mui/icons-material/ViewColumnOutlined";
+import ArrowDropDown from "@mui/icons-material/ArrowDropDown";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 import type { Feature } from "../../types/feature";
@@ -53,7 +56,7 @@ export type CaptureSpreadsheetDialogProps = {
   onClose: () => void;
   fullScreen?: boolean;
   embedded?: boolean;
-  mobilePortraitMode?: boolean;
+  hideSelectionColumn?: boolean;
   assets: ProjectAsset[];
   runsMap: Record<string, AssetWorkflowRun[]>;
   features: Feature[];
@@ -208,7 +211,7 @@ export default function CaptureSpreadsheetDialog({
   onClose,
   fullScreen = false,
   embedded = false,
-  mobilePortraitMode = false,
+  hideSelectionColumn = false,
   assets,
   runsMap,
   features,
@@ -222,26 +225,12 @@ export default function CaptureSpreadsheetDialog({
   const [search, setSearch] = useState("");
   const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(loadHiddenGroups);
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
-  const [isPortraitViewport, setIsPortraitViewport] = useState(() => {
-    if (typeof window === "undefined") return true;
-    return window.innerHeight >= window.innerWidth;
-  });
+  const [filterMenu, setFilterMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({ anchorEl: null, key: "" });
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     if (!open) setSearch("");
   }, [open]);
-
-  useEffect(() => {
-    if (!mobilePortraitMode) return;
-    const syncOrientation = () => setIsPortraitViewport(window.innerHeight >= window.innerWidth);
-    syncOrientation();
-    window.addEventListener("resize", syncOrientation);
-    window.addEventListener("orientationchange", syncOrientation);
-    return () => {
-      window.removeEventListener("resize", syncOrientation);
-      window.removeEventListener("orientationchange", syncOrientation);
-    };
-  }, [mobilePortraitMode]);
 
   const table = useMemo(
     () => buildProjectCaptureTable(assets, runsMap, features),
@@ -311,12 +300,60 @@ export default function CaptureSpreadsheetDialog({
     }));
   }, [assets, table.rows]);
 
+  const getColumnFilterValue = useCallback((key: string, asset: ProjectAsset, capture: ProjectCaptureRow) => {
+    if (key == "assetTag") return asset.assetTag || "-";
+    if (key == "status") return STATUS_LABELS[asset.status] ?? asset.status;
+    if (key == "actions") return renderActions ? "Available" : "-";
+    if (key.startsWith("asset-job:")) {
+      const columnId = key.slice("asset-job:".length);
+      const column = assetJobColumns.find((item) => item.id === columnId);
+      return column?.valueFor(asset) || "-";
+    }
+    if (key.startsWith("capture:")) {
+      const columnId = key.slice("capture:".length);
+      const value = capture.cells[columnId] ?? "";
+      return value.trim().length > 0 ? value : "-";
+    }
+    return "-";
+  }, [assetJobColumns, renderActions]);
+
+  const columnFilterOptions = useMemo(() => {
+    const next: Record<string, string[]> = {};
+    const ensure = (key: string, value: string) => {
+      if (!next[key]) next[key] = [];
+      if (!next[key].includes(value)) next[key].push(value);
+    };
+    for (const { asset, capture } of rows) {
+      ensure("assetTag", getColumnFilterValue("assetTag", asset, capture));
+      ensure("status", getColumnFilterValue("status", asset, capture));
+      ensure("actions", getColumnFilterValue("actions", asset, capture));
+      for (const column of assetJobColumns) {
+        ensure(`asset-job:${column.id}`, getColumnFilterValue(`asset-job:${column.id}`, asset, capture));
+      }
+      for (const group of orderedGroups) {
+        for (const column of group.columns) {
+          ensure(`capture:${column.id}`, getColumnFilterValue(`capture:${column.id}`, asset, capture));
+        }
+      }
+    }
+    for (const key of Object.keys(next)) next[key].sort((a, b) => a.localeCompare(b));
+    return next;
+  }, [assetJobColumns, getColumnFilterValue, orderedGroups, rows]);
+
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return rows.filter(({ asset, capture }) => rowSearchMatch(capture, asset, query));
-  }, [rows, search]);
+    return rows.filter(({ asset, capture }) => {
+      if (!rowSearchMatch(capture, asset, query)) return false;
+      for (const [key, selectedValues] of Object.entries(columnFilters)) {
+        if (selectedValues.length === 0) continue;
+        const value = getColumnFilterValue(key, asset, capture);
+        if (!selectedValues.includes(value)) return false;
+      }
+      return true;
+    });
+  }, [columnFilters, getColumnFilterValue, rows, search]);
 
-  const selectionEnabled = !mobilePortraitMode && Boolean(selectedAssetIds && onToggleAssetSelection && onToggleVisibleAssetSelection);
+  const selectionEnabled = !hideSelectionColumn && Boolean(selectedAssetIds && onToggleAssetSelection && onToggleVisibleAssetSelection);
   const filteredAssetIds = useMemo(() => filteredRows.map(({ asset }) => asset.id), [filteredRows]);
   const selectedVisibleCount = useMemo(
     () => selectionEnabled ? filteredAssetIds.filter((id) => selectedAssetIds?.has(id) ?? false).length : 0,
@@ -341,6 +378,46 @@ export default function CaptureSpreadsheetDialog({
       return next;
     });
   }, []);
+
+  const toggleColumnFilterValue = useCallback((key: string, value: string) => {
+    setColumnFilters((prev) => {
+      const current = new Set(prev[key] ?? []);
+      if (current.has(value)) current.delete(value);
+      else current.add(value);
+      return { ...prev, [key]: Array.from(current) };
+    });
+  }, []);
+
+  const clearColumnFilter = useCallback((key: string) => {
+    setColumnFilters((prev) => ({ ...prev, [key]: [] }));
+  }, []);
+
+  const renderHeaderLabel = useCallback((label: string, filterKey: string) => {
+    const activeCount = columnFilters[filterKey]?.length ?? 0;
+    return (
+      <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.15} sx={{ width: "100%" }}>
+        <Typography
+          component="span"
+          sx={{
+            display: "block",
+            whiteSpace: "pre-line",
+            lineHeight: 1.25,
+            minHeight: 24,
+            flex: 1,
+          }}
+        >
+          {splitLabelIntoTwoLines(label)}
+        </Typography>
+        <IconButton
+          size="small"
+          sx={{ p: 0.2, color: activeCount > 0 ? "warning.light" : "inherit" }}
+          onClick={(event) => setFilterMenu({ anchorEl: event.currentTarget, key: filterKey })}
+        >
+          <ArrowDropDown fontSize="small" />
+        </IconButton>
+      </Stack>
+    );
+  }, [columnFilters]);
 
   const defaultStatus = (asset: ProjectAsset) => (
     <Chip
@@ -458,14 +535,6 @@ export default function CaptureSpreadsheetDialog({
 
       {columnPickerOpen && renderGroupPicker()}
 
-      {mobilePortraitMode && (
-        <Alert severity={isPortraitViewport ? "info" : "warning"} sx={{ alignItems: "flex-start" }}>
-          {isPortraitViewport
-            ? "Phone capture view is simplified for portrait mode. Swipe sideways to review captured fields; selection checkboxes are intentionally hidden here."
-            : "Capture view is intentionally portrait-only on phone so the asset data stays readable. Rotate your device back to portrait to continue."}
-        </Alert>
-      )}
-
       {visibleGroups.length === 0 && (
         <Alert severity={table.columns.length > 0 ? 'warning' : 'info'}>
           {table.columns.length > 0
@@ -474,9 +543,8 @@ export default function CaptureSpreadsheetDialog({
         </Alert>
       )}
 
-      {(!mobilePortraitMode || isPortraitViewport) && (
       <Box sx={{ overflow: "auto", maxHeight: embedded ? undefined : (fullScreen ? "calc(100vh - 200px)" : "70vh") }}>
-        <Table size="small" stickyHeader sx={{ minWidth: mobilePortraitMode ? 720 : 760, borderCollapse: "separate", borderSpacing: 0 }}>
+        <Table size="small" stickyHeader sx={{ minWidth: 760, borderCollapse: "separate", borderSpacing: 0 }}>
           <TableHead>
             <TableRow>
               {selectionEnabled && (
@@ -521,7 +589,7 @@ export default function CaptureSpreadsheetDialog({
                   maxWidth: TAG_W,
                 }}
               >
-                Asset Tag
+                {renderHeaderLabel("Asset Tag", "assetTag")}
               </TableCell>
               {assetJobColumns.length > 0 && (
                 <TableCell
@@ -580,7 +648,7 @@ export default function CaptureSpreadsheetDialog({
                   borderBottom: `2px solid ${STATIC_HEADER_BORDER}`,
                 }}
               >
-                Status
+                {renderHeaderLabel("Status", "status")}
               </TableCell>
               <TableCell
                 rowSpan={3}
@@ -598,7 +666,7 @@ export default function CaptureSpreadsheetDialog({
                   borderBottom: `2px solid ${STATIC_HEADER_BORDER}`,
                 }}
               >
-                Actions
+                {renderHeaderLabel("Actions", "actions")}
               </TableCell>
             </TableRow>
             <TableRow>
@@ -681,7 +749,7 @@ export default function CaptureSpreadsheetDialog({
                       minHeight: 26,
                     }}
                   >
-                    {splitLabelIntoTwoLines(column.label)}
+                    {renderHeaderLabel(column.label, `asset-job:${column.id}`)}
                   </Typography>
                 </TableCell>
               ))}
@@ -714,7 +782,7 @@ export default function CaptureSpreadsheetDialog({
                         minHeight: 24,
                       }}
                     >
-                      {splitLabelIntoTwoLines(column.displayLabel)}
+                      {renderHeaderLabel(column.displayLabel, `capture:${column.id}`)}
                     </Typography>
                   </TableCell>
                 ));
@@ -833,7 +901,35 @@ export default function CaptureSpreadsheetDialog({
           </TableBody>
         </Table>
       </Box>
-      )}
+
+      <Menu
+        anchorEl={filterMenu.anchorEl}
+        open={Boolean(filterMenu.anchorEl)}
+        onClose={() => setFilterMenu({ anchorEl: null, key: "" })}
+      >
+        <MenuItem
+          onClick={() => {
+            if (filterMenu.key) clearColumnFilter(filterMenu.key);
+            setFilterMenu({ anchorEl: null, key: "" });
+          }}
+        >
+          Clear filter
+        </MenuItem>
+        {(columnFilterOptions[filterMenu.key] ?? []).length === 0 && (
+          <MenuItem disabled>No values</MenuItem>
+        )}
+        {(columnFilterOptions[filterMenu.key] ?? []).map((option) => {
+          const selected = (columnFilters[filterMenu.key] ?? []).includes(option);
+          return (
+            <MenuItem key={`${filterMenu.key}-${option}`} onClick={() => toggleColumnFilterValue(filterMenu.key, option)}>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 180 }}>
+                <Checkbox size="small" checked={selected} sx={{ p: 0 }} />
+                <Typography variant="body2">{option}</Typography>
+              </Stack>
+            </MenuItem>
+          );
+        })}
+      </Menu>
     </Stack>
   );
 
