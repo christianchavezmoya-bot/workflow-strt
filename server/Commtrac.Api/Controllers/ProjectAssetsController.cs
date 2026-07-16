@@ -92,14 +92,7 @@ public class ProjectAssetsController : ControllerBase
             .ToListAsync();
 
         var assetIds = assets.Select(a => a.Id).Distinct().ToList();
-        var latestRuns = await _db.AssetWorkflowRuns
-            .Where(r => assetIds.Contains(r.AssetId))
-            .OrderByDescending(r => r.StartedAt)
-            .ThenByDescending(r => r.UpdatedAt)
-            .ToListAsync();
-        var latestRunByAsset = latestRuns
-            .GroupBy(r => r.AssetId)
-            .ToDictionary(g => g.Key, g => g.First());
+        var latestRunByAsset = await DashboardReadQueries.GetLatestRunsByAssetIdAsync(_db, assetIds);
         var assignedWorkflowAssetIds = await _db.AssetWorkflowAssignments
             .Where(a => assetIds.Contains(a.AssetId) && a.Active)
             .Select(a => a.AssetId)
@@ -176,14 +169,7 @@ public class ProjectAssetsController : ControllerBase
         var assetIds = assets.Select(a => a.Id).Distinct().ToList();
         var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
 
-        var latestRuns = await _db.AssetWorkflowRuns
-            .Where(r => assetIds.Contains(r.AssetId))
-            .OrderByDescending(r => r.StartedAt)
-            .ThenByDescending(r => r.UpdatedAt)
-            .ToListAsync();
-        var latestRunByAsset = latestRuns
-            .GroupBy(r => r.AssetId)
-            .ToDictionary(g => g.Key, g => g.First());
+        var latestRunByAsset = await DashboardReadQueries.GetLatestRunsByAssetIdAsync(_db, assetIds);
 
         var assignments = await _db.AssetWorkflowAssignments
             .Where(a => assetIds.Contains(a.AssetId))
@@ -194,7 +180,7 @@ public class ProjectAssetsController : ControllerBase
             .GroupBy(a => a.AssetId)
             .ToDictionary(g => g.Key, g => g.First());
 
-        var workflowConfigIds = latestRuns
+        var workflowConfigIds = latestRunByAsset.Values
             .Select(r => r.WorkflowConfigId)
             .Concat(assignments.Select(a => a.WorkflowConfigId))
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -335,14 +321,8 @@ public class ProjectAssetsController : ControllerBase
             .ToDictionaryAsync(p => p.Id, p => p.JobNumber);
 
         // Get latest in-progress run per asset for start time
-        var runs = await _db.AssetWorkflowRuns
-            .Where(r => assetIds.Contains(r.AssetId) && !r.IsLocked)
-            .OrderByDescending(r => r.StartedAt)
-            .ToListAsync();
-
-        var latestRunByAsset = runs
-            .GroupBy(r => r.AssetId)
-            .ToDictionary(g => g.Key, g => g.First());
+        var latestRunByAsset = await DashboardReadQueries.GetLatestRunsByAssetIdAsync(
+            _db, assetIds, r => !r.IsLocked);
 
         var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
@@ -451,16 +431,8 @@ public class ProjectAssetsController : ControllerBase
             .Select(p => new { p.Id, p.JobNumber })
             .ToDictionaryAsync(p => p.Id, p => p.JobNumber);
 
-        // Get latest workflow run per asset (all runs, including completed/locked)
-        var runs = await _db.AssetWorkflowRuns
-            .Where(r => assetIds.Contains(r.AssetId))
-            .OrderByDescending(r => r.StartedAt)
-            .ThenByDescending(r => r.UpdatedAt)
-            .ToListAsync();
-
-        var latestRunByAsset = runs
-            .GroupBy(r => r.AssetId)
-            .ToDictionary(g => g.Key, g => g.First());
+        // Get latest workflow run per asset (all statuses including completed/locked)
+        var latestRunByAsset = await DashboardReadQueries.GetLatestRunsByAssetIdAsync(_db, assetIds);
 
         var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 

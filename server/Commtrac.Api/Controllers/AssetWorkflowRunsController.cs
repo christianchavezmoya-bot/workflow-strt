@@ -253,41 +253,28 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         try
         {
-            // If userId is provided, only consider assets assigned to that user
-            var assignedAssetIds = !string.IsNullOrWhiteSpace(userId)
+            IReadOnlyList<string>? assignedAssetIds = !string.IsNullOrWhiteSpace(userId)
                 ? await _db.ProjectAssets
+                    .AsNoTracking()
                     .Where(a => a.AssignedUserId == userId)
                     .Select(a => a.Id)
                     .ToListAsync()
                 : null;
 
-            var runs = await _db.AssetWorkflowRuns
-                .Where(r => r.IssuesJson != null && r.IssuesJson != "[]" && r.IssuesJson != "")
-                .ToListAsync();
+            var runs = await DashboardReadQueries.GetIssueRunsAsync(_db, assignedAssetIds);
 
-            var assetIds = runs.Select(r => r.AssetId).Distinct().ToList();
-            
-            // Filter runs to only those on user's assigned assets if userId provided
-            if (assignedAssetIds is not null)
-            {
-                assetIds = assetIds.Intersect(assignedAssetIds).ToList();
-                runs = runs.Where(r => assetIds.Contains(r.AssetId)).ToList();
-            }
-
-            var assets   = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
-
-            var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
-            var projects   = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
+            var runAssetIds = runs.Select(r => r.AssetId).Distinct().ToList();
+            var runAssets = await DashboardReadQueries.GetAssetIssueContextByIdsAsync(_db, runAssetIds);
+            var runProjectIds = runAssets.Values.Select(a => a.ProjectId).Distinct();
+            var runProjects = await DashboardReadQueries.GetProjectsByIdAsync(_db, runProjectIds);
 
             var result = new List<OpenIssueDto>();
             var opts   = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
-            // ── 1. Workflow-run issues ─────────────────────────────────────
             foreach (var run in runs)
             {
-                var asset   = assets.FirstOrDefault(a => a.Id == run.AssetId);
-                if (asset is null) continue;
-                var project = projects.FirstOrDefault(p => p.Id == asset.ProjectId);
+                if (!runAssets.TryGetValue(run.AssetId, out var asset)) continue;
+                runProjects.TryGetValue(asset.ProjectId, out var project);
 
                 List<JsonElement> issues;
                 try { issues = JsonSerializer.Deserialize<List<JsonElement>>(run.IssuesJson, opts) ?? []; }
@@ -322,27 +309,16 @@ public class AssetWorkflowRunsController : ControllerBase
                 }
             }
 
-            // ── 2. Manually-added asset-level issues ──────────────────────
-            var assetsWithIssuesQuery = _db.ProjectAssets
-                .Where(a => a.IssuesJson != null && a.IssuesJson != "[]" && a.IssuesJson != "");
-
-            // Filter to user's assigned assets if userId provided
-            if (assignedAssetIds is not null)
-            {
-                assetsWithIssuesQuery = assetsWithIssuesQuery.Where(a => assignedAssetIds.Contains(a.Id));
-            }
-
-            var assetsWithIssues = await assetsWithIssuesQuery.ToListAsync();
-
-            var assetProjectIds2 = assetsWithIssues.Select(a => a.ProjectId).Distinct().ToList();
-            var projects2 = await _db.Projects.Where(p => assetProjectIds2.Contains(p.Id)).ToListAsync();
+            var assetsWithIssues = await DashboardReadQueries.GetAssetsWithIssuesAsync(_db, assignedAssetIds);
+            var assetProjectIds2 = assetsWithIssues.Select(a => a.ProjectId).Distinct();
+            var projects2 = await DashboardReadQueries.GetProjectsByIdAsync(_db, assetProjectIds2);
 
             foreach (var asset in assetsWithIssues)
             {
-                var project = projects2.FirstOrDefault(p => p.Id == asset.ProjectId);
+                projects2.TryGetValue(asset.ProjectId, out var project);
 
                 List<JsonElement> issues;
-                try { issues = JsonSerializer.Deserialize<List<JsonElement>>(asset.IssuesJson!, opts) ?? []; }
+                try { issues = JsonSerializer.Deserialize<List<JsonElement>>(asset.IssuesJson, opts) ?? []; }
                 catch { continue; }
 
                 foreach (var iss in issues)
@@ -399,34 +375,28 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         try
         {
-            var assignedAssetIds = !string.IsNullOrWhiteSpace(userId)
-                ? await _db.ProjectAssets.Where(a => a.AssignedUserId == userId).Select(a => a.Id).ToListAsync()
+            IReadOnlyList<string>? assignedAssetIds = !string.IsNullOrWhiteSpace(userId)
+                ? await _db.ProjectAssets
+                    .AsNoTracking()
+                    .Where(a => a.AssignedUserId == userId)
+                    .Select(a => a.Id)
+                    .ToListAsync()
                 : null;
 
-            var runs = await _db.AssetWorkflowRuns
-                .Where(r => r.IssuesJson != null && r.IssuesJson != "[]" && r.IssuesJson != "")
-                .ToListAsync();
+            var runs = await DashboardReadQueries.GetIssueRunsAsync(_db, assignedAssetIds);
 
-            var assetIds = runs.Select(r => r.AssetId).Distinct().ToList();
-            if (assignedAssetIds is not null)
-            {
-                assetIds = assetIds.Intersect(assignedAssetIds).ToList();
-                runs = runs.Where(r => assetIds.Contains(r.AssetId)).ToList();
-            }
-
-            var assets     = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
-            var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
-            var projects   = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
+            var runAssetIds = runs.Select(r => r.AssetId).Distinct().ToList();
+            var runAssets = await DashboardReadQueries.GetAssetIssueContextByIdsAsync(_db, runAssetIds);
+            var runProjectIds = runAssets.Values.Select(a => a.ProjectId).Distinct();
+            var runProjects = await DashboardReadQueries.GetProjectsByIdAsync(_db, runProjectIds);
 
             var result = new List<ClosedIssueDto>();
             var opts   = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
-            // ── 1. Resolved workflow-run issues ──────────────────────────────
             foreach (var run in runs)
             {
-                var asset   = assets.FirstOrDefault(a => a.Id == run.AssetId);
-                if (asset is null) continue;
-                var project = projects.FirstOrDefault(p => p.Id == asset.ProjectId);
+                if (!runAssets.TryGetValue(run.AssetId, out var asset)) continue;
+                runProjects.TryGetValue(asset.ProjectId, out var project);
 
                 List<JsonElement> issues;
                 try { issues = JsonSerializer.Deserialize<List<JsonElement>>(run.IssuesJson, opts) ?? []; }
@@ -464,22 +434,16 @@ public class AssetWorkflowRunsController : ControllerBase
                 }
             }
 
-            // ── 2. Resolved asset-level issues ───────────────────────────────
-            var assetsWithIssuesQuery = _db.ProjectAssets
-                .Where(a => a.IssuesJson != null && a.IssuesJson != "[]" && a.IssuesJson != "");
-            if (assignedAssetIds is not null)
-                assetsWithIssuesQuery = assetsWithIssuesQuery.Where(a => assignedAssetIds.Contains(a.Id));
-
-            var assetsWithIssues  = await assetsWithIssuesQuery.ToListAsync();
-            var assetProjectIds2  = assetsWithIssues.Select(a => a.ProjectId).Distinct().ToList();
-            var projects2         = await _db.Projects.Where(p => assetProjectIds2.Contains(p.Id)).ToListAsync();
+            var assetsWithIssues = await DashboardReadQueries.GetAssetsWithIssuesAsync(_db, assignedAssetIds);
+            var assetProjectIds2 = assetsWithIssues.Select(a => a.ProjectId).Distinct();
+            var projects2 = await DashboardReadQueries.GetProjectsByIdAsync(_db, assetProjectIds2);
 
             foreach (var asset in assetsWithIssues)
             {
-                var project = projects2.FirstOrDefault(p => p.Id == asset.ProjectId);
+                projects2.TryGetValue(asset.ProjectId, out var project);
 
                 List<JsonElement> issues;
-                try { issues = JsonSerializer.Deserialize<List<JsonElement>>(asset.IssuesJson!, opts) ?? []; }
+                try { issues = JsonSerializer.Deserialize<List<JsonElement>>(asset.IssuesJson, opts) ?? []; }
                 catch { continue; }
 
                 foreach (var iss in issues)
@@ -514,7 +478,6 @@ public class AssetWorkflowRunsController : ControllerBase
                 }
             }
 
-            // Sort by most recently closed first
             result.Sort((a, b) => string.Compare(b.ResolvedAt ?? "", a.ResolvedAt ?? "", StringComparison.Ordinal));
             return Ok(result);
         }
@@ -1526,12 +1489,8 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         try
         {
-            var pendingRuns = await _db.AssetWorkflowRuns
-                .Where(r => r.IsLocked && (r.SignatureStatus == "PendingInstaller" || r.SignatureStatus == "PendingCustomer"))
-                .ToListAsync();
+            var pendingRuns = await DashboardReadQueries.GetPendingSignatureRunsAsync(_db);
 
-            // Keep only the latest actionable locked run per asset so stale historical
-            // pending-installer runs do not appear after a newer run advances to customer sign-off.
             var runs = pendingRuns
                 .GroupBy(r => r.AssetId)
                 .Select(group => group
@@ -1545,27 +1504,27 @@ public class AssetWorkflowRunsController : ControllerBase
                 .ThenByDescending(r => r.CreatedAt)
                 .ToList();
 
-            var assetIds  = runs.Select(r => r.AssetId).Distinct().ToList();
-            var assets    = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
+            var assetIds = runs.Select(r => r.AssetId).Distinct().ToList();
+            var assetRows = await DashboardReadQueries.GetPendingSignatureAssetsAsync(_db, assetIds);
+            var assetsById = assetRows.ToDictionary(a => a.Id);
 
-            // Filter to user's assigned assets if userId provided
             if (!string.IsNullOrWhiteSpace(userId))
             {
-                var assignedAssetIds = assets
-                    .Where(a => a.AssignedUserId == userId)
-                    .Select(a => a.Id)
-                    .ToHashSet();
-                runs = runs.Where(r => assignedAssetIds.Contains(r.AssetId)).ToList();
-                assets = assets.Where(a => assignedAssetIds.Contains(a.Id)).ToList();
+                runs = runs
+                    .Where(r => assetsById.TryGetValue(r.AssetId, out var a) && a.AssignedUserId == userId)
+                    .ToList();
             }
 
-            var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
-            var projects  = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
+            var projectIds = assetsById.Values.Select(a => a.ProjectId).Distinct();
+            var projects = await DashboardReadQueries.GetProjectsByIdAsync(_db, projectIds);
 
             var result = runs.Select(r =>
             {
-                var asset   = assets.FirstOrDefault(a => a.Id == r.AssetId);
-                var project = asset is null ? null : projects.FirstOrDefault(p => p.Id == asset.ProjectId);
+                assetsById.TryGetValue(r.AssetId, out var asset);
+                DashboardReadQueries.ProjectIssuesRow? project = null;
+                if (asset is not null)
+                    projects.TryGetValue(asset.ProjectId, out project);
+
                 return new PendingSignatureDto(
                     RunId:        r.Id,
                     AssetId:      r.AssetId,
