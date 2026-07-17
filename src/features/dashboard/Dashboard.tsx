@@ -1,4 +1,4 @@
-﻿import {
+import {
   Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, Grid,
   IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Snackbar, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from "@mui/material";
@@ -153,10 +153,36 @@ function dashboardStatusChip(asset: { runStatus?: string | null; status?: string
   return { label: asset.runStatus || asset.status || "Unknown", color: "default" };
 }
 
+// Resting-face widgets for the "My Jobs" cards. Mirrors the Assets page
+// getWorkflowDisplayState().feature.widgets vocabulary, but derived from the
+// Dashboard summary fields (see Option B note in getMyJobsCardAction).
+type MyJobsCardWidget = {
+  kind: "missing-photo" | "issue";
+  /** exact count for missing-photo; 0 for the generic issue marker */
+  count: number;
+  color: "warning" | "error";
+};
+
+type MyJobsCardAction = {
+  actionKind: "default" | "missing-media";
+  chipLabel: string;
+  chipColor: "default" | "primary" | "success" | "error" | "warning" | "info";
+  buttonLabel: string;
+  buttonColor: "inherit" | "primary" | "success" | "warning" | "error" | "info";
+  helperText: string;
+  widgets: MyJobsCardWidget[];
+};
+
 function formatStepCompletionPercent(completedSteps: number, totalSteps: number) {
   if (totalSteps <= 0) return null;
   const percent = Math.round((Math.max(0, completedSteps) / totalSteps) * 100);
   return `${Math.min(100, percent)}% complete`;
+}
+
+function formatMyJobsStepCompletionLabel(completedSteps: number, totalSteps: number) {
+  if (totalSteps <= 0) return null;
+  const percent = Math.round((Math.max(0, completedSteps) / totalSteps) * 100);
+  return `${Math.min(100, percent)}% completed`;
 }
 function workflowModeLabel(workflowMode?: string | null) {
   if (workflowMode === "INSPECTION_ONLY") return "Inspection";
@@ -1419,76 +1445,104 @@ const Dashboard = () => {
     };
   }, [openIssues, pendingSigs, quickActionAsset, quickActionRuns, resolveMissingMediaForAsset]);
 
-  const getMyJobsCardAction = useCallback((asset: QuickActionAsset) => {
+  const getMyJobsCardAction = useCallback((asset: QuickActionAsset): MyJobsCardAction => {
     const isActive = isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status);
     const isPaused = isPausedAsset(asset.runStatus);
     const pendingSignature = pendingSigs.find((sig) => sig.assetId === asset.id) ?? null;
     const missingMediaFlag = missingMediaFlags.find((flag) => flag.assetId === asset.id) ?? null;
+    const evidenceMissing = (asset.evidenceStatus ?? "").toLowerCase() === "missingdata";
     const hasMissingMediaFallback = asset.totalSteps > 0 && asset.completedSteps >= asset.totalSteps && asset.missingItems > 0;
     const missingCount = missingMediaFlag?.missingSteps?.length
       ?? (missingMediaFlag ? Math.max(0, missingMediaFlag.totalExpected - missingMediaFlag.totalCaptured) : 0)
       ?? 0;
     const effectiveMissingCount = missingCount > 0 ? missingCount : asset.missingItems;
+    const hasMissingMedia = Boolean(missingMediaFlag) || hasMissingMediaFallback || evidenceMissing;
 
-    if (missingMediaFlag || hasMissingMediaFallback) {
+    // Stacked resting-face widgets — same vocabulary as the Assets page
+    // getWorkflowDisplayState().feature.widgets, built here from the Dashboard
+    // summary fields.
+    //
+    // OPTION B LIMITATION: the summary only carries a boolean `hasOpenIssues`,
+    // not the per-severity breakdown, so the issue widget is a single generic
+    // marker rather than the Assets page's blocking / high-observation / medium
+    // / low split with open+resolved counts. The camera (missing-photo) widget
+    // IS exact (real count). Tapping the card loads the runs and the Quick
+    // Action dialog then surfaces the precise, severity-correct action
+    // (e.g. "Resolve Blocking Issue"). Widgets are independent of the primary
+    // action, so they are attached to every branch below.
+    const widgets: MyJobsCardWidget[] = [];
+    if (hasMissingMedia) {
+      widgets.push({ kind: "missing-photo", count: Math.max(0, effectiveMissingCount), color: "warning" });
+    }
+    if (asset.hasOpenIssues === true) {
+      widgets.push({ kind: "issue", count: 0, color: "error" });
+    }
+
+    // Action + status cascade — labels aligned to the Assets page
+    // getWorkflowDisplayState. Order mirrors its computeAction cascade:
+    // missing-media / signatures first, then paused, active, not-started.
+    if (hasMissingMedia) {
       return {
-        actionKind: "missing-media" as const,
-        chipLabel: "Missing",
-        chipColor: "warning" as const,
+        actionKind: "missing-media",
+        chipLabel: "Missing captures",
+        chipColor: "warning",
         buttonLabel: "Add Missing Photos",
-        buttonColor: "warning" as const,
+        buttonColor: "warning",
         helperText: effectiveMissingCount > 0
           ? `${effectiveMissingCount} missing photo${effectiveMissingCount === 1 ? "" : "s"}`
           : "Required workflow captures are still missing",
+        widgets,
       };
     }
 
     if (pendingSignature) {
       return {
-        actionKind: "default" as const,
-        chipLabel: pendingSignature.signatureStatus === "PendingCustomer" ? "Cust. Sig" : "Inst. Sig",
-        chipColor: "warning" as const,
+        actionKind: "default",
+        chipLabel: "Pending sign",
+        chipColor: "info",
         buttonLabel: pendingSignatureStageLabel(pendingSignature.signatureStatus),
-        buttonColor: "warning" as const,
+        buttonColor: "warning",
         helperText: pendingSignatureStageText(pendingSignature.signatureStatus),
+        widgets,
       };
     }
 
     if (isPaused) {
       return {
-        actionKind: "default" as const,
-        chipLabel: "Paused",
-        chipColor: "warning" as const,
-        buttonLabel: "Resume",
-        buttonColor: "primary" as const,
-        helperText: asset.totalSteps > 0
-          ? `${formatStepCompletionPercent(asset.completedSteps, asset.totalSteps)}`
-          : "Workflow paused",
+        actionKind: "default",
+        chipLabel: "Paused by user",
+        chipColor: "warning",
+        buttonLabel: "Resume Run",
+        buttonColor: "primary",
+        helperText: "Paused by user",
+        widgets,
       };
     }
 
     if (isActive) {
+      // R2 (matches the Assets page): a raw "Issue" asset is shown as
+      // "In Progress"; the red issue widget carries the signal, and the chip
+      // turns red so a blocking issue stays visible without the widget row.
+      const flagged = asset.hasOpenIssues === true;
       return {
-        actionKind: "default" as const,
-        chipLabel: "Active",
-        chipColor: "primary" as const,
-        buttonLabel: "Resume",
-        buttonColor: "primary" as const,
-        helperText: asset.totalSteps > 0
-          ? `${formatStepCompletionPercent(asset.completedSteps, asset.totalSteps)}`
-          : "Workflow in progress",
+        actionKind: "default",
+        chipLabel: "In Progress",
+        chipColor: flagged ? "error" : "primary",
+        buttonLabel: "Continue Run",
+        buttonColor: "primary",
+        helperText: flagged ? "In progress \u2014 issue flagged" : "Running",
+        widgets,
       };
     }
 
     return {
-      actionKind: "default" as const,
-      chipLabel: isPendingAsset(asset.status) ? "Pending" : "Queued",
-      chipColor: isPendingAsset(asset.status) ? ("info" as const) : ("default" as const),
-      buttonLabel: "Start",
-      buttonColor: "inherit" as const,
-      helperText: asset.totalSteps > 0
-        ? `${formatStepCompletionPercent(asset.completedSteps, asset.totalSteps)}`
-        : "Ready to start workflow",
+      actionKind: "default",
+      chipLabel: isPendingAsset(asset.status) ? "Pending sign" : "Not Started",
+      chipColor: isPendingAsset(asset.status) ? "info" : "default",
+      buttonLabel: "Start Run",
+      buttonColor: "inherit",
+      helperText: isPendingAsset(asset.status) ? "Awaiting sign-off" : "Ready to start",
+      widgets,
     };
   }, [missingMediaFlags, pendingSigs]);
 
@@ -4221,20 +4275,23 @@ const Dashboard = () => {
                           <Stack spacing={0.75}>
                             <Stack direction="row" alignItems="center" spacing={1}>
                               <Box sx={{ flex: 1, minWidth: 0 }}>
-                                <Typography variant="caption" fontWeight={600} noWrap display="block">
-                                  {a.assetTag || a.assetName}
-                                </Typography>
+                                <Stack direction="row" alignItems="baseline" spacing={0.75} sx={{ minWidth: 0 }}>
+                                  <Typography variant="caption" fontWeight={600} noWrap display="block">
+                                    {a.assetTag || a.assetName}
+                                  </Typography>
+                                  {a.totalSteps > 0 && (
+                                    <Typography
+                                      variant="caption"
+                                      color="text.secondary"
+                                      noWrap
+                                      sx={{ fontSize: "0.62rem", flexShrink: 0 }}
+                                    >
+                                      {formatMyJobsStepCompletionLabel(a.completedSteps, a.totalSteps)}
+                                    </Typography>
+                                  )}
+                                </Stack>
                                 <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
                                   {a.jobNumber}
-                                </Typography>
-                                <Typography
-                                  variant="caption"
-                                  color={cardAction.chipColor === "warning" ? "warning.main" : "text.disabled"}
-                                  noWrap
-                                  display="block"
-                                  sx={{ fontSize: "0.62rem" }}
-                                >
-                                  {cardAction.helperText}
                                 </Typography>
                               </Box>
                               <Chip
@@ -4245,6 +4302,25 @@ const Dashboard = () => {
                                 sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0 }}
                               />
                             </Stack>
+                            {cardAction.widgets.length > 0 && (
+                              <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+                                {cardAction.widgets.map((w, wi) => (
+                                  <Chip
+                                    key={`${w.kind}-${wi}`}
+                                    size="small"
+                                    variant="outlined"
+                                    color={w.color}
+                                    icon={w.kind === "missing-photo"
+                                      ? <PhotoCameraOutlined sx={{ fontSize: 12 }} />
+                                      : <ErrorOutlineOutlined sx={{ fontSize: 12 }} />}
+                                    label={w.kind === "missing-photo"
+                                      ? (w.count > 0 ? String(w.count) : "\u2013")
+                                      : "Issue"}
+                                    sx={{ height: 16, fontSize: "0.55rem", "& .MuiChip-icon": { fontSize: 12, ml: 0.25 } }}
+                                  />
+                                ))}
+                              </Stack>
+                            )}
                             <Button size="small" variant="outlined"
                               color={cardAction.buttonColor}
                               onClick={(e) => {

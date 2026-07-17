@@ -2542,7 +2542,7 @@ export default function WorkOrderRunner({
                   Add Missing Photos
                 </Button>
               )}
-              {hasBlockingIssues && Boolean(activeRunId) && (
+              {(hasBlockingIssues || hasMissingCaptures) && Boolean(activeRunId) && (
                 <Button
                   variant="outlined"
                   color="warning"
@@ -2610,7 +2610,7 @@ export default function WorkOrderRunner({
                     handleSave();
                   }
                 }}
-                disabled={saving || (hasBlockingIssues && Boolean(activeRunId))}
+                disabled={saving || (Boolean(activeRunId) && (hasBlockingIssues || hasMissingCaptures))}
                 startIcon={saving ? <CircularProgress size={14} /> : undefined}
               >
                 {saving ? "Saving..." : activeRunId ? "Lock run" : "Done (preview)"}
