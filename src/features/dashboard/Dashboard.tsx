@@ -31,6 +31,7 @@ import {
 import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import api from "../../services/api";
+import { entityGetAsset } from "../../services/localDB";
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import type { Office } from "../../components/GlobalOfficeMap";
@@ -46,12 +47,13 @@ import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType"
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
-import type { AssetIssue } from "../../types/projectAsset";
+import type { AssetIssue, ProjectAsset } from "../../types/projectAsset";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { featureService } from "../../services/featureService";
 import type { Feature as LibFeature } from "../../types/feature";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import { mediaStore } from "../../services/mediaStore";
 import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import { get as dcGet, put as dcPut, DASHBOARD_CACHE_KEYS } from "../../services/dashboardCache";
@@ -164,7 +166,7 @@ type MyJobsCardWidget = {
 };
 
 type MyJobsCardAction = {
-  actionKind: "default" | "missing-media";
+  actionKind: "default" | "missing-media" | "resolve-blocking" | "signature";
   chipLabel: string;
   chipColor: "default" | "primary" | "success" | "error" | "warning" | "info";
   buttonLabel: string;
@@ -172,6 +174,91 @@ type MyJobsCardAction = {
   helperText: string;
   widgets: MyJobsCardWidget[];
 };
+
+type NativeMyJobsCardContext = {
+  asset: ProjectAsset;
+  runs: AssetWorkflowRun[];
+};
+
+function myJobsCardWidgetsFromDisplayState(displayState: WorkflowDisplayState): MyJobsCardWidget[] {
+  const widgets: MyJobsCardWidget[] = [];
+  if (displayState.gates.missingMediaCount > 0) {
+    widgets.push({
+      kind: "missing-photo",
+      count: displayState.gates.missingMediaCount,
+      color: "warning",
+    });
+  }
+  if (displayState.gates.openIssueCount > 0) {
+    widgets.push({
+      kind: "issue",
+      count: displayState.gates.openIssueCount,
+      color: "error",
+    });
+  }
+  return widgets;
+}
+
+function myJobsCardHelperTextFromDisplayState(displayState: WorkflowDisplayState): string {
+  const actionKind = displayState.action?.kind ?? "none";
+  if (actionKind === "add-missing-photos") {
+    const count = displayState.gates.missingMediaCount;
+    return count > 0
+      ? `${count} missing photo${count === 1 ? "" : "s"}`
+      : "Required workflow captures are still missing";
+  }
+  if (actionKind === "resolve-blocking") {
+    const count = displayState.gates.blockingIssueCount;
+    return count > 0
+      ? `${count} blocking issue${count === 1 ? "" : "s"}`
+      : "Resolve the blocking issue before continuing";
+  }
+  if (actionKind === "installer-sign") return "Awaiting installer sign-off";
+  if (actionKind === "customer-sign") return "Awaiting customer sign-off";
+  if (actionKind === "resume") return "Paused by user";
+  if (actionKind === "continue") {
+    return displayState.gates.openIssueCount > 0 ? "In progress - issue flagged" : "Running";
+  }
+  if (actionKind === "start") return "Ready to start";
+  if (actionKind === "run-details") return "Field work complete";
+  if (actionKind === "upload-json") return "Import an inspection definition";
+  if (actionKind === "no-workflow") return "Assign a workflow to this asset first";
+  return displayState.status.label;
+}
+
+function myJobsCardActionFromDisplayState(displayState: WorkflowDisplayState): MyJobsCardAction {
+  const actionKind = displayState.action?.kind ?? "run-details";
+  const widgets = myJobsCardWidgetsFromDisplayState(displayState);
+  const hasMissingMedia = actionKind === "add-missing-photos";
+  const chipLabel = hasMissingMedia ? displayState.feature.label : displayState.status.label;
+  const chipColor = hasMissingMedia
+    ? "warning"
+    : displayState.gates.blockingIssueCount > 0
+      ? "error"
+      : displayState.status.color;
+
+  let resolvedActionKind: MyJobsCardAction["actionKind"] = "default";
+  if (actionKind === "add-missing-photos") resolvedActionKind = "missing-media";
+  else if (actionKind === "resolve-blocking") resolvedActionKind = "resolve-blocking";
+  else if (actionKind === "installer-sign" || actionKind === "customer-sign") resolvedActionKind = "signature";
+
+  return {
+    actionKind: resolvedActionKind,
+    chipLabel,
+    chipColor,
+    buttonLabel: displayState.action?.label ?? "Run Details",
+    buttonColor:
+      actionKind === "add-missing-photos" || actionKind === "installer-sign" || actionKind === "customer-sign"
+        ? "warning"
+        : actionKind === "resolve-blocking"
+          ? "error"
+          : actionKind === "resume" || actionKind === "continue"
+            ? "primary"
+            : "inherit",
+    helperText: myJobsCardHelperTextFromDisplayState(displayState),
+    widgets,
+  };
+}
 
 function formatStepCompletionPercent(completedSteps: number, totalSteps: number) {
   if (totalSteps <= 0) return null;
@@ -1286,6 +1373,45 @@ const Dashboard = () => {
     () => dashboardWorkspace.installHistory,
     [dashboardWorkspace]
   );
+  const [nativeMyJobsCardContext, setNativeMyJobsCardContext] = useState<Record<string, NativeMyJobsCardContext>>({});
+
+  useEffect(() => {
+    if (!isNativePlatform) {
+      setNativeMyJobsCardContext({});
+      return;
+    }
+    if (myInstallAssets.length === 0) {
+      setNativeMyJobsCardContext({});
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const entries = await Promise.all(
+        myInstallAssets.map(async (asset) => {
+          const [cachedAsset, runs] = await Promise.all([
+            entityGetAsset(asset.id),
+            assetWorkflowRunService.listLocalByAsset(asset.id),
+          ]);
+          const data = cachedAsset?.data as ProjectAsset | undefined;
+          if (!data) return null;
+          return [asset.id, { asset: data, runs }] as const;
+        })
+      );
+
+      if (cancelled) return;
+      const next: Record<string, NativeMyJobsCardContext> = {};
+      for (const entry of entries) {
+        if (!entry) continue;
+        next[entry[0]] = entry[1];
+      }
+      setNativeMyJobsCardContext(next);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isNativePlatform, myInstallAssets]);
 
   const renderHistoryCard = useCallback((asset: DashboardWorkspaceAssetItem) => (
     <Paper
@@ -1450,6 +1576,22 @@ const Dashboard = () => {
   }, [openIssues, pendingSigs, quickActionAsset, quickActionRuns, resolveMissingMediaForAsset]);
 
   const getMyJobsCardAction = useCallback((asset: QuickActionAsset): MyJobsCardAction => {
+    if (isNativePlatform) {
+      const nativeContext = nativeMyJobsCardContext[asset.id];
+      if (nativeContext) {
+        const displayState = getWorkflowDisplayState(nativeContext.asset, nativeContext.runs, {
+          paused: isPausedAsset(asset.runStatus),
+          inspectionMode: asset.workflowMode === "INSPECTION_ONLY",
+          hasRunnableWorkflowSource:
+            nativeContext.runs.length > 0
+            || !!nativeContext.asset.productConfigId
+            || !!nativeContext.asset.workflowTemplateId
+            || !!nativeContext.asset.workflowSummary?.hasWorkflow,
+        });
+        return myJobsCardActionFromDisplayState(displayState);
+      }
+    }
+
     const isActive = isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status);
     const isPaused = isPausedAsset(asset.runStatus);
     const pendingSignature = pendingSigs.find((sig) => sig.assetId === asset.id) ?? null;
@@ -1462,18 +1604,6 @@ const Dashboard = () => {
     const effectiveMissingCount = missingCount > 0 ? missingCount : asset.missingItems;
     const hasMissingMedia = Boolean(missingMediaFlag) || hasMissingMediaFallback || evidenceMissing;
 
-    // Stacked resting-face widgets — same vocabulary as the Assets page
-    // getWorkflowDisplayState().feature.widgets, built here from the Dashboard
-    // summary fields.
-    //
-    // OPTION B LIMITATION: the summary only carries a boolean `hasOpenIssues`,
-    // not the per-severity breakdown, so the issue widget is a single generic
-    // marker rather than the Assets page's blocking / high-observation / medium
-    // / low split with open+resolved counts. The camera (missing-photo) widget
-    // IS exact (real count). Tapping the card loads the runs and the Quick
-    // Action dialog then surfaces the precise, severity-correct action
-    // (e.g. "Resolve Blocking Issue"). Widgets are independent of the primary
-    // action, so they are attached to every branch below.
     const widgets: MyJobsCardWidget[] = [];
     if (hasMissingMedia) {
       widgets.push({ kind: "missing-photo", count: Math.max(0, effectiveMissingCount), color: "warning" });
@@ -1482,9 +1612,6 @@ const Dashboard = () => {
       widgets.push({ kind: "issue", count: 0, color: "error" });
     }
 
-    // Action + status cascade — labels aligned to the Assets page
-    // getWorkflowDisplayState. Order mirrors its computeAction cascade:
-    // missing-media / signatures first, then paused, active, not-started.
     if (hasMissingMedia) {
       return {
         actionKind: "missing-media",
@@ -1524,9 +1651,6 @@ const Dashboard = () => {
     }
 
     if (isActive) {
-      // R2 (matches the Assets page): a raw "Issue" asset is shown as
-      // "In Progress"; the red issue widget carries the signal, and the chip
-      // turns red so a blocking issue stays visible without the widget row.
       const flagged = asset.hasOpenIssues === true;
       return {
         actionKind: "default",
@@ -1534,7 +1658,7 @@ const Dashboard = () => {
         chipColor: flagged ? "error" : "primary",
         buttonLabel: "Continue Run",
         buttonColor: "primary",
-        helperText: flagged ? "In progress \u2014 issue flagged" : "Running",
+        helperText: flagged ? "In progress - issue flagged" : "Running",
         widgets,
       };
     }
@@ -1548,7 +1672,7 @@ const Dashboard = () => {
       helperText: isPendingAsset(asset.status) ? "Awaiting sign-off" : "Ready to start",
       widgets,
     };
-  }, [missingMediaFlags, pendingSigs]);
+  }, [isNativePlatform, missingMediaFlags, nativeMyJobsCardContext, pendingSigs]);
 
   type DashboardProductWorkflow = { configId: string; configName: string; workflowTypeId?: string } | null;
 
@@ -4332,6 +4456,20 @@ const Dashboard = () => {
                                 if (cardAction.actionKind === "missing-media") {
                                   void openMissingMediaFromDashboardAsset(a);
                                   return;
+                                }
+                                if (cardAction.actionKind === "resolve-blocking") {
+                                  const blockingIssue = openIssues.find((issue) => issue.assetId === a.id && issue.isBlocking);
+                                  if (blockingIssue) {
+                                    void openIssueRepair(blockingIssue);
+                                    return;
+                                  }
+                                }
+                                if (cardAction.actionKind === "signature") {
+                                  const pendingSignature = pendingSigs.find((sig) => sig.assetId === a.id);
+                                  if (pendingSignature) {
+                                    openSignatureRepair(pendingSignature);
+                                    return;
+                                  }
                                 }
                                 void openQuickActionOrStart(a);
                               }}
