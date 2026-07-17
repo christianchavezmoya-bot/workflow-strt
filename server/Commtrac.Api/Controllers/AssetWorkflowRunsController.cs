@@ -87,11 +87,30 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var query = _db.AssetWorkflowRuns.AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(assetId))
+        var hasAssetScope = !string.IsNullOrWhiteSpace(assetId);
+        var hasProjectScope = !string.IsNullOrWhiteSpace(projectId);
+        var hasStatusScope = !string.IsNullOrWhiteSpace(status);
+        var hasTypeScope = !string.IsNullOrWhiteSpace(workflowType) || !string.IsNullOrWhiteSpace(workflowTypeId);
+
+        // PERF / SAFETY: this endpoint previously scanned the ENTIRE AssetWorkflowRuns table
+        // (every row, including the large base64 StepResultsJson / WorkflowSnapshotJson columns)
+        // whenever no assetId/projectId/status was supplied — the workflowType/workflowTypeId
+        // filters were only applied in memory AFTER loading everything. A caller passing just
+        // workflowType (e.g. the dashboard's "Inspection" signal) therefore triggered a full-table
+        // load that took 9-12s and starved the connection pool, timing out other requests
+        // (including dashboard-workspace). Require at least one scoping filter, and push the
+        // workflow-type filter down to the DB query.
+        if (!hasAssetScope && !hasProjectScope && !hasStatusScope && !hasTypeScope)
+        {
+            // No caller needs "every run in the system"; refuse the unbounded scan.
+            return Ok(Array.Empty<AssetWorkflowRunListItemDto>());
+        }
+
+        if (hasAssetScope)
         {
             query = query.Where(r => r.AssetId == assetId);
         }
-        else if (!string.IsNullOrWhiteSpace(projectId))
+        else if (hasProjectScope)
         {
             var projectAssetIds = await _db.ProjectAssets
                 .Where(a => a.ProjectId == projectId)
@@ -100,10 +119,52 @@ public class AssetWorkflowRunsController : ControllerBase
             query = query.Where(r => projectAssetIds.Contains(r.AssetId));
         }
 
-        if (!string.IsNullOrWhiteSpace(status))
+        if (hasStatusScope)
         {
             var normalizedStatus = NormalizeRunStatus(status);
             query = query.Where(r => r.Status == normalizedStatus);
+        }
+
+        // Push the workflow-type filter down to the DB so a type-only request (no asset/project)
+        // doesn't load the whole table. A run's type is resolved from its WorkflowConfig, so
+        // restrict to the config ids that match the requested type/typeId.
+        if (hasTypeScope)
+        {
+            // Resolve the WorkflowType id(s) the caller asked for.
+            List<string> matchingTypeIds;
+            if (!string.IsNullOrWhiteSpace(workflowTypeId))
+            {
+                matchingTypeIds = new List<string> { workflowTypeId };
+            }
+            else
+            {
+                matchingTypeIds = await _db.WorkflowTypes
+                    .Where(t => t.Name != null && t.Name.ToLower() == workflowType!.ToLower())
+                    .Select(t => t.Id)
+                    .ToListAsync();
+            }
+
+            // A run's resolved type comes from its active assignment first, then its config
+            // (see item mapping below: assignment?.WorkflowTypeId ?? config?.WorkflowTypeId).
+            // To preserve exact prior behavior, include configs matched EITHER by the config's own
+            // WorkflowTypeId OR by an active assignment of the requested type. This keeps the DB
+            // query bounded while never dropping a run the old in-memory filter would have kept.
+            var configIdsByConfigType = await _db.WorkflowConfigs
+                .Where(c => c.WorkflowTypeId != null && matchingTypeIds.Contains(c.WorkflowTypeId))
+                .Select(c => c.Id)
+                .ToListAsync();
+
+            var configIdsByAssignmentType = await _db.AssetWorkflowAssignments
+                .Where(a => a.Active && matchingTypeIds.Contains(a.WorkflowTypeId))
+                .Select(a => a.WorkflowConfigId)
+                .ToListAsync();
+
+            var typeConfigIds = configIdsByConfigType
+                .Concat(configIdsByAssignmentType)
+                .Distinct()
+                .ToList();
+
+            query = query.Where(r => typeConfigIds.Contains(r.WorkflowConfigId));
         }
 
         var runs = await query

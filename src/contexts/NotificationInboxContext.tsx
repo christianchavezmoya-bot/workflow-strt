@@ -57,11 +57,25 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       const next = await notificationService.list(true, 50);
       setNotifications(next);
 
-      const unreadIds = new Set(next.filter((n) => !n.isRead).map((n) => n.id));
+      const unreadItems = next.filter((n) => !n.isRead);
+      const unreadIds = new Set(unreadItems.map((n) => n.id));
       if (!initializedRef.current) {
         initializedRef.current = true;
         seenUnreadIdsRef.current = unreadIds;
-        setBannerNotification(next.find((n) => !n.isRead) ?? null);
+        setBannerNotification(unreadItems[0] ?? null);
+
+        // Cold-load recovery: if the dashboard's first workspace fetch lost the race
+        // against a slow backend path, replay the existing unread assignment/run-state
+        // signals once so listeners can recover without waiting for a brand-new
+        // notification or a manual asset reassignment.
+        const hasUnreadAssignmentEvent = unreadItems.some((n) => ASSIGNMENT_EVENT_TYPES.has(n.eventType));
+        const hasUnreadRunStateEvent = unreadItems.some((n) => RUN_STATE_EVENT_TYPES.has(n.eventType));
+        if (hasUnreadAssignmentEvent) {
+          window.dispatchEvent(new Event("notifications:assignments-changed"));
+        }
+        if (hasUnreadRunStateEvent) {
+          window.dispatchEvent(new Event("notifications:run-state-changed"));
+        }
         return;
       }
 
@@ -86,7 +100,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
   useEffect(() => {
     void refresh();
 
-    // PERF: the notification poll (list includeRead=true take=50 → ~27kB, doubled by
+    // PERF: the notification poll (list includeRead=true take=50 -> ~27kB, doubled by
     // a CORS preflight on cross-origin dev) was firing far more than once per 15s,
     // because sync activity dispatches "notifications:refresh" repeatedly (useSyncEngine,
     // signatureService) and every dispatch triggered an immediate full fetch. On a busy
@@ -112,7 +126,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     const stopPolling = () => {
       if (timer !== undefined) { window.clearInterval(timer); timer = undefined; }
     };
-    // Only poll while the tab is visible — a backgrounded tab doesn't need to keep
+    // Only poll while the tab is visible - a backgrounded tab does not need to keep
     // hitting the server every 15s.
     if (document.visibilityState === "visible") startPolling();
 

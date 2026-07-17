@@ -243,7 +243,7 @@ function isDashboardVisibleProjectStatus(status?: string | null) {
 
 const Dashboard = () => {
   const navigate   = useNavigate();
-  const { user }   = useAuth();
+  const { user, isAuthenticated }   = useAuth();
   const can        = usePermissions();
   const isAdmin      = user.role === "Admin";
   const isManager    = user.role === "Admin" || user.role === "Project Manager";
@@ -468,8 +468,11 @@ const Dashboard = () => {
     window.addEventListener("repo:projects:updated", handleUpdated);
     return () => window.removeEventListener("repo:projects:updated", handleUpdated);
   }, [dispatch]);
-
   useEffect(() => {
+    // Wait until auth has resolved so the dashboard does not write an empty
+    // installer workspace during the cold-start Viewer bootstrap window.
+    if (!isAuthenticated) return;
+
     if (isViewer) {
       setDashboardWorkspace({
         currentInstalls: [],
@@ -482,8 +485,23 @@ const Dashboard = () => {
 
     let cancelled = false;
     setWorkspaceLoading(true);
-    projectAssetService
-      .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
+
+    const fetchWorkspaceWithRetry = async (): Promise<DashboardWorkspace> => {
+      const scopeId = isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined;
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await projectAssetService.dashboardWorkspace(scopeId);
+        } catch (err) {
+          lastErr = err;
+          if (cancelled) throw err;
+          await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
+        }
+      }
+      throw lastErr;
+    };
+
+    fetchWorkspaceWithRetry()
       .then((data) => {
         if (!cancelled) {
           setDashboardWorkspace(data);
@@ -494,11 +512,9 @@ const Dashboard = () => {
         }
       })
       .catch(() => {
-        // The workspace endpoint parses run JSON per asset and can time out under load.
-        // On failure, DO NOT blank the dashboard: keep whatever is already on screen,
-        // and if this is a fresh mount with nothing shown yet, restore the last good
-        // cached workspace. This turns "jobs vanish on a slow refresh" into "jobs stay
-        // put; the refresh simply didn't update them this time".
+        // All retries failed. DO NOT blank the dashboard: keep whatever is already on
+        // screen, and if this is a fresh mount with nothing shown yet, restore the last
+        // good cached workspace.
         if (cancelled) return;
         const cached = dcGet<DashboardWorkspace>(DASHBOARD_CACHE_KEYS.dashboardWorkspace);
         if (cached) {
@@ -514,7 +530,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [isManager, isViewer, selectedDashboardId]);
+  }, [isAuthenticated, isManager, isViewer, selectedDashboardId]);
 
   const refreshLiveDashboardData = useCallback(() => {
     projectAssetService.listOpen().then(setOpenAssets);
