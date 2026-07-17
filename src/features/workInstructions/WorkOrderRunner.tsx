@@ -2283,6 +2283,7 @@ export default function WorkOrderRunner({
     const missingCaptureTargets = getMissingCaptureTargets(stepsData);
     const missingCaptureCount = missingCaptureTargets.length;
     const hasMissingCaptures = missingCaptureCount > 0;
+    const primaryBlockingIssue = blockingIssues[0] ?? null;
 
     return (
       <>
@@ -2531,6 +2532,20 @@ export default function WorkOrderRunner({
           </Button>
           {!saved && (
             <Stack direction="row" spacing={1}>
+              {primaryBlockingIssue && (
+                <Button
+                  variant="outlined"
+                  color="error"
+                  disabled={saving}
+                  startIcon={<ReportProblemOutlined />}
+                  onClick={() => {
+                    setShowSummaryIssues(true);
+                    setIssueDetailId(primaryBlockingIssue.id);
+                  }}
+                >
+                  {blockingIssues.length === 1 ? "Resolve Blocking Issue" : "Resolve Blocking Issues"}
+                </Button>
+              )}
               {hasMissingCaptures && (
                 <Button
                   variant="outlined"
