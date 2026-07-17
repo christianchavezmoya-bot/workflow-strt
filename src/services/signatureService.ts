@@ -5,7 +5,7 @@ import offlineStore from "./offlineStore";
 import { mediaStore } from "./mediaStore";
 import { isMobileNativePlatform } from "../utils/platform";
 import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
-import { applyOfflineAssetStatusUpdate } from "./assetWorkflowRunService";
+import { applyOfflineAssetStatusUpdate, syncOfflineAssetWorkflowStateFromRun } from "./assetWorkflowRunService";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 export interface SubmitSignaturePayload {
@@ -49,7 +49,7 @@ function isOfflineNetworkError(error: unknown): boolean {
 export const signatureService = {
   async listEvents(runId: string): Promise<SignatureEvent[]> {
     if (!isMobileNativePlatform()) {
-      // Short TTL — signature status is the kind of thing that should
+      // Short TTL â€” signature status is the kind of thing that should
       // never feel stale to whoever is checking it.
       return webCachedGet(
         `/signature-events?runId=${runId}`,
@@ -87,7 +87,7 @@ export const signatureService = {
     const queuedPayload: SubmitSignaturePayload = { ...payload, signatureData };
 
     try {
-      // Fast-bail when we already know the server is unreachable — avoids the
+      // Fast-bail when we already know the server is unreachable â€” avoids the
       // full axios 10 s timeout on the doomed network call before falling into
       // the offline branch. Same pattern as assetWorkflowRunService.startRun.
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
@@ -110,6 +110,12 @@ export const signatureService = {
           syncError: undefined,
         };
         await offlineStore.saveRun(updatedRun);
+        if (isMobileNativePlatform()) {
+          await syncOfflineAssetWorkflowStateFromRun(
+            updatedRun,
+            payload.signerRole === "Customer" ? "Complete" : "Pending",
+          );
+        }
         window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
           detail: { assetId: updatedRun.assetId, runs: [updatedRun], mergeById: true },
         }));
@@ -149,12 +155,17 @@ export const signatureService = {
           installerSignedAt: payload.signerRole === "Installer" ? now : cachedRun.installerSignedAt,
           customerSignedAt: payload.signerRole === "Customer" ? now : cachedRun.customerSignedAt,
           signatureStatus: payload.signerRole === "Customer" ? "Signed" : (cachedRun.customerSignedAt ? "Signed" : "PendingCustomer"),
+          updatedAt: now,
           localStatus: "PendingSync" as const,
           dirty: true,
           syncError: undefined,
           lastLocalSavedAt: now,
         };
         await offlineStore.saveRun(updatedRun);
+        await syncOfflineAssetWorkflowStateFromRun(
+          updatedRun,
+          payload.signerRole === "Customer" ? "Complete" : "Pending",
+        );
         // Mirror the offline-run-write refresh signal from assetWorkflowRunService
         // so the Assets page updates immediately when a signature is captured
         // offline. mergeById: true replaces this run by id and keeps sibling
@@ -164,8 +175,8 @@ export const signatureService = {
         }));
         // Update the parent asset's status so the dashboard / asset page
         // reflect the new lifecycle state immediately:
-        //   - Customer signs (final step) → asset.status = "Complete"
-        //   - Installer signs (intermediate) → asset.status = "Pending"
+        //   - Customer signs (final step) â†’ asset.status = "Complete"
+        //   - Installer signs (intermediate) â†’ asset.status = "Pending"
         //     (still waiting for the customer signature)
         const nextAssetStatus = payload.signerRole === "Customer" ? "Complete" : "Pending";
         await applyOfflineAssetStatusUpdate(updatedRun.assetId, nextAssetStatus);

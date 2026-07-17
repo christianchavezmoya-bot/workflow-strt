@@ -346,7 +346,7 @@ export const projectAssetService = {
             hasWorkflow: !!(a as unknown as { workflowSummary?: unknown }).workflowSummary,
             status: a.status,
             runStatus: (a as unknown as { workflowSummary?: { latestRunStatus?: string } }).workflowSummary?.latestRunStatus,
-            completedSteps: (a as unknown as { workflowSummary?: { completedSteps?: number } }).workflowSummary?.completedSteps ?? 0,
+            completedSteps: (a as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedItems ?? (a as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedSteps ?? 0,
             totalSteps: (a as unknown as { workflowSummary?: { requiredItems?: number } }).workflowSummary?.requiredItems ?? 0,
             missingItems: (a as unknown as { workflowSummary?: { missingItems?: number } }).workflowSummary?.missingItems ?? 0,
             evidenceStatus: (a as unknown as { workflowSummary?: { evidenceStatus?: string } }).workflowSummary?.evidenceStatus,
@@ -387,7 +387,7 @@ export const projectAssetService = {
           status: asset.status,
           runStatus: (asset as unknown as { workflowSummary?: { latestRunStatus?: string } }).workflowSummary?.latestRunStatus,
           historyStatus: asset.status,
-          completedSteps: (asset as unknown as { workflowSummary?: { completedSteps?: number } }).workflowSummary?.completedSteps ?? 0,
+          completedSteps: (asset as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedItems ?? (asset as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedSteps ?? 0,
           totalSteps: (asset as unknown as { workflowSummary?: { requiredItems?: number } }).workflowSummary?.requiredItems ?? 0,
           missingItems: (asset as unknown as { workflowSummary?: { missingItems?: number } }).workflowSummary?.missingItems ?? 0,
           evidenceStatus: (asset as unknown as { workflowSummary?: { evidenceStatus?: string } }).workflowSummary?.evidenceStatus,
@@ -398,8 +398,8 @@ export const projectAssetService = {
           deleteReason: (asset as unknown as { deleteReason?: string }).deleteReason,
           latestActivityAt: (asset as unknown as { latestActivityAt?: string }).latestActivityAt,
           completedAt: (asset as unknown as { completedAt?: string }).completedAt,
-          hasOpenIssues: (asset as unknown as { hasOpenIssues?: boolean }).hasOpenIssues ?? false,
-          signatureStatus: (asset as unknown as { signatureStatus?: string }).signatureStatus,
+          hasOpenIssues: (asset as unknown as { hasOpenIssues?: boolean; workflowSummary?: { hasOpenIssues?: boolean } }).hasOpenIssues ?? (asset as unknown as { hasOpenIssues?: boolean; workflowSummary?: { hasOpenIssues?: boolean } }).workflowSummary?.hasOpenIssues ?? false,
+          signatureStatus: (asset as unknown as { signatureStatus?: string; workflowSummary?: { signatureStatus?: string } }).signatureStatus ?? (asset as unknown as { signatureStatus?: string; workflowSummary?: { signatureStatus?: string } }).workflowSummary?.signatureStatus,
         });
 
         const allItems = cached

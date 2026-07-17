@@ -1,7 +1,7 @@
 import api from "./api";
 import { IssueRepository } from "../repositories/IssueRepository";
 import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
-import type { ProjectAsset, ProjectAssetStatus } from "../types/projectAsset";
+import type { ProjectAsset, ProjectAssetStatus, ProjectAssetWorkflowSummary } from "../types/projectAsset";
 import type { Project } from "../types/project";
 import offlineStore, { type OfflineRun } from "./offlineStore";
 import syncQueue from "./syncQueue";
@@ -20,6 +20,12 @@ import { isMobileNativePlatform } from "../utils/platform";
 import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
+import {
+  countMissingWorkflowItems,
+  getWorkflowStepCompletion,
+  parseWorkflowStepsFromSnapshot,
+  runHasCompletedAllSteps,
+} from "../utils/workflowCompleteness";
 
 export interface PendingSignatureRecord {
   runId:        string;
@@ -307,7 +313,7 @@ async function cacheServerRun(run: AssetWorkflowRun): Promise<AssetWorkflowRun> 
   const projectId = await resolveProjectId(run.assetId, run.id);
   const existing = await offlineStore.getRun(run.id);
   if (existing?.dirty) {
-    // Local data is newer (pending sync) — merge server metadata but keep local payload intact
+    // Local data is newer (pending sync) â€” merge server metadata but keep local payload intact
     await offlineStore.saveRun({
       ...toOfflineRun(run, projectId),
       stepResultsJson: existing.stepResultsJson,
@@ -369,7 +375,7 @@ function refreshRunByIdInBackground(resolvedId: string): void {
 // workflow-runs-cache-updated listener refreshes its runsMap from this, so
 // status/features/actions update offline WITHOUT a network round-trip. This is
 // the offline counterpart to refreshRuns*InBackground, which only dispatch after
-// a successful network GET (they early-return when offline) — so without this,
+// a successful network GET (they early-return when offline) â€” so without this,
 // offline pause/issue/missing-photo writes persisted locally but the UI never
 // re-rendered until the app went back online.
 function signalLocalRunUpdate(run: AssetWorkflowRun): void {
@@ -414,6 +420,93 @@ function deriveOfflineAssetStatusFromRun(run: Pick<AssetWorkflowRun, "status" | 
   return "Complete";
 }
 
+
+type CachedAssetWithDerivedState = ProjectAsset & {
+  hasOpenIssues?: boolean;
+  signatureStatus?: string;
+  latestActivityAt?: string;
+  completedAt?: string;
+};
+
+function deriveOfflineWorkflowSummaryFromRun(
+  run: AssetWorkflowRun,
+  existingSummary?: ProjectAssetWorkflowSummary,
+): ProjectAssetWorkflowSummary {
+  const totalSteps = parseWorkflowStepsFromSnapshot(run.workflowSnapshotJson ?? "").length;
+  const { completedSteps } = getWorkflowStepCompletion(run);
+  const allStepsDone = runHasCompletedAllSteps(run);
+  const missingItems = allStepsDone ? countMissingWorkflowItems(run) : 0;
+  const hasOpenIssues = parseRunIssues(run.issuesJson).some((issue) => !issue.resolved);
+  const hasWorkflow = totalSteps > 0 || existingSummary?.hasWorkflow === true;
+
+  let evidenceStatus: ProjectAssetWorkflowSummary["evidenceStatus"] = "None";
+  if (hasWorkflow) {
+    if (!run.isLocked && run.status === "Paused") evidenceStatus = "Paused";
+    else if (!run.isLocked) evidenceStatus = "Running";
+    else if (missingItems > 0) evidenceStatus = "MissingData";
+    else evidenceStatus = "Complete";
+  }
+
+  return {
+    hasWorkflow,
+    evidenceStatus,
+    requiredItems: totalSteps,
+    completedItems: completedSteps,
+    missingItems,
+    latestRunId: run.id,
+    latestRunStatus: run.status,
+    latestRunLocked: run.isLocked,
+    signatureStatus: run.signatureStatus,
+    hasOpenIssues,
+    latestRunStartedAt: run.startedAt,
+    latestRunCompletedAt: run.completedAt,
+    totalInventoryFeatures: existingSummary?.totalInventoryFeatures,
+    completedInventoryFeatures: existingSummary?.completedInventoryFeatures,
+  };
+}
+
+export async function syncOfflineAssetWorkflowStateFromRun(
+  run: AssetWorkflowRun,
+  statusOverride?: ProjectAssetStatus,
+): Promise<void> {
+  if (!isMobileNativePlatform()) return;
+  try {
+    const existing = await entityGetAsset(run.assetId);
+    if (!existing) return;
+    const data = (existing.data as CachedAssetWithDerivedState | null) ?? null;
+    if (!data) return;
+
+    const workflowSummary = deriveOfflineWorkflowSummaryFromRun(run, data.workflowSummary);
+    const nextStatus = statusOverride ?? deriveOfflineAssetStatusFromRun(run);
+    const updated: CachedAssetWithDerivedState = {
+      ...data,
+      status: nextStatus,
+      updatedAt: run.updatedAt ?? data.updatedAt,
+      workflowSummary,
+      hasOpenIssues: workflowSummary.hasOpenIssues,
+      signatureStatus: run.signatureStatus,
+      latestActivityAt: run.updatedAt ?? data.updatedAt,
+      completedAt: run.completedAt ?? data.completedAt,
+    };
+
+    await entityPutAsset({
+      id: existing.id,
+      productId: existing.productId,
+      projectId: existing.projectId,
+      data: updated,
+      dirty: false,
+    });
+    window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+      detail: {
+        assetId: existing.id,
+        productId: existing.productId,
+        projectId: existing.projectId,
+      },
+    }));
+  } catch {
+    // non-fatal
+  }
+}
 async function enqueueRunMutation(
   runId: string,
   input: {
@@ -447,7 +540,7 @@ async function enqueueRunMutation(
   });
 }
 
-// ── Pure derivation helpers ────────────────────────────────────────────────────
+// â”€â”€ Pure derivation helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** Derive {id, assetId, projectId, data} records for the issues store from a
  *  run's issuesJson. Only unresolved issues are included. Enriches with run/asset
@@ -562,7 +655,7 @@ async function deriveClosedIssuesLocally(): Promise<ClosedIssueRecord[]> {
  * and shows the wrong action button / sub-label until the next server refresh
  * (e.g. on reconnect).
  *
- * Best-effort: never throws. Asset updates are non-fatal — the run itself is
+ * Best-effort: never throws. Asset updates are non-fatal â€” the run itself is
  * the source of truth and will reconcile with the server on next sync.
  */
 export async function applyOfflineAssetStatusUpdate(
@@ -596,7 +689,7 @@ export async function applyOfflineAssetStatusUpdate(
 }
 
 export const assetWorkflowRunService = {
-  /** IndexedDB runs for an asset — native only; no network. */
+  /** IndexedDB runs for an asset â€” native only; no network. */
   async listLocalByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
     if (!isMobileNativePlatform()) return [];
     return offlineStore.listRunsByAsset(assetId);
@@ -631,7 +724,7 @@ export const assetWorkflowRunService = {
 
   async listByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
     if (!isMobileNativePlatform()) {
-      // Shorter TTL than the default — this feeds run-state decisions (e.g.
+      // Shorter TTL than the default â€” this feeds run-state decisions (e.g.
       // "Continue Run" vs "Start Run") that should stay close to live.
       return webCachedGet(
         `/asset-workflow-runs/by-asset/${assetId}`,
@@ -733,6 +826,7 @@ export const assetWorkflowRunService = {
       const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", body);
       const updatedRun = await cacheServerRun(res.data);
       signalLocalRunUpdate(updatedRun);
+      await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));
       return updatedRun;
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
@@ -789,6 +883,7 @@ export const assetWorkflowRunService = {
 
       await offlineStore.saveRun(offlineRun);
       signalLocalRunUpdate(offlineRun);
+      await syncOfflineAssetWorkflowStateFromRun(offlineRun, deriveOfflineAssetStatusFromRun(offlineRun));
       // Update the parent asset's status so the dashboard / asset page reflect
       // the new InProgress state immediately, instead of waiting for the next
       // server refresh (which won't happen until the device reconnects).
@@ -840,6 +935,7 @@ export const assetWorkflowRunService = {
       });
       const updatedRun = await cacheServerRun(res.data);
       signalLocalRunUpdate(updatedRun);
+      await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));
       return updatedRun;
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
@@ -862,8 +958,9 @@ export const assetWorkflowRunService = {
 
       await offlineStore.saveRun(offlineRun);
       signalLocalRunUpdate(offlineRun);
+      await syncOfflineAssetWorkflowStateFromRun(offlineRun, deriveOfflineAssetStatusFromRun(offlineRun));
       // Sync issues store so Issues Board reflects any issue changes from progress saves.
-      // Fix: must call this even when openRecords is empty — entityReplaceIssuesForAsset
+      // Fix: must call this even when openRecords is empty â€” entityReplaceIssuesForAsset
       // correctly removes stale closed entries, unlike the old entityPutIssues-only call.
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
       await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);
@@ -896,7 +993,7 @@ export const assetWorkflowRunService = {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
       // Completing a run also changes the asset's own status server-side
-      // (see AssetWorkflowRunsController.CompleteRun) — invalidate both so
+      // (see AssetWorkflowRunsController.CompleteRun) â€” invalidate both so
       // the very next read of either is guaranteed live, not a stale
       // pre-completion snapshot.
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
@@ -919,6 +1016,7 @@ export const assetWorkflowRunService = {
       });
       const cachedRun = await cacheServerRun(res.data);
       signalLocalRunUpdate(cachedRun);
+      await syncOfflineAssetWorkflowStateFromRun(cachedRun, "Pending");
       // Fix: the server's /complete response only contains the run, but completing
       // a run also changes the asset's own status server-side (e.g. to "Pending"
       // awaiting signature). Without this refetch, the locally cached asset stays
@@ -937,7 +1035,7 @@ export const assetWorkflowRunService = {
           dirty: false,
         });
       } catch {
-        // Non-fatal — the run itself completed successfully. The asset will
+        // Non-fatal â€” the run itself completed successfully. The asset will
         // self-correct on its next normal refresh if this refetch fails.
       }
       return cachedRun;
@@ -959,7 +1057,7 @@ export const assetWorkflowRunService = {
         // Fix: the server always sets this to "PendingInstaller" on completion
         // (see AssetWorkflowRunsController.CompleteRun). The offline fallback
         // previously never set it, so the run stayed on whatever signatureStatus
-        // it had before completing — meaning the installer signature screen
+        // it had before completing â€” meaning the installer signature screen
         // never appeared until after reconnecting and re-syncing.
         signatureStatus: "PendingInstaller",
         completedAt: now,
@@ -972,6 +1070,7 @@ export const assetWorkflowRunService = {
 
       await offlineStore.saveRun(offlineRun);
       signalLocalRunUpdate(offlineRun);
+      await syncOfflineAssetWorkflowStateFromRun(offlineRun, deriveOfflineAssetStatusFromRun(offlineRun));
       // Update the parent asset so the dashboard reflects "Pending" (awaiting
       // installer signature) immediately, instead of waiting for reconnect.
       await applyOfflineAssetStatusUpdate(offlineRun.assetId, "Pending");
@@ -1003,7 +1102,7 @@ export const assetWorkflowRunService = {
     return res.data;
   },
 
-  /** Patch issues only — works on locked and in-progress runs. */
+  /** Patch issues only â€” works on locked and in-progress runs. */
   async patchIssues(runId: string, issuesJson: string): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
       const requestBody = await mediaStore.resolveUploadPayload({ issuesJson });
@@ -1023,6 +1122,7 @@ export const assetWorkflowRunService = {
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/issues`, requestBody);
       const updatedRun = await cacheServerRun(res.data);
       signalLocalRunUpdate(updatedRun);
+      await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));
       // Sync issues store so Issues Board reflects the change immediately,
       // without waiting for IssueRepository's own background refresh.
       const openRecords = await deriveOpenIssuesFromRun(updatedRun);
@@ -1050,6 +1150,7 @@ export const assetWorkflowRunService = {
 
       await offlineStore.saveRun(offlineRun);
       signalLocalRunUpdate(offlineRun);
+      await syncOfflineAssetWorkflowStateFromRun(offlineRun, deriveOfflineAssetStatusFromRun(offlineRun));
       // Sync issues store so Issues Board reflects the change immediately, offline.
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
       await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);
@@ -1099,7 +1200,7 @@ export const assetWorkflowRunService = {
     return await this.completeRun(runId, run.stepResultsJson ?? "[]", run.issuesJson ?? "[]", completedByName, run.bomActualJson);
   },
 
-  /** Patch step results on a locked/complete run — used to add missing photos after completion. */
+  /** Patch step results on a locked/complete run â€” used to add missing photos after completion. */
   async patchStepResults(runId: string, stepResultsJson: string, amendedByName?: string, captureDataAmend = false): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
       const requestBody = await mediaStore.resolveUploadPayload({
@@ -1134,6 +1235,7 @@ export const assetWorkflowRunService = {
       });
       const updatedRun = await cacheServerRun(res.data);
       signalLocalRunUpdate(updatedRun);
+      await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return updatedRun;
@@ -1143,7 +1245,7 @@ export const assetWorkflowRunService = {
       // Offline: persist the amended step results locally and queue the PATCH.
       // Media (base64 photos) in stepResultsJson is resolved by the sync engine's
       // generic replay path (mediaStore.resolveUploadPayload at send time), so
-      // photos survive the queue and upload on reconnect — matching the rest of
+      // photos survive the queue and upload on reconnect â€” matching the rest of
       // the run lifecycle instead of failing outright.
       const cachedRun = await getCachedRun(runId);
       if (!cachedRun) throw error;
@@ -1160,6 +1262,7 @@ export const assetWorkflowRunService = {
       };
       await offlineStore.saveRun(offlineRun);
       signalLocalRunUpdate(offlineRun);
+      await syncOfflineAssetWorkflowStateFromRun(offlineRun, deriveOfflineAssetStatusFromRun(offlineRun));
 
       await enqueueRunMutation(resolvedRunId, {
         opType: "STEP_RESULTS",
@@ -1217,6 +1320,7 @@ export const assetWorkflowRunService = {
     });
     const updatedRun = await cacheServerRun(res.data);
     signalLocalRunUpdate(updatedRun);
+      await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));
     window.dispatchEvent(new Event("notifications:run-state-changed"));
     window.dispatchEvent(new Event("notifications:refresh"));
     return updatedRun;
@@ -1235,10 +1339,11 @@ export const assetWorkflowRunService = {
     const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entries`, { timeEntriesJson });
     const updatedRun = await cacheServerRun(res.data);
     signalLocalRunUpdate(updatedRun);
+      await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));
     return updatedRun;
   },
 
-  /** Mark customer signature as waived — run stays complete but skips customer sign-off. */
+  /** Mark customer signature as waived â€” run stays complete but skips customer sign-off. */
   async waiveCustomerSignature(runId: string): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/waive-customer-signature`);
@@ -1253,6 +1358,7 @@ export const assetWorkflowRunService = {
     const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/waive-customer-signature`);
     const updatedRun = await cacheServerRun(res.data);
     signalLocalRunUpdate(updatedRun);
+      await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));
     window.dispatchEvent(new Event("notifications:run-state-changed"));
     window.dispatchEvent(new Event("notifications:refresh"));
     return updatedRun;
@@ -1285,6 +1391,7 @@ export const assetWorkflowRunService = {
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entry`, body);
       const updatedRun = await cacheServerRun(res.data);
       signalLocalRunUpdate(updatedRun);
+      await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));
       return updatedRun;
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
@@ -1306,6 +1413,7 @@ export const assetWorkflowRunService = {
 
       await offlineStore.saveRun(offlineRun);
       signalLocalRunUpdate(offlineRun);
+      await syncOfflineAssetWorkflowStateFromRun(offlineRun, deriveOfflineAssetStatusFromRun(offlineRun));
       await enqueueTimeEntry(resolvedRunId, body, {
         timeTrackingJson: offlineRun.timeTrackingJson,
         productiveSeconds: offlineRun.productiveSeconds,
@@ -1328,7 +1436,7 @@ export const assetWorkflowRunService = {
       // Offline fallback: the Assets page already derives the same
       // "awaiting installer/customer sign-off" state from locally cached
       // runs (AssetInstallationPage.getAssetAttentionSummary), so the data
-      // exists on-device — this endpoint previously just went blank offline
+      // exists on-device â€” this endpoint previously just went blank offline
       // instead of reading it, giving two different answers for the same
       // asset depending which screen you looked at.
       if (!isMobileNativePlatform()) return [];

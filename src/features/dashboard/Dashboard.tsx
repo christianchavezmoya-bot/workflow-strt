@@ -1043,16 +1043,20 @@ const Dashboard = () => {
   }, []);
 
   const refreshDashboardAfterIssueUpdate = useCallback(async () => {
-    await Promise.all([
+    const [, , , workspace] = await Promise.all([
       loadAttention(),
       projectAssetService.listOpen().then(setOpenAssets),
       projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([])),
       projectAssetService
         .dashboardWorkspace(dashboardWorkspaceScopeId)
-        .then((data) => applyDashboardWorkspace(data))
-        .catch(() => {}),
+        .then((data) => {
+          applyDashboardWorkspace(data);
+          return data;
+        })
+        .catch(() => null),
     ]);
     setAnalyticsRefreshTick((t) => t + 1);
+    return workspace;
   }, [applyDashboardWorkspace, dashboardWorkspaceScopeId, loadAttention]);
 
   const openHistoryReport = useCallback(async (assetItem: DashboardWorkspaceAssetItem) => {
@@ -5298,11 +5302,20 @@ const Dashboard = () => {
           mode={photoUploadMode}
           currentUserName={user.fullName ?? ""}
           onClose={() => setPhotoUploadTarget(null)}
-          onUpdated={async () => {
+          onUpdated={async (updatedFlag) => {
+            const repairedAssetId = photoUploadTarget?.assetId;
             setPhotoUploadTarget(null);
             const raw: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
             setMissingMediaFlags(raw.map((f) => ({ ...f, missingSteps: f.missingSteps ?? [], totalExpected: f.totalExpected ?? 0, totalCaptured: f.totalCaptured ?? 0 })));
-            await refreshDashboardAfterIssueUpdate();
+            const refreshedWorkspace = await refreshDashboardAfterIssueUpdate();
+            if (!isNativePlatform || updatedFlag !== null || !repairedAssetId || !refreshedWorkspace) {
+              return;
+            }
+            const refreshedAsset = [...refreshedWorkspace.currentInstalls, ...refreshedWorkspace.currentInspections]
+              .find((asset) => asset.id === repairedAssetId);
+            if (refreshedAsset) {
+              await openQuickActionOrStart(refreshedAsset);
+            }
           }}
         />
       )}
