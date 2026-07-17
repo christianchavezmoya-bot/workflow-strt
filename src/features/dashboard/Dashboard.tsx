@@ -153,6 +153,11 @@ function dashboardStatusChip(asset: { runStatus?: string | null; status?: string
   return { label: asset.runStatus || asset.status || "Unknown", color: "default" };
 }
 
+function formatStepCompletionPercent(completedSteps: number, totalSteps: number) {
+  if (totalSteps <= 0) return null;
+  const percent = Math.round((Math.max(0, completedSteps) / totalSteps) * 100);
+  return `${Math.min(100, percent)}% complete`;
+}
 function workflowModeLabel(workflowMode?: string | null) {
   if (workflowMode === "INSPECTION_ONLY") return "Inspection";
   if (workflowMode === "MIXED") return "Mixed";
@@ -1343,7 +1348,7 @@ const Dashboard = () => {
         buttonLabel: "Resume",
         buttonColor: "primary" as const,
         helperText: asset.totalSteps > 0
-          ? `${asset.completedSteps}/${asset.totalSteps} steps complete`
+          ? `${formatStepCompletionPercent(asset.completedSteps, asset.totalSteps)}`
           : "Workflow paused",
       };
     }
@@ -1356,7 +1361,7 @@ const Dashboard = () => {
         buttonLabel: "Resume",
         buttonColor: "primary" as const,
         helperText: asset.totalSteps > 0
-          ? `${asset.completedSteps}/${asset.totalSteps} steps complete`
+          ? `${formatStepCompletionPercent(asset.completedSteps, asset.totalSteps)}`
           : "Workflow in progress",
       };
     }
@@ -1368,7 +1373,7 @@ const Dashboard = () => {
       buttonLabel: "Start",
       buttonColor: "inherit" as const,
       helperText: asset.totalSteps > 0
-        ? `${asset.completedSteps}/${asset.totalSteps} steps complete`
+        ? `${formatStepCompletionPercent(asset.completedSteps, asset.totalSteps)}`
         : "Ready to start workflow",
     };
   }, [missingMediaFlags, pendingSigs]);
@@ -5151,7 +5156,7 @@ const Dashboard = () => {
                 <Box>
                   {quickActionAsset.totalSteps > 0 && (
                     <Typography variant="caption" color="text.secondary" display="block">
-                      Progress: {quickActionAsset.completedSteps}/{quickActionAsset.totalSteps} steps
+                      Progress: {formatStepCompletionPercent(quickActionAsset.completedSteps, quickActionAsset.totalSteps)}
                       {quickActionAsset.missingItems > 0 && ` \u2022 ${quickActionAsset.missingItems} missing`}
                     </Typography>
                   )}
@@ -5596,3 +5601,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+
