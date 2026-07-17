@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+﻿import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { notificationService } from "../services/notificationService";
 import { useAuth } from "../hooks/useAuth";
 import type { AppNotification } from "../types/notification";
@@ -8,6 +8,17 @@ const ASSIGNMENT_EVENT_TYPES = new Set([
   "workflow-unassigned", "asset-created", "asset-assignment-updated",
   "asset-assigned", "asset-unassigned", "asset-takeover", "asset-self-assigned",
 ]);
+
+const DASHBOARD_ASSIGNMENT_RECOVERY_KEY = "dashboard:pending-assignment-recovery";
+const DASHBOARD_RUN_STATE_RECOVERY_KEY = "dashboard:pending-run-state-recovery";
+
+function rememberDashboardRecoverySignal(storageKey: string) {
+  try {
+    window.sessionStorage.setItem(storageKey, "1");
+  } catch {
+    // Ignore storage/privacy-mode failures.
+  }
+}
 
 const RUN_STATE_EVENT_TYPES = new Set([
   "workflow-started", "workflow-paused", "workflow-resumed", "workflow-completed",
@@ -46,6 +57,12 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
 
     if (!isAuthenticated || !user?.id || isPublicRoute) {
       setNotifications([]);
+      try {
+        window.sessionStorage.removeItem(DASHBOARD_ASSIGNMENT_RECOVERY_KEY);
+        window.sessionStorage.removeItem(DASHBOARD_RUN_STATE_RECOVERY_KEY);
+      } catch {
+        // Ignore storage/privacy-mode failures.
+      }
       setBannerNotification(null);
       initializedRef.current = false;
       seenUnreadIdsRef.current = new Set();
@@ -71,9 +88,11 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
         const hasUnreadAssignmentEvent = unreadItems.some((n) => ASSIGNMENT_EVENT_TYPES.has(n.eventType));
         const hasUnreadRunStateEvent = unreadItems.some((n) => RUN_STATE_EVENT_TYPES.has(n.eventType));
         if (hasUnreadAssignmentEvent) {
+          rememberDashboardRecoverySignal(DASHBOARD_ASSIGNMENT_RECOVERY_KEY);
           window.dispatchEvent(new Event("notifications:assignments-changed"));
         }
         if (hasUnreadRunStateEvent) {
+          rememberDashboardRecoverySignal(DASHBOARD_RUN_STATE_RECOVERY_KEY);
           window.dispatchEvent(new Event("notifications:run-state-changed"));
         }
         return;
@@ -84,9 +103,11 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       if (newestUnread) {
         setBannerNotification(newestUnread);
         if (ASSIGNMENT_EVENT_TYPES.has(newestUnread.eventType)) {
+          rememberDashboardRecoverySignal(DASHBOARD_ASSIGNMENT_RECOVERY_KEY);
           window.dispatchEvent(new Event("notifications:assignments-changed"));
         }
         if (RUN_STATE_EVENT_TYPES.has(newestUnread.eventType)) {
+          rememberDashboardRecoverySignal(DASHBOARD_RUN_STATE_RECOVERY_KEY);
           window.dispatchEvent(new Event("notifications:run-state-changed"));
         }
       }

@@ -46,7 +46,7 @@ const navItems = [
   { label: "Documents",         icon: <FolderOutlinedIcon />,                     to: "/documents",                         tourKey: "nav-documents" },
   { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,                  to: "/tips",                              tourKey: "nav-tips" },
   ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project", tourKey: "nav-bom" }] : []),
-  // Admin and Settings are web/desktop only — hidden on native mobile app
+  // Admin and Settings are web/desktop only - hidden on native mobile app
   ...(!isNativeMobile ? [
     { label: "Admin",    icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin",    end: true,  tourKey: "nav-admin",     requiresFullAccess: false },
     { label: "Settings", icon: <SettingsOutlinedIcon />,           to: "/settings",            tourKey: "nav-settings",  requiresFullAccess: true  },
@@ -87,6 +87,8 @@ const Sidebar = () => {
       // Extract unique countries from global offices
       const countries = Array.from(new Set(offices.map((office) => office.country).filter(Boolean)));
       setOfficeOptions([...countries.sort(), "All"]);
+    }).catch(() => {
+      setOfficeOptions(["All"]);
     });
   }, []);
 

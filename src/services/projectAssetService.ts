@@ -1,4 +1,4 @@
-import axios from "axios";
+﻿import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 import type { Project } from "../types/project";
@@ -359,10 +359,14 @@ export const projectAssetService = {
     }
   },
 
-  async dashboardWorkspace(userId?: string): Promise<DashboardWorkspace> {
+  async dashboardWorkspace(userId?: string, options?: { light?: boolean }): Promise<DashboardWorkspace> {
     try {
+      const params: Record<string, string | boolean> = {};
+      if (userId) params.userId = userId;
+      if (options?.light) params.light = true;
+
       const res = await api.get<DashboardWorkspace>("/project-assets/dashboard-workspace", {
-        params: userId ? { userId } : undefined,
+        params: Object.keys(params).length > 0 ? params : undefined,
       });
       return res.data;
     } catch {

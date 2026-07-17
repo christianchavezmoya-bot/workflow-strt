@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
@@ -59,7 +59,7 @@ public class ProjectAssetsController : ControllerBase
         return Ok(counts);
     }
 
-    // GET api/project-assets/open  — all assets not yet Complete, joined with parent project info
+    // GET api/project-assets/open  - all assets not yet Complete, joined with parent project info
     [HttpGet("open")]
     public async Task<ActionResult<IEnumerable<OpenAssetDto>>> GetOpen()
     {
@@ -92,14 +92,7 @@ public class ProjectAssetsController : ControllerBase
             .ToListAsync();
 
         var assetIds = assets.Select(a => a.Id).Distinct().ToList();
-        var latestRuns = await _db.AssetWorkflowRuns
-            .Where(r => assetIds.Contains(r.AssetId))
-            .OrderByDescending(r => r.StartedAt)
-            .ThenByDescending(r => r.UpdatedAt)
-            .ToListAsync();
-        var latestRunByAsset = latestRuns
-            .GroupBy(r => r.AssetId)
-            .ToDictionary(g => g.Key, g => g.First());
+        var latestRunByAsset = await GetLatestRunsByAssetAsync(assetIds);
         var assignedWorkflowAssetIds = await _db.AssetWorkflowAssignments
             .Where(a => assetIds.Contains(a.AssetId) && a.Active)
             .Select(a => a.AssetId)
@@ -143,7 +136,7 @@ public class ProjectAssetsController : ControllerBase
 
     // GET api/project-assets/dashboard-workspace?userId={id}
     [HttpGet("dashboard-workspace")]
-    public async Task<ActionResult<DashboardWorkspaceDto>> GetDashboardWorkspace([FromQuery] string? userId = null)
+    public async Task<ActionResult<DashboardWorkspaceDto>> GetDashboardWorkspace([FromQuery] string? userId = null, [FromQuery] bool light = false)
     {
         var currentUserId = User.FindFirst("sub")?.Value
             ?? User.FindFirst("nameid")?.Value
@@ -176,27 +169,13 @@ public class ProjectAssetsController : ControllerBase
         var assetIds = assets.Select(a => a.Id).Distinct().ToList();
         var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
 
-        var latestRuns = await _db.AssetWorkflowRuns
-            .Where(r => assetIds.Contains(r.AssetId))
-            .OrderByDescending(r => r.StartedAt)
-            .ThenByDescending(r => r.UpdatedAt)
-            .ToListAsync();
-        var latestRunByAsset = latestRuns
-            .GroupBy(r => r.AssetId)
-            .ToDictionary(g => g.Key, g => g.First());
+        var latestRunByAsset = await GetLatestRunsByAssetAsync(assetIds);
 
-        var assignments = await _db.AssetWorkflowAssignments
-            .Where(a => assetIds.Contains(a.AssetId))
-            .OrderByDescending(a => a.Active)
-            .ThenByDescending(a => a.AssignedAt)
-            .ToListAsync();
-        var assignmentByAsset = assignments
-            .GroupBy(a => a.AssetId)
-            .ToDictionary(g => g.Key, g => g.First());
+        var assignmentByAsset = await GetLatestAssignmentsByAssetAsync(assetIds);
 
-        var workflowConfigIds = latestRuns
+        var workflowConfigIds = latestRunByAsset.Values
             .Select(r => r.WorkflowConfigId)
-            .Concat(assignments.Select(a => a.WorkflowConfigId))
+            .Concat(assignmentByAsset.Values.Select(a => a.WorkflowConfigId))
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct()
             .ToList();
@@ -232,10 +211,7 @@ public class ProjectAssetsController : ControllerBase
             assignmentByAsset.TryGetValue(asset.Id, out var latestAssignment);
             projects.TryGetValue(asset.ProjectId, out var project);
 
-            var counts = latestRun is null
-                ? (RequiredItems: 0, CompletedItems: 0, MissingItems: 0)
-                : CountWorkflowEvidence(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
-            var workflowSummary = BuildWorkflowSummary(asset, latestRun, latestAssignment?.Active == true);
+            var workflowSummary = BuildWorkflowSummary(asset, latestRun, latestAssignment?.Active == true, light);
 
             var runWorkflowType = latestRun is not null && workflowConfigTypesById.TryGetValue(latestRun.WorkflowConfigId, out var latestRunWorkflowType)
                 ? latestRunWorkflowType
@@ -274,9 +250,9 @@ public class ProjectAssetsController : ControllerBase
                 asset.Status,
                 latestRun?.Status,
                 BuildHistoryStatus(asset, project?.Status, latestRun),
-                counts.CompletedItems,
-                counts.RequiredItems,
-                counts.MissingItems,
+                workflowSummary.CompletedItems,
+                workflowSummary.RequiredItems,
+                workflowSummary.MissingItems,
                 workflowSummary.EvidenceStatus,
                 asset.AssignedUserId,
                 project?.WorkflowMode ?? string.Empty,
@@ -335,14 +311,7 @@ public class ProjectAssetsController : ControllerBase
             .ToDictionaryAsync(p => p.Id, p => p.JobNumber);
 
         // Get latest in-progress run per asset for start time
-        var runs = await _db.AssetWorkflowRuns
-            .Where(r => assetIds.Contains(r.AssetId) && !r.IsLocked)
-            .OrderByDescending(r => r.StartedAt)
-            .ToListAsync();
-
-        var latestRunByAsset = runs
-            .GroupBy(r => r.AssetId)
-            .ToDictionary(g => g.Key, g => g.First());
+        var latestRunByAsset = await GetLatestRunsByAssetAsync(assetIds, onlyUnlocked: true);
 
         var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
@@ -507,7 +476,7 @@ public class ProjectAssetsController : ControllerBase
                     }
 
                     // Same counting logic as dashboard-workspace IsCurrentWorkspaceAsset
-                    // Priority: Paused → In Progress → Issue → Pending → Not Started
+                    // Priority: Paused -> In Progress -> Issue -> Pending -> Not Started
                     if (runStatus == "paused")
                     {
                         paused++;
@@ -531,7 +500,7 @@ public class ProjectAssetsController : ControllerBase
                         notStarted++;
                     }
 
-                    // Step progress from the latest run (any status — includes completed/locked runs)
+                    // Step progress from the latest run (any status - includes completed/locked runs)
                     if (run != null)
                     {
                         try
@@ -720,7 +689,7 @@ public class ProjectAssetsController : ControllerBase
         return Ok(await ToDtoAsync(asset));
     }
 
-    // PATCH api/project-assets/{id}/issues — update issuesJson only; open to all authenticated users (Engineers, Installers, etc.)
+    // PATCH api/project-assets/{id}/issues - update issuesJson only; open to all authenticated users (Engineers, Installers, etc.)
     [HttpPatch("{id}/issues")]
     public async Task<ActionResult<ProjectAssetDto>> PatchIssues(string id, [FromBody] PatchIssuesRequest request)
     {
@@ -766,14 +735,14 @@ public class ProjectAssetsController : ControllerBase
         return Ok(await ToDtoAsync(asset));
     }
 
-    // PATCH api/project-assets/{id}/assignment — update AssignedUserId ONLY.
+    // PATCH api/project-assets/{id}/assignment - update AssignedUserId ONLY.
     // Open to all authenticated users (like {id}/issues) so an Installer can claim an
     // unassigned asset or take over one assigned to someone else. This is deliberately
     // narrow: it can change nothing but the assignee, so the broad Admin/PM-only PUT
     // stays locked down.
     //
     // AssignedUserId is the single source of truth for work assignment across the whole
-    // product — the Assets installer column AND the Dashboard "My Jobs Today" query
+    // product - the Assets installer column AND the Dashboard "My Jobs Today" query
     // (which filters `.Where(a => a.AssignedUserId == effectiveUserId)`). Without this
     // endpoint an installer's takeover could never persist, so the job never appeared in
     // the new owner's dashboard and stayed in the previous owner's.
@@ -792,7 +761,7 @@ public class ProjectAssetsController : ControllerBase
         var target = string.IsNullOrWhiteSpace(request.AssignedUserId) ? null : request.AssignedUserId;
 
         // SECURITY: a non-Admin/PM may only assign the asset to THEMSELVES. This is what
-        // makes an open endpoint safe — an installer can claim work, but cannot push work
+        // makes an open endpoint safe - an installer can claim work, but cannot push work
         // onto a colleague or unassign someone else. Admin/PM keep full freedom.
         if (!isAdminOrPm && !string.Equals(target, callerId, StringComparison.OrdinalIgnoreCase))
             return Forbid();
@@ -1056,16 +1025,7 @@ public class ProjectAssetsController : ControllerBase
         if (assetList.Count == 0) return new();
 
         var assetIds = assetList.Select(a => a.Id).Distinct().ToList();
-        var latestRuns = await _db.AssetWorkflowRuns
-            .Where(r => assetIds.Contains(r.AssetId))
-            .OrderByDescending(r => r.StartedAt)
-            .ThenByDescending(r => r.UpdatedAt)
-            .AsNoTracking()
-            .ToListAsync();
-
-        var latestRunByAsset = latestRuns
-            .GroupBy(r => r.AssetId)
-            .ToDictionary(g => g.Key, g => g.First());
+        var latestRunByAsset = await GetLatestRunsByAssetAsync(assetIds);
         var assignedWorkflowAssetIds = await _db.AssetWorkflowAssignments
             .Where(a => assetIds.Contains(a.AssetId) && a.Active)
             .Select(a => a.AssetId)
@@ -1084,6 +1044,72 @@ public class ProjectAssetsController : ControllerBase
         return summaries;
     }
 
+    private async Task<Dictionary<string, AssetWorkflowRunEntity>> GetLatestRunsByAssetAsync(IEnumerable<string> assetIds, bool onlyUnlocked = false)
+    {
+        var ids = assetIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct()
+            .ToList();
+        if (ids.Count == 0) return new();
+
+        var runKeysQuery = _db.AssetWorkflowRuns
+            .Where(r => ids.Contains(r.AssetId));
+        if (onlyUnlocked)
+        {
+            runKeysQuery = runKeysQuery.Where(r => !r.IsLocked);
+        }
+
+        var latestRunIds = (await runKeysQuery
+            .Select(r => new LatestRunKey(r.Id, r.AssetId, r.StartedAt, r.UpdatedAt))
+            .AsNoTracking()
+            .ToListAsync())
+            .GroupBy(r => r.AssetId)
+            .Select(g => g
+                .OrderByDescending(r => r.StartedAt)
+                .ThenByDescending(r => r.UpdatedAt)
+                .Select(r => r.Id)
+                .First())
+            .ToList();
+
+        if (latestRunIds.Count == 0) return new();
+
+        return await _db.AssetWorkflowRuns
+            .Where(r => latestRunIds.Contains(r.Id))
+            .AsNoTracking()
+            .ToDictionaryAsync(r => r.AssetId);
+    }
+
+    private async Task<Dictionary<string, AssetWorkflowAssignmentEntity>> GetLatestAssignmentsByAssetAsync(IEnumerable<string> assetIds)
+    {
+        var ids = assetIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct()
+            .ToList();
+        if (ids.Count == 0) return new();
+
+        var latestAssignmentIds = (await _db.AssetWorkflowAssignments
+            .Where(a => ids.Contains(a.AssetId))
+            .Select(a => new LatestAssignmentKey(a.Id, a.AssetId, a.Active, a.AssignedAt))
+            .AsNoTracking()
+            .ToListAsync())
+            .GroupBy(a => a.AssetId)
+            .Select(g => g
+                .OrderByDescending(a => a.Active)
+                .ThenByDescending(a => a.AssignedAt)
+                .Select(a => a.Id)
+                .First())
+            .ToList();
+
+        if (latestAssignmentIds.Count == 0) return new();
+
+        return await _db.AssetWorkflowAssignments
+            .Where(a => latestAssignmentIds.Contains(a.Id))
+            .AsNoTracking()
+            .ToDictionaryAsync(a => a.AssetId);
+    }
+
+    private sealed record LatestRunKey(string Id, string AssetId, DateTime StartedAt, DateTime UpdatedAt);
+    private sealed record LatestAssignmentKey(string Id, string AssetId, bool Active, DateTime AssignedAt);
     private static DashboardWorkspaceDto EmptyDashboardWorkspace() =>
         new([], [], [], []);
 
@@ -1170,7 +1196,7 @@ public class ProjectAssetsController : ControllerBase
         return -1;
     }
 
-    private static ProjectAssetWorkflowSummaryDto BuildWorkflowSummary(ProjectAssetEntity asset, AssetWorkflowRunEntity? latestRun, bool hasAssignedWorkflow = false)
+    private static ProjectAssetWorkflowSummaryDto BuildWorkflowSummary(ProjectAssetEntity asset, AssetWorkflowRunEntity? latestRun, bool hasAssignedWorkflow = false, bool lightweight = false)
     {
         var hasWorkflow = hasAssignedWorkflow
             || !string.IsNullOrWhiteSpace(asset.ProductConfigId)
@@ -1195,9 +1221,41 @@ public class ProjectAssetsController : ControllerBase
             );
         }
 
-        var counts = CountWorkflowEvidence(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
         var hasOpenIssues = HasOpenIssues(latestRun.IssuesJson) || HasOpenIssues(asset.IssuesJson);
 
+        if (lightweight)
+        {
+            var lightweightEvidenceStatus = "Pending";
+            if (string.Equals(latestRun.Status, "Paused", StringComparison.OrdinalIgnoreCase))
+            {
+                lightweightEvidenceStatus = "Paused";
+            }
+            else if (!latestRun.IsLocked || string.Equals(latestRun.Status, "InProgress", StringComparison.OrdinalIgnoreCase))
+            {
+                lightweightEvidenceStatus = "Running";
+            }
+            else
+            {
+                lightweightEvidenceStatus = "Complete";
+            }
+
+            return new ProjectAssetWorkflowSummaryDto(
+                true,
+                lightweightEvidenceStatus,
+                0,
+                0,
+                0,
+                latestRun.Id,
+                latestRun.Status,
+                latestRun.IsLocked,
+                latestRun.SignatureStatus,
+                hasOpenIssues,
+                latestRun.StartedAt,
+                latestRun.CompletedAt
+            );
+        }
+
+        var counts = CountWorkflowEvidence(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
         var allStepsCompleted = HasCompletedAllWorkflowSteps(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson, latestRun.IsLocked);
         var evidenceStatus = "Pending";
         if (string.Equals(latestRun.Status, "Paused", StringComparison.OrdinalIgnoreCase))
@@ -1278,7 +1336,7 @@ public class ProjectAssetsController : ControllerBase
                 var values = result.Values ?? new Dictionary<string, string>();
 
                 // Imported step results use generic keys (value/unit/pass/label/notes), not workflow input IDs.
-                // Counting their required fields as missing is incorrect — skip them entirely.
+                // Counting their required fields as missing is incorrect - skip them entirely.
                 var inputDefs = step.Inputs ?? [];
                 if (inputDefs.Count > 0 && values.Count > 0)
                 {

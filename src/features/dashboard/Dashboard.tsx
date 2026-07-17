@@ -207,6 +207,9 @@ function GaugeCircle({ value, size = 80, color = "primary.main" }: { value: numb
 const WINDOW_OPTIONS = [30, 60, 90, 180];
 
 const ALL_DASHBOARDS_VALUE = "__all__";
+const DASHBOARD_WORKSPACE_SESSION_PREFIX = "dashboard:web:workspace:";
+const DASHBOARD_ASSIGNMENT_RECOVERY_KEY = "dashboard:pending-assignment-recovery";
+const DASHBOARD_RUN_STATE_RECOVERY_KEY = "dashboard:pending-run-state-recovery";
 const DASHBOARD_PROJECT_REQUEST_KEY = buildProjectRequestKey();
 
 type PmDashboardTab = "pm-projects" | "my-inspections" | "my-installs";
@@ -362,11 +365,50 @@ const Dashboard = () => {
   });
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [cacheHydrated, setCacheHydrated] = useState(false);
+  const [dashboardBootPhase, setDashboardBootPhase] = useState<"workspace" | "full">(
+    isNativePlatform ? "full" : "workspace"
+  );
+  const unlockDeferredDashboardBoot = useCallback(() => {
+    setDashboardBootPhase((current) => current === "full" ? current : "full");
+  }, []);
 
   // Admin: view another user's dashboard
   type DashboardUserEntry = { id: string; fullName: string; role: string; office: string };
   const [dashboardUsers, setDashboardUsers] = useState<DashboardUserEntry[]>([]);
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>(isAdmin ? ALL_DASHBOARDS_VALUE : user.id);
+  const dashboardWorkspaceScopeId = isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined;
+  const dashboardWorkspaceSessionKey = useMemo(
+    () => `${DASHBOARD_WORKSPACE_SESSION_PREFIX}${user.id || "anonymous"}:${dashboardWorkspaceScopeId ?? "self"}`,
+    [dashboardWorkspaceScopeId, user.id],
+  );
+  const readCachedDashboardWorkspace = useCallback((): DashboardWorkspace | null => {
+    if (isNativePlatform) {
+      return dcGet<DashboardWorkspace>(DASHBOARD_CACHE_KEYS.dashboardWorkspace);
+    }
+    if (!user.id) return null;
+    try {
+      const raw = window.sessionStorage.getItem(dashboardWorkspaceSessionKey);
+      return raw ? (JSON.parse(raw) as DashboardWorkspace) : null;
+    } catch {
+      return null;
+    }
+  }, [dashboardWorkspaceSessionKey, isNativePlatform, user.id]);
+  const writeCachedDashboardWorkspace = useCallback((data: DashboardWorkspace) => {
+    if (isNativePlatform) {
+      dcPut(DASHBOARD_CACHE_KEYS.dashboardWorkspace, data);
+      return;
+    }
+    if (!user.id) return;
+    try {
+      window.sessionStorage.setItem(dashboardWorkspaceSessionKey, JSON.stringify(data));
+    } catch {
+      // Ignore storage unavailability/quota errors.
+    }
+  }, [dashboardWorkspaceSessionKey, isNativePlatform, user.id]);
+  const applyDashboardWorkspace = useCallback((data: DashboardWorkspace) => {
+    setDashboardWorkspace(data);
+    writeCachedDashboardWorkspace(data);
+  }, [writeCachedDashboardWorkspace]);
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
@@ -383,6 +425,9 @@ const Dashboard = () => {
         dcPut(DASHBOARD_CACHE_KEYS.globalOffices, offices);
         dcPut(DASHBOARD_CACHE_KEYS.availableCountries, countries);
       }
+    }).catch(() => {
+      setGlobalOffices([]);
+      setAvailableCountries([]);
     });
   }, []);
 
@@ -434,6 +479,15 @@ const Dashboard = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (isNativePlatform || !isAuthenticated || !user.id) return;
+    const cached = readCachedDashboardWorkspace();
+    if (!cached) return;
+    setDashboardWorkspace(cached);
+    setCacheHydrated(true);
+  }, [isAuthenticated, isNativePlatform, readCachedDashboardWorkspace, user.id]);
+
+  useEffect(() => {
+    if (!isAuthenticated || dashboardBootPhase !== "full") return;
     dispatch(fetchProjects());
     dispatch(fetchProducts());
     dispatch(fetchUsers());
@@ -447,7 +501,7 @@ const Dashboard = () => {
         setDraftConfigs(configs.filter((c: any) => c.status === "Draft" || c.status === "draft"));
       }).catch(() => {});
     }
-  }, [dispatch, loadAttention, isEngineer]);
+  }, [dashboardBootPhase, dispatch, isAuthenticated, isEngineer, isNativePlatform, loadAttention]);
 
   // ── Native cache: persist state to cache whenever it changes ──
   useEffect(() => {
@@ -480,18 +534,18 @@ const Dashboard = () => {
         installHistory: [],
         inspectionHistory: [],
       });
+      unlockDeferredDashboardBoot();
       return;
     }
 
     let cancelled = false;
     setWorkspaceLoading(true);
 
-    const fetchWorkspaceWithRetry = async (): Promise<DashboardWorkspace> => {
-      const scopeId = isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined;
+    const fetchWorkspaceWithRetry = async (options?: { light?: boolean }): Promise<DashboardWorkspace> => {
       let lastErr: unknown;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          return await projectAssetService.dashboardWorkspace(scopeId);
+          return await projectAssetService.dashboardWorkspace(dashboardWorkspaceScopeId, options);
         } catch (err) {
           lastErr = err;
           if (cancelled) throw err;
@@ -501,49 +555,71 @@ const Dashboard = () => {
       throw lastErr;
     };
 
-    fetchWorkspaceWithRetry()
-      .then((data) => {
-        if (!cancelled) {
-          setDashboardWorkspace(data);
-          // Cache the last good workspace on every platform (in-memory; survives a
-          // re-mount within the session). Previously web cached nothing, so a later
-          // failed refresh had nothing to fall back to.
-          dcPut(DASHBOARD_CACHE_KEYS.dashboardWorkspace, data);
-        }
-      })
-      .catch(() => {
-        // All retries failed. DO NOT blank the dashboard: keep whatever is already on
-        // screen, and if this is a fresh mount with nothing shown yet, restore the last
-        // good cached workspace.
+    const restoreCachedWorkspace = () => {
+      const cached = readCachedDashboardWorkspace();
+      if (!cached) return;
+      setDashboardWorkspace((prev) =>
+        prev.currentInstalls.length
+        || prev.currentInspections.length
+        || prev.installHistory.length
+        || prev.inspectionHistory.length
+          ? prev
+          : cached,
+      );
+      setCacheHydrated(true);
+    };
+
+    (async () => {
+      try {
+        const initialData = await fetchWorkspaceWithRetry(!isNativePlatform ? { light: true } : undefined);
         if (cancelled) return;
-        const cached = dcGet<DashboardWorkspace>(DASHBOARD_CACHE_KEYS.dashboardWorkspace);
-        if (cached) {
-          setDashboardWorkspace((prev) =>
-            prev.currentInstalls.length || prev.installHistory.length ? prev : cached,
-          );
+        applyDashboardWorkspace(initialData);
+      } catch {
+        if (cancelled) return;
+        restoreCachedWorkspace();
+      } finally {
+        if (!cancelled) {
+          setWorkspaceLoading(false);
+          unlockDeferredDashboardBoot();
         }
-      })
-      .finally(() => {
-        if (!cancelled) setWorkspaceLoading(false);
-      });
+      }
+
+      if (cancelled || isNativePlatform) return;
+
+      try {
+        const fullData = await fetchWorkspaceWithRetry();
+        if (cancelled) return;
+        applyDashboardWorkspace(fullData);
+      } catch {
+        // Keep the lighter or cached workspace on screen if the full refresh fails.
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, isManager, isViewer, selectedDashboardId]);
+  }, [
+    applyDashboardWorkspace,
+    dashboardWorkspaceScopeId,
+    isAuthenticated,
+    isNativePlatform,
+    isViewer,
+    readCachedDashboardWorkspace,
+    unlockDeferredDashboardBoot,
+  ]);
 
   const refreshLiveDashboardData = useCallback(() => {
     projectAssetService.listOpen().then(setOpenAssets);
     projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
     setWorkspaceLoading(true);
     projectAssetService
-      .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
-      .then((data) => { setDashboardWorkspace(data); dcPut(DASHBOARD_CACHE_KEYS.dashboardWorkspace, data); })
-      .catch(() => { /* keep last-good workspace on a failed manual refresh — never blank it */ })
+      .dashboardWorkspace(dashboardWorkspaceScopeId)
+      .then((data) => { applyDashboardWorkspace(data); })
+      .catch(() => { /* keep last-good workspace on a failed manual refresh - never blank it */ })
       .finally(() => setWorkspaceLoading(false));
     loadAttention();
     setAnalyticsRefreshTick((t) => t + 1);
-  }, [isManager, loadAttention, selectedDashboardId]);
+  }, [applyDashboardWorkspace, dashboardWorkspaceScopeId, loadAttention]);
 
   // PM: listen for new auto-assign flags written by AssetInstallationPage
   useEffect(() => {
@@ -577,30 +653,32 @@ const Dashboard = () => {
     return () => window.removeEventListener("installer-photo-reminders-changed", reload);
   }, []);
 
-  // Notification-driven refresh: assignment events → workload + workspace + open assets
+  // Notification-driven refresh: assignment events -> workload + workspace + open assets
   useEffect(() => {
+    if (dashboardBootPhase !== "full") return;
     const refresh = () => {
       setWorkloadLoading(true);
       projectAssetService.technicianWorkloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
       projectAssetService.listOpen().then(setOpenAssets);
       setWorkspaceLoading(true);
       projectAssetService
-        .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
-        .then((data) => setDashboardWorkspace(data))
-        .catch(() => { /* keep last-good workspace on failure — never blank it */ })
+        .dashboardWorkspace(dashboardWorkspaceScopeId)
+        .then((data) => applyDashboardWorkspace(data))
+        .catch(() => { /* keep last-good workspace on failure - never blank it */ })
         .finally(() => setWorkspaceLoading(false));
     };
     window.addEventListener("notifications:assignments-changed", refresh);
     return () => window.removeEventListener("notifications:assignments-changed", refresh);
-  }, [isManager, selectedDashboardId]);
+  }, [applyDashboardWorkspace, dashboardBootPhase, dashboardWorkspaceScopeId]);
 
-  // Notification-driven refresh: run state events → workspace + open assets + attention items + analytics
+  // Notification-driven refresh: run state events -> workspace + open assets + attention items + analytics
   useEffect(() => {
+    if (dashboardBootPhase !== "full") return;
     window.addEventListener("notifications:run-state-changed", refreshLiveDashboardData);
     window.addEventListener("notifications:refresh", refreshLiveDashboardData);
     // Also listen for asset-level changes dispatched by AssetRepository (and
     // forwarded by offline issue mutations) so the workspace + attention
-    // counts refresh live when assets change offline — not only when the
+    // counts refresh live when assets change offline - not only when the
     // notifications:* events happen to be fired alongside.
     window.addEventListener("repo:assets:updated", refreshLiveDashboardData);
     return () => {
@@ -608,35 +686,55 @@ const Dashboard = () => {
       window.removeEventListener("notifications:refresh", refreshLiveDashboardData);
       window.removeEventListener("repo:assets:updated", refreshLiveDashboardData);
     };
-  }, [refreshLiveDashboardData]);
+  }, [dashboardBootPhase, refreshLiveDashboardData]);
 
   useEffect(() => {
+    if (dashboardBootPhase !== "full") return;
+    try {
+      const shouldReplayAssignmentRefresh = window.sessionStorage.getItem(DASHBOARD_ASSIGNMENT_RECOVERY_KEY) === "1";
+      const shouldReplayRunStateRefresh = window.sessionStorage.getItem(DASHBOARD_RUN_STATE_RECOVERY_KEY) === "1";
+      if (!shouldReplayAssignmentRefresh && !shouldReplayRunStateRefresh) return;
+      window.sessionStorage.removeItem(DASHBOARD_ASSIGNMENT_RECOVERY_KEY);
+      window.sessionStorage.removeItem(DASHBOARD_RUN_STATE_RECOVERY_KEY);
+      if (shouldReplayAssignmentRefresh) {
+        window.dispatchEvent(new Event("notifications:assignments-changed"));
+      }
+      if (shouldReplayRunStateRefresh) {
+        window.dispatchEvent(new Event("notifications:run-state-changed"));
+      }
+    } catch {
+      // Ignore storage/privacy-mode failures.
+    }
+  }, [dashboardBootPhase]);
+
+  useEffect(() => {
+    if (dashboardBootPhase !== "full") return;
     const handleServerAssetUpdate = () => {
       refreshLiveDashboardData();
     };
     window.addEventListener("sse:assets:updated", handleServerAssetUpdate);
     return () => window.removeEventListener("sse:assets:updated", handleServerAssetUpdate);
-  }, [refreshLiveDashboardData]);
+  }, [dashboardBootPhase, refreshLiveDashboardData]);
 
   // Phase 4 - evidence completeness
   useEffect(() => {
-    if (!isManager) return;
+    if (!isManager || dashboardBootPhase !== "full") return;
     setEvidenceLoading(true);
     dashboardService.evidenceCompleteness(evidenceWindow)
       .then(setEvidenceData)
       .catch(() => setEvidenceData(null))
       .finally(() => setEvidenceLoading(false));
-  }, [isManager, evidenceWindow, analyticsRefreshTick]);
+  }, [dashboardBootPhase, isManager, evidenceWindow, analyticsRefreshTick]);
 
   // Phase 5 - workflow health
   useEffect(() => {
-    if (!isManager) return;
+    if (!isManager || dashboardBootPhase !== "full") return;
     setHealthLoading(true);
     dashboardService.workflowHealth(healthWindow)
       .then(setHealthData)
       .catch(() => setHealthData(null))
       .finally(() => setHealthLoading(false));
-  }, [isManager, healthWindow, analyticsRefreshTick]);
+  }, [dashboardBootPhase, isManager, healthWindow, analyticsRefreshTick]);
   // Derived data
   const filteredProjects = useMemo(() => {
     if (activeOffice === "All" || !officeIdsForRegion) return projects;
@@ -924,12 +1022,12 @@ const Dashboard = () => {
       projectAssetService.listOpen().then(setOpenAssets),
       projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([])),
       projectAssetService
-        .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
-        .then((data) => setDashboardWorkspace(data))
+        .dashboardWorkspace(dashboardWorkspaceScopeId)
+        .then((data) => applyDashboardWorkspace(data))
         .catch(() => {}),
     ]);
     setAnalyticsRefreshTick((t) => t + 1);
-  }, [isManager, loadAttention, selectedDashboardId]);
+  }, [applyDashboardWorkspace, dashboardWorkspaceScopeId, loadAttention]);
 
   const openHistoryReport = useCallback(async (assetItem: DashboardWorkspaceAssetItem) => {
     setHistoryDialogLoading(true);
@@ -2143,6 +2241,12 @@ const Dashboard = () => {
 
   // Load inspection signals for PM/Admin and installers
   useEffect(() => {
+    if (dashboardBootPhase !== "full") {
+      setInspectionRunsDue(0);
+      setInspectionImportsWaiting(0);
+      setInspectionImportsFailed(0);
+      return;
+    }
     if (!isManager && !canActAsFieldTechnician) {
       setInspectionRunsDue(0);
       setInspectionImportsWaiting(0);
@@ -2194,7 +2298,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [canActAsFieldTechnician, isManager, user.id, user.role, visibleProjectIds]);
+  }, [canActAsFieldTechnician, dashboardBootPhase, isManager, user.id, user.role, visibleProjectIds]);
 
   // Project status chart
   const statusGroups = useMemo(() => {
@@ -5561,8 +5665,8 @@ const Dashboard = () => {
             // Refresh the workspace after workflow completion
             setWorkspaceLoading(true);
             projectAssetService
-              .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
-              .then((data) => setDashboardWorkspace(data))
+              .dashboardWorkspace(dashboardWorkspaceScopeId)
+              .then((data) => applyDashboardWorkspace(data))
               .catch(() => { /* keep last-good workspace on failure — never blank it */ })
               .finally(() => setWorkspaceLoading(false));
           }}
@@ -5570,8 +5674,8 @@ const Dashboard = () => {
             // Refresh the workspace after workflow pause
             setWorkspaceLoading(true);
             projectAssetService
-              .dashboardWorkspace(isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined)
-              .then((data) => setDashboardWorkspace(data))
+              .dashboardWorkspace(dashboardWorkspaceScopeId)
+              .then((data) => applyDashboardWorkspace(data))
               .catch(() => { /* keep last-good workspace on failure — never blank it */ })
               .finally(() => setWorkspaceLoading(false));
           }}
@@ -5617,4 +5721,3 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
-

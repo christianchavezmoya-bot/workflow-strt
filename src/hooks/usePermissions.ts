@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultDomains, roleConfigService, RolePermissions, DomainPermissions } from "../services/roleConfigService";
 import { useAuth } from "./useAuth";
 
@@ -75,6 +75,7 @@ export const usePermissions = () => {
   const [roleConfig, setRoleConfig] = useState<Record<string, RolePermissions> | null>(null);
   // Tracks whether the role-config API call has settled (success or failure).
   const [configReady, setConfigReady] = useState(false);
+  const lastLoadedUserIdRef = useRef<string | null>(null);
 
   const loadRoleConfig = () => {
     roleConfigService.get().then((config) => {
@@ -84,16 +85,16 @@ export const usePermissions = () => {
     }).catch(() => {}).finally(() => setConfigReady(true));
   };
 
-  useEffect(() => {
-    loadRoleConfig();
-  }, []);
-
   // When the authenticated user identity changes (login or logout), clear the
   // module-level role-config cache and re-fetch. Without this, a role config
   // loaded before the admin saved updated permissions would stay stale for the
   // entire browser session even after logging out and back in.
   useEffect(() => {
-    roleConfigService.clearCache();
+    const previousUserId = lastLoadedUserIdRef.current;
+    if (previousUserId !== null && previousUserId !== user.id) {
+      roleConfigService.clearCache();
+    }
+    lastLoadedUserIdRef.current = user.id;
     setConfigReady(false);
     loadRoleConfig();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -102,6 +103,7 @@ export const usePermissions = () => {
   useEffect(() => {
     const reload = () => {
       roleConfigService.clearCache();
+      setConfigReady(false);
       loadRoleConfig();
     };
     window.addEventListener("roles-config-changed", reload);

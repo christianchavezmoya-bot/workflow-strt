@@ -4,14 +4,29 @@ import { isMobileNativePlatform } from "../utils/platform";
 
 // In-memory cache for offices (shared across all users in same session)
 let officesCache: Office[] | null = null;
+let officesPromise: Promise<Office[]> | null = null;
 let isMigrating = false; // Prevent infinite migration loops
 
 export const officesService = {
   async getAll(): Promise<Office[]> {
     if (!isMobileNativePlatform()) {
-      const response = await api.get<Office[]>("/offices");
-      officesCache = response.data;
-      return response.data;
+      if (officesCache) return officesCache;
+      if (officesPromise) return officesPromise;
+
+      officesPromise = api.get<Office[]>("/offices")
+        .then((response) => {
+          officesCache = response.data;
+          return response.data;
+        })
+        .catch((error) => {
+          if (officesCache) return officesCache;
+          throw error;
+        })
+        .finally(() => {
+          officesPromise = null;
+        });
+
+      return officesPromise;
     }
 
     try {
@@ -69,6 +84,7 @@ export const officesService = {
     if (!isMobileNativePlatform()) {
       const response = await api.post<Office>("/offices", office);
       officesCache = officesCache ? [...officesCache, response.data] : [response.data];
+      officesPromise = null;
       return response.data;
     }
 
@@ -106,6 +122,7 @@ export const officesService = {
       if (officesCache) {
         officesCache = officesCache.map((o) => (o.id === id ? updatedOffice : o));
       }
+      officesPromise = null;
       return updatedOffice;
     }
 
@@ -140,6 +157,7 @@ export const officesService = {
       if (officesCache) {
         officesCache = officesCache.filter((o) => o.id !== id);
       }
+      officesPromise = null;
       return;
     }
 
