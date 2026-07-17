@@ -1,6 +1,6 @@
 ﻿import {
   Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, Grid,
-  IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Snackbar, Stack, Tab, Tabs, TextField, Tooltip, Typography,
+  IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Skeleton, Snackbar, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from "@mui/material";
 import {
   AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined, CloseOutlined,
@@ -59,6 +59,76 @@ import { get as dcGet, put as dcPut, DASHBOARD_CACHE_KEYS } from "../../services
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "-";
   try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+}
+
+/** Pulsing placeholders while dashboard-workspace loads (Instant Illusion). */
+function DashboardJobCardsSkeleton({ count = 6 }: { count?: number }) {
+  return (
+    <Grid container spacing={1.5}>
+      {Array.from({ length: count }, (_, i) => (
+        <Grid item xs={12} sm={6} md={4} key={i}>
+          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+            <Stack spacing={1}>
+              <Skeleton variant="text" width="72%" height={18} animation="wave" />
+              <Skeleton variant="text" width="48%" height={14} animation="wave" />
+              <Skeleton variant="text" width="85%" height={12} animation="wave" />
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Skeleton variant="rounded" width={64} height={18} animation="wave" />
+                <Skeleton variant="rounded" width={88} height={22} animation="wave" />
+              </Stack>
+            </Stack>
+          </Paper>
+        </Grid>
+      ))}
+    </Grid>
+  );
+}
+
+function DashboardHistoryListSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <Stack spacing={0.75}>
+      {Array.from({ length: rows }, (_, i) => (
+        <Paper key={i} elevation={0} sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Box sx={{ flex: 1 }}>
+              <Skeleton variant="text" width="58%" height={16} animation="wave" />
+              <Skeleton variant="text" width="42%" height={12} animation="wave" />
+            </Box>
+            <Skeleton variant="rounded" width={52} height={18} animation="wave" />
+          </Stack>
+        </Paper>
+      ))}
+    </Stack>
+  );
+}
+
+function DashboardStatTilesSkeleton() {
+  return (
+    <Grid container spacing={1.5} sx={{ mb: 2 }}>
+      {Array.from({ length: 4 }, (_, i) => (
+        <Grid item xs={6} md={3} key={i}>
+          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
+            <Skeleton variant="text" width="55%" height={12} animation="wave" />
+            <Skeleton variant="text" width="35%" height={28} sx={{ mt: 0.75 }} animation="wave" />
+          </Paper>
+        </Grid>
+      ))}
+    </Grid>
+  );
+}
+
+function DashboardPmProjectRowsSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <Stack spacing={1.25}>
+      {Array.from({ length: rows }, (_, i) => (
+        <Box key={i} sx={{ px: 2, py: 1.25, borderRadius: 2, border: "1px solid rgba(255,255,255,0.08)" }}>
+          <Skeleton variant="text" width="38%" height={20} animation="wave" />
+          <Skeleton variant="text" width="62%" height={14} sx={{ mt: 0.75 }} animation="wave" />
+          <Skeleton variant="rounded" height={6} sx={{ mt: 1.5, borderRadius: 1 }} animation="wave" />
+        </Box>
+      ))}
+    </Stack>
+  );
 }
 
 function isPausedAsset(status?: string | null) {
@@ -252,6 +322,7 @@ const Dashboard = () => {
   const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch      = useAppDispatch();
   const projects      = useAppSelector((s) => s.projects.items);
+  const projectsLoading = useAppSelector((s) => s.projects.loading);
   const products      = useAppSelector((s) => s.products.items);
   const users         = useAppSelector((s) => s.users.items);
 
@@ -355,7 +426,7 @@ const Dashboard = () => {
     installHistory: [],
     inspectionHistory: [],
   });
-  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [cacheHydrated, setCacheHydrated] = useState(false);
 
   // Admin: view another user's dashboard
@@ -472,6 +543,7 @@ const Dashboard = () => {
         installHistory: [],
         inspectionHistory: [],
       });
+      setWorkspaceLoading(false);
       return;
     }
 
@@ -1136,6 +1208,20 @@ const Dashboard = () => {
   const myInstallHistory = useMemo(
     () => dashboardWorkspace.installHistory,
     [dashboardWorkspace]
+  );
+
+  /** Grey pulsing layout while slow dashboard-workspace fetch is in flight and we have nothing to show yet. */
+  const showWorkspaceSkeleton = useMemo(
+    () =>
+      workspaceLoading &&
+      myInstallAssets.length === 0 &&
+      myInspectionAssets.length === 0,
+    [workspaceLoading, myInstallAssets.length, myInspectionAssets.length]
+  );
+
+  const showPmProjectsSkeleton = useMemo(
+    () => isManager && projectsLoading && dashboardProjects.length === 0,
+    [isManager, projectsLoading, dashboardProjects.length]
   );
 
   const renderHistoryCard = useCallback((asset: DashboardWorkspaceAssetItem) => (
@@ -2197,6 +2283,9 @@ const Dashboard = () => {
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
         {isAdmin ? "Inspection activity across the current dashboard scope, grouped with PM ownership." : "Current inspection work plus your recent inspection history."}
       </Typography>
+      {showWorkspaceSkeleton ? (
+        <DashboardStatTilesSkeleton />
+      ) : (
       <Grid container spacing={1.5} sx={{ mb: 2 }}>
         <Grid item xs={6} md={3}>
           <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
@@ -2223,8 +2312,11 @@ const Dashboard = () => {
           </Paper>
         </Grid>
       </Grid>
+      )}
 
-      {myInspectionAssets.length === 0 && !workspaceLoading ? (
+      {showWorkspaceSkeleton ? (
+        <DashboardJobCardsSkeleton count={6} />
+      ) : myInspectionAssets.length === 0 && !workspaceLoading ? (
         <Typography variant="caption" color="text.disabled">No inspection assets currently assigned to you.</Typography>
       ) : (
         <Grid container spacing={1.5}>
@@ -2268,7 +2360,9 @@ const Dashboard = () => {
           <Chip label={myInspectionHistory.length} size="small" color={myInspectionHistory.length > 0 ? "success" : "default"} variant="outlined"
             sx={{ height: 20, fontSize: "0.7rem" }} />
         </Stack>
-        {myInspectionHistory.length === 0 ? (
+        {showWorkspaceSkeleton ? (
+          <DashboardHistoryListSkeleton rows={4} />
+        ) : myInspectionHistory.length === 0 ? (
           <Typography variant="caption" color="text.secondary">No inspection history yet</Typography>
         ) : (
           <Stack spacing={0.75}>
@@ -2758,7 +2852,9 @@ const Dashboard = () => {
             : `${dashboardProjectScope === "mine" ? "Your" : "All"} open projects and projects ready to close in the current dashboard scope.`}
       </Typography>
 
-      {dashboardProjects.length === 0 ? (
+      {showPmProjectsSkeleton ? (
+        <DashboardPmProjectRowsSkeleton rows={4} />
+      ) : dashboardProjects.length === 0 ? (
         <Typography variant="caption" color="text.disabled">No assigned projects in this scope.</Typography>
       ) : (
         <Stack spacing={1.25}>
@@ -3960,13 +4056,13 @@ const Dashboard = () => {
                 <Typography variant="caption" color="text.secondary">
                   Use the tabs below to review project ownership, inspection activity, and install activity across the current scope.
                 </Typography>
+              ) : showWorkspaceSkeleton ? (
+                <DashboardJobCardsSkeleton count={6} />
               ) : myAssets.length === 0 ? (
                 <Typography variant="caption" color="text.disabled">
-                  {workspaceLoading && !cacheHydrated
-                    ? "Loading your assigned assets..."
-                    : myInstallHistory.length > 0 || myInspectionHistory.length > 0
-                      ? "No active assets right now. Use the history cards below to review completed or closed work."
-                      : "No assets currently assigned to you."}
+                  {myInstallHistory.length > 0 || myInspectionHistory.length > 0
+                    ? "No active assets right now. Use the history cards below to review completed or closed work."
+                    : "No assets currently assigned to you."}
                 </Typography>
               ) : (
                 <Grid container spacing={1.5}>
@@ -4078,7 +4174,9 @@ const Dashboard = () => {
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
               Sorted by activity {"\u2014"} tap to open quick actions
             </Typography>
-            {myInstallAssets.length === 0 ? (
+            {showWorkspaceSkeleton ? (
+              <DashboardJobCardsSkeleton count={6} />
+            ) : myInstallAssets.length === 0 ? (
               <Typography variant="caption" color="text.disabled">No field jobs assigned to you.</Typography>
             ) : (
               <>
@@ -4379,7 +4477,9 @@ const Dashboard = () => {
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
               Finished, completed, closed, cancelled, or deleted installation work that was assigned to you.
             </Typography>
-            {myInstallHistory.length === 0 ? (
+            {showWorkspaceSkeleton ? (
+              <DashboardHistoryListSkeleton rows={5} />
+            ) : myInstallHistory.length === 0 ? (
               <Typography variant="caption" color="text.secondary">No install history yet</Typography>
             ) : (
               <Stack spacing={0.75}>
@@ -4479,7 +4579,9 @@ const Dashboard = () => {
               <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
                 sx={{ height: 20, fontSize: "0.7rem" }} />
             </Stack>
-            {myInstallHistory.length === 0 ? (
+            {showWorkspaceSkeleton ? (
+              <DashboardHistoryListSkeleton rows={5} />
+            ) : myInstallHistory.length === 0 ? (
               <Typography variant="caption" color="text.secondary">No install history yet</Typography>
             ) : (
               <Stack spacing={0.75}>
@@ -4808,7 +4910,9 @@ const Dashboard = () => {
                 <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
                   Installation assets currently assigned to you for field execution.
                 </Typography>
-                {myInstallAssets.length === 0 ? (
+                {showWorkspaceSkeleton ? (
+                  <DashboardJobCardsSkeleton count={6} />
+                ) : myInstallAssets.length === 0 ? (
                   <Typography variant="caption" color="text.disabled">No installation assets currently assigned to you for field execution.</Typography>
                 ) : (
                   <>
@@ -4858,7 +4962,9 @@ const Dashboard = () => {
                   <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
                     sx={{ height: 20, fontSize: "0.7rem" }} />
                 </Stack>
-                {myInstallHistory.length === 0 ? (
+                {showWorkspaceSkeleton ? (
+                  <DashboardHistoryListSkeleton rows={5} />
+                ) : myInstallHistory.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">No install history yet</Typography>
                 ) : (
                   <Stack spacing={0.75}>
