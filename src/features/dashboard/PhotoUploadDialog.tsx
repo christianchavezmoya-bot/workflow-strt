@@ -40,7 +40,7 @@ import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
 import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// -- Types -------------------------------------------------------------------
 
 export type MissingStep = {
   stepId: string;
@@ -89,6 +89,14 @@ type StoredStepCapture = {
   iterationIndex?: number;
 };
 
+type PersistedRunPhotoState = {
+  allSteps: MissingStep[];
+  missingSteps: MissingStep[];
+  values: Record<string, Record<string, string>>;
+  captures: StoredStepCapture[];
+  seededCaptures: Record<string, string[]>;
+};
+
 type TokenResponse = {
   token: string;
   expiresAt: string;
@@ -113,7 +121,7 @@ function parseCaptureKey(key: string): { stepId: string; inputId: string } | nul
   };
 }
 
-// ── Props ──────────────────────────────────────────────────────────────────────
+// -- Props -------------------------------------------------------------------
 
 interface PhotoUploadDialogProps {
   open: boolean;
@@ -125,7 +133,7 @@ interface PhotoUploadDialogProps {
   onUpdated: (updatedFlag: MissingMediaFlag | null) => void;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 function acceptForInputType(inputType: "photo" | "video"): string {
   return inputType === "video" ? "video/*" : "image/*";
@@ -220,7 +228,28 @@ function derivePhotoSteps(
   }
 }
 
-// ── Component ──────────────────────────────────────────────────────────────────
+function derivePersistedRunPhotoState(
+  workflowSnapshotJson: string,
+  stepResultsJson: string,
+): PersistedRunPhotoState {
+  const { allSteps, missingSteps } = derivePhotoSteps(workflowSnapshotJson, stepResultsJson);
+  const values = parseStepValues(stepResultsJson);
+  const captures = parseStepCaptures(stepResultsJson);
+  const seededCaptures = allSteps.reduce<Record<string, string[]>>((acc, step) => {
+    acc[buildCaptureKey(step.stepId, step.inputId)] = parseCaptures(values[step.stepId]?.[step.inputId]);
+    return acc;
+  }, {});
+
+  return {
+    allSteps,
+    missingSteps,
+    values,
+    captures,
+    seededCaptures,
+  };
+}
+
+// -- Component ---------------------------------------------------------------
 
 export default function PhotoUploadDialog({
   open,
@@ -249,7 +278,7 @@ export default function PhotoUploadDialog({
   const [phoneQrLoading, setPhoneQrLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Derived from live run data — overrides stale flag data
+  // Derived from live run data - overrides stale flag data
   const [runValues, setRunValues] = useState<Record<string, Record<string, string>>>({});
   const [stepCaptures, setStepCaptures] = useState<StoredStepCapture[]>([]);
   const [allPhotoSteps, setAllPhotoSteps] = useState<MissingStep[]>([]);
@@ -271,33 +300,35 @@ export default function PhotoUploadDialog({
     }
   }
 
-  async function refreshRunState() {
-    setLoading(true);
-    setError(null);
-    const run = await assetWorkflowRunService.getById(flag.runId);
-    if (!run) {
-      setError("Could not load run data.");
-      setLoading(false);
-      return null;
-    }
-    const { allSteps, missingSteps } = derivePhotoSteps(
-      run.workflowSnapshotJson ?? "{}",
-      run.stepResultsJson ?? "[]"
-    );
-    const values = parseStepValues(run.stepResultsJson ?? "[]");
-    const captures = parseStepCaptures(run.stepResultsJson ?? "[]");
-    const seededCaptures = allSteps.reduce<Record<string, string[]>>((acc, step) => {
-      acc[buildCaptureKey(step.stepId, step.inputId)] = parseCaptures(values[step.stepId]?.[step.inputId]);
-      return acc;
-    }, {});
-    setRunValues(values);
-    setStepCaptures(captures);
-    setAllPhotoSteps(allSteps);
-    setEffectiveMissingSteps(missingSteps);
-    setEditedCaptures(seededCaptures);
+  function applyRunState(state: PersistedRunPhotoState) {
+    setRunValues(state.values);
+    setStepCaptures(state.captures);
+    setAllPhotoSteps(state.allSteps);
+    setEffectiveMissingSteps(state.missingSteps);
+    setEditedCaptures(state.seededCaptures);
     setStagedFiles({});
-    setLoading(false);
-    return { allSteps, missingSteps };
+  }
+
+  async function refreshRunState(options?: { showSpinner?: boolean }) {
+    const showSpinner = options?.showSpinner ?? true;
+    if (showSpinner) setLoading(true);
+    setError(null);
+    try {
+      const run = await assetWorkflowRunService.getById(flag.runId);
+      if (!run) {
+        setError("Could not load run data.");
+        return null;
+      }
+
+      const nextState = derivePersistedRunPhotoState(
+        run.workflowSnapshotJson ?? "{}",
+        run.stepResultsJson ?? "[]",
+      );
+      applyRunState(nextState);
+      return nextState;
+    } finally {
+      if (showSpinner) setLoading(false);
+    }
   }
 
   function syncMissingMediaFlags(allSteps: MissingStep[], missingSteps: MissingStep[]) {
@@ -346,7 +377,7 @@ export default function PhotoUploadDialog({
     }
   }
 
-  // Load run on open — derive photo steps from live data
+  // Load run on open - derive photo steps from live data
   useEffect(() => {
     if (!open) return;
     void refreshRunState();
@@ -527,11 +558,13 @@ export default function PhotoUploadDialog({
         await assetWorkflowRunService.patchStepResults(flag.runId, newStepResultsJson, currentUserName);
       }
 
-      // Re-derive which steps are still missing after save
-      const stillMissing = effectiveMissingSteps.filter(({ stepId, inputId }) => {
-        return getCurrentCaptures(stepId, inputId).length === 0;
-      });
-      const allDone = stillMissing.length === 0;
+      const verifiedState = await refreshRunState({ showSpinner: false });
+      if (!verifiedState) {
+        setError("Photos may have been saved, but the run could not be reloaded to verify them. Reopen the asset and check again.");
+        return;
+      }
+
+      const allDone = verifiedState.missingSteps.length === 0;
 
       // PM notification
       const notification: PhotoUpdateNotification = {
@@ -542,15 +575,15 @@ export default function PhotoUploadDialog({
         workflowName: flag.workflowName,
         installerName: currentUserName,
         updatedAt: new Date().toISOString(),
-        stillMissing: stillMissing.length,
+        stillMissing: verifiedState.missingSteps.length,
         wasComplete: allDone,
       };
       const existingNotifs = JSON.parse(localStorage.getItem("pm_photo_update_notifications") ?? "[]");
       localStorage.setItem("pm_photo_update_notifications", JSON.stringify([...existingNotifs, notification]));
       window.dispatchEvent(new Event("photo-update-notifications-changed"));
 
-      // Update/remove flag
-      syncMissingMediaFlags(allPhotoSteps, stillMissing);
+      // Update/remove flag using the persisted run state, not optimistic local edits.
+      syncMissingMediaFlags(verifiedState.allSteps, verifiedState.missingSteps);
     } catch (err) {
       console.error(err);
       setError("Failed to save photos. Please try again.");
@@ -604,10 +637,10 @@ export default function PhotoUploadDialog({
           <PhotoCameraOutlined sx={{ color: "warning.main" }} />
           <Box sx={{ flex: 1 }}>
             <Typography variant="subtitle1" fontWeight={700} sx={{ lineHeight: 1.2 }}>
-              {flag.assetTag} — {flag.workflowName}
+              {flag.assetTag} - {flag.workflowName}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {loading ? "Loading…" : `${liveCaptured} of ${totalExpected} photo steps completed`}
+              {loading ? "Loading..." : `${liveCaptured} of ${totalExpected} photo steps completed`}
             </Typography>
           </Box>
           {isPM && !loading && effectiveMissingSteps.length > 0 && (
@@ -661,7 +694,7 @@ export default function PhotoUploadDialog({
               </Box>
             )}
 
-            {/* Add from phone — web browser only */}
+            {/* Add from phone - web browser only */}
             {!isPM && isWebBrowser && (
               <Accordion disableGutters elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
                 <AccordionSummary expandIcon={<ExpandMoreOutlined />}>
@@ -712,7 +745,7 @@ export default function PhotoUploadDialog({
                 <Stack direction="row" alignItems="center" spacing={1}>
                   <VisibilityOutlined sx={{ fontSize: 16, color: "text.secondary" }} />
                   <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                    RUN PHOTO STATUS — {flag.technicianName} · {new Date(flag.completedAt).toLocaleDateString()}
+                    RUN PHOTO STATUS - {flag.technicianName} | {new Date(flag.completedAt).toLocaleDateString()}
                   </Typography>
                 </Stack>
                 {allPhotoSteps.map(({ stepId, stepOrder, stepTitle, inputId, inputLabel, captured }) => (
@@ -893,7 +926,7 @@ export default function PhotoUploadDialog({
 
             {!isPM && effectiveMissingSteps.length === 0 && totalExpected > 0 && (
               <Alert severity="success" icon={<CheckCircleOutlined />}>
-                All photo steps completed — nothing to upload.
+                All photo steps completed - nothing to upload.
               </Alert>
             )}
 
@@ -915,7 +948,7 @@ export default function PhotoUploadDialog({
             onClick={handleRemindInstaller}
             disabled={reminderSent || effectiveMissingSteps.length === 0}
           >
-            {reminderSent ? "Reminder Sent ✓" : "Notify Field User"}
+            {reminderSent ? "Reminder Sent *" : "Notify Field User"}
           </Button>
         )}
         {!isPM && (
@@ -925,7 +958,7 @@ export default function PhotoUploadDialog({
             disabled={saving || loading}
             startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
           >
-            {saving ? "Saving…" : "Save Photos"}
+            {saving ? "Saving..." : "Save Photos"}
           </Button>
         )}
       </DialogActions>
