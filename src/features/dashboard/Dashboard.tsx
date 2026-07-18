@@ -446,6 +446,7 @@ const Dashboard = () => {
   } | null>(null);
   const [resolvingDashboardIssueId, setResolvingDashboardIssueId] = useState<string | null>(null);
   const [historyDialogLoading, setHistoryDialogLoading] = useState(false);
+  const nativeDashboardRefreshTimerRef = useRef<number | null>(null);
 
   // Quick action dialog for "My Jobs Today" assets (state declared after myInstallAssets is defined)
   const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
@@ -478,9 +479,7 @@ const Dashboard = () => {
   });
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [cacheHydrated, setCacheHydrated] = useState(false);
-  const [dashboardBootPhase, setDashboardBootPhase] = useState<"workspace" | "full">(
-    isNativePlatform ? "full" : "workspace"
-  );
+  const [dashboardBootPhase, setDashboardBootPhase] = useState<"workspace" | "full">("workspace");
   const unlockDeferredDashboardBoot = useCallback(() => {
     setDashboardBootPhase((current) => current === "full" ? current : "full");
   }, []);
@@ -684,7 +683,7 @@ const Dashboard = () => {
 
     (async () => {
       try {
-        const initialData = await fetchWorkspaceWithRetry(!isNativePlatform ? { light: true } : undefined);
+        const initialData = await fetchWorkspaceWithRetry({ light: true });
         if (cancelled) return;
         applyDashboardWorkspace(initialData);
       } catch {
@@ -697,7 +696,11 @@ const Dashboard = () => {
         }
       }
 
-      if (cancelled || isNativePlatform) return;
+      if (cancelled) return;
+      if (isNativePlatform) {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        if (cancelled) return;
+      }
 
       try {
         const fullData = await fetchWorkspaceWithRetry();
@@ -721,7 +724,7 @@ const Dashboard = () => {
     unlockDeferredDashboardBoot,
   ]);
 
-  const refreshLiveDashboardData = useCallback(() => {
+  const refreshLiveDashboardDataNow = useCallback(() => {
     projectAssetService.listOpen().then(setOpenAssets);
     projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
     setWorkspaceLoading(true);
@@ -733,6 +736,26 @@ const Dashboard = () => {
     loadAttention();
     setAnalyticsRefreshTick((t) => t + 1);
   }, [applyDashboardWorkspace, dashboardWorkspaceScopeId, loadAttention]);
+
+  const refreshLiveDashboardData = useCallback(() => {
+    if (!isNativePlatform) {
+      refreshLiveDashboardDataNow();
+      return;
+    }
+    if (nativeDashboardRefreshTimerRef.current !== null) {
+      window.clearTimeout(nativeDashboardRefreshTimerRef.current);
+    }
+    nativeDashboardRefreshTimerRef.current = window.setTimeout(() => {
+      nativeDashboardRefreshTimerRef.current = null;
+      refreshLiveDashboardDataNow();
+    }, 650);
+  }, [isNativePlatform, refreshLiveDashboardDataNow]);
+
+  useEffect(() => () => {
+    if (nativeDashboardRefreshTimerRef.current !== null) {
+      window.clearTimeout(nativeDashboardRefreshTimerRef.current);
+    }
+  }, []);
 
   // PM: listen for new auto-assign flags written by AssetInstallationPage
   useEffect(() => {
@@ -772,17 +795,11 @@ const Dashboard = () => {
     const refresh = () => {
       setWorkloadLoading(true);
       projectAssetService.technicianWorkloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
-      projectAssetService.listOpen().then(setOpenAssets);
-      setWorkspaceLoading(true);
-      projectAssetService
-        .dashboardWorkspace(dashboardWorkspaceScopeId)
-        .then((data) => applyDashboardWorkspace(data))
-        .catch(() => { /* keep last-good workspace on failure - never blank it */ })
-        .finally(() => setWorkspaceLoading(false));
+      refreshLiveDashboardData();
     };
     window.addEventListener("notifications:assignments-changed", refresh);
     return () => window.removeEventListener("notifications:assignments-changed", refresh);
-  }, [applyDashboardWorkspace, dashboardBootPhase, dashboardWorkspaceScopeId]);
+  }, [dashboardBootPhase, refreshLiveDashboardData]);
 
   // Notification-driven refresh: run state events -> workspace + open assets + attention items + analytics
   useEffect(() => {
@@ -1798,33 +1815,34 @@ const Dashboard = () => {
     setQuickActionLoading(true);
     setRunnerLoading(asset.id);
     setDocsLoading(true);
+    let docsLoadDeferred = false;
     try {
-      // Runs come from listByAssetFresh (always a live server fetch with
-      // local-cache fallback) instead of listByAsset (which returns local
-      // cache immediately + fire-and-forget refresh). The previous behaviour
-      // let the phone open the runner at the stale local step (e.g. step 1)
-      // while the server was already at step 3 — Bug 3.
-      const [assignments, runs, docs, fullAsset] = await Promise.all([
+      const [assignments, runs] = await Promise.all([
         assetWorkflowAssignmentService.listByAsset(asset.id),
-        assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => []),
-        api.get(`/asset-documents/by-asset/${asset.id}`).then((res) => res.data).catch(() => []),
-        projectAssetService.getById(asset.id).catch(() => null),
+        assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => assetWorkflowRunService.listByAsset(asset.id)),
       ]);
 
-      const resolvedProductWorkflow = await resolveProductWorkflowForAsset(fullAsset, assignments);
-
-      // Option B: if there's an active (paused / in-progress) run, resume it
-      // directly — matches the web assets-page UX (one tap → runner opens,
-      // no Quick Action Dialog). Works the same way online and offline
-      // because both the run (listByAsset) and the config (getById has an
-      // offline short-circuit) are served from local cache.
       const attention = getQuickActionAttentionForAsset(asset, runs);
       if (attention.activeRun && !attention.activeRun.isLocked) {
         const launched = await resumeActiveRunFromDashboard(asset, attention.activeRun);
         if (launched) return;
-        // If launch failed (config not cached, no steps, etc.) fall through
-        // so the dialog still opens and the user at least sees the options.
       }
+
+      if (assignments.length === 1 && canStartDirectlyFromDashboard({
+        asset,
+        assignments,
+        runs,
+        productWorkflow: null,
+      })) {
+        await startWorkflowFromDashboard(asset, assignments[0], runs);
+        return;
+      }
+
+      let fullAsset: Awaited<ReturnType<typeof projectAssetService.getById>> = null;
+      if (assignments.length === 0) {
+        fullAsset = await projectAssetService.getById(asset.id).catch(() => null);
+      }
+      const resolvedProductWorkflow = await resolveProductWorkflowForAsset(fullAsset, assignments);
 
       if (canStartDirectlyFromDashboard({
         asset,
@@ -1845,9 +1863,15 @@ const Dashboard = () => {
       setQuickActionAsset(asset);
       setQuickActionAssignments(assignments);
       setQuickActionRuns(runs);
-      setDocsCount(Array.isArray(docs) ? docs.length : 0);
+      setDocsCount(0);
       setProductWorkflow(resolvedProductWorkflow);
       setQuickActionOpen(true);
+
+      docsLoadDeferred = true;
+      void api.get(`/asset-documents/by-asset/${asset.id}`)
+        .then((res) => setDocsCount(Array.isArray(res.data) ? res.data.length : 0))
+        .catch(() => setDocsCount(0))
+        .finally(() => setDocsLoading(false));
     } catch {
       setQuickActionAsset(asset);
       setQuickActionAssignments([]);
@@ -1857,7 +1881,7 @@ const Dashboard = () => {
       setQuickActionOpen(true);
     } finally {
       setRunnerLoading((current) => (current === asset.id ? null : current));
-      setDocsLoading(false);
+      if (!docsLoadDeferred) setDocsLoading(false);
       setQuickActionLoading(false);
     }
   }

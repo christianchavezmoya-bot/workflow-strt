@@ -1,4 +1,4 @@
-import api from "./api";
+﻿import api from "./api";
 import type { WorkflowConfig, UpsertWorkflowConfigInput, WorkflowConfigStatus } from "../types/workflowConfig";
 import offlineStore from "./offlineStore";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
@@ -51,7 +51,7 @@ async function cacheConfigs(configs: WorkflowConfig[]): Promise<void> {
 /**
  * Fire-and-forget reference-media download for Published configs, called
  * right after their steps/text data is cached. Without this, media only
- * ever downloaded via the periodic offlineBootstrapService sweep — leaving a
+ * ever downloaded via the periodic offlineBootstrapService sweep - leaving a
  * window where a config a technician just viewed/started/was-assigned has
  * working steps offline but missing reference photos, because nothing had
  * downloaded them yet. Draft configs are skipped since they aren't
@@ -62,6 +62,18 @@ function prefetchPublishedMedia(configs: WorkflowConfig[]): void {
   for (const config of configs) {
     if (config.status !== "Published") continue;
     configMediaCache.prefetchConfig(config).catch(() => {});
+  }
+}
+
+async function persistFetchedConfig(config: WorkflowConfig): Promise<void> {
+  await offlineStore.saveCache(CACHE_ID_KEY(config.id), config);
+  prefetchPublishedMedia([config]);
+  if (config.productId) {
+    const list = lsRead(config.productId);
+    const existingIdx = list.findIndex((c) => c.id === config.id);
+    if (existingIdx >= 0) list[existingIdx] = config;
+    else list.unshift(config);
+    lsWrite(config.productId, list);
   }
 }
 
@@ -106,12 +118,12 @@ export const workflowConfigService = {
     // The cache always stores the UNFILTERED superset for a product, regardless
     // of what status the caller asked for. This guarantees the cache gets warmed
     // even when every caller for a given product only ever requests a filtered
-    // status (e.g. AssetInstallationPage always asks for "Published" only) —
+    // status (e.g. AssetInstallationPage always asks for "Published" only) -
     // without this, a status-filtered-only product would never build a usable
     // cache and offline loads would always fall through to the network wait.
     const cached = await offlineStore.getCache<WorkflowConfig[]>(CACHE_PRODUCT_KEY(productId));
 
-    // Background refresh — always fetches the UNFILTERED list so the cache stays
+    // Background refresh - always fetches the UNFILTERED list so the cache stays
     // a complete superset usable by any caller, regardless of this call's status arg.
     // Skip when offline to avoid doomed requests.
     if (!shouldSkipBlockingFetch()) {
@@ -128,7 +140,7 @@ export const workflowConfigService = {
     if (cached && cached.length > 0) {
       // Ensure per-ID cache entries exist so getById() works offline even
       // if the background refresh hasn't completed yet. Also opportunistically
-      // catch up on any media that a prior pass didn't get to (idempotent —
+      // catch up on any media that a prior pass didn't get to (idempotent -
       // prefetchConfig skips already-downloaded items).
       cacheConfigs(cached).catch(() => {});
       prefetchPublishedMedia(cached);
@@ -140,7 +152,7 @@ export const workflowConfigService = {
       return status ? local.filter((c) => c.status === status) : local;
     }
 
-    // No cache yet — wait for network (first-ever load for this product).
+    // No cache yet - wait for network (first-ever load for this product).
     // Still fetch unfiltered here too, so the very first load also warms the
     // full cache rather than only ever caching whatever status was requested.
     try {
@@ -171,50 +183,42 @@ export const workflowConfigService = {
       }
     }
 
+    const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
+    if (cached) {
+      if (!shouldSkipBlockingFetch()) {
+        void api.get<WorkflowConfig>(`/workflow-configs/${id}`)
+          .then(async (res) => {
+            await persistFetchedConfig(res.data);
+          })
+          .catch(() => {});
+      }
+      return await configMediaCache.hydrateConfig(cached);
+    }
+
+    const all = lsReadAll();
+    const local = all.find((c) => c.id === id);
+    if (local) {
+      if (!shouldSkipBlockingFetch()) {
+        void api.get<WorkflowConfig>(`/workflow-configs/${id}`)
+          .then(async (res) => {
+            await persistFetchedConfig(res.data);
+          })
+          .catch(() => {});
+      }
+      return await configMediaCache.hydrateConfig(local);
+    }
+
     if (shouldSkipBlockingFetch()) {
-      console.log("[wfConfig.getById] OFFLINE path — id:", id);
-      const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
-      if (cached) {
-        console.log("[wfConfig.getById] OFFLINE — IndexedDB cache HIT");
-        return await configMediaCache.hydrateConfig(cached);
-      }
-      const all = lsReadAll();
-      const local = all.find((c) => c.id === id);
-      if (local) {
-        console.log("[wfConfig.getById] OFFLINE — localStorage fallback HIT, lsReadAll count:", all.length);
-        return await configMediaCache.hydrateConfig(local);
-      }
-      console.warn("[wfConfig.getById] OFFLINE — NO cache found for id:", id, "lsReadAll count:", all.length);
       return null;
     }
 
     try {
       const res = await api.get<WorkflowConfig>(`/workflow-configs/${id}`);
-      await offlineStore.saveCache(CACHE_ID_KEY(id), res.data);
-      prefetchPublishedMedia([res.data]);
-      // Also persist to localStorage so the next `getById` (and `lsReadAll` callers
-      // in `openQuickActionOrStart`) can find the config even if the IndexedDB
-      // cache entry was evicted. `lsRead` is keyed by productId; the response
-      // includes it. (Bug 2 — first open was waiting the full axios 10 s
-      // timeout for an uncached GET; persisting locally removes that wait for
-      // every subsequent open.)
-      if (res.data.productId) {
-        const list = lsRead(res.data.productId);
-        const existingIdx = list.findIndex((c) => c.id === id);
-        if (existingIdx >= 0) list[existingIdx] = res.data;
-        else list.unshift(res.data);
-        lsWrite(res.data.productId, list);
-      }
+      await persistFetchedConfig(res.data);
       return res.data;
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) return null;
-      console.warn("[wfConfig.getById] API failed, falling back to cache — id:", id);
-      const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
-      if (cached) return await configMediaCache.hydrateConfig(cached);
-      const all = lsReadAll();
-      const local = all.find((c) => c.id === id);
-      if (local) return await configMediaCache.hydrateConfig(local);
       return null;
     }
   },

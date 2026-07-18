@@ -1,4 +1,4 @@
-﻿import axios from "axios";
+import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 import type { Project } from "../types/project";
@@ -78,12 +78,27 @@ export const projectAssetService = {
       });
     }
 
+    const local = await entityGetAsset(id);
+    if (local) {
+      void api.get<ProjectAsset>(`/project-assets/${id}`)
+        .then(async (res) => {
+          const asset = fromDto(res.data);
+          await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+          window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+            detail: { assetId: asset.id, productId: asset.productId, projectId: asset.projectId },
+          }));
+        })
+        .catch(() => {});
+      return fromDto(local.data as ProjectAsset);
+    }
+
     try {
       const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
-      return fromDto(res.data);
+      const asset = fromDto(res.data);
+      await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+      return asset;
     } catch {
-      const local = await entityGetAsset(id);
-      return local ? fromDto(local.data as ProjectAsset) : null;
+      return null;
     }
   },
 
