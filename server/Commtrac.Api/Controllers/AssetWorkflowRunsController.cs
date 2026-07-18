@@ -1315,9 +1315,9 @@ public class AssetWorkflowRunsController : ControllerBase
                 actorName);
         }
 
-        // Real-time push: notify all other connected clients that this asset changed
-        await _sse.BroadcastExceptAsync(
-            actorUserId ?? "",
+        // Real-time push: notify all connected clients that this asset changed.
+        // Same-user web + phone sessions must both refresh after offline sync.
+        await _sse.BroadcastAsync(
             "assets:updated",
             new { productId = asset.ProductId, projectId = asset.ProjectId });
     }

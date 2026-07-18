@@ -292,6 +292,22 @@ async function markAssetSyncedFromServer(asset: ProjectAsset): Promise<void> {
   });
 }
 
+async function refreshAssetAfterRunSync(assetId: string): Promise<void> {
+  try {
+    const assetRes = await api.get<ProjectAsset>(`/project-assets/${assetId}`);
+    await markAssetSyncedFromServer(assetRes.data);
+    window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+      detail: {
+        assetId: assetRes.data.id,
+        productId: assetRes.data.productId,
+        projectId: assetRes.data.projectId,
+      },
+    }));
+  } catch {
+    // Non-fatal - keep the run update even if the asset refetch fails.
+  }
+}
+
 async function processSyncedAction(action: PendingAction, responseData: unknown): Promise<void> {
   if (action.opType === "ASSET_DOCUMENT_LINK_ATTACH" || action.opType === "ASSET_DOCUMENT_LINK_UPLOAD") {
     const syncedLink = responseData as AssetDocumentLink | undefined;
@@ -347,6 +363,7 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
         lastLocalSavedAt: signedAt,
       };
       await offlineStore.saveRun(syncedSignedRun);
+      await refreshAssetAfterRunSync(syncedSignedRun.assetId);
       // Refresh the display after a signature syncs (mergeById preserves siblings).
       window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
         detail: { assetId: syncedSignedRun.assetId, runs: [syncedSignedRun], mergeById: true },
@@ -358,27 +375,8 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
   if (action.entityType === "workflow-run" && responseData && typeof responseData === "object") {
     const syncedRun = responseData as AssetWorkflowRun;
     await markRunSyncedFromServer(syncedRun, action.entityId);
-    // Fix: when a queued RUN_COMPLETE action finally syncs after reconnecting,
-    // the server has already updated the asset's status (e.g. to "Pending"
-    // awaiting signature) — but that response only contains the run, never the
-    // asset. Refetch the asset here so the locally cached copy matches the
-    // server immediately, instead of staying stuck on its pre-completion status
-    // until some unrelated screen happens to refresh it.
     if (action.opType === "RUN_COMPLETE") {
-      try {
-        const assetRes = await api.get<{ id: string; productId: string; projectId: string; status: string }>(
-          `/project-assets/${syncedRun.assetId}`
-        );
-        await entityPutAsset({
-          id: assetRes.data.id,
-          productId: assetRes.data.productId,
-          projectId: assetRes.data.projectId,
-          data: assetRes.data,
-          dirty: false,
-        });
-      } catch {
-        // Non-fatal — see same note in assetWorkflowRunService.completeRun.
-      }
+      await refreshAssetAfterRunSync(syncedRun.assetId);
     }
     window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
       detail: { assetId: syncedRun.assetId, runs: [syncedRun], mergeById: true },

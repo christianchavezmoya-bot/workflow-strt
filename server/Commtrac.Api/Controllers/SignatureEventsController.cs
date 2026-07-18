@@ -169,10 +169,7 @@ public class SignatureEventsController : ControllerBase
                     project?.JobNumber);
             }
 
-            if (!string.IsNullOrWhiteSpace(actorUserId))
-            {
-                await _sse.BroadcastExceptAsync(actorUserId, "assets:updated", new { projectId = asset.ProjectId });
-            }
+            await _sse.BroadcastAsync("assets:updated", new { projectId = asset.ProjectId });
         }
 
         return CreatedAtAction(nameof(List), new { runId }, ToDto(entity));

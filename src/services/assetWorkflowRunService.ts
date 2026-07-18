@@ -478,6 +478,9 @@ export async function syncOfflineAssetWorkflowStateFromRun(
 
     const workflowSummary = deriveOfflineWorkflowSummaryFromRun(run, data.workflowSummary);
     const nextStatus = statusOverride ?? deriveOfflineAssetStatusFromRun(run);
+    const localRunState = run as Partial<{ dirty: boolean; localStatus: string }>;
+    const keepAssetDirty = localRunState.dirty === true
+      || (!!localRunState.localStatus && localRunState.localStatus !== "Synced");
     const updated: CachedAssetWithDerivedState = {
       ...data,
       status: nextStatus,
@@ -494,7 +497,7 @@ export async function syncOfflineAssetWorkflowStateFromRun(
       productId: existing.productId,
       projectId: existing.projectId,
       data: updated,
-      dirty: false,
+      dirty: keepAssetDirty,
     });
     window.dispatchEvent(new CustomEvent("repo:assets:updated", {
       detail: {
