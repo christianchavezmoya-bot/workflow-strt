@@ -1,11 +1,22 @@
 import { Office } from "../components/GlobalOfficeMap";
 import api from "./api";
 import { isMobileNativePlatform } from "../utils/platform";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 
 // In-memory cache for offices (shared across all users in same session)
 let officesCache: Office[] | null = null;
 let officesPromise: Promise<Office[]> | null = null;
 let isMigrating = false; // Prevent infinite migration loops
+
+function refreshNativeOfficesInBackground(): void {
+  if (shouldSkipBlockingFetch()) return;
+  void api.get<Office[]>("/offices")
+    .then((response) => {
+      officesCache = response.data;
+      localStorage.setItem("globalOffices", JSON.stringify(response.data));
+    })
+    .catch(() => {});
+}
 
 export const officesService = {
   async getAll(): Promise<Office[]> {
@@ -27,6 +38,20 @@ export const officesService = {
         });
 
       return officesPromise;
+    }
+
+    const storedRaw = localStorage.getItem("globalOffices");
+    const stored = storedRaw ? JSON.parse(storedRaw) : [];
+
+    if (Array.isArray(officesCache) && officesCache.length > 0) {
+      refreshNativeOfficesInBackground();
+      return officesCache;
+    }
+
+    if (Array.isArray(stored) && stored.length > 0) {
+      officesCache = stored;
+      refreshNativeOfficesInBackground();
+      return stored;
     }
 
     try {

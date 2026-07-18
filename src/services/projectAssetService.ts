@@ -2,12 +2,12 @@ import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 import type { Project } from "../types/project";
-import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll } from "./localDB";
+import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll, referenceDataGet } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
-import { userService } from "./userService";
+import type { User } from "../types/user";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -29,6 +29,157 @@ export async function pendingAssetIds(): Promise<Set<string>> {
   if (!isMobileNativePlatform()) return new Set<string>();
   const all = await pendingGetAll();
   return new Set(all.filter((a) => a.entityType === "asset").map((a) => a.entityId));
+}
+
+function toOpenAssetItem(asset: ProjectAsset): OpenAssetItem {
+  return {
+    id: asset.id,
+    projectId: asset.projectId,
+    jobNumber: (asset as unknown as { jobNumber?: string }).jobNumber ?? "",
+    office: (asset as unknown as { office?: string }).office ?? "",
+    officeId: (asset as unknown as { officeId?: string }).officeId,
+    assetTag: asset.assetTag,
+    assetName: asset.assetName,
+    assetModel: asset.assetModel,
+    manufacturer: (asset as unknown as { manufacturer?: string }).manufacturer,
+    hasWorkflow: !!(asset as unknown as { workflowSummary?: unknown }).workflowSummary,
+    status: asset.status,
+    runStatus: (asset as unknown as { workflowSummary?: { latestRunStatus?: string } }).workflowSummary?.latestRunStatus,
+    completedSteps:
+      (asset as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedItems
+      ?? (asset as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedSteps
+      ?? 0,
+    totalSteps: (asset as unknown as { workflowSummary?: { requiredItems?: number } }).workflowSummary?.requiredItems ?? 0,
+    missingItems: (asset as unknown as { workflowSummary?: { missingItems?: number } }).workflowSummary?.missingItems ?? 0,
+    evidenceStatus: (asset as unknown as { workflowSummary?: { evidenceStatus?: string } }).workflowSummary?.evidenceStatus,
+    assignedUserId: (asset as unknown as { assignedUserId?: string }).assignedUserId,
+    location: asset.location,
+  } satisfies OpenAssetItem;
+}
+
+function buildActiveSummaryFromAssets(cached: ProjectAsset[]): ProjectAssetSummaryItem[] {
+  const byProject = new Map<string, ProjectAssetSummaryItem>();
+  for (const asset of cached) {
+    let bucket = byProject.get(asset.projectId);
+    if (!bucket) {
+      bucket = { projectId: asset.projectId, notStarted: 0, inProgress: 0, complete: 0, total: 0 };
+      byProject.set(asset.projectId, bucket);
+    }
+    bucket.total += 1;
+    if (asset.status === "Complete" || asset.status === "Closed") bucket.complete += 1;
+    else if (asset.status === "NotStarted") bucket.notStarted += 1;
+    else bucket.inProgress += 1;
+  }
+  return [...byProject.values()];
+}
+
+async function buildTechnicianWorkloadSummaryFromLocal(): Promise<TechnicianWorkloadSummaryItem[]> {
+  const [cached, users, projects] = await Promise.all([
+    entityGetAllAssets() as Promise<ProjectAsset[]>,
+    referenceDataGet<User[]>("users").then((data) => data ?? []),
+    entityGetAllProjects() as Promise<Project[]>,
+  ]);
+  const projectById = new Map(projects.map((p) => [p.id, p]));
+  const byUser = new Map<string, TechnicianWorkloadSummaryItem & { jobNumberSet: Set<string> }>();
+  for (const asset of cached) {
+    const userId = asset.assignedUserId;
+    if (!userId) continue;
+    let bucket = byUser.get(userId);
+    if (!bucket) {
+      const user = users.find((u) => u.id === userId);
+      bucket = {
+        userId,
+        fullName: user?.fullName ?? "Unknown",
+        paused: 0,
+        inProgress: 0,
+        notStarted: 0,
+        totalAssigned: 0,
+        jobNumbers: [],
+        jobNumberSet: new Set<string>(),
+        hasIssues: false,
+        completedSteps: 0,
+        totalSteps: 0,
+        startedAt: undefined,
+      };
+      byUser.set(userId, bucket);
+    }
+    bucket.totalAssigned += 1;
+    if (asset.status === "Paused") bucket.paused += 1;
+    else if (asset.status === "NotStarted") bucket.notStarted += 1;
+    else if (asset.status !== "Complete" && asset.status !== "Closed") bucket.inProgress += 1;
+    const summary = asset.workflowSummary;
+    if (summary?.hasOpenIssues) bucket.hasIssues = true;
+    bucket.completedSteps += summary?.completedItems ?? 0;
+    bucket.totalSteps += summary?.requiredItems ?? 0;
+    if (summary?.latestRunStartedAt && (!bucket.startedAt || summary.latestRunStartedAt < bucket.startedAt)) {
+      bucket.startedAt = summary.latestRunStartedAt;
+    }
+    const project = projectById.get(asset.projectId);
+    if (project?.jobNumber) bucket.jobNumberSet.add(project.jobNumber);
+  }
+  return [...byUser.values()].map(({ jobNumberSet, ...rest }) => ({ ...rest, jobNumbers: [...jobNumberSet] }));
+}
+
+function buildDashboardWorkspaceFromAssets(cached: ProjectAsset[], userId?: string): DashboardWorkspace {
+  const toWorkspaceItem = (asset: ProjectAsset): DashboardWorkspaceAssetItem => ({
+    id: asset.id,
+    projectId: asset.projectId,
+    jobNumber: (asset as unknown as { jobNumber?: string }).jobNumber ?? "",
+    assetTag: asset.assetTag,
+    assetName: asset.assetName,
+    assetModel: asset.assetModel,
+    location: asset.location,
+    status: asset.status,
+    runStatus: (asset as unknown as { workflowSummary?: { latestRunStatus?: string } }).workflowSummary?.latestRunStatus,
+    historyStatus: asset.status,
+    completedSteps:
+      (asset as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedItems
+      ?? (asset as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedSteps
+      ?? 0,
+    totalSteps: (asset as unknown as { workflowSummary?: { requiredItems?: number } }).workflowSummary?.requiredItems ?? 0,
+    missingItems: (asset as unknown as { workflowSummary?: { missingItems?: number } }).workflowSummary?.missingItems ?? 0,
+    evidenceStatus: (asset as unknown as { workflowSummary?: { evidenceStatus?: string } }).workflowSummary?.evidenceStatus,
+    assignedUserId: (asset as unknown as { assignedUserId?: string }).assignedUserId,
+    workflowMode: (asset as unknown as { workflowMode?: string }).workflowMode ?? "",
+    isDeleted: asset.isDeleted ?? false,
+    deletedAtUtc: (asset as unknown as { deletedAtUtc?: string }).deletedAtUtc,
+    deleteReason: (asset as unknown as { deleteReason?: string }).deleteReason,
+    latestActivityAt: (asset as unknown as { latestActivityAt?: string }).latestActivityAt,
+    completedAt: (asset as unknown as { completedAt?: string }).completedAt,
+    hasOpenIssues:
+      (asset as unknown as { hasOpenIssues?: boolean; workflowSummary?: { hasOpenIssues?: boolean } }).hasOpenIssues
+      ?? (asset as unknown as { hasOpenIssues?: boolean; workflowSummary?: { hasOpenIssues?: boolean } }).workflowSummary?.hasOpenIssues
+      ?? false,
+    signatureStatus:
+      (asset as unknown as { signatureStatus?: string; workflowSummary?: { signatureStatus?: string } }).signatureStatus
+      ?? (asset as unknown as { signatureStatus?: string; workflowSummary?: { signatureStatus?: string } }).workflowSummary?.signatureStatus,
+  });
+
+  const allItems = cached
+    .map((asset) => toWorkspaceItem(asset))
+    .filter((item) => !item.isDeleted && item.status !== "Cancelled" && item.status !== "Closed");
+
+  const userFiltered = userId
+    ? allItems.filter((item) => item.assignedUserId === userId)
+    : allItems;
+
+  const isInstallationWorkflow = (mode?: string) =>
+    !mode || mode === "INSTALLATION_ONLY" || mode === "MIXED";
+  const isInspectionWorkflow = (mode?: string) =>
+    mode === "INSPECTION_ONLY" || mode === "MIXED";
+
+  const isCurrent = (item: DashboardWorkspaceAssetItem) =>
+    item.status !== "Complete" && item.status !== "Completed" && item.status !== "Closed";
+
+  const isHistory = (item: DashboardWorkspaceAssetItem) =>
+    item.status === "Complete" || item.status === "Completed";
+
+  return {
+    currentInstalls: userFiltered.filter((item) => isCurrent(item) && isInstallationWorkflow(item.workflowMode)),
+    currentInspections: userFiltered.filter((item) => isCurrent(item) && isInspectionWorkflow(item.workflowMode)),
+    installHistory: userFiltered.filter((item) => isHistory(item) && isInstallationWorkflow(item.workflowMode)),
+    inspectionHistory: userFiltered.filter((item) => isHistory(item) && isInspectionWorkflow(item.workflowMode)),
+  };
 }
 
 export const projectAssetService = {
@@ -235,67 +386,36 @@ export const projectAssetService = {
     }
   },
 
+  async technicianWorkloadSummaryLocal(): Promise<TechnicianWorkloadSummaryItem[]> {
+    if (!isMobileNativePlatform()) return [];
+    try {
+      return await buildTechnicianWorkloadSummaryFromLocal();
+    } catch {
+      return [];
+    }
+  },
+
   async technicianWorkloadSummary(): Promise<TechnicianWorkloadSummaryItem[]> {
     try {
       const res = await api.get<TechnicianWorkloadSummaryItem[]>("/project-assets/technician-workload-summary");
       return res.data;
     } catch {
-      // Offline fallback: grouped from cached assets. paused/inProgress/
-      // notStarted/totalAssigned/jobNumbers/hasIssues/startedAt come straight
-      // from each asset's own cached record (including workflowSummary,
-      // already synced per-asset), so these are accurate. completedSteps/
-      // totalSteps are summed from workflowSummary.completedItems/requiredItems
-      // across the technician's assigned assets — a reasonable approximation,
-      // not a re-derivation of the server's own step-level aggregation.
       if (!isMobileNativePlatform()) return [];
       try {
-        const [cached, users, projects] = await Promise.all([
-          entityGetAllAssets() as Promise<ProjectAsset[]>,
-          userService.getUsers(),
-          entityGetAllProjects() as Promise<Project[]>,
-        ]);
-        const projectById = new Map(projects.map((p) => [p.id, p]));
-        const byUser = new Map<string, TechnicianWorkloadSummaryItem & { jobNumberSet: Set<string> }>();
-        for (const asset of cached) {
-          const userId = asset.assignedUserId;
-          if (!userId) continue;
-          let bucket = byUser.get(userId);
-          if (!bucket) {
-            const user = users.find((u) => u.id === userId);
-            bucket = {
-              userId,
-              fullName: user?.fullName ?? "Unknown",
-              paused: 0,
-              inProgress: 0,
-              notStarted: 0,
-              totalAssigned: 0,
-              jobNumbers: [],
-              jobNumberSet: new Set<string>(),
-              hasIssues: false,
-              completedSteps: 0,
-              totalSteps: 0,
-              startedAt: undefined,
-            };
-            byUser.set(userId, bucket);
-          }
-          bucket.totalAssigned += 1;
-          if (asset.status === "Paused") bucket.paused += 1;
-          else if (asset.status === "NotStarted") bucket.notStarted += 1;
-          else if (asset.status !== "Complete" && asset.status !== "Closed") bucket.inProgress += 1;
-          const summary = asset.workflowSummary;
-          if (summary?.hasOpenIssues) bucket.hasIssues = true;
-          bucket.completedSteps += summary?.completedItems ?? 0;
-          bucket.totalSteps += summary?.requiredItems ?? 0;
-          if (summary?.latestRunStartedAt && (!bucket.startedAt || summary.latestRunStartedAt < bucket.startedAt)) {
-            bucket.startedAt = summary.latestRunStartedAt;
-          }
-          const project = projectById.get(asset.projectId);
-          if (project?.jobNumber) bucket.jobNumberSet.add(project.jobNumber);
-        }
-        return [...byUser.values()].map(({ jobNumberSet, ...rest }) => ({ ...rest, jobNumbers: [...jobNumberSet] }));
+        return await buildTechnicianWorkloadSummaryFromLocal();
       } catch {
         return [];
       }
+    }
+  },
+
+  async activeSummaryLocal(): Promise<ProjectAssetSummaryItem[]> {
+    if (!isMobileNativePlatform()) return [];
+    try {
+      const cached = await entityGetAllAssets() as ProjectAsset[];
+      return buildActiveSummaryFromAssets(cached);
+    } catch {
+      return [];
     }
   },
 
@@ -304,25 +424,9 @@ export const projectAssetService = {
       const res = await api.get<ProjectAssetSummaryItem[]>("/project-assets/active-summary");
       return res.data;
     } catch {
-      // Offline fallback: derive per-project status counts from cached assets,
-      // same source listOpen() already falls back to below. Previously this
-      // went blank offline instead of reading it.
       if (!isMobileNativePlatform()) return [];
       try {
-        const cached = (await entityGetAllAssets()) as ProjectAsset[];
-        const byProject = new Map<string, ProjectAssetSummaryItem>();
-        for (const asset of cached) {
-          let bucket = byProject.get(asset.projectId);
-          if (!bucket) {
-            bucket = { projectId: asset.projectId, notStarted: 0, inProgress: 0, complete: 0, total: 0 };
-            byProject.set(asset.projectId, bucket);
-          }
-          bucket.total += 1;
-          if (asset.status === "Complete" || asset.status === "Closed") bucket.complete += 1;
-          else if (asset.status === "NotStarted") bucket.notStarted += 1;
-          else bucket.inProgress += 1; // InProgress | Paused | Pending | Issue
-        }
-        return [...byProject.values()];
+        return await this.activeSummaryLocal();
       } catch {
         return [];
       }
@@ -338,39 +442,48 @@ export const projectAssetService = {
     }
   },
 
+  async listOpenLocal(): Promise<OpenAssetItem[]> {
+    if (!isMobileNativePlatform()) return [];
+    try {
+      const cached = await entityGetAllAssets();
+      return cached
+        .map((asset) => toOpenAssetItem(asset as ProjectAsset))
+        .filter((asset) => asset.status !== "Complete" && asset.status !== "Closed");
+    } catch {
+      return [];
+    }
+  },
+
   async listOpen(): Promise<OpenAssetItem[]> {
     try {
       const res = await api.get<OpenAssetItem[]>("/project-assets/open");
       return res.data;
     } catch {
-      // Offline fallback: derive from cached assets
-      if (isMobileNativePlatform()) {
-        const cached = await entityGetAllAssets();
-        return cached.map((asset) => {
-          const a = asset as ProjectAsset;
-          return {
-            id: a.id,
-            projectId: a.projectId,
-            jobNumber: (a as unknown as { jobNumber?: string }).jobNumber ?? "",
-            office: (a as unknown as { office?: string }).office ?? "",
-            officeId: (a as unknown as { officeId?: string }).officeId,
-            assetTag: a.assetTag,
-            assetName: a.assetName,
-            assetModel: a.assetModel,
-            manufacturer: (a as unknown as { manufacturer?: string }).manufacturer,
-            hasWorkflow: !!(a as unknown as { workflowSummary?: unknown }).workflowSummary,
-            status: a.status,
-            runStatus: (a as unknown as { workflowSummary?: { latestRunStatus?: string } }).workflowSummary?.latestRunStatus,
-            completedSteps: (a as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedItems ?? (a as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedSteps ?? 0,
-            totalSteps: (a as unknown as { workflowSummary?: { requiredItems?: number } }).workflowSummary?.requiredItems ?? 0,
-            missingItems: (a as unknown as { workflowSummary?: { missingItems?: number } }).workflowSummary?.missingItems ?? 0,
-            evidenceStatus: (a as unknown as { workflowSummary?: { evidenceStatus?: string } }).workflowSummary?.evidenceStatus,
-            assignedUserId: (a as unknown as { assignedUserId?: string }).assignedUserId,
-            location: a.location,
-          } satisfies OpenAssetItem;
-        }).filter((a) => a.status !== "Complete" && a.status !== "Closed");
-      }
+      if (isMobileNativePlatform()) return await this.listOpenLocal();
       return [];
+    }
+  },
+
+  async dashboardWorkspaceLocal(userId?: string): Promise<DashboardWorkspace> {
+    if (!isMobileNativePlatform()) {
+      return {
+        currentInstalls: [],
+        currentInspections: [],
+        installHistory: [],
+        inspectionHistory: [],
+      };
+    }
+
+    try {
+      const cached = await entityGetAllAssets() as ProjectAsset[];
+      return buildDashboardWorkspaceFromAssets(cached, userId);
+    } catch {
+      return {
+        currentInstalls: [],
+        currentInspections: [],
+        installHistory: [],
+        inspectionHistory: [],
+      };
     }
   },
 
@@ -385,79 +498,7 @@ export const projectAssetService = {
       });
       return res.data;
     } catch {
-      // Offline fallback: derive from cached assets
-      if (isMobileNativePlatform()) {
-        const cached = await entityGetAllAssets();
-        const now = new Date();
-        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-        const toWorkspaceItem = (asset: ProjectAsset): DashboardWorkspaceAssetItem => ({
-          id: asset.id,
-          projectId: asset.projectId,
-          jobNumber: (asset as unknown as { jobNumber?: string }).jobNumber ?? "",
-          assetTag: asset.assetTag,
-          assetName: asset.assetName,
-          assetModel: asset.assetModel,
-          location: asset.location,
-          status: asset.status,
-          runStatus: (asset as unknown as { workflowSummary?: { latestRunStatus?: string } }).workflowSummary?.latestRunStatus,
-          historyStatus: asset.status,
-          completedSteps: (asset as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedItems ?? (asset as unknown as { workflowSummary?: { completedItems?: number; completedSteps?: number } }).workflowSummary?.completedSteps ?? 0,
-          totalSteps: (asset as unknown as { workflowSummary?: { requiredItems?: number } }).workflowSummary?.requiredItems ?? 0,
-          missingItems: (asset as unknown as { workflowSummary?: { missingItems?: number } }).workflowSummary?.missingItems ?? 0,
-          evidenceStatus: (asset as unknown as { workflowSummary?: { evidenceStatus?: string } }).workflowSummary?.evidenceStatus,
-          assignedUserId: (asset as unknown as { assignedUserId?: string }).assignedUserId,
-          workflowMode: (asset as unknown as { workflowMode?: string }).workflowMode ?? "",
-          isDeleted: asset.isDeleted ?? false,
-          deletedAtUtc: (asset as unknown as { deletedAtUtc?: string }).deletedAtUtc,
-          deleteReason: (asset as unknown as { deleteReason?: string }).deleteReason,
-          latestActivityAt: (asset as unknown as { latestActivityAt?: string }).latestActivityAt,
-          completedAt: (asset as unknown as { completedAt?: string }).completedAt,
-          hasOpenIssues: (asset as unknown as { hasOpenIssues?: boolean; workflowSummary?: { hasOpenIssues?: boolean } }).hasOpenIssues ?? (asset as unknown as { hasOpenIssues?: boolean; workflowSummary?: { hasOpenIssues?: boolean } }).workflowSummary?.hasOpenIssues ?? false,
-          signatureStatus: (asset as unknown as { signatureStatus?: string; workflowSummary?: { signatureStatus?: string } }).signatureStatus ?? (asset as unknown as { signatureStatus?: string; workflowSummary?: { signatureStatus?: string } }).workflowSummary?.signatureStatus,
-        });
-
-        const allItems = cached
-          .map((a) => toWorkspaceItem(a as ProjectAsset))
-          .filter((item) => !item.isDeleted && item.status !== "Cancelled" && item.status !== "Closed");
-
-        // Filter by userId if provided (for personal workspace)
-        const userFiltered = userId
-          ? allItems.filter((item) => item.assignedUserId === userId)
-          : allItems;
-
-        const isInstallationWorkflow = (mode?: string) =>
-          !mode || mode === "INSTALLATION_ONLY" || mode === "MIXED";
-        const isInspectionWorkflow = (mode?: string) =>
-          mode === "INSPECTION_ONLY" || mode === "MIXED";
-
-        const isCurrent = (item: DashboardWorkspaceAssetItem) =>
-          item.status !== "Complete" && item.status !== "Completed" && item.status !== "Closed";
-
-        const isHistory = (item: DashboardWorkspaceAssetItem) =>
-          item.status === "Complete" || item.status === "Completed";
-
-        const currentInstalls = userFiltered.filter(
-          (item) => isCurrent(item) && isInstallationWorkflow(item.workflowMode)
-        );
-        const currentInspections = userFiltered.filter(
-          (item) => isCurrent(item) && isInspectionWorkflow(item.workflowMode)
-        );
-        const installHistory = userFiltered.filter(
-          (item) => isHistory(item) && isInstallationWorkflow(item.workflowMode)
-        );
-        const inspectionHistory = userFiltered.filter(
-          (item) => isHistory(item) && isInspectionWorkflow(item.workflowMode)
-        );
-
-        return { currentInstalls, currentInspections, installHistory, inspectionHistory };
-      }
-      // WEB: do NOT swallow the error into a fake-empty workspace. Returning empty
-      // here is indistinguishable from "you genuinely have no jobs", so a transient
-      // timeout (this endpoint parses run JSON per asset and can exceed the 10s
-      // request timeout under load) would silently wipe the user's jobs off the
-      // dashboard — and stick until a later call happened to succeed. Rethrow so the
-      // caller can keep the previously-loaded data and show a soft error instead.
+      if (isMobileNativePlatform()) return await this.dashboardWorkspaceLocal(userId);
       throw new Error("dashboard-workspace-failed");
     }
   },

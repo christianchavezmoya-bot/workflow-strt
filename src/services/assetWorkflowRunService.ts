@@ -510,6 +510,38 @@ export async function syncOfflineAssetWorkflowStateFromRun(
     // non-fatal
   }
 }
+async function listPendingSignaturesLocalImpl(userId?: string): Promise<PendingSignatureRecord[]> {
+  const [runs, assets, projects] = await Promise.all([
+    entityGetAllWorkflowRuns(),
+    entityGetAllAssets(),
+    entityGetAllProjects(),
+  ]);
+  const assetById = new Map((assets as ProjectAsset[]).map((asset) => [asset.id, asset]));
+  const projectById = new Map((projects as Project[]).map((project) => [project.id, project]));
+  const records: PendingSignatureRecord[] = [];
+  for (const run of runs as AssetWorkflowRun[]) {
+    if (!run.isLocked) continue;
+    if (run.signatureStatus !== "PendingInstaller" && run.signatureStatus !== "PendingCustomer") continue;
+    const asset = assetById.get(run.assetId);
+    if (!asset) continue;
+    if (userId && asset.assignedUserId !== userId) continue;
+    const project = projectById.get(asset.projectId);
+    records.push({
+      runId: run.id,
+      assetId: run.assetId,
+      assetTag: asset.assetTag,
+      assetName: asset.assetName ?? "",
+      projectId: asset.projectId,
+      jobNumber: project?.jobNumber ?? "",
+      customerName: project?.customerName ?? "",
+      completedAt: run.completedAt ?? "",
+      completedBy: run.completedByName ?? "",
+      signatureStatus: run.signatureStatus,
+    });
+  }
+  return records;
+}
+
 async function enqueueRunMutation(
   runId: string,
   input: {
@@ -1437,6 +1469,15 @@ export const assetWorkflowRunService = {
     }
   },
 
+  async listPendingSignaturesLocal(userId?: string): Promise<PendingSignatureRecord[]> {
+    if (!isMobileNativePlatform()) return [];
+    try {
+      return await listPendingSignaturesLocalImpl(userId);
+    } catch {
+      return [];
+    }
+  },
+
   async listPendingSignatures(userId?: string): Promise<PendingSignatureRecord[]> {
     try {
       const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures", {
@@ -1444,43 +1485,9 @@ export const assetWorkflowRunService = {
       });
       return res.data;
     } catch {
-      // Offline fallback: the Assets page already derives the same
-      // "awaiting installer/customer sign-off" state from locally cached
-      // runs (AssetInstallationPage.getAssetAttentionSummary), so the data
-      // exists on-device - this endpoint previously just went blank offline
-      // instead of reading it, giving two different answers for the same
-      // asset depending which screen you looked at.
       if (!isMobileNativePlatform()) return [];
       try {
-        const [runs, assets, projects] = await Promise.all([
-          entityGetAllWorkflowRuns(),
-          entityGetAllAssets(),
-          entityGetAllProjects(),
-        ]);
-        const assetById = new Map((assets as ProjectAsset[]).map((a) => [a.id, a]));
-        const projectById = new Map((projects as Project[]).map((p) => [p.id, p]));
-        const records: PendingSignatureRecord[] = [];
-        for (const run of runs as AssetWorkflowRun[]) {
-          if (!run.isLocked) continue;
-          if (run.signatureStatus !== "PendingInstaller" && run.signatureStatus !== "PendingCustomer") continue;
-          const asset = assetById.get(run.assetId);
-          if (!asset) continue;
-          if (userId && asset.assignedUserId !== userId) continue;
-          const project = projectById.get(asset.projectId);
-          records.push({
-            runId: run.id,
-            assetId: run.assetId,
-            assetTag: asset.assetTag,
-            assetName: asset.assetName ?? "",
-            projectId: asset.projectId,
-            jobNumber: project?.jobNumber ?? "",
-            customerName: project?.customerName ?? "",
-            completedAt: run.completedAt ?? "",
-            completedBy: run.completedByName ?? "",
-            signatureStatus: run.signatureStatus,
-          });
-        }
-        return records;
+        return await listPendingSignaturesLocalImpl(userId);
       } catch {
         return [];
       }

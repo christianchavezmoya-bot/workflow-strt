@@ -55,6 +55,7 @@ import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/gener
 import { isMobileNativePlatform } from "../../utils/platform";
 import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import { mediaStore } from "../../services/mediaStore";
+import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import { get as dcGet, put as dcPut, DASHBOARD_CACHE_KEYS } from "../../services/dashboardCache";
 
@@ -522,6 +523,52 @@ const Dashboard = () => {
     writeCachedDashboardWorkspace(data);
   }, [writeCachedDashboardWorkspace]);
 
+  const dashboardWorkspaceHasRows = useCallback((data: DashboardWorkspace) => (
+    data.currentInstalls.length > 0
+    || data.currentInspections.length > 0
+    || data.installHistory.length > 0
+    || data.inspectionHistory.length > 0
+  ), []);
+
+  const seedNativeDashboardSummariesFromLocal = useCallback(() => {
+    if (!isNativePlatform) return;
+
+    void projectAssetService.technicianWorkloadSummaryLocal()
+      .then((data) => {
+        setWorkload((prev) => (data.length > 0 || prev.length === 0 ? data : prev));
+        dcPut(DASHBOARD_CACHE_KEYS.workload, data);
+        setWorkloadLoading(false);
+      })
+      .catch(() => {});
+
+    void projectAssetService.listOpenLocal()
+      .then((data) => {
+        setOpenAssets((prev) => (data.length > 0 || prev.length === 0 ? data : prev));
+        dcPut(DASHBOARD_CACHE_KEYS.openAssets, data);
+      })
+      .catch(() => {});
+
+    void projectAssetService.activeSummaryLocal()
+      .then((data) => {
+        setProjectAssetSummary((prev) => (data.length > 0 || prev.length === 0 ? data : prev));
+        dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, data);
+      })
+      .catch(() => {});
+  }, [isNativePlatform]);
+
+  const seedNativeDashboardWorkspaceFromLocal = useCallback(() => {
+    if (!isNativePlatform) return;
+
+    void projectAssetService.dashboardWorkspaceLocal(dashboardWorkspaceScopeId)
+      .then((data) => {
+        if (!dashboardWorkspaceHasRows(data)) return;
+        applyDashboardWorkspace(data);
+        setCacheHydrated(true);
+        setWorkspaceLoading(false);
+      })
+      .catch(() => {});
+  }, [applyDashboardWorkspace, dashboardWorkspaceHasRows, dashboardWorkspaceScopeId, isNativePlatform]);
+
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
     if (activeOffice === "All") return null;
@@ -552,8 +599,22 @@ const Dashboard = () => {
 
   const loadAttention = useCallback(async () => {
     setAttentionLoading(true);
+    const attentionUserId = isManager ? undefined : user.id;
+
+    if (isNativePlatform) {
+      try {
+        const [localIssues, localSigs] = await Promise.all([
+          assetWorkflowRunService.listOpenIssues(attentionUserId),
+          assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId),
+        ]);
+        setOpenIssues((prev) => (localIssues.length > 0 || prev.length === 0 ? localIssues : prev));
+        setPendingSigs((prev) => (localSigs.length > 0 || prev.length === 0 ? localSigs : prev));
+      } catch {
+        // Keep the current attention widgets if local cache probing fails.
+      }
+    }
+
     try {
-      const attentionUserId = isManager ? undefined : user.id;
       const [iss, sigs] = await Promise.all([
         assetWorkflowRunService.listOpenIssues(attentionUserId),
         assetWorkflowRunService.listPendingSignatures(attentionUserId),
@@ -563,7 +624,7 @@ const Dashboard = () => {
     } finally {
       setAttentionLoading(false);
     }
-  }, [isManager, user.id]);
+  }, [isManager, isNativePlatform, user.id]);
 
   // ── Native cache hydration: show last-known data instantly on mount ──
   useEffect(() => {
@@ -603,6 +664,9 @@ const Dashboard = () => {
     dispatch(fetchProjects());
     dispatch(fetchProducts());
     dispatch(fetchUsers());
+    if (isNativePlatform) {
+      seedNativeDashboardSummariesFromLocal();
+    }
     loadAttention();
     setWorkloadLoading(true);
     projectAssetService.technicianWorkloadSummary().then((w) => { setWorkload(w); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.workload, w); }).finally(() => setWorkloadLoading(false));
@@ -613,7 +677,7 @@ const Dashboard = () => {
         setDraftConfigs(configs.filter((c: any) => c.status === "Draft" || c.status === "draft"));
       }).catch(() => {});
     }
-  }, [dashboardBootPhase, dispatch, isAuthenticated, isEngineer, isNativePlatform, loadAttention]);
+  }, [dashboardBootPhase, dispatch, isAuthenticated, isEngineer, isNativePlatform, loadAttention, seedNativeDashboardSummariesFromLocal]);
 
   // ── Native cache: persist state to cache whenever it changes ──
   useEffect(() => {
@@ -652,6 +716,7 @@ const Dashboard = () => {
 
     let cancelled = false;
     setWorkspaceLoading(true);
+    seedNativeDashboardWorkspaceFromLocal();
 
     const fetchWorkspaceWithRetry = async (options?: { light?: boolean }): Promise<DashboardWorkspace> => {
       let lastErr: unknown;
@@ -721,10 +786,15 @@ const Dashboard = () => {
     isNativePlatform,
     isViewer,
     readCachedDashboardWorkspace,
+    seedNativeDashboardWorkspaceFromLocal,
     unlockDeferredDashboardBoot,
   ]);
 
   const refreshLiveDashboardDataNow = useCallback(() => {
+    if (isNativePlatform) {
+      seedNativeDashboardSummariesFromLocal();
+      seedNativeDashboardWorkspaceFromLocal();
+    }
     projectAssetService.listOpen().then(setOpenAssets);
     projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
     setWorkspaceLoading(true);
@@ -735,7 +805,14 @@ const Dashboard = () => {
       .finally(() => setWorkspaceLoading(false));
     loadAttention();
     setAnalyticsRefreshTick((t) => t + 1);
-  }, [applyDashboardWorkspace, dashboardWorkspaceScopeId, loadAttention]);
+  }, [
+    applyDashboardWorkspace,
+    dashboardWorkspaceScopeId,
+    isNativePlatform,
+    loadAttention,
+    seedNativeDashboardSummariesFromLocal,
+    seedNativeDashboardWorkspaceFromLocal,
+  ]);
 
   const refreshLiveDashboardData = useCallback(() => {
     if (!isNativePlatform) {
@@ -1147,6 +1224,11 @@ const Dashboard = () => {
   }, []);
 
   const refreshDashboardAfterIssueUpdate = useCallback(async () => {
+    if (isNativePlatform) {
+      seedNativeDashboardSummariesFromLocal();
+      seedNativeDashboardWorkspaceFromLocal();
+    }
+
     const [, , , workspace] = await Promise.all([
       loadAttention(),
       projectAssetService.listOpen().then(setOpenAssets),
@@ -1161,7 +1243,14 @@ const Dashboard = () => {
     ]);
     setAnalyticsRefreshTick((t) => t + 1);
     return workspace;
-  }, [applyDashboardWorkspace, dashboardWorkspaceScopeId, loadAttention]);
+  }, [
+    applyDashboardWorkspace,
+    dashboardWorkspaceScopeId,
+    isNativePlatform,
+    loadAttention,
+    seedNativeDashboardSummariesFromLocal,
+    seedNativeDashboardWorkspaceFromLocal,
+  ]);
 
   const openHistoryReport = useCallback(async (assetItem: DashboardWorkspaceAssetItem) => {
     setHistoryDialogLoading(true);
@@ -1769,8 +1858,8 @@ const Dashboard = () => {
     try {
       const [assignments, runs, docs, fullAsset] = await Promise.all([
         assetWorkflowAssignmentService.listByAsset(asset.id),
-        api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${asset.id}`).then(r => r.data).catch(() => []),
-        api.get(`/asset-documents/by-asset/${asset.id}`).then(res => res.data).catch(() => []),
+        assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
+        assetDocumentLinkService.listByAsset(asset.id).catch(() => []),
         projectAssetService.getById(asset.id).catch(() => null),
       ]);
       setQuickActionAssignments(assignments);
@@ -1798,7 +1887,7 @@ const Dashboard = () => {
   async function openMissingMediaFromDashboardAsset(asset: QuickActionAsset) {
     setRunnerLoading(asset.id);
     try {
-      const runs = await assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => assetWorkflowRunService.listByAsset(asset.id));
+      const runs = await assetWorkflowRunService.listByAsset(asset.id).catch(() => []);
       const missingMedia = resolveMissingMediaForAsset(asset, runs);
       if (!missingMedia) {
         await openQuickActionOrStart(asset);
@@ -1819,7 +1908,7 @@ const Dashboard = () => {
     try {
       const [assignments, runs] = await Promise.all([
         assetWorkflowAssignmentService.listByAsset(asset.id),
-        assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => assetWorkflowRunService.listByAsset(asset.id)),
+        assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
       ]);
 
       const attention = getQuickActionAttentionForAsset(asset, runs);
@@ -5912,24 +6001,8 @@ const Dashboard = () => {
           assetTag={runnerAsset.assetTag}
           jobNumber={runnerAsset.jobNumber}
           teamMembers={runnerTeamMembers}
-          onComplete={() => {
-            // Refresh the workspace after workflow completion
-            setWorkspaceLoading(true);
-            projectAssetService
-              .dashboardWorkspace(dashboardWorkspaceScopeId)
-              .then((data) => applyDashboardWorkspace(data))
-              .catch(() => { /* keep last-good workspace on failure — never blank it */ })
-              .finally(() => setWorkspaceLoading(false));
-          }}
-          onPause={() => {
-            // Refresh the workspace after workflow pause
-            setWorkspaceLoading(true);
-            projectAssetService
-              .dashboardWorkspace(dashboardWorkspaceScopeId)
-              .then((data) => applyDashboardWorkspace(data))
-              .catch(() => { /* keep last-good workspace on failure — never blank it */ })
-              .finally(() => setWorkspaceLoading(false));
-          }}
+          onComplete={refreshLiveDashboardDataNow}
+          onPause={refreshLiveDashboardDataNow}
         />
       )}
 
