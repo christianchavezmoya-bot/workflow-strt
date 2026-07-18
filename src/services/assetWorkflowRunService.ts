@@ -18,6 +18,7 @@ import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
 import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
+import { boundedFreshRead } from "../utils/boundedFreshRead";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 import {
@@ -796,24 +797,26 @@ export const assetWorkflowRunService = {
       return res.data;
     }
 
-    const cachedRuns = await offlineStore.listRunsByAsset(assetId);
-    if (cachedRuns.length > 0) {
-      if (!shouldSkipBlockingFetch()) {
-        refreshRunsInBackground({ type: "asset", id: assetId }, `/asset-workflow-runs/by-asset/${assetId}`);
-      }
-      return cachedRuns;
-    }
-
-    if (shouldSkipBlockingFetch()) {
-      return cachedRuns;
-    }
-
-    try {
-      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
-      return await cacheServerRuns(res.data);
-    } catch {
-      return await offlineStore.listRunsByAsset(assetId);
-    }
+    // CONTRACT: "Fresh" means authoritative. Callers use this exactly when a
+    // stale answer is harmful (resume-vs-start decisions, verifying a save,
+    // priming the bootstrap cache). A previous perf pass made this return the
+    // local cache whenever it was non-empty and only refreshed in the
+    // background, which silently turned every caller back into a cache read —
+    // on an online phone that means run-state decisions were made from stale
+    // runs.
+    //
+    // But awaiting unconditionally is also wrong on a phone: on site wifi with
+    // no route to the server, every call would block for the full 10 s API
+    // timeout. boundedFreshRead waits only a short slice for the authoritative
+    // answer, then serves cache and lets the request finish in the background.
+    // Device-level offline short-circuits to cache with no network attempt.
+    return await boundedFreshRead(
+      async () => {
+        const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
+        return await cacheServerRuns(res.data);
+      },
+      () => offlineStore.listRunsByAsset(assetId),
+    );
   },
 
   async getById(id: string): Promise<AssetWorkflowRun | null> {

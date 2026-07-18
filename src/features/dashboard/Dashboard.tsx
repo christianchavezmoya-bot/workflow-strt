@@ -446,7 +446,10 @@ const Dashboard = () => {
     source: "asset" | "run";
   } | null>(null);
   const [resolvingDashboardIssueId, setResolvingDashboardIssueId] = useState<string | null>(null);
-  const [historyDialogLoading, setHistoryDialogLoading] = useState(false);
+  // Per-asset, not a shared boolean: with one flag every "View" button in Job
+  // History span and disabled at once, so pressing one row looked like the app
+  // had fired all of them. Mirrors the existing runnerLoading pattern.
+  const [historyDialogLoading, setHistoryDialogLoading] = useState<string | null>(null);
   const nativeDashboardRefreshTimerRef = useRef<number | null>(null);
 
   // Quick action dialog for "My Jobs Today" assets (state declared after myInstallAssets is defined)
@@ -888,10 +891,19 @@ const Dashboard = () => {
     // counts refresh live when assets change offline - not only when the
     // notifications:* events happen to be fired alongside.
     window.addEventListener("repo:assets:updated", refreshLiveDashboardData);
+    // Assignment and run caches refresh in the background on native and emit
+    // these when they land. Without listening, the dashboard kept rendering the
+    // pre-refresh snapshot while other screens (the Assets page listens to
+    // repo:assignments:updated) recovered correctly — so the dashboard alone
+    // stayed wrong until a manual reload.
+    window.addEventListener("repo:assignments:updated", refreshLiveDashboardData);
+    window.addEventListener("repo:runs:updated", refreshLiveDashboardData);
     return () => {
       window.removeEventListener("notifications:run-state-changed", refreshLiveDashboardData);
       window.removeEventListener("notifications:refresh", refreshLiveDashboardData);
       window.removeEventListener("repo:assets:updated", refreshLiveDashboardData);
+      window.removeEventListener("repo:assignments:updated", refreshLiveDashboardData);
+      window.removeEventListener("repo:runs:updated", refreshLiveDashboardData);
     };
   }, [dashboardBootPhase, refreshLiveDashboardData]);
 
@@ -1253,7 +1265,7 @@ const Dashboard = () => {
   ]);
 
   const openHistoryReport = useCallback(async (assetItem: DashboardWorkspaceAssetItem) => {
-    setHistoryDialogLoading(true);
+    setHistoryDialogLoading(assetItem.id);
     try {
       const [asset, runs] = await Promise.all([
         projectAssetService.getById(assetItem.id),
@@ -1309,7 +1321,7 @@ const Dashboard = () => {
         outputMode: "open",
       });
     } finally {
-      setHistoryDialogLoading(false);
+      setHistoryDialogLoading((current) => (current === assetItem.id ? null : current));
     }
   }, [navigate, projects, user.fullName]);
 
@@ -1545,8 +1557,8 @@ const Dashboard = () => {
           <Button
             size="small"
             variant="outlined"
-            startIcon={historyDialogLoading ? <CircularProgress size={12} /> : <OpenInNewOutlined fontSize="small" />}
-            disabled={historyDialogLoading}
+            startIcon={historyDialogLoading === asset.id ? <CircularProgress size={12} /> : <OpenInNewOutlined fontSize="small" />}
+            disabled={historyDialogLoading === asset.id}
             onClick={(e) => {
               e.stopPropagation();
               void openHistoryReport(asset);
@@ -1908,7 +1920,13 @@ const Dashboard = () => {
     try {
       const [assignments, runs] = await Promise.all([
         assetWorkflowAssignmentService.listByAsset(asset.id),
-        assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
+        // Authoritative read: this result decides resume-vs-start and which run
+        // is opened. The cache-first listByAsset() is right for painting the
+        // card, but acting on a stale run here is what made an online phone
+        // fail to open a workflow (it could try to start a run the server
+        // already has, or resume one the server had already locked).
+        // listByAssetFresh falls back to cache when offline.
+        assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => []),
       ]);
 
       const attention = getQuickActionAttentionForAsset(asset, runs);
@@ -4564,6 +4582,14 @@ const Dashboard = () => {
                             )}
                             <Button size="small" variant="outlined"
                               color={cardAction.buttonColor}
+                              // Immediate feedback on the button that was actually
+                              // pressed. Offline (or on a slow link) resolving an
+                              // action can take a moment with no visible change,
+                              // which reads as "the app ignored me" and invites
+                              // repeat taps. runnerLoading is per-asset, so only
+                              // this card's button reacts.
+                              startIcon={runnerLoading === a.id ? <CircularProgress size={12} color="inherit" /> : undefined}
+                              disabled={runnerLoading === a.id}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (cardAction.actionKind === "missing-media") {
@@ -4573,7 +4599,13 @@ const Dashboard = () => {
                                 if (cardAction.actionKind === "resolve-blocking") {
                                   const blockingIssue = openIssues.find((issue) => issue.assetId === a.id && issue.isBlocking);
                                   if (blockingIssue) {
-                                    void openIssueRepair(blockingIssue);
+                                    // openIssueRepair tracks its own dialog flag, so drive
+                                    // runnerLoading here too or this button alone would stay
+                                    // inert while it loads the issue.
+                                    setRunnerLoading(a.id);
+                                    void openIssueRepair(blockingIssue).finally(() => {
+                                      setRunnerLoading((current) => (current === a.id ? null : current));
+                                    });
                                     return;
                                   }
                                 }
