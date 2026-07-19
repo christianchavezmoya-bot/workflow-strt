@@ -10,6 +10,7 @@ import {
   WarningAmberOutlined, WorkOutlineOutlined,
 } from "@mui/icons-material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRepoSubscription } from "../../hooks/useRepoSubscription";
 import { Link, useNavigate } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
@@ -577,6 +578,15 @@ const Dashboard = () => {
     if (activeOffice === "All") return null;
     return new Set(globalOffices.filter((o) => o.country === activeOffice).map((o) => o.id));
   }, [activeOffice, globalOffices]);
+
+  // officesService serves cache first and refreshes in the background; re-read
+  // when that lands or the office filter stays on pre-refresh values.
+  useRepoSubscription(["repo:offices:updated"], () => {
+    void officesService.getAll().then((offices) => {
+      setGlobalOffices(offices);
+      setAvailableCountries(Array.from(new Set(offices.map((o) => o.country).filter(Boolean))).sort());
+    }).catch(() => {});
+  });
 
   useEffect(() => {
     officesService.getAll().then((offices) => {

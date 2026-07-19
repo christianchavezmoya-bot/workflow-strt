@@ -12,8 +12,15 @@ function refreshNativeOfficesInBackground(): void {
   if (shouldSkipBlockingFetch()) return;
   void api.get<Office[]>("/offices")
     .then((response) => {
+      const next = JSON.stringify(response.data);
+      const changed = next !== JSON.stringify(officesCache);
       officesCache = response.data;
-      localStorage.setItem("globalOffices", JSON.stringify(response.data));
+      localStorage.setItem("globalOffices", next);
+      // Notify the UI only when the data actually changed — callers already
+      // rendered the cached list and otherwise never learn the refresh landed.
+      if (changed) {
+        window.dispatchEvent(new Event("repo:offices:updated"));
+      }
     })
     .catch(() => {});
 }

@@ -8,6 +8,7 @@ export const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "
   Complete: "success",
   Closed: "info",
   Issue: "error",
+  Cancelled: "error",
 };
 
 export const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
@@ -18,4 +19,5 @@ export const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   Complete: "Complete",
   Closed: "Closed",
   Issue: "Issue",
+  Cancelled: "Cancelled",
 };

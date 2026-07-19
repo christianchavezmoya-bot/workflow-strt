@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRepoSubscription } from "../../hooks/useRepoSubscription";
 import {
   Box,
   Divider,
@@ -82,7 +83,7 @@ const Sidebar = () => {
     return () => window.removeEventListener("brand-name-changed", handleBrandUpdate);
   }, []);
 
-  useEffect(() => {
+  const loadOffices = useCallback(() => {
     officesService.getAll().then((offices: Office[]) => {
       // Extract unique countries from global offices
       const countries = Array.from(new Set(offices.map((office) => office.country).filter(Boolean)));
@@ -91,6 +92,12 @@ const Sidebar = () => {
       setOfficeOptions(["All"]);
     });
   }, []);
+
+  useEffect(() => { loadOffices(); }, [loadOffices]);
+
+  // officesService serves cache first and refreshes in the background; without
+  // this the office list stayed on the pre-refresh values until a manual reload.
+  useRepoSubscription(["repo:offices:updated"], loadOffices);
 
   return (
     <Box className="sidebar">

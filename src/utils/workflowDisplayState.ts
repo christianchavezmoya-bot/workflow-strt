@@ -109,6 +109,7 @@ const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   Complete: "Complete",
   Closed: "Closed",
   Issue: "In Progress",       // R2: display Issue as In Progress; red widget carries it
+  Cancelled: "Cancelled",
 };
 
 const STATUS_COLORS: Record<ProjectAssetStatus, ChipColor> = {
@@ -119,6 +120,7 @@ const STATUS_COLORS: Record<ProjectAssetStatus, ChipColor> = {
   Complete: "success",
   Closed: "info",
   Issue: "primary",           // R2: same as In Progress; the widget is red, not the chip
+  Cancelled: "error",
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -301,6 +303,13 @@ interface ActionInput {
 
 function computeAction(i: ActionInput): WorkflowDisplayState["action"] {
   const { asset, opts } = i;
+
+  // Cancelled assets are terminal and locked: no start/continue/resume/sign.
+  // Checked before everything else so a cancel mid-run cannot fall through to a
+  // signature or resume action.
+  if (asset.status === "Cancelled") {
+    return { kind: "run-details", label: "Run Details", tooltip: "Asset cancelled — view only", color: "inherit" };
+  }
 
   // 0. Awaiting signatures — checked FIRST, before the workflow-source check.
   //

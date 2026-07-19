@@ -43,6 +43,7 @@ const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success
   Complete: "success",
   Closed: "info",
   Issue: "error",
+  Cancelled: "error",
 };
 
 const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
@@ -53,6 +54,7 @@ const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   Complete: "Complete",
   Closed: "Closed",
   Issue: "Issue",
+  Cancelled: "Cancelled",
 };
 
 export default function AssetRegistryPage() {

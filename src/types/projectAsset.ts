@@ -1,4 +1,4 @@
-export type ProjectAssetStatus = "NotStarted" | "InProgress" | "Paused" | "Pending" | "Complete" | "Closed" | "Issue";
+export type ProjectAssetStatus = "NotStarted" | "InProgress" | "Paused" | "Pending" | "Complete" | "Closed" | "Issue" | "Cancelled";
 
 export interface IssueComment {
   id: string;

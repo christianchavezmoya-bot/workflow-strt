@@ -1607,7 +1607,16 @@ public class AssetWorkflowRunsController : ControllerBase
                 .ToList();
 
             var assetIds  = runs.Select(r => r.AssetId).Distinct().ToList();
-            var assets    = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
+            // Exclude cancelled assets. A cancelled job needs no signature, and
+            // without this a cancelled asset kept appearing in My Pending
+            // Signatures (the query filtered only on run state and assigned user).
+            // Soft-deleted assets are already excluded by the global query filter.
+            var assets    = await _db.ProjectAssets
+                .Where(a => assetIds.Contains(a.Id) && a.Status != "Cancelled")
+                .ToListAsync();
+            // Drop runs whose asset was filtered out above.
+            var visibleAssetIds = assets.Select(a => a.Id).ToHashSet();
+            runs = runs.Where(r => visibleAssetIds.Contains(r.AssetId)).ToList();
 
             // Filter to user's assigned assets if userId provided
             if (!string.IsNullOrWhiteSpace(userId))

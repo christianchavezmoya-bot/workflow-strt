@@ -37,6 +37,18 @@ export const userService = {
           .then(async (response) => {
             await referenceDataSet(USERS_REF_KEY, response.data);
             await syncMetaSet("users");
+            // Tell the UI the background refresh landed. Without this the caller
+            // already rendered the cached list and had no way to learn newer data
+            // had arrived, so a one-shot page load stayed stale until a manual
+            // reload.
+            //
+            // Only fire when the data actually CHANGED. That keeps a routine
+            // refresh from re-rendering every consumer, and it is what stops the
+            // central listener (store/index.ts re-dispatches fetchUsers) from
+            // looping: the refetch it triggers finds identical data and goes quiet.
+            if (JSON.stringify(response.data) !== JSON.stringify(cached)) {
+              window.dispatchEvent(new Event("repo:users:updated"));
+            }
           })
           .catch(() => {});
       }

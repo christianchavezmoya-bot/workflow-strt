@@ -235,6 +235,7 @@ const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success
   Complete: "success",
   Closed: "info",
   Issue: "error",
+  Cancelled: "error",
 };
 
 const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
@@ -245,6 +246,7 @@ const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
   Complete: "Complete",
   Closed: "Closed",
   Issue: "Issue",
+  Cancelled: "Cancelled",
 };
 
 /** Time-ago helper for mobile sync timestamp display */
@@ -498,6 +500,9 @@ const AssetInstallationPage = () => {
   const [editStatus, setEditStatus] = useState<ProjectAssetStatus>("NotStarted");
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancellingAsset, setCancellingAsset] = useState(false);
 
   // Delete (single)
   const [deleteAsset, setDeleteAsset] = useState<ProjectAsset | null>(null);
@@ -1801,7 +1806,7 @@ const AssetInstallationPage = () => {
       });
     }
     const statusLabel: Record<string, string> = {
-      NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Closed: "Closed", Issue: "Issue",
+      NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Closed: "Closed", Issue: "Issue", Cancelled: "Cancelled",
     };
     return pool.map((a): PrintRow => {
       const tech        = a.assignedUserId ? userMap.get(a.assignedUserId) : undefined;
@@ -2196,6 +2201,46 @@ const AssetInstallationPage = () => {
       setEditError("Failed to update asset.");
     } finally {
       setEditSaving(false);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Cancel asset
+  //
+  // Cancel is a STATUS, not a soft-delete: the asset stays visible on this page
+  // (chip + filter) instead of disappearing the way a deleted asset does. It
+  // rides the existing Admin/PM update endpoint, so no new backend route.
+  //
+  // No run surgery is needed. IsCurrentWorkspaceAsset drops a cancelled asset
+  // before it inspects the run, and every active-asset query already excludes
+  // "Cancelled" - so an in-flight run simply stops counting as current and the
+  // captured work is preserved as an audit record.
+  // ------------------------------------------------------------------
+
+  async function confirmCancelAsset() {
+    if (!editAsset) return;
+    const reason = cancelReason.trim();
+    if (!reason) return;
+    setCancellingAsset(true);
+    try {
+      // Reason is appended to Notes: it needs no schema migration and stays
+      // visible wherever asset notes are already shown.
+      const stamp = new Date().toISOString().slice(0, 10);
+      const existingNotes = (editForm.notes ?? "").trim();
+      const cancelNote = `[Cancelled ${stamp}] ${reason}`;
+      await projectAssetService.update(editAsset.id, {
+        status: "Cancelled",
+        notes: existingNotes ? `${existingNotes}\n${cancelNote}` : cancelNote,
+      });
+      setCancelConfirmOpen(false);
+      setCancelReason("");
+      setEditOpen(false);
+      setEditAsset(null);
+      refreshAssets();
+    } catch {
+      setEditError("Failed to cancel asset.");
+    } finally {
+      setCancellingAsset(false);
     }
   }
 
@@ -4970,6 +5015,7 @@ ${words.slice(midpoint).join(" ")}`;
               <MenuItem value="Complete">Complete</MenuItem>
               <MenuItem value="Closed">Closed</MenuItem>
               <MenuItem value="Issue">Issue</MenuItem>
+              <MenuItem value="Cancelled">Cancelled</MenuItem>
             </Select>
           </FormControl>
           <Tooltip title="Search by asset tag, serial, part #, captures, or installer">
@@ -6085,6 +6131,12 @@ ${words.slice(midpoint).join(" ")}`;
         <DialogTitle>Edit Asset - {editAsset?.assetTag}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {editAsset?.status === "Cancelled" && (
+              <Alert severity="warning" sx={{ fontSize: 12 }}>
+                This asset is cancelled and locked. Its details and workflow can no longer be
+                edited. The reason is recorded in Notes.
+              </Alert>
+            )}
             {/* Site name from project (read-only) */}
             {editAsset && (() => {
               const proj = projectMap.get(editAsset.projectId);
@@ -6175,8 +6227,22 @@ ${words.slice(midpoint).join(" ")}`;
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditOpen(false)} disabled={editSaving}>Cancel</Button>
-          <Button variant="contained" onClick={saveEditAsset} disabled={editSaving}
+          <Button onClick={() => setEditOpen(false)} disabled={editSaving}>Close</Button>
+          {/* Distinct from "Close" above (which just discards the dialog): this
+              cancels the JOB. Admin/PM only — the update endpoint it uses is
+              Admin/PM gated, so the same permission that lets you edit status
+              lets you cancel. Hidden once already cancelled. */}
+          {canEditAssetStatus && editAsset?.status !== "Cancelled" && (
+            <Button
+              color="error"
+              onClick={() => { setCancelReason(""); setCancelConfirmOpen(true); }}
+              disabled={editSaving}
+            >
+              Cancel asset
+            </Button>
+          )}
+          <Button variant="contained" onClick={saveEditAsset}
+            disabled={editSaving || editAsset?.status === "Cancelled"}
             startIcon={editSaving ? <CircularProgress size={14} /> : undefined}>
             {editSaving ? "Saving..." : "Save changes"}
           </Button>
@@ -6208,6 +6274,44 @@ ${words.slice(midpoint).join(" ")}`;
       </Menu>
 
       {/* Archive confirmation */}
+      {/* Cancel asset — requires a reason so the audit trail is never empty. */}
+      <Dialog open={cancelConfirmOpen} onClose={() => !cancellingAsset && setCancelConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Cancel this asset?</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="warning" sx={{ fontSize: 12 }}>
+              {editAsset?.assetTag} will be marked <strong>Cancelled</strong> and locked from further
+              editing. It stays visible on this page and is filterable by the Cancelled status.
+              Any work already captured is kept as a record.
+            </Alert>
+            <TextField
+              label="Reason for cancelling *"
+              size="small"
+              fullWidth
+              required
+              multiline
+              rows={3}
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="e.g. Equipment removed from site; job descoped by customer"
+              helperText="Recorded in the asset's Notes."
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCancelConfirmOpen(false)} disabled={cancellingAsset}>Back</Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={confirmCancelAsset}
+            disabled={cancellingAsset || !cancelReason.trim()}
+            startIcon={cancellingAsset ? <CircularProgress size={14} /> : undefined}
+          >
+            {cancellingAsset ? "Cancelling..." : "Cancel asset"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={Boolean(deleteAsset)} onClose={() => !deletingAsset && setDeleteAsset(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Archive Asset?</DialogTitle>
         <DialogContent>
@@ -7228,7 +7332,7 @@ ${words.slice(midpoint).join(" ")}`;
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                       {(["NotStarted", "InProgress", "Paused", "Pending", "Complete", "Closed", "Issue"] as const).map((s) => {
                         const labels: Record<string, string> = {
-                          NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Closed: "Closed", Issue: "Issue",
+                          NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Closed: "Closed", Issue: "Issue", Cancelled: "Cancelled",
                         };
                         const checked = printStatuses.includes(s);
                         return (

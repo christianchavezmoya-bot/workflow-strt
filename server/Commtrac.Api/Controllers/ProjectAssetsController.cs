@@ -1120,11 +1120,13 @@ public class ProjectAssetsController : ControllerBase
         var assetStatus = (asset.Status ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
         var runStatus = (latestRun?.Status ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
 
+        // Terminal asset states are checked FIRST. Previously the pending-installer
+        // branch below returned true before this ran, so an asset cancelled while a
+        // locked run awaited signature stayed in the technician's My Jobs forever.
+        if (assetStatus is "complete" or "completed" or "closed" or "cancelled") return false;
+
         if (latestRun?.IsLocked == true && string.Equals(latestRun.SignatureStatus, "PendingInstaller", StringComparison.OrdinalIgnoreCase))
             return true;
-
-        // Complete/closed/cancelled assets are never "current"
-        if (assetStatus is "complete" or "completed" or "closed" or "cancelled") return false;
 
         // Active assets that need work are "current" (includes Issue, Pending)
         if (runStatus is "paused" or "inprogress") return true;
