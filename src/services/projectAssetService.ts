@@ -17,6 +17,7 @@ function normalizeStatus(raw: unknown): ProjectAssetStatus {
   if (value === "pending") return "Pending";
   if (value === "complete" || value === "completed" || value === "done") return "Complete";
   if (value === "closed") return "Closed";
+  if (value === "cancelled" || value === "canceled") return "Cancelled";
   if (value === "issue" || value === "issues" || value === "missing") return "Issue";
   return "NotStarted";
 }
@@ -234,7 +235,7 @@ export const projectAssetService = {
     if (local) {
       // Only refresh in the background when there is actually a link to refresh
       // over. Without this guard an offline phone fired a doomed request on
-      // EVERY getById — and getById is called per asset on hot paths (card taps,
+      // EVERY getById - and getById is called per asset on hot paths (card taps,
       // quick actions, run launches), so a single offline screen could queue a
       // burst of requests that each burn the full 10s API timeout before failing.
       // Matches the guard already used by workflowConfigService, userService and
@@ -254,7 +255,7 @@ export const projectAssetService = {
     }
 
     // No cached copy. Offline there is nothing to fetch and nothing to fall back
-    // to, so the request can only fail — short-circuit to the same null answer
+    // to, so the request can only fail - short-circuit to the same null answer
     // instead of paying the full API timeout to get there.
     if (shouldSkipBlockingFetch()) return null;
 
@@ -271,7 +272,7 @@ export const projectAssetService = {
   async update(id: string, patch: Partial<CreateProjectAssetInput> & { status?: string; workOrderId?: string }): Promise<ProjectAsset> {
     if (!isMobileNativePlatform()) {
       const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
-      // A write happened — invalidate BOTH the single-asset cache AND the
+      // A write happened - invalidate BOTH the single-asset cache AND the
       // by-project/by-product LIST caches, or the asset lists (e.g. the assigned-
       // technician column) keep serving a stale pre-edit snapshot for up to the
       // cache TTL and the change appears to "revert". Mirrors AssetRepository.update.
@@ -291,7 +292,7 @@ export const projectAssetService = {
 
     const result = await AssetRepository.update(id, patch as Partial<ProjectAsset> & Record<string, unknown>);
     if (result === null) {
-      // Queued with no local row to merge — re-read after a list refresh may still fail;
+      // Queued with no local row to merge - re-read after a list refresh may still fail;
       // return a minimal optimistic object so takeover/start flows can proceed in-session.
       const local = await entityGetAsset(id);
       const data = local?.data as ProjectAsset | undefined;
@@ -302,7 +303,7 @@ export const projectAssetService = {
         }));
         return optimistic;
       }
-      throw new Error("Offline — asset not cached yet; open this project once while online");
+      throw new Error("Offline - asset not cached yet; open this project once while online");
     }
     window.dispatchEvent(new CustomEvent("repo:assets:updated", {
       detail: { productId: result.productId, projectId: result.projectId },
@@ -320,10 +321,10 @@ export const projectAssetService = {
     if (isMobileNativePlatform()) {
       await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
       // Sync the issues store so Issues Board reflects this change even while offline.
-      // Write only open (unresolved) issues — resolved ones are excluded from the
+      // Write only open (unresolved) issues - resolved ones are excluded from the
       // server's open-issues response and Issues Board only shows open ones.
       // Fix: must call this even when openRecords is empty (every issue just
-      // resolved) — entityReplaceIssuesForAsset correctly removes stale closed
+      // resolved) - entityReplaceIssuesForAsset correctly removes stale closed
       // entries; the old entityPutIssues-only call never deleted anything,
       // leaving resolved issues stuck in the store indefinitely while offline.
       const openRecords = deriveOpenIssuesFromAsset(asset);
@@ -373,7 +374,7 @@ export const projectAssetService = {
         await entityDeleteAsset(id);
         return;
       }
-      // No response = network unreachable — delete locally and queue for server
+      // No response = network unreachable - delete locally and queue for server
       if (axios.isAxiosError(error) && !error.response) {
         await entityDeleteAsset(id);
         await pendingAdd({
@@ -620,3 +621,4 @@ export interface DashboardWorkspace {
   installHistory: DashboardWorkspaceAssetItem[];
   inspectionHistory: DashboardWorkspaceAssetItem[];
 }
+
