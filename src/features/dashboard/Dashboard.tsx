@@ -273,6 +273,46 @@ function formatMyJobsStepCompletionLabel(completedSteps: number, totalSteps: num
   const percent = Math.round((Math.max(0, completedSteps) / totalSteps) * 100);
   return `${Math.min(100, percent)}% completed`;
 }
+
+function dashboardWorkspaceItemHasCardSignals(item: DashboardWorkspaceAssetItem) {
+  return item.totalSteps > 0
+    || item.completedSteps > 0
+    || item.missingItems > 0
+    || (item.evidenceStatus ?? "").toLowerCase() === "missingdata"
+    || Boolean(item.signatureStatus)
+    || item.hasOpenIssues;
+}
+
+function mergeDashboardWorkspaceItems(
+  previousItems: DashboardWorkspaceAssetItem[],
+  nextItems: DashboardWorkspaceAssetItem[],
+) {
+  if (previousItems.length === 0 || nextItems.length === 0) return nextItems;
+  const previousById = new Map(previousItems.map((item) => [item.id, item]));
+  return nextItems.map((item) => {
+    const previous = previousById.get(item.id);
+    if (!previous) return item;
+    if (!dashboardWorkspaceItemHasCardSignals(previous) || dashboardWorkspaceItemHasCardSignals(item)) return item;
+    return {
+      ...item,
+      completedSteps: previous.completedSteps,
+      totalSteps: previous.totalSteps,
+      missingItems: previous.missingItems,
+      evidenceStatus: previous.evidenceStatus,
+      signatureStatus: previous.signatureStatus,
+      hasOpenIssues: previous.hasOpenIssues,
+    };
+  });
+}
+
+function stabilizeDashboardWorkspace(previous: DashboardWorkspace, next: DashboardWorkspace): DashboardWorkspace {
+  return {
+    currentInstalls: mergeDashboardWorkspaceItems(previous.currentInstalls, next.currentInstalls),
+    currentInspections: mergeDashboardWorkspaceItems(previous.currentInspections, next.currentInspections),
+    installHistory: mergeDashboardWorkspaceItems(previous.installHistory, next.installHistory),
+    inspectionHistory: mergeDashboardWorkspaceItems(previous.inspectionHistory, next.inspectionHistory),
+  };
+}
 function workflowModeLabel(workflowMode?: string | null) {
   if (workflowMode === "INSPECTION_ONLY") return "Inspection";
   if (workflowMode === "MIXED") return "Mixed";
@@ -371,6 +411,9 @@ const Dashboard = () => {
   const canActAsFieldTechnician = !!can.installationAssets?.runWorkflow && !isViewer;
   const isNativePlatform = isMobileNativePlatform();
   const showNativeManagerHome = isManager && isNativePlatform;
+  const isInstallerDashboard = canActAsFieldTechnician && !isManager && !isSupervisor && !isEngineer;
+  const shouldSkipLightWorkspaceBoot = isInstallerDashboard;
+  const shouldUseDashboardWorkspaceSessionCache = !isNativePlatform && !isInstallerDashboard;
 
   const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch      = useAppDispatch();
@@ -482,12 +525,22 @@ const Dashboard = () => {
     installHistory: [],
     inspectionHistory: [],
   });
+  const dashboardWorkspaceRef = useRef<DashboardWorkspace>({
+    currentInstalls: [],
+    currentInspections: [],
+    installHistory: [],
+    inspectionHistory: [],
+  });
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [cacheHydrated, setCacheHydrated] = useState(false);
   const [dashboardBootPhase, setDashboardBootPhase] = useState<"workspace" | "full">("workspace");
   const unlockDeferredDashboardBoot = useCallback(() => {
     setDashboardBootPhase((current) => current === "full" ? current : "full");
   }, []);
+
+  useEffect(() => {
+    dashboardWorkspaceRef.current = dashboardWorkspace;
+  }, [dashboardWorkspace]);
 
   // Admin: view another user's dashboard
   type DashboardUserEntry = { id: string; fullName: string; role: string; office: string };
@@ -502,6 +555,7 @@ const Dashboard = () => {
     if (isNativePlatform) {
       return dcGet<DashboardWorkspace>(DASHBOARD_CACHE_KEYS.dashboardWorkspace);
     }
+    if (!shouldUseDashboardWorkspaceSessionCache) return null;
     if (!user.id) return null;
     try {
       const raw = window.sessionStorage.getItem(dashboardWorkspaceSessionKey);
@@ -509,23 +563,33 @@ const Dashboard = () => {
     } catch {
       return null;
     }
-  }, [dashboardWorkspaceSessionKey, isNativePlatform, user.id]);
+  }, [dashboardWorkspaceSessionKey, isNativePlatform, shouldUseDashboardWorkspaceSessionCache, user.id]);
   const writeCachedDashboardWorkspace = useCallback((data: DashboardWorkspace) => {
     if (isNativePlatform) {
       dcPut(DASHBOARD_CACHE_KEYS.dashboardWorkspace, data);
       return;
     }
+    if (!shouldUseDashboardWorkspaceSessionCache) return;
     if (!user.id) return;
     try {
       window.sessionStorage.setItem(dashboardWorkspaceSessionKey, JSON.stringify(data));
     } catch {
       // Ignore storage unavailability/quota errors.
     }
-  }, [dashboardWorkspaceSessionKey, isNativePlatform, user.id]);
-  const applyDashboardWorkspace = useCallback((data: DashboardWorkspace) => {
-    setDashboardWorkspace(data);
-    writeCachedDashboardWorkspace(data);
-  }, [writeCachedDashboardWorkspace]);
+  }, [dashboardWorkspaceSessionKey, isNativePlatform, shouldUseDashboardWorkspaceSessionCache, user.id]);
+  const applyDashboardWorkspace = useCallback((
+    data: DashboardWorkspace,
+    options?: { persist?: boolean; stabilize?: boolean },
+  ) => {
+    const shouldStabilize = options?.stabilize ?? shouldSkipLightWorkspaceBoot;
+    const next = shouldStabilize
+      ? stabilizeDashboardWorkspace(dashboardWorkspaceRef.current, data)
+      : data;
+    dashboardWorkspaceRef.current = next;
+    setDashboardWorkspace(next);
+    if (options?.persist === false) return;
+    writeCachedDashboardWorkspace(next);
+  }, [shouldSkipLightWorkspaceBoot, writeCachedDashboardWorkspace]);
 
   const dashboardWorkspaceHasRows = useCallback((data: DashboardWorkspace) => (
     data.currentInstalls.length > 0
@@ -566,7 +630,7 @@ const Dashboard = () => {
     void projectAssetService.dashboardWorkspaceLocal(dashboardWorkspaceScopeId)
       .then((data) => {
         if (!dashboardWorkspaceHasRows(data)) return;
-        applyDashboardWorkspace(data);
+        applyDashboardWorkspace(data, { persist: false, stabilize: true });
         setCacheHydrated(true);
         setWorkspaceLoading(false);
       })
@@ -655,7 +719,7 @@ const Dashboard = () => {
     if (cOpenAssets) setOpenAssets(cOpenAssets);
     if (cSummary) setProjectAssetSummary(cSummary);
     if (cWorkload) setWorkload(cWorkload);
-    if (cWorkspace) setDashboardWorkspace(cWorkspace);
+    if (cWorkspace) applyDashboardWorkspace(cWorkspace, { persist: false, stabilize: true });
     if (cOffices) setGlobalOffices(cOffices);
     if (cCountries) setAvailableCountries(cCountries);
     // Mark cache as hydrated so loading spinners don't override cached data
@@ -668,9 +732,9 @@ const Dashboard = () => {
     if (isNativePlatform || !isAuthenticated || !user.id) return;
     const cached = readCachedDashboardWorkspace();
     if (!cached) return;
-    setDashboardWorkspace(cached);
+    applyDashboardWorkspace(cached, { persist: false, stabilize: true });
     setCacheHydrated(true);
-  }, [isAuthenticated, isNativePlatform, readCachedDashboardWorkspace, user.id]);
+  }, [applyDashboardWorkspace, isAuthenticated, isNativePlatform, readCachedDashboardWorkspace, user.id]);
 
   useEffect(() => {
     if (!isAuthenticated || dashboardBootPhase !== "full") return;
@@ -748,22 +812,18 @@ const Dashboard = () => {
     const restoreCachedWorkspace = () => {
       const cached = readCachedDashboardWorkspace();
       if (!cached) return;
-      setDashboardWorkspace((prev) =>
-        prev.currentInstalls.length
-        || prev.currentInspections.length
-        || prev.installHistory.length
-        || prev.inspectionHistory.length
-          ? prev
-          : cached,
-      );
+      if (dashboardWorkspaceHasRows(dashboardWorkspaceRef.current)) return;
+      applyDashboardWorkspace(cached, { persist: false, stabilize: true });
       setCacheHydrated(true);
     };
 
     (async () => {
       try {
-        const initialData = await fetchWorkspaceWithRetry({ light: true });
+        const initialData = shouldSkipLightWorkspaceBoot
+          ? await fetchWorkspaceWithRetry()
+          : await fetchWorkspaceWithRetry({ light: true });
         if (cancelled) return;
-        applyDashboardWorkspace(initialData);
+        applyDashboardWorkspace(initialData, shouldSkipLightWorkspaceBoot ? undefined : { stabilize: true });
       } catch {
         if (cancelled) return;
         restoreCachedWorkspace();
@@ -774,7 +834,7 @@ const Dashboard = () => {
         }
       }
 
-      if (cancelled) return;
+      if (shouldSkipLightWorkspaceBoot || cancelled) return;
       if (isNativePlatform) {
         await new Promise((resolve) => setTimeout(resolve, 900));
         if (cancelled) return;
@@ -794,9 +854,11 @@ const Dashboard = () => {
     };
   }, [
     applyDashboardWorkspace,
+    dashboardWorkspaceHasRows,
     dashboardWorkspaceScopeId,
     isAuthenticated,
     isNativePlatform,
+    shouldSkipLightWorkspaceBoot,
     isViewer,
     readCachedDashboardWorkspace,
     seedNativeDashboardWorkspaceFromLocal,
@@ -1528,12 +1590,24 @@ const Dashboard = () => {
       );
 
       if (cancelled) return;
-      const next: Record<string, NativeMyJobsCardContext> = {};
-      for (const entry of entries) {
-        if (!entry) continue;
-        next[entry[0]] = entry[1];
-      }
-      setNativeMyJobsCardContext(next);
+      setNativeMyJobsCardContext((prev) => {
+        const fresh: Record<string, NativeMyJobsCardContext> = {};
+        for (const entry of entries) {
+          if (!entry) continue;
+          fresh[entry[0]] = entry[1];
+        }
+        const merged: Record<string, NativeMyJobsCardContext> = {};
+        for (const asset of myInstallAssets) {
+          if (fresh[asset.id]) {
+            merged[asset.id] = fresh[asset.id];
+            continue;
+          }
+          if (prev[asset.id]) {
+            merged[asset.id] = prev[asset.id];
+          }
+        }
+        return merged;
+      });
     })();
 
     return () => {
