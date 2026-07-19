@@ -5,6 +5,7 @@ import type { Project } from "../types/project";
 import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll, referenceDataGet } from "./localDB";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import type { User } from "../types/user";
@@ -231,17 +232,31 @@ export const projectAssetService = {
 
     const local = await entityGetAsset(id);
     if (local) {
-      void api.get<ProjectAsset>(`/project-assets/${id}`)
-        .then(async (res) => {
-          const asset = fromDto(res.data);
-          await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
-          window.dispatchEvent(new CustomEvent("repo:assets:updated", {
-            detail: { assetId: asset.id, productId: asset.productId, projectId: asset.projectId },
-          }));
-        })
-        .catch(() => {});
+      // Only refresh in the background when there is actually a link to refresh
+      // over. Without this guard an offline phone fired a doomed request on
+      // EVERY getById — and getById is called per asset on hot paths (card taps,
+      // quick actions, run launches), so a single offline screen could queue a
+      // burst of requests that each burn the full 10s API timeout before failing.
+      // Matches the guard already used by workflowConfigService, userService and
+      // officesService for their background refreshes.
+      if (!shouldSkipBlockingFetch()) {
+        void api.get<ProjectAsset>(`/project-assets/${id}`)
+          .then(async (res) => {
+            const asset = fromDto(res.data);
+            await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+            window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+              detail: { assetId: asset.id, productId: asset.productId, projectId: asset.projectId },
+            }));
+          })
+          .catch(() => {});
+      }
       return fromDto(local.data as ProjectAsset);
     }
+
+    // No cached copy. Offline there is nothing to fetch and nothing to fall back
+    // to, so the request can only fail — short-circuit to the same null answer
+    // instead of paying the full API timeout to get there.
+    if (shouldSkipBlockingFetch()) return null;
 
     try {
       const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
