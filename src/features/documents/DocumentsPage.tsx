@@ -1,4 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useServerRecovery } from "../../hooks/useServerRecovery";
 import {
   AddOutlined,
   ArrowDropDown,
@@ -301,6 +302,14 @@ export default function DocumentsPage() {
     loadDocs();
     loadConfig();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Native document reads fast-bail while the server is flagged unreachable, so
+  // a page that loaded during that window would otherwise stay empty forever.
+  // Ask again the moment the link is back.
+  useServerRecovery(() => {
+    void loadDocs();
+    void loadConfig();
+  });
 
   async function loadDocs() {
     setLoading(true);

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useServerRecovery } from "../../hooks/useServerRecovery";
 import {
   Autocomplete,
   Box,
@@ -294,6 +295,10 @@ export default function TipsAndTricksPage() {
     loadDocs();
     productService.getProducts().then(setProducts).catch(() => {});
   }, []);
+
+  // Native document reads fast-bail while the server is flagged unreachable, so
+  // a page that loaded during that window would otherwise stay empty forever.
+  useServerRecovery(() => { void loadDocs(); });
 
   useEffect(() => {
     const isPmUser = user?.role === "Project Manager";

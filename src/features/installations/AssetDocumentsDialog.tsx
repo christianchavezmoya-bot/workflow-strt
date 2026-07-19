@@ -14,6 +14,7 @@
  * Documents page), so the classification stays consistent.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useServerRecovery } from "../../hooks/useServerRecovery";
 import {
   AttachFileOutlined,
   CloudUploadOutlined,
@@ -236,6 +237,16 @@ export default function AssetDocumentsDialog({
   // onDocsChanged is stable (useCallback in parent) but kept out of deps to be safe
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, reload]);
+
+  // Native document reads fast-bail while the server is flagged unreachable. If
+  // the dialog was opened during that window it would show an empty list and
+  // never retry, so pull again as soon as the link is back.
+  useServerRecovery(() => {
+    if (!open) return;
+    void reload().then((data) => {
+      if (data) onDocsChanged(asset.id, data.length);
+    });
+  });
 
   // ── Load library when Library tab is active ────────────────────────────────
   useEffect(() => {
