@@ -10,6 +10,7 @@ import {
   WarningAmberOutlined, WorkOutlineOutlined,
 } from "@mui/icons-material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { useRepoSubscription } from "../../hooks/useRepoSubscription";
 import { Link, useNavigate } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
@@ -426,8 +427,14 @@ const Dashboard = () => {
   const isNativePlatform = isMobileNativePlatform();
   const showNativeManagerHome = isManager && isNativePlatform;
   const isInstallerDashboard = canActAsFieldTechnician && !isManager && !isSupervisor && !isEngineer;
-  const shouldSkipLightWorkspaceBoot = isInstallerDashboard;
-  const shouldUseDashboardWorkspaceSessionCache = !isNativePlatform && !isInstallerDashboard;
+  // FIX 1: installers were opted OUT of the fast path by cc9d896 (they awaited
+  // the full workspace instead of the light one). The card-flicker problem that
+  // change solved is handled by the stabilize/merge logic below, which is kept,
+  // so installers get the light first paint back like every other role.
+  const shouldSkipLightWorkspaceBoot = false;
+  // FIX 1: web session cache was also disabled for installers. Native is
+  // unaffected either way - it reads its own cache via dcGet regardless.
+  const shouldUseDashboardWorkspaceSessionCache = !isNativePlatform;
 
   const { activeOffice, updateActiveOffice } = useActiveOffice();
   const dispatch      = useAppDispatch();
@@ -455,11 +462,13 @@ const Dashboard = () => {
   // Phase 4 - evidence
   const [evidenceData,    setEvidenceData]    = useState<EvidenceCompleteness | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState(false);
   const [evidenceWindow,  setEvidenceWindow]  = useState(90);
 
   // Phase 5 - workflow health
   const [healthData,    setHealthData]    = useState<WorkflowHealth | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
+  const [healthError, setHealthError] = useState(false);
   const [healthWindow,  setHealthWindow]  = useState(90);
 
   // Incremented by run-state events to trigger analytics re-fetch
@@ -596,7 +605,11 @@ const Dashboard = () => {
     data: DashboardWorkspace,
     options?: { persist?: boolean; stabilize?: boolean },
   ) => {
-    const shouldStabilize = options?.stabilize ?? shouldSkipLightWorkspaceBoot;
+    // Default ON: this is cc9d896's card-state merge, kept deliberately. It
+    // previously defaulted from shouldSkipLightWorkspaceBoot, which is now false,
+    // so it is pinned to true to preserve that fix. No-op on first paint (the
+    // merge returns nextItems when there is no previous list).
+    const shouldStabilize = options?.stabilize ?? true;
     const next = shouldStabilize
       ? stabilizeDashboardWorkspace(dashboardWorkspaceRef.current, data)
       : data;
@@ -810,14 +823,26 @@ const Dashboard = () => {
     setWorkspaceLoading(true);
     seedNativeDashboardWorkspaceFromLocal();
 
-    const fetchWorkspaceWithRetry = async (options?: { light?: boolean }): Promise<DashboardWorkspace> => {
+    const fetchWorkspaceWithRetry = async (
+      options?: { light?: boolean; attempts?: number },
+    ): Promise<DashboardWorkspace> => {
+      // FIX 3a (offline): when the device is genuinely offline there is nothing
+      // to retry - the request can only time out. Fail immediately so the caller
+      // falls straight through to cached/local data instead of burning the API
+      // timeout (and, on web, three of them) before showing anything.
+      if (shouldSkipBlockingFetch()) throw new Error("dashboard-workspace-offline");
+
+      const maxAttempts = options?.attempts ?? 3;
       let lastErr: unknown;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
           return await projectAssetService.dashboardWorkspace(dashboardWorkspaceScopeId, options);
         } catch (err) {
           lastErr = err;
           if (cancelled) throw err;
+          // FIX 3b: don't sleep after the FINAL attempt. The old loop always
+          // slept, so a fully failed boot wasted an extra 1800ms doing nothing.
+          if (attempt === maxAttempts - 1) break;
           await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
         }
       }
@@ -833,12 +858,22 @@ const Dashboard = () => {
     };
 
     (async () => {
+      // Paint the cached workspace BEFORE awaiting the network. This call had
+      // drifted into the catch block (1cbaf56), making the cache a failure-only
+      // fallback: on a slow-but-successful fetch nothing rendered until the
+      // request returned. Restoring it here brings back stale-while-revalidate.
+      // No-ops when there is no cache or rows are already present, so it can
+      // never clobber fresher data; offline is unchanged.
+      restoreCachedWorkspace();
+
       try {
-        const initialData = shouldSkipLightWorkspaceBoot
-          ? await fetchWorkspaceWithRetry()
-          : await fetchWorkspaceWithRetry({ light: true });
+        // FIX 3c: first paint gets ONE fast attempt. If it fails we fall back to
+        // cache immediately (below) rather than making the user wait out the full
+        // retry budget; the follow-up fetch further down still retries properly
+        // and reconciles in the background.
+        const initialData = await fetchWorkspaceWithRetry({ light: true, attempts: 1 });
         if (cancelled) return;
-        applyDashboardWorkspace(initialData, shouldSkipLightWorkspaceBoot ? undefined : { stabilize: true });
+        applyDashboardWorkspace(initialData, { stabilize: true });
       } catch {
         if (cancelled) return;
         restoreCachedWorkspace();
@@ -1027,6 +1062,7 @@ const Dashboard = () => {
     if (!isManager || dashboardBootPhase !== "full") return;
     let cancelled = false;
     setEvidenceLoading(true);
+    setEvidenceError(false);
     void (async () => {
       try {
         const data = isNativePlatform
@@ -1034,8 +1070,15 @@ const Dashboard = () => {
           : await loadDashboardMetricWithRetry(() => dashboardService.evidenceCompleteness(evidenceWindow));
         if (cancelled) return;
         setEvidenceData(data);
+        setEvidenceError(false);
       } catch {
         if (cancelled) return;
+        // Previously this catch was empty while `finally` still cleared the
+        // spinner, so a failed load looked exactly like "no data": the panel
+        // reported success and rendered blank, keeping any stale figures.
+        // Clear the data and record the failure so the panel can say so.
+        setEvidenceData(null);
+        setEvidenceError(true);
       } finally {
         if (!cancelled) setEvidenceLoading(false);
       }
@@ -1050,6 +1093,7 @@ const Dashboard = () => {
     if (!isManager || dashboardBootPhase !== "full") return;
     let cancelled = false;
     setHealthLoading(true);
+    setHealthError(false);
     void (async () => {
       try {
         const data = isNativePlatform
@@ -1057,8 +1101,12 @@ const Dashboard = () => {
           : await loadDashboardMetricWithRetry(() => dashboardService.workflowHealth(healthWindow));
         if (cancelled) return;
         setHealthData(data);
+        setHealthError(false);
       } catch {
         if (cancelled) return;
+        // Same silent-blank failure as the evidence panel above.
+        setHealthData(null);
+        setHealthError(true);
       } finally {
         if (!cancelled) setHealthLoading(false);
       }
@@ -1243,10 +1291,16 @@ const Dashboard = () => {
         String(project.projectManager ?? "").trim().toLowerCase() === dashboardProjectOwnerName
       );
     }
+    // An Admin (anyone with all-projects visibility) is not normally named as
+    // the Project Manager on anything, so filtering by their own name returned
+    // an empty set - which is why the native manager home showed no projects at
+    // all for Admins. Give them the full active list; PMs still see only what
+    // they manage.
+    if (canViewAllProjects) return activeDashboardProjects;
     return activeDashboardProjects.filter((project) =>
       String(project.projectManager ?? "").trim().toLowerCase() === String(user.fullName ?? "").trim().toLowerCase()
     );
-  }, [activeDashboardProjects, dashboardProjectOwnerName, scopedProjects, user.fullName, viewedDashboardUserId]);
+  }, [activeDashboardProjects, canViewAllProjects, dashboardProjectOwnerName, scopedProjects, user.fullName, viewedDashboardUserId]);
   const managedProjectIds = useMemo(() => new Set(managedProjects.map((project) => project.id)), [managedProjects]);
   const managedOpenAssets = useMemo(
     () => openAssets.filter((asset) => managedProjectIds.has(asset.projectId)),
@@ -3804,7 +3858,11 @@ const Dashboard = () => {
               <Typography variant="caption" color="text.disabled">{evidenceData.totalRuns} completed runs in last {evidenceWindow} days</Typography>
             </Stack>
           ) : (
-            <Typography variant="caption" color="text.disabled">No data available for selected window.</Typography>
+            <Typography variant="caption" color={evidenceError ? "error.main" : "text.disabled"}>
+              {evidenceError
+                ? "Couldn't load evidence completeness. Check your connection and retry."
+                : "No data available for selected window."}
+            </Typography>
           )}
         </Box>
       </Grid>
@@ -3870,7 +3928,11 @@ const Dashboard = () => {
               <Typography variant="caption" color="text.disabled">{healthData.totalRuns} runs in last {healthWindow} days - prev score {healthData.previousScore}%</Typography>
             </Stack>
           ) : (
-            <Typography variant="caption" color="text.disabled">No data available for selected window.</Typography>
+            <Typography variant="caption" color={healthError ? "error.main" : "text.disabled"}>
+              {healthError
+                ? "Couldn't load workflow health. Check your connection and retry."
+                : "No data available for selected window."}
+            </Typography>
           )}
         </Box>
       </Grid>
@@ -4149,7 +4211,7 @@ const Dashboard = () => {
           </Box>
           <Stack direction="row" spacing={1}>
             <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>My Projects</Typography>
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>{canViewAllProjects ? "All Projects" : "My Projects"}</Typography>
               <Typography variant="h6" fontWeight={700}>{managedProjects.length}</Typography>
             </Paper>
             <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
