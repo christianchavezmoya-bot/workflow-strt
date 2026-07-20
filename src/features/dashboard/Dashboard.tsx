@@ -313,6 +313,20 @@ function stabilizeDashboardWorkspace(previous: DashboardWorkspace, next: Dashboa
     inspectionHistory: mergeDashboardWorkspaceItems(previous.inspectionHistory, next.inspectionHistory),
   };
 }
+async function loadDashboardMetricWithRetry<T>(loader: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await loader();
+    } catch (err) {
+      lastErr = err;
+      if (attempt === 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 function workflowModeLabel(workflowMode?: string | null) {
   if (workflowMode === "INSPECTION_ONLY") return "Inspection";
   if (workflowMode === "MIXED") return "Mixed";
@@ -513,6 +527,7 @@ const Dashboard = () => {
   );
   const tabRoleCorrected = useRef(false);
   const fieldTabCorrected = useRef(false);
+  const dashboardProjectScopeCorrected = useRef(false);
   // If the role's viewScope is "own", always lock to "mine" — no dropdown shown.
   const canViewAllProjects = (can.projects?.viewScope ?? "own") === "all";
   // Admin defaults to "all" (oversight view); every other role defaults to "mine".
@@ -1010,22 +1025,48 @@ const Dashboard = () => {
   // Phase 4 - evidence completeness
   useEffect(() => {
     if (!isManager || dashboardBootPhase !== "full") return;
+    let cancelled = false;
     setEvidenceLoading(true);
-    dashboardService.evidenceCompleteness(evidenceWindow)
-      .then(setEvidenceData)
-      .catch(() => setEvidenceData(null))
-      .finally(() => setEvidenceLoading(false));
-  }, [dashboardBootPhase, isManager, evidenceWindow, analyticsRefreshTick]);
+    void (async () => {
+      try {
+        const data = isNativePlatform
+          ? await dashboardService.evidenceCompleteness(evidenceWindow)
+          : await loadDashboardMetricWithRetry(() => dashboardService.evidenceCompleteness(evidenceWindow));
+        if (cancelled) return;
+        setEvidenceData(data);
+      } catch {
+        if (cancelled) return;
+      } finally {
+        if (!cancelled) setEvidenceLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [analyticsRefreshTick, dashboardBootPhase, evidenceWindow, isManager, isNativePlatform]);
 
   // Phase 5 - workflow health
   useEffect(() => {
     if (!isManager || dashboardBootPhase !== "full") return;
+    let cancelled = false;
     setHealthLoading(true);
-    dashboardService.workflowHealth(healthWindow)
-      .then(setHealthData)
-      .catch(() => setHealthData(null))
-      .finally(() => setHealthLoading(false));
-  }, [dashboardBootPhase, isManager, healthWindow, analyticsRefreshTick]);
+    void (async () => {
+      try {
+        const data = isNativePlatform
+          ? await dashboardService.workflowHealth(healthWindow)
+          : await loadDashboardMetricWithRetry(() => dashboardService.workflowHealth(healthWindow));
+        if (cancelled) return;
+        setHealthData(data);
+      } catch {
+        if (cancelled) return;
+      } finally {
+        if (!cancelled) setHealthLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [analyticsRefreshTick, dashboardBootPhase, healthWindow, isManager, isNativePlatform]);
   // Derived data
   const filteredProjects = useMemo(() => {
     if (activeOffice === "All" || !officeIdsForRegion) return projects;
@@ -2586,6 +2627,24 @@ const Dashboard = () => {
     fieldTabCorrected.current = true;
     setPmDashboardTab(nextTab);
   }, []);
+
+  useEffect(() => {
+    dashboardProjectScopeCorrected.current = false;
+  }, [user.id]);
+
+  // useAuth boots as Viewer first, so Admin can initialize to "mine" before
+  // the real role lands. Correct that once on web without overriding later
+  // manual scope changes.
+  useEffect(() => {
+    if (isNativePlatform || !isAuthenticated || !isAdmin || !canViewAllProjects) return;
+    if (dashboardProjectScopeCorrected.current) return;
+    if (dashboardProjectScope === "all") {
+      dashboardProjectScopeCorrected.current = true;
+      return;
+    }
+    setDashboardProjectScope("all");
+    dashboardProjectScopeCorrected.current = true;
+  }, [canViewAllProjects, dashboardProjectScope, isAdmin, isAuthenticated, isNativePlatform]);
 
   // Redirect to a valid tab when the current selection isn't available for this user.
   // Also corrects the initial tab for managers: useAuth starts with role="Viewer" so
