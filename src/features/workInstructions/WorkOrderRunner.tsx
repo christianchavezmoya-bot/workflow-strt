@@ -67,6 +67,8 @@ import { getMissingWorkflowItems, getRunMissingWorkflowItems, type MissingWorkfl
 import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
 import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
+import { isMobileNativePlatform } from "../../utils/platform";
+import { markOfflinePerf } from "../../utils/offlinePerf";
 
 // Types
 
@@ -617,6 +619,82 @@ export default function WorkOrderRunner({
     onClose();
   }
 
+  function applyRunProgressFromRun(run: AssetWorkflowRun): void {
+    setActiveRunId(run.id);
+    setActiveRun(run);
+    syncRunTimeState(run);
+
+    let prevValues: Record<string, Record<string, string>> = {};
+    let navRestored = false;
+    if (run.stepResultsJson && run.stepResultsJson !== "[]") {
+      try {
+        const prev = JSON.parse(run.stepResultsJson) as StepCapture[];
+        const navEntry = prev.find((sc) => sc.stepId === "__nav__");
+        const dataEntries = prev.filter((sc) => sc.stepId !== "__nav__");
+
+        for (const sc of dataEntries) prevValues[sc.stepId] = sc.values;
+        setValues(prevValues);
+
+        if (navEntry?.values?.currentStepId) {
+          const savedStepId = navEntry.values.currentStepId;
+          const savedHistory: string[] = JSON.parse(navEntry.values.historyJson ?? "[]");
+          setCurrentStepId(savedStepId);
+          setHistory(savedHistory);
+          setResumingRun(true);
+          navRestored = true;
+        }
+      } catch { /* ignore */ }
+    }
+    if (run.issuesJson && run.issuesJson !== "[]") {
+      try { setIssues(JSON.parse(run.issuesJson) as RunIssue[]); } catch { /* ignore */ }
+    }
+
+    if (!navRestored) {
+      const hasData = Object.keys(prevValues).length > 0;
+      if (hasData) {
+        setResumingRun(true);
+        const firstIncomplete = stepsSorted.find((s) => !Object.keys(prevValues[s.id] ?? {}).length);
+        const resumeStepId = firstIncomplete?.id ?? stepsSorted[stepsSorted.length - 1]?.id ?? null;
+        const resumeIdx = stepsSorted.findIndex((s) => s.id === resumeStepId);
+        setHistory(stepsSorted.slice(0, Math.max(resumeIdx, 0)).map((s) => s.id));
+        setCurrentStepId(resumeStepId);
+      } else {
+        setCurrentStepId(stepsSorted[0]?.id ?? null);
+      }
+    }
+  }
+
+  async function reconcileRunWithServer(): Promise<void> {
+    if (!projectAssetId || !workflowConfigId) return;
+    markOfflinePerf("network_request_start", "runner-reconcile");
+    try {
+      let run = activeRunId
+        ? await assetWorkflowRunService.getById(activeRunId)
+        : await assetWorkflowRunService.startRun(projectAssetId, workflowConfigId);
+
+      if (!run) return;
+
+      if (run.isLocked) {
+        run = await assetWorkflowRunService.startRun(projectAssetId, workflowConfigId);
+      }
+
+      applyRunProgressFromRun(run);
+
+      const timeEntries = parseRunTimeEntries(run.timeTrackingJson ?? "[]");
+      const hasOpenEntry = timeEntries.some((e) => !e.endedAtUtc);
+      if (!hasOpenEntry && run.id) {
+        try {
+          const resumed = await assetWorkflowRunService.trackTimeEntry(run.id, "ResumeProductive", "Continued");
+          if (resumed) syncRunTimeState(resumed);
+        } catch { /* non-fatal */ }
+      }
+    } catch {
+      // Keep local state — sync engine will reconcile later.
+    } finally {
+      markOfflinePerf("network_request_end", "runner-reconcile");
+    }
+  }
+
   async function startRun() {
     if (!isRealRun) {
       setCurrentStepId(stepsSorted[0]?.id ?? null);
@@ -626,8 +704,20 @@ export default function WorkOrderRunner({
 
     setStartingRun(true);
     setStartError(null);
+    markOfflinePerf("navigation_start", "runner-continue");
+
     try {
-      // Fetch or create the run. Backend is idempotent: returns existing active run if present.
+      if (activeRunId && isMobileNativePlatform()) {
+        const localRun = await assetWorkflowRunService.getByIdLocalFirst(activeRunId);
+        if (localRun && !localRun.isLocked) {
+          applyRunProgressFromRun(localRun);
+          markOfflinePerf("interactive_ready", "runner-local");
+          setStage("running");
+          void reconcileRunWithServer();
+          return;
+        }
+      }
+
       let run = activeRunId
         ? await assetWorkflowRunService.getById(activeRunId)
         : await assetWorkflowRunService.startRun(projectAssetId!, workflowConfigId!);
@@ -637,70 +727,22 @@ export default function WorkOrderRunner({
         return;
       }
 
-      // Stale-cache guard: if the resolved run is already locked (e.g. completed in another
-      // session), the existingRunId was pointing at outdated data. Start a fresh run instead
-      // so the user isn't silently working on a locked record that will 400 on complete.
       if (run.isLocked && projectAssetId && workflowConfigId) {
         run = await assetWorkflowRunService.startRun(projectAssetId, workflowConfigId);
       }
 
-      setActiveRunId(run.id);
-      setActiveRun(run);
-      syncRunTimeState(run);
+      applyRunProgressFromRun(run);
 
-      // If the run has no open time entry (was paused â†’ idle), automatically
-      // resume productive so the clock starts the moment the tech continues.
       const timeEntries = parseRunTimeEntries(run.timeTrackingJson ?? "[]");
       const hasOpenEntry = timeEntries.some((e) => !e.endedAtUtc);
       if (!hasOpenEntry && run.id) {
         try {
           const resumed = await assetWorkflowRunService.trackTimeEntry(run.id, "ResumeProductive", "Continued");
           if (resumed) syncRunTimeState(resumed);
-        } catch { /* non-fatal â€" tracking will still work manually */ }
+        } catch { /* non-fatal */ }
       }
 
-      // Restore step values and issues from saved progress
-      let prevValues: Record<string, Record<string, string>> = {};
-      let navRestored = false;
-      if (run.stepResultsJson && run.stepResultsJson !== "[]") {
-        try {
-          const prev = JSON.parse(run.stepResultsJson) as StepCapture[];
-          const navEntry = prev.find((sc) => sc.stepId === "__nav__");
-          const dataEntries = prev.filter((sc) => sc.stepId !== "__nav__");
-
-          // Restore input values
-          for (const sc of dataEntries) prevValues[sc.stepId] = sc.values;
-          setValues(prevValues);
-
-          // Restore exact navigation position from nav marker
-          if (navEntry?.values?.currentStepId) {
-            const savedStepId = navEntry.values.currentStepId;
-            const savedHistory: string[] = JSON.parse(navEntry.values.historyJson ?? "[]");
-            setCurrentStepId(savedStepId);
-            setHistory(savedHistory);
-            setResumingRun(true);
-            navRestored = true;
-          }
-        } catch {}
-      }
-      if (run.issuesJson && run.issuesJson !== "[]") {
-        try { setIssues(JSON.parse(run.issuesJson) as RunIssue[]); } catch {}
-      }
-
-      // Fallback if no nav marker: go to first step without captured data
-      if (!navRestored) {
-        const hasData = Object.keys(prevValues).length > 0;
-        if (hasData) {
-          setResumingRun(true);
-          const firstIncomplete = stepsSorted.find((s) => !Object.keys(prevValues[s.id] ?? {}).length);
-          const resumeStepId = firstIncomplete?.id ?? stepsSorted[stepsSorted.length - 1]?.id ?? null;
-          const resumeIdx = stepsSorted.findIndex((s) => s.id === resumeStepId);
-          setHistory(stepsSorted.slice(0, Math.max(resumeIdx, 0)).map((s) => s.id));
-          setCurrentStepId(resumeStepId);
-        } else {
-          setCurrentStepId(stepsSorted[0]?.id ?? null);
-        }
-      }
+      markOfflinePerf("interactive_ready", "runner-network");
     } catch {
       setStartError("Could not start run. Check your connection and try again.");
       return;

@@ -57,6 +57,7 @@ import {
   buildSyncAttemptDiagnostics,
   measurePayload,
 } from "../utils/syncDiagnostics";
+import { markOfflinePerf } from "../utils/offlinePerf";
 import { getSyncOpTimeoutMs } from "../utils/syncPolicy";
 import {
   fromWorkInstructionDto,
@@ -470,10 +471,12 @@ export function useSyncEngine(): SyncState {
     // second gets rejected by the server as a spurious "someone else edited
     // this" conflict, even though nothing actually conflicted.
     _flushing = true;
+    markOfflinePerf("queue_flush_start");
 
     const due = await pendingGetDue();
     if (due.length === 0) {
       // Nothing to do — release the lock so a later real flush can proceed.
+      markOfflinePerf("queue_flush_end");
       _flushing = false;
       // Nothing due — but there may be future-scheduled items; let scheduleRetry handle them
       await scheduleRetryRef.current?.();
@@ -642,6 +645,7 @@ export function useSyncEngine(): SyncState {
     setHasError(anyError);
     setSyncing(false);
     setLastSyncAt(new Date());
+    markOfflinePerf("queue_flush_end");
     _flushing = false;
 
     // Schedule next retry if there are still items with future nextRetryAt

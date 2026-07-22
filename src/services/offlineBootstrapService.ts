@@ -134,11 +134,10 @@ export const offlineBootstrapService = {
         productService.getProducts(),
         brandSettingsService.get(),
         featureService.getAll(),
-        // Warm the document index so Tips/Documents can browse offline without
-        // forcing a full file-library download during bootstrap.
         documentService.refreshDocumentsCache({ prefetchFiles: false }),
         workflowConfigService.getAll("Published").catch(() => []),
       ]);
+      emit("bootstrap:progress", { phase: "reference", done: 1, total: 1 } satisfies BootstrapProgress);
 
       // ── Phase 2: projects ─────────────────────────────────────────────────
       emit("bootstrap:progress", { phase: "projects", done: 0, total: 1 } satisfies BootstrapProgress);

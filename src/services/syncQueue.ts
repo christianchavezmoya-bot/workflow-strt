@@ -58,9 +58,29 @@ async function listAll(): Promise<SyncQueueOp[]> {
   return (all as SyncQueueOp[]).sort(sortByCreatedAt);
 }
 
+function buildIdempotencyKey(input: EnqueueSyncOpInput): string {
+  return `${input.opType}:${input.method}:${input.entityType}:${input.entityId}:${input.url}`;
+}
+
 export const syncQueue = {
   async enqueue(input: EnqueueSyncOpInput): Promise<SyncQueueOp> {
     const db = await getDB();
+    const idempotencyKey = buildIdempotencyKey(input);
+    const existing = (await listAll()).find(
+      (op) => op.idempotencyKey === idempotencyKey && op.status !== "uploading",
+    );
+    if (existing) {
+      await db.put("pending_actions", {
+        ...existing,
+        body: input.body,
+        optimisticPatch: input.optimisticPatch ?? existing.optimisticPatch,
+        serverEntityId: input.serverEntityId ?? existing.serverEntityId,
+        dependsOnOpId: input.dependsOnOpId ?? existing.dependsOnOpId,
+      });
+      window.dispatchEvent(new Event("sync-pending-changed"));
+      return existing;
+    }
+
     const op: SyncQueueOp = {
       id: crypto.randomUUID(),
       opType: input.opType,
@@ -75,6 +95,7 @@ export const syncQueue = {
       status: "pending",
       serverEntityId: input.serverEntityId,
       dependsOnOpId: input.dependsOnOpId,
+      idempotencyKey,
     };
     await db.put("pending_actions", op);
     window.dispatchEvent(new Event("sync-pending-changed"));

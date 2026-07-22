@@ -17,7 +17,7 @@ import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
-import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
+import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead, shouldSkipRunMutation } from "./connectivityMonitor";
 import { boundedFreshRead } from "../utils/boundedFreshRead";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
@@ -343,7 +343,7 @@ function refreshRunsInBackground(
   scope: { type: "project"; id: string } | { type: "asset"; id: string },
   endpoint: string,
 ): void {
-  if (shouldSkipBlockingFetch()) return;
+  if (shouldSkipBlockingNetworkRead()) return;
   api.get<AssetWorkflowRun[]>(endpoint)
     .then(async (res) => {
       const runs = await cacheServerRuns(res.data);
@@ -359,7 +359,7 @@ function refreshRunsInBackground(
 }
 
 function refreshRunByIdInBackground(resolvedId: string): void {
-  if (shouldSkipBlockingFetch()) return;
+  if (shouldSkipBlockingNetworkRead()) return;
   api.get<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedId}`)
     .then(async (res) => {
       await cacheServerRun(res.data);
@@ -745,7 +745,7 @@ export const assetWorkflowRunService = {
       return cachedRuns;
     }
 
-    if (shouldSkipBlockingFetch()) {
+    if (shouldSkipBlockingNetworkRead()) {
       return cachedRuns;
     }
 
@@ -778,7 +778,7 @@ export const assetWorkflowRunService = {
       return cachedRuns;
     }
 
-    if (shouldSkipBlockingFetch()) {
+    if (shouldSkipBlockingNetworkRead()) {
       return cachedRuns;
     }
 
@@ -838,7 +838,7 @@ export const assetWorkflowRunService = {
       return cached;
     }
 
-    if (shouldSkipBlockingFetch()) {
+    if (shouldSkipBlockingNetworkRead()) {
       return null;
     }
 
@@ -848,6 +848,19 @@ export const assetWorkflowRunService = {
     } catch {
       return await getCachedRun(id);
     }
+  },
+
+  /** Local IndexedDB only — used on the critical runner open path. */
+  async getByIdLocalFirst(id: string): Promise<AssetWorkflowRun | null> {
+    if (!isMobileNativePlatform()) {
+      return this.getById(id);
+    }
+    return getCachedRun(id);
+  },
+
+  /** Fire-and-forget authoritative refresh for an asset's runs. */
+  refreshByAssetInBackground(assetId: string): void {
+    refreshRunsInBackground({ type: "asset", id: assetId }, `/asset-workflow-runs/by-asset/${assetId}`);
   },
 
   async startRun(assetId: string, workflowConfigId: string, technicianUserId?: string): Promise<AssetWorkflowRun> {

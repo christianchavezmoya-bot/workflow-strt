@@ -1,4 +1,4 @@
-import { getServerReachable, shouldSkipBlockingFetch } from "../services/connectivityMonitor";
+import { getServerReachable, shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead } from "../services/connectivityMonitor";
 
 /**
  * How long an "authoritative" native read may block the UI before we give up
@@ -42,7 +42,7 @@ export async function boundedFreshRead<T>(
 ): Promise<T> {
   // Device-level offline (radio off / manual offline mode): cache is the source
   // of truth and there is nothing to wait for.
-  if (shouldSkipBlockingFetch()) {
+  if (shouldSkipBlockingFetch() || shouldSkipBlockingNetworkRead()) {
     return await cached();
   }
 

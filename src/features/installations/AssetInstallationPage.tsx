@@ -2372,7 +2372,8 @@ const AssetInstallationPage = () => {
     try {
       // New path: productConfigId â†' WorkflowConfig (published work instruction)
       if (asset.productConfigId) {
-        const wfConfig = await workflowConfigService.getById(asset.productConfigId);
+        const wfConfig = await workflowConfigService.getByIdLocalFirst(asset.productConfigId)
+          ?? await workflowConfigService.getById(asset.productConfigId);
         if (!wfConfig) {
           if (shouldSkipBlockingFetch()) {
             alert("This work order hasn't been downloaded to this device yet. Connect to the internet once to load it, then it will work offline.");
@@ -2725,9 +2726,10 @@ const AssetInstallationPage = () => {
       // Load the workflow config to get steps — fallback to in-memory maps
       // when the per-ID IndexedDB cache is empty (e.g. background refresh
       // hadn't finished caching individual configs before going offline).
-      const cfg = await workflowConfigService.getById(assignment.workflowConfigId)
+      const cfg = await workflowConfigService.getByIdLocalFirst(assignment.workflowConfigId)
         ?? wfConfigMap.get(assignment.workflowConfigId)
-        ?? publishedWfConfigs.find((c) => c.id === assignment.workflowConfigId);
+        ?? publishedWfConfigs.find((c) => c.id === assignment.workflowConfigId)
+        ?? await workflowConfigService.getById(assignment.workflowConfigId);
       if (!cfg) { alert("Workflow config not found."); return; }
       let wf: Workflow | null = null;
       try {

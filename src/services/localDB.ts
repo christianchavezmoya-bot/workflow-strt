@@ -38,6 +38,7 @@ export interface PendingAction {
   opType?: string;
   serverEntityId?: string;
   dependsOnOpId?: string;
+  idempotencyKey?: string;
   nextRetryAt?: string;  // ISO timestamp — when to next attempt this action
   // Conflict detection fields
   snapshotUpdatedAt?: string;  // entity's updatedAt at queue time
@@ -325,12 +326,18 @@ export async function pendingMarkError(id: string, error: string): Promise<void>
   } catch { /* ignore */ }
 }
 
-// ── Backoff schedule: 5s, 15s, 30s, 60s, 300s ────────────────────────────────
+// ── Backoff schedule with jitter: 5s → 15s → 30s → 60s → 5m → 15m → 30m ─────
+
+const RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 300_000, 900_000, 1_800_000];
+
+function jitterMs(baseMs: number): number {
+  const jitter = Math.floor(baseMs * 0.15 * Math.random());
+  return baseMs + jitter;
+}
 
 export function calcNextRetryAt(retryCount: number): string {
-  const delays = [5_000, 15_000, 30_000, 60_000, 300_000];
-  const delay = delays[Math.min(retryCount, delays.length - 1)];
-  return new Date(Date.now() + delay).toISOString();
+  const delay = RETRY_DELAYS_MS[Math.min(retryCount, RETRY_DELAYS_MS.length - 1)];
+  return new Date(Date.now() + jitterMs(delay)).toISOString();
 }
 
 /** Get only actions that are due for retry right now (no nextRetryAt, or it has passed). */

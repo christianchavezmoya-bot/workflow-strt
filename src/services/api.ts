@@ -5,6 +5,9 @@ import { getApiBaseUrl } from "./apiBase";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { formatPayloadSize } from "../utils/syncDiagnostics";
+import { isCircuitOpen, resetCircuitBreaker, tripCircuitBreaker } from "../utils/circuitBreaker";
+import { isOfflineGraceValid } from "./biometricAuth";
+import { markOfflinePerf } from "../utils/offlinePerf";
 
 export const API_BASE_URL: string = getApiBaseUrl();
 
@@ -152,16 +155,29 @@ api.interceptors.request.use(async (config) => {
   // The thrown error keeps the same shape as a real network error so every
   // service's `isOfflineNetworkError()` still routes to the offline path.
   // Auth calls are exempt — login must keep working to recover.
-  if (!url.includes("/auth/") && isMobileNativePlatform() && shouldSkipBlockingFetch()) {
+  const skipBlocking =
+    !url.includes("/auth/")
+    && isMobileNativePlatform()
+    && (shouldSkipBlockingFetch() || isCircuitOpen());
+
+  if (skipBlocking) {
     const err = new Error("offline-skip") as Error & { code?: string; isOfflineSkip?: boolean };
     err.code = "ERR_NETWORK";
     err.isOfflineSkip = true;
     throw err;
   }
 
-  // Skip refresh for the refresh call itself and for login-related endpoints
+  // Skip refresh for the refresh call itself and for login-related endpoints.
+  // GETs must not block UI on token refresh — fire in background; mutations await.
+  const method = (config.method ?? "get").toLowerCase();
   if (!url.includes("/auth/refresh") && !url.includes("/auth/login")) {
-    await silentRefresh();
+    if (method === "get") {
+      void silentRefresh();
+    } else {
+      markOfflinePerf("token_refresh_start", url);
+      await silentRefresh();
+      markOfflinePerf("token_refresh_end", url);
+    }
   }
 
   const token = secureGet("auth_token");
@@ -235,7 +251,7 @@ export async function cachedGet<T>(url: string, params?: Record<string, unknown>
   // request instead of waiting the full axios 10 s timeout before failing.
   // The connectivity monitor, native radio, and navigator.onLine are all
   // already consulted by shouldSkipBlockingFetch().
-  if (shouldSkipBlockingFetch()) {
+  if (shouldSkipBlockingFetch() || isCircuitOpen()) {
     throw new Error("offline-cache-miss");
   }
   const res = await api.get<T>(url, { params });
@@ -271,7 +287,7 @@ api.interceptors.response.use(
       ).catch(() => {});
     }
 
-    // Real server response — signal server is reachable (used by sync engine)
+    resetCircuitBreaker();
     window.dispatchEvent(new Event("api-server-reachable"));
 
     return response;
@@ -286,6 +302,7 @@ api.interceptors.response.use(
     // server unreachable. HTTP responses like 403/404/500 prove the server
     // answered, so those do not count as unreachable.
     if (!(error as { isOfflineSkip?: boolean })?.isOfflineSkip && isNetworkOrTimeoutError(error)) {
+      tripCircuitBreaker();
       window.dispatchEvent(new Event("api-server-unreachable"));
     }
     const cfg = config as typeof config & AxiosConfigWithMeta;
@@ -329,6 +346,12 @@ api.interceptors.response.use(
       const reqUrl = config.url ?? "";
       // Don't redirect for login/refresh calls — they handle their own errors
       if (!reqUrl.includes("/auth/login") && !reqUrl.includes("/auth/refresh") && !reqUrl.includes("/brand-settings")) {
+        const allowOfflineSession =
+          isMobileNativePlatform()
+          && (shouldSkipBlockingFetch() || isCircuitOpen() || isOfflineGraceValid());
+        if (allowOfflineSession) {
+          return Promise.reject(error);
+        }
         window.dispatchEvent(new Event("api-auth-error"));
         secureRemove("auth_token");
         secureRemove("auth_user");

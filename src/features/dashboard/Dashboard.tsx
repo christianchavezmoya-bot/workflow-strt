@@ -2090,14 +2090,12 @@ const Dashboard = () => {
     try {
       const [assignments, runs] = await Promise.all([
         assetWorkflowAssignmentService.listByAsset(asset.id),
-        // Authoritative read: this result decides resume-vs-start and which run
-        // is opened. The cache-first listByAsset() is right for painting the
-        // card, but acting on a stale run here is what made an online phone
-        // fail to open a workflow (it could try to start a run the server
-        // already has, or resume one the server had already locked).
-        // listByAssetFresh falls back to cache when offline.
-        assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => []),
+        // Local-first: paint and act from IndexedDB immediately; never block open on network.
+        assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
       ]);
+
+      // Authoritative refresh in background — reconciles resume-vs-start without blocking UI.
+      void assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => []);
 
       const attention = getQuickActionAttentionForAsset(asset, runs);
       if (attention.activeRun && !attention.activeRun.isLocked) {

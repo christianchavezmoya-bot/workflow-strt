@@ -23,6 +23,7 @@ import { Network } from "@capacitor/network";
 import { isServerReachable } from "./networkService";
 import { isManualOfflineModeActive } from "./offlineModeState";
 import { isMobileNativePlatform } from "../utils/platform";
+import { isCircuitOpen, resetCircuitBreaker, tripCircuitBreaker } from "../utils/circuitBreaker";
 
 const PING_INTERVAL_MS = 30_000;
 
@@ -110,12 +111,14 @@ export function startConnectivityMonitor(): void {
   // registered once at singleton startup so the cost is amortised.
   if (typeof window !== "undefined") {
     window.addEventListener("api-server-reachable", () => {
+      resetCircuitBreaker();
       if (currentValue !== true) notify(true);
     });
 
     // Only a real API request failing with a genuine network error may mark the
     // server unreachable. This keeps native write suppression outcome-based.
     window.addEventListener("api-server-unreachable", () => {
+      tripCircuitBreaker();
       if (currentValue !== false) notify(false);
     });
   }
@@ -154,6 +157,9 @@ export function shouldSkipBlockingFetch(): boolean {
   return isManualOfflineModeActive();
 }
 
+/** Re-export for callers that need circuit-aware read skipping. */
+export { isCircuitOpen, shouldSkipBlockingNetworkRead } from "../utils/circuitBreaker";
+
 /**
  * Fast-bail guard for NATIVE write paths (runs, signatures, document links).
  *
@@ -170,7 +176,8 @@ export function shouldSkipBlockingFetch(): boolean {
  */
 export function shouldSkipRunMutation(): boolean {
   if (shouldSkipBlockingFetch()) return true;
-  return getServerReachable() === false;
+  if (getServerReachable() === false) return true;
+  return isCircuitOpen();
 }
 
 /**

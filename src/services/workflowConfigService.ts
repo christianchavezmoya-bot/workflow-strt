@@ -1,7 +1,7 @@
 ﻿import api from "./api";
 import type { WorkflowConfig, UpsertWorkflowConfigInput, WorkflowConfigStatus } from "../types/workflowConfig";
 import offlineStore from "./offlineStore";
-import { shouldSkipBlockingFetch } from "./connectivityMonitor";
+import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { configMediaCache } from "./configMediaCache";
@@ -183,32 +183,13 @@ export const workflowConfigService = {
       }
     }
 
-    const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
-    if (cached) {
-      if (!shouldSkipBlockingFetch()) {
-        void api.get<WorkflowConfig>(`/workflow-configs/${id}`)
-          .then(async (res) => {
-            await persistFetchedConfig(res.data);
-          })
-          .catch(() => {});
-      }
-      return await configMediaCache.hydrateConfig(cached);
+    const localFirst = await this.getByIdLocalFirst(id);
+    if (localFirst) {
+      this.refreshByIdInBackground(id);
+      return localFirst;
     }
 
-    const all = lsReadAll();
-    const local = all.find((c) => c.id === id);
-    if (local) {
-      if (!shouldSkipBlockingFetch()) {
-        void api.get<WorkflowConfig>(`/workflow-configs/${id}`)
-          .then(async (res) => {
-            await persistFetchedConfig(res.data);
-          })
-          .catch(() => {});
-      }
-      return await configMediaCache.hydrateConfig(local);
-    }
-
-    if (shouldSkipBlockingFetch()) {
+    if (shouldSkipBlockingNetworkRead()) {
       return null;
     }
 
@@ -221,6 +202,35 @@ export const workflowConfigService = {
       if (status === 404) return null;
       return null;
     }
+  },
+
+  /** IndexedDB / localStorage only — never awaits network (critical open path). */
+  async getByIdLocalFirst(id: string): Promise<WorkflowConfig | null> {
+    if (!isMobileNativePlatform()) {
+      return this.getById(id);
+    }
+
+    const cached = await offlineStore.getCache<WorkflowConfig>(CACHE_ID_KEY(id));
+    if (cached) {
+      return await configMediaCache.hydrateConfig(cached);
+    }
+
+    const local = lsReadAll().find((c) => c.id === id);
+    if (local) {
+      return await configMediaCache.hydrateConfig(local);
+    }
+
+    return null;
+  },
+
+  /** Background authoritative refresh — never blocks UI. */
+  refreshByIdInBackground(id: string): void {
+    if (!isMobileNativePlatform() || shouldSkipBlockingNetworkRead()) return;
+    void api.get<WorkflowConfig>(`/workflow-configs/${id}`)
+      .then(async (res) => {
+        await persistFetchedConfig(res.data);
+      })
+      .catch(() => {});
   },
 
   async create(input: UpsertWorkflowConfigInput): Promise<WorkflowConfig> {
