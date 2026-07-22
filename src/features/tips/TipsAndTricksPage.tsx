@@ -14,7 +14,6 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
-  Grid,
   IconButton,
   InputAdornment,
   MenuItem,
@@ -51,6 +50,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import QRUploadButton from "../../components/QRUploadButton";
 import DocThumbnail from "../../components/ui/DocThumbnail";
+import MobileDocumentPreviewDialog from "../../components/ui/MobileDocumentPreviewDialog";
 import type { Product } from "../../types/product";
 
 type ContentTypeLabel =
@@ -90,10 +90,6 @@ function fmtDate(iso?: string | null) {
   }
 }
 
-function isImage(ct?: string | null) {
-  return !!ct && ct.startsWith("image/");
-}
-
 function getDocProductId(doc: DocumentRecord) {
   return doc.customValues?.productId || doc.linkedTo || "";
 }
@@ -106,144 +102,6 @@ function getDocProductLabel(doc: DocumentRecord, productNameById: Map<string, st
     (productId ? productNameById.get(productId) : "") ||
     doc.linkedTo ||
     ""
-  );
-}
-
-function DocPreviewDialog({
-  doc,
-  onClose,
-}: {
-  doc: DocumentRecord | null;
-  onClose: () => void;
-}) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    setBlobUrl(null);
-    if (!doc?.downloadUrl) return;
-
-    setLoading(true);
-    documentService
-      .openDocument(doc.downloadUrl)
-      .then((url) => {
-        if (mountedRef.current) setBlobUrl(url);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (mountedRef.current) setLoading(false);
-      });
-
-    return () => {
-      mountedRef.current = false;
-    };
-  }, [doc?.downloadUrl]);
-
-  if (!doc) return null;
-
-  return (
-    <Dialog
-      open={!!doc}
-      onClose={onClose}
-      maxWidth="md"
-      fullWidth
-      PaperProps={{
-        sx: {
-          borderRadius: 3,
-          bgcolor: "background.paper",
-          maxHeight: "90vh",
-          display: "flex",
-          flexDirection: "column",
-        },
-      }}
-    >
-      <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, pb: 1, flexShrink: 0 }}>
-        <LightbulbOutlined sx={{ color: "#f59e0b", fontSize: 20 }} />
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="subtitle1" fontWeight={700} noWrap>
-            {doc.name}
-          </Typography>
-          {doc.notes && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block" }} noWrap>
-              {doc.notes}
-            </Typography>
-          )}
-        </Box>
-        <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-          {doc.downloadUrl && (
-            <Tooltip title="Download">
-              <IconButton
-                size="small"
-                onClick={() => void documentService.downloadDocument(doc.downloadUrl!, doc.name)}
-              >
-                <DownloadOutlined fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-          <IconButton size="small" onClick={onClose}>
-            <CloseOutlined fontSize="small" />
-          </IconButton>
-        </Stack>
-      </DialogTitle>
-
-      <DialogContent
-        sx={{
-          p: { xs: 1, sm: 2 },
-          pt: "4px !important",
-          flex: 1,
-          overflow: "auto",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {loading && (
-          <Stack alignItems="center" justifyContent="center" sx={{ flex: 1 }}>
-            <CircularProgress size={28} />
-          </Stack>
-        )}
-
-        {!loading && blobUrl && isImage(doc.contentType) && (
-          <Box
-            component="img"
-            src={blobUrl}
-            alt={doc.name}
-            sx={{
-              width: "100%",
-              height: "72vh",
-              objectFit: "contain",
-              borderRadius: 1,
-              display: "block",
-            }}
-          />
-        )}
-
-        {!loading && blobUrl && !isImage(doc.contentType) && (
-          <Box
-            component="iframe"
-            src={blobUrl}
-            title={doc.name}
-            sx={{
-              width: "100%",
-              height: "72vh",
-              border: "none",
-              borderRadius: 1,
-              flex: 1,
-              display: "block",
-            }}
-          />
-        )}
-
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1, flexShrink: 0 }}>
-          {doc.createdBy && <Typography variant="caption" color="text.disabled">{doc.createdBy}</Typography>}
-          {doc.uploadedAt && <Typography variant="caption" color="text.disabled">• {fmtDate(doc.uploadedAt)}</Typography>}
-          {fmtSize(doc.fileSize) && (
-            <Chip label={fmtSize(doc.fileSize)} size="small" sx={{ fontSize: "0.6rem", height: 18, ml: "auto" }} />
-          )}
-        </Stack>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -412,6 +270,8 @@ export default function TipsAndTricksPage() {
       }).length,
     [docs, myProductIds, myProductNameSet, productNameById]
   );
+
+  const featuredTips = useMemo(() => filteredDocs.slice(0, 3), [filteredDocs]);
 
   const resetAddForm = () => {
     setAddTitle("");
@@ -630,10 +490,21 @@ export default function TipsAndTricksPage() {
   );
 
   const renderGrid = () => (
-    <Grid container spacing={2}>
+    <Box
+      sx={{
+        display: "grid",
+        gridTemplateColumns: {
+          xs: "repeat(3, minmax(0, 1fr))",
+          sm: "repeat(3, minmax(0, 1fr))",
+          md: "repeat(4, minmax(0, 1fr))",
+          xl: "repeat(5, minmax(0, 1fr))",
+        },
+        gap: { xs: 1, sm: 1.5, lg: 2 },
+      }}
+    >
       {filteredDocs.map((doc) => (
-        <Grid item xs={12} sm={6} lg={4} xl={3} key={doc.id}>
           <Card
+            key={doc.id}
             className="glass-card"
             elevation={0}
             sx={{
@@ -641,13 +512,15 @@ export default function TipsAndTricksPage() {
               display: "flex",
               flexDirection: "column",
               border: "1px solid var(--stroke)",
-              background: "linear-gradient(180deg, rgba(10,18,24,0.92), rgba(8,14,19,0.96))",
-              borderRadius: 2,
+              background: "linear-gradient(180deg, rgba(10,18,24,0.96), rgba(8,14,19,0.99))",
+              borderRadius: 3,
               overflow: "hidden",
-              transition: "border-color 0.2s, background 0.2s",
+              minWidth: 0,
+              transition: "transform 0.2s, border-color 0.2s, background 0.2s",
               "&:hover": {
                 borderColor: "rgba(45,212,191,0.4)",
                 background: "rgba(45,212,191,0.06)",
+                transform: "translateY(-2px)",
               },
             }}
           >
@@ -659,27 +532,44 @@ export default function TipsAndTricksPage() {
                 <DocThumbnail
                   downloadUrl={doc.downloadUrl}
                   contentType={doc.contentType}
-                  height={180}
+                  height={104}
                 />
               )}
 
-              <CardContent sx={{ width: "100%", p: 1.5 }}>
+              <CardContent sx={{ width: "100%", p: 1.2 }}>
+                <Chip
+                  label={doc.customValues?.contentType || "Tip"}
+                  size="small"
+                  sx={{
+                    height: 20,
+                    mb: 0.9,
+                    bgcolor: "rgba(245,158,11,0.12)",
+                    color: "#fcd34d",
+                    fontSize: "0.62rem",
+                  }}
+                />
                 <Typography
-                  variant="subtitle2"
+                  variant="body2"
                   fontWeight={700}
-                  sx={{ display: "block", lineHeight: 1.35, mb: 0.4 }}
+                  sx={{ display: "block", lineHeight: 1.3, mb: 0.4, minWidth: 0 }}
                   className="line-clamp-2"
                 >
                   {doc.name}
                 </Typography>
-                <Typography variant="caption" color="text.secondary" display="block" noWrap>
-                  {[doc.customValues?.division, getDocProductLabel(doc, productNameById), doc.customValues?.contentType].filter(Boolean).join(" • ")}
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  display="block"
+                  sx={{ lineHeight: 1.35, minWidth: 0 }}
+                  className="line-clamp-2"
+                >
+                  {[doc.customValues?.division, getDocProductLabel(doc, productNameById)].filter(Boolean).join(" • ") || "General"}
                 </Typography>
                 {doc.notes && (
                   <Typography
                     variant="caption"
                     color="text.secondary"
-                    sx={{ display: "block", lineHeight: 1.4, mt: 0.5 }}
+                    sx={{ display: "block", lineHeight: 1.35, mt: 0.65, minWidth: 0 }}
                     className="line-clamp-2"
                   >
                     {doc.notes}
@@ -694,9 +584,9 @@ export default function TipsAndTricksPage() {
                 since these are no longer inside the click target, the previous
                 e.stopPropagation() guards are no longer needed. */}
             <Box sx={{ px: 1.5, pb: 1.5 }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.5}>
                 {fmtSize(doc.fileSize) && (
-                  <Typography variant="caption" sx={{ color: "text.disabled" }}>
+                  <Typography variant="caption" sx={{ color: "text.disabled", minWidth: 0 }}>
                     {fmtSize(doc.fileSize)}
                   </Typography>
                 )}
@@ -729,9 +619,8 @@ export default function TipsAndTricksPage() {
               </Stack>
             </Box>
           </Card>
-        </Grid>
       ))}
-    </Grid>
+    </Box>
   );
 
   const renderTable = () => (
@@ -805,7 +694,7 @@ export default function TipsAndTricksPage() {
 
   return (
     <Stack spacing={3} sx={{ pb: 6 }}>
-      <Box>
+      <Box className="glass-card" sx={{ p: { xs: 1.5, sm: 2 }, background: "linear-gradient(135deg, rgba(8,18,24,0.98), rgba(12,28,36,0.94))" }}>
         <Stack
           direction={{ xs: "column", lg: "row" }}
           alignItems={{ lg: "center" }}
@@ -824,7 +713,7 @@ export default function TipsAndTricksPage() {
                 </IconButton>
               </Tooltip>
             </Stack>
-            <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", md: "block" } }}>
+            <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "block", md: "block" }, maxWidth: 680 }}>
               Field notes, pinouts, drawings, and quick references shared across products and projects.
             </Typography>
           </Box>
@@ -857,6 +746,70 @@ export default function TipsAndTricksPage() {
             )}
           </Stack>
         </Stack>
+
+        <Box
+          sx={{
+            mt: 1.75,
+            display: "grid",
+            gridTemplateColumns: { xs: "repeat(3, minmax(0, 1fr))", md: "repeat(3, minmax(0, 1fr))" },
+            gap: 1,
+          }}
+        >
+          <Box sx={{ borderRadius: 2.5, p: 1.25, bgcolor: "rgba(45,212,191,0.08)", border: "1px solid rgba(45,212,191,0.18)" }}>
+            <Typography variant="caption" sx={{ color: "rgba(153,246,228,0.84)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+              Total
+            </Typography>
+            <Typography variant="h6" sx={{ mt: 0.25 }}>
+              {docs.length}
+            </Typography>
+          </Box>
+          <Box sx={{ borderRadius: 2.5, p: 1.25, bgcolor: "rgba(14,165,233,0.08)", border: "1px solid rgba(14,165,233,0.18)" }}>
+            <Typography variant="caption" sx={{ color: "rgba(125,211,252,0.88)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+              Visible
+            </Typography>
+            <Typography variant="h6" sx={{ mt: 0.25 }}>
+              {filteredDocs.length}
+            </Typography>
+          </Box>
+          <Box sx={{ borderRadius: 2.5, p: 1.25, bgcolor: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.18)" }}>
+            <Typography variant="caption" sx={{ color: "rgba(253,224,71,0.88)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+              My Match
+            </Typography>
+            <Typography variant="h6" sx={{ mt: 0.25 }}>
+              {myMatches}
+            </Typography>
+          </Box>
+        </Box>
+
+        {featuredTips.length > 0 && (
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5, overflowX: "auto", pb: 0.25 }}>
+            {featuredTips.map((doc) => (
+              <Button
+                key={doc.id}
+                variant="outlined"
+                onClick={() => setPreviewDoc(doc)}
+                sx={{
+                  justifyContent: "flex-start",
+                  minWidth: 180,
+                  px: 1.25,
+                  py: 1,
+                  borderRadius: 2.5,
+                  borderColor: "rgba(148,163,184,0.2)",
+                  color: "#e2e8f0",
+                }}
+              >
+                <Stack alignItems="flex-start" spacing={0.2} sx={{ minWidth: 0 }}>
+                  <Typography variant="caption" sx={{ color: "rgba(153,246,228,0.8)", textTransform: "uppercase", letterSpacing: 0.7 }}>
+                    Quick Preview
+                  </Typography>
+                  <Typography variant="body2" fontWeight={600} className="line-clamp-1">
+                    {doc.name}
+                  </Typography>
+                </Stack>
+              </Button>
+            ))}
+          </Stack>
+        )}
       </Box>
 
       <Box className="glass-card" sx={{ p: 1.5 }}>
@@ -915,8 +868,8 @@ export default function TipsAndTricksPage() {
             </Stack>
           )}
 
-          <Grid container spacing={1.25}>
-            <Grid item xs={12} sm={4}>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0, 1fr))" }, gap: 1.25 }}>
+            <Box>
               <Select
                 value={filterDivision}
                 onChange={(e) => {
@@ -934,8 +887,8 @@ export default function TipsAndTricksPage() {
                   </MenuItem>
                 ))}
               </Select>
-            </Grid>
-            <Grid item xs={12} sm={4}>
+            </Box>
+            <Box>
               <Autocomplete
                 options={productsForDivision}
                 getOptionLabel={(product) => product.name}
@@ -945,8 +898,8 @@ export default function TipsAndTricksPage() {
                 fullWidth
                 renderInput={(params) => <TextField {...params} placeholder="All Products" />}
               />
-            </Grid>
-            <Grid item xs={12} sm={4}>
+            </Box>
+            <Box>
               <Select
                 value={filterContentType}
                 onChange={(e) => setFilterContentType(e.target.value as ContentTypeLabel | "All")}
@@ -960,8 +913,8 @@ export default function TipsAndTricksPage() {
                   </MenuItem>
                 ))}
               </Select>
-            </Grid>
-          </Grid>
+            </Box>
+          </Box>
 
           <Typography variant="caption" color="text.secondary">
             {filteredDocs.length} of {docs.length} tips
@@ -993,7 +946,7 @@ export default function TipsAndTricksPage() {
       )}
 
       {renderAddDialog()}
-      <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />
+      <MobileDocumentPreviewDialog doc={previewDoc} open={Boolean(previewDoc)} onClose={() => setPreviewDoc(null)} />
     </Stack>
   );
 }

@@ -399,12 +399,9 @@ type InspectionRunSignal = {
 
 type AdminInstallFilter = "all" | "in-progress" | "unassigned";
 
-type WorkloadProjectBreakdown = { projectId: string; jobNumber: string; notStarted: number; pending: number; inProgress: number; paused: number; total: number };
-type ScopedWorkloadItem = {
-  userId: string; fullName: string;
-  notStarted: number; pending: number; inProgress: number; paused: number; totalAssigned: number;
-  jobNumbers: string[]; hasIssues: boolean; completedSteps: number; totalSteps: number;
-  startedAt?: string; projectBreakdown: WorkloadProjectBreakdown[];
+type WorkloadProjectBreakdown = { projectId: string; jobNumber: string; notStarted: number; inProgress: number; paused: number; total: number };
+type ScopedWorkloadItem = TechnicianWorkloadSummaryItem & {
+  projectBreakdown: WorkloadProjectBreakdown[];
 };
 
 function isDashboardVisibleProjectStatus(status?: string | null) {
@@ -1209,52 +1206,46 @@ const Dashboard = () => {
     [openAssets, visibleProjectIds],
   );
 
-  // Workload derived from visibleOpenAssets so it respects the My/All scope filter.
-  // Cross-references the full workload API data for step counts, issue flags, and fullName.
+  // Technician workload should come from the dedicated summary source of truth.
+  // Project assets are only used here to enrich the expand/report breakdown.
   const scopedWorkload = useMemo(() => {
-    type PBEntry = { projectId: string; jobNumber: string; notStarted: number; pending: number; inProgress: number; paused: number; total: number };
-    const byUser = new Map<string, { assets: OpenAssetItem[]; breakdown: Map<string, PBEntry> }>();
-
-    for (const asset of visibleOpenAssets) {
+    const breakdownByUser = new Map<string, Map<string, WorkloadProjectBreakdown>>();
+    for (const asset of openAssets) {
       if (!asset.assignedUserId) continue;
-      if (!byUser.has(asset.assignedUserId))
-        byUser.set(asset.assignedUserId, { assets: [], breakdown: new Map() });
-      const entry = byUser.get(asset.assignedUserId)!;
-      entry.assets.push(asset);
-      if (!entry.breakdown.has(asset.projectId))
-        entry.breakdown.set(asset.projectId, { projectId: asset.projectId, jobNumber: asset.jobNumber ?? "", notStarted: 0, pending: 0, inProgress: 0, paused: 0, total: 0 });
-      const pb = entry.breakdown.get(asset.projectId)!;
+      if (!breakdownByUser.has(asset.assignedUserId)) {
+        breakdownByUser.set(asset.assignedUserId, new Map());
+      }
+      const byProject = breakdownByUser.get(asset.assignedUserId)!;
+      if (!byProject.has(asset.projectId)) {
+        byProject.set(asset.projectId, {
+          projectId: asset.projectId,
+          jobNumber: asset.jobNumber ?? "",
+          notStarted: 0,
+          inProgress: 0,
+          paused: 0,
+          total: 0,
+        });
+      }
+      const pb = byProject.get(asset.projectId)!;
       pb.total++;
-      if (isPausedAsset(asset.runStatus)) pb.paused++;
-      else if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) pb.inProgress++;
-      else if (isIssueAsset(asset.status)) pb.inProgress++;
-      else if (isPendingAsset(asset.status)) pb.pending++;
-      else if (isNotStartedAsset(asset.status)) pb.notStarted++;
+      if (isPausedAsset(asset.runStatus)) {
+        pb.paused++;
+      } else if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status) || isIssueAsset(asset.status)) {
+        pb.inProgress++;
+      } else {
+        pb.notStarted++;
+      }
     }
 
-    return [...byUser.entries()]
-      .map(([userId, data]) => {
-        const api = workload.find((w) => w.userId === userId);
-        const assets = data.assets;
-        return {
-          userId,
-          fullName: api?.fullName ?? userId,
-          paused:        assets.filter((a) => isPausedAsset(a.runStatus)).length,
-          inProgress:    assets.filter((a) => !isPausedAsset(a.runStatus) && (isInProgressAsset(a.runStatus) || isInProgressAsset(a.status))).length,
-          notStarted:    assets.filter((a) => !isPausedAsset(a.runStatus) && !isInProgressAsset(a.runStatus) && !isInProgressAsset(a.status) && isNotStartedAsset(a.status)).length,
-          pending:       assets.filter((a) => !isPausedAsset(a.runStatus) && !isInProgressAsset(a.runStatus) && !isInProgressAsset(a.status) && isPendingAsset(a.status)).length,
-          totalAssigned: assets.length,
-          jobNumbers:    [...new Set(assets.map((a) => a.jobNumber).filter(Boolean))] as string[],
-          hasIssues:     api?.hasIssues ?? false,
-          completedSteps: api?.completedSteps ?? 0,
-          totalSteps:     api?.totalSteps ?? 0,
-          startedAt:      api?.startedAt,
-          projectBreakdown: [...data.breakdown.values()],
-        };
-      })
+    return workload
+      .filter((item) => !viewedDashboardUserId || item.userId === viewedDashboardUserId)
+      .map((item) => ({
+        ...item,
+        projectBreakdown: [...(breakdownByUser.get(item.userId)?.values() ?? [])],
+      }))
       .filter((w) => w.totalAssigned > 0)
       .sort((a, b) => b.totalAssigned - a.totalAssigned);
-  }, [visibleOpenAssets, workload]);
+  }, [openAssets, viewedDashboardUserId, workload]);
   const unassignedAssets = useMemo(
     () => visibleOpenAssets.filter((asset) => !asset.assignedUserId && asset.status !== "Complete" && asset.status !== "Completed"),
     [visibleOpenAssets]
@@ -3988,7 +3979,7 @@ const Dashboard = () => {
             const isExpanded = expandedWorkloadId === w.userId;
             const inPct     = w.totalAssigned > 0 ? (w.inProgress / w.totalAssigned) * 100 : 0;
             const pausedPct = w.totalAssigned > 0 ? (w.paused   / w.totalAssigned) * 100 : 0;
-            const notPct    = w.totalAssigned > 0 ? ((w.notStarted + w.pending) / w.totalAssigned) * 100 : 0;
+            const notPct    = w.totalAssigned > 0 ? (w.notStarted / w.totalAssigned) * 100 : 0;
             const stepPct   = w.totalSteps > 0 ? Math.min(100, (w.completedSteps / w.totalSteps) * 100) : 0;
             const load      = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
             const loadLabel = w.totalAssigned >= 10 ? "Heavy" : w.totalAssigned >= 5 ? "Moderate" : "Light";
@@ -3996,7 +3987,7 @@ const Dashboard = () => {
             const startLabel = w.startedAt
               ? new Date(w.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
               : null;
-            const techAssets = visibleOpenAssets.filter((a) => a.assignedUserId === w.userId);
+            const techAssets = openAssets.filter((a) => a.assignedUserId === w.userId);
             return (
               <Paper key={w.userId} elevation={0}
                 onClick={() => setExpandedWorkloadId(isExpanded ? null : w.userId)}
@@ -4020,8 +4011,8 @@ const Dashboard = () => {
                     <Box sx={{ flex: 1 }}>
                       <Tooltip title={
                         w.totalSteps > 0
-                          ? `${w.completedSteps}/${w.totalSteps} steps · ${w.inProgress} active · ${w.paused} paused · ${w.notStarted} queued · ${w.pending} pending`
-                          : `${w.inProgress} active · ${w.paused} paused · ${w.notStarted} queued · ${w.pending} pending`
+                          ? `${w.completedSteps}/${w.totalSteps} steps · ${w.inProgress} active · ${w.paused} paused · ${w.notStarted} queued`
+                          : `${w.inProgress} active · ${w.paused} paused · ${w.notStarted} queued`
                       } arrow>
                         <Box sx={{ position: "relative", height: 10, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.08)", display: "flex" }}>
                           {w.totalSteps > 0 ? (
@@ -4068,11 +4059,6 @@ const Dashboard = () => {
                       <Tooltip title="No workflow run has been started yet" arrow>
                         <span style={{ cursor: "help", textDecoration: "underline dotted" }}>{w.notStarted} queued</span>
                       </Tooltip>
-                      {w.pending > 0 && (
-                        <>{" · "}<Tooltip title="Asset is assigned and acknowledged but the workflow hasn't started" arrow>
-                          <span style={{ cursor: "help", textDecoration: "underline dotted" }}>{w.pending} pending</span>
-                        </Tooltip></>
-                      )}
                       {startLabel && <span style={{ opacity: 0.5 }}>{" · since "}{startLabel}</span>}
                     </Typography>
                   </Stack>
@@ -4081,7 +4067,7 @@ const Dashboard = () => {
                   {w.projectBreakdown.length > 0 && (
                     <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                       {w.projectBreakdown.map((pb) => (
-                        <Tooltip key={pb.projectId} title={`${pb.inProgress} active · ${pb.paused} paused · ${pb.notStarted} queued · ${pb.pending} pending`} arrow>
+                        <Tooltip key={pb.projectId} title={`${pb.inProgress} active · ${pb.paused} paused · ${pb.notStarted} queued`} arrow>
                           <Chip
                             label={`${pb.jobNumber}: ${pb.total}`}
                             size="small" variant="outlined"
@@ -5618,7 +5604,7 @@ const Dashboard = () => {
       {/* ── Per-installer workload report dialog ── */}
       {workloadReportTarget && (() => {
         const w = workloadReportTarget;
-        const techAssets = visibleOpenAssets.filter((a) => a.assignedUserId === w.userId);
+        const techAssets = openAssets.filter((a) => a.assignedUserId === w.userId);
         const load = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
         return (
           <Dialog open onClose={() => setWorkloadReportTarget(null)} fullWidth maxWidth="md" id="workload-report-dialog">
@@ -5726,7 +5712,7 @@ const Dashboard = () => {
         <DialogContent dividers>
           <Stack spacing={3}>
             {scopedWorkload.map((w) => {
-              const techAssets = visibleOpenAssets.filter((a) => a.assignedUserId === w.userId);
+              const techAssets = openAssets.filter((a) => a.assignedUserId === w.userId);
               const load = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
               return (
                 <Box key={w.userId}>

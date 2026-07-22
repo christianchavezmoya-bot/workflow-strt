@@ -51,6 +51,8 @@ import {
   Tooltip,
   Typography,
   Select,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { demoProducts } from "../../data/demo";
 import type { FeatureSelection } from "../../services/productConfigService";
@@ -194,6 +196,8 @@ interface PreviewProps {
 }
 
 function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
+  const theme = useTheme();
+  const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const [activeStep, setActiveStep] = useState(0);
 
   const workflow = useMemo(() => parseSteps(cfg), [cfg]);
@@ -211,45 +215,63 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
     <Dialog
       open={open}
       onClose={onClose}
-      maxWidth="lg"
+      fullScreen={isPhone}
+      maxWidth="xl"
       fullWidth
-      PaperProps={{ sx: { height: "88vh", display: "flex", flexDirection: "column", overflow: "hidden" } }}
+      PaperProps={{
+        sx: {
+          height: isPhone ? "100%" : "92vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          borderRadius: isPhone ? 0 : 4,
+          background: "linear-gradient(180deg, rgba(8,18,24,0.98), rgba(8,14,19,0.99))",
+          border: "1px solid rgba(45,212,191,0.18)",
+        },
+      }}
     >
-      {/* â”€â”€ Colored header band â”€â”€ */}
-      <Box sx={{ bgcolor: "primary.main", color: "primary.contrastText", px: 3, py: 2.5, flexShrink: 0 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
+      <Box
+        sx={{
+          px: { xs: 1.5, sm: 3 },
+          py: { xs: 1.5, sm: 2.5 },
+          flexShrink: 0,
+          background: "linear-gradient(135deg, rgba(13,148,136,0.2), rgba(15,23,42,0.25))",
+          borderBottom: "1px solid rgba(148,163,184,0.14)",
+        }}
+      >
+        <Stack direction={isPhone ? "column" : "row"} justifyContent="space-between" alignItems={isPhone ? "stretch" : "flex-start"} spacing={1.5}>
           <Box sx={{ minWidth: 0 }}>
-            <Typography variant="h6" fontWeight={700} sx={{ fontFamily: "Sora" }}>
+            <Typography variant="h6" fontWeight={700} sx={{ fontFamily: "Sora", color: "#f8fafc" }}>
               {cfg.name}
             </Typography>
             <Stack direction="row" spacing={0} flexWrap="wrap" useFlexGap sx={{ mt: 0.5, gap: "4px 16px" }}>
-              <Typography variant="caption" sx={{ opacity: 0.85 }}>Product: {productName}</Typography>
+              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)" }}>Product: {productName}</Typography>
               {cfg.configType && (
-                <Typography variant="caption" sx={{ opacity: 0.85 }}>Type: {cfg.configType}</Typography>
+                <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)" }}>Type: {cfg.configType}</Typography>
               )}
               {cfg.createdBy && (
-                <Typography variant="caption" sx={{ opacity: 0.85 }}>By: {cfg.createdBy}</Typography>
+                <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)" }}>By: {cfg.createdBy}</Typography>
               )}
-              <Typography variant="caption" sx={{ opacity: 0.75 }}>{formatDate(cfg.createdAt)}</Typography>
+              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.62)" }}>{formatDate(cfg.createdAt)}</Typography>
             </Stack>
             {cfg.notes && (
-              <Typography variant="caption" fontStyle="italic" sx={{ opacity: 0.7, mt: 0.5, display: "block" }}>
+              <Typography variant="caption" fontStyle="italic" sx={{ color: "rgba(226,232,240,0.68)", mt: 0.75, display: "block" }}>
                 {cfg.notes}
               </Typography>
             )}
           </Box>
-          <Stack alignItems="flex-end" spacing={0.75} sx={{ flexShrink: 0 }}>
-            <Stack direction="row" spacing={0.5} alignItems="center">
+          <Stack alignItems={isPhone ? "flex-start" : "flex-end"} spacing={0.75} sx={{ flexShrink: 0 }}>
+            <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
               <StatusChip status={cfg.status} />
               <Chip
                 size="small"
                 label={`v${cfg.version}`}
                 variant="outlined"
-                sx={{ color: "primary.contrastText", borderColor: "rgba(255,255,255,0.5)" }}
+                sx={{ color: "#e2e8f0", borderColor: "rgba(255,255,255,0.3)" }}
               />
             </Stack>
             {steps.length > 0 && (
-              <Typography variant="caption" sx={{ opacity: 0.7 }}>
+              <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.62)" }}>
                 {steps.length} step{steps.length === 1 ? "" : "s"}
               </Typography>
             )}
@@ -257,8 +279,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
         </Stack>
       </Box>
 
-      {/* â”€â”€ Body â”€â”€ */}
-      <Box sx={{ display: "flex", flex: 1, overflow: "hidden" }}>
+      <Box sx={{ display: "flex", flexDirection: isPhone ? "column" : "row", flex: 1, overflow: "hidden" }}>
         {!workflow || steps.length === 0 ? (
           <Box sx={{ p: 3, flex: 1 }}>
             <Alert severity="info">
@@ -269,64 +290,98 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
           </Box>
         ) : (
           <>
-            {/* Left sidebar — step list */}
             <Box
               sx={{
-                width: 200,
+                width: isPhone ? "100%" : 220,
                 flexShrink: 0,
-                borderRight: "1px solid",
-                borderColor: "divider",
-                overflowY: "auto",
-                bgcolor: "grey.50",
+                borderRight: isPhone ? "none" : "1px solid",
+                borderBottom: isPhone ? "1px solid" : "none",
+                borderColor: "rgba(148,163,184,0.14)",
+                overflowX: isPhone ? "auto" : "hidden",
+                overflowY: isPhone ? "hidden" : "auto",
+                bgcolor: isPhone ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.03)",
               }}
             >
-              <Box sx={{ px: 1.5, pt: 1.5, pb: 1 }}>
+              <Box sx={{ px: 1.5, pt: 1.25, pb: isPhone ? 0.75 : 1 }}>
                 <Typography
                   variant="caption"
-                  color="text.secondary"
                   fontWeight={700}
-                  sx={{ textTransform: "uppercase", letterSpacing: 0.6 }}
+                  sx={{ color: "rgba(226,232,240,0.62)", textTransform: "uppercase", letterSpacing: 0.6 }}
                 >
                   Steps
                 </Typography>
               </Box>
-              <Divider />
-              {steps.map((step, idx) => (
-                <Box
-                  key={step.id}
-                  onClick={() => setActiveStep(idx)}
-                  sx={{
-                    px: 1.5,
-                    py: 1.25,
-                    cursor: "pointer",
-                    bgcolor: activeStep === idx ? "primary.main" : "transparent",
-                    color: activeStep === idx ? "primary.contrastText" : "text.primary",
-                    "&:hover": { bgcolor: activeStep === idx ? "primary.dark" : "action.hover" },
-                    borderBottom: "1px solid",
-                    borderColor: "divider",
-                    transition: "background-color 0.15s",
-                  }}
-                >
-                  <Typography
-                    variant="caption"
-                    sx={{ opacity: 0.65, display: "block", fontWeight: 700, lineHeight: 1.2 }}
-                  >
-                    {String(step.order).padStart(2, "0")}
-                  </Typography>
-                  <Typography variant="body2" fontWeight={activeStep === idx ? 600 : 400} noWrap>
-                    {step.title || "(Untitled)"}
-                  </Typography>
-                  {(step.inputs ?? []).length > 0 && (
-                    <Typography variant="caption" sx={{ opacity: 0.6 }}>
-                      {step.inputs.length} input{step.inputs.length === 1 ? "" : "s"}
-                    </Typography>
-                  )}
-                </Box>
-              ))}
+              {isPhone ? (
+                <Stack direction="row" spacing={1} sx={{ px: 1.5, pb: 1.25, overflowX: "auto" }}>
+                  {steps.map((step, idx) => (
+                    <Box
+                      key={step.id}
+                      onClick={() => setActiveStep(idx)}
+                      sx={{
+                        minWidth: 140,
+                        px: 1.25,
+                        py: 1,
+                        cursor: "pointer",
+                        borderRadius: 2.5,
+                        border: "1px solid",
+                        borderColor: activeStep === idx ? "rgba(45,212,191,0.44)" : "rgba(148,163,184,0.16)",
+                        bgcolor: activeStep === idx ? "rgba(45,212,191,0.12)" : "rgba(255,255,255,0.02)",
+                      }}
+                    >
+                      <Typography variant="caption" sx={{ color: activeStep === idx ? "#99f6e4" : "rgba(226,232,240,0.58)", fontWeight: 700 }}>
+                        {String(step.order).padStart(2, "0")}
+                      </Typography>
+                      <Typography variant="body2" fontWeight={600} sx={{ color: "#f8fafc" }} className="line-clamp-2">
+                        {step.title || "(Untitled)"}
+                      </Typography>
+                      {(step.inputs ?? []).length > 0 && (
+                        <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.58)" }}>
+                          {step.inputs.length} input{step.inputs.length === 1 ? "" : "s"}
+                        </Typography>
+                      )}
+                    </Box>
+                  ))}
+                </Stack>
+              ) : (
+                <>
+                  <Divider />
+                  {steps.map((step, idx) => (
+                    <Box
+                      key={step.id}
+                      onClick={() => setActiveStep(idx)}
+                      sx={{
+                        px: 1.5,
+                        py: 1.25,
+                        cursor: "pointer",
+                        bgcolor: activeStep === idx ? "rgba(45,212,191,0.16)" : "transparent",
+                        color: activeStep === idx ? "#f8fafc" : "text.primary",
+                        "&:hover": { bgcolor: activeStep === idx ? "rgba(45,212,191,0.22)" : "rgba(255,255,255,0.04)" },
+                        borderBottom: "1px solid",
+                        borderColor: "rgba(148,163,184,0.14)",
+                        transition: "background-color 0.15s",
+                      }}
+                    >
+                      <Typography
+                        variant="caption"
+                        sx={{ color: activeStep === idx ? "#99f6e4" : "rgba(226,232,240,0.58)", display: "block", fontWeight: 700, lineHeight: 1.2 }}
+                      >
+                        {String(step.order).padStart(2, "0")}
+                      </Typography>
+                      <Typography variant="body2" fontWeight={activeStep === idx ? 600 : 400} noWrap sx={{ color: activeStep === idx ? "#f8fafc" : "#e2e8f0" }}>
+                        {step.title || "(Untitled)"}
+                      </Typography>
+                      {(step.inputs ?? []).length > 0 && (
+                        <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.58)" }}>
+                          {step.inputs.length} input{step.inputs.length === 1 ? "" : "s"}
+                        </Typography>
+                      )}
+                    </Box>
+                  ))}
+                </>
+              )}
             </Box>
 
-            {/* Right — step content */}
-            <Box sx={{ flex: 1, overflowY: "auto", p: 3.5 }}>
+            <Box sx={{ flex: 1, overflowY: "auto", p: { xs: 1.5, sm: 3.5 } }}>
               {currentStep && (
                 <Stack spacing={3}>
                   <Box>
@@ -336,8 +391,8 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                           width: 34,
                           height: 34,
                           borderRadius: "50%",
-                          bgcolor: "primary.main",
-                          color: "primary.contrastText",
+                          bgcolor: "rgba(45,212,191,0.18)",
+                          color: "#99f6e4",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -348,30 +403,29 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                       >
                         {currentStep.order}
                       </Box>
-                      <Typography variant="h6" fontWeight={600}>
+                      <Typography variant="h6" fontWeight={600} sx={{ color: "#f8fafc" }}>
                         {currentStep.title || "(Untitled step)"}
                       </Typography>
                     </Stack>
                     {currentStep.description && (
-                      <Typography variant="body2" color="text.secondary" sx={{ pl: "50px" }}>
+                      <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.72)", pl: { xs: 0, sm: "50px" } }}>
                         {currentStep.description}
                       </Typography>
                     )}
                   </Box>
 
-                  <Divider />
+                  <Divider sx={{ borderColor: "rgba(148,163,184,0.14)" }} />
 
                   {(currentStep.inputs ?? []).length === 0 ? (
-                    <Typography variant="body2" color="text.disabled" fontStyle="italic">
+                    <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.46)" }} fontStyle="italic">
                       No input fields for this step.
                     </Typography>
                   ) : (
                     <Stack spacing={0}>
                       <Typography
                         variant="caption"
-                        color="text.secondary"
                         fontWeight={700}
-                        sx={{ textTransform: "uppercase", letterSpacing: 0.6, mb: 1.5, display: "block" }}
+                        sx={{ color: "rgba(153,246,228,0.84)", textTransform: "uppercase", letterSpacing: 0.6, mb: 1.5, display: "block" }}
                       >
                         Input Fields
                       </Typography>
@@ -380,17 +434,17 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                           key={inp.id}
                           sx={{
                             display: "grid",
-                            gridTemplateColumns: "230px 1fr",
+                            gridTemplateColumns: { xs: "1fr", sm: "230px 1fr" },
                             gap: 2,
                             alignItems: "center",
                             py: 1.5,
                             px: 1.5,
-                            bgcolor: i % 2 === 0 ? "grey.50" : "transparent",
-                            borderRadius: 1,
+                            bgcolor: i % 2 === 0 ? "rgba(255,255,255,0.03)" : "transparent",
+                            borderRadius: 2,
                           }}
                         >
                           <Box>
-                            <Typography variant="body2" fontWeight={500}>
+                            <Typography variant="body2" fontWeight={500} sx={{ color: "#f8fafc" }}>
                               {inp.label}
                               {inp.required && (
                                 <Typography component="span" variant="caption" color="error.main" sx={{ ml: 0.5 }}>
@@ -400,8 +454,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                             </Typography>
                             <Typography
                               variant="caption"
-                              color="text.disabled"
-                              sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}
+                              sx={{ color: "rgba(226,232,240,0.54)", textTransform: "uppercase", letterSpacing: 0.4 }}
                             >
                               {inp.type}
                               {inp.type === "choice" && (inp.options ?? []).length > 0
@@ -412,7 +465,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                           <Box
                             sx={{
                               borderBottom: "1.5px solid",
-                              borderColor: "grey.400",
+                              borderColor: "rgba(148,163,184,0.36)",
                               minHeight: inp.type === "note" ? 56 : 30,
                             }}
                           />
@@ -425,9 +478,8 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                     <Box>
                       <Typography
                         variant="caption"
-                        color="text.secondary"
                         fontWeight={700}
-                        sx={{ textTransform: "uppercase", letterSpacing: 0.6, display: "block", mb: 1 }}
+                        sx={{ color: "rgba(153,246,228,0.84)", textTransform: "uppercase", letterSpacing: 0.6, display: "block", mb: 1 }}
                       >
                         Decision Options
                       </Typography>
@@ -439,7 +491,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                     </Box>
                   )}
 
-                  <Stack direction="row" spacing={1} alignItems="center" pt={1}>
+                  <Stack direction="row" spacing={1} alignItems="center" pt={1} flexWrap="wrap" useFlexGap>
                     <Button
                       size="small"
                       variant="outlined"
@@ -456,7 +508,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                     >
                       Next →
                     </Button>
-                    <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                    <Typography variant="caption" sx={{ ml: 1, color: "rgba(226,232,240,0.62)" }}>
                       Step {activeStep + 1} of {steps.length}
                     </Typography>
                   </Stack>
@@ -467,8 +519,8 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
         )}
       </Box>
 
-      <Divider />
-      <DialogActions sx={{ px: 3, py: 1.5 }}>
+      <Divider sx={{ borderColor: "rgba(148,163,184,0.14)" }} />
+      <DialogActions sx={{ px: { xs: 1.5, sm: 3 }, py: 1.5 }}>
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>
@@ -498,6 +550,8 @@ const emptyConfigForm = (): ConfigFormState => ({
 // â”€â”€â”€ WorkInstructions component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const WorkInstructions = () => {
+  const theme = useTheme();
+  const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const can = usePermissions();
   const dispatch = useAppDispatch();
   const productsState = useAppSelector((state) => state.products);
@@ -663,6 +717,14 @@ const WorkInstructions = () => {
   // Drives the "Show archived (N)" toggle — only worth showing if any exist.
   const archivedCount = useMemo(
     () => configs.filter((c) => c.status === "Archived").length,
+    [configs],
+  );
+  const publishedCount = useMemo(
+    () => configs.filter((c) => c.status === "Published").length,
+    [configs],
+  );
+  const draftCount = useMemo(
+    () => configs.filter((c) => c.status === "Draft").length,
     [configs],
   );
 
@@ -868,7 +930,7 @@ const WorkInstructions = () => {
 
   return (
     <Stack spacing={3}>
-      {/* Header */}
+      <Box className="glass-card" sx={{ p: { xs: 1.5, sm: 2 }, background: "linear-gradient(135deg, rgba(8,18,24,0.98), rgba(12,28,36,0.94))" }}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
         <Box>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
@@ -916,6 +978,34 @@ const WorkInstructions = () => {
           )}
         </Stack>
       </Stack>
+      <Box
+        sx={{
+          mt: 1.75,
+          display: "grid",
+          gridTemplateColumns: { xs: "repeat(3, minmax(0, 1fr))", sm: "repeat(3, minmax(0, 1fr))" },
+          gap: 1,
+        }}
+      >
+        <Box sx={{ borderRadius: 2.5, p: 1.25, bgcolor: "rgba(45,212,191,0.08)", border: "1px solid rgba(45,212,191,0.18)" }}>
+          <Typography variant="caption" sx={{ color: "rgba(153,246,228,0.84)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+            Published
+          </Typography>
+          <Typography variant="h6" sx={{ mt: 0.25 }}>{publishedCount}</Typography>
+        </Box>
+        <Box sx={{ borderRadius: 2.5, p: 1.25, bgcolor: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.18)" }}>
+          <Typography variant="caption" sx={{ color: "rgba(253,224,71,0.88)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+            Drafts
+          </Typography>
+          <Typography variant="h6" sx={{ mt: 0.25 }}>{draftCount}</Typography>
+        </Box>
+        <Box sx={{ borderRadius: 2.5, p: 1.25, bgcolor: "rgba(148,163,184,0.08)", border: "1px solid rgba(148,163,184,0.18)" }}>
+          <Typography variant="caption" sx={{ color: "rgba(226,232,240,0.82)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+            Archived
+          </Typography>
+          <Typography variant="h6" sx={{ mt: 0.25 }}>{archivedCount}</Typography>
+        </Box>
+      </Box>
+      </Box>
 
       {/* Product tabs */}
       <Paper className="glass-card" sx={{ p: 1.5 }}>
@@ -1012,6 +1102,84 @@ const WorkInstructions = () => {
                     ? `No work instructions yet for ${activeProduct.name}. Click "+ New Work Instruction" to create one.`
                     : "No work instructions match the search."}
                 </Alert>
+              ) : isPhone ? (
+                <Stack spacing={1.25}>
+                  {filteredConfigs.map((cfg) => (
+                    <Box
+                      key={cfg.id}
+                      sx={{
+                        p: 1.5,
+                        borderRadius: 3,
+                        border: "1px solid rgba(148,163,184,0.12)",
+                        background: "linear-gradient(180deg, rgba(10,18,24,0.94), rgba(8,14,19,0.98))",
+                      }}
+                    >
+                      <Stack spacing={1.1}>
+                        <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
+                          <Box sx={{ minWidth: 0, flex: 1 }}>
+                            <Typography variant="body1" fontWeight={700} className="line-clamp-2">
+                              {cfg.name}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" className="line-clamp-2">
+                              {cfg.notes || cfg.configType || "No description"}
+                            </Typography>
+                          </Box>
+                          <Stack alignItems="flex-end" spacing={0.5}>
+                            <StatusChip status={cfg.status} />
+                            <Chip size="small" label={`v${cfg.version}`} variant="outlined" />
+                          </Stack>
+                        </Stack>
+
+                        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 0.75 }}>
+                          <Box sx={{ borderRadius: 2, p: 1, bgcolor: "rgba(255,255,255,0.03)" }}>
+                            <Typography variant="caption" color="text.secondary">Type</Typography>
+                            <Typography variant="body2" fontWeight={600} className="line-clamp-1">
+                              {cfg.configType || "—"}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ borderRadius: 2, p: 1, bgcolor: "rgba(255,255,255,0.03)" }}>
+                            <Typography variant="caption" color="text.secondary">By</Typography>
+                            <Typography variant="body2" fontWeight={600} className="line-clamp-1">
+                              {cfg.createdBy || "—"}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ borderRadius: 2, p: 1, bgcolor: "rgba(255,255,255,0.03)" }}>
+                            <Typography variant="caption" color="text.secondary">Date</Typography>
+                            <Typography variant="body2" fontWeight={600}>
+                              {formatDate(cfg.createdAt)}
+                            </Typography>
+                          </Box>
+                        </Box>
+
+                        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                          <Button size="small" variant="contained" onClick={() => setPreviewConfig(cfg)}>
+                            Preview
+                          </Button>
+                          {!can.viewOnly && (
+                            <Button size="small" variant="outlined" onClick={(e) => setExportMenu({ el: e.currentTarget, cfg })}>
+                              Export
+                            </Button>
+                          )}
+                          {can.editForms && (
+                            <Button size="small" variant="outlined" onClick={() => openBuilder(cfg)}>
+                              Builder
+                            </Button>
+                          )}
+                          {can.editForms && cfg.status === "Draft" && (
+                            <Button size="small" variant="outlined" onClick={() => openEditConfig(cfg)}>
+                              Details
+                            </Button>
+                          )}
+                          {can.editForms && cfg.status !== "Archived" && (
+                            <Button size="small" variant="outlined" onClick={() => setArchiveConfig(cfg)}>
+                              Archive
+                            </Button>
+                          )}
+                        </Stack>
+                      </Stack>
+                    </Box>
+                  ))}
+                </Stack>
               ) : (
                 <Table size="small">
                   <TableHead>

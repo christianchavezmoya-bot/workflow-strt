@@ -47,7 +47,10 @@ import {
   TextField,
   Tooltip,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
+import MobileDocumentPreviewDialog from "../../components/ui/MobileDocumentPreviewDialog";
 import { documentService, type DocumentRecord } from "../../services/documentService";
 import QRUploadButton from "../../components/QRUploadButton";
 import { productService } from "../../services/productService";
@@ -197,6 +200,8 @@ function parseFieldsJson(json: string): { customFields: CustomField[]; columnOrd
 // ------------------------------------------------------------------
 
 export default function DocumentsPage() {
+  const theme = useTheme();
+  const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   useAuth(); // keep auth context available for future use
   const can = usePermissions();
   const canUploadDocuments = can.documents.upload;
@@ -260,10 +265,7 @@ export default function DocumentsPage() {
   const [editSaving,       setEditSaving]       = useState(false);
 
   // ---- preview dialog ---------------------------------------------
-  const [previewDoc,     setPreviewDoc]     = useState<DocumentRecord | null>(null);
-  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError,   setPreviewError]   = useState<string | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<DocumentRecord | null>(null);
 
   // ---- delete confirm dialog --------------------------------------
   const [deleteDoc,     setDeleteDoc]     = useState<DocumentRecord | null>(null);
@@ -511,57 +513,103 @@ export default function DocumentsPage() {
       window.open(doc.downloadUrl, "_blank", "noopener,noreferrer");
       return;
     }
-    // Uploaded file — fetch as authenticated blob and show inline
     setPreviewDoc(doc);
-    setPreviewBlobUrl(null);
-    setPreviewError(null);
-    setPreviewLoading(true);
-    try {
-      const url = await documentService.openDocument(doc.downloadUrl);
-      setPreviewBlobUrl(url);
-    } catch {
-      setPreviewError("Could not load the document. The file may be missing on the server.");
-    } finally {
-      setPreviewLoading(false);
-    }
   }
 
-  function closePreview() {
-    if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
-    setPreviewDoc(null);
-    setPreviewBlobUrl(null);
-    setPreviewError(null);
-    setPreviewLoading(false);
-  }
-
-  function renderPreview() {
-    if (!previewBlobUrl) return null;
-    const ct = previewDoc?.contentType ?? "";
-    if (ct.startsWith("image/")) return (
-      <Box sx={{ p: 2, textAlign: "center" }}>
-        <img src={previewBlobUrl} alt={previewDoc?.name} style={{ maxWidth: "100%", maxHeight: "72vh", objectFit: "contain" }} />
-      </Box>
-    );
-    if (ct === "application/pdf" || ct === "application/x-pdf") return (
-      <iframe src={previewBlobUrl} style={{ width: "100%", height: "72vh", border: "none", display: "block" }} title={previewDoc?.name} />
-    );
-    if (ct.startsWith("video/")) return (
-      <Box sx={{ p: 2 }}>
-        <video src={previewBlobUrl} controls style={{ width: "100%", maxHeight: "72vh" }} />
-      </Box>
-    );
-    // Unsupported type — show download prompt
+  function renderMobileCards() {
     return (
-      <Stack alignItems="center" justifyContent="center" sx={{ p: 8 }} spacing={2}>
-        <FolderOutlined sx={{ fontSize: 56, color: "text.disabled" }} />
-        <Typography color="text.secondary">
-          Preview not available for this file type{ct ? ` (${ct})` : ""}.
-        </Typography>
-        <Button component="a" href={previewBlobUrl} download={addExtIfMissing(previewDoc?.name ?? "", previewDoc?.contentType)}
-          variant="contained" startIcon={<DownloadOutlined />}>
-          Download file
-        </Button>
-      </Stack>
+      <Box sx={{ display: "grid", gap: 1.25, p: 1.25 }}>
+        {sortedDocs.map((doc) => {
+          const tabDef = tabs.find((tab) => tab.id === doc.type);
+          return (
+            <Box
+              key={doc.id}
+              className="glass-card"
+              sx={{
+                p: 1.5,
+                borderRadius: 3,
+                border: "1px solid rgba(148,163,184,0.12)",
+                background: "linear-gradient(180deg, rgba(10,18,24,0.94), rgba(8,14,19,0.98))",
+              }}
+            >
+              <Stack spacing={1.1}>
+                <Stack direction="row" spacing={1} alignItems="flex-start">
+                  <Box
+                    sx={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 2.5,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      bgcolor: "rgba(45,212,191,0.08)",
+                      color: "#99f6e4",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <FolderOutlined fontSize="small" />
+                  </Box>
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Typography variant="body2" fontWeight={700} sx={{ lineHeight: 1.35 }} className="line-clamp-2">
+                      {addExtIfMissing(doc.name, doc.contentType)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" className="line-clamp-2">
+                      {doc.notes || "No description"}
+                    </Typography>
+                  </Box>
+                </Stack>
+
+                <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                  <Chip size="small" label={tabDef?.label ?? doc.type} color={tabDef?.color ?? "default"} variant="outlined" />
+                  <Chip
+                    size="small"
+                    label={doc.linkedTo || "General"}
+                    variant="outlined"
+                    sx={{ maxWidth: "100%", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }}
+                  />
+                </Stack>
+
+                <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 0.75 }}>
+                  <Box sx={{ borderRadius: 2, p: 1, bgcolor: "rgba(255,255,255,0.03)" }}>
+                    <Typography variant="caption" color="text.secondary">Size</Typography>
+                    <Typography variant="body2" fontWeight={600}>{formatBytes(doc.fileSize)}</Typography>
+                  </Box>
+                  <Box sx={{ borderRadius: 2, p: 1, bgcolor: "rgba(255,255,255,0.03)" }}>
+                    <Typography variant="caption" color="text.secondary">Date</Typography>
+                    <Typography variant="body2" fontWeight={600}>
+                      {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : "—"}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ borderRadius: 2, p: 1, bgcolor: "rgba(255,255,255,0.03)" }}>
+                    <Typography variant="caption" color="text.secondary">By</Typography>
+                    <Typography variant="body2" fontWeight={600} className="line-clamp-1">
+                      {doc.createdBy || "—"}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                <Stack direction="row" spacing={0.75}>
+                  {doc.downloadUrl && can.documents.view && (
+                    <Button fullWidth size="small" variant="contained" onClick={() => void openPreview(doc)}>
+                      Preview
+                    </Button>
+                  )}
+                  {canUploadDocuments && showComplexControls && (
+                    <Button fullWidth size="small" variant="outlined" onClick={() => openEdit(doc)}>
+                      Edit
+                    </Button>
+                  )}
+                  {canDeleteDocuments && showComplexControls && (
+                    <Button fullWidth size="small" color="error" variant="outlined" onClick={() => setDeleteDoc(doc)}>
+                      Delete
+                    </Button>
+                  )}
+                </Stack>
+              </Stack>
+            </Box>
+          );
+        })}
+      </Box>
     );
   }
 
@@ -696,6 +744,7 @@ export default function DocumentsPage() {
   return (
     <Stack spacing={3}>
       {/* Header */}
+      <Box className="glass-card" sx={{ p: { xs: 1.5, sm: 2 }, background: "linear-gradient(135deg, rgba(8,18,24,0.98), rgba(12,28,36,0.94))" }}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
         <Box>
           <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Documents</Typography>
@@ -750,6 +799,34 @@ export default function DocumentsPage() {
           )}
         </Stack>
       </Stack>
+      <Box
+        sx={{
+          mt: 1.75,
+          display: "grid",
+          gridTemplateColumns: { xs: "repeat(3, minmax(0, 1fr))", sm: "repeat(3, minmax(0, 1fr))" },
+          gap: 1,
+        }}
+      >
+        <Box sx={{ borderRadius: 2.5, p: 1.25, bgcolor: "rgba(45,212,191,0.08)", border: "1px solid rgba(45,212,191,0.18)" }}>
+          <Typography variant="caption" sx={{ color: "rgba(153,246,228,0.84)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+            Library
+          </Typography>
+          <Typography variant="h6" sx={{ mt: 0.25 }}>{docs.length}</Typography>
+        </Box>
+        <Box sx={{ borderRadius: 2.5, p: 1.25, bgcolor: "rgba(14,165,233,0.08)", border: "1px solid rgba(14,165,233,0.18)" }}>
+          <Typography variant="caption" sx={{ color: "rgba(125,211,252,0.88)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+            Visible
+          </Typography>
+          <Typography variant="h6" sx={{ mt: 0.25 }}>{sortedDocs.length}</Typography>
+        </Box>
+        <Box sx={{ borderRadius: 2.5, p: 1.25, bgcolor: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.18)" }}>
+          <Typography variant="caption" sx={{ color: "rgba(253,224,71,0.88)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+            Tabs
+          </Typography>
+          <Typography variant="h6" sx={{ mt: 0.25 }}>{Math.max(0, tabs.length - 1)}</Typography>
+        </Box>
+      </Box>
+      </Box>
 
       {/* Config loading indicator */}
       {!configLoaded && (
@@ -793,6 +870,8 @@ export default function DocumentsPage() {
               {docs.length === 0 ? "No documents yet. Click \"Add document\" to upload or link one." : "No documents match the current filters."}
             </Alert>
           </Box>
+        ) : isPhone ? (
+          renderMobileCards()
         ) : (
           <Table size="small">
             <TableHead>
@@ -1246,38 +1325,7 @@ export default function DocumentsPage() {
       {/* ================================================================ */}
       {/* Document Preview dialog                                           */}
       {/* ================================================================ */}
-      <Dialog open={Boolean(previewDoc)} onClose={closePreview} maxWidth="lg" fullWidth>
-        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, pr: 2 }}>
-          <Typography variant="h6" sx={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {previewDoc?.name}
-          </Typography>
-          {previewBlobUrl && (
-            <Button component="a" href={previewBlobUrl} download={addExtIfMissing(previewDoc?.name ?? "", previewDoc?.contentType)}
-              size="small" variant="outlined" startIcon={<DownloadOutlined />} sx={{ flexShrink: 0 }}>
-              Download
-            </Button>
-          )}
-        </DialogTitle>
-        <DialogContent dividers sx={{ p: 0, minHeight: 240 }}>
-          {previewLoading && (
-            <Stack alignItems="center" justifyContent="center" sx={{ p: 8 }} spacing={1}>
-              <CircularProgress />
-              <Typography variant="caption" color="text.secondary">Loading document…</Typography>
-            </Stack>
-          )}
-          {previewError && <Alert severity="error" sx={{ m: 2 }}>{previewError}</Alert>}
-          {renderPreview()}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={closePreview}>Close</Button>
-          {previewBlobUrl && (
-            <Button component="a" href={previewBlobUrl} download={addExtIfMissing(previewDoc?.name ?? "", previewDoc?.contentType)}
-              variant="contained" startIcon={<DownloadOutlined />}>
-              Download
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
+      <MobileDocumentPreviewDialog doc={previewDoc} open={Boolean(previewDoc)} onClose={() => setPreviewDoc(null)} />
 
       {/* ================================================================ */}
       {/* Delete confirmation dialog                                        */}
@@ -1420,4 +1468,3 @@ export default function DocumentsPage() {
     </Stack>
   );
 }
-
