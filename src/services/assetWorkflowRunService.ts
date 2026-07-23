@@ -18,7 +18,7 @@ import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
 import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead, shouldSkipRunMutation } from "./connectivityMonitor";
-import { boundedFreshRead } from "../utils/boundedFreshRead";
+import { boundedFreshRead, BOUNDED_FRESH_TIMEOUT_MS } from "../utils/boundedFreshRead";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 import {
@@ -856,6 +856,35 @@ export const assetWorkflowRunService = {
       return this.getById(id);
     }
     return getCachedRun(id);
+  },
+
+  /**
+   * Authoritative read for background reconcile — waits briefly for network,
+   * unlike getById() which returns cache immediately when present.
+   */
+  async getByIdFresh(id: string): Promise<AssetWorkflowRun | null> {
+    if (!isMobileNativePlatform()) {
+      try {
+        const res = await api.get<AssetWorkflowRun>(`/asset-workflow-runs/${id}`);
+        return res.data;
+      } catch {
+        return null;
+      }
+    }
+
+    if (shouldSkipBlockingNetworkRead()) {
+      return getCachedRun(id);
+    }
+
+    const resolvedId = await resolveRunId(id);
+    return await boundedFreshRead(
+      async () => {
+        const res = await api.get<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedId}`);
+        return await cacheServerRun(res.data);
+      },
+      async () => (await getCachedRun(id)) ?? null,
+      { timeoutMs: BOUNDED_FRESH_TIMEOUT_MS },
+    );
   },
 
   /** Fire-and-forget authoritative refresh for an asset's runs. */

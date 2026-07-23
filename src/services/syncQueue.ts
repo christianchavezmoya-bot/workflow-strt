@@ -58,14 +58,20 @@ async function listAll(): Promise<SyncQueueOp[]> {
   return (all as SyncQueueOp[]).sort(sortByCreatedAt);
 }
 
-function buildIdempotencyKey(input: EnqueueSyncOpInput): string {
-  return `${input.opType}:${input.method}:${input.entityType}:${input.entityId}:${input.url}`;
+/** Exported for unit tests — must distinguish installer vs customer signatures. */
+export function buildSyncIdempotencyKey(input: EnqueueSyncOpInput): string {
+  const base = `${input.opType}:${input.method}:${input.entityType}:${input.entityId}:${input.url}`;
+  if (input.opType === "SIGNATURE_SUBMIT" && input.body && typeof input.body === "object") {
+    const role = (input.body as { signerRole?: string }).signerRole;
+    if (role) return `${base}:${role}`;
+  }
+  return base;
 }
 
 export const syncQueue = {
   async enqueue(input: EnqueueSyncOpInput): Promise<SyncQueueOp> {
     const db = await getDB();
-    const idempotencyKey = buildIdempotencyKey(input);
+    const idempotencyKey = buildSyncIdempotencyKey(input);
     const existing = (await listAll()).find(
       (op) => op.idempotencyKey === idempotencyKey && op.status !== "uploading",
     );

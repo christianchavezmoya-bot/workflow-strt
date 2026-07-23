@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
   _resetCircuitBreakerForTests,
+  getCircuitFailureCount,
   isCircuitOpen,
   resetCircuitBreaker,
   shouldSkipBlockingNetworkRead,
@@ -23,5 +24,12 @@ describe("circuitBreaker", () => {
     expect(shouldSkipBlockingNetworkRead()).toBe(true);
     resetCircuitBreaker();
     expect(isCircuitOpen()).toBe(false);
+  });
+
+  it("increments failure count once per trip call", () => {
+    tripCircuitBreaker();
+    expect(getCircuitFailureCount()).toBe(1);
+    tripCircuitBreaker();
+    expect(getCircuitFailureCount()).toBe(2);
   });
 });

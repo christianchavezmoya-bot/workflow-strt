@@ -5,7 +5,7 @@ import { getApiBaseUrl } from "./apiBase";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { formatPayloadSize } from "../utils/syncDiagnostics";
-import { isCircuitOpen, resetCircuitBreaker, tripCircuitBreaker } from "../utils/circuitBreaker";
+import { isCircuitOpen, resetCircuitBreaker } from "../utils/circuitBreaker";
 import { isOfflineGraceValid } from "./biometricAuth";
 import { markOfflinePerf } from "../utils/offlinePerf";
 
@@ -301,8 +301,9 @@ api.interceptors.response.use(
     // Only a real request failing with a genuine network error should mark the
     // server unreachable. HTTP responses like 403/404/500 prove the server
     // answered, so those do not count as unreachable.
+    // Trip the circuit breaker only via the connectivityMonitor listener on this
+    // event — calling tripCircuitBreaker() here as well double-counted failures.
     if (!(error as { isOfflineSkip?: boolean })?.isOfflineSkip && isNetworkOrTimeoutError(error)) {
-      tripCircuitBreaker();
       window.dispatchEvent(new Event("api-server-unreachable"));
     }
     const cfg = config as typeof config & AxiosConfigWithMeta;

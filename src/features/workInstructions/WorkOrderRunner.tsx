@@ -669,7 +669,7 @@ export default function WorkOrderRunner({
     markOfflinePerf("network_request_start", "runner-reconcile");
     try {
       let run = activeRunId
-        ? await assetWorkflowRunService.getById(activeRunId)
+        ? await assetWorkflowRunService.getByIdFresh(activeRunId)
         : await assetWorkflowRunService.startRun(projectAssetId, workflowConfigId);
 
       if (!run) return;
