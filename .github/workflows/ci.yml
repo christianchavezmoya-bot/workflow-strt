@@ -48,6 +48,21 @@ jobs:
       # docs-fresh + hygiene gates via the committed runner
       - run: node .claude/skills/enterprise-dev-practices/scripts/check-gates.mjs docs hygiene
 
+  e2e-full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:full
+
   e2e:
     runs-on: ubuntu-latest
     steps:

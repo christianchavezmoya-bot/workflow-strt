@@ -14,6 +14,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:e2e:full": "playwright test --config playwright.full.config.ts",
+    "version:sync": "node scripts/sync-version.mjs",
     "gates": "node .claude/skills/enterprise-dev-practices/scripts/check-gates.mjs",
     "postinstall": "node scripts/patch-biometric-spm.cjs && node scripts/install-githooks.mjs",
     "docs:update": "node scripts/update-architecture-docs.mjs",
