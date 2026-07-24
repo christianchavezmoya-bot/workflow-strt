@@ -573,6 +573,12 @@ const Dashboard = () => {
   const [dashboardUsers, setDashboardUsers] = useState<DashboardUserEntry[]>([]);
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>(isAdmin ? ALL_DASHBOARDS_VALUE : user.id);
   const dashboardWorkspaceScopeId = isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined;
+  // Offline local reads have no JWT — scope to the logged-in user unless a manager
+  // is explicitly viewing all dashboards (org-wide cache is intentional there).
+  const effectiveDashboardWorkspaceUserId =
+    isManager && selectedDashboardId === ALL_DASHBOARDS_VALUE
+      ? undefined
+      : (dashboardWorkspaceScopeId ?? user.id);
   const dashboardWorkspaceSessionKey = useMemo(
     () => `${DASHBOARD_WORKSPACE_SESSION_PREFIX}${user.id || "anonymous"}:${dashboardWorkspaceScopeId ?? "self"}`,
     [dashboardWorkspaceScopeId, user.id],
@@ -657,7 +663,7 @@ const Dashboard = () => {
   const seedNativeDashboardWorkspaceFromLocal = useCallback(() => {
     if (!isNativePlatform) return;
 
-    void projectAssetService.dashboardWorkspaceLocal(dashboardWorkspaceScopeId)
+    void projectAssetService.dashboardWorkspaceLocal(effectiveDashboardWorkspaceUserId)
       .then((data) => {
         if (!dashboardWorkspaceHasRows(data)) return;
         applyDashboardWorkspace(data, { persist: false, stabilize: true });
@@ -665,7 +671,7 @@ const Dashboard = () => {
         setWorkspaceLoading(false);
       })
       .catch(() => {});
-  }, [applyDashboardWorkspace, dashboardWorkspaceHasRows, dashboardWorkspaceScopeId, isNativePlatform]);
+  }, [applyDashboardWorkspace, dashboardWorkspaceHasRows, effectiveDashboardWorkspaceUserId, isNativePlatform]);
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
@@ -838,7 +844,7 @@ const Dashboard = () => {
       let lastErr: unknown;
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
-          return await projectAssetService.dashboardWorkspace(dashboardWorkspaceScopeId, options);
+          return await projectAssetService.dashboardWorkspace(effectiveDashboardWorkspaceUserId, options);
         } catch (err) {
           lastErr = err;
           if (cancelled) throw err;
@@ -907,7 +913,7 @@ const Dashboard = () => {
   }, [
     applyDashboardWorkspace,
     dashboardWorkspaceHasRows,
-    dashboardWorkspaceScopeId,
+    effectiveDashboardWorkspaceUserId,
     isAuthenticated,
     isNativePlatform,
     shouldSkipLightWorkspaceBoot,
@@ -926,7 +932,7 @@ const Dashboard = () => {
     projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
     setWorkspaceLoading(true);
     projectAssetService
-      .dashboardWorkspace(dashboardWorkspaceScopeId)
+      .dashboardWorkspace(effectiveDashboardWorkspaceUserId)
       .then((data) => { applyDashboardWorkspace(data); })
       .catch(() => { /* keep last-good workspace on a failed manual refresh - never blank it */ })
       .finally(() => setWorkspaceLoading(false));
@@ -934,7 +940,7 @@ const Dashboard = () => {
     setAnalyticsRefreshTick((t) => t + 1);
   }, [
     applyDashboardWorkspace,
-    dashboardWorkspaceScopeId,
+    effectiveDashboardWorkspaceUserId,
     isNativePlatform,
     loadAttention,
     seedNativeDashboardSummariesFromLocal,
@@ -1409,7 +1415,7 @@ const Dashboard = () => {
       projectAssetService.listOpen().then(setOpenAssets),
       projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([])),
       projectAssetService
-        .dashboardWorkspace(dashboardWorkspaceScopeId)
+        .dashboardWorkspace(effectiveDashboardWorkspaceUserId)
         .then((data) => {
           applyDashboardWorkspace(data);
           return data;
@@ -1420,7 +1426,7 @@ const Dashboard = () => {
     return workspace;
   }, [
     applyDashboardWorkspace,
-    dashboardWorkspaceScopeId,
+    effectiveDashboardWorkspaceUserId,
     isNativePlatform,
     loadAttention,
     seedNativeDashboardSummariesFromLocal,

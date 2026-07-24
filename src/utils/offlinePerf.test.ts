@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   _resetOfflinePerfForTests,
   formatOfflinePerfEntry,
@@ -13,16 +13,24 @@ describe("offlinePerf", () => {
     _resetOfflinePerfForTests();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("computes interactive ready ms from navigation_start to interactive_ready", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
     markOfflinePerf("navigation_start", "dashboard-resume:cfg-1");
+    vi.setSystemTime(1050);
     markOfflinePerf("workflow_local_read_start", "cfg-1");
+    vi.setSystemTime(1060);
     markOfflinePerf("workflow_local_read_end", "cfg-1");
+    vi.setSystemTime(1070);
     markOfflinePerf("first_render", "runner");
+    vi.setSystemTime(1100);
     markOfflinePerf("interactive_ready", "runner-local");
 
-    const ms = getInteractiveReadyMs();
-    expect(ms).not.toBeNull();
-    expect(ms!).toBeGreaterThanOrEqual(0);
+    expect(getInteractiveReadyMs()).toBe(100);
   });
 
   it("returns null when markers are incomplete", () => {
@@ -30,18 +38,31 @@ describe("offlinePerf", () => {
     expect(getInteractiveReadyMs()).toBeNull();
   });
 
-  it("returns the most recent interactive_ready after a second open", () => {
+  it("returns the most recent open pair after a second open", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
     markOfflinePerf("navigation_start", "first");
+    vi.setSystemTime(1200);
     markOfflinePerf("interactive_ready", "first");
-    const firstReadyAt = getInteractiveReadyMs();
 
+    vi.setSystemTime(5000);
     markOfflinePerf("navigation_start", "second");
+    vi.setSystemTime(5100);
     markOfflinePerf("interactive_ready", "second");
-    const secondReadyAt = getInteractiveReadyMs();
 
-    expect(secondReadyAt).not.toBeNull();
-    expect(secondReadyAt!).toBeGreaterThanOrEqual(0);
-    expect(firstReadyAt).not.toBeNull();
+    expect(getInteractiveReadyMs()).toBe(100);
+  });
+
+  it("does not accumulate wall time across unrelated opens", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    markOfflinePerf("navigation_start", "old");
+    vi.setSystemTime(373_182);
+    markOfflinePerf("navigation_start", "new");
+    vi.setSystemTime(373_282);
+    markOfflinePerf("interactive_ready", "new");
+
+    expect(getInteractiveReadyMs()).toBe(100);
   });
 
   it("returns the last N perf markers", () => {

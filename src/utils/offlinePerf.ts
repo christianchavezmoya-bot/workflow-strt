@@ -61,13 +61,24 @@ export function clearOfflinePerfLog(): void {
   w.__offlinePerf = [];
 }
 
-/** Time from navigation_start to interactive_ready, if both exist. */
+/** Time from the latest completed navigation_start → interactive_ready pair. */
 export function getInteractiveReadyMs(): number | null {
   const log = getOfflinePerfLog();
-  const nav = log.find((e) => e.marker === "navigation_start");
-  const ready = [...log].reverse().find((e) => e.marker === "interactive_ready");
-  if (!nav || !ready) return null;
-  return ready.at - nav.at;
+  let pendingNav: OfflinePerfEntry | null = null;
+  let lastPairMs: number | null = null;
+
+  for (const entry of log) {
+    if (entry.marker === "navigation_start") {
+      pendingNav = entry;
+      continue;
+    }
+    if (entry.marker === "interactive_ready" && pendingNav) {
+      lastPairMs = entry.at - pendingNav.at;
+      pendingNav = null;
+    }
+  }
+
+  return lastPairMs;
 }
 
 /** Last N perf markers for debug readout. */
