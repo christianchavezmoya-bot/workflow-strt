@@ -65,6 +65,7 @@ import type { FeatureDependency } from "../../types/featureDependency";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
 import type { WorkflowType } from "../../types/workflowType";
 import WorkOrderRunner from "./WorkOrderRunner";
 
@@ -1023,6 +1024,11 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
 
   const isReadOnly = currentConfig?.status === "Published" || currentConfig?.status === "Archived";
 
+  function handlePreviewRun() {
+    markWorkflowOpenTap("builder-preview", currentConfig?.id ?? workflow.id);
+    setRunnerOpen(true);
+  }
+
   return (
     <Stack spacing={2}>
       {/* Read-only banner for Published/Archived */}
@@ -1076,7 +1082,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             variant="contained"
             color="success"
             startIcon={<PlayArrowOutlined />}
-            onClick={() => setRunnerOpen(true)}
+            onClick={handlePreviewRun}
             disabled={stepsSorted.length === 0}
           >
             Run

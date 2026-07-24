@@ -3,7 +3,7 @@ import type { ProjectAsset } from "../types/projectAsset";
 import type { Workflow } from "../types/workflow";
 import type { WorkflowConfig } from "../types/workflowConfig";
 import { isMobileNativePlatform } from "../utils/platform";
-import { markOfflinePerf, startOfflinePerfSpan } from "../utils/offlinePerf";
+import { markOfflinePerf, startWorkflowLocalReadSpan } from "../utils/offlinePerf";
 import {
   getCachedWorkflowShell,
   parseWorkflowFromConfig,
@@ -32,7 +32,7 @@ export async function loadWorkflowOpenPayload(
   },
 ): Promise<WorkflowOpenPayload | null> {
   markOfflinePerf("navigation_start", configId);
-  const endLocalRead = startOfflinePerfSpan("workflow_local_read_start", configId);
+  const endLocalRead = startWorkflowLocalReadSpan(configId);
 
   const cfg =
     options?.configFromMemory

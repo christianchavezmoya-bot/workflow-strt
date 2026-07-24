@@ -18,8 +18,14 @@ import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import LockClockOutlinedIcon from "@mui/icons-material/LockClockOutlined";
+import SpeedOutlinedIcon from "@mui/icons-material/SpeedOutlined";
 import { useEffect, useState } from "react";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
+import {
+  formatOfflinePerfEntry,
+  getInteractiveReadyMs,
+  getRecentOfflinePerfMarkers,
+} from "../../utils/offlinePerf";
 
 type Chip = {
   key: string;
@@ -53,7 +59,21 @@ export default function ConnectivityDebugBar() {
   // Driven by the same repo:*:fetch-failed / repo:*:updated events added in
   // Stage 1 and already present for assets.
   const [showingCachedData, setShowingCachedData] = useState(false);
+  const [interactiveReadyMs, setInteractiveReadyMs] = useState<number | null>(null);
+  const [recentPerfMarkers, setRecentPerfMarkers] = useState<string[]>([]);
   const [, forceTick] = useState(0);
+
+  const refreshPerfReadout = () => {
+    setInteractiveReadyMs(getInteractiveReadyMs());
+    setRecentPerfMarkers(getRecentOfflinePerfMarkers(5).map(formatOfflinePerfEntry));
+  };
+
+  useEffect(() => {
+    refreshPerfReadout();
+    const onPerf = () => refreshPerfReadout();
+    window.addEventListener("offline-perf", onPerf);
+    return () => window.removeEventListener("offline-perf", onPerf);
+  }, []);
 
   useEffect(() => {
     const markCached    = () => setShowingCachedData(true);
@@ -183,6 +203,19 @@ export default function ConnectivityDebugBar() {
       tone: "success",
     });
   }
+
+  const openMsLabel = interactiveReadyMs != null ? `${interactiveReadyMs}ms` : "—";
+  const perfTooltip = recentPerfMarkers.length
+    ? `navigation_start → interactive_ready: ${openMsLabel}\n\nRecent markers:\n${recentPerfMarkers.join("\n")}`
+    : `navigation_start → interactive_ready: ${openMsLabel}\n\nOpen a workflow to record markers.`;
+
+  chips.push({
+    key: "open-perf",
+    label: `Open: ${openMsLabel}`,
+    tooltip: perfTooltip,
+    icon: <SpeedOutlinedIcon sx={{ fontSize: 14 }} />,
+    tone: interactiveReadyMs != null && interactiveReadyMs <= 1000 ? "success" : "info",
+  });
 
   return (
     <Box

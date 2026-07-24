@@ -152,6 +152,7 @@ import {
 import { buildProjectCaptureTable } from "../../utils/projectCaptureTable";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
+import { markWorkflowOpenTap, startWorkflowLocalReadSpan } from "../../utils/workflowOpenPerf";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 
 // Reference media lives on the config's mediaJson, separate from stepsJson.
@@ -2368,7 +2369,12 @@ const AssetInstallationPage = () => {
   }, [runnerOpen, runnerAsset?.productId, runnerWorkflow?.id]);
 
   async function handleStartWorkOrder(asset: ProjectAsset) {
+    const configIdForPerf = asset.productConfigId ?? asset.workflowTemplateId ?? asset.id;
+    markWorkflowOpenTap("assets-work-order", configIdForPerf);
     setRunnerLoading(asset.id);
+    const endLocalRead = asset.productConfigId
+      ? startWorkflowLocalReadSpan(asset.productConfigId)
+      : () => {};
     try {
       // New path: productConfigId â†' WorkflowConfig (published work instruction)
       if (asset.productConfigId) {
@@ -2453,6 +2459,7 @@ const AssetInstallationPage = () => {
     } catch {
       alert("Failed to load workflow.");
     } finally {
+      endLocalRead();
       setRunnerLoading(null);
     }
   }
@@ -2721,7 +2728,9 @@ const AssetInstallationPage = () => {
   }
 
   async function _doStartAssignmentRun(asset: ProjectAsset, assignment: WorkflowAssignment) {
+    markWorkflowOpenTap("assets-assignment", assignment.workflowConfigId);
     setRunnerLoading(asset.id);
+    const endLocalRead = startWorkflowLocalReadSpan(assignment.workflowConfigId);
     try {
       // Load the workflow config to get steps — fallback to in-memory maps
       // when the per-ID IndexedDB cache is empty (e.g. background refresh
@@ -2756,6 +2765,7 @@ const AssetInstallationPage = () => {
       setRunnerFeatureSelections(parseFeatureSelectionsForConfig(assignment.workflowConfigId));
       setRunnerOpen(true);
     } catch { alert("Failed to load workflow."); } finally {
+      endLocalRead();
       setRunnerLoading(null);
     }
   }
@@ -3550,9 +3560,11 @@ ${words.slice(midpoint).join(" ")}`;
     const asset = runHistoryAsset;
     const configId = runHistoryConfigId;
     if (!asset || !configId) return;
+    markWorkflowOpenTap("assets-rerun", configId);
     setRunHistoryOpen(false);
 
     setRunnerLoading(asset.id);
+    const endLocalRead = startWorkflowLocalReadSpan(configId);
     try {
       const cfg = wfConfigMap.get(configId) ?? await workflowConfigService.getById(configId);
       if (!cfg) { alert("Workflow config not found."); return; }
@@ -3575,6 +3587,7 @@ ${words.slice(midpoint).join(" ")}`;
       // Optimistically mark asset as InProgress so the Continue button shows if the user pauses
       setAssets(prev => prev.map(a => a.id === asset.id ? { ...a, status: "InProgress" as const } : a));
     } catch { alert("Failed to load workflow."); } finally {
+      endLocalRead();
       setRunnerLoading(null);
     }
   }
@@ -3582,8 +3595,10 @@ ${words.slice(midpoint).join(" ")}`;
   async function handleContinueRun(run: AssetWorkflowRun) {
     const asset = runHistoryAsset;
     if (!asset) return;
+    markWorkflowOpenTap("assets-continue", run.workflowConfigId);
     setRunHistoryOpen(false);
     setRunnerLoading(asset.id);
+    const endLocalRead = startWorkflowLocalReadSpan(run.workflowConfigId);
     try {
       const cfg = wfConfigMap.get(run.workflowConfigId) ?? await workflowConfigService.getById(run.workflowConfigId);
       if (!cfg) { alert("Workflow config not found."); return; }
@@ -3602,6 +3617,7 @@ ${words.slice(midpoint).join(" ")}`;
       setRunnerFeatureSelections(parseFeatureSelectionsForConfig(run.workflowConfigId));
       setRunnerOpen(true);
     } catch { alert("Failed to load workflow."); } finally {
+      endLocalRead();
       setRunnerLoading(null);
     }
   }

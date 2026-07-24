@@ -55,6 +55,7 @@ import { featureService } from "../../services/featureService";
 import type { Feature as LibFeature } from "../../types/feature";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { markWorkflowOpenTap, startWorkflowLocalReadSpan } from "../../utils/workflowOpenPerf";
 import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import { mediaStore } from "../../services/mediaStore";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
@@ -2162,7 +2163,9 @@ const Dashboard = () => {
   }
 
   async function launchProductWorkflowFromDashboard(asset: QuickActionAsset, workflowMeta: { configId: string; configName: string; workflowTypeId?: string }) {
+    markWorkflowOpenTap("dashboard-product", workflowMeta.configId);
     setRunnerLoading(asset.id);
+    const endLocalRead = startWorkflowLocalReadSpan(workflowMeta.configId);
     try {
       const cfg = await workflowConfigService.getById(workflowMeta.configId);
       if (!cfg) { alert("Workflow config not found."); return; }
@@ -2182,6 +2185,7 @@ const Dashboard = () => {
     } catch {
       alert("Failed to load workflow.");
     } finally {
+      endLocalRead();
       setRunnerLoading(null);
     }
   }
@@ -2295,7 +2299,9 @@ const Dashboard = () => {
   }
 
   async function startWorkflowFromDashboard(asset: QuickActionAsset, assignment: WorkflowAssignment, runsOverride?: AssetWorkflowRun[]) {
+    markWorkflowOpenTap("dashboard-start", assignment.workflowConfigId);
     setRunnerLoading(asset.id);
+    const endLocalRead = startWorkflowLocalReadSpan(assignment.workflowConfigId);
     try {
       const cfg = await workflowConfigService.getById(assignment.workflowConfigId);
       if (!cfg) { alert("Workflow config not found."); return; }
@@ -2319,6 +2325,7 @@ const Dashboard = () => {
       setRunnerOpen(true);
       closeQuickActionDialog();
     } catch { alert("Failed to load workflow."); } finally {
+      endLocalRead();
       setRunnerLoading(null);
     }
   }
@@ -2336,7 +2343,9 @@ const Dashboard = () => {
    * user at least sees the options).
    */
   async function resumeActiveRunFromDashboard(asset: QuickActionAsset, run: AssetWorkflowRun): Promise<boolean> {
+    markWorkflowOpenTap("dashboard-resume", run.workflowConfigId);
     setRunnerLoading(asset.id);
+    const endLocalRead = startWorkflowLocalReadSpan(run.workflowConfigId);
     try {
       const cfg: WorkflowConfig | null = await workflowConfigService.getById(run.workflowConfigId);
       if (!cfg) return false;
@@ -2358,6 +2367,7 @@ const Dashboard = () => {
     } catch {
       return false;
     } finally {
+      endLocalRead();
       setRunnerLoading(null);
     }
   }

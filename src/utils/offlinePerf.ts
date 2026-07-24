@@ -70,6 +70,30 @@ export function getInteractiveReadyMs(): number | null {
   return ready.at - nav.at;
 }
 
+/** Last N perf markers for debug readout. */
+export function getRecentOfflinePerfMarkers(limit = 5): OfflinePerfEntry[] {
+  const log = getOfflinePerfLog();
+  if (limit <= 0) return [];
+  return log.slice(-limit);
+}
+
+/** Span for local workflow config + run resolution (entry-point open path). */
+export function startWorkflowLocalReadSpan(configId: string): () => void {
+  markOfflinePerf("workflow_local_read_start", configId);
+  const start = Date.now();
+  return () => {
+    markOfflinePerf("workflow_local_read_end", configId);
+    if (import.meta.env.DEV) {
+      console.debug(`[offline-perf] workflow_local_read (${configId}): ${Date.now() - start}ms`);
+    }
+  };
+}
+
+export function formatOfflinePerfEntry(entry: OfflinePerfEntry): string {
+  const detail = entry.detail ? ` ${entry.detail}` : "";
+  return `${entry.marker}${detail}`;
+}
+
 export function _resetOfflinePerfForTests(): void {
   clearOfflinePerfLog();
 }

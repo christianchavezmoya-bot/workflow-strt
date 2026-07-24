@@ -9,6 +9,7 @@ import NotificationBanner from "./NotificationBanner";
 import PullToRefresh from "./PullToRefresh";
 import SyncDroppedBanner from "./SyncDroppedBanner";
 import OfflineModeBanner from "./OfflineModeBanner";
+import OfflineBootstrapBanner from "./OfflineBootstrapBanner";
 import { useViewMode } from "../../contexts/ViewModeContext";
 import { useAccessMode } from "../../contexts/AccessModeContext";
 import { FavoritesProvider } from "../../contexts/FavoritesContext";
@@ -67,6 +68,7 @@ const AppShell = () => {
         <Box className={`app-main ${viewMode === "minimal" ? "minimal-view" : ""}`}>
           <NotificationBanner />
           <SyncDroppedBanner />
+          <OfflineBootstrapBanner />
           <OfflineModeBanner />
           {isViewOnly && (
             <Box sx={{ px: 2, py: 1, borderBottom: "1px solid rgba(245, 158, 11, 0.25)", background: "rgba(245, 158, 11, 0.12)", color: "warning.light", fontSize: "0.85rem", fontWeight: 700 }}>

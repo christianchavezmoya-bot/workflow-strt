@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AccessTimeOutlined,
   AttachMoneyOutlined,
@@ -240,6 +240,7 @@ export default function WorkOrderRunner({
   );
 
   const [stage, setStage] = useState<Stage>("setup");
+  const firstRenderMarkedRef = useRef(false);
   const [currentStepId, setCurrentStepId] = useState<string | null>(stepsSorted[0]?.id ?? null);
   const [history, setHistory] = useState<string[]>([]);
   // values[stepId][inputId] = string value
@@ -415,6 +416,12 @@ export default function WorkOrderRunner({
     if (!open) reset();
   }, [open, existingRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useLayoutEffect(() => {
+    if (!open || stage !== "running" || firstRenderMarkedRef.current) return;
+    firstRenderMarkedRef.current = true;
+    markOfflinePerf("first_render", "runner");
+  }, [open, stage]);
+
   // Tick every second while the dialog is open â€" drives productiveSecondsLive
   // and downtimeSecondsLive in real time. Running unconditionally (not gated
   // on stage or trackingCategory) means the clock never stops due to a stage
@@ -426,6 +433,7 @@ export default function WorkOrderRunner({
   }, [open]);
 
   function reset() {
+    firstRenderMarkedRef.current = false;
     setStage("setup");
     setCurrentStepId(stepsSorted[0]?.id ?? null);
     setHistory([]);
@@ -704,7 +712,6 @@ export default function WorkOrderRunner({
 
     setStartingRun(true);
     setStartError(null);
-    markOfflinePerf("navigation_start", "runner-continue");
 
     try {
       if (activeRunId && isMobileNativePlatform()) {

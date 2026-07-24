@@ -13,6 +13,7 @@ import type { Project } from "../../types/project";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import { parseWorkflowConfigToWorkflow } from "../../utils/workflowConfigParser";
+import { markWorkflowOpenTap, startWorkflowLocalReadSpan } from "../../utils/workflowOpenPerf";
 import WorkflowRunHistoryDialog from "../installations/WorkflowRunHistoryDialog";
 import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import ProjectInspectionInboxPage from "./ProjectInspectionInboxPage";
@@ -79,6 +80,8 @@ export default function ProjectAssetInspectionPage() {
 
   async function handleStartInspection() {
     if (!projectId || !assetId || !selectedConfig) return;
+    markWorkflowOpenTap("inspection-start", selectedConfig.id);
+    const endLocalRead = startWorkflowLocalReadSpan(selectedConfig.id);
     try {
       const run = await projectInspectionRunService.create(projectId, assetId, { workflowConfigId: selectedConfig.id });
       setRunnerConfig(selectedConfig);
@@ -87,6 +90,8 @@ export default function ProjectAssetInspectionPage() {
       setRunnerOpen(true);
     } catch {
       setError("Unable to start inspection.");
+    } finally {
+      endLocalRead();
     }
   }
 

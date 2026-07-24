@@ -211,9 +211,25 @@ interface CommtracDB extends DBSchema {
 // ── Singleton ─────────────────────────────────────────────────────────────────
 
 let _db: IDBPDatabase<CommtracDB> | null = null;
+let _dbOpenPerfStarted = false;
 
 export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
   if (_db) return _db;
+
+  let endDbOpenPerf: (() => void) | undefined;
+  if (!_dbOpenPerfStarted && typeof window !== "undefined") {
+    _dbOpenPerfStarted = true;
+    const { markOfflinePerf } = await import("../utils/offlinePerf");
+    markOfflinePerf("local_database_open_start");
+    const start = Date.now();
+    endDbOpenPerf = () => {
+      markOfflinePerf("local_database_open_end");
+      if (import.meta.env.DEV) {
+        console.debug(`[offline-perf] local_database_open: ${Date.now() - start}ms`);
+      }
+    };
+  }
+
   // v2 (schema version 2) adds offline-bootstrap stores: workflow_assignments,
   // features, reference_data, config_media. The upgrade is additive and
   // idempotent so existing v1 databases migrate without data loss.
@@ -266,6 +282,7 @@ export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
       }
     },
   });
+  endDbOpenPerf?.();
   return _db;
 }
 
