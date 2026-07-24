@@ -13,7 +13,8 @@ import type { Project } from "../../types/project";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import { parseWorkflowConfigToWorkflow } from "../../utils/workflowConfigParser";
-import { markWorkflowOpenTap, startWorkflowLocalReadSpan } from "../../utils/workflowOpenPerf";
+import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
+import { loadWorkflowOpenPayload } from "../../services/workflowOpenService";
 import WorkflowRunHistoryDialog from "../installations/WorkflowRunHistoryDialog";
 import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import ProjectInspectionInboxPage from "./ProjectInspectionInboxPage";
@@ -81,17 +82,21 @@ export default function ProjectAssetInspectionPage() {
   async function handleStartInspection() {
     if (!projectId || !assetId || !selectedConfig) return;
     markWorkflowOpenTap("inspection-start", selectedConfig.id);
-    const endLocalRead = startWorkflowLocalReadSpan(selectedConfig.id);
     try {
       const run = await projectInspectionRunService.create(projectId, assetId, { workflowConfigId: selectedConfig.id });
-      setRunnerConfig(selectedConfig);
+      const payload = await loadWorkflowOpenPayload(selectedConfig.id, { id: assetId }, {
+        configFromMemory: selectedConfig,
+      });
+      if (!payload) {
+        setError("Unable to load inspection workflow.");
+        return;
+      }
+      setRunnerConfig(payload.config);
       setRuns((prev) => [run, ...prev.filter((item) => item.id !== run.id)]);
       setActiveRunId(run.id);
       setRunnerOpen(true);
     } catch {
       setError("Unable to start inspection.");
-    } finally {
-      endLocalRead();
     }
   }
 

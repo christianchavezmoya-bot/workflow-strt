@@ -45,6 +45,16 @@ export function parseWorkflowFromConfig(cfg: WorkflowConfig): Workflow | null {
   return null;
 }
 
+/** Merge config mediaJson into workflow when stepsJson has no embedded media. */
+export function mergeWorkflowConfigMedia(wf: Workflow, cfg: { mediaJson?: string }): Workflow {
+  if (wf.media && wf.media.length > 0) return wf;
+  try {
+    const cfgMedia = JSON.parse(cfg.mediaJson || "[]");
+    if (Array.isArray(cfgMedia) && cfgMedia.length > 0) return { ...wf, media: cfgMedia };
+  } catch { /* no media */ }
+  return wf;
+}
+
 export function _clearWorkflowOpenCacheForTests(): void {
   cache.clear();
 }

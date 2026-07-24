@@ -3,12 +3,14 @@ import type { ProjectAsset } from "../types/projectAsset";
 import type { Workflow } from "../types/workflow";
 import type { WorkflowConfig } from "../types/workflowConfig";
 import { isMobileNativePlatform } from "../utils/platform";
-import { markOfflinePerf, startWorkflowLocalReadSpan } from "../utils/offlinePerf";
+import { startWorkflowLocalReadSpan } from "../utils/offlinePerf";
 import {
   getCachedWorkflowShell,
+  mergeWorkflowConfigMedia,
   parseWorkflowFromConfig,
   setCachedWorkflowShell,
 } from "../utils/workflowOpenCache";
+import { shouldSkipBlockingNetworkRead } from "./connectivityMonitor";
 import { assetWorkflowRunService } from "./assetWorkflowRunService";
 import { workflowConfigService } from "./workflowConfigService";
 
@@ -18,57 +20,84 @@ export type WorkflowOpenPayload = {
   existingRunId?: string;
 };
 
+export type LoadWorkflowOpenOptions = {
+  /** Preloaded config (in-memory maps on Assets page). */
+  configFromMemory?: WorkflowConfig | null;
+  /** Preloaded runs — skips listByAsset when provided. */
+  runs?: AssetWorkflowRun[];
+  /** Match active run against this config id (defaults to configId). */
+  workflowConfigIdForRun?: string;
+  /** Builder preview — skip asset run lookup and asset refresh. */
+  previewOnly?: boolean;
+  /** Merge config mediaJson into workflow shell (Assets page). */
+  mergeMedia?: boolean;
+};
+
+async function resolveWorkflowConfig(
+  configId: string,
+  configFromMemory?: WorkflowConfig | null,
+): Promise<WorkflowConfig | null> {
+  if (configFromMemory) return configFromMemory;
+
+  const local = await workflowConfigService.getByIdLocalFirst(configId);
+  if (local) return local;
+
+  if (isMobileNativePlatform() && shouldSkipBlockingNetworkRead()) {
+    return null;
+  }
+
+  try {
+    return await workflowConfigService.getById(configId);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Local-first workflow load for opening the runner. Never waits on network when
- * cached config/steps exist on device. Background refresh is fire-and-forget.
+ * cached config/steps exist on device. Caller marks navigation_start at tap;
+ * WorkOrderRunner marks interactive_ready when the UI is usable.
  */
 export async function loadWorkflowOpenPayload(
   configId: string,
-  asset: Pick<ProjectAsset, "id">,
-  options?: {
-    configFromMemory?: WorkflowConfig | null;
-    runs?: AssetWorkflowRun[];
-    workflowConfigIdForRun?: string;
-  },
+  asset: Pick<ProjectAsset, "id"> | null,
+  options?: LoadWorkflowOpenOptions,
 ): Promise<WorkflowOpenPayload | null> {
-  markOfflinePerf("navigation_start", configId);
   const endLocalRead = startWorkflowLocalReadSpan(configId);
 
-  const cfg =
-    options?.configFromMemory
-    ?? await workflowConfigService.getByIdLocalFirst(configId);
+  try {
+    const cfg = await resolveWorkflowConfig(configId, options?.configFromMemory);
+    if (!cfg) return null;
 
-  if (!cfg) {
+    let workflow = getCachedWorkflowShell(configId);
+    if (!workflow) {
+      workflow = parseWorkflowFromConfig(cfg);
+      if (workflow) setCachedWorkflowShell(configId, workflow);
+    }
+
+    if (!workflow || workflow.steps.length === 0) return null;
+
+    if (options?.mergeMedia) {
+      workflow = mergeWorkflowConfigMedia(workflow, cfg);
+    }
+
+    let existingRunId: string | undefined;
+    if (!options?.previewOnly && asset) {
+      const matchConfigId = options?.workflowConfigIdForRun ?? configId;
+      const runs = options?.runs ?? await assetWorkflowRunService.listByAsset(asset.id);
+      const activeRun = runs.find((r) => r.workflowConfigId === matchConfigId && !r.isLocked);
+      if (activeRun) existingRunId = activeRun.id;
+    }
+
+    if (isMobileNativePlatform() && !options?.previewOnly && asset) {
+      void workflowConfigService.refreshByIdInBackground(configId);
+      void assetWorkflowRunService.refreshByAssetInBackground(asset.id);
+    }
+
+    return { workflow, config: cfg, existingRunId };
+  } finally {
     endLocalRead();
-    return null;
   }
-
-  let workflow = getCachedWorkflowShell(configId);
-  if (!workflow) {
-    workflow = parseWorkflowFromConfig(cfg);
-    if (workflow) setCachedWorkflowShell(configId, workflow);
-  }
-
-  if (!workflow || workflow.steps.length === 0) {
-    endLocalRead();
-    return null;
-  }
-
-  let existingRunId: string | undefined;
-  const runs = options?.runs ?? await assetWorkflowRunService.listByAsset(asset.id);
-  const matchConfigId = options?.workflowConfigIdForRun ?? configId;
-  const activeRun = runs.find((r) => r.workflowConfigId === matchConfigId && !r.isLocked);
-  if (activeRun) existingRunId = activeRun.id;
-
-  endLocalRead();
-  markOfflinePerf("interactive_ready", configId);
-
-  if (isMobileNativePlatform()) {
-    void workflowConfigService.refreshByIdInBackground(configId);
-    void assetWorkflowRunService.refreshByAssetInBackground(asset.id);
-  }
-
-  return { workflow, config: cfg, existingRunId };
 }
 
 /** Resume reconcile after local-first runner open — authoritative server state. */

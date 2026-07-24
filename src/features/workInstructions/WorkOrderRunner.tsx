@@ -69,6 +69,7 @@ import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProces
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { markOfflinePerf } from "../../utils/offlinePerf";
+import { shouldSkipRunMutation } from "../../services/connectivityMonitor";
 
 // Types
 
@@ -706,6 +707,7 @@ export default function WorkOrderRunner({
   async function startRun() {
     if (!isRealRun) {
       setCurrentStepId(stepsSorted[0]?.id ?? null);
+      markOfflinePerf("interactive_ready", "runner-preview");
       setStage("running");
       return;
     }
@@ -721,6 +723,10 @@ export default function WorkOrderRunner({
           markOfflinePerf("interactive_ready", "runner-local");
           setStage("running");
           void reconcileRunWithServer();
+          return;
+        }
+        if (shouldSkipRunMutation()) {
+          setStartError("Could not load run. Open it once online to cache it for offline use.");
           return;
         }
       }

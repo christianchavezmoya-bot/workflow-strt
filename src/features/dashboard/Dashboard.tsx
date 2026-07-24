@@ -55,7 +55,11 @@ import { featureService } from "../../services/featureService";
 import type { Feature as LibFeature } from "../../types/feature";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { isMobileNativePlatform } from "../../utils/platform";
-import { markWorkflowOpenTap, startWorkflowLocalReadSpan } from "../../utils/workflowOpenPerf";
+import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
+import {
+  loadWorkflowOpenPayload,
+  refreshWorkflowOpenDataInBackground,
+} from "../../services/workflowOpenService";
 import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import { mediaStore } from "../../services/mediaStore";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
@@ -2162,32 +2166,53 @@ const Dashboard = () => {
     }
   }
 
-  async function launchProductWorkflowFromDashboard(asset: QuickActionAsset, workflowMeta: { configId: string; configName: string; workflowTypeId?: string }) {
-    markWorkflowOpenTap("dashboard-product", workflowMeta.configId);
+  async function openRunnerWithPayload(
+    asset: QuickActionAsset,
+    configId: string,
+    source: string,
+    options?: {
+      runs?: AssetWorkflowRun[];
+      existingRunId?: string;
+      onOpened?: () => void;
+    },
+  ): Promise<boolean> {
+    markWorkflowOpenTap(source, configId);
     setRunnerLoading(asset.id);
-    const endLocalRead = startWorkflowLocalReadSpan(workflowMeta.configId);
     try {
-      const cfg = await workflowConfigService.getById(workflowMeta.configId);
-      if (!cfg) { alert("Workflow config not found."); return; }
-      let wf: Workflow | null = null;
-      try {
-        const parsed = JSON.parse(cfg.stepsJson);
-        if (parsed?.steps) wf = parsed as Workflow;
-        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
-      } catch {}
-      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
-      setRunnerExistingRunId(undefined);
+      const payload = await loadWorkflowOpenPayload(configId, { id: asset.id }, {
+        runs: options?.runs,
+        workflowConfigIdForRun: configId,
+      });
+      if (!payload) {
+        alert("Workflow config not found.");
+        return false;
+      }
+      if (payload.workflow.steps.length === 0) {
+        alert("This workflow has no steps defined.");
+        return false;
+      }
+      setRunnerExistingRunId(options?.existingRunId ?? payload.existingRunId);
       setRunnerAsset(asset);
-      setRunnerWorkflow(wf);
-      setRunnerWorkflowConfigId(workflowMeta.configId);
+      setRunnerWorkflow(payload.workflow);
+      setRunnerWorkflowConfigId(configId);
       setRunnerOpen(true);
-      closeQuickActionDialog();
+      refreshWorkflowOpenDataInBackground(asset.id, configId);
+      options?.onOpened?.();
+      return true;
     } catch {
       alert("Failed to load workflow.");
+      return false;
     } finally {
-      endLocalRead();
       setRunnerLoading(null);
     }
+  }
+
+  async function launchProductWorkflowFromDashboard(asset: QuickActionAsset, workflowMeta: { configId: string; configName: string; workflowTypeId?: string }) {
+    setRunnerExistingRunId(undefined);
+    const opened = await openRunnerWithPayload(asset, workflowMeta.configId, "dashboard-product", {
+      onOpened: closeQuickActionDialog,
+    });
+    if (!opened) return;
   }
 
   const quickActionPrimaryAction = useMemo(() => {
@@ -2299,35 +2324,10 @@ const Dashboard = () => {
   }
 
   async function startWorkflowFromDashboard(asset: QuickActionAsset, assignment: WorkflowAssignment, runsOverride?: AssetWorkflowRun[]) {
-    markWorkflowOpenTap("dashboard-start", assignment.workflowConfigId);
-    setRunnerLoading(asset.id);
-    const endLocalRead = startWorkflowLocalReadSpan(assignment.workflowConfigId);
-    try {
-      const cfg = await workflowConfigService.getById(assignment.workflowConfigId);
-      if (!cfg) { alert("Workflow config not found."); return; }
-      let wf: Workflow | null = null;
-      try {
-        const parsed = JSON.parse(cfg.stepsJson);
-        if (parsed?.steps) wf = parsed as Workflow;
-        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
-      } catch {}
-      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
-
-      let existingRunId: string | undefined;
-      const runs = runsOverride ?? quickActionRuns;
-      const activeRun = runs.find((r) => r.workflowConfigId === assignment.workflowConfigId && !r.isLocked);
-      if (activeRun) existingRunId = activeRun.id;
-
-      setRunnerExistingRunId(existingRunId);
-      setRunnerAsset(asset);
-      setRunnerWorkflow(wf);
-      setRunnerWorkflowConfigId(assignment.workflowConfigId);
-      setRunnerOpen(true);
-      closeQuickActionDialog();
-    } catch { alert("Failed to load workflow."); } finally {
-      endLocalRead();
-      setRunnerLoading(null);
-    }
+    await openRunnerWithPayload(asset, assignment.workflowConfigId, "dashboard-start", {
+      runs: runsOverride ?? quickActionRuns,
+      onOpened: closeQuickActionDialog,
+    });
   }
 
   /**
@@ -2343,33 +2343,10 @@ const Dashboard = () => {
    * user at least sees the options).
    */
   async function resumeActiveRunFromDashboard(asset: QuickActionAsset, run: AssetWorkflowRun): Promise<boolean> {
-    markWorkflowOpenTap("dashboard-resume", run.workflowConfigId);
-    setRunnerLoading(asset.id);
-    const endLocalRead = startWorkflowLocalReadSpan(run.workflowConfigId);
-    try {
-      const cfg: WorkflowConfig | null = await workflowConfigService.getById(run.workflowConfigId);
-      if (!cfg) return false;
-      let wf: Workflow | null = null;
-      try {
-        const parsed = JSON.parse(cfg.stepsJson);
-        if (parsed?.steps) wf = parsed as Workflow;
-        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
-      } catch {}
-      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return false; }
-
-      setRunnerExistingRunId(run.id);
-      setRunnerAsset(asset);
-      setRunnerWorkflow(wf);
-      setRunnerWorkflowConfigId(run.workflowConfigId);
-      setRunnerOpen(true);
-      closeQuickActionDialog();
-      return true;
-    } catch {
-      return false;
-    } finally {
-      endLocalRead();
-      setRunnerLoading(null);
-    }
+    return openRunnerWithPayload(asset, run.workflowConfigId, "dashboard-resume", {
+      existingRunId: run.id,
+      onOpened: closeQuickActionDialog,
+    });
   }
 
   async function confirmAutoAssignAndStartFromDashboard() {

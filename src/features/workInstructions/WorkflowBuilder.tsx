@@ -66,6 +66,7 @@ import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
+import { loadWorkflowOpenPayload } from "../../services/workflowOpenService";
 import type { WorkflowType } from "../../types/workflowType";
 import WorkOrderRunner from "./WorkOrderRunner";
 
@@ -1024,8 +1025,19 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
 
   const isReadOnly = currentConfig?.status === "Published" || currentConfig?.status === "Archived";
 
-  function handlePreviewRun() {
-    markWorkflowOpenTap("builder-preview", currentConfig?.id ?? workflow.id);
+  async function handlePreviewRun() {
+    const configId = currentConfig?.id ?? workflow.id;
+    markWorkflowOpenTap("builder-preview", configId);
+    if (currentConfig?.id) {
+      const payload = await loadWorkflowOpenPayload(currentConfig.id, null, {
+        configFromMemory: currentConfig,
+        previewOnly: true,
+      });
+      if (payload) {
+        setRunnerOpen(true);
+        return;
+      }
+    }
     setRunnerOpen(true);
   }
 
@@ -1082,7 +1094,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             variant="contained"
             color="success"
             startIcon={<PlayArrowOutlined />}
-            onClick={handlePreviewRun}
+            onClick={() => { void handlePreviewRun(); }}
             disabled={stepsSorted.length === 0}
           >
             Run

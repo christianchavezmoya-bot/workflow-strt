@@ -97,3 +97,26 @@ export function formatOfflinePerfEntry(entry: OfflinePerfEntry): string {
 export function _resetOfflinePerfForTests(): void {
   clearOfflinePerfLog();
 }
+
+/** Exposed for Playwright perf assertions in dev/test builds. */
+export function exposeOfflinePerfForTesting(): void {
+  if (typeof window === "undefined") return;
+  const w = window as typeof window & {
+    __offlinePerfApi?: {
+      mark: typeof markOfflinePerf;
+      getMs: typeof getInteractiveReadyMs;
+      getLog: typeof getOfflinePerfLog;
+      reset: typeof clearOfflinePerfLog;
+    };
+  };
+  w.__offlinePerfApi = {
+    mark: markOfflinePerf,
+    getMs: getInteractiveReadyMs,
+    getLog: getOfflinePerfLog,
+    reset: clearOfflinePerfLog,
+  };
+}
+
+if (import.meta.env.DEV) {
+  exposeOfflinePerfForTesting();
+}

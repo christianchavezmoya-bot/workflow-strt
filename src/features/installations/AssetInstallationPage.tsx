@@ -152,22 +152,14 @@ import {
 import { buildProjectCaptureTable } from "../../utils/projectCaptureTable";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
-import { markWorkflowOpenTap, startWorkflowLocalReadSpan } from "../../utils/workflowOpenPerf";
+import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
+import {
+  loadWorkflowOpenPayload,
+  refreshWorkflowOpenDataInBackground,
+} from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 
-// Reference media lives on the config's mediaJson, separate from stepsJson.
-// Merge it into the workflow so step reference images render. Offline, the cfg
-// has already been media-hydrated by workflowConfigService.getById, so the URLs
-// are embedded data URLs that work without a network. Existing stepsJson-embedded
-// media (if any) always wins.
-function mergeConfigMedia(wf: Workflow, cfg: { mediaJson?: string }): Workflow {
-  if (wf.media && wf.media.length > 0) return wf;
-  try {
-    const cfgMedia = JSON.parse(cfg.mediaJson || "[]");
-    if (Array.isArray(cfgMedia) && cfgMedia.length > 0) return { ...wf, media: cfgMedia };
-  } catch { /* no media */ }
-  return wf;
-}
+// Reference media is merged inside loadWorkflowOpenPayload when mergeMedia: true.
 
 // ------------------------------------------------------------------
 // Column configuration
@@ -2369,79 +2361,57 @@ const AssetInstallationPage = () => {
   }, [runnerOpen, runnerAsset?.productId, runnerWorkflow?.id]);
 
   async function handleStartWorkOrder(asset: ProjectAsset) {
-    const configIdForPerf = asset.productConfigId ?? asset.workflowTemplateId ?? asset.id;
-    markWorkflowOpenTap("assets-work-order", configIdForPerf);
+    markWorkflowOpenTap("assets-work-order", asset.productConfigId ?? asset.id);
     setRunnerLoading(asset.id);
-    const endLocalRead = asset.productConfigId
-      ? startWorkflowLocalReadSpan(asset.productConfigId)
-      : () => {};
     try {
-      // New path: productConfigId â†' WorkflowConfig (published work instruction)
+      // New path: productConfigId → WorkflowConfig (published work instruction)
       if (asset.productConfigId) {
-        const wfConfig = await workflowConfigService.getByIdLocalFirst(asset.productConfigId)
-          ?? await workflowConfigService.getById(asset.productConfigId);
-        if (!wfConfig) {
-          if (shouldSkipBlockingFetch()) {
-            alert("This work order hasn't been downloaded to this device yet. Connect to the internet once to load it, then it will work offline.");
-          } else {
-            alert("Work instruction config not found.");
-          }
+        const payload = await loadWorkflowOpenPayload(asset.productConfigId, asset, {
+          runs: runsMap[asset.id],
+          mergeMedia: true,
+        });
+        if (payload) {
+          setRunnerExistingRunId(payload.existingRunId);
+          setRunnerAsset(asset);
+          setRunnerWorkflow(payload.workflow);
+          setRunnerWorkflowConfigId(asset.productConfigId);
+          setRunnerFeatureSelections(parseFeatureSelectionsForConfig(asset.productConfigId));
+          setRunnerOpen(true);
+          refreshWorkflowOpenDataInBackground(asset.id, asset.productConfigId);
           return;
         }
-        let wf: Workflow | null = null;
-        try {
-          const parsed = JSON.parse(wfConfig.stepsJson);
-          if (parsed?.steps) wf = parsed as Workflow;
-          else if (Array.isArray(parsed)) wf = { id: wfConfig.id, name: wfConfig.name, productId: wfConfig.productId, createdAt: Date.now(), steps: parsed, media: [] };
-        } catch {}
-        if (!wf || wf.steps.length === 0) { alert("Work instruction has no steps. Open it in Work Instructions and add steps first."); return; }
 
-        // Find the active (non-locked) run so we can resume exactly where we left off
-        let existingRunId: string | undefined = undefined;
         if (asset.status === "InProgress") {
           let runs: AssetWorkflowRun[] | undefined = runsMap[asset.id];
           if (!runs) {
-            try { runs = await assetWorkflowRunService.listByAsset(asset.id); } catch {}
+            try { runs = await assetWorkflowRunService.listByAsset(asset.id); } catch { /* empty */ }
           }
-          let activeRun = runs?.find((r) => r.workflowConfigId === wfConfig.id && !r.isLocked);
-          if (!activeRun) {
-            // Fallback: find any non-locked InProgress run (e.g. from a re-run of an assignment workflow)
-            const candidates = (runs ?? []).filter(r => !r.isLocked && r.status === "InProgress");
-            const fallback = candidates.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
-            if (fallback && fallback.workflowConfigId !== wfConfig.id) {
-              try {
-                const activeCfg = await workflowConfigService.getById(fallback.workflowConfigId);
-                if (activeCfg) {
-                  let activeWf: Workflow | null = null;
-                  try {
-                    const parsed = JSON.parse(activeCfg.stepsJson);
-                    if (parsed?.steps) activeWf = parsed as Workflow;
-                    else if (Array.isArray(parsed)) activeWf = { id: activeCfg.id, name: activeCfg.name, productId: activeCfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
-                  } catch {}
-                  if (activeWf) {
-                    setRunnerExistingRunId(fallback.id);
-                    setRunnerAsset(asset);
-                    setRunnerWorkflow(activeWf);
-                    setRunnerWorkflowConfigId(activeCfg.id);
-                    setRunnerFeatureSelections(parseFeatureSelectionsForConfig(activeCfg.id));
-                    setRunnerOpen(true);
-                    return;
-                  }
-                }
-              } catch { /* fall through */ }
-            } else if (fallback) {
-              activeRun = fallback;
+          const fallback = (runs ?? [])
+            .filter((r) => !r.isLocked && r.status === "InProgress")
+            .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
+          if (fallback && fallback.workflowConfigId !== asset.productConfigId) {
+            const fbPayload = await loadWorkflowOpenPayload(fallback.workflowConfigId, asset, {
+              runs,
+              mergeMedia: true,
+            });
+            if (fbPayload) {
+              setRunnerExistingRunId(fallback.id);
+              setRunnerAsset(asset);
+              setRunnerWorkflow(fbPayload.workflow);
+              setRunnerWorkflowConfigId(fallback.workflowConfigId);
+              setRunnerFeatureSelections(parseFeatureSelectionsForConfig(fallback.workflowConfigId));
+              setRunnerOpen(true);
+              refreshWorkflowOpenDataInBackground(asset.id, fallback.workflowConfigId);
+              return;
             }
           }
-          if (activeRun) existingRunId = activeRun.id;
         }
 
-        setRunnerExistingRunId(existingRunId);
-        setRunnerAsset(asset);
-        setRunnerWorkflow(wf);
-        setRunnerWorkflowConfigId(wfConfig.id);
-        setRunnerFeatureSelections(parseFeatureSelectionsForConfig(wfConfig.id));
-        setRunnerOpen(true);
+        if (shouldSkipBlockingFetch()) {
+          alert("This work order hasn't been downloaded to this device yet. Connect to the internet once to load it, then it will work offline.");
+          return;
+        }
+        alert("Work instruction config not found.");
         return;
       }
       // Legacy path: workflowTemplateId
@@ -2459,7 +2429,6 @@ const AssetInstallationPage = () => {
     } catch {
       alert("Failed to load workflow.");
     } finally {
-      endLocalRead();
       setRunnerLoading(null);
     }
   }
@@ -2730,42 +2699,26 @@ const AssetInstallationPage = () => {
   async function _doStartAssignmentRun(asset: ProjectAsset, assignment: WorkflowAssignment) {
     markWorkflowOpenTap("assets-assignment", assignment.workflowConfigId);
     setRunnerLoading(asset.id);
-    const endLocalRead = startWorkflowLocalReadSpan(assignment.workflowConfigId);
     try {
-      // Load the workflow config to get steps — fallback to in-memory maps
-      // when the per-ID IndexedDB cache is empty (e.g. background refresh
-      // hadn't finished caching individual configs before going offline).
-      const cfg = await workflowConfigService.getByIdLocalFirst(assignment.workflowConfigId)
-        ?? wfConfigMap.get(assignment.workflowConfigId)
+      const cfgFromMemory = wfConfigMap.get(assignment.workflowConfigId)
         ?? publishedWfConfigs.find((c) => c.id === assignment.workflowConfigId)
-        ?? await workflowConfigService.getById(assignment.workflowConfigId);
-      if (!cfg) { alert("Workflow config not found."); return; }
-      let wf: Workflow | null = null;
-      try {
-        const parsed = JSON.parse(cfg.stepsJson);
-        if (parsed?.steps) wf = parsed as Workflow;
-        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
-      } catch {}
-      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
-      wf = mergeConfigMedia(wf, cfg);
+        ?? null;
+      const payload = await loadWorkflowOpenPayload(assignment.workflowConfigId, asset, {
+        configFromMemory: cfgFromMemory,
+        runs: runsMap[asset.id],
+        workflowConfigIdForRun: assignment.workflowConfigId,
+        mergeMedia: true,
+      });
+      if (!payload) { alert("Workflow config not found."); return; }
 
-      // Find the active (non-locked) run so we can resume exactly where we left off
-      let existingRunId: string | undefined = undefined;
-      let runs: AssetWorkflowRun[] | undefined = runsMap[asset.id];
-      if (!runs) {
-        try { runs = await assetWorkflowRunService.listByAsset(asset.id); } catch {}
-      }
-      const activeRun = runs?.find((r) => r.workflowConfigId === assignment.workflowConfigId && !r.isLocked);
-      if (activeRun) existingRunId = activeRun.id;
-
-      setRunnerExistingRunId(existingRunId);
+      setRunnerExistingRunId(payload.existingRunId);
       setRunnerAsset(asset);
-      setRunnerWorkflow(wf);
+      setRunnerWorkflow(payload.workflow);
       setRunnerWorkflowConfigId(assignment.workflowConfigId);
       setRunnerFeatureSelections(parseFeatureSelectionsForConfig(assignment.workflowConfigId));
       setRunnerOpen(true);
+      refreshWorkflowOpenDataInBackground(asset.id, assignment.workflowConfigId);
     } catch { alert("Failed to load workflow."); } finally {
-      endLocalRead();
       setRunnerLoading(null);
     }
   }
@@ -3564,30 +3517,25 @@ ${words.slice(midpoint).join(" ")}`;
     setRunHistoryOpen(false);
 
     setRunnerLoading(asset.id);
-    const endLocalRead = startWorkflowLocalReadSpan(configId);
     try {
-      const cfg = wfConfigMap.get(configId) ?? await workflowConfigService.getById(configId);
-      if (!cfg) { alert("Workflow config not found."); return; }
-      let wf: Workflow | null = null;
-      try {
-        const parsed = JSON.parse(cfg.stepsJson);
-        if (parsed?.steps) wf = parsed as Workflow;
-        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
-      } catch {}
-      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
-      wf = mergeConfigMedia(wf, cfg);
+      const cfgFromMemory = wfConfigMap.get(configId) ?? null;
+      const payload = await loadWorkflowOpenPayload(configId, asset, {
+        configFromMemory: cfgFromMemory,
+        mergeMedia: true,
+      });
+      if (!payload) { alert("Workflow config not found."); return; }
 
       setRunnerPrefillValues(prefillValues);
-      setRunnerExistingRunId(undefined); // fresh run
+      setRunnerExistingRunId(undefined);
       setRunnerAsset(asset);
-      setRunnerWorkflow(wf);
+      setRunnerWorkflow(payload.workflow);
       setRunnerWorkflowConfigId(configId);
       setRunnerFeatureSelections(parseFeatureSelectionsForConfig(configId));
       setRunnerOpen(true);
+      refreshWorkflowOpenDataInBackground(asset.id, configId);
       // Optimistically mark asset as InProgress so the Continue button shows if the user pauses
       setAssets(prev => prev.map(a => a.id === asset.id ? { ...a, status: "InProgress" as const } : a));
     } catch { alert("Failed to load workflow."); } finally {
-      endLocalRead();
       setRunnerLoading(null);
     }
   }
@@ -3598,26 +3546,23 @@ ${words.slice(midpoint).join(" ")}`;
     markWorkflowOpenTap("assets-continue", run.workflowConfigId);
     setRunHistoryOpen(false);
     setRunnerLoading(asset.id);
-    const endLocalRead = startWorkflowLocalReadSpan(run.workflowConfigId);
     try {
-      const cfg = wfConfigMap.get(run.workflowConfigId) ?? await workflowConfigService.getById(run.workflowConfigId);
-      if (!cfg) { alert("Workflow config not found."); return; }
-      let wf: Workflow | null = null;
-      try {
-        const parsed = JSON.parse(cfg.stepsJson);
-        if (parsed?.steps) wf = parsed as Workflow;
-        else if (Array.isArray(parsed)) wf = { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
-      } catch {}
-      if (!wf || wf.steps.length === 0) { alert("This workflow has no steps defined."); return; }
-      wf = mergeConfigMedia(wf, cfg);
+      const cfgFromMemory = wfConfigMap.get(run.workflowConfigId) ?? null;
+      const payload = await loadWorkflowOpenPayload(run.workflowConfigId, asset, {
+        configFromMemory: cfgFromMemory,
+        runs: runsMap[asset.id],
+        mergeMedia: true,
+      });
+      if (!payload) { alert("Workflow config not found."); return; }
+
       setRunnerExistingRunId(run.id);
       setRunnerAsset(asset);
-      setRunnerWorkflow(wf);
+      setRunnerWorkflow(payload.workflow);
       setRunnerWorkflowConfigId(run.workflowConfigId);
       setRunnerFeatureSelections(parseFeatureSelectionsForConfig(run.workflowConfigId));
       setRunnerOpen(true);
+      refreshWorkflowOpenDataInBackground(asset.id, run.workflowConfigId);
     } catch { alert("Failed to load workflow."); } finally {
-      endLocalRead();
       setRunnerLoading(null);
     }
   }
