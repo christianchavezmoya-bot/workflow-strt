@@ -11,6 +11,12 @@ vi.mock("./connectivityMonitor", () => ({
   shouldSkipBlockingNetworkRead: vi.fn(() => true),
 }));
 
+vi.mock("./offlineBootstrapService", () => ({
+  default: {
+    retry: vi.fn(),
+  },
+}));
+
 const getByIdLocalFirst = vi.fn();
 const getById = vi.fn();
 const refreshByIdInBackground = vi.fn();
@@ -32,7 +38,11 @@ vi.mock("./assetWorkflowRunService", () => ({
   },
 }));
 
-import { loadWorkflowOpenPayload } from "./workflowOpenService";
+import {
+  loadWorkflowOpenPayload,
+  isOfflineConfigMissingContext,
+  OFFLINE_CONFIG_MISSING_MESSAGE,
+} from "./workflowOpenService";
 
 function sampleConfig(id = "cfg-1"): WorkflowConfig {
   return {
@@ -129,5 +139,15 @@ describe("loadWorkflowOpenPayload", () => {
     expect(payload?.existingRunId).toBeUndefined();
     expect(listByAsset).not.toHaveBeenCalled();
     expect(refreshByAssetInBackground).not.toHaveBeenCalled();
+  });
+});
+
+describe("workflowOpenService offline UX helpers", () => {
+  it("exports a user-facing offline config message", () => {
+    expect(OFFLINE_CONFIG_MISSING_MESSAGE).toContain("Connect to the internet");
+  });
+
+  it("isOfflineConfigMissingContext is true when native + skip network read", () => {
+    expect(isOfflineConfigMissingContext()).toBe(true);
   });
 });

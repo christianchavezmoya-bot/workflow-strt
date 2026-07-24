@@ -4,7 +4,7 @@ import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 import { getServerReachable, shouldSkipBlockingFetch } from "./connectivityMonitor";
 import offlineStore from "./offlineStore";
-import { mediaStore } from "./mediaStore";
+import { mediaStore, MEDIA_STORE_LIMITS } from "./mediaStore";
 
 export interface DocumentRecord {
   id: string;
@@ -39,6 +39,9 @@ interface CachedDocumentFile {
 const DOCUMENTS_CACHE_KEY = "documents_v1_all";
 const DOCUMENT_FILE_CACHE_PREFIX = "document-file:";
 const DOCUMENT_PREFETCH_CONCURRENCY = 2;
+/** Bootstrap prefetch cap — linked asset PDFs/images only; pending uploads are never evicted. */
+export const DOCUMENT_PREFETCH_MAX_BYTES = MEDIA_STORE_LIMITS.bootstrapDocumentPrefetchMaxBytes;
+export const DOCUMENT_PREFETCH_MAX_FILES = MEDIA_STORE_LIMITS.bootstrapDocumentPrefetchMaxFiles;
 const OFFLINE_DOCUMENT_MESSAGE = "Not available offline";
 const queuedPrefetchKeys = new Set<string>();
 const prefetchQueue: DocumentRecord[] = [];
@@ -193,6 +196,67 @@ function queueDocumentPrefetch(records: DocumentRecord[]): void {
     prefetchQueue.push(record);
   }
   drainDocumentPrefetchQueue();
+}
+
+export type AssetDocumentPrefetchLink = {
+  document: Pick<DocumentRecord, "downloadUrl" | "contentType" | "fileSize">;
+};
+
+/** Bounded prefetch for documents linked to assigned assets (bootstrap pass). */
+export async function prefetchAssetLinkedDocuments(
+  links: AssetDocumentPrefetchLink[],
+  options?: { maxTotalBytes?: number; maxFiles?: number },
+): Promise<{ prefetched: number; skipped: number; bytesUsed: number }> {
+  if (!isMobileNativePlatform()) {
+    return { prefetched: 0, skipped: links.length, bytesUsed: 0 };
+  }
+  if (shouldSkipNativeDocumentFetch()) {
+    return { prefetched: 0, skipped: links.length, bytesUsed: 0 };
+  }
+
+  const maxBytes = options?.maxTotalBytes ?? DOCUMENT_PREFETCH_MAX_BYTES;
+  const maxFiles = options?.maxFiles ?? DOCUMENT_PREFETCH_MAX_FILES;
+  let bytesUsed = 0;
+  let prefetched = 0;
+  let skipped = 0;
+  const seen = new Set<string>();
+
+  for (const link of links) {
+    const downloadUrl = link.document?.downloadUrl;
+    if (!downloadUrl || !isBackendDocumentUrl(downloadUrl)) {
+      skipped += 1;
+      continue;
+    }
+    if (seen.has(downloadUrl)) continue;
+    seen.add(downloadUrl);
+
+    const cached = await offlineStore.getCache<CachedDocumentFile>(documentFileCacheKey(downloadUrl));
+    if (cached?.storedValue) {
+      prefetched += 1;
+      continue;
+    }
+
+    if (prefetched >= maxFiles) {
+      skipped += 1;
+      continue;
+    }
+
+    const estimatedSize = link.document.fileSize ?? 0;
+    if (estimatedSize > 0 && bytesUsed + estimatedSize > maxBytes) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      const blob = await fetchAndCacheDocumentBlob(downloadUrl, link.document);
+      bytesUsed += blob.size;
+      prefetched += 1;
+    } catch {
+      skipped += 1;
+    }
+  }
+
+  return { prefetched, skipped, bytesUsed };
 }
 
 export const documentService = {

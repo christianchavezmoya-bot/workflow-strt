@@ -36,6 +36,7 @@ import {
   type DroppedAction,
 } from "../../services/localDB";
 import ApiDebugPanel from "../../components/ui/ApiDebugPanel";
+import OfflineReadinessPanel from "../../components/layout/OfflineReadinessPanel";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { AssetWorkflowRun, RunIssue, StepResult } from "../../types/assetWorkflowRun";
 import offlineStore from "../../services/offlineStore";
@@ -543,6 +544,7 @@ export default function SyncCenterPage({ open, onClose }: Props) {
         </DialogTitle>
 
         <DialogContent sx={{ px: 2, pt: 1, pb: 4 }}>
+          <OfflineReadinessPanel />
           {/* Connection status */}
           <Stack spacing={1} mb={2}>
             <Stack direction="row" alignItems="center" spacing={1}>

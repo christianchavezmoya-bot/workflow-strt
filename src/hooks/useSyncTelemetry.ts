@@ -75,6 +75,9 @@ function domainForPhase(phase?: string): DomainKey | null {
     case "assets": return "assets";
     case "configs":
     case "workflows":
+    case "issues":
+    case "asset-documents":
+    case "document-files":
     case "media":
     case "reference": return "more";
     default: return null;

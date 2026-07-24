@@ -60,6 +60,9 @@ import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
 import {
   loadWorkflowOpenPayload,
   refreshWorkflowOpenDataInBackground,
+  OFFLINE_CONFIG_MISSING_MESSAGE,
+  isOfflineConfigMissingContext,
+  retryOfflineDownload,
 } from "../../services/workflowOpenService";
 import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import { mediaStore } from "../../services/mediaStore";
@@ -2227,7 +2230,12 @@ const Dashboard = () => {
         workflowConfigIdForRun: configId,
       });
       if (!payload) {
-        alert("Workflow config not found.");
+        if (isOfflineConfigMissingContext()) {
+          alert(OFFLINE_CONFIG_MISSING_MESSAGE);
+          retryOfflineDownload();
+        } else {
+          alert("Workflow config not found.");
+        }
         return false;
       }
       if (payload.workflow.steps.length === 0) {

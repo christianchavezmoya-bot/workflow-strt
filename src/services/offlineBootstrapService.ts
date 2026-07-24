@@ -5,6 +5,7 @@ import { projectService } from "./projectService";
 import { projectAssetService } from "./projectAssetService";
 import { assetWorkflowAssignmentService } from "./assetWorkflowAssignmentService";
 import { assetWorkflowRunService } from "./assetWorkflowRunService";
+import { assetDocumentLinkService } from "./assetDocumentLinkService";
 import { workflowConfigService } from "./workflowConfigService";
 import { workflowTypeService } from "./workflowTypeService";
 import { workflowTemplateService } from "./workflowTemplateService";
@@ -14,7 +15,13 @@ import { featureService } from "./featureService";
 import { userService } from "./userService";
 import { brandSettingsService } from "./brandSettingsService";
 import { configMediaCache } from "./configMediaCache";
-import { documentService } from "./documentService";
+import {
+  documentService,
+  prefetchAssetLinkedDocuments,
+  type AssetDocumentPrefetchLink,
+} from "./documentService";
+import { MEDIA_STORE_LIMITS } from "./mediaStore";
+import offlineStore from "./offlineStore";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { User } from "../types/user";
 import type { WorkflowConfig } from "../types/workflowConfig";
@@ -42,7 +49,28 @@ export interface BootstrapRunOptions {
   scope?: BootstrapScope;
 }
 
+export interface BootstrapSummary {
+  completedAt: string;
+  scope: BootstrapScope;
+  projects: number;
+  assets: number;
+  deepAssets: number;
+  products: number;
+  configs: number;
+  documentFilesPrefetched?: number;
+  documentPrefetchSkipped?: number;
+}
+
+export interface BootstrapStatus {
+  lastCompletedAt: Date | null;
+  isStale: boolean;
+  isRunning: boolean;
+  summary: BootstrapSummary | null;
+  readyForOffline: boolean;
+}
+
 const BOOTSTRAP_META_KEY = "bootstrap";
+const BOOTSTRAP_SUMMARY_CACHE_KEY = "bootstrap-summary";
 const REFRESH_STALE_MS = CACHE_SOFT_LIMIT_MS; // 4h — re-run bootstrap on foreground if older
 
 let _running = false;
@@ -79,7 +107,8 @@ function currentUserId(): string | null {
   }
 }
 
-function assetsForDeepCache(allAssets: ProjectAsset[], scope: BootstrapScope, userId: string | null): ProjectAsset[] {
+/** Deep-cache filter: assigned user + active field statuses. Exported for tests. */
+export function assetsForDeepCache(allAssets: ProjectAsset[], scope: BootstrapScope, userId: string | null): ProjectAsset[] {
   if (scope === "all") return allAssets;
   return allAssets.filter((a) =>
     (userId && a.assignedUserId === userId) ||
@@ -87,6 +116,10 @@ function assetsForDeepCache(allAssets: ProjectAsset[], scope: BootstrapScope, us
     a.status === "Paused" ||
     a.status === "Pending"
   );
+}
+
+async function saveBootstrapSummary(summary: BootstrapSummary): Promise<void> {
+  await offlineStore.saveCache(BOOTSTRAP_SUMMARY_CACHE_KEY, summary);
 }
 
 export const offlineBootstrapService = {
@@ -100,6 +133,27 @@ export const offlineBootstrapService = {
     const last = await syncMetaGet(BOOTSTRAP_META_KEY);
     if (!last) return true;
     return Date.now() - new Date(last).getTime() > REFRESH_STALE_MS;
+  },
+
+  async getStatus(): Promise<BootstrapStatus> {
+    const [lastRaw, summary, isStale] = await Promise.all([
+      syncMetaGet(BOOTSTRAP_META_KEY),
+      offlineStore.getCache<BootstrapSummary>(BOOTSTRAP_SUMMARY_CACHE_KEY),
+      this.isStale(),
+    ]);
+    const lastCompletedAt = lastRaw ? new Date(lastRaw) : null;
+    return {
+      lastCompletedAt,
+      isStale,
+      isRunning: _running,
+      summary,
+      readyForOffline: !!lastCompletedAt && !isStale && !_running,
+    };
+  },
+
+  /** User-triggered retry (e.g. missing config on first open). */
+  async retry(options?: BootstrapRunOptions): Promise<void> {
+    return this.run(options ?? { scope: "assigned" });
   },
 
   /**
@@ -143,6 +197,7 @@ export const offlineBootstrapService = {
       emit("bootstrap:progress", { phase: "projects", done: 0, total: 1 } satisfies BootstrapProgress);
       const projectsResp = await projectService.getProjects();
       const projects = projectsResp.items ?? [];
+      emit("bootstrap:progress", { phase: "projects", done: 1, total: 1 } satisfies BootstrapProgress);
 
       // ── Phase 3: assets per project (full list cache) ─────────────────────
       const allAssets: ProjectAsset[] = [];
@@ -196,7 +251,35 @@ export const offlineBootstrapService = {
         emit("bootstrap:progress", { phase: "workflows", done: assetDone, total: deepAssets.length } satisfies BootstrapProgress);
       });
 
-      // ── Phase 7: workflow-config reference media ──────────────────────────
+      // ── Phase 7: open + closed issues (issues board + attention widgets) ───
+      emit("bootstrap:progress", { phase: "issues", done: 0, total: 2 } satisfies BootstrapProgress);
+      await Promise.allSettled([
+        assetWorkflowRunService.listOpenIssues(),
+        assetWorkflowRunService.listClosedIssues(),
+      ]);
+      await syncMetaSet("issues").catch(() => {});
+      emit("bootstrap:progress", { phase: "issues", done: 2, total: 2 } satisfies BootstrapProgress);
+
+      // ── Phase 8: asset document link metadata + bounded file prefetch ───────
+      const docLinks: AssetDocumentPrefetchLink[] = [];
+      let docMetaDone = 0;
+      await runPool(deepAssets, 4, async (asset) => {
+        const links = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
+        for (const link of links) {
+          docLinks.push({ document: link.document });
+        }
+        docMetaDone++;
+        emit("bootstrap:progress", { phase: "asset-documents", done: docMetaDone, total: deepAssets.length } satisfies BootstrapProgress);
+      });
+
+      emit("bootstrap:progress", { phase: "document-files", done: 0, total: 1 } satisfies BootstrapProgress);
+      const docPrefetch = await prefetchAssetLinkedDocuments(docLinks, {
+        maxTotalBytes: MEDIA_STORE_LIMITS.bootstrapDocumentPrefetchMaxBytes,
+        maxFiles: MEDIA_STORE_LIMITS.bootstrapDocumentPrefetchMaxFiles,
+      });
+      emit("bootstrap:progress", { phase: "document-files", done: 1, total: 1 } satisfies BootstrapProgress);
+
+      // ── Phase 9: workflow-config reference media ──────────────────────────
       const relevantConfigs: WorkflowConfig[] = [];
       const seenConfig = new Set<string>();
       for (const productId of productIds) {
@@ -223,15 +306,20 @@ export const offlineBootstrapService = {
         emit("bootstrap:progress", { phase: "media", done: mediaDone, total: relevantConfigs.length } satisfies BootstrapProgress);
       });
 
-      await syncMetaSet(BOOTSTRAP_META_KEY);
-      emit("bootstrap:complete", {
+      const summary: BootstrapSummary = {
+        completedAt: new Date().toISOString(),
         scope,
         projects: projects.length,
         assets: allAssets.length,
         deepAssets: deepAssets.length,
         products: productIds.length,
         configs: relevantConfigs.length,
-      });
+        documentFilesPrefetched: docPrefetch.prefetched,
+        documentPrefetchSkipped: docPrefetch.skipped,
+      };
+      await saveBootstrapSummary(summary);
+      await syncMetaSet(BOOTSTRAP_META_KEY);
+      emit("bootstrap:complete", summary);
     } catch (err) {
       emit("bootstrap:error", { message: (err as Error)?.message });
     } finally {

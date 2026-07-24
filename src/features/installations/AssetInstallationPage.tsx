@@ -156,6 +156,8 @@ import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
 import {
   loadWorkflowOpenPayload,
   refreshWorkflowOpenDataInBackground,
+  OFFLINE_CONFIG_MISSING_MESSAGE,
+  retryOfflineDownload,
 } from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 
@@ -2408,7 +2410,8 @@ const AssetInstallationPage = () => {
         }
 
         if (shouldSkipBlockingFetch()) {
-          alert("This work order hasn't been downloaded to this device yet. Connect to the internet once to load it, then it will work offline.");
+          alert(OFFLINE_CONFIG_MISSING_MESSAGE);
+          retryOfflineDownload();
           return;
         }
         alert("Work instruction config not found.");

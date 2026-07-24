@@ -13,6 +13,21 @@ import {
 import { shouldSkipBlockingNetworkRead } from "./connectivityMonitor";
 import { assetWorkflowRunService } from "./assetWorkflowRunService";
 import { workflowConfigService } from "./workflowConfigService";
+import offlineBootstrapService from "./offlineBootstrapService";
+
+export const OFFLINE_CONFIG_MISSING_MESSAGE =
+  "This work order hasn't been downloaded to this device yet. Connect to the internet once to load it, then it will work offline.";
+
+/** True when native offline and network reads are skipped (config likely not cached). */
+export function isOfflineConfigMissingContext(): boolean {
+  return isMobileNativePlatform() && shouldSkipBlockingNetworkRead();
+}
+
+/** Fire-and-forget bootstrap retry when online (assigned scope = faster). */
+export function retryOfflineDownload(): void {
+  if (typeof navigator !== "undefined" && !navigator.onLine) return;
+  void offlineBootstrapService.retry({ scope: "assigned" });
+}
 
 export type WorkflowOpenPayload = {
   workflow: Workflow;

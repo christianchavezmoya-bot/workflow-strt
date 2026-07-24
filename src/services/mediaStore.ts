@@ -2,6 +2,20 @@ import { Directory, Filesystem } from "@capacitor/filesystem";
 import type { OfflineMediaRef } from "./offlineStore";
 import { isMobileNativePlatform } from "../utils/platform";
 
+/**
+ * Native media filesystem policy:
+ * - Pending upload blobs (sync queue MEDIA_UPLOAD) are never evicted automatically.
+ * - Config reference media: offline-config-media/ (configMediaCache).
+ * - Captured field media: offline-media/ (this module).
+ * - Linked document files: offlineStore document-file:* entries (documentService).
+ * Automatic LRU eviction is not implemented; when added, skip pending uploads and
+ * uploaded:false mediaStore refs.
+ */
+export const MEDIA_STORE_LIMITS = {
+  bootstrapDocumentPrefetchMaxBytes: 50 * 1024 * 1024,
+  bootstrapDocumentPrefetchMaxFiles: 30,
+} as const;
+
 const MEDIA_ROOT = "offline-media";
 const MEDIA_REF_PREFIX = "offline-media-ref:";
 const JSON_MEDIA_FIELDS = new Set(["issuesJson", "stepResultsJson"]);

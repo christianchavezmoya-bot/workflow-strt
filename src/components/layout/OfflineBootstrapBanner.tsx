@@ -11,6 +11,9 @@ const PHASE_LABELS: Record<string, string> = {
   configs: "Product configs",
   "linked-configs": "Workflow configs",
   workflows: "Assignments & runs",
+  issues: "Open & closed issues",
+  "asset-documents": "Asset document links",
+  "document-files": "Linked document files",
   media: "Reference photos",
 };
 
