@@ -228,6 +228,48 @@ export const mediaStore = {
     return await resolveUploadValue(payload) as T;
   },
 
+  /**
+   * Persist resolution photo blobs in issuesJson to the filesystem before
+   * queuing offline. Returns the original string when nothing changed.
+   */
+  async persistIssueMediaInJson(issuesJson: string, scopeId: string): Promise<string> {
+    if (!this.isNativeFilesystemAvailable()) return issuesJson;
+    let issues: Array<{ id?: string; resolutionMedia?: string[] }>;
+    try {
+      const parsed = JSON.parse(issuesJson);
+      if (!Array.isArray(parsed)) return issuesJson;
+      issues = parsed;
+    } catch {
+      return issuesJson;
+    }
+
+    let changed = false;
+    const next = await Promise.all(
+      issues.map(async (issue, index) => {
+        const media = issue?.resolutionMedia;
+        if (!media?.length) return issue;
+        const issueKey = issue.id ?? String(index);
+        const persisted = await Promise.all(
+          media.map(async (value, mediaIndex) => {
+            if (typeof value !== "string") return value;
+            if (this.isStoredMediaValue(value)) return value;
+            if (!value.startsWith("data:") && !value.startsWith("blob:")) return value;
+            changed = true;
+            return this.persistMediaValue(
+              value,
+              "photo",
+              "issue-resolution",
+              `${scopeId}:${issueKey}:${mediaIndex}`,
+            );
+          }),
+        );
+        return { ...issue, resolutionMedia: persisted };
+      }),
+    );
+
+    return changed ? JSON.stringify(next) : issuesJson;
+  },
+
   isNativeFilesystemAvailable(): boolean {
     return isMobileNativePlatform();
   },

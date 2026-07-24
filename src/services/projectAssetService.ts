@@ -10,6 +10,38 @@ import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import type { User } from "../types/user";
+import { shouldSkipRunMutation } from "./connectivityMonitor";
+import { mediaStore } from "./mediaStore";
+
+function isOfflineNetworkError(error: unknown): boolean {
+  if (shouldSkipRunMutation()) return true;
+  if (!error || typeof error !== "object") return typeof navigator !== "undefined" && navigator.onLine === false;
+  const candidate = error as { response?: unknown; code?: string; message?: string };
+  if (candidate.response) return false;
+  return (
+    (typeof navigator !== "undefined" && navigator.onLine === false) ||
+    candidate.code === "ECONNABORTED" ||
+    candidate.code === "ERR_NETWORK" ||
+    candidate.message === "Network Error" ||
+    candidate.message === "skip-network-offline"
+  );
+}
+
+async function persistAssetIssuesLocally(asset: ProjectAsset, dirty: boolean): Promise<ProjectAsset> {
+  await entityPutAsset({
+    id: asset.id,
+    productId: asset.productId,
+    projectId: asset.projectId,
+    data: asset,
+    dirty,
+  });
+  const openRecords = deriveOpenIssuesFromAsset(asset);
+  await entityReplaceIssuesForAsset(asset.id, openRecords);
+  window.dispatchEvent(new Event("repo:issues:updated"));
+  window.dispatchEvent(new Event("notifications:run-state-changed"));
+  window.dispatchEvent(new Event("notifications:refresh"));
+  return asset;
+}
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -321,26 +353,48 @@ export const projectAssetService = {
   },
 
   async patchIssues(id: string, issuesJson: string): Promise<ProjectAsset> {
-    const res = await api.patch<ProjectAsset>(`/project-assets/${id}/issues`, { issuesJson });
-    const asset = fromDto(res.data);
-    if (isMobileNativePlatform()) {
-      await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
-      // Sync the issues store so Issues Board reflects this change even while offline.
-      // Write only open (unresolved) issues - resolved ones are excluded from the
-      // server's open-issues response and Issues Board only shows open ones.
-      // Fix: must call this even when openRecords is empty (every issue just
-      // resolved) - entityReplaceIssuesForAsset correctly removes stale closed
-      // entries; the old entityPutIssues-only call never deleted anything,
-      // leaving resolved issues stuck in the store indefinitely while offline.
-      const openRecords = deriveOpenIssuesFromAsset(asset);
-      await entityReplaceIssuesForAsset(asset.id, openRecords);
-      window.dispatchEvent(new Event("repo:issues:updated"));
-    } else {
+    if (!isMobileNativePlatform()) {
+      const res = await api.patch<ProjectAsset>(`/project-assets/${id}/issues`, { issuesJson });
       invalidateWebCache(`/project-assets/${id}`);
+      return fromDto(res.data);
     }
-    window.dispatchEvent(new Event("notifications:run-state-changed"));
-    window.dispatchEvent(new Event("notifications:refresh"));
-    return asset;
+
+    const body = { issuesJson };
+    try {
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
+      const requestBody = await mediaStore.resolveUploadPayload(body);
+      const res = await api.patch<ProjectAsset>(`/project-assets/${id}/issues`, requestBody);
+      const asset = fromDto(res.data);
+      return await persistAssetIssuesLocally(asset, false);
+    } catch (error) {
+      if (!isOfflineNetworkError(error)) throw error;
+
+      const local = await entityGetAsset(id);
+      if (!local) {
+        throw new Error("Offline - asset not cached yet; open this project once while online");
+      }
+
+      const persistedIssuesJson = await mediaStore.persistIssueMediaInJson(issuesJson, id);
+      const merged = fromDto({
+        ...(local.data as ProjectAsset),
+        issuesJson: persistedIssuesJson,
+      });
+      await persistAssetIssuesLocally(merged, true);
+      await syncQueue.enqueue({
+        opType: "ASSET_UPDATE",
+        url: `/project-assets/${id}/issues`,
+        method: "PATCH",
+        entityType: "asset",
+        entityId: id,
+        body: { issuesJson: persistedIssuesJson },
+        optimisticPatch: { issuesJson: persistedIssuesJson },
+        snapshotUpdatedAt: merged.updatedAt,
+      });
+      window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+        detail: { productId: merged.productId, projectId: merged.projectId },
+      }));
+      return merged;
+    }
   },
 
   // Assign/claim an asset via the narrow, installer-permitted endpoint.
@@ -349,19 +403,63 @@ export const projectAssetService = {
   // "My Jobs Today" query, so this must persist for the job to appear in the new
   // owner's dashboard.
   async patchAssignment(id: string, assignedUserId: string | null): Promise<ProjectAsset> {
-    const res = await api.patch<ProjectAsset>(`/project-assets/${id}/assignment`, { assignedUserId });
-    const asset = fromDto(res.data);
-    if (isMobileNativePlatform()) {
+    if (!isMobileNativePlatform()) {
+      const res = await api.patch<ProjectAsset>(`/project-assets/${id}/assignment`, { assignedUserId });
+      invalidateWebCache(`/project-assets/${id}`);
+      const asset = fromDto(res.data);
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return asset;
+    }
+
+    const body = { assignedUserId };
+    try {
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
+      const res = await api.patch<ProjectAsset>(`/project-assets/${id}/assignment`, body);
+      const asset = fromDto(res.data);
       await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
       window.dispatchEvent(new CustomEvent("repo:assets:updated", {
         detail: { productId: asset.productId, projectId: asset.projectId },
       }));
-    } else {
-      invalidateWebCache(`/project-assets/${id}`);
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return asset;
+    } catch (error) {
+      if (!isOfflineNetworkError(error)) throw error;
+
+      const local = await entityGetAsset(id);
+      if (!local) {
+        throw new Error("Offline - asset not cached yet; open this project once while online");
+      }
+
+      const merged = fromDto({
+        ...(local.data as ProjectAsset),
+        assignedUserId: assignedUserId ?? undefined,
+      });
+      await entityPutAsset({
+        id: merged.id,
+        productId: merged.productId,
+        projectId: merged.projectId,
+        data: merged,
+        dirty: true,
+      });
+      await syncQueue.enqueue({
+        opType: "ASSET_UPDATE",
+        url: `/project-assets/${id}/assignment`,
+        method: "PATCH",
+        entityType: "asset",
+        entityId: id,
+        body,
+        optimisticPatch: { assignedUserId },
+        snapshotUpdatedAt: merged.updatedAt,
+      });
+      window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+        detail: { productId: merged.productId, projectId: merged.projectId },
+      }));
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return merged;
     }
-    window.dispatchEvent(new Event("notifications:run-state-changed"));
-    window.dispatchEvent(new Event("notifications:refresh"));
-    return asset;
   },
 
   async remove(id: string): Promise<void> {

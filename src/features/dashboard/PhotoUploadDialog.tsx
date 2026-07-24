@@ -270,6 +270,7 @@ export default function PhotoUploadDialog({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offlineQueued, setOfflineQueued] = useState(false);
   const [reminderSent, setReminderSent] = useState(false);
   const [publicFrontendBaseUrl, setPublicFrontendBaseUrl] = useState("");
   const [phoneQrToken, setPhoneQrToken] = useState<string | null>(null);
@@ -545,21 +546,33 @@ export default function PhotoUploadDialog({
   async function handleSave() {
     setSaving(true);
     setError(null);
+    setOfflineQueued(false);
     try {
       const newStepResultsJson = buildPatchedStepResultsJson();
       const uploadPlan = analyzeCaptureChanges();
+      let savedRun;
       if (uploadPlan.appendOnly && uploadPlan.uploads.length > 0) {
         try {
-          await assetWorkflowRunService.uploadStepMedia(flag.runId, uploadPlan.uploads, currentUserName);
+          savedRun = await assetWorkflowRunService.uploadStepMedia(flag.runId, uploadPlan.uploads, currentUserName);
         } catch {
-          await assetWorkflowRunService.patchStepResults(flag.runId, newStepResultsJson, currentUserName);
+          savedRun = await assetWorkflowRunService.patchStepResults(flag.runId, newStepResultsJson, currentUserName);
         }
       } else {
-        await assetWorkflowRunService.patchStepResults(flag.runId, newStepResultsJson, currentUserName);
+        savedRun = await assetWorkflowRunService.patchStepResults(flag.runId, newStepResultsJson, currentUserName);
+      }
+
+      const queuedOffline = isMobileNativePlatform()
+        && (savedRun as { localStatus?: string }).localStatus === "PendingSync";
+      if (queuedOffline) {
+        setOfflineQueued(true);
       }
 
       const verifiedState = await refreshRunState({ showSpinner: false });
       if (!verifiedState) {
+        if (queuedOffline) {
+          onUpdated(null);
+          return;
+        }
         setError("Photos may have been saved, but the run could not be reloaded to verify them. Reopen the asset and check again.");
         return;
       }
@@ -665,6 +678,11 @@ export default function PhotoUploadDialog({
         {!loading && (
           <Stack spacing={2}>
             {error && <Alert severity="error">{error}</Alert>}
+            {offlineQueued && (
+              <Alert severity="info">
+                Saved offline — photos are queued and will sync when you reconnect.
+              </Alert>
+            )}
 
             {uploadPlan.appendOnly && uploadPlan.uploads.length > 0 && (
               <Alert severity="info">

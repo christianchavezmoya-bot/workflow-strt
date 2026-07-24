@@ -159,7 +159,9 @@ export const signatureService = {
           ...cachedRun,
           installerSignedAt: payload.signerRole === "Installer" ? now : cachedRun.installerSignedAt,
           customerSignedAt: payload.signerRole === "Customer" ? now : cachedRun.customerSignedAt,
-          signatureStatus: payload.signerRole === "Customer" ? "Signed" : (cachedRun.customerSignedAt ? "Signed" : "PendingCustomer"),
+          signatureStatus: payload.signerRole === "Customer"
+            ? (payload.reasonCode === "Declined" ? "Declined" : "Signed")
+            : (cachedRun.customerSignedAt ? "Signed" : "PendingCustomer"),
           updatedAt: now,
           localStatus: "PendingSync" as const,
           dirty: true,
@@ -169,7 +171,9 @@ export const signatureService = {
         await offlineStore.saveRun(updatedRun);
         await syncOfflineAssetWorkflowStateFromRun(
           updatedRun,
-          payload.signerRole === "Customer" ? "Complete" : "Pending",
+          payload.signerRole === "Customer"
+            ? (payload.reasonCode === "Declined" ? "Pending" : "Complete")
+            : "Pending",
         );
         // Mirror the offline-run-write refresh signal from assetWorkflowRunService
         // so the Assets page updates immediately when a signature is captured
@@ -183,7 +187,9 @@ export const signatureService = {
         //   - Customer signs (final step) â†’ asset.status = "Complete"
         //   - Installer signs (intermediate) â†’ asset.status = "Pending"
         //     (still waiting for the customer signature)
-        const nextAssetStatus = payload.signerRole === "Customer" ? "Complete" : "Pending";
+        const nextAssetStatus = payload.signerRole === "Customer"
+          ? (payload.reasonCode === "Declined" ? "Pending" : "Complete")
+          : "Pending";
         await applyOfflineAssetStatusUpdate(updatedRun.assetId, nextAssetStatus);
       }
 

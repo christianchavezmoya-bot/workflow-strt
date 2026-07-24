@@ -19,6 +19,7 @@ import api from "../services/api";
 import {
   entityGetAsset,
   entityPutAsset,
+  entityReplaceIssuesForAsset,
   pendingCount,
   pendingGetByEntityId,
   pendingGetAll,
@@ -47,6 +48,7 @@ import {
   type AssetDocumentLinkUploadBody,
 } from "../services/assetDocumentLinkService";
 import { isMobileNativePlatform } from "../utils/platform";
+import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import {
   subscribeServerReachable,
   pingNow,
@@ -400,7 +402,17 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
   }
 
   if (action.entityType === "asset" && responseData && typeof responseData === "object") {
-    await markAssetSyncedFromServer(responseData as ProjectAsset);
+    const asset = responseData as ProjectAsset;
+    await markAssetSyncedFromServer(asset);
+    const queuedIssues = (action.body as { issuesJson?: string } | undefined)?.issuesJson
+      ?? (action.optimisticPatch as { issuesJson?: string } | undefined)?.issuesJson;
+    if (queuedIssues || action.url.includes("/issues")) {
+      await entityReplaceIssuesForAsset(asset.id, deriveOpenIssuesFromAsset(asset));
+      window.dispatchEvent(new Event("repo:issues:updated"));
+    }
+    window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+      detail: { assetId: asset.id, productId: asset.productId, projectId: asset.projectId },
+    }));
   }
 }
 

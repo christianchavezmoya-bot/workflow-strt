@@ -1276,10 +1276,11 @@ export const assetWorkflowRunService = {
       const cachedRun = await getCachedRun(runId);
       if (!cachedRun) throw error;
 
+      const persistedIssuesJson = await mediaStore.persistIssueMediaInJson(issuesJson, resolvedRunId);
       const now = new Date().toISOString();
       const offlineRun: OfflineRun = {
         ...cachedRun,
-        issuesJson,
+        issuesJson: persistedIssuesJson,
         updatedAt: now,
         lastLocalSavedAt: now,
         dirty: true,
@@ -1301,8 +1302,8 @@ export const assetWorkflowRunService = {
         opType: "ISSUE_UPDATE",
         method: "PATCH",
         url: `/asset-workflow-runs/${resolvedRunId}/issues`,
-        body,
-        optimisticPatch: { issuesJson, updatedAt: now },
+        body: { issuesJson: persistedIssuesJson },
+        optimisticPatch: { issuesJson: persistedIssuesJson, updatedAt: now },
       });
       window.dispatchEvent(new Event("repo:issues:updated"));
       window.dispatchEvent(new Event("notifications:run-state-changed"));

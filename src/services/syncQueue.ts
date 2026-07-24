@@ -70,6 +70,12 @@ export function buildSyncIdempotencyKey(input: EnqueueSyncOpInput): string {
     const role = (input.body as { signerRole?: string }).signerRole;
     if (role) return `${base}:${role}`;
   }
+  if (input.opType === "ASSET_DOCUMENT_LINK_ATTACH" && input.body && typeof input.body === "object") {
+    const { assetId, documentId } = input.body as { assetId?: string; documentId?: string };
+    if (assetId && documentId) {
+      return `${input.opType}:${input.method}:${assetId}:${documentId}`;
+    }
+  }
   return base;
 }
 
