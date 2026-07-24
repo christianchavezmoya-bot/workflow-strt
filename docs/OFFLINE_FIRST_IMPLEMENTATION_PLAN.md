@@ -13,8 +13,8 @@ Phased delivery for native offline field operations. Phases **1–9** are implem
 | 7 | Inspection workflows offline | #18 | ✅ Done |
 | 8 | Secondary screens & honest limits | #19 | ✅ Done |
 | 9 | Sync conflicts + SSE probing | #20 | ✅ Done |
-| **10** | **Acceptance testing & release gates** | **#21** | **This phase** |
-| 11 | Post-release monitoring | — | Planned |
+| **10** | **Acceptance testing & release gates** | **#21** | ✅ Done |
+| **11** | **Post-release monitoring** | **#22** | **This phase** |
 
 User-facing summary: [`OFFLINE_FIRST_UX.md`](./OFFLINE_FIRST_UX.md) · Device sign-off: [`OFFLINE_ACCEPTANCE_MATRIX.md`](./OFFLINE_ACCEPTANCE_MATRIX.md)
 
@@ -58,11 +58,22 @@ Print or share [`OFFLINE_INSTALLER_QUICK_REF.md`](./OFFLINE_INSTALLER_QUICK_REF.
 
 ---
 
-## Phase 11 — Post-release monitoring (planned)
+## Phase 11 — Post-release monitoring
 
-1. Sync error telemetry export from Sync Center debug log
-2. Support playbook in `BUG_TRIAGE.md` for offline/sync issues
-3. Quarterly staging restore + offline QA
+**Goal:** Catch and diagnose field sync issues without exposing secrets.
+
+### Shipped
+
+1. **Sync Center support bundle** — `Copy support bundle` / `Download JSON` (`syncSupportBundleService.ts`): pending queue, conflicts, dropped actions, bootstrap status, sanitized API logs, offline perf (native). No tokens or step bodies.
+2. **API Debug Log** — **Copy sanitized logs** button
+3. **`BUG_TRIAGE.md`** — offline/sync support playbook (collect → classify → read bundle → first response)
+4. **`OFFLINE_OPS_PLAYBOOK.md`** — quarterly staging restore + offline QA checklist
+
+### Exit criteria
+
+- [ ] Support can request bundle from any native user with sync issues
+- [ ] Quarterly ops checklist scheduled
+- [ ] S0/S1 sync tickets include bundle attachment
 
 ---
 

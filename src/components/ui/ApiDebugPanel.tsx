@@ -4,6 +4,7 @@
  */
 import {
   Box,
+  Button,
   Chip,
   Dialog,
   DialogContent,
@@ -14,9 +15,12 @@ import {
   Typography,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import { useEffect, useState } from "react";
 import type { ApiDebugLog } from "../../services/api";
 import { formatPayloadSize } from "../../utils/syncDiagnostics";
+import { sanitizeUrl } from "../../services/syncSupportBundleService";
 
 function statusColor(status?: number): "success" | "warning" | "error" | "default" {
   if (!status) return "error";
@@ -32,6 +36,7 @@ interface Props {
 
 export default function ApiDebugPanel({ open, onClose }: Props) {
   const [logs, setLogs] = useState<ApiDebugLog[]>([]);
+  const [copied, setCopied] = useState(false);
 
   const refresh = () => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: ApiDebugLog[] };
@@ -46,6 +51,22 @@ export default function ApiDebugPanel({ open, onClose }: Props) {
     return () => window.removeEventListener("api-debug-log", handler);
   }, [open]);
 
+  async function copySanitizedLogs() {
+    const payload = logs.map((log) => ({
+      time: log.time,
+      method: log.method,
+      url: sanitizeUrl(log.url),
+      status: log.status,
+      durationMs: log.durationMs,
+      error: log.error,
+      source: log.source,
+      opType: log.opType,
+    }));
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }
+
   return (
     <Dialog open={open} onClose={onClose} fullScreen>
       <DialogTitle sx={{ pb: 1 }}>
@@ -54,8 +75,19 @@ export default function ApiDebugPanel({ open, onClose }: Props) {
           <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>
         </Stack>
         <Typography variant="caption" color="text.secondary">
-          Last {logs.length} requests — newest first
+          Last {logs.length} requests — newest first. Copy excludes tokens and request bodies.
         </Typography>
+        {logs.length > 0 && (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ContentCopyIcon />}
+            sx={{ mt: 1, textTransform: "none" }}
+            onClick={() => void copySanitizedLogs()}
+          >
+            {copied ? "Copied" : "Copy sanitized logs"}
+          </Button>
+        )}
       </DialogTitle>
       <DialogContent sx={{ p: 0 }}>
         {logs.length === 0 && (

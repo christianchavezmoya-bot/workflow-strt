@@ -22,6 +22,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import { useEffect, useMemo, useState } from "react";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import api from "../../services/api";
@@ -45,6 +46,10 @@ import {
   formatSyncDiagnosticSummary,
   toAllowlistedDiagnostics,
 } from "../../utils/syncDiagnostics";
+import {
+  copySyncSupportBundle,
+  downloadSyncSupportBundle,
+} from "../../services/syncSupportBundleService";
 
 interface Props {
   open: boolean;
@@ -468,6 +473,7 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   const [loadingConflictIds, setLoadingConflictIds] = useState<Record<string, boolean>>({});
   const [expandedDiagIds, setExpandedDiagIds] = useState<Record<string, boolean>>({});
   const [copiedDiagId, setCopiedDiagId] = useState<string | null>(null);
+  const [exportState, setExportState] = useState<"idle" | "copying" | "downloading" | "copied" | "error">("idle");
 
   const loadQueue = async () => setQueue(await pendingGetAll());
   const loadDropped = async () => setDroppedActions(await droppedActionsGetAll());
@@ -647,7 +653,43 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                 Clear Failed
               </Button>
             )}
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<ContentCopyIcon />}
+              disabled={exportState === "copying" || exportState === "downloading"}
+              onClick={() => {
+                setExportState("copying");
+                void copySyncSupportBundle()
+                  .then(() => setExportState("copied"))
+                  .catch(() => setExportState("error"))
+                  .finally(() => window.setTimeout(() => setExportState("idle"), 2500));
+              }}
+            >
+              {exportState === "copied" ? "Copied bundle" : exportState === "copying" ? "Copying…" : "Copy support bundle"}
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<DownloadOutlinedIcon />}
+              disabled={exportState === "copying" || exportState === "downloading"}
+              onClick={() => {
+                setExportState("downloading");
+                void downloadSyncSupportBundle()
+                  .then(() => setExportState("idle"))
+                  .catch(() => setExportState("error"))
+                  .finally(() => window.setTimeout(() => setExportState("idle"), 2500));
+              }}
+            >
+              Download JSON
+            </Button>
           </Stack>
+
+          {exportState === "error" && (
+            <Alert severity="warning" sx={{ mb: 2, py: 0.5, fontSize: "0.75rem" }}>
+              Could not export support bundle. Try again or use API Debug Log below.
+            </Alert>
+          )}
 
           {/* ── Conflicts ─────────────────────────────────────────────────────── */}
           {conflictCount > 0 && (
@@ -918,6 +960,10 @@ export default function SyncCenterPage({ open, onClose }: Props) {
           <Divider sx={{ mt: 4, mb: 2 }} />
 
           {/* Link to API Debug Log */}
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+            Support bundle excludes tokens, passwords, and step/photo content. Attach the JSON to tickets per{" "}
+            <Box component="span" sx={{ fontFamily: "monospace" }}>docs/BUG_TRIAGE.md</Box>.
+          </Typography>
           <Button
             variant="text"
             size="small"

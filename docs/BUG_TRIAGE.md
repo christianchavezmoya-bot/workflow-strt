@@ -46,8 +46,65 @@ Report → Triage (severity + owner) → Reproduce → Fix branch → Tests → 
 | Tool | Access |
 |---|---|
 | Offline open timing | `window.__offlinePerf` / `getOfflinePerfLog()` in dev tools (remote WebView debug) |
-| API timing/errors | `window.__apiDebugLogs` |
+| API timing/errors | `window.__apiDebugLogs` or Sync Center → **View API Debug Log** → Copy sanitized logs |
 | Pending sync | Sync Center → pending / failed / conflict rows |
+| **Support bundle** | Sync Center → **Copy support bundle** or **Download JSON** (sanitized — safe for tickets) |
+
+Attach a support bundle for **all S0/S1 sync reports**. Never paste JWTs, passwords, or raw `stepResultsJson`.
+
+---
+
+## Offline and sync support playbook
+
+Use this when triaging native field reports (badge stuck, data missing, conflicts, duplicates).
+
+### 1. Collect (ask the reporter)
+
+- Platform + OS version, app version (`package.json` / About), API tag
+- Online, offline, or airplane; sync badge text (Synced / Offline · ↑N / N conflicts)
+- Steps to reproduce (numbered)
+- **Sync Center → Copy support bundle** (or Download JSON) — attach to ticket
+
+### 2. Classify severity
+
+| Symptom | Likely cause | Default severity |
+|---------|--------------|------------------|
+| Field work lost after reconnect | Queue drop, wrong discard, duplicate apply | **S0** |
+| Cannot complete/sign workflow offline when cached | Missing bootstrap, business-rule 422 | **S1** |
+| Stuck pending >30 min online | Server unreachable, token expired, conflict | **S1** |
+| Conflict banner / wrong server version | Concurrent edit (web + phone) | **S2** until data loss |
+| Stale dashboard counts | SSE/cache lag; not data loss | **S3** |
+| Document not previewable offline | File not prefetched (bootstrap cap) | **S3** (documented limit) |
+
+### 3. Read the support bundle
+
+| Section | What to check |
+|---------|----------------|
+| `summary` | pending / conflict / dropped counts |
+| `connectivity` | `manualOffline`, `serverReachable`, `navigatorOnLine` |
+| `bootstrap` | `readyForOffline`, `isStale`, last download time |
+| `conflicts` | `conflictKind`: `concurrency` vs `business_rule`; `conflictMessage` |
+| `droppedActions` | Permanently failed after max retries — **S0/S1** |
+| `apiLogs` | `source: sync-engine` failures, HTTP status, timeouts |
+| `offlinePerf` | Resume path slow? `interactive_ready` before network? |
+
+### 4. First-response actions (support)
+
+1. **Pending queue, online** — Sync Center → Sync Now; check API health
+2. **Conflicts** — guide user: concurrency → Keep vs Accept server; 422 → fix blocking issues then Remove from queue
+3. **Not downloaded** — connect → Sync Center → Download now (Offline readiness)
+4. **Token expired** — re-login; queue should preserve (verify in bundle `pendingActions`)
+5. **Duplicates after sync** — escalate **S0**; attach bundle + server logs for run id
+
+### 5. Engineering fix criteria
+
+- Reproduce on staging with same app/API versions
+- Offline/sync fixes: pass [`OFFLINE_ACCEPTANCE_MATRIX.md`](./OFFLINE_ACCEPTANCE_MATRIX.md) rows relevant to the bug
+- Add regression test for S0/S1 when feasible (`syncSupportBundleService`, sync engine, or API)
+
+See also: [`OFFLINE_OPS_PLAYBOOK.md`](./OFFLINE_OPS_PLAYBOOK.md) (quarterly staging QA), [`OFFLINE_FIRST_UX.md`](./OFFLINE_FIRST_UX.md).
+
+---
 
 ## Escalation
 

@@ -2,7 +2,7 @@
 
 Use this checklist for **every** production release (web, API, and/or phone). Nothing ships without staging sign-off.
 
-Related docs: `docs/BUG_TRIAGE.md`, `docs/MOBILE_BUILD.md`, `docs/FIELD_RUN_QA_CHECKLIST.md`, `docs/OFFLINE_FIRST_UX.md`, `docs/OFFLINE_FIRST_IMPLEMENTATION_PLAN.md`, `docs/OFFLINE_ACCEPTANCE_MATRIX.md`, `docs/OFFLINE_INSTALLER_QUICK_REF.md`.
+Related docs: `docs/BUG_TRIAGE.md`, `docs/MOBILE_BUILD.md`, `docs/FIELD_RUN_QA_CHECKLIST.md`, `docs/OFFLINE_FIRST_UX.md`, `docs/OFFLINE_FIRST_IMPLEMENTATION_PLAN.md`, `docs/OFFLINE_ACCEPTANCE_MATRIX.md`, `docs/OFFLINE_INSTALLER_QUICK_REF.md`, `docs/OFFLINE_OPS_PLAYBOOK.md`.
 
 ---
 
@@ -126,3 +126,15 @@ Record device results in [`docs/OFFLINE_ACCEPTANCE_MATRIX.md`](OFFLINE_ACCEPTANC
 | Dev lead | | | |
 | QA / field lead | | | |
 | Product / ops | | | |
+
+---
+
+## Layer E — Quarterly offline ops (every 3 months)
+
+See [`docs/OFFLINE_OPS_PLAYBOOK.md`](OFFLINE_OPS_PLAYBOOK.md).
+
+- [ ] Staging DB restore + RC deploy
+- [ ] `npm run release-gates` + `npm run test:e2e:full` on RC
+- [ ] Native acceptance matrix spot-check (rows 1, 6, 7, 8)
+- [ ] Sync Center support bundle export verified
+- [ ] Sample bundle filed with ops sign-off (no tokens)

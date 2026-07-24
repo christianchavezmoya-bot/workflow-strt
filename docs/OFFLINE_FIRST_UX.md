@@ -51,6 +51,8 @@ Pending writes appear in Sync Center. When a queued change cannot sync:
 
 Unresolved conflicts are not re-sent until you choose an action in Sync Center. The top-bar sync badge shows a conflict count when review is needed.
 
+**Support:** Sync Center → **Copy support bundle** (sanitized JSON for tickets). See [`BUG_TRIAGE.md`](./BUG_TRIAGE.md).
+
 ## Related code
 
 - `src/contexts/OfflineModeContext.tsx` — manual offline toggle API
@@ -66,6 +68,7 @@ See [`OFFLINE_INSTALLER_QUICK_REF.md`](./OFFLINE_INSTALLER_QUICK_REF.md) for a o
 ## Related docs
 
 - [`OFFLINE_FIRST_IMPLEMENTATION_PLAN.md`](./OFFLINE_FIRST_IMPLEMENTATION_PLAN.md) — phased delivery + release gates
+- [`OFFLINE_OPS_PLAYBOOK.md`](./OFFLINE_OPS_PLAYBOOK.md) — quarterly staging QA + monitoring
 - [`OFFLINE_ACCEPTANCE_MATRIX.md`](./OFFLINE_ACCEPTANCE_MATRIX.md) — native device sign-off template
 - [`OFFLINE_DEVICE_MEASUREMENT.md`](./OFFLINE_DEVICE_MEASUREMENT.md) — p95 resume latency baseline
 - [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md) — full release train
