@@ -41,6 +41,7 @@ import type { ProjectAsset } from "../types/projectAsset";
 import type { SignatureEvent } from "../types/signature";
 import { mediaStore } from "../services/mediaStore";
 import syncQueue, { type SyncOpType } from "../services/syncQueue";
+import { revertLocalEntityForConflict } from "../services/syncConflictProbe";
 import {
   removeCachedLinkById,
   replaceCachedLink,
@@ -536,6 +537,12 @@ export function useSyncEngine(): SyncState {
         continue;
       }
 
+      // User must resolve flagged conflicts in Sync Center — do not re-send blindly.
+      if (action.conflictDetected) {
+        anyError = true;
+        continue;
+      }
+
       // ── Conflict detection (PATCH / PUT only) ─────────────────────────────
       if (
         (action.method === "PATCH" || action.method === "PUT") &&
@@ -550,7 +557,10 @@ export function useSyncEngine(): SyncState {
           // If the entity was refreshed from the server MORE THAN 5s after we queued
           // the action, another device/user has written to it — flag as conflict.
           if (syncedAt > queuedAt + 5_000) {
-            await pendingMarkConflict(action.id);
+            await pendingMarkConflict(action.id, {
+              conflictKind: "concurrency",
+              conflictMessage: "Another update arrived while this change was queued.",
+            });
             window.dispatchEvent(new CustomEvent("sync-conflict-detected", {
               detail: { actionId: action.id, entityId: action.entityId, entityType: action.entityType },
             }));
@@ -602,10 +612,20 @@ export function useSyncEngine(): SyncState {
         const timedOutAgainstReachableServer =
           errorCode === "ECONNABORTED" && getServerReachable();
         if (httpStatus === 409 || httpStatus === 412) {
-          // Server confirmed a conflict — mark and let user resolve
-          await pendingMarkConflict(action.id);
+          const conflictMessage = extractServerErrorMessage(e, `Conflict (${httpStatus})`);
+          await pendingMarkConflict(action.id, {
+            conflictKind: "concurrency",
+            conflictHttpStatus: httpStatus,
+            conflictMessage,
+          });
           window.dispatchEvent(new CustomEvent("sync-conflict-detected", {
-            detail: { actionId: action.id, entityId: action.entityId, entityType: action.entityType },
+            detail: {
+              actionId: action.id,
+              entityId: action.entityId,
+              entityType: action.entityType,
+              httpStatus,
+              message: conflictMessage,
+            },
           }));
           anyError = true;
         } else if (httpStatus && httpStatus !== 429 && httpStatus >= 400 && httpStatus < 500) {
@@ -617,7 +637,11 @@ export function useSyncEngine(): SyncState {
             // must see, and dependent ops (signatures after a rejected complete)
             // must not proceed against a run the server never completed.
             const rejectMessage = extractServerErrorMessage(e, `Server rejected (${httpStatus})`);
-            await pendingMarkConflict(action.id);
+            await pendingMarkConflict(action.id, {
+              conflictKind: "business_rule",
+              conflictHttpStatus: httpStatus,
+              conflictMessage: rejectMessage,
+            });
             await markRunSyncFailed(action.entityId, rejectMessage);
             window.dispatchEvent(new CustomEvent("sync-conflict-detected", {
               detail: {
@@ -895,7 +919,11 @@ export function useSyncEngine(): SyncState {
   }, [flush, refreshPending]);
 
   const resolveConflictDiscard = useCallback(async (actionId: string) => {
-    // Drop the action entirely — accept whatever the server has
+    const all = await pendingGetAll();
+    const action = all.find((item) => item.id === actionId);
+    if (action) {
+      await revertLocalEntityForConflict(action);
+    }
     await pendingRemove(actionId);
     await refreshPending();
   }, [refreshPending]);
@@ -907,7 +935,7 @@ export function useSyncEngine(): SyncState {
     connectivity === "offline" || connectivity === "server-unreachable" ? "offline" :
     connectivity === "token-expired" ? "error" :
     syncing    ? "syncing"  :
-    hasError   ? "error"    :
+    conflicts > 0 || hasError ? "error"    :
     pending > 0 ? "pending"  :
                   "synced";
 

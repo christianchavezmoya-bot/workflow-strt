@@ -175,6 +175,19 @@ function formatBomSummary(raw: string | null | undefined): string {
   return `${items.length} BOM item${items.length === 1 ? "" : "s"}`;
 }
 
+function isBusinessRuleConflict(action: PendingAction): boolean {
+  return action.conflictKind === "business_rule" || action.conflictHttpStatus === 422 || action.conflictHttpStatus === 400;
+}
+
+function conflictSummary(action: PendingAction): string {
+  if (action.conflictMessage) return action.conflictMessage;
+  if (action.lastError) return action.lastError;
+  if (isBusinessRuleConflict(action)) {
+    return "The server rejected this queued action. Fix the underlying issue, then remove it from the queue or retry.";
+  }
+  return "Someone else edited this record while you were offline.";
+}
+
 function deriveChangedKeys(action: PendingAction): string[] {
   const source = Object.keys(action.optimisticPatch ?? {});
   if (source.length > 0) return source;
@@ -647,11 +660,14 @@ export default function SyncCenterPage({ open, onClose }: Props) {
               </Stack>
 
               <Alert severity="warning" sx={{ fontSize: "0.75rem", py: 0.5 }}>
-                Someone else edited these records while you were offline. Choose
-                whether to keep your change or accept the server version.
+                Some queued changes could not sync automatically. Review each item below —
+                concurrency conflicts let you keep or discard your version; server rejections
+                (for example unresolved blocking issues) need to be fixed on the asset or run first.
               </Alert>
 
-              {conflicted.map(action => (
+              {conflicted.map(action => {
+                const businessRule = isBusinessRuleConflict(action);
+                return (
                 <Box
                   key={action.id}
                   sx={{
@@ -667,11 +683,15 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                       <Typography variant="caption" sx={{ fontWeight: 700, textTransform: "uppercase", color: "warning.main", fontSize: "0.65rem" }}>
                         {action.entityType}
                       </Typography>
-                      <Chip label="conflict" color="warning" size="small" sx={{ height: 16, fontSize: "0.62rem" }} />
+                      <Chip label={businessRule ? "rejected" : "conflict"} color="warning" size="small" sx={{ height: 16, fontSize: "0.62rem" }} />
                       <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.65rem" }}>
                         {action.method} {action.url}
                       </Typography>
                     </Stack>
+
+                    <Alert severity={businessRule ? "error" : "info"} sx={{ py: 0.25, fontSize: "0.72rem" }}>
+                      {conflictSummary(action)}
+                    </Alert>
 
                     {loadingConflictIds[action.id] && !conflictDetails[action.id] ? (
                       <Stack direction="row" alignItems="center" spacing={1} sx={{ py: 1 }}>
@@ -743,7 +763,7 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                         sx={{ fontSize: "0.7rem", py: 0.25 }}
                         onClick={() => void resolveConflictKeep(action.id).then(loadQueue)}
                       >
-                        Keep my change
+                        {businessRule ? "Retry anyway" : "Keep my change"}
                       </Button>
                       <Button
                         size="small"
@@ -752,12 +772,12 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                         sx={{ fontSize: "0.7rem", py: 0.25 }}
                         onClick={() => void resolveConflictDiscard(action.id).then(loadQueue)}
                       >
-                        Discard
+                        {businessRule ? "Remove from queue" : "Accept server version"}
                       </Button>
                     </Stack>
                   </Stack>
                 </Box>
-              ))}
+              );})}
 
               <Divider />
             </Stack>

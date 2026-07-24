@@ -43,6 +43,9 @@ export interface PendingAction {
   // Conflict detection fields
   snapshotUpdatedAt?: string;  // entity's updatedAt at queue time
   conflictDetected?: boolean;  // true when server refreshed a newer version after we queued
+  conflictHttpStatus?: number;
+  conflictMessage?: string;
+  conflictKind?: "concurrency" | "business_rule";
   // Last failed flush attempt (diagnostics only — does not affect sync behavior)
   lastAttemptAt?: string;
   lastDurationMs?: number;
@@ -911,12 +914,26 @@ export async function entityGetAssetCacheAgeMs(
 // ── Conflict detection helpers ────────────────────────────────────────────────
 
 /** Mark a pending action as having a detected conflict (server has newer data). */
-export async function pendingMarkConflict(id: string): Promise<void> {
+export async function pendingMarkConflict(
+  id: string,
+  meta?: {
+    conflictHttpStatus?: number;
+    conflictMessage?: string;
+    conflictKind?: PendingAction["conflictKind"];
+  },
+): Promise<void> {
   try {
     const db = await getDB();
     const item = await db.get("pending_actions", id);
     if (item) {
-      await db.put("pending_actions", { ...item, conflictDetected: true, status: "failed" });
+      await db.put("pending_actions", {
+        ...item,
+        conflictDetected: true,
+        status: "failed",
+        conflictHttpStatus: meta?.conflictHttpStatus ?? item.conflictHttpStatus,
+        conflictMessage: meta?.conflictMessage ?? item.conflictMessage,
+        conflictKind: meta?.conflictKind ?? item.conflictKind ?? "concurrency",
+      });
       window.dispatchEvent(new Event("sync-pending-changed"));
     }
   } catch { /* ignore */ }
@@ -931,6 +948,9 @@ export async function pendingClearConflict(id: string): Promise<void> {
       await db.put("pending_actions", {
         ...item,
         conflictDetected: false,
+        conflictHttpStatus: undefined,
+        conflictMessage: undefined,
+        conflictKind: undefined,
         status: "pending",
         nextRetryAt: undefined,
         lastError: undefined,

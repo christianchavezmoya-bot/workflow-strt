@@ -16,6 +16,7 @@ import { useEffect, useRef } from "react";
 import { secureGet } from "../services/secureStorage";
 import { getApiBaseUrl } from "../services/apiBase";
 import { invalidateWebCacheByPrefix } from "../services/webFreshCache";
+import { probePendingConflictsFromSse } from "../services/syncConflictProbe";
 import { isMobileNativePlatform } from "../utils/platform";
 
 const BASE_RETRY_MS = 3_000;
@@ -66,6 +67,10 @@ export function useSseEvents() {
             invalidateWebCacheByPrefix("/asset-workflow-runs/");
           }
           window.dispatchEvent(new CustomEvent("sse:assets:updated", { detail }));
+          void probePendingConflictsFromSse({
+            productId: typeof detail.productId === "string" ? detail.productId : undefined,
+            projectId: typeof detail.projectId === "string" ? detail.projectId : undefined,
+          });
         } catch { /* malformed JSON — ignore */ }
       });
 

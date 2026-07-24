@@ -43,7 +43,13 @@ Open **Sync Center** (status badge) → **Offline readiness**:
 
 ## Sync queue
 
-Pending writes appear in Sync Center. Conflicts (409/412) are surfaced there (Phase 9). Until then, failed items stay in the queue with retry/backoff.
+Pending writes appear in Sync Center. When a queued change cannot sync:
+
+- **Concurrency conflict** (another edit arrived first, or HTTP 409/412): Sync Center shows a side-by-side comparison. **Keep my change** retries your version; **Accept server version** drops the queue item and refreshes local cache from the server.
+- **Business-rule rejection** (HTTP 422/400 on workflow ops, e.g. blocking issues on complete): shows the server message. **Remove from queue** reverts local cache; **Retry anyway** clears the flag and tries again after you fix the issue.
+- SSE `assets:updated` events proactively flag queued asset writes when the server `updatedAt` is newer than your snapshot.
+
+Unresolved conflicts are not re-sent until you choose an action in Sync Center. The top-bar sync badge shows a conflict count when review is needed.
 
 ## Related code
 

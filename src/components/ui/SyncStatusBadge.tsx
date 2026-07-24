@@ -17,6 +17,7 @@ import {
   CloudOffOutlined,
   ErrorOutlineOutlined,
   UploadOutlined,
+  WarningAmberOutlined,
 } from "@mui/icons-material";
 
 import { useCallback, useEffect, useState } from "react";
@@ -32,12 +33,25 @@ function timeAgo(date: Date): string {
 }
 
 export default function SyncStatusBadge() {
-  const { status, pendingCount, lastSyncAt, syncing, triggerSync } = useSyncEngine();
+  const { status, pendingCount, conflictCount, lastSyncAt, syncing, triggerSync } = useSyncEngine();
   const [syncCenterOpen, setSyncCenterOpen] = useState(false);
 
   const iconSx = { fontSize: 13 };
 
   const badge = (() => {
+    if (conflictCount > 0) {
+      return (
+        <Tooltip title={`${conflictCount} conflict${conflictCount !== 1 ? "s" : ""} need review — tap to open Sync Center`}>
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            <WarningAmberOutlined sx={{ ...iconSx, color: "warning.main" }} />
+            <Typography variant="caption" sx={{ fontSize: "0.68rem", color: "warning.main" }}>
+              {conflictCount} conflict{conflictCount !== 1 ? "s" : ""}
+            </Typography>
+          </Stack>
+        </Tooltip>
+      );
+    }
+
     if (status === "syncing") {
       return (
         <Stack direction="row" alignItems="center" spacing={0.5}>
@@ -137,8 +151,8 @@ export function SyncDot({ entityId, sx }: { entityId: string; sx?: object }) {
   const refresh = useCallback(async () => {
     const actions = await pendingGetByEntityId(entityId);
     if (actions.length === 0) { setActionState(null); return; }
-    // Priority: uploading > failed > pending
-    if (actions.some(a => a.status === "uploading")) setActionState("uploading");
+    if (actions.some(a => a.conflictDetected)) setActionState("failed");
+    else if (actions.some(a => a.status === "uploading")) setActionState("uploading");
     else if (actions.some(a => a.status === "failed")) setActionState("failed");
     else setActionState("pending");
   }, [entityId]);
