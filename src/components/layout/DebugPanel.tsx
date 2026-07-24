@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { secureGet } from "../../services/secureStorage";
 import { getApiBaseUrl } from "../../services/apiBase";
 import { pendingCount, syncMetaGet } from "../../services/localDB";
+import { subscribeServerReachable } from "../../services/connectivityMonitor";
 
 type DebugLog = {
   id: string;
@@ -21,12 +22,28 @@ const getLogs = (): DebugLog[] => {
   return anyWindow.__apiDebugLogs || [];
 };
 
+function formatAuthUserSummary(raw: string): string {
+  if (!raw) return "none";
+  try {
+    const parsed = JSON.parse(raw) as { id?: string; email?: string; role?: string; fullName?: string };
+    const parts = [
+      parsed.fullName,
+      parsed.email,
+      parsed.role ? `role=${parsed.role}` : null,
+      parsed.id ? `id=${parsed.id}` : null,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : "present (redacted)";
+  } catch {
+    return "present (redacted)";
+  }
+}
+
 const DebugPanel = () => {
   const [open, setOpen] = useState(false);
   const [logs, setLogs] = useState<DebugLog[]>(() => getLogs());
-  const [authInfo, setAuthInfo] = useState({
-    token: secureGet("auth_token") || "",
-    user: secureGet("auth_user") || secureGet("local_auth_user") || ""
+  const [authSummary, setAuthSummary] = useState({
+    tokenPresent: Boolean(secureGet("auth_token")),
+    user: formatAuthUserSummary(secureGet("auth_user") || secureGet("local_auth_user") || ""),
   });
   const [serverReachable, setServerReachable] = useState<boolean | null>(null);
   const [pending, setPending] = useState(0);
@@ -40,31 +57,32 @@ const DebugPanel = () => {
 
     const refreshCounts = async () => {
       setPending(await pendingCount());
-      setLastAssetSync(await syncMetaGet("asset"));
+      setLastAssetSync(await syncMetaGet("assets"));
     };
     void refreshCounts();
 
     const handler = () => {
       setLogs(getLogs());
-      setAuthInfo({
-        token: secureGet("auth_token") || "",
-        user: secureGet("auth_user") || secureGet("local_auth_user") || ""
+      setAuthSummary({
+        tokenPresent: Boolean(secureGet("auth_token")),
+        user: formatAuthUserSummary(secureGet("auth_user") || secureGet("local_auth_user") || ""),
       });
       void refreshCounts();
     };
 
-    const handleReachable  = () => setServerReachable(true);
-    const handleUnreachable = () => setServerReachable(false);
     const handlePending = () => void refreshCounts();
     window.addEventListener("api-debug-log", handler);
-    window.addEventListener("api-server-reachable", handleReachable);
-    window.addEventListener("api-serving-cache", handleUnreachable);
     window.addEventListener("sync-pending-changed", handlePending);
+
+    const unsubscribeReachable = subscribeServerReachable((reachable) => {
+      setServerReachable(reachable);
+      void refreshCounts();
+    });
+
     return () => {
       window.removeEventListener("api-debug-log", handler);
-      window.removeEventListener("api-server-reachable", handleReachable);
-      window.removeEventListener("api-serving-cache", handleUnreachable);
       window.removeEventListener("sync-pending-changed", handlePending);
+      unsubscribeReachable();
     };
   }, []);
 
@@ -145,13 +163,13 @@ const DebugPanel = () => {
 
           <Divider sx={{ my: 1 }} />
 
-          {/* Auth info */}
+          {/* Auth info — redacted for field/support safety */}
           <Box sx={{ mb: 1 }}>
             <Typography variant="caption" color="text.secondary">
-              Auth token: {authInfo.token ? authInfo.token.slice(0, 16) + "..." : "none"}
+              Auth token: {authSummary.tokenPresent ? "present (redacted)" : "none"}
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-              User: {authInfo.user || "none"}
+              User: {authSummary.user}
             </Typography>
           </Box>
 

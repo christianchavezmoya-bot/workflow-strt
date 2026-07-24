@@ -36,6 +36,10 @@ import api from "../../services/api";
 import { userService } from "../../services/userService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
+import {
+  dashboardWorkspaceHasRows,
+  stabilizeDashboardWorkspace,
+} from "../../utils/dashboardWorkspaceMerge";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
@@ -284,45 +288,6 @@ function formatMyJobsStepCompletionLabel(completedSteps: number, totalSteps: num
   return `${Math.min(100, percent)}% completed`;
 }
 
-function dashboardWorkspaceItemHasCardSignals(item: DashboardWorkspaceAssetItem) {
-  return item.totalSteps > 0
-    || item.completedSteps > 0
-    || item.missingItems > 0
-    || (item.evidenceStatus ?? "").toLowerCase() === "missingdata"
-    || Boolean(item.signatureStatus)
-    || item.hasOpenIssues;
-}
-
-function mergeDashboardWorkspaceItems(
-  previousItems: DashboardWorkspaceAssetItem[],
-  nextItems: DashboardWorkspaceAssetItem[],
-) {
-  if (previousItems.length === 0 || nextItems.length === 0) return nextItems;
-  const previousById = new Map(previousItems.map((item) => [item.id, item]));
-  return nextItems.map((item) => {
-    const previous = previousById.get(item.id);
-    if (!previous) return item;
-    if (!dashboardWorkspaceItemHasCardSignals(previous) || dashboardWorkspaceItemHasCardSignals(item)) return item;
-    return {
-      ...item,
-      completedSteps: previous.completedSteps,
-      totalSteps: previous.totalSteps,
-      missingItems: previous.missingItems,
-      evidenceStatus: previous.evidenceStatus,
-      signatureStatus: previous.signatureStatus,
-      hasOpenIssues: previous.hasOpenIssues,
-    };
-  });
-}
-
-function stabilizeDashboardWorkspace(previous: DashboardWorkspace, next: DashboardWorkspace): DashboardWorkspace {
-  return {
-    currentInstalls: mergeDashboardWorkspaceItems(previous.currentInstalls, next.currentInstalls),
-    currentInspections: mergeDashboardWorkspaceItems(previous.currentInspections, next.currentInspections),
-    installHistory: mergeDashboardWorkspaceItems(previous.installHistory, next.installHistory),
-    inspectionHistory: mergeDashboardWorkspaceItems(previous.inspectionHistory, next.inspectionHistory),
-  };
-}
 async function loadDashboardMetricWithRetry<T>(loader: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -617,26 +582,18 @@ const Dashboard = () => {
     data: DashboardWorkspace,
     options?: { persist?: boolean; stabilize?: boolean },
   ) => {
-    // Default ON: this is cc9d896's card-state merge, kept deliberately. It
-    // previously defaulted from shouldSkipLightWorkspaceBoot, which is now false,
-    // so it is pinned to true to preserve that fix. No-op on first paint (the
-    // merge returns nextItems when there is no previous list).
     const shouldStabilize = options?.stabilize ?? true;
+    const previous = dashboardWorkspaceRef.current;
     const next = shouldStabilize
-      ? stabilizeDashboardWorkspace(dashboardWorkspaceRef.current, data)
+      ? stabilizeDashboardWorkspace(previous, data)
       : data;
     dashboardWorkspaceRef.current = next;
     setDashboardWorkspace(next);
     if (options?.persist === false) return;
+    // Never persist a workspace regression to empty when we already had rows.
+    if (dashboardWorkspaceHasRows(previous) && !dashboardWorkspaceHasRows(next)) return;
     writeCachedDashboardWorkspace(next);
-  }, [shouldSkipLightWorkspaceBoot, writeCachedDashboardWorkspace]);
-
-  const dashboardWorkspaceHasRows = useCallback((data: DashboardWorkspace) => (
-    data.currentInstalls.length > 0
-    || data.currentInspections.length > 0
-    || data.installHistory.length > 0
-    || data.inspectionHistory.length > 0
-  ), []);
+  }, [writeCachedDashboardWorkspace]);
 
   const seedNativeDashboardSummariesFromLocal = useCallback(() => {
     if (!isNativePlatform) return;
@@ -781,7 +738,7 @@ const Dashboard = () => {
     if (cOpenAssets) setOpenAssets(cOpenAssets);
     if (cSummary) setProjectAssetSummary(cSummary);
     if (cWorkload) setWorkload(cWorkload);
-    if (cWorkspace) applyDashboardWorkspace(cWorkspace, { persist: false, stabilize: true });
+    if (cWorkspace && dashboardWorkspaceHasRows(cWorkspace)) applyDashboardWorkspace(cWorkspace, { persist: false, stabilize: true });
     if (cOffices) setGlobalOffices(cOffices);
     if (cCountries) setAvailableCountries(cCountries);
     // Mark cache as hydrated so loading spinners don't override cached data
@@ -793,7 +750,7 @@ const Dashboard = () => {
   useEffect(() => {
     if (isNativePlatform || !isAuthenticated || !user.id) return;
     const cached = readCachedDashboardWorkspace();
-    if (!cached) return;
+    if (!cached || !dashboardWorkspaceHasRows(cached)) return;
     applyDashboardWorkspace(cached, { persist: false, stabilize: true });
     setCacheHydrated(true);
   }, [applyDashboardWorkspace, isAuthenticated, isNativePlatform, readCachedDashboardWorkspace, user.id]);
@@ -899,7 +856,7 @@ const Dashboard = () => {
 
     const restoreCachedWorkspace = () => {
       const cached = readCachedDashboardWorkspace();
-      if (!cached) return;
+      if (!cached || !dashboardWorkspaceHasRows(cached)) return;
       if (dashboardWorkspaceHasRows(dashboardWorkspaceRef.current)) return;
       applyDashboardWorkspace(cached, { persist: false, stabilize: true });
       setCacheHydrated(true);
