@@ -21,7 +21,11 @@ export type SyncOpType =
   | "ASSET_DOCUMENT_LINK_DETACH"
   | "MEDIA_UPLOAD"
   | "SIGNATURE_SUBMIT"
-  | "TIME_ENTRY";
+  | "TIME_ENTRY"
+  | "ASSET_UPDATE"
+  | "ASSET_DELETE"
+  | "WORKFLOW_ASSIGNMENT_CREATE"
+  | "WORKFLOW_ASSIGNMENT_DELETE";
 
 export interface SyncQueueOp extends PendingAction {
   opType: SyncOpType;
@@ -39,6 +43,7 @@ export interface EnqueueSyncOpInput {
   optimisticPatch?: Record<string, unknown>;
   serverEntityId?: string;
   dependsOnOpId?: string;
+  snapshotUpdatedAt?: string;
 }
 
 export interface UpdateQueuedOpInput {
@@ -80,9 +85,10 @@ export const syncQueue = {
         ...existing,
         body: input.body,
         optimisticPatch: input.optimisticPatch ?? existing.optimisticPatch,
-        serverEntityId: input.serverEntityId ?? existing.serverEntityId,
-        dependsOnOpId: input.dependsOnOpId ?? existing.dependsOnOpId,
-      });
+      serverEntityId: input.serverEntityId ?? existing.serverEntityId,
+      dependsOnOpId: input.dependsOnOpId ?? existing.dependsOnOpId,
+      snapshotUpdatedAt: input.snapshotUpdatedAt ?? existing.snapshotUpdatedAt,
+    });
       window.dispatchEvent(new Event("sync-pending-changed"));
       return existing;
     }
@@ -102,6 +108,7 @@ export const syncQueue = {
       serverEntityId: input.serverEntityId,
       dependsOnOpId: input.dependsOnOpId,
       idempotencyKey,
+      snapshotUpdatedAt: input.snapshotUpdatedAt,
     };
     await db.put("pending_actions", op);
     window.dispatchEvent(new Event("sync-pending-changed"));

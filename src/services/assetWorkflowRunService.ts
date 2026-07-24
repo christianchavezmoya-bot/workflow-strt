@@ -215,12 +215,17 @@ async function enqueueTimeEntry(
   body: Record<string, unknown>,
   optimisticPatch: Record<string, unknown>,
 ): Promise<void> {
+  const dependsOnOpId = await resolvePendingRunCreateOpId(runId);
   const existing = (await syncQueue.listByEntityId(runId))
     .filter((op) => op.opType === "TIME_ENTRY" && op.url.endsWith("/time-entry"))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
   if (existing && existing.status !== "uploading") {
-    await syncQueue.updateQueuedOp(existing.id, { body, optimisticPatch });
+    await syncQueue.updateQueuedOp(existing.id, {
+      body,
+      optimisticPatch,
+      dependsOnOpId: dependsOnOpId ?? existing.dependsOnOpId,
+    });
     return;
   }
 
@@ -232,7 +237,15 @@ async function enqueueTimeEntry(
     entityId: runId,
     body,
     optimisticPatch,
+    dependsOnOpId,
   });
+}
+
+async function resolvePendingRunCreateOpId(runId: string): Promise<string | undefined> {
+  if (!runId.startsWith("offline-run-")) return undefined;
+  const create = (await syncQueue.listByEntityId(runId))
+    .find((op) => op.opType === "RUN_CREATE" && op.status !== "uploading");
+  return create?.id;
 }
 
 function isOfflineNetworkError(error: unknown): boolean {
@@ -406,6 +419,14 @@ function parseRunIssues(issuesJson: string | undefined): RunIssue[] {
   }
 }
 
+export function assertNoBlockingIssuesForComplete(issuesJson: string): void {
+  const blockingCount = parseRunIssues(issuesJson)
+    .filter((issue) => issue.isBlocking && !issue.resolved).length;
+  if (blockingCount > 0) {
+    throw new Error(`Cannot complete: ${blockingCount} blocking issue(s) must be resolved first.`);
+  }
+}
+
 /** Matches server finalized signature check (AssetWorkflowRunsController). */
 export function isRunSignatureFinalized(
   run: Pick<AssetWorkflowRun, "signatureStatus" | "customerSignedAt">,
@@ -570,13 +591,15 @@ async function listPendingSignaturesLocalImpl(userId?: string): Promise<PendingS
 async function enqueueRunMutation(
   runId: string,
   input: {
-    opType: "RUN_UPDATE" | "RUN_COMPLETE" | "STEP_RESULTS";
+    opType: "RUN_UPDATE" | "RUN_COMPLETE" | "STEP_RESULTS" | "ISSUE_UPDATE";
     method: "PUT" | "POST" | "PATCH";
     url: string;
     body: Record<string, unknown>;
     optimisticPatch: Record<string, unknown>;
+    dependsOnOpId?: string;
   },
 ): Promise<void> {
+  const dependsOnOpId = input.dependsOnOpId ?? await resolvePendingRunCreateOpId(runId);
   const existing = (await syncQueue.listByEntityId(runId))
     .filter((op) => op.opType === input.opType && op.url === input.url && op.method === input.method)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
@@ -585,6 +608,7 @@ async function enqueueRunMutation(
     await syncQueue.updateQueuedOp(existing.id, {
       body: input.body,
       optimisticPatch: input.optimisticPatch,
+      dependsOnOpId: dependsOnOpId ?? existing.dependsOnOpId,
     });
     return;
   }
@@ -597,6 +621,7 @@ async function enqueueRunMutation(
     entityId: runId,
     body: input.body,
     optimisticPatch: input.optimisticPatch,
+    dependsOnOpId,
   });
 }
 
@@ -1157,6 +1182,8 @@ export const assetWorkflowRunService = {
       const cachedRun = await getCachedRun(runId);
       if (!cachedRun) throw error;
 
+      assertNoBlockingIssuesForComplete(issuesJson);
+
       const now = new Date().toISOString();
       const offlineRun: OfflineRun = {
         ...cachedRun,
@@ -1270,26 +1297,13 @@ export const assetWorkflowRunService = {
         offlineRun.assetId,
         deriveOfflineAssetStatusFromRun(offlineRun),
       );
-      const existing = (await syncQueue.listByEntityId(resolvedRunId))
-        .filter((op) => op.opType === "ISSUE_UPDATE" && op.url === `/asset-workflow-runs/${resolvedRunId}/issues`)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-
-      if (existing && existing.status !== "uploading") {
-        await syncQueue.updateQueuedOp(existing.id, {
-          body,
-          optimisticPatch: { issuesJson, updatedAt: now },
-        });
-      } else {
-        await syncQueue.enqueue({
-          opType: "ISSUE_UPDATE",
-          url: `/asset-workflow-runs/${resolvedRunId}/issues`,
-          method: "PATCH",
-          entityType: "workflow-run",
-          entityId: resolvedRunId,
-          body,
-          optimisticPatch: { issuesJson, updatedAt: now },
-        });
-      }
+      await enqueueRunMutation(resolvedRunId, {
+        opType: "ISSUE_UPDATE",
+        method: "PATCH",
+        url: `/asset-workflow-runs/${resolvedRunId}/issues`,
+        body,
+        optimisticPatch: { issuesJson, updatedAt: now },
+      });
       window.dispatchEvent(new Event("repo:issues:updated"));
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));

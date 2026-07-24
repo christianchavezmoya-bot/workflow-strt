@@ -357,6 +357,26 @@ export function calcNextRetryAt(retryCount: number): string {
   return new Date(Date.now() + jitterMs(delay)).toISOString();
 }
 
+/** Clear backoff schedules so a reconnect can flush immediately. */
+export async function pendingResetRetrySchedule(): Promise<void> {
+  try {
+    const db = await getDB();
+    const all = await pendingGetAll();
+    await Promise.all(
+      all
+        .filter((item) => item.status === "failed" || item.nextRetryAt)
+        .map((item) => db.put("pending_actions", {
+          ...item,
+          status: "pending",
+          nextRetryAt: undefined,
+        })),
+    );
+    window.dispatchEvent(new Event("sync-pending-changed"));
+  } catch {
+    // ignore
+  }
+}
+
 /** Get only actions that are due for retry right now (no nextRetryAt, or it has passed). */
 export async function pendingGetDue(): Promise<PendingAction[]> {
   try {

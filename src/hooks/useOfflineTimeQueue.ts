@@ -1,71 +1,40 @@
 /**
- * Offline-resilient time tracking queue.
+ * Offline-resilient time tracking for the workflow runner.
  *
- * When the device is offline (or the API call fails), actions are stored in
- * localStorage with the exact timestamp they occurred. When connectivity
- * returns, they are replayed in order against the server — so the resulting
- * time entries are accurate regardless of when the sync happens.
- *
- * Usage:
- *   const { pendingCount, syncing, isOnline, queueOrSend } = useOfflineTimeQueue({ runId, onSynced });
- *   const updated = await queueOrSend("StartDowntime", "Waiting for access");
- *   if (updated) syncFromServer(updated);   // online — authoritative data
- *   else         applyOptimistic(action);   // queued — update UI locally
+ * Delegates to assetWorkflowRunService.trackTimeEntry, which applies optimistic
+ * local run updates and enqueues TIME_ENTRY ops in the unified syncQueue
+ * (IndexedDB). Pending count reflects syncQueue entries for the active run.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { assetWorkflowRunService } from "../services/assetWorkflowRunService";
+import syncQueue from "../services/syncQueue";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 
 export type TrackAction = "StartProductive" | "ResumeProductive" | "StartDowntime" | "StopDowntime" | "StopAll";
 
-interface QueuedAction {
-  /** Unique ID for deduplication. */
-  id: string;
-  runId: string;
-  action: TrackAction;
-  reason?: string;
-  /** The real wall-clock time the user performed the action — sent to the
-   *  server as StartedAtUtc so entries are accurate even when replayed later. */
-  startedAtUtc: string;
-}
-
-const QUEUE_KEY = "commtrac_time_queue_v1";
-
-function readQueue(): QueuedAction[] {
-  try {
-    const raw = localStorage.getItem(QUEUE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw) as QueuedAction[];
-  } catch { return []; }
-}
-
-function writeQueue(q: QueuedAction[]): void {
-  try {
-    localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
-  } catch { /* storage quota — ignore */ }
-}
+const LEGACY_QUEUE_KEY = "commtrac_time_queue_v1";
 
 interface Options {
   runId: string | null;
-  /** Called with the latest server run after a successful flush. */
-  onSynced: (updated: AssetWorkflowRun) => void;
+  /** Called with the latest run after a successful server sync (optional). */
+  onSynced?: (updated: AssetWorkflowRun) => void;
 }
 
 export interface OfflineQueueState {
-  /** How many actions are waiting to be synced for the current run. */
   pendingCount: number;
-  /** True while the queue is being flushed to the server. */
   syncing: boolean;
-  /** Current navigator.onLine value (reactive). */
   isOnline: boolean;
-  /**
-   * Try to send the action now; if offline/failed, queue it.
-   * Returns the updated run on success, null if queued.
-   */
   queueOrSend: (action: TrackAction, reason?: string) => Promise<AssetWorkflowRun | null>;
-  /** Manually trigger a flush (e.g., on focus / visibility change). */
+  /** Request a global sync flush (e.g. before RUN_COMPLETE). */
   flush: () => Promise<void>;
+}
+
+async function countPendingTimeEntries(runId: string): Promise<number> {
+  const ops = await syncQueue.listByEntityId(runId);
+  return ops.filter(
+    (op) => op.opType === "TIME_ENTRY" && (op.status === "pending" || op.status === "failed"),
+  ).length;
 }
 
 export function useOfflineTimeQueue({ runId, onSynced }: Options): OfflineQueueState {
@@ -73,58 +42,38 @@ export function useOfflineTimeQueue({ runId, onSynced }: Options): OfflineQueueS
   const [syncing, setSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
 
-  // Stable refs so callbacks never go stale
   const runIdRef = useRef(runId);
   const onSyncedRef = useRef(onSynced);
-  const syncingRef = useRef(false);
   runIdRef.current = runId;
   onSyncedRef.current = onSynced;
 
-  function refreshCount() {
-    const count = readQueue().filter((q) => q.runId === runIdRef.current).length;
-    setPendingCount(count);
-  }
-
-  // Stable flush — uses refs, safe in event listeners and effects
-  const flush = useCallback(async (): Promise<void> => {
+  const refreshCount = useCallback(async () => {
     const rid = runIdRef.current;
-    if (!rid || syncingRef.current) return;
-
-    const mine = readQueue().filter((q) => q.runId === rid);
-    if (mine.length === 0) return;
-
-    syncingRef.current = true;
-    setSyncing(true);
-
-    let lastUpdated: AssetWorkflowRun | null = null;
-
-    for (const item of mine) {
-      try {
-        lastUpdated = await assetWorkflowRunService.trackTimeEntry(
-          item.runId,
-          item.action,
-          item.reason,
-          item.startedAtUtc,   // <-- replay with the original timestamp
-        );
-        // Success: drop this item from queue
-        writeQueue(readQueue().filter((q) => q.id !== item.id));
-        refreshCount();
-      } catch {
-        // Still offline or server error — stop and retry next time
-        break;
-      }
+    if (!rid) {
+      setPendingCount(0);
+      return;
     }
+    setPendingCount(await countPendingTimeEntries(rid));
+  }, []);
 
-    syncingRef.current = false;
-    setSyncing(false);
-    if (lastUpdated) onSyncedRef.current(lastUpdated);
-  }, []); // stable — everything via refs
+  useEffect(() => {
+    try {
+      localStorage.removeItem(LEGACY_QUEUE_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
 
-  // React to online/offline events
+  useEffect(() => {
+    void refreshCount();
+    const handler = () => void refreshCount();
+    window.addEventListener("sync-pending-changed", handler);
+    return () => window.removeEventListener("sync-pending-changed", handler);
+  }, [runId, refreshCount]);
+
   useEffect(() => {
     function handleOnline() {
       setIsOnline(true);
-      void flush();
     }
     function handleOffline() {
       setIsOnline(false);
@@ -135,24 +84,11 @@ export function useOfflineTimeQueue({ runId, onSynced }: Options): OfflineQueueS
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [flush]);
+  }, []);
 
-  // Also flush on page/tab becoming visible (catches phone lock/unlock)
-  useEffect(() => {
-    function handleVisibility() {
-      if (document.visibilityState === "visible" && navigator.onLine) {
-        void flush();
-      }
-    }
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [flush]);
-
-  // Flush when runId becomes available (app resumed with active run)
-  useEffect(() => {
-    refreshCount();
-    if (runId && navigator.onLine) void flush();
-  }, [runId, flush]);
+  const flush = useCallback(async (): Promise<void> => {
+    window.dispatchEvent(new Event("sync-request-flush"));
+  }, []);
 
   const queueOrSend = useCallback(async (
     action: TrackAction,
@@ -162,27 +98,29 @@ export function useOfflineTimeQueue({ runId, onSynced }: Options): OfflineQueueS
     if (!rid) return null;
 
     const startedAtUtc = new Date().toISOString();
-
-    if (navigator.onLine) {
-      try {
-        const updated = await assetWorkflowRunService.trackTimeEntry(rid, action, reason, startedAtUtc);
-        return updated;
-      } catch {
-        // Network error despite onLine — fall through to queue
-      }
+    try {
+      const updated = await assetWorkflowRunService.trackTimeEntry(
+        rid,
+        action,
+        reason,
+        startedAtUtc,
+      );
+      void refreshCount();
+      return updated;
+    } catch {
+      return null;
     }
+  }, [refreshCount]);
 
-    // Offline path: persist and return null
-    const item: QueuedAction = {
-      id: crypto.randomUUID(),
-      runId: rid,
-      action,
-      reason,
-      startedAtUtc,
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ run?: AssetWorkflowRun }>).detail;
+      if (detail?.run && detail.run.id === runIdRef.current) {
+        onSyncedRef.current?.(detail.run);
+      }
     };
-    writeQueue([...readQueue(), item]);
-    refreshCount();
-    return null;
+    window.addEventListener("workflow-run-synced", handler);
+    return () => window.removeEventListener("workflow-run-synced", handler);
   }, []);
 
   return { pendingCount, syncing, isOnline, queueOrSend, flush };

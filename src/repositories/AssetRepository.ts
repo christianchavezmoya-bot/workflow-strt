@@ -9,9 +9,9 @@ import {
   entityReplaceAssetsByProduct,
   entityReplaceAssetsByProject,
   entityReplaceIssuesForAsset,
-  pendingAdd,
   syncMetaSet,
 } from "../services/localDB";
+import syncQueue from "../services/syncQueue";
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import { isMobileNativePlatform } from "../utils/platform";
@@ -175,15 +175,17 @@ export const AssetRepository = {
       return asset;
     } catch {
       const base = await findLocalAsset(id);
-      await pendingAdd({
-        id: crypto.randomUUID(),
+      await syncQueue.enqueue({
+        opType: "ASSET_UPDATE",
         url: `/project-assets/${id}`,
         method: "PUT",
         body: patch,
         entityType: "asset",
         entityId: id,
         optimisticPatch: patch as Record<string, unknown>,
-        createdAt: new Date().toISOString(),
+        snapshotUpdatedAt: typeof (patch as { updatedAt?: string }).updatedAt === "string"
+          ? (patch as { updatedAt?: string }).updatedAt
+          : base?.updatedAt,
       });
 
       if (!base) {

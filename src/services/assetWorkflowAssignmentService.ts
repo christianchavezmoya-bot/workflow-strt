@@ -1,7 +1,8 @@
 import axios from "axios";
 import api from "./api";
 import type { WorkflowAssignment } from "../types/workflowType";
-import { pendingAdd } from "./localDB";
+import { pendingGetAll } from "./localDB";
+import syncQueue from "./syncQueue";
 import { isMobileNativePlatform } from "../utils/platform";
 import { invalidateWebCache } from "./webFreshCache";
 import { WorkflowAssignmentRepository } from "../repositories/WorkflowAssignmentRepository";
@@ -67,15 +68,14 @@ export const assetWorkflowAssignmentService = {
     } catch (error) {
       // 3. Offline network error — queue the POST for later sync.
       if (axios.isAxiosError(error) && !error.response) {
-        await pendingAdd({
-          id: crypto.randomUUID(),
+        await syncQueue.enqueue({
+          opType: "WORKFLOW_ASSIGNMENT_CREATE",
           url: "/asset-workflow-assignments",
           method: "POST",
           body: { assetId, workflowConfigId, workflowTypeId },
           entityType: "workflowAssignment",
           entityId: tempId,
           optimisticPatch: { assetId, workflowConfigId, workflowTypeId } as unknown as Record<string, unknown>,
-          createdAt: new Date().toISOString(),
         });
         return optimistic;
       }
@@ -104,15 +104,13 @@ export const assetWorkflowAssignmentService = {
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 404) return;
       if (axios.isAxiosError(error) && !error.response) {
-        await pendingAdd({
-          id: crypto.randomUUID(),
+        await syncQueue.enqueue({
+          opType: "WORKFLOW_ASSIGNMENT_DELETE",
           url: `/asset-workflow-assignments/${id}`,
           method: "DELETE",
-          body: undefined,
           entityType: "workflowAssignment",
           entityId: id,
           optimisticPatch: {},
-          createdAt: new Date().toISOString(),
         });
         return;
       }

@@ -503,25 +503,8 @@ export default function WorkOrderRunner({
     try {
       const updated = await queueOrSend(action, reason);
       if (updated) {
-        // Online â€" sync from authoritative server response
         setActiveRun(updated);
         syncRunTimeState(updated);
-      } else {
-        // Queued (offline) â€" apply optimistic UI state immediately
-        const nowIso = new Date().toISOString();
-        if (action === "StartDowntime") {
-          setProductiveSecondsBase(productiveSecondsLive);
-          setTrackingCategory("downtime");
-          setTrackingStartedAt(nowIso);
-        } else if (action === "StopDowntime") {
-          setDowntimeSecondsBase(downtimeSecondsLive);
-          setTrackingCategory(null);
-          setTrackingStartedAt(null);
-        } else if (action === "ResumeProductive") {
-          setDowntimeSecondsBase(downtimeSecondsLive);
-          setTrackingCategory("productive");
-          setTrackingStartedAt(nowIso);
-        }
       }
       if (action !== "StartDowntime") setDowntimeReason("");
     } catch {
@@ -606,16 +589,9 @@ export default function WorkOrderRunner({
 
   async function handlePause() {
     if (activeRunId && isRealRun) {
-      // Route StopAll through the offline queue - identical to StartDowntime/ResumeProductive.
-      // Online: sends immediately, syncs time state from server response.
-      // Offline: queues for replay with the original timestamp; optimistically stops the clock.
       const updated = await queueOrSend("StopAll");
       if (updated) {
         syncRunTimeState(updated);
-      } else {
-        // Queued (offline path) - stop the clock in the UI immediately
-        setTrackingCategory(null);
-        setTrackingStartedAt(null);
       }
     }
     await autosaveProgress(undefined, undefined, "Paused");

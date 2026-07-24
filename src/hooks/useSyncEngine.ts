@@ -19,7 +19,6 @@ import api from "../services/api";
 import {
   entityGetAsset,
   entityPutAsset,
-  pendingAdd,
   pendingCount,
   pendingGetByEntityId,
   pendingGetAll,
@@ -29,6 +28,7 @@ import {
   pendingClearConflict,
   pendingGetConflicted,
   pendingRemove,
+  pendingResetRetrySchedule,
   pendingSetStatus,
   syncMetaSet,
   type PendingAction,
@@ -39,7 +39,7 @@ import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { SignatureEvent } from "../types/signature";
 import { mediaStore } from "../services/mediaStore";
-import syncQueue from "../services/syncQueue";
+import syncQueue, { type SyncOpType } from "../services/syncQueue";
 import {
   removeCachedLinkById,
   replaceCachedLink,
@@ -119,7 +119,21 @@ export interface QueueOrSendOpts {
   entityType: string;
   entityId: string;
   optimisticPatch?: Record<string, unknown>;
+  opType: SyncOpType;
 }
+
+function extractServerErrorMessage(error: unknown, fallback: string): string {
+  const data = (error as { response?: { data?: { message?: string } } }).response?.data;
+  if (typeof data?.message === "string" && data.message.trim()) return data.message;
+  return fallback;
+}
+
+async function reconnectAndFlush(): Promise<void> {
+  await pendingResetRetrySchedule();
+  void flushRef.current?.();
+}
+
+const flushRef = { current: null as (() => Promise<void>) | null };
 
 // ── Singleton flush lock so multiple hook instances don't double-flush ────────
 let _flushing = false;
@@ -590,10 +604,17 @@ export function useSyncEngine(): SyncState {
             // issues). This is NOT "malformed/deleted" — it's a rejection the user
             // must see, and dependent ops (signatures after a rejected complete)
             // must not proceed against a run the server never completed.
+            const rejectMessage = extractServerErrorMessage(e, `Server rejected (${httpStatus})`);
             await pendingMarkConflict(action.id);
-            await markRunSyncFailed(action.entityId, `Server rejected (${httpStatus})`);
+            await markRunSyncFailed(action.entityId, rejectMessage);
             window.dispatchEvent(new CustomEvent("sync-conflict-detected", {
-              detail: { actionId: action.id, entityId: action.entityId, entityType: action.entityType, httpStatus },
+              detail: {
+                actionId: action.id,
+                entityId: action.entityId,
+                entityType: action.entityType,
+                httpStatus,
+                message: rejectMessage,
+              },
             }));
             droppedRunEntityIds.add(action.entityId);
             anyError = true;
@@ -652,6 +673,8 @@ export function useSyncEngine(): SyncState {
     await scheduleRetryRef.current?.();
   }, [refreshPending, setConnectivityState]);
 
+  flushRef.current = flush;
+
   // ── Scheduled retry timer ─────────────────────────────────────────────────
   const scheduleRetry = useCallback(async () => {
     // Don't schedule retry timers while offline — the connectivity-restored
@@ -677,7 +700,7 @@ export function useSyncEngine(): SyncState {
     const handleOnline  = () => {
       setConnectivityUnlessTokenExpired("online");
       if (isMobileNativePlatform()) pingNow();
-      void flush();
+      void reconnectAndFlush();
     };
     const handleOffline = () => setConnectivityState("offline");
     window.addEventListener("online",  handleOnline);
@@ -699,7 +722,7 @@ export function useSyncEngine(): SyncState {
       if (status.connected) {
         setConnectivityUnlessTokenExpired("online");
         if (isMobileNativePlatform()) pingNow();
-        void flush();
+        void reconnectAndFlush();
       } else {
         setConnectivityState("offline");
       }
@@ -724,7 +747,7 @@ export function useSyncEngine(): SyncState {
       pingNow();
       if (hasNetworkSignal()) {
         setConnectivityUnlessTokenExpired("online");
-        void flush();
+        void reconnectAndFlush();
       } else {
         setConnectivityState("offline");
       }
@@ -763,13 +786,13 @@ export function useSyncEngine(): SyncState {
     const handleReachable   = () => {
       setConnectivityState("online");
       setLastSyncAt(new Date());
-      void flush();
+      void reconnectAndFlush();
     };
     const handleAuthError = () => setConnectivityState("token-expired");
     const handleAuthRecovered = () => {
       setConnectivityState("online");
       setLastSyncAt(new Date());
-      void flush();
+      void reconnectAndFlush();
     };
 
     window.addEventListener("api-serving-cache",        handleUnreachable);
@@ -813,7 +836,7 @@ export function useSyncEngine(): SyncState {
 
   // ── queueOrSend ───────────────────────────────────────────────────────────
   const queueOrSend = useCallback(async <T>(opts: QueueOrSendOpts): Promise<T | null> => {
-    const { url, method, body, entityType, entityId, optimisticPatch = {} } = opts;
+    const { url, method, body, entityType, entityId, optimisticPatch = {}, opType } = opts;
 
     if (hasNetworkSignal()) {
       try {
@@ -827,27 +850,29 @@ export function useSyncEngine(): SyncState {
       }
     }
 
-    // Offline path: store in IndexedDB and signal optimistic update.
-    // Capture snapshotUpdatedAt from body so conflict detection can compare later.
     const bodyObj = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
     const snapshotUpdatedAt =
       typeof bodyObj["updatedAt"] === "string" ? bodyObj["updatedAt"] : undefined;
 
-    const action: Omit<PendingAction, "retries" | "status"> = {
-      id: crypto.randomUUID(),
+    await syncQueue.enqueue({
+      opType,
       url,
       method,
       body,
       entityType,
       entityId,
       optimisticPatch,
-      createdAt: new Date().toISOString(),
       snapshotUpdatedAt,
-    };
-    await pendingAdd(action);
+    });
     await refreshPending();
     return null;
   }, [refreshPending]);
+
+  useEffect(() => {
+    const handler = () => void reconnectAndFlush();
+    window.addEventListener("sync-request-flush", handler);
+    return () => window.removeEventListener("sync-request-flush", handler);
+  }, [flush]);
 
   // ── Conflict resolvers ────────────────────────────────────────────────────
   const resolveConflictKeep = useCallback(async (actionId: string) => {

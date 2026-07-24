@@ -2,7 +2,8 @@ import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 import type { Project } from "../types/project";
-import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingAdd, pendingGetAll, referenceDataGet } from "./localDB";
+import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingGetAll, referenceDataGet } from "./localDB";
+import syncQueue from "./syncQueue";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
@@ -377,15 +378,13 @@ export const projectAssetService = {
       // No response = network unreachable - delete locally and queue for server
       if (axios.isAxiosError(error) && !error.response) {
         await entityDeleteAsset(id);
-        await pendingAdd({
-          id: crypto.randomUUID(),
+        await syncQueue.enqueue({
+          opType: "ASSET_DELETE",
           url: `/project-assets/${id}`,
           method: "DELETE",
-          body: undefined,
           entityType: "asset",
           entityId: id,
           optimisticPatch: {},
-          createdAt: new Date().toISOString(),
         });
         return;
       }

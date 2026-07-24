@@ -137,6 +137,10 @@ export const signatureService = {
           optimisticPatch: { signerRole: payload.signerRole, signedAtUtc: now },
         });
       } else {
+        const dependsOnOpId = (await syncQueue.listByEntityId(resolvedRunId))
+          .filter((op) => op.opType === "RUN_COMPLETE" && op.status !== "uploading")
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.id;
+
         await syncQueue.enqueue({
           opType: "SIGNATURE_SUBMIT",
           url: `/signature-events?runId=${encodeURIComponent(resolvedRunId)}`,
@@ -145,6 +149,7 @@ export const signatureService = {
           entityId: resolvedRunId,
           body: queuedPayload,
           optimisticPatch: { signerRole: payload.signerRole, signedAtUtc: now },
+          dependsOnOpId,
         });
       }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertNoBlockingIssuesForComplete,
   deriveOfflineAssetStatusFromRun,
   isRunSignatureFinalized,
 } from "./assetWorkflowRunService";
@@ -56,5 +57,21 @@ describe("isRunSignatureFinalized", () => {
     expect(isRunSignatureFinalized({ signatureStatus: "PendingCustomer", customerSignedAt: "2026-01-01T00:00:00.000Z" })).toBe(true);
     expect(isRunSignatureFinalized({ signatureStatus: "Signed" })).toBe(true);
     expect(isRunSignatureFinalized({ signatureStatus: "PendingInstaller" })).toBe(false);
+  });
+});
+
+describe("assertNoBlockingIssuesForComplete", () => {
+  it("throws when unresolved blocking issues remain", () => {
+    const issues = JSON.stringify([
+      { id: "1", description: "block", issueType: "blocking", severity: "high", isBlocking: true, resolved: false, reportedAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+    expect(() => assertNoBlockingIssuesForComplete(issues)).toThrow(/blocking issue/);
+  });
+
+  it("passes when blocking issues are resolved", () => {
+    const issues = JSON.stringify([
+      { id: "1", description: "fixed", issueType: "blocking", severity: "high", isBlocking: true, resolved: true, reportedAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+    expect(() => assertNoBlockingIssuesForComplete(issues)).not.toThrow();
   });
 });
