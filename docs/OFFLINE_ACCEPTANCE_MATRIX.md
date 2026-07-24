@@ -4,6 +4,8 @@ Record results on a **physical device** before each native app release. Attach a
 
 **Automated CI** covers smoke, login, and offline-open perf contract (`npm run release-gates`). This matrix covers scenarios that still require manual native QA.
 
+**Mac agent:** copy-paste instructions in [`IOS_PRE_MERGE_ACCEPTANCE_PROMPT.md`](./IOS_PRE_MERGE_ACCEPTANCE_PROMPT.md).
+
 Related: [`OFFLINE_DEVICE_MEASUREMENT.md`](./OFFLINE_DEVICE_MEASUREMENT.md) (p95 resume latency), [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md) Layer C.
 
 ---
