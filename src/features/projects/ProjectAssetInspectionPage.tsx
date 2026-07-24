@@ -11,17 +11,24 @@ import { workflowConfigService } from "../../services/workflowConfigService";
 import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 import type { Project } from "../../types/project";
 import type { ProjectAsset } from "../../types/projectAsset";
+import type { Workflow } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
-import { parseWorkflowConfigToWorkflow } from "../../utils/workflowConfigParser";
+import { isInspectionWorkflowConfig } from "../../utils/inspectionWorkflow";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
-import { loadWorkflowOpenPayload } from "../../services/workflowOpenService";
+import {
+  loadWorkflowOpenPayload,
+  refreshWorkflowOpenDataInBackground,
+  OFFLINE_CONFIG_MISSING_MESSAGE,
+  isOfflineConfigMissingContext,
+  retryOfflineDownload,
+} from "../../services/workflowOpenService";
+import { isMobileNativePlatform } from "../../utils/platform";
 import WorkflowRunHistoryDialog from "../installations/WorkflowRunHistoryDialog";
 import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import ProjectInspectionInboxPage from "./ProjectInspectionInboxPage";
 
-function isInspectionConfig(config: WorkflowConfig) {
-  const normalized = (config.configType ?? "").trim().toLowerCase();
-  return normalized === "inspection" || normalized === "wftype-inspection";
+function isResumableInspectionRun(run: AssetWorkflowRun): boolean {
+  return !run.isLocked && (run.status === "InProgress" || run.status === "Paused");
 }
 
 export default function ProjectAssetInspectionPage() {
@@ -36,11 +43,13 @@ export default function ProjectAssetInspectionPage() {
   const [selectedConfigId, setSelectedConfigId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [runnerOpen, setRunnerOpen] = useState(false);
+  const [runnerWorkflow, setRunnerWorkflow] = useState<Workflow | null>(null);
   const [runnerConfig, setRunnerConfig] = useState<WorkflowConfig | null>(null);
   const [runHistoryOpen, setRunHistoryOpen] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
 
-  async function load() {
+  async function load(options?: { background?: boolean }) {
     if (!projectId || !assetId) return;
     try {
       const [loadedProject, loadedAsset] = await Promise.all([
@@ -53,10 +62,12 @@ export default function ProjectAssetInspectionPage() {
       }
 
       const [loadedRuns, productConfigs] = await Promise.all([
-        projectInspectionRunService.list(projectId, assetId).catch(() => []),
+        isMobileNativePlatform()
+          ? projectInspectionRunService.listLocalFirst(projectId, assetId)
+          : projectInspectionRunService.list(projectId, assetId).catch(() => []),
         workflowConfigService.listByProduct(loadedAsset.productId, "Published").catch(() => []),
       ]);
-      const inspectionConfigs = productConfigs.filter(isInspectionConfig);
+      const inspectionConfigs = productConfigs.filter(isInspectionWorkflowConfig);
 
       setProject(loadedProject);
       setAsset(loadedAsset);
@@ -64,8 +75,17 @@ export default function ProjectAssetInspectionPage() {
       setConfigs(inspectionConfigs);
       setSelectedConfigId((current) => current || inspectionConfigs[0]?.id || "");
       setError(null);
+
+      if (isMobileNativePlatform() && !options?.background) {
+        projectInspectionRunService.refreshInBackground(projectId, assetId);
+        void projectInspectionRunService.list(projectId, assetId)
+          .then(setRuns)
+          .catch(() => {});
+      }
     } catch {
-      setError("Unable to load inspection asset details.");
+      if (!options?.background) {
+        setError("Unable to load inspection asset details.");
+      }
     }
   }
 
@@ -79,28 +99,67 @@ export default function ProjectAssetInspectionPage() {
     [configs, selectedConfigId]
   );
 
+  async function openInspectionRunner(
+    configId: string,
+    options?: { runs?: AssetWorkflowRun[]; existingRunId?: string },
+  ): Promise<boolean> {
+    if (!assetId) return false;
+    const payload = await loadWorkflowOpenPayload(configId, { id: assetId }, {
+      configFromMemory: configs.find((config) => config.id === configId) ?? selectedConfig,
+      runs: options?.runs ?? runs,
+      workflowConfigIdForRun: configId,
+      mergeMedia: true,
+    });
+    if (!payload) {
+      if (isOfflineConfigMissingContext()) {
+        setError(OFFLINE_CONFIG_MISSING_MESSAGE);
+        retryOfflineDownload();
+      } else {
+        setError("Unable to load inspection workflow.");
+      }
+      return false;
+    }
+    setRunnerConfig(payload.config);
+    setRunnerWorkflow(payload.workflow);
+    setActiveRunId(options?.existingRunId ?? payload.existingRunId ?? null);
+    setRunnerOpen(true);
+    refreshWorkflowOpenDataInBackground(assetId, configId);
+    return true;
+  }
+
   async function handleStartInspection() {
     if (!projectId || !assetId || !selectedConfig) return;
     markWorkflowOpenTap("inspection-start", selectedConfig.id);
+    setStarting(true);
+    setError(null);
     try {
-      const run = await projectInspectionRunService.create(projectId, assetId, { workflowConfigId: selectedConfig.id });
-      const payload = await loadWorkflowOpenPayload(selectedConfig.id, { id: assetId }, {
-        configFromMemory: selectedConfig,
+      const run = await projectInspectionRunService.create(projectId, assetId, {
+        workflowConfigId: selectedConfig.id,
+        technicianUserId: user?.id,
       });
-      if (!payload) {
-        setError("Unable to load inspection workflow.");
-        return;
-      }
-      setRunnerConfig(payload.config);
-      setRuns((prev) => [run, ...prev.filter((item) => item.id !== run.id)]);
-      setActiveRunId(run.id);
-      setRunnerOpen(true);
+      const nextRuns = [run, ...runs.filter((item) => item.id !== run.id)];
+      setRuns(nextRuns);
+      const opened = await openInspectionRunner(selectedConfig.id, {
+        runs: nextRuns,
+        existingRunId: run.id,
+      });
+      if (!opened) return;
     } catch {
       setError("Unable to start inspection.");
+    } finally {
+      setStarting(false);
     }
   }
 
-  const workflow = selectedConfig ? parseWorkflowConfigToWorkflow(selectedConfig) : null;
+  async function handleResumeInspection(run: AssetWorkflowRun) {
+    markWorkflowOpenTap("inspection-resume", run.workflowConfigId);
+    setError(null);
+    await openInspectionRunner(run.workflowConfigId, {
+      runs,
+      existingRunId: run.id,
+    });
+  }
+
   const runnerTeamMembers = useMemo(() => {
     if (!project?.teamMemberIds?.length) return [];
     return users
@@ -108,7 +167,7 @@ export default function ProjectAssetInspectionPage() {
       .map((item) => ({ id: item.id, fullName: item.fullName }));
   }, [project?.teamMemberIds, users]);
 
-  if (!project || !asset) {
+  if (!asset) {
     return <Typography variant="body2" color="text.secondary">{error || "Loading inspection asset..."}</Typography>;
   }
 
@@ -120,8 +179,14 @@ export default function ProjectAssetInspectionPage() {
             {asset.assetTag || asset.assetName || asset.id} inspections
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            <Link to={`/projects/${project.id}`} style={{ color: "inherit" }}>{project.jobNumber}</Link>
-            {" "}• {project.customerName}
+            {project ? (
+              <>
+                <Link to={`/projects/${project.id}`} style={{ color: "inherit" }}>{project.jobNumber}</Link>
+                {" "}• {project.customerName}
+              </>
+            ) : (
+              "Project details loading…"
+            )}
           </Typography>
         </Box>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
@@ -140,8 +205,12 @@ export default function ProjectAssetInspectionPage() {
               ))}
             </Select>
           </FormControl>
-          <Button variant="contained" onClick={() => void handleStartInspection()} disabled={!selectedConfig}>
-            Create Inspection
+          <Button
+            variant="contained"
+            onClick={() => void handleStartInspection()}
+            disabled={!selectedConfig || starting}
+          >
+            {starting ? "Starting…" : "Create Inspection"}
           </Button>
           <Button
             variant="outlined"
@@ -180,16 +249,27 @@ export default function ProjectAssetInspectionPage() {
                       Started {new Date(run.startedAt).toLocaleString()}
                     </Typography>
                   </Box>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => {
-                      setActiveRunId(run.id);
-                      setRunHistoryOpen(true);
-                    }}
-                  >
-                    Open popup
-                  </Button>
+                  <Stack direction="row" spacing={1}>
+                    {isResumableInspectionRun(run) && (
+                      <Button
+                        size="small"
+                        variant="contained"
+                        onClick={() => void handleResumeInspection(run)}
+                      >
+                        Resume
+                      </Button>
+                    )}
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => {
+                        setActiveRunId(run.id);
+                        setRunHistoryOpen(true);
+                      }}
+                    >
+                      Open popup
+                    </Button>
+                  </Stack>
                 </Stack>
               </Box>
             ))}
@@ -198,13 +278,13 @@ export default function ProjectAssetInspectionPage() {
       </Box>
 
       <ProjectInspectionInboxPage
-        projectId={project.id}
+        projectId={project?.id ?? projectId}
         assetId={asset.id}
         assets={[asset]}
-        onChanged={() => load()}
+        onChanged={() => load({ background: true })}
       />
 
-      {runnerConfig && workflow && (
+      {runnerConfig && runnerWorkflow && (
         <Dialog open={runnerOpen} onClose={() => setRunnerOpen(false)} maxWidth="lg" fullWidth>
           <DialogTitle>Inspection runner</DialogTitle>
           <DialogContent>
@@ -212,17 +292,17 @@ export default function ProjectAssetInspectionPage() {
               open={runnerOpen}
               onClose={() => {
                 setRunnerOpen(false);
-                void load();
+                void load({ background: true });
               }}
-              workflow={workflow}
+              workflow={runnerWorkflow}
               productId={asset.productId}
-              productName={project.jobNumber}
+              productName={project?.jobNumber ?? asset.assetTag ?? "Inspection"}
               projectAssetId={asset.id}
               workflowConfigId={runnerConfig.id}
               existingRunId={activeRunId ?? undefined}
               currentUserName={user.fullName}
               assetTag={asset.assetTag}
-              jobNumber={project.jobNumber}
+              jobNumber={project?.jobNumber}
               teamMembers={runnerTeamMembers}
             />
           </DialogContent>
