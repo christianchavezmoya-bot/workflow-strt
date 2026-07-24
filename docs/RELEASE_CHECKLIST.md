@@ -2,7 +2,7 @@
 
 Use this checklist for **every** production release (web, API, and/or phone). Nothing ships without staging sign-off.
 
-Related docs: `docs/BUG_TRIAGE.md`, `docs/MOBILE_BUILD.md`, `docs/FIELD_RUN_QA_CHECKLIST.md`.
+Related docs: `docs/OFFLINE_FIRST_UX.md`, `docs/OFFLINE_FIRST_IMPLEMENTATION_PLAN.md`, `docs/BUG_TRIAGE.md`, `docs/MOBILE_BUILD.md`, `docs/FIELD_RUN_QA_CHECKLIST.md`.
 
 ---
 
