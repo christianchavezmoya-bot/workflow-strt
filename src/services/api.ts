@@ -153,7 +153,8 @@ api.interceptors.request.use(async (config) => {
   // into and losing a write is worse than delaying one.
   //
   // The thrown error keeps the same shape as a real network error so every
-  // service's `isOfflineNetworkError()` still routes to the offline path.
+  // service's isOfflineNetworkError() (see utils/offlineNetworkError.ts) still
+  // routes to the offline path.
   // Auth calls are exempt — login must keep working to recover.
   const skipBlocking =
     !url.includes("/auth/")

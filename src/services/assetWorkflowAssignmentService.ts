@@ -1,11 +1,11 @@
 import axios from "axios";
 import api from "./api";
 import type { WorkflowAssignment } from "../types/workflowType";
-import { pendingGetAll } from "./localDB";
 import syncQueue from "./syncQueue";
 import { isMobileNativePlatform } from "../utils/platform";
 import { invalidateWebCache } from "./webFreshCache";
 import { WorkflowAssignmentRepository } from "../repositories/WorkflowAssignmentRepository";
+import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 
 export const assetWorkflowAssignmentService = {
   /**
@@ -66,8 +66,7 @@ export const assetWorkflowAssignmentService = {
       } catch { /* non-fatal */ }
       return res.data;
     } catch (error) {
-      // 3. Offline network error — queue the POST for later sync.
-      if (axios.isAxiosError(error) && !error.response) {
+      if (isOfflineNetworkError(error)) {
         await syncQueue.enqueue({
           opType: "WORKFLOW_ASSIGNMENT_CREATE",
           url: "/asset-workflow-assignments",
@@ -103,7 +102,7 @@ export const assetWorkflowAssignmentService = {
       await api.delete(`/asset-workflow-assignments/${id}`);
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 404) return;
-      if (axios.isAxiosError(error) && !error.response) {
+      if (isOfflineNetworkError(error)) {
         await syncQueue.enqueue({
           opType: "WORKFLOW_ASSIGNMENT_DELETE",
           url: `/asset-workflow-assignments/${id}`,

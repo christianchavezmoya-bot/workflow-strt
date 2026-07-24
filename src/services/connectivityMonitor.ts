@@ -51,6 +51,7 @@ function startNativeNetworkTracking(): void {
       // Clear stale negative state before the advisory ping runs. Otherwise the
       // first write after reconnect can still be skipped even though the radio is
       // back and the server may be reachable.
+      resetCircuitBreaker();
       if (currentValue === false) currentValue = null;
       pingNow();
     }
@@ -73,7 +74,17 @@ async function runPingIfForeground() {
   // The /health ping is advisory only. It may confirm reachable, but it must
   // never declare unreachable because it uses a different transport.
   const reachable = await isServerReachable();
-  if (reachable) notify(true);
+  if (reachable) {
+    const wasBlocked = isCircuitOpen() || currentValue === false;
+    resetCircuitBreaker();
+    notify(true);
+    // Unblock axios traffic + sync flush when the health ping succeeds after an
+    // offline stretch. api-server-reachable normally fires from axios success,
+    // but the open circuit prevents any axios request from being attempted.
+    if (wasBlocked && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("api-server-reachable"));
+    }
+  }
 }
 
 function startForegroundTracking() {

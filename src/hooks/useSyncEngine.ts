@@ -60,6 +60,7 @@ import {
   buildSyncAttemptDiagnostics,
   measurePayload,
 } from "../utils/syncDiagnostics";
+import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { markOfflinePerf } from "../utils/offlinePerf";
 import { getSyncOpTimeoutMs } from "../utils/syncPolicy";
 import {
@@ -68,6 +69,8 @@ import {
   replaceLocalWorkInstructionId,
   saveLocalWorkInstruction,
 } from "../services/workInstructionService";
+import { WorkflowAssignmentRepository } from "../repositories/WorkflowAssignmentRepository";
+import type { WorkflowAssignment } from "../types/workflowType";
 import type { WorkInstruction } from "../types/workInstruction";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -149,15 +152,8 @@ function hasNetworkSignal(): boolean {
 }
 
 function isNetworkLikeError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return !hasNetworkSignal();
-  const candidate = error as { response?: unknown; code?: string; message?: string };
-  if (candidate.response) return false;
-  return (
-    !hasNetworkSignal() ||
-    candidate.code === "ECONNABORTED" ||
-    candidate.code === "ERR_NETWORK" ||
-    candidate.message === "Network Error"
-  );
+  if (!hasNetworkSignal()) return true;
+  return isOfflineNetworkError(error);
 }
 
 async function markRunSyncedFromServer(run: AssetWorkflowRun, fallbackRunId: string): Promise<void> {
@@ -361,6 +357,30 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
 
   if (action.opType === "WORK_INSTRUCTION_DELETE") {
     removeLocalWorkInstruction(action.entityId);
+    return;
+  }
+
+  if (action.opType === "WORKFLOW_ASSIGNMENT_CREATE") {
+    const synced = responseData as WorkflowAssignment | undefined;
+    const body = action.body as { assetId?: string } | undefined;
+    const assetId = body?.assetId ?? synced?.assetId;
+    if (synced?.id && assetId) {
+      const current = await WorkflowAssignmentRepository.getLocalByAsset(assetId);
+      await WorkflowAssignmentRepository.replaceByAsset(assetId, [
+        ...current.filter((a) => a.id !== action.entityId && a.id !== synced.id),
+        synced,
+      ]);
+      await syncQueue.replaceEntityId(action.entityId, synced.id);
+      window.dispatchEvent(new CustomEvent("repo:assignments:updated", { detail: { assetId } }));
+    }
+    return;
+  }
+
+  if (action.opType === "WORKFLOW_ASSIGNMENT_DELETE") {
+    const assetId = (action.body as { assetId?: string } | undefined)?.assetId;
+    if (assetId) {
+      window.dispatchEvent(new CustomEvent("repo:assignments:updated", { detail: { assetId } }));
+    }
     return;
   }
 

@@ -12,19 +12,11 @@ import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import type { User } from "../types/user";
 import { shouldSkipRunMutation } from "./connectivityMonitor";
 import { mediaStore } from "./mediaStore";
+import { isOfflineNetworkError as isOfflineNetworkErrorShape } from "../utils/offlineNetworkError";
 
 function isOfflineNetworkError(error: unknown): boolean {
   if (shouldSkipRunMutation()) return true;
-  if (!error || typeof error !== "object") return typeof navigator !== "undefined" && navigator.onLine === false;
-  const candidate = error as { response?: unknown; code?: string; message?: string };
-  if (candidate.response) return false;
-  return (
-    (typeof navigator !== "undefined" && navigator.onLine === false) ||
-    candidate.code === "ECONNABORTED" ||
-    candidate.code === "ERR_NETWORK" ||
-    candidate.message === "Network Error" ||
-    candidate.message === "skip-network-offline"
-  );
+  return isOfflineNetworkErrorShape(error);
 }
 
 async function persistAssetIssuesLocally(asset: ProjectAsset, dirty: boolean): Promise<ProjectAsset> {
@@ -478,7 +470,7 @@ export const projectAssetService = {
         return;
       }
       // No response = network unreachable - delete locally and queue for server
-      if (axios.isAxiosError(error) && !error.response) {
+      if (isOfflineNetworkError(error)) {
         await entityDeleteAsset(id);
         await syncQueue.enqueue({
           opType: "ASSET_DELETE",
