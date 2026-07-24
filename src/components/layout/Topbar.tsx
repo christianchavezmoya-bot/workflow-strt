@@ -1,4 +1,4 @@
-import { Avatar, Badge, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, IconButton, InputAdornment, InputLabel, ListItemIcon, Menu, MenuItem, Popover, Select, Stack, Tab, Tabs, TextField, Tooltip, Typography } from "@mui/material";
+import { Alert, Avatar, Badge, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, IconButton, InputAdornment, InputLabel, ListItemIcon, Menu, MenuItem, Popover, Select, Stack, Tab, Tabs, TextField, Tooltip, Typography } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import SwitchAccountOutlinedIcon from "@mui/icons-material/SwitchAccountOutlined";
 import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
@@ -93,7 +93,7 @@ const Topbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const { notifications, unreadNotifications, loading: notificationsLoading, acknowledge } = useNotificationInbox();
+  const { notifications, unreadNotifications, loading: notificationsLoading, fromCache: notificationsFromCache, acknowledge } = useNotificationInbox();
   const { complexViewActive, recordLogoTap } = useComplexView();
   const { viewMode, toggleViewMode } = useViewMode();
   const { isFavorited, getFavorite, add, remove } = useFavoritesContext();
@@ -573,12 +573,17 @@ const Topbar = () => {
               </Box>
               <Button
                 size="small"
-                disabled={notificationsLoading || unreadNotifications.length === 0}
+                disabled={notificationsLoading || unreadNotifications.length === 0 || notificationsFromCache}
                 onClick={() => void acknowledge()}
               >
                 Acknowledge all
               </Button>
             </Stack>
+            {notificationsFromCache && (
+              <Alert severity="info" sx={{ py: 0.25, fontSize: "0.75rem" }}>
+                Showing cached notifications from your last online session.
+              </Alert>
+            )}
             <Tabs
               value={notificationView}
               onChange={(_, value) => setNotificationView(value)}

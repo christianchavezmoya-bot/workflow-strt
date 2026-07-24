@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import {
+  Alert,
   Box,
   Chip,
   CircularProgress,
@@ -27,6 +28,8 @@ import DragIndicatorOutlinedIcon from "@mui/icons-material/DragIndicatorOutlined
 import { useLocation, useNavigate } from "react-router-dom";
 import { globalSearchService, type GlobalSearchResult, type SearchDocumentPreview } from "../../services/globalSearchService";
 import GlobalSearchDocumentPreview from "./GlobalSearchDocumentPreview";
+import { useOfflineMode } from "../../contexts/OfflineModeContext";
+import { isMobileNativePlatform } from "../../utils/platform";
 
 type Props = {
   open: boolean;
@@ -238,6 +241,8 @@ function applyHighlights(term: string, activeSnippet?: string | null, activeKey?
 const GlobalSearchDialog = ({ open, onClose }: Props) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { isOfflineMode } = useOfflineMode();
+  const searchBlocked = isMobileNativePlatform() && isOfflineMode;
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<GlobalSearchResult[]>([]);
@@ -263,7 +268,7 @@ const GlobalSearchDialog = ({ open, onClose }: Props) => {
   }, [open, location.key, highlightTerm, activeResultSnippet, activeResultKey]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || searchBlocked) return;
     const trimmed = query.trim();
     if (trimmed.length < 2) {
       setResults([]);
@@ -295,7 +300,7 @@ const GlobalSearchDialog = ({ open, onClose }: Props) => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [open, query]);
+  }, [open, query, searchBlocked]);
 
   const filteredResults = useMemo(() => {
     const q = results;
@@ -464,12 +469,19 @@ const GlobalSearchDialog = ({ open, onClose }: Props) => {
 
       <Box sx={{ p: 1.5 }}>
         <Stack spacing={1.25}>
+          {searchBlocked ? (
+            <Alert severity="info">
+              Global search requires a server connection. Browse cached projects and assets from the dashboard while offline.
+            </Alert>
+          ) : null}
+
           <TextField
             autoFocus
             fullWidth
             size="small"
             placeholder="Search projects, documents, workflow, assets..."
             value={query}
+            disabled={searchBlocked}
             onChange={(event) => setQuery(event.target.value)}
             InputProps={{
               startAdornment: (
@@ -520,7 +532,7 @@ const GlobalSearchDialog = ({ open, onClose }: Props) => {
           ) : null}
 
           <Box sx={{ maxHeight: 470, overflowY: "auto", pr: 0.5 }}>
-            {query.trim().length < 2 ? (
+            {searchBlocked ? null : query.trim().length < 2 ? (
               <Typography variant="body2" color="text.secondary">
                 Type at least 2 characters to search.
               </Typography>

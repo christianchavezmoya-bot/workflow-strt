@@ -59,7 +59,8 @@ import { customerService } from "../../services/customerService";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useComplexView } from "../../contexts/ComplexViewContext";
-import { isDesktopLikePlatform } from "../../utils/platform";
+import { useOfflineMode } from "../../contexts/OfflineModeContext";
+import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 
 // ------------------------------------------------------------------
 // Types
@@ -207,6 +208,7 @@ export default function DocumentsPage() {
   const canUploadDocuments = can.documents.upload;
   const canDeleteDocuments = can.documents.delete;
   const { complexViewActive } = useComplexView();
+  const { isOfflineMode } = useOfflineMode();
   // Web always shows full document controls; native keeps them behind Complex View.
   const showComplexControls = isDesktopLikePlatform() || complexViewActive;
   // ---- data -------------------------------------------------------
@@ -228,7 +230,13 @@ export default function DocumentsPage() {
     const raw = localStorage.getItem(LS_FIELDS_KEY);
     return raw ? parseFieldsJson(raw).columnOrder : [...BUILTIN_COL_IDS];
   });
-  const [configLoaded, setConfigLoaded] = useState(false);
+  const [configLoaded, setConfigLoaded] = useState(() => {
+    try {
+      return !!localStorage.getItem(LS_TABS_KEY) || !!localStorage.getItem(LS_FIELDS_KEY);
+    } catch {
+      return false;
+    }
+  });
 
   // ---- relation data (fetched lazily) -----------------------------
   const [relProducts,  setRelProducts]  = useState<{ id: string; name: string }[]>([]);
@@ -314,7 +322,7 @@ export default function DocumentsPage() {
   });
 
   async function loadDocs() {
-    setLoading(true);
+    if (docs.length === 0) setLoading(true);
     try { setDocs(await documentService.getDocuments()); } catch {} finally { setLoading(false); }
   }
 
@@ -828,6 +836,12 @@ export default function DocumentsPage() {
       </Box>
       </Box>
 
+      {isMobileNativePlatform() && isOfflineMode && (
+        <Alert severity="info">
+          Showing cached documents. Files not downloaded during field sync cannot be previewed offline.
+        </Alert>
+      )}
+
       {/* Config loading indicator */}
       {!configLoaded && (
         <Stack direction="row" alignItems="center" spacing={1}>
@@ -862,12 +876,16 @@ export default function DocumentsPage() {
 
       {/* Documents table */}
       <Paper className="glass-card" sx={{ overflow: "hidden" }}>
-        {loading ? (
+        {loading && docs.length === 0 ? (
           <Stack alignItems="center" justifyContent="center" sx={{ p: 6 }}><CircularProgress size={32} /></Stack>
         ) : sortedDocs.length === 0 ? (
           <Box sx={{ p: 3 }}>
             <Alert severity="info">
-              {docs.length === 0 ? "No documents yet. Click \"Add document\" to upload or link one." : "No documents match the current filters."}
+              {docs.length === 0
+                ? (isMobileNativePlatform() && isOfflineMode
+                  ? "No documents cached on this device. Connect to the internet and download field data from Sync Center."
+                  : "No documents yet. Click \"Add document\" to upload or link one.")
+                : "No documents match the current filters."}
             </Alert>
           </Box>
         ) : isPhone ? (

@@ -5,12 +5,16 @@ import { useNavigate } from "react-router-dom";
 import { authService, Session, LoginHistoryEntry } from "../../services/authService";
 import { secureGet, secureSet } from "../../services/secureStorage";
 import { useAuth } from "../../hooks/useAuth";
+import { useOfflineMode } from "../../contexts/OfflineModeContext";
+import { isMobileNativePlatform } from "../../utils/platform";
 import TwoFactorSetup from "../auth/TwoFactorSetup";
 import PasswordField from "../../components/ui/PasswordField";
 
 const ProfileWizard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isOfflineMode } = useOfflineMode();
+  const profileSaveBlocked = isMobileNativePlatform() && isOfflineMode;
   const [fullName, setFullName] = useState(user?.fullName || "");
   const [office, setOffice] = useState(user?.office || "USA");
   const [loading, setLoading] = useState(false);
@@ -111,7 +115,9 @@ const ProfileWizard = () => {
       notifyAuthUserUpdated();
       navigate("/");
     } catch {
-      setError("Unable to save profile.");
+      setError(profileSaveBlocked
+        ? "Profile changes require a connection. Your cached profile is shown below."
+        : "Unable to save profile.");
     } finally {
       setLoading(false);
     }
@@ -251,12 +257,17 @@ const ProfileWizard = () => {
               ))}
             </Select>
           </FormControl>
+          {profileSaveBlocked && (
+            <Alert severity="info" sx={{ py: 0.5 }}>
+              Profile updates sync when you reconnect. Cached values are shown below.
+            </Alert>
+          )}
           {error && (
             <Typography variant="body2" color="error">
               {error}
             </Typography>
           )}
-          <Button variant="contained" onClick={handleSave} disabled={loading}>
+          <Button variant="contained" onClick={handleSave} disabled={loading || profileSaveBlocked}>
             {loading ? "Saving..." : "Save profile"}
           </Button>
         </Stack>

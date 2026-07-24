@@ -37,6 +37,7 @@ interface CachedDocumentFile {
 }
 
 const DOCUMENTS_CACHE_KEY = "documents_v1_all";
+const DOCUMENT_CONFIG_CACHE_KEY = "documents_config_v1";
 const DOCUMENT_FILE_CACHE_PREFIX = "document-file:";
 const DOCUMENT_PREFETCH_CONCURRENCY = 2;
 /** Bootstrap prefetch cap — linked asset PDFs/images only; pending uploads are never evicted. */
@@ -57,6 +58,13 @@ export function hydrateCustomValues(doc: DocumentRecord): DocumentRecord {
 
 export function isBackendDocumentUrl(downloadUrl: string): boolean {
   return /\/api\/documents\/[^/]+\/download(?:\?|$)/.test(downloadUrl);
+}
+
+/** True when a backend-hosted file blob is stored locally (native offline preview). */
+export async function isDocumentFileCached(downloadUrl: string): Promise<boolean> {
+  if (!downloadUrl || !isBackendDocumentUrl(downloadUrl)) return true;
+  const cached = await offlineStore.getCache<CachedDocumentFile>(documentFileCacheKey(downloadUrl));
+  return !!cached?.storedValue;
 }
 
 function documentFileCacheKey(downloadUrl: string): string {
@@ -352,8 +360,24 @@ export const documentService = {
   // ── Document UI config (tabs + custom fields) ─────────────────────────────
 
   async getDocumentConfig(): Promise<DocumentConfig> {
-    const response = await api.get<DocumentConfig>("/documents/config");
-    return response.data;
+    if (!isMobileNativePlatform()) {
+      const response = await api.get<DocumentConfig>("/documents/config");
+      return response.data;
+    }
+
+    const cached = await cacheGet<DocumentConfig>(DOCUMENT_CONFIG_CACHE_KEY);
+
+    if (!shouldSkipBlockingFetch()) {
+      try {
+        const response = await api.get<DocumentConfig>("/documents/config");
+        await cachePut(DOCUMENT_CONFIG_CACHE_KEY, response.data);
+        return response.data;
+      } catch {
+        if (cached) return cached;
+      }
+    }
+
+    return cached ?? { tabsJson: "[]", fieldsJson: "[]" };
   },
 
   async saveDocumentConfig(config: DocumentConfig): Promise<void> {

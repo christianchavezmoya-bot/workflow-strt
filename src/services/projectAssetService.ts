@@ -575,10 +575,27 @@ export const projectAssetService = {
   },
 
   async myProjectIds(): Promise<string[]> {
+    if (isMobileNativePlatform() && shouldSkipBlockingFetch()) {
+      try {
+        const cached = await entityGetAllAssets() as ProjectAsset[];
+        return Array.from(new Set(cached.map((a) => a.projectId).filter(Boolean)));
+      } catch {
+        return [];
+      }
+    }
+
     try {
       const res = await api.get<string[]>("/project-assets/my-project-ids");
       return res.data;
     } catch {
+      if (isMobileNativePlatform()) {
+        try {
+          const cached = await entityGetAllAssets() as ProjectAsset[];
+          return Array.from(new Set(cached.map((a) => a.projectId).filter(Boolean)));
+        } catch {
+          return [];
+        }
+      }
       return [];
     }
   },

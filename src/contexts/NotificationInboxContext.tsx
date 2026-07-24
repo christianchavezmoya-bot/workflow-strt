@@ -1,5 +1,6 @@
 ﻿import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { notificationService } from "../services/notificationService";
+import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { useAuth } from "../hooks/useAuth";
 import type { AppNotification } from "../types/notification";
 
@@ -32,6 +33,7 @@ type NotificationInboxContextValue = {
   unreadNotifications: AppNotification[];
   bannerNotification: AppNotification | null;
   loading: boolean;
+  fromCache: boolean;
   acknowledge: (notificationIds?: string[]) => Promise<void>;
   dismissBanner: () => void;
   refresh: () => Promise<void>;
@@ -43,6 +45,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
   const { user, isAuthenticated } = useAuth();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fromCache, setFromCache] = useState(false);
   const [bannerNotification, setBannerNotification] = useState<AppNotification | null>(null);
   const seenUnreadIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
@@ -66,13 +69,16 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       setBannerNotification(null);
       initializedRef.current = false;
       seenUnreadIdsRef.current = new Set();
+      setFromCache(false);
       return;
     }
 
-    setLoading(true);
+    const offlineRead = shouldSkipBlockingFetch();
+    if (!offlineRead) setLoading(true);
     try {
       const next = await notificationService.list(true, 50);
       setNotifications(next);
+      setFromCache(offlineRead);
 
       const unreadItems = next.filter((n) => !n.isRead);
       const unreadIds = new Set(unreadItems.map((n) => n.id));
@@ -113,6 +119,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       }
     } catch (error) {
       console.error("Notification inbox refresh failed:", error);
+      setFromCache(shouldSkipBlockingFetch());
     } finally {
       setLoading(false);
     }
@@ -130,8 +137,10 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     // Two changes:
     //   1) Debounce the EVENT-driven triggers so a burst collapses into a single fetch.
     //   2) Pause the 15s interval while the tab is hidden; refresh once on becoming visible.
+    //   3) Skip polling entirely while offline — serve the IndexedDB cache instead.
     let debounceTimer: number | undefined;
     const debouncedRefresh = () => {
+      if (shouldSkipBlockingFetch()) return;
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
         debounceTimer = undefined;
@@ -141,24 +150,33 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
 
     let timer: number | undefined;
     const startPolling = () => {
-      if (timer !== undefined) return;
+      if (timer !== undefined || shouldSkipBlockingFetch()) return;
       timer = window.setInterval(() => { void refresh(); }, 15000);
     };
     const stopPolling = () => {
       if (timer !== undefined) { window.clearInterval(timer); timer = undefined; }
     };
-    // Only poll while the tab is visible - a backgrounded tab does not need to keep
-    // hitting the server every 15s.
-    if (document.visibilityState === "visible") startPolling();
+    // Only poll while the tab is visible and online.
+    if (document.visibilityState === "visible" && !shouldSkipBlockingFetch()) startPolling();
 
     const handleRefreshTrigger = () => { debouncedRefresh(); };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void refresh();     // catch up immediately on return
-        startPolling();
+        if (!shouldSkipBlockingFetch()) {
+          void refresh();
+          startPolling();
+        }
       } else {
         stopPolling();
       }
+    };
+    const handleOfflineModeOnline = () => {
+      void refresh();
+      startPolling();
+    };
+    const handleOfflineModeOffline = () => {
+      stopPolling();
+      void refresh();
     };
 
     window.addEventListener("focus", handleRefreshTrigger);
@@ -166,6 +184,8 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     window.addEventListener("auth-change", handleRefreshTrigger);
     window.addEventListener("auth-user-updated", handleRefreshTrigger);
     window.addEventListener("notifications:refresh", handleRefreshTrigger);
+    window.addEventListener("offline-mode-online", handleOfflineModeOnline);
+    window.addEventListener("offline", handleOfflineModeOffline);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
@@ -176,6 +196,8 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       window.removeEventListener("auth-change", handleRefreshTrigger);
       window.removeEventListener("auth-user-updated", handleRefreshTrigger);
       window.removeEventListener("notifications:refresh", handleRefreshTrigger);
+      window.removeEventListener("offline-mode-online", handleOfflineModeOnline);
+      window.removeEventListener("offline", handleOfflineModeOffline);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [refresh]);
@@ -201,10 +223,11 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     unreadNotifications: notifications.filter((n) => !n.isRead),
     bannerNotification,
     loading,
+    fromCache,
     acknowledge,
     dismissBanner: () => setBannerNotification(null),
     refresh,
-  }), [notifications, bannerNotification, loading, refresh]);
+  }), [notifications, bannerNotification, loading, fromCache, refresh]);
 
   return (
     <NotificationInboxContext.Provider value={value}>

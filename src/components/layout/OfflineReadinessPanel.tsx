@@ -8,10 +8,13 @@ import {
   Button,
   Chip,
   CircularProgress,
+  FormControlLabel,
   Stack,
+  Switch,
   Typography,
 } from "@mui/material";
 import { useCallback, useEffect, useState } from "react";
+import { useOfflineMode } from "../../contexts/OfflineModeContext";
 import {
   offlineBootstrapService,
   type BootstrapStatus,
@@ -28,6 +31,7 @@ function formatWhen(date: Date | null): string {
 }
 
 export default function OfflineReadinessPanel() {
+  const { isManualOffline, isOfflineMode, goOffline, goOnline } = useOfflineMode();
   const [status, setStatus] = useState<BootstrapStatus | null>(null);
   const [retrying, setRetrying] = useState(false);
 
@@ -128,6 +132,22 @@ export default function OfflineReadinessPanel() {
             Connect to Wi‑Fi or cellular and tap Download now to refresh cached projects, workflows, and reference photos.
           </Alert>
         )}
+
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={isManualOffline}
+              onChange={(_, checked) => { checked ? goOffline() : goOnline(); }}
+            />
+          }
+          label={
+            <Typography variant="body2" color="text.secondary">
+              Work offline {isOfflineMode && !isManualOffline ? "(no connection)" : ""}
+            </Typography>
+          }
+          sx={{ ml: 0, alignSelf: "flex-start" }}
+        />
 
         <Button
           variant="outlined"

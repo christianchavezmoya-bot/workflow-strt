@@ -21,6 +21,7 @@ import { isMobileNativePlatform } from "../utils/platform";
 
 interface OfflineModeContextType {
   isOfflineMode: boolean;
+  isManualOffline: boolean;
   serverReachable: boolean | null;
   goOffline: () => void;
   goOnline: () => void;
@@ -108,7 +109,7 @@ export function OfflineModeProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <OfflineModeContext.Provider value={{ isOfflineMode, serverReachable, goOffline, goOnline }}>
+    <OfflineModeContext.Provider value={{ isOfflineMode, isManualOffline: manualOffline, serverReachable, goOffline, goOnline }}>
       {children}
     </OfflineModeContext.Provider>
   );
