@@ -376,22 +376,33 @@ export default function WorkflowRunHistoryDialog({
 
   useEffect(() => {
     if (!open) return;
-    setLoading(true);
     setExpandedRunId(null);
     setExpandedStepResultIds({});
+
+    const applyRuns = (all: AssetWorkflowRun[]) => {
+      const filtered = all
+        .filter((r) => !workflowConfigId || r.workflowConfigId === workflowConfigId)
+        .sort(
+          (a, b) =>
+            (b.runNumber ?? 0) - (a.runNumber ?? 0) ||
+            new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+        );
+      setRuns(filtered);
+      if (filtered.length > 0) setExpandedRunId(filtered[0].id);
+    };
+
+    if (isMobileNativePlatform()) {
+      void assetWorkflowRunService.listLocalByAsset(asset.id)
+        .then((local) => {
+          if (local.length > 0) applyRuns(local);
+        })
+        .catch(() => {});
+    }
+
+    setLoading(true);
     assetWorkflowRunService
       .listByAsset(asset.id)
-      .then((all) => {
-        const filtered = all
-          .filter((r) => !workflowConfigId || r.workflowConfigId === workflowConfigId)
-          .sort(
-            (a, b) =>
-              (b.runNumber ?? 0) - (a.runNumber ?? 0) ||
-              new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
-          );
-        setRuns(filtered);
-        if (filtered.length > 0) setExpandedRunId(filtered[0].id);
-      })
+      .then(applyRuns)
       .finally(() => setLoading(false));
   }, [open, asset.id, workflowConfigId]);
 

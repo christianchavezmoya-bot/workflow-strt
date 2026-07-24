@@ -273,6 +273,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
     }
 
     projectService.getProject(id).then((project) => {
+      if (!project) return;
       reset({
         customerName: project.customerName,
         customerId: project.customerId,

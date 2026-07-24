@@ -26,6 +26,7 @@ import UploadFileIcon from "@mui/icons-material/UploadFile";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { InspectionImport } from "../../types/project";
 import { inspectionImportService } from "../../services/inspectionImportService";
+import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { useAuth } from "../../hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import api from "../../services/api";
@@ -89,13 +90,20 @@ const AssetInspectionDialog = ({ asset, open, onClose }: Props) => {
     if (!asset) return;
     setLoading(true);
     Promise.all([
-      api.get<AssetWorkflowRun[]>("/asset-workflow-runs", {
-        params: { assetId: asset.id, workflowType: "Inspection" },
-      }),
+      assetWorkflowRunService.listByAsset(asset.id).then((allRuns) =>
+        allRuns.map((r) => ({
+          id: r.id,
+          workflowTypeName: "Inspection",
+          status: r.status,
+          startedAt: r.startedAt,
+          completedAt: r.completedAt,
+          assignedTo: r.completedByName,
+        } satisfies AssetWorkflowRun)),
+      ),
       inspectionImportService.list({ assetId: asset.id }),
     ])
-      .then(([runRes, importItems]) => {
-        setRuns(runRes.data);
+      .then(([runItems, importItems]) => {
+        setRuns(runItems);
         setImports(importItems);
       })
       .catch(() => setError("Unable to load inspection data."))

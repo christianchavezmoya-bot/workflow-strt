@@ -4,6 +4,7 @@ import { Project, ProjectStatus, ProjectType } from "../types/project";
 import { ProjectRepository } from "../repositories/ProjectRepository";
 import { entityDeleteProject, entityPutProject } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 export interface ProjectFilters {
@@ -43,8 +44,31 @@ export const projectService = {
         return response.data;
       });
     }
-    const response = await api.get<Project>(`/projects/${id}`);
-    return response.data;
+
+    const cached = await ProjectRepository.getById(id);
+    if (cached) {
+      if (!shouldSkipBlockingFetch()) {
+        void api.get<Project>(`/projects/${id}`)
+          .then(async (response) => {
+            await entityPutProject({ id: response.data.id, data: response.data });
+            window.dispatchEvent(new CustomEvent("repo:projects:updated", {
+              detail: { items: [response.data], total: 1, requestKey: id },
+            }));
+          })
+          .catch(() => {});
+      }
+      return cached;
+    }
+
+    if (shouldSkipBlockingFetch()) return null;
+
+    try {
+      const response = await api.get<Project>(`/projects/${id}`);
+      await entityPutProject({ id: response.data.id, data: response.data });
+      return response.data;
+    } catch {
+      return null;
+    }
   },
   async createProject(payload: Project) {
     const response = await api.post<Project>("/projects", payload);

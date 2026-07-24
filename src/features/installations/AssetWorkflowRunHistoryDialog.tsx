@@ -39,6 +39,7 @@ import {
   Typography,
 } from "@mui/material";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { isMobileNativePlatform } from "../../utils/platform";
 import type { AssetWorkflowRun, RunIssue, StepResult } from "../../types/assetWorkflowRun";
 import type { BomActualItem, WorkflowStep } from "../../types/workflow";
 import type { WorkflowAssignment } from "../../types/workflowType";
@@ -87,18 +88,28 @@ export default function AssetWorkflowRunHistoryDialog({ open, onClose, asset, as
 
   useEffect(() => {
     if (!open) return;
+
+    const applyRuns = (all: AssetWorkflowRun[]) => {
+      const filtered = all
+        .filter((r) => r.workflowConfigId === assignment.workflowConfigId)
+        .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+      setRuns(filtered);
+      const map: Record<string, RunIssue[]> = {};
+      for (const r of filtered) map[r.id] = parseIssues(r.issuesJson);
+      setRunIssueMap(map);
+    };
+
+    if (isMobileNativePlatform()) {
+      void assetWorkflowRunService.listLocalByAsset(asset.id)
+        .then((local) => {
+          if (local.length > 0) applyRuns(local);
+        })
+        .catch(() => {});
+    }
+
     setLoading(true);
     assetWorkflowRunService.listByAsset(asset.id)
-      .then((all) => {
-        const filtered = all
-          .filter((r) => r.workflowConfigId === assignment.workflowConfigId)
-          .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
-        setRuns(filtered);
-        // Seed local issue map
-        const map: Record<string, RunIssue[]> = {};
-        for (const r of filtered) map[r.id] = parseIssues(r.issuesJson);
-        setRunIssueMap(map);
-      })
+      .then(applyRuns)
       .finally(() => setLoading(false));
   }, [open, asset.id, assignment.workflowConfigId]);
 

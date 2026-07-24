@@ -224,6 +224,10 @@ export const projectAssetService = {
     return created;
   },
 
+  async getByIdLocalFirst(id: string): Promise<ProjectAsset | null> {
+    return this.getById(id);
+  },
+
   async getById(id: string): Promise<ProjectAsset | null> {
     if (!isMobileNativePlatform()) {
       return webCachedGet(`/project-assets/${id}`, async () => {
@@ -411,6 +415,18 @@ export const projectAssetService = {
   },
 
   async technicianWorkloadSummary(): Promise<TechnicianWorkloadSummaryItem[]> {
+    if (isMobileNativePlatform()) {
+      const local = await this.technicianWorkloadSummaryLocal();
+      if (local.length > 0) {
+        if (!shouldSkipBlockingFetch()) {
+          void api.get<TechnicianWorkloadSummaryItem[]>("/project-assets/technician-workload-summary")
+            .then(() => {})
+            .catch(() => {});
+        }
+        return local;
+      }
+      if (shouldSkipBlockingFetch()) return local;
+    }
     try {
       const res = await api.get<TechnicianWorkloadSummaryItem[]>("/project-assets/technician-workload-summary");
       return res.data;
@@ -435,6 +451,18 @@ export const projectAssetService = {
   },
 
   async activeSummary(): Promise<ProjectAssetSummaryItem[]> {
+    if (isMobileNativePlatform()) {
+      const local = await this.activeSummaryLocal();
+      if (local.length > 0) {
+        if (!shouldSkipBlockingFetch()) {
+          void api.get<ProjectAssetSummaryItem[]>("/project-assets/active-summary")
+            .then(() => {})
+            .catch(() => {});
+        }
+        return local;
+      }
+      if (shouldSkipBlockingFetch()) return local;
+    }
     try {
       const res = await api.get<ProjectAssetSummaryItem[]>("/project-assets/active-summary");
       return res.data;
@@ -470,6 +498,18 @@ export const projectAssetService = {
   },
 
   async listOpen(): Promise<OpenAssetItem[]> {
+    if (isMobileNativePlatform()) {
+      const local = await this.listOpenLocal();
+      if (local.length > 0) {
+        if (!shouldSkipBlockingFetch()) {
+          void api.get<OpenAssetItem[]>("/project-assets/open")
+            .then(() => {})
+            .catch(() => {});
+        }
+        return local;
+      }
+      if (shouldSkipBlockingFetch()) return local;
+    }
     try {
       const res = await api.get<OpenAssetItem[]>("/project-assets/open");
       return res.data;

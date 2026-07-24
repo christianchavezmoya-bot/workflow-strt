@@ -1,6 +1,6 @@
 import api from "../services/api";
 import type { Project } from "../types/project";
-import { entityGetAllProjects, entityPutProjects, reconcileProjects, syncMetaSet } from "../services/localDB";
+import { entityGetAllProjects, entityPutProject, entityPutProjects, reconcileProjects, syncMetaSet } from "../services/localDB";
 import type { ProjectFilters, ProjectListResponse } from "../services/projectService";
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
@@ -46,6 +46,12 @@ function canReconcileProjects(filters?: ProjectFilters): boolean {
 }
 
 export const ProjectRepository = {
+  async getById(id: string): Promise<Project | null> {
+    const all = await entityGetAllProjects();
+    const found = (all as Project[]).find((p) => p.id === id);
+    return found ?? null;
+  },
+
   async getAll(filters?: ProjectFilters): Promise<ProjectListResponse> {
     const params = filters && Object.keys(filters).length ? filters : undefined;
     if (!isMobileNativePlatform()) {

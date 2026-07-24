@@ -48,6 +48,7 @@ import type { RunIssue } from "../../types/assetWorkflowRun";
 import type { AssetIssue } from "../../types/projectAsset";
 import MediaCapture from "../../components/ui/MediaCapture";
 import { useAuth } from "../../hooks/useAuth";
+import { isMobileNativePlatform } from "../../utils/platform";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -122,6 +123,13 @@ const IssuesBoard = () => {
     setLoadingHistory(true);
     try { setClosedIssues(await assetWorkflowRunService.listClosedIssues()); }
     finally { setLoadingHistory(false); }
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileNativePlatform()) return;
+    void assetWorkflowRunService.listOpenIssues()
+      .then(setIssues)
+      .catch(() => {});
   }, []);
 
   useEffect(() => { load(); }, [load]);

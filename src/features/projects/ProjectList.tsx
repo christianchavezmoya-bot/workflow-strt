@@ -32,6 +32,7 @@ import {
   Typography,
   useMediaQuery,
   useTheme,
+  Alert,
 } from "@mui/material";
 import { ArrowDropDown, CalendarTodayOutlined, DeleteForeverOutlined, DeleteOutline, EditOutlined, ExpandLess, ExpandMore, FilterAltOffOutlined, PersonOutlined, RestoreOutlined } from "@mui/icons-material";
 import ProjectChevronPanel from "./ProjectChevronPanel";
@@ -59,7 +60,9 @@ import { projectService } from "../../services/projectService";
 import { Project, ProjectStatus } from "../../types/project";
 import ProjectForm from "./ProjectForm";
 import { useComplexView } from "../../contexts/ComplexViewContext";
-import { isDesktopLikePlatform } from "../../utils/platform";
+import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
+import { CACHE_SOFT_LIMIT_MS, syncMetaGet } from "../../services/localDB";
+import { useSyncEngine } from "../../hooks/useSyncEngine";
 
 // Style for field definition labels (yellow bold)
 const fieldLabelStyle = {
@@ -259,6 +262,8 @@ const ProjectList = () => {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { items, total, loading, error } = useAppSelector((state) => state.projects);
+  const { isOnline } = useSyncEngine();
+  const [projectsCacheStale, setProjectsCacheStale] = useState(false);
   const productsState = useAppSelector((state) => state.products);
   const projectsDynamic = useDynamicFields("projects");
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
@@ -334,6 +339,14 @@ const ProjectList = () => {
     setAutoFilters({});
     setPage(0);
   }, [activeOffice]);
+
+  useEffect(() => {
+    if (!isMobileNativePlatform()) return;
+    void syncMetaGet("projects").then((lastSync) => {
+      if (!lastSync) return;
+      setProjectsCacheStale(Date.now() - new Date(lastSync).getTime() > CACHE_SOFT_LIMIT_MS);
+    });
+  }, [items.length]);
 
   useEffect(() => {
     dispatch(
@@ -609,9 +622,18 @@ const ProjectList = () => {
               label="Show archived"
             />
             {canCreateProjects && (
-              <Button variant="contained" component={Link} to="/projects/new">
-                Create project
-              </Button>
+              <Tooltip title={!isOnline && isMobileNativePlatform() ? "Connect to the server to create projects" : ""}>
+                <span>
+                  <Button
+                    variant="contained"
+                    component={Link}
+                    to="/projects/new"
+                    disabled={!isOnline && isMobileNativePlatform()}
+                  >
+                    Create project
+                  </Button>
+                </span>
+              </Tooltip>
             )}
             {canManageProjectTable && (
               <Button variant="outlined" onClick={() => setTableConfigOpen(true)}>
@@ -621,6 +643,12 @@ const ProjectList = () => {
           </Stack>
         )}
       </Stack>
+
+      {projectsCacheStale && isMobileNativePlatform() && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Project list may be out of date — connect to refresh.
+        </Alert>
+      )}
 
       <Box className="glass-card" sx={{ p: 2 }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>

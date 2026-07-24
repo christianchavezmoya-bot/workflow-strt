@@ -33,7 +33,8 @@ import {
 import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import api from "../../services/api";
-import { entityGetAsset } from "../../services/localDB";
+import { userService } from "../../services/userService";
+import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import type { Office } from "../../components/GlobalOfficeMap";
@@ -62,9 +63,9 @@ import {
 } from "../../services/workflowOpenService";
 import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import { mediaStore } from "../../services/mediaStore";
-import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import { get as dcGet, put as dcPut, DASHBOARD_CACHE_KEYS } from "../../services/dashboardCache";
+import { entityGetAsset } from "../../services/localDB";
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -705,8 +706,15 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (!isManager) return;
-    api.get<DashboardUserEntry[]>("/users")
-      .then((res) => setDashboardUsers(res.data.filter((u) => u.id !== user.id)))
+    void userService.getUsers()
+      .then((users) => setDashboardUsers(
+        users.filter((u) => u.id !== user.id).map((u) => ({
+          id: u.id,
+          fullName: u.fullName,
+          role: u.role,
+          office: u.office ?? "",
+        })),
+      ))
       .catch(() => {});
   }, [isManager, user.id]);
 
@@ -725,6 +733,21 @@ const Dashboard = () => {
       } catch {
         // Keep the current attention widgets if local cache probing fails.
       }
+      if (shouldSkipBlockingFetch()) {
+        setAttentionLoading(false);
+        return;
+      }
+      void Promise.all([
+        assetWorkflowRunService.listOpenIssues(attentionUserId),
+        assetWorkflowRunService.listPendingSignatures(attentionUserId),
+      ])
+        .then(([iss, sigs]) => {
+          setOpenIssues(iss);
+          setPendingSigs(sigs);
+        })
+        .catch(() => {})
+        .finally(() => setAttentionLoading(false));
+      return;
     }
 
     try {
@@ -779,12 +802,26 @@ const Dashboard = () => {
     dispatch(fetchUsers());
     if (isNativePlatform) {
       seedNativeDashboardSummariesFromLocal();
+      setWorkloadLoading(false);
+      loadAttention();
+      if (!shouldSkipBlockingFetch()) {
+        void projectAssetService.technicianWorkloadSummary()
+          .then((w) => { setWorkload(w); dcPut(DASHBOARD_CACHE_KEYS.workload, w); })
+          .catch(() => {});
+        void projectAssetService.listOpen()
+          .then((a) => { setOpenAssets(a); dcPut(DASHBOARD_CACHE_KEYS.openAssets, a); })
+          .catch(() => {});
+        void projectAssetService.activeSummary()
+          .then((s) => { setProjectAssetSummary(s); dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, s); })
+          .catch(() => setProjectAssetSummary([]));
+      }
+    } else {
+      loadAttention();
+      setWorkloadLoading(true);
+      projectAssetService.technicianWorkloadSummary().then((w) => { setWorkload(w); }).finally(() => setWorkloadLoading(false));
+      projectAssetService.listOpen().then(setOpenAssets);
+      projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
     }
-    loadAttention();
-    setWorkloadLoading(true);
-    projectAssetService.technicianWorkloadSummary().then((w) => { setWorkload(w); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.workload, w); }).finally(() => setWorkloadLoading(false));
-    projectAssetService.listOpen().then((a) => { setOpenAssets(a); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.openAssets, a); });
-    projectAssetService.activeSummary().then((s) => { setProjectAssetSummary(s); if (isNativePlatform) dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, s); }).catch(() => setProjectAssetSummary([]));
     if (isEngineer) {
       workflowConfigService.getAll().then((configs) => {
         setDraftConfigs(configs.filter((c: any) => c.status === "Draft" || c.status === "draft"));
@@ -2154,8 +2191,8 @@ const Dashboard = () => {
       setQuickActionOpen(true);
 
       docsLoadDeferred = true;
-      void api.get(`/asset-documents/by-asset/${asset.id}`)
-        .then((res) => setDocsCount(Array.isArray(res.data) ? res.data.length : 0))
+      void assetDocumentLinkService.listByAsset(asset.id)
+        .then((links) => setDocsCount(links.length))
         .catch(() => setDocsCount(0))
         .finally(() => setDocsLoading(false));
     } catch {

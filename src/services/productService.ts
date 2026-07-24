@@ -14,6 +14,22 @@ export const productService = {
     }
 
     const cached = await referenceDataGet<Product[]>(PRODUCTS_REF_KEY);
+
+    if (cached && cached.length > 0) {
+      if (!shouldSkipBlockingFetch()) {
+        void api.get<Product[]>("/products")
+          .then(async (response) => {
+            await referenceDataSet(PRODUCTS_REF_KEY, response.data);
+            await syncMetaSet("products");
+            if (JSON.stringify(response.data) !== JSON.stringify(cached)) {
+              window.dispatchEvent(new Event("repo:products:updated"));
+            }
+          })
+          .catch(() => {});
+      }
+      return cached;
+    }
+
     if (shouldSkipBlockingFetch()) return cached ?? [];
 
     try {
