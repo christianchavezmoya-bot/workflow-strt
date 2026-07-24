@@ -406,7 +406,19 @@ function parseRunIssues(issuesJson: string | undefined): RunIssue[] {
   }
 }
 
-function deriveOfflineAssetStatusFromRun(run: Pick<AssetWorkflowRun, "status" | "isLocked" | "issuesJson" | "signatureStatus" | "customerSignedAt">): ProjectAssetStatus {
+/** Matches server finalized signature check (AssetWorkflowRunsController). */
+export function isRunSignatureFinalized(
+  run: Pick<AssetWorkflowRun, "signatureStatus" | "customerSignedAt">,
+): boolean {
+  return !!run.customerSignedAt
+    || run.signatureStatus === "Signed"
+    || run.signatureStatus === "Declined"
+    || run.signatureStatus === "WaivedCustomer";
+}
+
+export function deriveOfflineAssetStatusFromRun(
+  run: Pick<AssetWorkflowRun, "status" | "isLocked" | "issuesJson" | "signatureStatus" | "customerSignedAt" | "installerSignedAt">,
+): ProjectAssetStatus {
   const hasOpenBlockingIssue = parseRunIssues(run.issuesJson)
     .some((issue) => issue.isBlocking && !issue.resolved);
 
@@ -415,6 +427,12 @@ function deriveOfflineAssetStatusFromRun(run: Pick<AssetWorkflowRun, "status" | 
     if (hasOpenBlockingIssue) return "Issue";
     return "InProgress";
   }
+
+  if (isRunSignatureFinalized(run)) return "Complete";
+
+  // Trust signature timestamps over stale signatureStatus (e.g. PendingInstaller after installer signed).
+  if (run.installerSignedAt && run.customerSignedAt) return "Complete";
+  if (run.installerSignedAt && !run.customerSignedAt) return "Pending";
 
   if (run.signatureStatus === "PendingInstaller") return "Pending";
   if (run.signatureStatus === "PendingCustomer" && !run.customerSignedAt) return "Pending";
@@ -478,7 +496,12 @@ export async function syncOfflineAssetWorkflowStateFromRun(
     if (!data) return;
 
     const workflowSummary = deriveOfflineWorkflowSummaryFromRun(run, data.workflowSummary);
-    const nextStatus = statusOverride ?? deriveOfflineAssetStatusFromRun(run);
+    let nextStatus = statusOverride ?? deriveOfflineAssetStatusFromRun(run);
+    // A stale run snapshot must not regress a locally Complete asset back to Pending
+    // (e.g. dual-signed CC-0007 after an unrelated offline write).
+    if (data.status === "Complete" && nextStatus === "Pending") {
+      nextStatus = "Complete";
+    }
     const localRunState = run as Partial<{ dirty: boolean; localStatus: string }>;
     const keepAssetDirty = localRunState.dirty === true
       || (!!localRunState.localStatus && localRunState.localStatus !== "Synced");
@@ -522,6 +545,7 @@ async function listPendingSignaturesLocalImpl(userId?: string): Promise<PendingS
   const records: PendingSignatureRecord[] = [];
   for (const run of runs as AssetWorkflowRun[]) {
     if (!run.isLocked) continue;
+    if (isRunSignatureFinalized(run)) continue;
     if (run.signatureStatus !== "PendingInstaller" && run.signatureStatus !== "PendingCustomer") continue;
     const asset = assetById.get(run.assetId);
     if (!asset) continue;
