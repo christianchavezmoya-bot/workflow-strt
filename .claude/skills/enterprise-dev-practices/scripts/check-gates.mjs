@@ -163,6 +163,13 @@ if (wants("e2e")) {
   record("e2e", r.code === 0, r.code === 0 ? "e2e passed" : lastLines(r.out, 14));
 }
 
+// --- e2eperf: offline open perf contract (Phase 2+ release gate) -----------
+if (wants("e2eperf")) {
+  console.log(`${C.dim}running Playwright offline perf e2e…${C.reset}`);
+  const r = run("npm", ["run", "test:e2e:perf"], ROOT);
+  record("e2eperf", r.code === 0, r.code === 0 ? "offline perf e2e passed" : lastLines(r.out, 14));
+}
+
 function lastLines(s, n) {
   return s.trim().split(/\r?\n/).slice(-n).join("\n      ");
 }

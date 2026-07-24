@@ -58,3 +58,14 @@ Unresolved conflicts are not re-sent until you choose an action in Sync Center. 
 - `src/services/offlineBootstrapService.ts` — field download orchestration
 - `src/components/layout/OfflineReadinessPanel.tsx` — Sync Center panel
 - `src/services/workflowOpenService.ts` — `OFFLINE_CONFIG_MISSING_MESSAGE`
+
+## Installer quick reference
+
+See [`OFFLINE_INSTALLER_QUICK_REF.md`](./OFFLINE_INSTALLER_QUICK_REF.md) for a one-page field handout.
+
+## Related docs
+
+- [`OFFLINE_FIRST_IMPLEMENTATION_PLAN.md`](./OFFLINE_FIRST_IMPLEMENTATION_PLAN.md) — phased delivery + release gates
+- [`OFFLINE_ACCEPTANCE_MATRIX.md`](./OFFLINE_ACCEPTANCE_MATRIX.md) — native device sign-off template
+- [`OFFLINE_DEVICE_MEASUREMENT.md`](./OFFLINE_DEVICE_MEASUREMENT.md) — p95 resume latency baseline
+- [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md) — full release train

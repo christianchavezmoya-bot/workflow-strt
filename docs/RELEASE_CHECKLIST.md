@@ -2,7 +2,7 @@
 
 Use this checklist for **every** production release (web, API, and/or phone). Nothing ships without staging sign-off.
 
-Related docs: `docs/BUG_TRIAGE.md`, `docs/MOBILE_BUILD.md`, `docs/FIELD_RUN_QA_CHECKLIST.md`.
+Related docs: `docs/BUG_TRIAGE.md`, `docs/MOBILE_BUILD.md`, `docs/FIELD_RUN_QA_CHECKLIST.md`, `docs/OFFLINE_FIRST_UX.md`, `docs/OFFLINE_FIRST_IMPLEMENTATION_PLAN.md`, `docs/OFFLINE_ACCEPTANCE_MATRIX.md`, `docs/OFFLINE_INSTALLER_QUICK_REF.md`.
 
 ---
 
@@ -23,18 +23,20 @@ Related docs: `docs/BUG_TRIAGE.md`, `docs/MOBILE_BUILD.md`, `docs/FIELD_RUN_QA_C
 Run on the **exact commit** being released:
 
 ```bash
-node .claude/skills/enterprise-dev-practices/scripts/check-gates.mjs typecheck backend test
-npm run test:e2e          # SPA smoke (no API)
+npm run release-gates     # typecheck + backend + vitest + e2e smoke + offline perf
 npm run test:e2e:full     # login flow (API + frontend)
+node .claude/skills/enterprise-dev-practices/scripts/check-gates.mjs backendtest  # same as CI backend job
 ```
 
 | Gate | Must pass |
 |---|---|
-| Typecheck + Vite build | Yes |
-| `dotnet build` | Yes |
-| Vitest (`npm test`) | Yes |
+| `npm run release-gates` | Yes |
+| Typecheck + Vite build | Yes (included in release-gates) |
+| `dotnet build` | Yes (included in release-gates) |
+| Vitest (`npm test`) | Yes (included in release-gates) |
 | Backend tests (`dotnet test`) | Yes |
-| E2E smoke | Yes |
+| E2E smoke | Yes (included in release-gates) |
+| E2E offline perf | Yes (included in release-gates) |
 | E2E full (login) | Yes before production |
 
 ---
@@ -73,6 +75,8 @@ Tester, date, app version, API tag: _______________
 - [ ] Documents — browse index
 
 ### Offline-first (phone — required before phone release)
+
+Record device results in [`docs/OFFLINE_ACCEPTANCE_MATRIX.md`](OFFLINE_ACCEPTANCE_MATRIX.md). Share [`docs/OFFLINE_INSTALLER_QUICK_REF.md`](OFFLINE_INSTALLER_QUICK_REF.md) with field teams.
 
 - [ ] Online bootstrap completes (assigned assets + configs cached)
 - [ ] Airplane mode: open cached workflow in ≤1s (target)
