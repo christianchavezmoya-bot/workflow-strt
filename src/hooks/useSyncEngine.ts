@@ -553,7 +553,11 @@ export function useSyncEngine(): SyncState {
       // Nothing to do — release the lock so a later real flush can proceed.
       markOfflinePerf("queue_flush_end");
       _flushing = false;
-      // Nothing due — but there may be future-scheduled items; let scheduleRetry handle them
+      await refreshPending();
+      // Clear stale error badge when the queue is genuinely empty. hasError was
+      // previously only reset inside the "has work" path, so a past failure left
+      // "Sync error · Retry" stuck even after everything drained.
+      setHasError(false);
       await scheduleRetryRef.current?.();
       return;
     }
