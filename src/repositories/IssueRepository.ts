@@ -9,7 +9,20 @@ function toRecord(i: OpenIssueRecord) {
   return { id: i.issueId, assetId: i.assetId, projectId: i.projectId, data: i };
 }
 
+function issuesListChanged(previous: OpenIssueRecord[], next: OpenIssueRecord[]): boolean {
+  if (previous.length !== next.length) return true;
+  const prevIds = new Set(previous.map((issue) => issue.issueId));
+  return next.some((issue) => !prevIds.has(issue.issueId));
+}
+
 export const IssueRepository = {
+  /** Read IndexedDB snapshot only — no network, no repo:issues:updated event. */
+  async getLocalSnapshot(): Promise<OpenIssueRecord[]> {
+    if (!isMobileNativePlatform()) return [];
+    const local = await entityGetAllIssues();
+    return local as OpenIssueRecord[];
+  },
+
   async getAll(userId?: string): Promise<OpenIssueRecord[]> {
     if (!isMobileNativePlatform()) {
       return webCachedGet(
@@ -27,6 +40,8 @@ export const IssueRepository = {
     if (!shouldSkipBlockingFetch()) {
       api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", { params: userId ? { userId } : undefined })
         .then(async (res) => {
+          const localSnapshot = (local.length > 0 ? local : await entityGetAllIssues()) as OpenIssueRecord[];
+          if (!issuesListChanged(localSnapshot, res.data)) return;
           await entityReplaceAllIssues(res.data.map(toRecord));
           await syncMetaSet("issues");
           window.dispatchEvent(new Event("repo:issues:updated"));

@@ -17,6 +17,7 @@ import { Network } from "@capacitor/network";
 import { App } from "@capacitor/app";
 import api from "../services/api";
 import {
+  entityGetAllIssues,
   entityGetAsset,
   entityPutAsset,
   entityReplaceAllIssues,
@@ -329,6 +330,12 @@ async function refreshOpenIssuesCacheFromServer(): Promise<void> {
   if (!isMobileNativePlatform() || shouldSkipBlockingFetch()) return;
   try {
     const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues");
+    const local = await entityGetAllIssues();
+    const localSnapshot = local as OpenIssueRecord[];
+    if (localSnapshot.length === res.data.length
+      && res.data.every((issue) => localSnapshot.some((prev) => prev.issueId === issue.issueId))) {
+      return;
+    }
     await entityReplaceAllIssues(
       res.data.map((issue) => ({
         id: issue.issueId,

@@ -22,6 +22,7 @@ import { fetchProducts } from "../../store/productsSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { officesService } from "../../services/officesService";
 import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
+import { IssueRepository } from "../../repositories/IssueRepository";
 import {
   projectAssetService,
   type DashboardWorkspace,
@@ -731,6 +732,26 @@ const Dashboard = () => {
     }
   }, [isManager, isNativePlatform, user.id]);
 
+  // Silent attention refresh: read the local issues/sigs snapshot only.
+  // repo:issues:updated is fired after sync/cache writes — must NOT call
+  // loadAttention() here (that re-triggers IssueRepository background fetch →
+  // another repo:issues:updated → spinner/chip flicker loop).
+  const refreshAttentionFromIssueCache = useCallback(async () => {
+    const attentionUserId = isManager ? undefined : user.id;
+    try {
+      const [issues, sigs] = await Promise.all([
+        isNativePlatform
+          ? IssueRepository.getLocalSnapshot()
+          : assetWorkflowRunService.listOpenIssues(attentionUserId),
+        assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId),
+      ]);
+      setOpenIssues(issues);
+      setPendingSigs(sigs);
+    } catch {
+      // Keep current widgets if the local snapshot read fails.
+    }
+  }, [isManager, isNativePlatform, user.id]);
+
   // ── Native cache hydration: show last-known data instantly on mount ──
   useEffect(() => {
     if (!isNativePlatform) return;
@@ -1027,7 +1048,7 @@ const Dashboard = () => {
     // counts refresh live when assets change offline - not only when the
     // notifications:* events happen to be fired alongside.
     window.addEventListener("repo:assets:updated", refreshLiveDashboardData);
-    window.addEventListener("repo:issues:updated", refreshLiveDashboardData);
+    window.addEventListener("repo:issues:updated", refreshAttentionFromIssueCache);
     // Assignment and run caches refresh in the background on native and emit
     // these when they land. Without listening, the dashboard kept rendering the
     // pre-refresh snapshot while other screens (the Assets page listens to
@@ -1039,11 +1060,11 @@ const Dashboard = () => {
       window.removeEventListener("notifications:run-state-changed", refreshLiveDashboardData);
       window.removeEventListener("notifications:refresh", refreshLiveDashboardData);
       window.removeEventListener("repo:assets:updated", refreshLiveDashboardData);
-      window.removeEventListener("repo:issues:updated", refreshLiveDashboardData);
+      window.removeEventListener("repo:issues:updated", refreshAttentionFromIssueCache);
       window.removeEventListener("repo:assignments:updated", refreshLiveDashboardData);
       window.removeEventListener("repo:runs:updated", refreshLiveDashboardData);
     };
-  }, [dashboardBootPhase, refreshLiveDashboardData]);
+  }, [dashboardBootPhase, refreshAttentionFromIssueCache, refreshLiveDashboardData]);
 
   useEffect(() => {
     if (dashboardBootPhase !== "full") return;
