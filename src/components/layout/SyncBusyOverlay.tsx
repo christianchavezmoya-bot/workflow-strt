@@ -4,7 +4,7 @@
  */
 import { Backdrop, Box, Stack, Typography, keyframes } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
-import strataSyncMark from "../../assets/strata-sync-mark.svg";
+import strataLogo from "../../assets/strata_transparent.png";
 import { isMobileNativePlatform } from "../../utils/platform";
 
 const spin = keyframes`
@@ -65,21 +65,19 @@ export default function SyncBusyOverlay() {
       sx={{
         zIndex: 1300,
         flexDirection: "column",
-        bgcolor: "rgba(11, 29, 36, 0.58)",
-        backdropFilter: "blur(2px)",
+        bgcolor: "rgba(11, 29, 36, 0.62)",
       }}
     >
       <Stack alignItems="center" spacing={2}>
         <Box
           component="img"
-          src={strataSyncMark}
-          alt=""
+          src={strataLogo}
+          alt="Strata Worldwide"
           draggable={false}
           sx={{
-            width: { xs: 88, sm: 96 },
-            height: { xs: 88, sm: 96 },
+            width: { xs: 148, sm: 168 },
+            height: "auto",
             animation: `${spin} 1.15s linear infinite`,
-            filter: "drop-shadow(0 4px 12px rgba(37, 99, 235, 0.35))",
           }}
         />
         <Typography
