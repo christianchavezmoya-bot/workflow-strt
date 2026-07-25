@@ -348,6 +348,15 @@ function GaugeCircle({ value, size = 80, color = "primary.main" }: { value: numb
   );
 }
 
+// Derives the workflowTypeId a config implies, since a config's own type is
+// redundant to ask the user for separately (mirrors AssetInstallationPage).
+function resolveConfigWorkflowTypeId(config: WorkflowConfig, types: WorkflowType[]): string {
+  if (config.workflowTypeId) return config.workflowTypeId;
+  const normalized = config.configType?.trim().toLowerCase();
+  if (!normalized) return "";
+  return types.find((t) => t.name.trim().toLowerCase() === normalized)?.id ?? "";
+}
+
 const WINDOW_OPTIONS = [30, 60, 90, 180];
 
 const ALL_DASHBOARDS_VALUE = "__all__";
@@ -1800,7 +1809,7 @@ const Dashboard = () => {
   const [assignForm, setAssignForm] = useState({ workflowTypeId: "", workflowConfigId: "" });
   const [assignSaving, setAssignSaving] = useState(false);
   const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
-  const [workflowConfigs, setWorkflowConfigs] = useState<{ id: string; name: string; workflowTypeId: string }[]>([]);
+  const [workflowConfigs, setWorkflowConfigs] = useState<WorkflowConfig[]>([]);
   // Product-based workflow for assets without explicit assignment
   const [productWorkflow, setProductWorkflow] = useState<{ configId: string; configName: string; workflowTypeId?: string } | null>(null);
 
@@ -2391,27 +2400,42 @@ const Dashboard = () => {
     return typeName.includes("inspection") || typeName === "insp";
   }
 
-  // Load workflow types and configs when assign dialog opens
-  useEffect(() => {
-    if (assignDialogOpen && workflowTypes.length === 0) {
-      workflowTypeService.list().then(setWorkflowTypes).catch(() => setWorkflowTypes([]));
+  // Load workflow configs scoped to this asset's product when the assign
+  // dialog opens — mirrors AssetInstallationPage.openAssignDialog(). The
+  // Workflow Type is no longer a user choice: the project already fixes it,
+  // and it's derived from the chosen config (resolveConfigWorkflowTypeId).
+  async function openAssignDialogFromDashboard() {
+    if (!quickActionAsset) return;
+    setAssignForm({ workflowTypeId: "", workflowConfigId: "" });
+    setAssignDialogOpen(true);
+    try {
+      const fullAsset = await projectAssetService.getByIdLocalFirst(quickActionAsset.id);
+      if (!fullAsset?.productId) {
+        setWorkflowConfigs([]);
+        return;
+      }
+      const [types, cfgs] = await Promise.all([
+        workflowTypeService.list(),
+        workflowConfigService.listByProduct(fullAsset.productId, "Published"),
+      ]);
+      setWorkflowTypes(types);
+      setWorkflowConfigs(cfgs);
+    } catch {
+      setWorkflowConfigs([]);
     }
-  }, [assignDialogOpen, workflowTypes.length]);
-
-  useEffect(() => {
-    if (assignDialogOpen && quickActionAsset) {
-      // Load all configs and filter by product if available
-      workflowConfigService.getAll().then((configs) => {
-        setWorkflowConfigs(configs.map((c: any) => ({ id: c.id, name: c.name, workflowTypeId: c.workflowTypeId })));
-      }).catch(() => setWorkflowConfigs([]));
-    }
-  }, [assignDialogOpen, quickActionAsset]);
+  }
 
   async function saveAssignmentFromDashboard() {
-    if (!quickActionAsset || !assignForm.workflowTypeId || !assignForm.workflowConfigId) return;
+    if (!quickActionAsset || !assignForm.workflowConfigId) return;
+    const cfg = workflowConfigs.find((c) => c.id === assignForm.workflowConfigId);
+    const workflowTypeId = cfg ? resolveConfigWorkflowTypeId(cfg, workflowTypes) || (cfg.workflowTypeId ?? "") : "";
+    if (!workflowTypeId) {
+      alert("Could not determine the workflow type for this config. Reconnect and try again.");
+      return;
+    }
     setAssignSaving(true);
     try {
-      await assetWorkflowAssignmentService.create(quickActionAsset.id, assignForm.workflowConfigId, assignForm.workflowTypeId);
+      await assetWorkflowAssignmentService.create(quickActionAsset.id, assignForm.workflowConfigId, workflowTypeId);
       // Reload assignments
       const [assignments, runs] = await Promise.all([
         assetWorkflowAssignmentService.listByAsset(quickActionAsset.id),
@@ -5931,7 +5955,7 @@ const Dashboard = () => {
                     variant="contained"
                     color="primary"
                     startIcon={<PlayArrowOutlined />}
-                    onClick={() => setAssignDialogOpen(true)}
+                    onClick={() => void openAssignDialogFromDashboard()}
                   >
                     Assign Workflow
                   </Button>
@@ -6004,7 +6028,7 @@ const Dashboard = () => {
                     variant="contained"
                     color="primary"
                     startIcon={<PlayArrowOutlined />}
-                    onClick={() => setAssignDialogOpen(true)}
+                    onClick={() => void openAssignDialogFromDashboard()}
                     sx={{ mt: 1.5 }}
                   >
                     Assign New Workflow
@@ -6156,30 +6180,32 @@ const Dashboard = () => {
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Workflow Type</InputLabel>
+            <Typography variant="caption" color="text.secondary">
+              Workflow Type: <strong>{workflowModeLabel(quickActionAsset?.workflowMode)}</strong> (set by the project)
+            </Typography>
+            <FormControl size="small" fullWidth required>
+              <InputLabel shrink>Workflow Config (Published) *</InputLabel>
               <Select
-                value={assignForm.workflowTypeId}
-                label="Workflow Type"
-                onChange={(e) => setAssignForm((f) => ({ ...f, workflowTypeId: e.target.value, workflowConfigId: "" }))}
-              >
-                {workflowTypes.map((wt) => (
-                  <MenuItem key={wt.id} value={wt.id}>{wt.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl fullWidth size="small" disabled={!assignForm.workflowTypeId}>
-              <InputLabel>Workflow Config</InputLabel>
-              <Select
+                label="Workflow Config (Published) *"
                 value={assignForm.workflowConfigId}
-                label="Workflow Config"
-                onChange={(e) => setAssignForm((f) => ({ ...f, workflowConfigId: e.target.value }))}
+                onChange={(e) => {
+                  const cfg = workflowConfigs.find((c) => c.id === e.target.value);
+                  setAssignForm({
+                    workflowConfigId: e.target.value,
+                    workflowTypeId: cfg ? resolveConfigWorkflowTypeId(cfg, workflowTypes) : "",
+                  });
+                }}
               >
-                {workflowConfigs
-                  .filter((c) => c.workflowTypeId === assignForm.workflowTypeId)
-                  .map((c) => (
-                    <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-                  ))}
+                {workflowConfigs.length === 0 && (
+                  <MenuItem value="" disabled>No published configs available for this product</MenuItem>
+                )}
+                {workflowConfigs.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.name}
+                    {c.configType ? ` - ${c.configType}` : ""}
+                    <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>v{c.version}</Typography>
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
           </Stack>
@@ -6189,7 +6215,7 @@ const Dashboard = () => {
           <Button
             variant="contained"
             onClick={saveAssignmentFromDashboard}
-            disabled={!assignForm.workflowTypeId || !assignForm.workflowConfigId || assignSaving}
+            disabled={!assignForm.workflowConfigId || assignSaving}
             startIcon={assignSaving ? <CircularProgress size={16} /> : undefined}
           >
             {assignSaving ? "Saving..." : "Assign"}
