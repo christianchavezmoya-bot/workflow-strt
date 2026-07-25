@@ -19,6 +19,7 @@ import api from "../services/api";
 import {
   entityGetAsset,
   entityPutAsset,
+  entityReplaceAllIssues,
   entityReplaceIssuesForAsset,
   pendingCount,
   pendingGetByEntityId,
@@ -49,12 +50,14 @@ import {
   type AssetDocumentLinkUploadBody,
 } from "../services/assetDocumentLinkService";
 import { isMobileNativePlatform } from "../utils/platform";
+import type { OpenIssueRecord } from "../services/assetWorkflowRunService";
 import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import {
   subscribeServerReachable,
   pingNow,
   getNativeNetworkConnected,
   getServerReachable,
+  shouldSkipBlockingFetch,
 } from "../services/connectivityMonitor";
 import {
   buildSyncAttemptDiagnostics,
@@ -319,6 +322,24 @@ async function refreshAssetAfterRunSync(assetId: string): Promise<void> {
     }));
   } catch {
     // Non-fatal - keep the run update even if the asset refetch fails.
+  }
+}
+
+async function refreshOpenIssuesCacheFromServer(): Promise<void> {
+  if (!isMobileNativePlatform() || shouldSkipBlockingFetch()) return;
+  try {
+    const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues");
+    await entityReplaceAllIssues(
+      res.data.map((issue) => ({
+        id: issue.issueId,
+        assetId: issue.assetId,
+        projectId: issue.projectId,
+        data: issue,
+      })),
+    );
+    window.dispatchEvent(new Event("repo:issues:updated"));
+  } catch {
+    // Non-fatal — Dashboard will refresh on the next IssueRepository background fetch.
   }
 }
 
@@ -714,6 +735,7 @@ export function useSyncEngine(): SyncState {
     // until something else happens to trigger a refresh. Fired once per pass,
     // not per-op, since the Dashboard has no in-flight guard of its own.
     if (syncedAny) {
+      await refreshOpenIssuesCacheFromServer();
       window.dispatchEvent(new Event("notifications:refresh"));
       window.dispatchEvent(new Event("repo:assets:updated"));
     }
