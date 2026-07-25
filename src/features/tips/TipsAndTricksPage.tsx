@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerRecovery } from "../../hooks/useServerRecovery";
 import {
+  Alert,
   Autocomplete,
   Box,
   Button,
@@ -48,6 +49,8 @@ import { productService } from "../../services/productService";
 import { projectAssetService } from "../../services/projectAssetService";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
+import { useOfflineMode } from "../../contexts/OfflineModeContext";
+import { isMobileNativePlatform } from "../../utils/platform";
 import QRUploadButton from "../../components/QRUploadButton";
 import DocThumbnail from "../../components/ui/DocThumbnail";
 import MobileDocumentPreviewDialog from "../../components/ui/MobileDocumentPreviewDialog";
@@ -108,6 +111,7 @@ function getDocProductLabel(doc: DocumentRecord, productNameById: Map<string, st
 export default function TipsAndTricksPage() {
   const { user } = useAuth();
   const can = usePermissions();
+  const { isOfflineMode } = useOfflineMode();
   const canViewTips = can.documents.view;
   const canUploadTips = can.documents.upload;
   const canDeleteTips = can.documents.delete;
@@ -143,7 +147,9 @@ export default function TipsAndTricksPage() {
       const all = await documentService.getDocuments();
       setDocs(all.filter((d) => d.type === "tips"));
     } catch {
-      setError("Could not load documents. Make sure the server is reachable.");
+      if (!isMobileNativePlatform() || !isOfflineMode) {
+        setError("Could not load documents. Make sure the server is reachable.");
+      }
     } finally {
       setLoading(false);
     }
@@ -812,6 +818,12 @@ export default function TipsAndTricksPage() {
         )}
       </Box>
 
+      {isMobileNativePlatform() && isOfflineMode && (
+        <Alert severity="info">
+          Showing cached tips. Files not downloaded during field sync cannot be previewed offline.
+        </Alert>
+      )}
+
       <Box className="glass-card" sx={{ p: 1.5 }}>
         <Stack spacing={1.25}>
           <TextField
@@ -936,7 +948,11 @@ export default function TipsAndTricksPage() {
         <Box className="glass-card" sx={{ p: 4, textAlign: "center" }}>
           <LightbulbOutlined sx={{ fontSize: 40, color: "text.disabled", mb: 1 }} />
           <Typography variant="body2" color="text.secondary">
-            {search ? `No results for "${search}"` : "No Tips & Tricks documents found."}
+            {search
+              ? `No results for "${search}"`
+              : docs.length === 0 && isMobileNativePlatform() && isOfflineMode
+                ? "No tips cached on this device. Connect to the internet and download field data from Sync Center."
+                : "No Tips & Tricks documents found."}
           </Typography>
         </Box>
       ) : viewMode === "grid" ? (

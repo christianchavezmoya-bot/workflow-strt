@@ -43,6 +43,8 @@ const DOCUMENT_PREFETCH_CONCURRENCY = 2;
 /** Bootstrap prefetch cap — linked asset PDFs/images only; pending uploads are never evicted. */
 export const DOCUMENT_PREFETCH_MAX_BYTES = MEDIA_STORE_LIMITS.bootstrapDocumentPrefetchMaxBytes;
 export const DOCUMENT_PREFETCH_MAX_FILES = MEDIA_STORE_LIMITS.bootstrapDocumentPrefetchMaxFiles;
+export const LIBRARY_DOCUMENT_PREFETCH_MAX_BYTES = MEDIA_STORE_LIMITS.bootstrapLibraryDocumentPrefetchMaxBytes;
+export const LIBRARY_DOCUMENT_PREFETCH_MAX_FILES = MEDIA_STORE_LIMITS.bootstrapLibraryDocumentPrefetchMaxFiles;
 const OFFLINE_DOCUMENT_MESSAGE = "Not available offline";
 const queuedPrefetchKeys = new Set<string>();
 const prefetchQueue: DocumentRecord[] = [];
@@ -210,18 +212,24 @@ export type AssetDocumentPrefetchLink = {
   document: Pick<DocumentRecord, "downloadUrl" | "contentType" | "fileSize">;
 };
 
-/** Bounded prefetch for documents linked to assigned assets (bootstrap pass). */
-export async function prefetchAssetLinkedDocuments(
-  links: AssetDocumentPrefetchLink[],
+export type DocumentPrefetchRecord = Pick<DocumentRecord, "downloadUrl" | "contentType" | "fileSize" | "type">;
+
+/** Tips first, then smaller files so bootstrap caps cover more library items. */
+export function sortDocumentsForLibraryPrefetch(records: DocumentPrefetchRecord[]): DocumentPrefetchRecord[] {
+  return [...records].sort((a, b) => {
+    const aTips = a.type === "tips" ? 0 : 1;
+    const bTips = b.type === "tips" ? 0 : 1;
+    if (aTips !== bTips) return aTips - bTips;
+    const aSize = a.fileSize ?? Number.MAX_SAFE_INTEGER;
+    const bSize = b.fileSize ?? Number.MAX_SAFE_INTEGER;
+    return aSize - bSize;
+  });
+}
+
+async function prefetchDocumentBlobs(
+  records: Array<Pick<DocumentRecord, "downloadUrl" | "contentType" | "fileSize">>,
   options?: { maxTotalBytes?: number; maxFiles?: number },
 ): Promise<{ prefetched: number; skipped: number; bytesUsed: number }> {
-  if (!isMobileNativePlatform()) {
-    return { prefetched: 0, skipped: links.length, bytesUsed: 0 };
-  }
-  if (shouldSkipNativeDocumentFetch()) {
-    return { prefetched: 0, skipped: links.length, bytesUsed: 0 };
-  }
-
   const maxBytes = options?.maxTotalBytes ?? DOCUMENT_PREFETCH_MAX_BYTES;
   const maxFiles = options?.maxFiles ?? DOCUMENT_PREFETCH_MAX_FILES;
   let bytesUsed = 0;
@@ -229,8 +237,8 @@ export async function prefetchAssetLinkedDocuments(
   let skipped = 0;
   const seen = new Set<string>();
 
-  for (const link of links) {
-    const downloadUrl = link.document?.downloadUrl;
+  for (const record of records) {
+    const downloadUrl = record.downloadUrl;
     if (!downloadUrl || !isBackendDocumentUrl(downloadUrl)) {
       skipped += 1;
       continue;
@@ -249,14 +257,14 @@ export async function prefetchAssetLinkedDocuments(
       continue;
     }
 
-    const estimatedSize = link.document.fileSize ?? 0;
+    const estimatedSize = record.fileSize ?? 0;
     if (estimatedSize > 0 && bytesUsed + estimatedSize > maxBytes) {
       skipped += 1;
       continue;
     }
 
     try {
-      const blob = await fetchAndCacheDocumentBlob(downloadUrl, link.document);
+      const blob = await fetchAndCacheDocumentBlob(downloadUrl, record);
       bytesUsed += blob.size;
       prefetched += 1;
     } catch {
@@ -265,6 +273,40 @@ export async function prefetchAssetLinkedDocuments(
   }
 
   return { prefetched, skipped, bytesUsed };
+}
+
+/** Bounded prefetch for documents linked to assigned assets (bootstrap pass). */
+export async function prefetchAssetLinkedDocuments(
+  links: AssetDocumentPrefetchLink[],
+  options?: { maxTotalBytes?: number; maxFiles?: number },
+): Promise<{ prefetched: number; skipped: number; bytesUsed: number }> {
+  if (!isMobileNativePlatform()) {
+    return { prefetched: 0, skipped: links.length, bytesUsed: 0 };
+  }
+  if (shouldSkipNativeDocumentFetch()) {
+    return { prefetched: 0, skipped: links.length, bytesUsed: 0 };
+  }
+
+  const records = links.map((link) => link.document).filter(Boolean);
+  return prefetchDocumentBlobs(records, options);
+}
+
+/** Bounded prefetch for Documents library + Tips & Tricks (bootstrap pass). */
+export async function prefetchLibraryDocuments(
+  records: DocumentRecord[],
+  options?: { maxTotalBytes?: number; maxFiles?: number },
+): Promise<{ prefetched: number; skipped: number; bytesUsed: number }> {
+  if (!isMobileNativePlatform()) {
+    return { prefetched: 0, skipped: records.length, bytesUsed: 0 };
+  }
+  if (shouldSkipNativeDocumentFetch()) {
+    return { prefetched: 0, skipped: records.length, bytesUsed: 0 };
+  }
+
+  const backendRecords = records.filter(
+    (record) => record.downloadUrl && isBackendDocumentUrl(record.downloadUrl),
+  );
+  return prefetchDocumentBlobs(sortDocumentsForLibraryPrefetch(backendRecords), options);
 }
 
 export const documentService = {

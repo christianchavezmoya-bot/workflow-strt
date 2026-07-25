@@ -14,6 +14,9 @@ import { isMobileNativePlatform } from "../utils/platform";
 export const MEDIA_STORE_LIMITS = {
   bootstrapDocumentPrefetchMaxBytes: 50 * 1024 * 1024,
   bootstrapDocumentPrefetchMaxFiles: 30,
+  /** Documents library + Tips & Tricks files (tips prioritized during bootstrap). */
+  bootstrapLibraryDocumentPrefetchMaxBytes: 100 * 1024 * 1024,
+  bootstrapLibraryDocumentPrefetchMaxFiles: 50,
 } as const;
 
 const MEDIA_ROOT = "offline-media";

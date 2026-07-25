@@ -838,7 +838,7 @@ export default function DocumentsPage() {
 
       {isMobileNativePlatform() && isOfflineMode && (
         <Alert severity="info">
-          Showing cached documents. Files not downloaded during field sync cannot be previewed offline.
+          Showing cached documents. Preview uses files downloaded during field sync (library + tips, up to 100 MB).
         </Alert>
       )}
 

@@ -18,6 +18,7 @@ import { configMediaCache } from "./configMediaCache";
 import {
   documentService,
   prefetchAssetLinkedDocuments,
+  prefetchLibraryDocuments,
   type AssetDocumentPrefetchLink,
 } from "./documentService";
 import { MEDIA_STORE_LIMITS } from "./mediaStore";
@@ -59,6 +60,8 @@ export interface BootstrapSummary {
   configs: number;
   documentFilesPrefetched?: number;
   documentPrefetchSkipped?: number;
+  libraryDocumentFilesPrefetched?: number;
+  libraryDocumentPrefetchSkipped?: number;
 }
 
 export interface BootstrapStatus {
@@ -188,10 +191,18 @@ export const offlineBootstrapService = {
         productService.getProducts(),
         brandSettingsService.get(),
         featureService.getAll(),
-        documentService.refreshDocumentsCache({ prefetchFiles: false }),
         workflowConfigService.getAll("Published").catch(() => []),
       ]);
       emit("bootstrap:progress", { phase: "reference", done: 1, total: 1 } satisfies BootstrapProgress);
+
+      // ── Phase 1b: Documents library + Tips & Tricks file blobs ─────────────
+      emit("bootstrap:progress", { phase: "library-documents", done: 0, total: 1 } satisfies BootstrapProgress);
+      const libraryDocs = await documentService.refreshDocumentsCache({ prefetchFiles: false }).catch(() => []);
+      const libraryPrefetch = await prefetchLibraryDocuments(libraryDocs, {
+        maxTotalBytes: MEDIA_STORE_LIMITS.bootstrapLibraryDocumentPrefetchMaxBytes,
+        maxFiles: MEDIA_STORE_LIMITS.bootstrapLibraryDocumentPrefetchMaxFiles,
+      });
+      emit("bootstrap:progress", { phase: "library-documents", done: 1, total: 1 } satisfies BootstrapProgress);
 
       // ── Phase 2: projects ─────────────────────────────────────────────────
       emit("bootstrap:progress", { phase: "projects", done: 0, total: 1 } satisfies BootstrapProgress);
@@ -316,6 +327,8 @@ export const offlineBootstrapService = {
         configs: relevantConfigs.length,
         documentFilesPrefetched: docPrefetch.prefetched,
         documentPrefetchSkipped: docPrefetch.skipped,
+        libraryDocumentFilesPrefetched: libraryPrefetch.prefetched,
+        libraryDocumentPrefetchSkipped: libraryPrefetch.skipped,
       };
       await saveBootstrapSummary(summary);
       await syncMetaSet(BOOTSTRAP_META_KEY);

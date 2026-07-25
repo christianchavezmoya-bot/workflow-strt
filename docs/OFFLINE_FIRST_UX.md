@@ -17,8 +17,8 @@ Manual offline is toggled in **Sync Center → Work offline**. It clears automat
 - **Dashboard / projects / assets / workflows** — cached via bootstrap; see `OfflineReadinessPanel`
 - **Inspection runs** — asset workflow runs filtered by inspection config (Phase 7)
 - **Issues, signatures, photos** — queued writes with optimistic UI (Phases 3–6)
-- **Documents list** — metadata cached; **preview only for files prefetched** during bootstrap (50 MB / 30 files cap)
-- **Tips & tricks** — document list from cache; “My products” filter uses cached assets when offline
+- **Documents list** — metadata cached; **preview for library/tips files prefetched during bootstrap** (100 MB / 50 files, tips prioritized) plus asset-linked files (50 MB / 30 files)
+- **Tips & tricks** — document list from cache; preview uses same offline file cache; “My products” filter uses cached assets when offline
 - **Notifications inbox** — last fetched list from IndexedDB; no new items until online
 - **Profile** — read cached name/office; **save disabled** until online
 
