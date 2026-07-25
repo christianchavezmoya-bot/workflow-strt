@@ -7,9 +7,9 @@ import { useEffect, useRef, useState } from "react";
 import strataLogo from "../../assets/strata_transparent.png";
 import { isMobileNativePlatform } from "../../utils/platform";
 
-const spin = keyframes`
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+const spinY = keyframes`
+  from { transform: rotateY(0deg); }
+  to { transform: rotateY(360deg); }
 `;
 
 const MIN_VISIBLE_MS = 450;
@@ -69,17 +69,21 @@ export default function SyncBusyOverlay() {
       }}
     >
       <Stack alignItems="center" spacing={2}>
-        <Box
-          component="img"
-          src={strataLogo}
-          alt="Strata Worldwide"
-          draggable={false}
-          sx={{
-            width: { xs: 148, sm: 168 },
-            height: "auto",
-            animation: `${spin} 1.15s linear infinite`,
-          }}
-        />
+        <Box sx={{ perspective: 900 }}>
+          <Box
+            component="img"
+            src={strataLogo}
+            alt="Strata Worldwide"
+            draggable={false}
+            sx={{
+              width: { xs: 148, sm: 168 },
+              height: "auto",
+              animation: `${spinY} 1.15s linear infinite`,
+              transformStyle: "preserve-3d",
+              backfaceVisibility: "hidden",
+            }}
+          />
+        </Box>
         <Typography
           variant="body1"
           sx={{ color: "common.white", fontWeight: 700, letterSpacing: "0.02em" }}
