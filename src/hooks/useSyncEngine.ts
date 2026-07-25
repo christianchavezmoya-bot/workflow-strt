@@ -145,6 +145,11 @@ async function reconnectAndFlush(): Promise<void> {
 
 const flushRef = { current: null as (() => Promise<void>) | null };
 
+function dispatchSyncEngineSyncing(syncing: boolean): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("sync-engine:syncing", { detail: { syncing } }));
+}
+
 // ── Singleton flush lock so multiple hook instances don't double-flush ────────
 let _flushing = false;
 
@@ -563,6 +568,7 @@ export function useSyncEngine(): SyncState {
     }
 
     setSyncing(true);
+    dispatchSyncEngineSyncing(true);
     setHasError(false);
 
     let anyError = false;
@@ -754,6 +760,7 @@ export function useSyncEngine(): SyncState {
     await refreshPending();
     setHasError(anyError);
     setSyncing(false);
+    dispatchSyncEngineSyncing(false);
     setLastSyncAt(new Date());
     markOfflinePerf("queue_flush_end");
     _flushing = false;

@@ -10,6 +10,7 @@ import PullToRefresh from "./PullToRefresh";
 import SyncDroppedBanner from "./SyncDroppedBanner";
 import OfflineModeBanner from "./OfflineModeBanner";
 import OfflineBootstrapBanner from "./OfflineBootstrapBanner";
+import SyncBusyOverlay from "./SyncBusyOverlay";
 import { useViewMode } from "../../contexts/ViewModeContext";
 import { useAccessMode } from "../../contexts/AccessModeContext";
 import { FavoritesProvider } from "../../contexts/FavoritesContext";
@@ -85,6 +86,7 @@ const AppShell = () => {
         </Box>
         {/* Bottom tab bar: mobile only (shown via CSS) */}
         <BottomTabBar />
+        <SyncBusyOverlay />
         <DebugPanel />
         <OnboardingLayer />
       </Box>
