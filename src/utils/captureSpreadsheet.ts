@@ -9,6 +9,16 @@ import type { FeatureDependency } from "../types/featureDependency";
 import type { WorkflowStep } from "../types/workflow";
 import type { FeatureSelection } from "../services/productConfigService";
 
+export function computeCaptureHeaderStickyTops(row1Height: number, row2Height: number) {
+  const safeRow1 = Math.max(0, row1Height);
+  const safeRow2 = Math.max(0, row2Height);
+  return {
+    name: 0,
+    pn: safeRow1,
+    fields: safeRow1 + safeRow2,
+  };
+}
+
 export type CaptureColumnKind =
   | "feature-pn-mfr"
   | "feature-pn-alt"

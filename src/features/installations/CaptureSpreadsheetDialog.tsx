@@ -2,7 +2,7 @@
  * Full-screen / dialog capture spreadsheet — used on phone (popup) and reusable on web.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -43,6 +43,7 @@ import {
   type ProjectCaptureGroup,
   type ProjectCaptureRow,
 } from "../../utils/projectCaptureTable";
+import { computeCaptureHeaderStickyTops } from "../../utils/captureSpreadsheet";
 import { STATUS_LABELS, STATUS_COLORS } from "./assetStatusDisplay";
 
 export type CaptureSpreadsheetAssetJobColumn = {
@@ -76,15 +77,20 @@ export type CaptureSpreadsheetDialogProps = {
 };
 
 const LS_HIDDEN_KEY = "capture_spreadsheet_hidden_groups_v1";
-const STICKY_TOP_NAME = 0;
-const STICKY_TOP_PN = 36;
-const STICKY_TOP_FIELDS = 72;
 const CHECKBOX_W = 40;
 const TAG_W = 98;
 const ASSET_JOB_COL_W = 118;
 const CAPTURE_COL_W = 104;
 const STATUS_W = 112;
 const ACTIONS_W = 132;
+const HEADER_Z = {
+  corner: 120,
+  row1: 115,
+  row2: 110,
+  row3: 105,
+  bodyStickyLeft: 5,
+} as const;
+const DEFAULT_HEADER_STICKY_TOPS = { name: 0, pn: 36, fields: 72 };
 const STATIC_HEADER_BG = "#1F4E78";
 const STATIC_HEADER_TEXT = "#F4FBFF";
 const STATIC_HEADER_BORDER = "#4F6F8B";
@@ -156,8 +162,6 @@ function bodyCellHoverSx(rowBg: string) {
     "&:hover": {
       bgcolor: `${ROW_HOVER_BG} !important`,
       boxShadow: `inset 0 0 0 2px ${CELL_HOVER_BORDER}`,
-      position: "relative",
-      zIndex: 1,
     },
   } as const;
 }
@@ -227,6 +231,15 @@ export default function CaptureSpreadsheetDialog({
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
   const [filterMenu, setFilterMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({ anchorEl: null, key: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const headerRow1Ref = useRef<HTMLTableRowElement>(null);
+  const headerRow2Ref = useRef<HTMLTableRowElement>(null);
+  const [headerStickyTops, setHeaderStickyTops] = useState(DEFAULT_HEADER_STICKY_TOPS);
+
+  const measureHeaderStickyTops = useCallback(() => {
+    const row1Height = headerRow1Ref.current?.getBoundingClientRect().height ?? DEFAULT_HEADER_STICKY_TOPS.pn;
+    const row2Height = headerRow2Ref.current?.getBoundingClientRect().height ?? (DEFAULT_HEADER_STICKY_TOPS.fields - DEFAULT_HEADER_STICKY_TOPS.pn);
+    setHeaderStickyTops(computeCaptureHeaderStickyTops(row1Height, row2Height));
+  }, []);
 
   useEffect(() => {
     if (!open) setSearch("");
@@ -250,6 +263,19 @@ export default function CaptureSpreadsheetDialog({
   const signOffGroups = useMemo(() => visibleGroups.filter((group) => group.groupType === "general"), [visibleGroups]);
   const orderedGroups = useMemo(() => [...componentGroups, ...signOffGroups], [componentGroups, signOffGroups]);
   const visibleColumns = useMemo(() => orderedGroups.flatMap((group) => group.columns), [orderedGroups]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    measureHeaderStickyTops();
+    const resizeObserver = new ResizeObserver(measureHeaderStickyTops);
+    if (headerRow1Ref.current) resizeObserver.observe(headerRow1Ref.current);
+    if (headerRow2Ref.current) resizeObserver.observe(headerRow2Ref.current);
+    window.addEventListener("resize", measureHeaderStickyTops);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", measureHeaderStickyTops);
+    };
+  }, [measureHeaderStickyTops, open, orderedGroups, assetJobColumns, columnPickerOpen, columnFilters]);
 
   const runDiagnostics = useMemo(() => {
     const runs = Object.values(runsMap).flat();
@@ -543,17 +569,17 @@ export default function CaptureSpreadsheetDialog({
         </Alert>
       )}
 
-      <Box sx={{ overflow: "auto", maxHeight: embedded ? undefined : (fullScreen ? "calc(100vh - 200px)" : "70vh") }}>
+      <Box sx={{ overflow: "auto", maxHeight: embedded ? undefined : (fullScreen ? "calc(100vh - 200px)" : "70vh"), WebkitOverflowScrolling: "touch" }}>
         <Table size="small" stickyHeader sx={{ minWidth: 760, borderCollapse: "separate", borderSpacing: 0 }}>
           <TableHead>
-            <TableRow>
+            <TableRow ref={headerRow1Ref}>
               {selectionEnabled && (
                 <TableCell
                   rowSpan={3}
                   padding="checkbox"
                   sx={{
-                    ...stickyCell(0, CHECKBOX_W, 10),
-                    top: STICKY_TOP_NAME,
+                    ...stickyCell(0, CHECKBOX_W, HEADER_Z.corner),
+                    top: headerStickyTops.name,
                     fontWeight: 700,
                     bgcolor: STATIC_HEADER_BG,
                     color: STATIC_HEADER_TEXT,
@@ -577,8 +603,8 @@ export default function CaptureSpreadsheetDialog({
               <TableCell
                 rowSpan={3}
                 sx={{
-                  ...stickyCell(selectionEnabled ? CHECKBOX_W : 0, TAG_W, 9),
-                  top: STICKY_TOP_NAME,
+                  ...stickyCell(selectionEnabled ? CHECKBOX_W : 0, TAG_W, HEADER_Z.corner),
+                  top: headerStickyTops.name,
                   fontWeight: 700,
                   bgcolor: STATIC_HEADER_BG,
                   color: STATIC_HEADER_TEXT,
@@ -597,9 +623,9 @@ export default function CaptureSpreadsheetDialog({
                   align="center"
                   colSpan={assetJobColumns.length}
                   sx={{
-                    top: STICKY_TOP_NAME,
+                    top: headerStickyTops.name,
                     position: "sticky",
-                    zIndex: 8,
+                    zIndex: HEADER_Z.row1,
                     bgcolor: ASSET_JOB_PALETTE.header,
                     color: "common.white",
                     fontWeight: 700,
@@ -618,9 +644,9 @@ export default function CaptureSpreadsheetDialog({
                     align="center"
                     colSpan={group.columns.length}
                     sx={{
-                      top: STICKY_TOP_NAME,
+                      top: headerStickyTops.name,
                       position: "sticky",
-                      zIndex: 8,
+                      zIndex: HEADER_Z.row1,
                       bgcolor: palette.header,
                       color: "common.white",
                       fontWeight: 700,
@@ -635,9 +661,9 @@ export default function CaptureSpreadsheetDialog({
               <TableCell
                 rowSpan={3}
                 sx={{
-                  top: STICKY_TOP_NAME,
+                  top: headerStickyTops.name,
                   position: "sticky",
-                  zIndex: 7,
+                  zIndex: HEADER_Z.corner,
                   minWidth: STATUS_W,
                   width: STATUS_W,
                   maxWidth: STATUS_W,
@@ -653,9 +679,9 @@ export default function CaptureSpreadsheetDialog({
               <TableCell
                 rowSpan={3}
                 sx={{
-                  top: STICKY_TOP_NAME,
+                  top: headerStickyTops.name,
                   position: "sticky",
-                  zIndex: 7,
+                  zIndex: HEADER_Z.corner,
                   minWidth: ACTIONS_W,
                   width: ACTIONS_W,
                   maxWidth: ACTIONS_W,
@@ -669,16 +695,16 @@ export default function CaptureSpreadsheetDialog({
                 {renderHeaderLabel("Actions", "actions")}
               </TableCell>
             </TableRow>
-            <TableRow>
+            <TableRow ref={headerRow2Ref}>
               {assetJobColumns.length > 0 && (
                 <TableCell
                   key="asset-job:pn"
                   align="center"
                   colSpan={assetJobColumns.length}
                   sx={{
-                    top: STICKY_TOP_PN,
+                    top: headerStickyTops.pn,
                     position: "sticky",
-                    zIndex: 8,
+                    zIndex: HEADER_Z.row2,
                     bgcolor: ASSET_JOB_PALETTE.subHeader,
                     color: ASSET_JOB_PALETTE.text,
                     fontWeight: 700,
@@ -703,9 +729,9 @@ export default function CaptureSpreadsheetDialog({
                     align="center"
                     colSpan={group.columns.length}
                     sx={{
-                      top: STICKY_TOP_PN,
+                      top: headerStickyTops.pn,
                       position: "sticky",
-                      zIndex: 8,
+                      zIndex: HEADER_Z.row2,
                       bgcolor: palette.subHeader,
                       color: palette.border,
                       fontWeight: 700,
@@ -725,9 +751,9 @@ export default function CaptureSpreadsheetDialog({
                   key={column.id}
                   align="center"
                   sx={{
-                    top: STICKY_TOP_FIELDS,
+                    top: headerStickyTops.fields,
                     position: "sticky",
-                    zIndex: 8,
+                    zIndex: HEADER_Z.row3,
                     bgcolor: ASSET_JOB_PALETTE.subHeader,
                     color: ASSET_JOB_PALETTE.text,
                     fontWeight: 700,
@@ -760,9 +786,9 @@ export default function CaptureSpreadsheetDialog({
                     key={column.id}
                     align="center"
                     sx={{
-                      top: STICKY_TOP_FIELDS,
+                      top: headerStickyTops.fields,
                       position: "sticky",
-                      zIndex: 8,
+                      zIndex: HEADER_Z.row3,
                       bgcolor: hexToRgba(palette.border, group.groupType === "general" ? 0.08 : 0.1),
                       color: "text.primary",
                       fontWeight: 700,
@@ -771,6 +797,7 @@ export default function CaptureSpreadsheetDialog({
                       borderLeft: index === 0 ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
                       borderRight: index === group.columns.length - 1 ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
                       borderBottom: `2px solid ${palette.border}`,
+                      boxShadow: "0 2px 4px rgba(15, 23, 42, 0.12)",
                     }}
                   >
                     <Typography
@@ -807,18 +834,13 @@ export default function CaptureSpreadsheetDialog({
                   hover
                   sx={{
                     backgroundColor: rowBg,
-                    transition: "transform 120ms ease, filter 120ms ease",
-                    '&:hover': {
-                      transform: 'translateY(-1px)',
-                      filter: 'brightness(1.01)',
-                    },
                   }}
                 >
                   {selectionEnabled && (
                     <TableCell
                       padding="checkbox"
                       sx={{
-                        ...stickyCell(0, CHECKBOX_W, 7),
+                        ...stickyCell(0, CHECKBOX_W, HEADER_Z.bodyStickyLeft),
                         borderRight: '1px solid #D8DEE7',
                         borderBottom: '1px solid #D8DEE7',
                         px: 0.25,
@@ -835,7 +857,7 @@ export default function CaptureSpreadsheetDialog({
                   )}
                   <TableCell
                     sx={{
-                      ...stickyCell(selectionEnabled ? CHECKBOX_W : 0, TAG_W, 6),
+                      ...stickyCell(selectionEnabled ? CHECKBOX_W : 0, TAG_W, HEADER_Z.bodyStickyLeft),
                       borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
                       borderBottom: '1px solid #D8DEE7',
                       px: 0.75,
