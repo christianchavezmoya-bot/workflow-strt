@@ -68,6 +68,7 @@ import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
 import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { randomId } from "../../utils/randomId";
 import { markOfflinePerf } from "../../utils/offlinePerf";
 import { shouldSkipRunMutation } from "../../services/connectivityMonitor";
 
@@ -520,7 +521,7 @@ export default function WorkOrderRunner({
       flagIsScopeDeviation ? "scope-deviation" : flagSeverity === "high" ? "blocking" : "observation";
     const isBlocking = flagSeverity === "high" && !flagIsScopeDeviation;
     const issue: RunIssue = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `issue_${Date.now()}`,
+      id: randomId("issue"),
       description: flagDescription.trim(),
       issueType: derivedIssueType,
       isBlocking,
@@ -1132,7 +1133,7 @@ export default function WorkOrderRunner({
             .map(({ stepId, stepTitle, inputId, inputLabel, captured }) => ({ stepId, stepTitle, inputId, inputLabel, captured }));
 
           const flag = {
-            id: crypto.randomUUID(),
+            id: randomId(),
             runId: activeRunId,
             assetId: projectAssetId ?? "",
             assetTag: assetTag ?? "",
@@ -2917,7 +2918,7 @@ export default function WorkOrderRunner({
               variant="text"
               onClick={() => setUnlistedConsumables(prev => [
                 ...prev,
-                { id: crypto.randomUUID(), description: "", qty: 1, unit: "ea" }
+                { id: randomId(), description: "", qty: 1, unit: "ea" }
               ])}
             >
               + Add unlisted item

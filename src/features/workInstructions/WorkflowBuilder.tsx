@@ -65,6 +65,7 @@ import type { FeatureDependency } from "../../types/featureDependency";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { randomId } from "../../utils/randomId";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
 import { loadWorkflowOpenPayload } from "../../services/workflowOpenService";
 import type { WorkflowType } from "../../types/workflowType";
@@ -74,10 +75,7 @@ import WorkOrderRunner from "./WorkOrderRunner";
 // Helpers
 // ------------------------------------------------------------------
 
-const uid = () =>
-  typeof crypto !== "undefined" && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `id_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+const uid = () => randomId();
 
 function deepCopy<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
@@ -2950,7 +2948,7 @@ function WorkerPreviewPanel({
 // RightPanel — Preview tab + BOM tab
 // ------------------------------------------------------------------
 
-const uid2 = () => typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `id_${Math.random().toString(16).slice(2)}`;
+const uid2 = () => randomId();
 
 function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isReadOnly, onWorkflowUpdate, productFeatures, featureSelections, onFeatureSelectionsChange, configId }: {
   workflow: Workflow;

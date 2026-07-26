@@ -47,6 +47,7 @@ import { fieldService } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
+import { randomId } from "../../utils/randomId";
 import { installationTabsService, InstallationTab, InstallationTabRow } from "../../services/installationTabsService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createInstallation, deleteInstallation, fetchInstallations, updateInstallation } from "../../store/installationSlice";
@@ -323,7 +324,7 @@ const InstallationList = () => {
       const payload: InstallationTabRow[] = rows.map((row, index) => {
         let rowId = typeof row._rowId === "string" && row._rowId ? row._rowId : "";
         if (!rowId) {
-          rowId = crypto.randomUUID();
+          rowId = randomId();
           didAssignIds = true;
         }
         const { _rowId, ...data } = row;

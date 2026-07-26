@@ -34,6 +34,7 @@ import {
 } from "@mui/icons-material";
 import type { AssetWorkflowRun, RunTimeEntry } from "../../types/assetWorkflowRun";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { randomId } from "../../utils/randomId";
 
 interface Props {
   open: boolean;
@@ -210,7 +211,7 @@ export default function TimeEntriesEditorDialog({ open, run, readOnly = false, o
       );
     } else {
       const newEntry: RunTimeEntry = {
-        id: crypto.randomUUID(),
+        id: randomId(),
         category: form.category,
         reason: form.reason || null,
         startedAtUtc: startIso,

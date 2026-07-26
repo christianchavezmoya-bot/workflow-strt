@@ -4,6 +4,7 @@ import {
   type PendingAction,
   type PendingActionMethod,
 } from "./localDB";
+import { randomId } from "../utils/randomId";
 
 export type SyncOpType =
   | "RUN_CREATE"
@@ -100,7 +101,7 @@ export const syncQueue = {
     }
 
     const op: SyncQueueOp = {
-      id: crypto.randomUUID(),
+      id: randomId(),
       opType: input.opType,
       url: input.url,
       method: input.method,

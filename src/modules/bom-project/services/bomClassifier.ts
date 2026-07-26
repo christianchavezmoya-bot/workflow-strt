@@ -10,6 +10,7 @@ import type {
   RuleCondition,
   ItemType,
 } from "../types/classification";
+import { randomId } from "../../../utils/randomId";
 
 const VALID_ITEM_TYPES: ItemType[] = ["asset", "component", "consumable", "reference", "ignore"];
 
@@ -113,7 +114,7 @@ export function classifyRow(
   const hint = parseItemTypeHint(row.itemTypeHint);
   if (hint) {
     return {
-      classificationId: crypto.randomUUID(),
+      classificationId: randomId(),
       sourceRowId: row.sourceRowId,
       importRunId,
       itemType: hint,
@@ -136,7 +137,7 @@ export function classifyRow(
   for (const rule of allRules) {
     if (evaluateRule(row, rule)) {
       return {
-        classificationId: crypto.randomUUID(),
+        classificationId: randomId(),
         sourceRowId: row.sourceRowId,
         importRunId,
         itemType: rule.result.itemType ?? "component",
@@ -158,7 +159,7 @@ export function classifyRow(
 
   // Fallback
   return {
-    classificationId: crypto.randomUUID(),
+    classificationId: randomId(),
     sourceRowId: row.sourceRowId,
     importRunId,
     itemType: "component",

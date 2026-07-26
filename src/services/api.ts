@@ -4,6 +4,7 @@ import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
+import { randomId } from "../utils/randomId";
 import { formatPayloadSize } from "../utils/syncDiagnostics";
 import { isCircuitOpen, resetCircuitBreaker } from "../utils/circuitBreaker";
 import { isOfflineGraceValid } from "./biometricAuth";
@@ -266,7 +267,7 @@ api.interceptors.response.use(
     const syncMeta = cfg.syncMeta;
     const durationMs = meta?.start ? Date.now() - meta.start : undefined;
     pushDebugLog({
-      id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2),
+      id: randomId(),
       time: new Date().toLocaleTimeString(),
       method: response.config.method?.toUpperCase(),
       url: response.config.url,
@@ -312,7 +313,7 @@ api.interceptors.response.use(
     const syncMeta = cfg.syncMeta;
     const durationMs = meta?.start ? Date.now() - meta.start : undefined;
     pushDebugLog({
-      id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2),
+      id: randomId(),
       time: new Date().toLocaleTimeString(),
       method: config.method?.toUpperCase(),
       url: config.url,

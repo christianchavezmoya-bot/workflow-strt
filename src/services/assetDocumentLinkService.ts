@@ -9,6 +9,7 @@ import syncQueue from "./syncQueue";
 import offlineStore from "./offlineStore";
 import { mediaStore } from "./mediaStore";
 import { isMobileNativePlatform } from "../utils/platform";
+import { randomId } from "../utils/randomId";
 import { getServerReachable, shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
 
 export interface AssetDocumentLink {
@@ -213,7 +214,7 @@ export const assetDocumentLinkService = {
 
       const cachedDoc = await findCachedDocument(documentId);
       const offlineLink: AssetDocumentLink = {
-        id: `${OFFLINE_LINK_PREFIX}${crypto.randomUUID()}`,
+        id: `${OFFLINE_LINK_PREFIX}${randomId()}`,
         assetId,
         documentId,
         attachedBy,
@@ -292,8 +293,8 @@ export const assetDocumentLinkService = {
         });
       }
 
-      const temporaryDocumentId = `${OFFLINE_DOCUMENT_PREFIX}${crypto.randomUUID()}`;
-      const temporaryLinkId = `${OFFLINE_LINK_PREFIX}${crypto.randomUUID()}`;
+      const temporaryDocumentId = `${OFFLINE_DOCUMENT_PREFIX}${randomId()}`;
+      const temporaryLinkId = `${OFFLINE_LINK_PREFIX}${randomId()}`;
       const fileData = await mediaStore.persistMediaValue(file, "document", "document", temporaryDocumentId, file.name);
       const syntheticDocument = buildSyntheticDocument(
         temporaryDocumentId,

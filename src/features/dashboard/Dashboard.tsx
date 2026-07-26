@@ -42,6 +42,7 @@ import {
   stabilizeDashboardWorkspace,
 } from "../../utils/dashboardWorkspaceMerge";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
+import { randomId } from "../../utils/randomId";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
@@ -5475,7 +5476,7 @@ const Dashboard = () => {
                         disabled={reminderSentId === f.id}
                         onClick={() => {
                           const reminder = {
-                            id: crypto.randomUUID(),
+                            id: randomId(),
                             runId: f.runId,
                             assetTag: f.assetTag,
                             jobNumber: f.jobNumber,

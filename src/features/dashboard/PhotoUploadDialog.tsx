@@ -34,6 +34,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { settingsService } from "../../services/settingsService";
 import { getFallbackPublicFrontendBaseUrl } from "../../services/publicFrontendBase";
+import { randomId } from "../../utils/randomId";
 import api from "../../services/api";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
@@ -581,7 +582,7 @@ export default function PhotoUploadDialog({
 
       // PM notification
       const notification: PhotoUpdateNotification = {
-        id: crypto.randomUUID(),
+        id: randomId(),
         runId: flag.runId,
         assetTag: flag.assetTag,
         jobNumber: flag.jobNumber,
@@ -607,7 +608,7 @@ export default function PhotoUploadDialog({
 
   function handleRemindInstaller() {
     const reminder = {
-      id: crypto.randomUUID(),
+      id: randomId(),
       runId: flag.runId,
       assetTag: flag.assetTag,
       jobNumber: flag.jobNumber,

@@ -24,7 +24,7 @@ export interface CacheEntry {
 export type PendingActionMethod = "PATCH" | "POST" | "PUT" | "DELETE";
 
 export interface PendingAction {
-  id: string;            // crypto.randomUUID()
+  id: string;            // randomId() at creation time
   url: string;           // relative API path e.g. /project-assets/abc
   method: PendingActionMethod;
   body: unknown;

@@ -8,6 +8,7 @@ import type { ClassificationResult } from "../types/classification";
 import type { DraftProject } from "../types/projectDraft";
 import type { ValidationResult, ValidationIssue } from "../types/validation";
 import { VALIDATION_CODES } from "../types/validation";
+import { randomId } from "../../../utils/randomId";
 
 export function validateImport(
   importRunId: string,
@@ -28,7 +29,7 @@ export function validateImport(
   const dupes = assetNames.filter((n, i) => assetNames.indexOf(n) !== i);
   dupes.forEach((name) => {
     errors.push({
-      id: crypto.randomUUID(),
+      id: randomId(),
       severity: "error",
       code: VALIDATION_CODES.DUPLICATE_ASSET_NAME,
       message: `Duplicate asset name: "${name}"`,
@@ -41,7 +42,7 @@ export function validateImport(
     asset.components.forEach((comp) => {
       if (comp.inventoryTracked && !comp.partNumber) {
         errors.push({
-          id: crypto.randomUUID(),
+          id: randomId(),
           severity: "error",
           code: VALIDATION_CODES.MISSING_PART_NUMBER,
           message: `Component "${comp.description}" is inventory-tracked but has no part number.`,
@@ -58,7 +59,7 @@ export function validateImport(
   rows.forEach((row) => {
     if (!classMap.has(row.sourceRowId)) {
       errors.push({
-        id: crypto.randomUUID(),
+        id: randomId(),
         severity: "error",
         code: VALIDATION_CODES.MISSING_CLASSIFICATION,
         message: `Row ${row.rowIndex} (${row.description}) has no classification.`,
@@ -75,7 +76,7 @@ export function validateImport(
     if (cl.confidenceScore < 0.5 && !cl.isManualOverride) {
       const row = rows.find((r) => r.sourceRowId === cl.sourceRowId);
       warnings.push({
-        id: crypto.randomUUID(),
+        id: randomId(),
         severity: "warning",
         code: VALIDATION_CODES.LOW_CONFIDENCE,
         message: `Row ${row?.rowIndex ?? "?"} classification confidence is low (${Math.round(cl.confidenceScore * 100)}%).`,
@@ -91,7 +92,7 @@ export function validateImport(
     asset.components.forEach((comp) => {
       if (comp.differenceQty !== undefined && comp.differenceQty < 0) {
         warnings.push({
-          id: crypto.randomUUID(),
+          id: randomId(),
           severity: "warning",
           code: VALIDATION_CODES.STOCK_SHORTAGE,
           message: `"${comp.description}" (${comp.partNumber ?? "no PN"}) has a stock shortage of ${Math.abs(comp.differenceQty)} ${comp.draftComponentId}.`,
@@ -106,7 +107,7 @@ export function validateImport(
   draft.assets.forEach((asset) => {
     if (!asset.workflowTemplateCandidate) {
       warnings.push({
-        id: crypto.randomUUID(),
+        id: randomId(),
         severity: "warning",
         code: VALIDATION_CODES.NO_WORKFLOW_SUGGESTION,
         message: `Asset "${asset.assetName}" has no workflow template suggestion.`,
@@ -120,7 +121,7 @@ export function validateImport(
   const ignoredRows = classifications.filter((c) => c.itemType === "ignore");
   if (ignoredRows.length > 0) {
     infos.push({
-      id: crypto.randomUUID(),
+      id: randomId(),
       severity: "info",
       code: VALIDATION_CODES.IGNORED_ROWS,
       message: `${ignoredRows.length} row(s) will be ignored and not imported.`,
@@ -131,7 +132,7 @@ export function validateImport(
   const overrides = classifications.filter((c) => c.isManualOverride);
   if (overrides.length > 0) {
     infos.push({
-      id: crypto.randomUUID(),
+      id: randomId(),
       severity: "info",
       code: VALIDATION_CODES.MANUAL_OVERRIDE,
       message: `${overrides.length} row(s) have manual classification overrides.`,

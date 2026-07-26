@@ -108,6 +108,7 @@ import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, ent
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { buildWorkflowReportJson, createWorkflowReportDocx, workflowReportBaseFileName, type WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
+import { randomId } from "../../utils/randomId";
 import { getWorkflowDisplayState } from "../../utils/workflowDisplayState";
 import {
   generateAssetListReport,
@@ -2465,7 +2466,7 @@ const AssetInstallationPage = () => {
     let issues: AssetIssue[] = [];
     try { issues = JSON.parse(runnerAsset.issuesJson || "[]"); } catch {}
     const newIssue: AssetIssue = {
-      id: crypto.randomUUID(),
+      id: randomId(),
       ...info,
       issueType: "observation",
       isBlocking: false,
@@ -2488,7 +2489,7 @@ const AssetInstallationPage = () => {
     let issues: AssetIssue[] = [];
     try { issues = JSON.parse(issueDialogAsset.issuesJson || "[]"); } catch {}
     const newIssue: AssetIssue = {
-      id: crypto.randomUUID(),
+      id: randomId(),
       description: issueForm.description.trim(),
       severity: issueForm.severity,
       issueType: "observation",
@@ -3826,7 +3827,7 @@ ${words.slice(midpoint).join(" ")}`;
                     onClick={() => {
                       const text = commentVal.trim();
                       if (!text) return;
-                      const newComment = { id: crypto.randomUUID(), text, author: currentUser?.fullName ?? "User", createdAt: new Date().toISOString() };
+                      const newComment = { id: randomId(), text, author: currentUser?.fullName ?? "User", createdAt: new Date().toISOString() };
                       onSaveComment({ ...issue, reportMedia: inlineReportMedia[issue.id]?.length ? inlineReportMedia[issue.id] : issue.reportMedia, comments: [...(issue.comments ?? []), newComment] });
                       setInlineCommentTexts(prev => ({ ...prev, [issue.id]: "" }));
                     }}

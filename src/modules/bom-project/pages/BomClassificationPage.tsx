@@ -18,6 +18,7 @@ import { featureService } from "../../../services/featureService";
 import type { CanonicalBomRow } from "../types/canonicalBom";
 import type { ItemType, ClassificationResult } from "../types/classification";
 import type { Feature } from "../../../types/feature";
+import { randomId } from "../../../utils/randomId";
 
 const ITEM_TYPES: ItemType[] = ["asset", "component", "consumable", "ignore"];
 
@@ -217,7 +218,7 @@ export default function BomClassificationPage() {
   };
 
   const addRow = () => {
-    const sourceRowId = crypto.randomUUID();
+    const sourceRowId = randomId();
     const assetNumber = state.normalizedRows.filter((r) => {
       const cl = new Map(state.classifications.map((c) => [c.sourceRowId, c])).get(r.sourceRowId);
       return cl?.itemType === "asset";
@@ -230,7 +231,7 @@ export default function BomClassificationPage() {
       description: `Asset ${assetNumber}`,
     };
     const classification: ClassificationResult = {
-      classificationId: crypto.randomUUID(),
+      classificationId: randomId(),
       sourceRowId,
       importRunId: id ?? "",
       itemType: "asset",

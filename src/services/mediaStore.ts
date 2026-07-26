@@ -1,6 +1,7 @@
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import type { OfflineMediaRef } from "./offlineStore";
 import { isMobileNativePlatform } from "../utils/platform";
+import { randomId } from "../utils/randomId";
 
 /**
  * Native media filesystem policy:
@@ -79,7 +80,7 @@ async function writeMedia(
   const dataUrl = typeof source === "string" ? source : await blobToDataUrl(source);
   const mimeType = mimeFromDataUrl(dataUrl);
   const ext = extFromMime(mimeType);
-  const mediaId = crypto.randomUUID();
+  const mediaId = randomId();
   const safeName = fileName ?? `${kind}-${mediaId}.${ext}`;
   const path = `${MEDIA_ROOT}/${safeName}`;
   const data = stripDataUrlPrefix(dataUrl);

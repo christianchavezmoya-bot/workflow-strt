@@ -3,6 +3,7 @@ import type { WorkInstruction, WorkInstructionInput } from "../types/workInstruc
 import syncQueue, { type SyncQueueOp } from "./syncQueue";
 import offlineStore from "./offlineStore";
 import { isMobileNativePlatform } from "../utils/platform";
+import { randomId } from "../utils/randomId";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
@@ -238,7 +239,7 @@ export const workInstructionService = {
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
 
-      const localId = crypto.randomUUID ? crypto.randomUUID() : `wi-${Date.now()}`;
+      const localId = randomId("wi");
       const item = buildLocalWorkInstruction(localId, productId, input, { dirty: true });
       saveLocalWorkInstruction(item);
       await syncQueue.enqueue({

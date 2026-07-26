@@ -51,6 +51,7 @@ import type { FeatureDependency } from "../../types/featureDependency";
 import { productService } from "../../services/productService";
 import type { Product } from "../../types/product";
 import api from "../../services/api";
+import { randomId } from "../../utils/randomId";
 import { settingsService } from "../../services/settingsService";
 import { getFallbackPublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/settings";
@@ -3249,7 +3250,7 @@ const Settings = () => {
               variant="outlined"
               onClick={() => {
                 if (!lookupFieldId) return;
-                const next = { id: crypto.randomUUID(), label: "" };
+                const next = { id: randomId(), label: "" };
                 setLookupRows((prev) => ({
                   ...prev,
                   [lookupFieldId]: [...(prev[lookupFieldId] || []), next]

@@ -3,6 +3,7 @@ import api from "./api";
 import type { WorkflowAssignment } from "../types/workflowType";
 import syncQueue from "./syncQueue";
 import { isMobileNativePlatform } from "../utils/platform";
+import { randomId } from "../utils/randomId";
 import { invalidateWebCache } from "./webFreshCache";
 import { WorkflowAssignmentRepository } from "../repositories/WorkflowAssignmentRepository";
 import { isOfflineNetworkError } from "../utils/offlineNetworkError";
@@ -32,7 +33,7 @@ export const assetWorkflowAssignmentService = {
     // ── Mobile native path ──────────────────────────────────────────
     // 1. Optimistically write a temp assignment to the local cache so the
     //    UI updates immediately (the workflow becomes startable offline).
-    const tempId = `local-${crypto.randomUUID()}`;
+    const tempId = `local-${randomId()}`;
     const optimistic = {
       id: tempId,
       assetId,

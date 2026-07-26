@@ -12,6 +12,7 @@ import OfflineModeBanner from "./OfflineModeBanner";
 import OfflineBootstrapBanner from "./OfflineBootstrapBanner";
 import SyncBusyOverlay from "./SyncBusyOverlay";
 import { useViewMode } from "../../contexts/ViewModeContext";
+import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import { useAccessMode } from "../../contexts/AccessModeContext";
 import { FavoritesProvider } from "../../contexts/FavoritesContext";
 import OnboardingController from "../../onboarding/OnboardingController";
@@ -56,6 +57,7 @@ function OnboardingLayer() {
 const AppShell = () => {
   const { viewMode } = useViewMode();
   const { isViewOnly } = useAccessMode();
+  const mobileWebLayout = useMobileWebLayout();
   useSseEvents(); // real-time push from server
   useOfflineBootstrap(); // keep offline cache warm (native only)
 
@@ -64,8 +66,8 @@ const AppShell = () => {
   return (
     <FavoritesProvider>
       <Box className="app-shell">
-        {/* Sidebar: desktop only (hidden on mobile via CSS) */}
-        {viewMode === "full" && <Sidebar />}
+        {/* Sidebar: desktop web only (hidden on mobile web + native via layout rules) */}
+        {viewMode === "full" && !mobileWebLayout && <Sidebar />}
         <Box className={`app-main ${viewMode === "minimal" ? "minimal-view" : ""}`}>
           <NotificationBanner />
           <SyncDroppedBanner />

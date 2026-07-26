@@ -25,6 +25,7 @@ import { secureClearAuth } from "../../services/secureStorage";
 import strataLogo from "../../assets/strata_transparent.png";
 import SyncStatusBadge from "../ui/SyncStatusBadge";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
+import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import ConnectivityDebugBar from "./ConnectivityDebugBar";
 import SyncTelemetryPanel from "./SyncTelemetryPanel";
 
@@ -102,6 +103,7 @@ const Topbar = () => {
   const projects = useAppSelector((s) => s.projects.items);
   const isNativeMobile = isMobileNativePlatform();
   const isDesktopLike = isDesktopLikePlatform();
+  const mobileWebLayout = useMobileWebLayout();
 
   const [appName, setAppName] = useState(APP_NAME);
   const [qbEnabled, setQbEnabled] = useState(false);
@@ -398,6 +400,7 @@ const Topbar = () => {
           />
         ) : (
           <>
+            {!mobileWebLayout && (
             <Chip
               icon={viewMode === "full" ? <ViewSidebarOutlinedIcon /> : <DashboardOutlinedIcon />}
               label={viewMode === "full" ? "Full View" : "Minimal View"}
@@ -410,6 +413,7 @@ const Topbar = () => {
                 "&:hover": { background: "rgba(45, 212, 191, 0.28)" }
               }}
             />
+            )}
             <Stack spacing={0.5}>
               <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
                 {appName}

@@ -54,6 +54,7 @@ import { usePermissions } from "../../hooks/usePermissions";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
+import { randomId } from "../../utils/randomId";
 import type { Site } from "../../types/site";
 import type { FieldDefinition } from "../../services/fieldService";
 
@@ -483,9 +484,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       anyWindow.__apiDebugLogs = [];
     }
     anyWindow.__apiDebugLogs.push({
-      id: typeof globalThis.crypto?.randomUUID === "function"
-        ? globalThis.crypto.randomUUID()
-        : Math.random().toString(36).slice(2),
+      id: randomId(),
       time: new Date().toLocaleTimeString(),
       method: "UI",
       url: message,

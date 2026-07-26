@@ -11,6 +11,7 @@ import type {
   DraftFeature,
   CaptureFieldPreview,
 } from "../types/projectDraft";
+import { randomId } from "../../../utils/randomId";
 
 interface GeneratorInput {
   importRunId: string;
@@ -32,10 +33,10 @@ export function generateDraftProject(input: GeneratorInput): DraftProject {
   );
 
   // ── Build asset drafts ────────────────────────────────────────────────────
-  const draftProjectId = crypto.randomUUID();
+  const draftProjectId = randomId();
   const assets: DraftAsset[] = assetRows.map((assetRow) => {
     const cl = classMap.get(assetRow.sourceRowId)!;
-    const draftAssetId = crypto.randomUUID();
+    const draftAssetId = randomId();
     const assetName = assetRow.assetNameCandidate ?? assetRow.vehicleType ?? assetRow.description;
 
     // Find component rows that belong to this asset (same group / vehicle type)
@@ -51,7 +52,7 @@ export function generateDraftProject(input: GeneratorInput): DraftProject {
     const components: DraftComponent[] = componentRows.map((cr) => {
       const ccl = classMap.get(cr.sourceRowId)!;
       return {
-        draftComponentId: crypto.randomUUID(),
+        draftComponentId: randomId(),
         draftAssetId,
         partNumber: cr.partNumber,
         description: cr.description,
@@ -107,7 +108,7 @@ function buildFeaturesFromClassification(
 
   if (cl.installRequired) {
     features.push({
-      draftFeatureId: crypto.randomUUID(),
+      draftFeatureId: randomId(),
       draftAssetId,
       featureName: "Installation",
       featureType: "installation",
@@ -118,7 +119,7 @@ function buildFeaturesFromClassification(
   }
   if (cl.testRequired) {
     features.push({
-      draftFeatureId: crypto.randomUUID(),
+      draftFeatureId: randomId(),
       draftAssetId,
       featureName: "Commissioning Test",
       featureType: "test",

@@ -17,6 +17,7 @@ import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
 import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
+import { randomId } from "../utils/randomId";
 import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead, shouldSkipRunMutation } from "./connectivityMonitor";
 import { boundedFreshRead, BOUNDED_FRESH_TIMEOUT_MS } from "../utils/boundedFreshRead";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
@@ -134,7 +135,7 @@ function closeAnyOpenTimeEntry(entries: RunTimeEntry[], atUtc: string): void {
 function startProductivePeriod(entries: RunTimeEntry[], atUtc: string, reason?: string | null): void {
   if (entries.some((e) => !e.endedAtUtc && e.category === "productive")) return;
   entries.push({
-    id: crypto.randomUUID(),
+    id: randomId(),
     category: "productive",
     startedAtUtc: atUtc,
     endedAtUtc: null,
@@ -145,7 +146,7 @@ function startProductivePeriod(entries: RunTimeEntry[], atUtc: string, reason?: 
 function startDowntimePeriod(entries: RunTimeEntry[], atUtc: string, reason?: string | null): void {
   if (entries.some((e) => !e.endedAtUtc && e.category === "downtime")) return;
   entries.push({
-    id: crypto.randomUUID(),
+    id: randomId(),
     category: "downtime",
     startedAtUtc: atUtc,
     endedAtUtc: null,
@@ -299,7 +300,7 @@ function buildRunSnapshot(config: { id: string; name: string; version: number; s
 
 function buildInitialTimeTracking(now: string): string {
   const entries: RunTimeEntry[] = [{
-    id: crypto.randomUUID(),
+    id: randomId(),
     category: "productive",
     startedAtUtc: now,
     endedAtUtc: null,
@@ -982,7 +983,7 @@ export const assetWorkflowRunService = {
       if (!config) throw error;
 
       const now = new Date().toISOString();
-      const localRunId = `offline-run-${crypto.randomUUID()}`;
+      const localRunId = `offline-run-${randomId()}`;
       const projectId = await resolveProjectId(assetId);
       const existingRuns = await offlineStore.listRunsByAsset(assetId);
       const offlineRun: OfflineRun = {

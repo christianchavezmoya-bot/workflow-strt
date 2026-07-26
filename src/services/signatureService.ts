@@ -4,6 +4,7 @@ import syncQueue from "./syncQueue";
 import offlineStore from "./offlineStore";
 import { mediaStore } from "./mediaStore";
 import { isMobileNativePlatform } from "../utils/platform";
+import { randomId } from "../utils/randomId";
 import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
 import { applyOfflineAssetStatusUpdate, syncOfflineAssetWorkflowStateFromRun } from "./assetWorkflowRunService";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
@@ -197,7 +198,7 @@ export const signatureService = {
       window.dispatchEvent(new Event("notifications:refresh"));
 
       return {
-        id: `offline-signature-${crypto.randomUUID()}`,
+        id: `offline-signature-${randomId()}`,
         runId,
         signerRole: payload.signerRole,
         signerName: payload.signerName,
