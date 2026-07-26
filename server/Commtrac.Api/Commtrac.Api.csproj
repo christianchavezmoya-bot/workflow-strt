@@ -4,6 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Enables dotnet user-secrets in Development (API key — never commit the secret itself). -->
+    <UserSecretsId>7f4e8c2a-1b3d-4e5f-9a6b-0c15trac9151</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

@@ -65,7 +65,9 @@ $key = (Get-Content "C:\Users\cchavez\Documents\Commtrac\API keys\Ngo_cloudflare
 dotnet user-secrets set "Email:ResendApiKey" $key --project server/Commtrac.Api
 ```
 
-Verify it is set (shows key name only, not value in output ideally):
+The csproj already has a `UserSecretsId` — **do not** run `dotnet user-secrets init` (that would duplicate the ID).
+
+Verify it is set:
 
 ```powershell
 dotnet user-secrets list --project server/Commtrac.Api

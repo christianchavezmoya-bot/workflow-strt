@@ -10,11 +10,19 @@ Store the Resend API key **only** in environment variables or .NET user secrets 
 
 ### Windows — user secrets (recommended for local dev)
 
+The project includes a committed `UserSecretsId` in `Commtrac.Api.csproj`. Secrets load automatically when `ASPNETCORE_ENVIRONMENT=Development` (default for `dotnet run`).
+
 From the repo root:
 
 ```powershell
 dotnet user-secrets set "Email:ResendApiKey" "re_YOUR_KEY_HERE" --project server/Commtrac.Api
 ```
+
+No `dotnet user-secrets init` step is required.
+
+### Resend sender address
+
+Resend always sends from **`Strata-ngo <noreply@strata-ngo.com>`** (see `AppBranding`). This is independent of the SMTP "from" field in notification settings, so a legacy `commtrac.local` value in the DB cannot cause Resend 403 errors.
 
 ### Environment variable (production / CI)
 

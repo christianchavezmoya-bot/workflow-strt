@@ -161,14 +161,14 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
         }
 
         var settings = await _settingsService.GetEmailSettingsAsync();
-        var fromAddress = ResolveFromAddress(settings);
-        var fromName = ResolveFromName(settings);
-        var fromHeader = FormatFromHeader(fromName, fromAddress);
+        var smtpFromAddress = ResolveSmtpFromAddress(settings);
+        var smtpFromName = ResolveSmtpFromName(settings);
+        var resendFromHeader = FormatFromHeader(AppBranding.EmailFromName, AppBranding.EmailFromAddress);
 
         var apiKey = ResolveResendApiKey();
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
-            var sent = await TrySendViaResendAsync(apiKey, fromHeader, toEmail.Trim(), subject, body, cancellationToken);
+            var sent = await TrySendViaResendAsync(apiKey, resendFromHeader, toEmail.Trim(), subject, body, cancellationToken);
             if (sent.Success)
             {
                 return sent;
@@ -182,7 +182,7 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
 
         if (!string.IsNullOrWhiteSpace(settings.SmtpHost))
         {
-            var sent = await TrySendViaSmtpAsync(settings, fromAddress, toEmail.Trim(), subject, body, cancellationToken);
+            var sent = await TrySendViaSmtpAsync(settings, smtpFromAddress, toEmail.Trim(), subject, body, cancellationToken);
             if (sent.Success)
             {
                 return sent;
@@ -197,7 +197,7 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
         _logger.LogInformation(
             "Email simulated (no Resend key and no SMTP host). To: {To} From: {From} Subject: {Subject} Body: {Body}",
             toEmail,
-            fromHeader,
+            resendFromHeader,
             subject,
             body);
         return new EmailSendResult(true, "simulated", "No Resend API key or SMTP host configured — message logged only.");
@@ -319,12 +319,12 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
             Environment.GetEnvironmentVariable("Resend__ApiKey"));
     }
 
-    private static string ResolveFromAddress(EmailSettings settings)
+    private static string ResolveSmtpFromAddress(EmailSettings settings)
         => string.IsNullOrWhiteSpace(settings.FromAddress)
             ? AppBranding.EmailFromAddress
             : settings.FromAddress.Trim();
 
-    private static string ResolveFromName(EmailSettings settings)
+    private static string ResolveSmtpFromName(EmailSettings settings)
         => string.IsNullOrWhiteSpace(settings.FromName)
             ? AppBranding.EmailFromName
             : settings.FromName.Trim();

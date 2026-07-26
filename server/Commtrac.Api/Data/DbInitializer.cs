@@ -37,6 +37,7 @@ public static class DbInitializer
         // BEFORE any seeding query below hits a !IsDeleted query filter, or a fresh
         // database crashes with "no such column: IsDeleted".
         EnsureSoftDeleteColumns(db);
+        EnsureNotificationSettingsResendFrom(db);
 
         if (!db.Users.Any())
         {
@@ -176,6 +177,27 @@ public static class DbInitializer
         }
 
         db.SaveChanges();
+    }
+
+    /// <summary>
+    /// Legacy dev DBs may still have commtrac.local in SmtpFrom from old appsettings seeds.
+    /// Resend always uses AppBranding, but this keeps notification settings and SMTP fallback aligned.
+    /// </summary>
+    private static void EnsureNotificationSettingsResendFrom(AppDbContext db)
+    {
+        var entity = db.NotificationSettings.FirstOrDefault(s => s.Id == 1);
+        if (entity is null)
+        {
+            return;
+        }
+
+        var from = entity.SmtpFrom?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(from)
+            || from.Contains("commtrac.local", StringComparison.OrdinalIgnoreCase))
+        {
+            entity.SmtpFrom = AppBranding.EmailFromAddress;
+            db.SaveChanges();
+        }
     }
 
     // TableConfigDialog only allows linking to fields that are typed as "primary key"/"composite key"/"lookup field".
