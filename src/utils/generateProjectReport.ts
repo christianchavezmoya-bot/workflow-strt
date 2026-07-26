@@ -115,7 +115,7 @@ function addHeader(doc: jsPDF, logoBase64: string | null) {
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(180, 200, 220);
-  doc.text("Commtrac Field Operations", PAGE_W / 2, HEADER_H / 2 + 5, { align: "center", baseline: "middle" });
+  doc.text("Strata N-go", PAGE_W / 2, HEADER_H / 2 + 5, { align: "center", baseline: "middle" });
 }
 
 function sectionBar(doc: jsPDF, y: number, title: string): number {

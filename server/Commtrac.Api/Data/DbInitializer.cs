@@ -1,6 +1,7 @@
 using System.Text.Json;
 using BCrypt.Net;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Commtrac.Api.Data;
@@ -157,11 +158,20 @@ public static class DbInitializer
                 SmtpUseSsl = false,
                 SmtpUser = "",
                 SmtpPass = "",
-                SmtpFrom = config["Email:FromAddress"] ?? "no-reply@commtrac.local",
+                SmtpFrom = config["Email:FromAddress"] ?? AppBranding.EmailFromAddress,
                 FrontendBaseUrl = config["Email:FrontendBaseUrl"] ?? "",
                 SmsProvider = config["Sms:Provider"] ?? "",
                 SmsApiKey = config["Sms:ApiKey"] ?? "",
                 SmsSender = config["Sms:Sender"] ?? ""
+            });
+        }
+
+        if (!db.BrandSettings.Any(s => s.Key == "app-name"))
+        {
+            db.BrandSettings.Add(new BrandSettingEntity
+            {
+                Key = "app-name",
+                Value = AppBranding.AppName,
             });
         }
 

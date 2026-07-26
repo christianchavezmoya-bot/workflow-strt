@@ -5,13 +5,14 @@ import { authService } from "../../services/authService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import PasswordField from "../../components/ui/PasswordField";
 import axios from "axios";
+import { APP_NAME } from "../../constants/branding";
 
 const ResetPassword = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const token = useMemo(() => searchParams.get("token") ?? "", [searchParams]);
   const isInvite = searchParams.get("invite") === "true";
-  const [appName, setAppName] = useState<string>("Commtrac");
+  const [appName, setAppName] = useState<string>(APP_NAME);
 
   useEffect(() => {
     brandSettingsService.get().then((s) => {

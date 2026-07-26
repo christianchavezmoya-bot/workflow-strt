@@ -34,6 +34,10 @@ public record NotificationSettingsDto(
     string SmsSender
 );
 
+public record TestEmailRequest(string ToEmail);
+
+public record TestEmailResponse(bool Sent, string Mode, string Message);
+
 public record PublicAppSettingsDto(
     string FrontendBaseUrl
 );

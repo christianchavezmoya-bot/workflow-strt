@@ -77,7 +77,8 @@ public sealed class NotificationSettingsService
             UseSsl = s.SmtpUseSsl,
             Username = s.SmtpUser ?? "",
             Password = s.SmtpPass ?? "",
-            FromAddress = string.IsNullOrWhiteSpace(s.SmtpFrom) ? "no-reply@commtrac.local" : s.SmtpFrom,
+            FromAddress = string.IsNullOrWhiteSpace(s.SmtpFrom) ? AppBranding.EmailFromAddress : s.SmtpFrom,
+            FromName = string.IsNullOrWhiteSpace(_fallbackEmail.FromName) ? AppBranding.EmailFromName : _fallbackEmail.FromName,
             FrontendBaseUrl = effectiveFrontendBaseUrl
         };
     }

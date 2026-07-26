@@ -19,6 +19,7 @@ import { recordOnlineLogin } from "../../services/biometricAuth";
 import { offlineBootstrapService } from "../../services/offlineBootstrapService";
 import { getNetworkStatus, getNetworkMessage, NetworkStatus } from "../../services/networkService";
 import strataLogo from "../../assets/strata_transparent.png";
+import { APP_NAME } from "../../constants/branding";
 
 // Must be outside Login so it doesn't remount on every keystroke
 const PageWrapper = ({ children }: { children: React.ReactNode }) => (
@@ -35,9 +36,9 @@ const PageWrapper = ({ children }: { children: React.ReactNode }) => (
     }}
   >
     <Stack alignItems="center" spacing={1.5} sx={{ mt: { xs: 6, sm: 0 }, mb: { xs: 4, sm: 0 } }}>
-      <Box component="img" src={strataLogo} alt="Kinet" sx={{ height: { xs: 72, sm: 56 }, borderRadius: "12px" }} />
+      <Box component="img" src={strataLogo} alt={APP_NAME} sx={{ height: { xs: 72, sm: 56 }, borderRadius: "12px" }} />
       <Typography variant="h5" fontWeight={700} sx={{ fontFamily: "Sora", display: { xs: "block", sm: "none" } }}>
-        Kinet
+        {APP_NAME}
       </Typography>
     </Stack>
     <Box className="glass-card" sx={{ padding: { xs: 3, sm: 4 }, width: "100%", maxWidth: 420, mt: { xs: 0, sm: 4 } }}>
@@ -317,7 +318,7 @@ const Login = () => {
 
         <Box>
           <Typography variant="h5" fontWeight={700} sx={{ fontFamily: "Sora" }}>
-            {isFirstTimeUser ? "Welcome to Kinet" : "Welcome back"}
+            {isFirstTimeUser ? `Welcome to ${APP_NAME}` : "Welcome back"}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {isFirstTimeUser 

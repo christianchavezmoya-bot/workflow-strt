@@ -201,7 +201,7 @@ public class AuthController : ControllerBase
         user.TotpSecret = base32Secret;
         await _db.SaveChangesAsync();
 
-        var issuer = Uri.EscapeDataString("Commtrac");
+        var issuer = Uri.EscapeDataString(AppBranding.AppName);
         var account = Uri.EscapeDataString(user.Email);
         var qrCodeUri = $"otpauth://totp/{issuer}:{account}?secret={base32Secret}&issuer={issuer}&digits=6&period=30";
 
@@ -487,7 +487,7 @@ public class AuthController : ControllerBase
                 {
                     await _emailSender.SendNotificationAsync(
                         email,
-                        "Commtrac account locked",
+                        $"{AppBranding.AppName} account locked",
                         $"Your account has been temporarily locked due to {MaxLoginAttempts} failed login attempts. " +
                         $"It will unlock automatically in {LockoutDuration.TotalMinutes} minutes. " +
                         "If this wasn't you, please contact your administrator."

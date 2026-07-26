@@ -30,6 +30,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { officesService } from "../../services/officesService";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import { APP_NAME } from "../../constants/branding";
 import type { Office } from "../../components/GlobalOfficeMap";
 import strataLogo from "../../assets/strata_transparent.png";
 import FavoritesSection from "./FavoritesSection";
@@ -68,7 +69,7 @@ const Sidebar = () => {
     const stored = localStorage.getItem("active_office");
     return stored && stored !== "All" ? [stored, "All"] : ["All"];
   });
-  const [appName, setAppName] = useState("Field Operations");
+  const [appName, setAppName] = useState(APP_NAME);
 
   useEffect(() => {
     brandSettingsService.get().then((s) => {

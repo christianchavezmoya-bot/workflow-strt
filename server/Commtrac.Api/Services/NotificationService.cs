@@ -10,7 +10,7 @@ public sealed class NotificationService
     private readonly AppDbContext _db;
     private readonly IEmailSender _emailSender;
     private readonly ISmsSender _smsSender;
-    private readonly EmailSettings _emailSettings;
+    private readonly NotificationSettingsService _notificationSettings;
     private readonly IConfiguration _config;
     private readonly ILogger<NotificationService> _logger;
 
@@ -18,14 +18,14 @@ public sealed class NotificationService
         AppDbContext db,
         IEmailSender emailSender,
         ISmsSender smsSender,
-        IOptions<EmailSettings> emailSettings,
+        NotificationSettingsService notificationSettings,
         IConfiguration config,
         ILogger<NotificationService> logger)
     {
         _db = db;
         _emailSender = emailSender;
         _smsSender = smsSender;
-        _emailSettings = emailSettings.Value;
+        _notificationSettings = notificationSettings;
         _config = config;
         _logger = logger;
     }
@@ -36,6 +36,53 @@ public sealed class NotificationService
         var subject = $"Installation completed: {installation.InstallationNumber}";
         var body = $"Installation {installation.InstallationNumber} is now 100% complete.";
         await _emailSender.SendNotificationAsync(adminEmail, subject, body);
+    }
+
+    public async Task NotifyWorkflowCompletedAsync(
+        AssetWorkflowRunEntity run,
+        ProjectAssetEntity asset,
+        string completedByName,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var project = await _db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == asset.ProjectId, cancellationToken);
+            var jobLabel = project?.JobNumber ?? "unknown";
+            var frontendBase = (await _notificationSettings.GetFrontendBaseUrlAsync()).TrimEnd('/');
+            var reportLink = string.IsNullOrWhiteSpace(frontendBase)
+                ? null
+                : $"{frontendBase}/projects/{asset.ProjectId}/installations";
+
+            var recipients = await _db.Users.AsNoTracking()
+                .Where(u => u.IsActive && (u.Role == "Admin" || u.Role == "Project Manager"))
+                .Select(u => u.Email)
+                .Where(email => !string.IsNullOrWhiteSpace(email))
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            if (recipients.Count == 0)
+            {
+                _logger.LogInformation(
+                    "Workflow completion email skipped — no Admin/PM recipients for asset {AssetTag}",
+                    asset.AssetTag);
+                return;
+            }
+
+            foreach (var email in recipients)
+            {
+                await _emailSender.SendWorkflowCompletionNotificationAsync(
+                    email,
+                    asset.AssetTag,
+                    jobLabel,
+                    completedByName,
+                    reportLink,
+                    cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Workflow completion email failed for run {RunId}", run.Id);
+        }
     }
 
     public async Task NotifyInspectionAssignedAsync(InspectionEntity inspection)

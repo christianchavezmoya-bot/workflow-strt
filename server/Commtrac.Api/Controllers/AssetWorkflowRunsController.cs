@@ -18,13 +18,22 @@ public class AssetWorkflowRunsController : ControllerBase
     private readonly SseHub _sse;
     private readonly ILogger<AssetWorkflowRunsController> _logger;
     private readonly ProjectLifecycleService _projectLifecycle;
-    public AssetWorkflowRunsController(AppDbContext db, NotificationFeedService feed, SseHub sse, ILogger<AssetWorkflowRunsController> logger, ProjectLifecycleService projectLifecycle)
+    private readonly NotificationService _notifications;
+
+    public AssetWorkflowRunsController(
+        AppDbContext db,
+        NotificationFeedService feed,
+        SseHub sse,
+        ILogger<AssetWorkflowRunsController> logger,
+        ProjectLifecycleService projectLifecycle,
+        NotificationService notifications)
     {
         _db     = db;
         _feed   = feed;
         _sse    = sse;
         _logger = logger;
         _projectLifecycle = projectLifecycle;
+        _notifications = notifications;
     }
 
     private sealed class RunTimeEntry
@@ -842,6 +851,13 @@ public class AssetWorkflowRunsController : ControllerBase
             "Workflow completed",
             $"{(req.CompletedByName ?? ResolveActorName())} completed workflow for asset {{asset}} on job {{job}}.",
             notifyInstaller: false);
+        if (asset is not null)
+        {
+            await _notifications.NotifyWorkflowCompletedAsync(
+                run,
+                asset,
+                req.CompletedByName ?? ResolveActorName());
+        }
         if (asset is not null && string.Equals(asset.Status, "Pending", StringComparison.OrdinalIgnoreCase))
         {
             await NotifyAssetEventAsync(

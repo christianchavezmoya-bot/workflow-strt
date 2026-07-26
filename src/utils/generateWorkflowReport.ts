@@ -270,7 +270,7 @@ export interface GenerateReportParams {
 export async function generateWorkflowReport(params: GenerateReportParams): Promise<Blob | void> {
   const {
     run, asset, workflowConfigName,
-    businessLogoBase64, customerLogoBase64, companyName = "Commtrac",
+    businessLogoBase64, customerLogoBase64, companyName = "Strata N-go",
     customerName, jobNumber, siteName, siteLocation, assignedTechnician,
     includeAllSteps = false,
     signatureEvents = [],

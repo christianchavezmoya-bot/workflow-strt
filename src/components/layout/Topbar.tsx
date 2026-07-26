@@ -20,6 +20,7 @@ import { useAppSelector } from "../../store/hooks";
 import GlobalSearchDialog from "./GlobalSearchDialog";
 import { searchIndexService, type SearchIndexStatus } from "../../services/searchIndexService";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import { APP_NAME } from "../../constants/branding";
 import { secureClearAuth } from "../../services/secureStorage";
 import strataLogo from "../../assets/strata_transparent.png";
 import SyncStatusBadge from "../ui/SyncStatusBadge";
@@ -102,7 +103,7 @@ const Topbar = () => {
   const isNativeMobile = isMobileNativePlatform();
   const isDesktopLike = isDesktopLikePlatform();
 
-  const [appName, setAppName] = useState("Field Operations");
+  const [appName, setAppName] = useState(APP_NAME);
   const [qbEnabled, setQbEnabled] = useState(false);
   const [qbHost, setQbHost] = useState("");
 

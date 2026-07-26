@@ -20,17 +20,20 @@ public class SettingsController : ControllerBase
     private readonly NotificationSettingsService _notificationSettings;
     private readonly SqliteBackupService _backupService;
     private readonly RecoveryService _recovery;
+    private readonly ResendEmailService _emailService;
 
     public SettingsController(
         AppDbContext db,
         NotificationSettingsService notificationSettings,
         SqliteBackupService backupService,
-        RecoveryService recovery)
+        RecoveryService recovery,
+        ResendEmailService emailService)
     {
         _db = db;
         _notificationSettings = notificationSettings;
         _backupService = backupService;
         _recovery = recovery;
+        _emailService = emailService;
     }
 
     [HttpGet("quickbase")]
@@ -121,6 +124,18 @@ public class SettingsController : ControllerBase
     public async Task<ActionResult<NotificationSettingsDto>> SaveNotifications([FromBody] NotificationSettingsDto request)
     {
         return Ok(await _notificationSettings.SaveAsync(request));
+    }
+
+    [HttpPost("notifications/test-email")]
+    public async Task<ActionResult<TestEmailResponse>> SendTestEmail([FromBody] TestEmailRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.ToEmail) || !request.ToEmail.Contains('@'))
+        {
+            return BadRequest(new TestEmailResponse(false, "skipped", "A valid recipient email address is required."));
+        }
+
+        var result = await _emailService.SendTestEmailWithResultAsync(request.ToEmail.Trim(), cancellationToken);
+        return Ok(new TestEmailResponse(result.Success, result.Mode, result.Message ?? ""));
     }
 
     private string GetRequestHostPrivateIpv4()

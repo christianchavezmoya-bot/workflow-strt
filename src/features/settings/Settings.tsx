@@ -57,6 +57,7 @@ import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/set
 import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
 import { useAuth } from "../../hooks/useAuth";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import { APP_NAME } from "../../constants/branding";
 import * as XLSX from "xlsx";
 import PasswordField from "../../components/ui/PasswordField";
 import { secureGet, secureRemove } from "../../services/secureStorage";
@@ -131,7 +132,7 @@ function BusinessLogoTab() {
     setAppNameError(null);
     try {
       await brandSettingsService.setAppName(appName.trim());
-      const resolvedName = appName.trim() || "Field Operations";
+      const resolvedName = appName.trim() || APP_NAME;
       document.title = resolvedName;
       window.dispatchEvent(new CustomEvent("brand-name-changed", { detail: { appName: resolvedName } }));
       setAppNameSuccess(true);
@@ -157,7 +158,7 @@ function BusinessLogoTab() {
             label="App Name"
             value={appName}
             onChange={(e) => setAppName(e.target.value)}
-            placeholder="e.g. Field Operations"
+            placeholder={`e.g. ${APP_NAME}`}
             sx={{ maxWidth: 360 }}
             size="small"
             InputLabelProps={{ shrink: true }}
