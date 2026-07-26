@@ -153,6 +153,10 @@ function groupPalette(group: ProjectCaptureGroup) {
   return featurePalettes[Math.abs(group.tintIndex) % featurePalettes.length];
 }
 
+function solidFieldHeaderBg(group: ProjectCaptureGroup): string {
+  return groupPalette(group).subHeader;
+}
+
 
 
 function bodyCellHoverSx(rowBg: string) {
@@ -511,6 +515,8 @@ export default function CaptureSpreadsheetDialog({
           verticalAlign: "top",
           px: 0.75,
           py: 0.45,
+          position: "relative",
+          zIndex: 0,
           ...bodyCellHoverSx(rowBg),
         }}
       >
@@ -571,7 +577,7 @@ export default function CaptureSpreadsheetDialog({
 
       <Box sx={{ overflow: "auto", maxHeight: embedded ? undefined : (fullScreen ? "calc(100vh - 200px)" : "70vh"), WebkitOverflowScrolling: "touch" }}>
         <Table size="small" stickyHeader sx={{ minWidth: 760, borderCollapse: "separate", borderSpacing: 0 }}>
-          <TableHead>
+          <TableHead sx={{ position: "relative", zIndex: HEADER_Z.row1 }}>
             <TableRow ref={headerRow1Ref}>
               {selectionEnabled && (
                 <TableCell
@@ -789,7 +795,7 @@ export default function CaptureSpreadsheetDialog({
                       top: headerStickyTops.fields,
                       position: "sticky",
                       zIndex: HEADER_Z.row3,
-                      bgcolor: hexToRgba(palette.border, group.groupType === "general" ? 0.08 : 0.1),
+                      bgcolor: solidFieldHeaderBg(group),
                       color: "text.primary",
                       fontWeight: 700,
                       fontSize: 11.5,
@@ -816,7 +822,7 @@ export default function CaptureSpreadsheetDialog({
               })}
             </TableRow>
           </TableHead>
-          <TableBody>
+          <TableBody sx={{ position: "relative", zIndex: 0 }}>
             {filteredRows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={visibleColumns.length + assetJobColumns.length + (selectionEnabled ? 4 : 3)}>

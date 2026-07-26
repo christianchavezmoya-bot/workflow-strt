@@ -252,10 +252,23 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
             if (cancelled) return;
             setHtmlPreview(
               `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1" /><style>
-                body{font-family:Arial,sans-serif;padding:24px;line-height:1.6;background:#fff;color:#111;margin:0}
-                table{border-collapse:collapse;width:100%}
-                td,th{border:1px solid #ccc;padding:6px 10px}
-                img{max-width:100%;height:auto}
+                html { overflow: auto; background: #fff; }
+                body {
+                  font-family: Arial, sans-serif;
+                  padding: 20px 24px 32px;
+                  line-height: 1.55;
+                  background: #fff;
+                  color: #111;
+                  margin: 0 auto;
+                  max-width: 920px;
+                  width: 100%;
+                  box-sizing: border-box;
+                  overflow-wrap: anywhere;
+                }
+                table { border-collapse: collapse; width: 100%; max-width: 100%; table-layout: fixed; }
+                td, th { border: 1px solid #ccc; padding: 6px 10px; word-break: break-word; }
+                img { max-width: 100%; height: auto; display: block; }
+                p, li, h1, h2, h3, h4 { max-width: 100%; }
               </style></head><body>${result.value}</body></html>`,
             );
             return;
@@ -314,7 +327,7 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
     };
   }, [doc, fileType, open, previewMode]);
 
-  const canZoom = previewMode === "pdf" || previewMode === "image";
+  const canZoom = previewMode === "pdf" || previewMode === "image" || previewMode === "html";
   const showDownload = !!doc?.downloadUrl;
   const sizeLabel = formatSize(doc?.fileSize);
 
@@ -513,21 +526,30 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         )}
 
         {!loading && !error && previewMode === "html" && htmlPreview && (
-          <Box sx={{ flex: 1, overflow: "hidden", p: { xs: 1.25, sm: 2.5 } }}>
+          <Box sx={{ flex: 1, overflow: "auto", p: { xs: 1.25, sm: 2.5 } }}>
             <Box
-              component="iframe"
-              srcDoc={htmlPreview}
-              title={doc?.name ?? "Preview"}
-              sandbox="allow-same-origin"
               sx={{
-                width: "100%",
-                height: "100%",
-                border: "none",
-                borderRadius: 3,
-                bgcolor: "#fff",
-                boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
+                width: `${Math.max(100, zoom * 100)}%`,
+                minHeight: "100%",
+                mx: "auto",
               }}
-            />
+            >
+              <Box
+                component="iframe"
+                srcDoc={htmlPreview}
+                title={doc?.name ?? "Preview"}
+                sandbox="allow-same-origin"
+                sx={{
+                  width: "100%",
+                  minHeight: "100%",
+                  height: zoom >= 1 ? `${Math.max(100, zoom * 100)}%` : "100%",
+                  border: "none",
+                  borderRadius: 3,
+                  bgcolor: "#fff",
+                  boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
+                }}
+              />
+            </Box>
           </Box>
         )}
 

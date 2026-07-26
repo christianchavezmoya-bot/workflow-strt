@@ -77,6 +77,26 @@ function shouldSkipNativeDocumentFetch(): boolean {
   return shouldSkipBlockingFetch() || getServerReachable() === false;
 }
 
+export function documentSyncFingerprint(
+  record: Pick<DocumentRecord, "id" | "uploadedAt" | "fileSize" | "downloadUrl">,
+): string {
+  return `${record.id}|${record.uploadedAt}|${record.fileSize ?? 0}|${record.downloadUrl ?? ""}`;
+}
+
+/** Records whose metadata changed or are new — only these need blob prefetch. */
+export function listDocumentsNeedingPrefetch(
+  cached: DocumentRecord[],
+  fresh: DocumentRecord[],
+): DocumentRecord[] {
+  const cachedById = new Map(cached.map((record) => [record.id, documentSyncFingerprint(record)]));
+  return fresh.filter((record) => {
+    if (!record.downloadUrl || !isBackendDocumentUrl(record.downloadUrl)) return false;
+    const previous = cachedById.get(record.id);
+    if (!previous) return true;
+    return previous !== documentSyncFingerprint(record);
+  });
+}
+
 function hydrateDocumentRecords(
   records: DocumentRecord[],
   options?: { prefetchFiles?: boolean },
@@ -91,9 +111,16 @@ function hydrateDocumentRecords(
 async function refreshDocumentIndex(
   options?: { prefetchFiles?: boolean },
 ): Promise<DocumentRecord[]> {
+  const previous = await cacheGet<DocumentRecord[] | unknown>(DOCUMENTS_CACHE_KEY);
+  const previousRecords = Array.isArray(previous) ? previous : [];
   const response = await api.get<DocumentRecord[]>("/documents");
+  const changed = listDocumentsNeedingPrefetch(previousRecords, response.data);
   await cachePut(DOCUMENTS_CACHE_KEY, response.data);
-  return hydrateDocumentRecords(response.data, options);
+  const hydrated = hydrateDocumentRecords(response.data, { prefetchFiles: false });
+  if (options?.prefetchFiles !== false && changed.length > 0) {
+    queueDocumentPrefetch(changed);
+  }
+  return hydrated;
 }
 
 async function blobFromStoredValue(storedValue: string, mimeType: string): Promise<Blob> {
@@ -321,19 +348,23 @@ export const documentService = {
     const cached = await cacheGet<DocumentRecord[] | unknown>(DOCUMENTS_CACHE_KEY);
     const cachedRecords = Array.isArray(cached) ? cached : null;
 
-    // Background refresh — skip when the native app is offline from the API.
+    // Background refresh — metadata only; prefetch blobs for new/changed records.
     if (!shouldSkipNativeDocumentFetch()) {
       api.get<DocumentRecord[]>("/documents")
-        .then((res) => {
-          const hydrated = hydrateDocumentRecords(res.data);
-          cachePut(DOCUMENTS_CACHE_KEY, res.data).catch(() => {});
-          return hydrated;
+        .then(async (res) => {
+          const previous = Array.isArray(cachedRecords) ? cachedRecords : [];
+          const changed = listDocumentsNeedingPrefetch(previous, res.data);
+          await cachePut(DOCUMENTS_CACHE_KEY, res.data).catch(() => {});
+          if (changed.length > 0) {
+            queueDocumentPrefetch(changed);
+          }
+          return hydrateDocumentRecords(res.data, { prefetchFiles: false });
         })
         .catch(() => {});
     }
 
     if (cachedRecords !== null) {
-      return hydrateDocumentRecords(cachedRecords);
+      return hydrateDocumentRecords(cachedRecords, { prefetchFiles: false });
     }
 
     // No cache yet — if offline from the API, return empty instead of hanging.

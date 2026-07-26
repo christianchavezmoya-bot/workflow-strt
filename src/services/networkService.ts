@@ -38,7 +38,7 @@ export async function hasInternetConnection(): Promise<boolean> {
  * Sends a lightweight HEAD request to check server health
  */
 export async function isServerReachable(): Promise<boolean> {
-  try {
+  const attempt = async (): Promise<boolean> => {
     if (isMobileNativePlatform()) {
       const response = await CapacitorHttp.get({
         url: `${getApiBaseUrl()}/health`,
@@ -58,25 +58,19 @@ export async function isServerReachable(): Promise<boolean> {
     });
     clearTimeout(timeoutId);
     return response.ok || response.status < 500;
-  } catch {
-    // On native, the first CapacitorHttp call can fail on cold start
-    // before the plugin is fully initialised. Retry once after a brief delay.
-    if (isMobileNativePlatform()) {
-      await new Promise(r => setTimeout(r, 2000));
-      try {
-        const response = await CapacitorHttp.get({
-          url: `${getApiBaseUrl()}/health`,
-          connectTimeout: 5000,
-          readTimeout: 5000,
-          responseType: "json",
-        });
-        return response.status >= 200 && response.status < 500;
-      } catch {
-        return false;
+  };
+
+  const maxAttempts = isMobileNativePlatform() ? 3 : 1;
+  for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex += 1) {
+    try {
+      if (await attempt()) return true;
+    } catch {
+      if (attemptIndex < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 900 * (attemptIndex + 1)));
       }
     }
-    return false;
   }
+  return false;
 }
 
 /**

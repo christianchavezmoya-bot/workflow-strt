@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { sortDocumentsForLibraryPrefetch, type DocumentPrefetchRecord } from "./documentService";
+import {
+  documentSyncFingerprint,
+  listDocumentsNeedingPrefetch,
+  sortDocumentsForLibraryPrefetch,
+  type DocumentPrefetchRecord,
+  type DocumentRecord,
+} from "./documentService";
 
 function record(partial: Partial<DocumentPrefetchRecord> & Pick<DocumentPrefetchRecord, "downloadUrl">): DocumentPrefetchRecord {
   return {
@@ -38,5 +44,36 @@ describe("sortDocumentsForLibraryPrefetch", () => {
     const snapshot = [...input];
     sortDocumentsForLibraryPrefetch(input);
     expect(input).toEqual(snapshot);
+  });
+});
+
+describe("listDocumentsNeedingPrefetch", () => {
+  const baseDoc = (overrides: Partial<DocumentRecord> = {}): DocumentRecord => ({
+    id: "doc-1",
+    name: "Manual",
+    type: "manual",
+    linkedTo: "General",
+    uploadedAt: "2026-07-01T00:00:00Z",
+    downloadUrl: "/api/documents/doc-1/download",
+    fileSize: 1024,
+    ...overrides,
+  });
+
+  it("returns only new or changed backend-hosted documents", () => {
+    const cached = [baseDoc()];
+    const fresh = [
+      baseDoc(),
+      baseDoc({ id: "doc-2", downloadUrl: "/api/documents/doc-2/download" }),
+      baseDoc({ uploadedAt: "2026-07-02T00:00:00Z" }),
+    ];
+
+    const needed = listDocumentsNeedingPrefetch(cached, fresh);
+    expect(needed.map((doc) => doc.id)).toEqual(["doc-2", "doc-1"]);
+    expect(documentSyncFingerprint(baseDoc())).toBe(documentSyncFingerprint(fresh[0]));
+  });
+
+  it("skips unchanged records", () => {
+    const docs = [baseDoc(), baseDoc({ id: "doc-2", downloadUrl: "/api/documents/doc-2/download" })];
+    expect(listDocumentsNeedingPrefetch(docs, docs)).toEqual([]);
   });
 });

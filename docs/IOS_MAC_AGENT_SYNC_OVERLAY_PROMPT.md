@@ -61,7 +61,7 @@ Xcode: **physical iPhone** → signing for `com.christianchavez.kinet` → **Pro
 
 ## Part 2 — Sync busy overlay (NEW — must test)
 
-**What shipped:** Native-only full-screen overlay during queue flush — dimmed backdrop, **rotating blue Strata icon** (~96px), **“Syncing…”** caption. Asset: `src/assets/strata-sync-mark.svg` (CSS spin, transparent).
+**What shipped:** Native-only full-screen overlay during queue flush — crisp dimmed backdrop (no blur), **rotating Strata Worldwide wordmark** (~168px wide), **“Syncing…”** caption. Asset: `src/assets/strata_transparent.png` (same as Login/Sidebar; CSS spin, full alpha).
 
 ### Test steps
 

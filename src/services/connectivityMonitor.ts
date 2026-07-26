@@ -26,11 +26,13 @@ import { isMobileNativePlatform } from "../utils/platform";
 import { isCircuitOpen, resetCircuitBreaker, tripCircuitBreaker } from "../utils/circuitBreaker";
 
 const PING_INTERVAL_MS = 30_000;
+const UNREACHABLE_SIGNAL_THRESHOLD = 2;
 
 type Listener = (reachable: boolean) => void;
 
 let started = false;
 let currentValue: boolean | null = null; // null = no successful check yet
+let unreachableSignals = 0;
 /** Capacitor network status — more reliable on iOS/Android than navigator.onLine. */
 let nativeNetworkConnected: boolean | null = null;
 let isForeground = true;
@@ -76,6 +78,7 @@ async function runPingIfForeground() {
   const reachable = await isServerReachable();
   if (reachable) {
     const wasBlocked = isCircuitOpen() || currentValue === false;
+    unreachableSignals = 0;
     resetCircuitBreaker();
     notify(true);
     // Unblock axios traffic + sync flush when the health ping succeeds after an
@@ -122,13 +125,17 @@ export function startConnectivityMonitor(): void {
   // registered once at singleton startup so the cost is amortised.
   if (typeof window !== "undefined") {
     window.addEventListener("api-server-reachable", () => {
+      unreachableSignals = 0;
       resetCircuitBreaker();
       if (currentValue !== true) notify(true);
     });
 
-    // Only a real API request failing with a genuine network error may mark the
-    // server unreachable. This keeps native write suppression outcome-based.
+    // Only a real request failing with a genuine network error may mark the
+    // server unreachable. Require consecutive signals so one slow startup
+    // request does not stick the app in "Server not responding".
     window.addEventListener("api-server-unreachable", () => {
+      unreachableSignals += 1;
+      if (unreachableSignals < UNREACHABLE_SIGNAL_THRESHOLD) return;
       tripCircuitBreaker();
       if (currentValue !== false) notify(false);
     });
@@ -203,6 +210,7 @@ export function pingNow(): void {
 export function _resetConnectivityMonitorForTests(): void {
   started = false;
   currentValue = null;
+  unreachableSignals = 0;
   nativeNetworkConnected = null;
   isForeground = true;
   if (intervalId) clearInterval(intervalId);

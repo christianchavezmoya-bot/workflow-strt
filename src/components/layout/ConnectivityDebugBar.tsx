@@ -121,12 +121,9 @@ export default function ConnectivityDebugBar() {
     });
   }
 
-  // One fact, two states — no third "unknown" option once the app has run
-  // its first check. `serverReachable` comes from a dedicated background
-  // ping (services/connectivityMonitor.ts) that runs on a timer independent
-  // of whatever screen is open, so this stays accurate even on pages that
-  // never happen to make a request that could fail.
-  if (!serverReachable) {
+  // One fact, two states — treat "unknown" separately so cold start does not
+  // flash a false "Server not responding" before the first successful check.
+  if (serverReachable === false) {
     chips.push({
       key: "server",
       label: "Server not responding",
@@ -134,7 +131,7 @@ export default function ConnectivityDebugBar() {
       icon: <DnsOutlinedIcon sx={{ fontSize: 14 }} />,
       tone: "danger",
     });
-  } else {
+  } else if (serverReachable === true) {
     chips.push({
       key: "server",
       label: "Server reachable",

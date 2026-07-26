@@ -54,7 +54,7 @@ const Login = () => {
   const [resetSent, setResetSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>({ hasInternet: true, serverReachable: true, status: "online" });
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatus | null>(null);
   
   // Check if this is a first-time user (no previous session)
   const isFirstTimeUser = !secureGet("auth_user") && !secureGet("auth_token");
@@ -296,8 +296,11 @@ const Login = () => {
   return (
     <PageWrapper>
       <Stack spacing={2.5}>
-        {/* Network status warning for first-time users */}
-        {networkStatus.status !== "online" && (
+        {/* Network status warning — first-time users need internet; returning users only warn when radio is off. */}
+        {networkStatus && (
+          networkStatus.status === "offline"
+          || (isFirstTimeUser && networkStatus.status === "server-unavailable")
+        ) && (
           <Alert 
             severity="warning" 
             icon={networkStatus.status === "offline" ? <WifiOff /> : <CloudOff />}

@@ -7,10 +7,13 @@ import { useEffect, useRef, useState } from "react";
 import strataLogo from "../../assets/strata_transparent.png";
 import { isMobileNativePlatform } from "../../utils/platform";
 
-const spinY = keyframes`
-  from { transform: rotateY(0deg); }
-  to { transform: rotateY(360deg); }
+const spin3d = keyframes`
+  from { transform: rotateX(14deg) rotateY(0deg); }
+  to { transform: rotateX(14deg) rotateY(360deg); }
 `;
+
+const LOGO_WIDTH = { xs: 148, sm: 168 } as const;
+const LOGO_HEIGHT = { xs: 78, sm: 88 } as const;
 
 const MIN_VISIBLE_MS = 450;
 
@@ -69,20 +72,61 @@ export default function SyncBusyOverlay() {
       }}
     >
       <Stack alignItems="center" spacing={2}>
-        <Box sx={{ perspective: 900 }}>
+        <Box
+          aria-label="Strata Worldwide"
+          sx={{
+            perspective: 1100,
+            perspectiveOrigin: "center center",
+            width: LOGO_WIDTH,
+            height: LOGO_HEIGHT,
+          }}
+        >
           <Box
-            component="img"
-            src={strataLogo}
-            alt="Strata Worldwide"
-            draggable={false}
             sx={{
-              width: { xs: 148, sm: 168 },
-              height: "auto",
-              animation: `${spinY} 1.15s linear infinite`,
+              position: "relative",
+              width: "100%",
+              height: "100%",
               transformStyle: "preserve-3d",
-              backfaceVisibility: "hidden",
+              animation: `${spin3d} 1.15s linear infinite`,
+              willChange: "transform",
             }}
-          />
+          >
+            <Box
+              component="img"
+              src={strataLogo}
+              alt=""
+              draggable={false}
+              aria-hidden
+              sx={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                transform: "translateZ(8px)",
+                backfaceVisibility: "hidden",
+                filter: "drop-shadow(0 10px 18px rgba(15, 23, 42, 0.45))",
+              }}
+            />
+            <Box
+              component="img"
+              src={strataLogo}
+              alt=""
+              draggable={false}
+              aria-hidden
+              sx={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                transform: "rotateY(180deg) translateZ(8px)",
+                backfaceVisibility: "hidden",
+                opacity: 0.78,
+                filter: "brightness(0.82) drop-shadow(0 6px 12px rgba(15, 23, 42, 0.35))",
+              }}
+            />
+          </Box>
         </Box>
         <Typography
           variant="body1"
