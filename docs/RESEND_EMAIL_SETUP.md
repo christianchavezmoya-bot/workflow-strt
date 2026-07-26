@@ -62,3 +62,15 @@ Email failures are logged and never thrown to callers.
 - Password resets and account lockout notices
 - Customer workflow / signature links
 - Workflow completion notifications (Admin / Project Manager)
+
+## Production deliverability (not PR blockers)
+
+Verified on Windows (2026-07-26): all six test sends were **delivered** via Resend from `Strata-ngo <noreply@strata-ngo.com>`. One password-reset message landed in **Spam** because invite/reset links used a **private LAN IP over HTTP** (`http://10.x.x.x:5173/...`). That is expected in local dev and is a strong spam signal for real recipients.
+
+Before go-live:
+
+1. Set **`Email:FrontendBaseUrl`** (notification settings or env) to your public HTTPS app URL, e.g. `https://app.strata-ngo.com` — never a bare LAN IP in production emails.
+2. Confirm **SPF, DKIM, and DMARC** for `strata-ngo.com` in Cloudflare + Resend (you already have DKIM/SPF/MX for Resend; add DMARC if missing).
+3. After DNS propagates, send a fresh invite/reset to an external inbox and confirm **Inbox** (not Spam).
+
+Local dev can keep a LAN IP in `appsettings.Development.json` for on-network testing; production/staging must use the verified domain.
