@@ -78,6 +78,7 @@ import { divisionService } from "../../services/divisionService";
 import type { Division } from "../../types/division";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
+import { randomId } from "../../utils/randomId";
 
 // Style for field definition labels (yellow bold)
 const fieldLabelStyle = {
@@ -1402,7 +1403,7 @@ export const UserManagement: React.FC = () => {
       const payload: AdminTabRow[] = rows.map((row, index) => {
         let rowId = typeof row._rowId === "string" && row._rowId ? row._rowId : "";
         if (!rowId) {
-          rowId = crypto.randomUUID();
+          rowId = randomId();
           didAssignIds = true;
         }
         const { _rowId, ...data } = row;
@@ -1853,7 +1854,7 @@ export const UserManagement: React.FC = () => {
       anyWindow.__apiDebugLogs = [];
     }
     anyWindow.__apiDebugLogs.push({
-      id: crypto.randomUUID(),
+      id: randomId(),
       time: new Date().toLocaleTimeString(),
       method: "UI",
       url: "UserManagement create user",
@@ -1935,7 +1936,7 @@ export const UserManagement: React.FC = () => {
       anyWindow.__apiDebugLogs = [];
     }
     anyWindow.__apiDebugLogs.push({
-      id: crypto.randomUUID(),
+      id: randomId(),
       time: new Date().toLocaleTimeString(),
       method: "UI",
       url: "UserManagement create customer",
@@ -2117,7 +2118,7 @@ export const UserManagement: React.FC = () => {
   };
 
   const createFeature = (): ProductFeatureDefinition => ({
-    id: crypto.randomUUID ? crypto.randomUUID() : `feature-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id: randomId("feature"),
     name: "",
     valueType: "text",
     options: []
@@ -5805,7 +5806,7 @@ export const UserManagement: React.FC = () => {
                             setProductFeatures((prev) =>
                               prev.map((f) =>
                                 f.id === feature.id
-                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: crypto.randomUUID(), name: "", valueType: "text" as const, isInventory: false }] }
+                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: randomId(), name: "", valueType: "text" as const, isInventory: false }] }
                                   : f
                               )
                             )
@@ -6129,7 +6130,7 @@ export const UserManagement: React.FC = () => {
                             setEditProductFeatures((prev) =>
                               prev.map((f) =>
                                 f.id === feature.id
-                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: crypto.randomUUID(), name: "", valueType: "text" as const, isInventory: false }] }
+                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: randomId(), name: "", valueType: "text" as const, isInventory: false }] }
                                   : f
                               )
                             )
@@ -6295,7 +6296,7 @@ export const UserManagement: React.FC = () => {
           <Button
             variant="contained"
             onClick={() => {
-              const targetId = editingAssetId || crypto.randomUUID();
+              const targetId = editingAssetId || randomId();
               setAssets((prev) => {
                 if (editingAssetId) {
                   return prev.map((item) =>
