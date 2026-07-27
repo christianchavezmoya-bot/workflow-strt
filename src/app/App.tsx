@@ -65,7 +65,8 @@ const App = () => {
     const handleAuthError = () => {
       console.log("[App] Auth error — switching to Login");
       forceLogin();
-      void refreshAuthState();
+      // Do not call refreshAuthState here — it can revert to biometric-needed when
+      // Capacitor Network briefly reports offline, leaving a zombie dashboard.
     };
 
     window.addEventListener("storage", handleStorageChange);
@@ -174,7 +175,7 @@ const App = () => {
     authState === "no-session"
     || authState === "grace-expired"
     || (isMobileNativePlatform() && authState === null)
-    || (authState === "session-unlocked" && shouldForceLoginNow())
+    || shouldForceLoginNow()
   ) {
     return <Login />;
   }

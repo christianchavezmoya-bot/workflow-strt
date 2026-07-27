@@ -375,6 +375,12 @@ const Login = () => {
           {loading ? "Signing in…" : networkStatus?.status === "offline" ? "Sign in (Wi‑Fi required)" : "Sign in"}
         </Button>
 
+        {networkStatus?.status === "offline" && !hadPriorSession && (
+          <Typography variant="caption" color="text.secondary" textAlign="center">
+            After signing out, an internet connection is required to sign in again. Turn on Wi‑Fi or cellular, then tap Sign in.
+          </Typography>
+        )}
+
         <Typography variant="caption" color="text.secondary" textAlign="center">
           First time? You'll be guided through profile setup.
         </Typography>
