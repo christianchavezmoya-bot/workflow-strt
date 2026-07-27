@@ -7,6 +7,7 @@
 
 import { secureGet, secureSet } from "./secureStorage";
 import { isMobileNativePlatform } from "../utils/platform";
+import { isAuthTokenExpired } from "../utils/authToken";
 
 // How long (ms) a session can be used offline before requiring a full re-login
 export const OFFLINE_GRACE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -97,6 +98,17 @@ export async function getLaunchAuthModeAsync(): Promise<BiometricCheckResult> {
   if (!token) return "no-session";
 
   if (!isOfflineGraceValid()) return "grace-expired";
+
+  // JWT expired while online → full re-login, not Face ID unlock.
+  if (isAuthTokenExpired(token)) {
+    try {
+      const { Network } = await import("@capacitor/network");
+      const status = await Network.getStatus();
+      if (status.connected) return "no-session";
+    } catch {
+      if (typeof navigator !== "undefined" && navigator.onLine) return "no-session";
+    }
+  }
 
   // Check if biometric is available
   const biometricAvailable = await isBiometricAvailable();

@@ -6,6 +6,7 @@ import { Network } from "@capacitor/network";
 import { promptBiometric, verifyPin, isBiometricAvailable, isPinSet } from "../services/biometricAuth";
 import { secureGet, secureClearAuth } from "../services/secureStorage";
 import { isMobileNativePlatform } from "../utils/platform";
+import { isAuthTokenExpired } from "../utils/authToken";
 
 interface Props {
   onUnlocked: () => void;
@@ -24,6 +25,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
   const [biometricAvailable, setBiometricAvailable] = useState(true);
   const [hasPin, setHasPin] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [networkChecked, setNetworkChecked] = useState(false);
 
   // Check biometric availability and PIN status on mount
   useEffect(() => {
@@ -54,6 +56,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
         } else {
           setIsOffline(!navigator.onLine);
         }
+        setNetworkChecked(true);
       } catch (e) {
         console.warn("[BiometricLockScreen] Network check failed");
         setIsOffline(!navigator.onLine);
@@ -87,6 +90,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
   }, [initialAuthMode]);
 
   const storedUser = secureGet("auth_user");
+  const sessionExpiredOnline = networkChecked && !isOffline && isAuthTokenExpired();
   const noLocalUnlockMethod = !biometricAvailable && !hasPin;
   const userName = (() => {
     try { return storedUser ? (JSON.parse(storedUser) as { fullName?: string }).fullName : null; }
@@ -98,12 +102,22 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
     ? new Date(parseInt(lastLoginTs, 10)).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : null;
 
+  const finishUnlock = async () => {
+    if (!isOffline && isAuthTokenExpired()) {
+      setError("Your login session expired. Sign in again to sync.");
+      await secureClearAuth();
+      navigate("/login", { replace: true });
+      return;
+    }
+    onUnlocked();
+  };
+
   const handleBiometricUnlock = async () => {
     setLoading(true);
     setError(null);
     try {
       await promptBiometric("Unlock to continue");
-      onUnlocked();
+      await finishUnlock();
     } catch {
       setError("Face ID failed or was cancelled. Try again.");
     } finally {
@@ -121,7 +135,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
     try {
       const valid = await verifyPin(pin);
       if (valid) {
-        onUnlocked();
+        await finishUnlock();
       } else {
         setPinAttempts(prev => prev + 1);
         if (pinAttempts >= 4) {
@@ -195,7 +209,9 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
             {userName ? `Welcome back, ${userName.split(" ")[0]}` : "Welcome back"}
           </Typography>
           <Typography variant="body2" color="text.secondary" textAlign="center">
-            {noLocalUnlockMethod
+            {sessionExpiredOnline
+              ? "Your login session expired. Sign in again to sync with the server."
+              : noLocalUnlockMethod
               ? "This device no longer has a local unlock method. Sign in online to continue."
               : authMode === "biometric" 
               ? isOffline 
@@ -218,7 +234,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
         )}
 
         {/* Biometric unlock */}
-        {authMode === "biometric" && !noLocalUnlockMethod && (
+        {authMode === "biometric" && !noLocalUnlockMethod && !sessionExpiredOnline && (
           <>
             <Button
               variant="contained"
@@ -249,7 +265,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
         )}
 
         {/* PIN unlock */}
-        {authMode === "pin" && (
+        {authMode === "pin" && !sessionExpiredOnline && (
           <>
             <TextField
               label="Enter PIN"
@@ -290,7 +306,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
           </>
         )}
 
-        {noLocalUnlockMethod && (
+        {(noLocalUnlockMethod || sessionExpiredOnline) && (
           <Button
             variant="contained"
             size="large"
@@ -298,14 +314,14 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
             onClick={handleSignOut}
             sx={{ borderRadius: 2, py: 1.5, fontWeight: 700 }}
           >
-            Sign out and sign in online
+            {sessionExpiredOnline ? "Sign in again" : "Sign out and sign in online"}
           </Button>
         )}
 
         <Divider sx={{ width: "100%" }} />
 
         {/* Sign out link */}
-        {!noLocalUnlockMethod && (
+        {!noLocalUnlockMethod && !sessionExpiredOnline && (
           <Button
             variant="text"
             size="small"
