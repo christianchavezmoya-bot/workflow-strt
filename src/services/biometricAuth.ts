@@ -9,6 +9,7 @@ import { secureGet, secureSet } from "./secureStorage";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isAuthTokenExpired } from "../utils/authToken";
 import { getNativeNetworkConnected, getServerReachable } from "./connectivityMonitor";
+import { isManualOfflineModeActive } from "./offlineModeState";
 import { isSessionLoginRequired } from "./sessionLoginRequired";
 
 // How long (ms) a session can be used offline before requiring a full re-login
@@ -43,24 +44,29 @@ export async function canEnterAppWithStoredSession(): Promise<boolean> {
   if (!isAuthTokenExpired(token)) return true;
 
   // Expired JWT is OK offline within grace; online (or server reachable) requires Login.
+  if (getNativeNetworkConnected() === false) return true;
+  if (isManualOfflineModeActive()) return true;
   if (getServerReachable() === true) return false;
   return !(await isDeviceOnlineForAuthAsync());
 }
 
-/** Sync online check for render gates — no awaits. */
+/** Sync online check for render gates — no awaits. Prefer keeping offline users in-app. */
 export function isOnlineForAuthSync(): boolean {
-  if (getServerReachable() === true) return true;
   if (getNativeNetworkConnected() === false) return false;
-  return true;
+  if (isManualOfflineModeActive()) return false;
+  if (getServerReachable() === true) return true;
+  if (getNativeNetworkConnected() === true) return true;
+  return false;
 }
 
 /** True when Login must show immediately (expired JWT while online, or server rejected session). */
 export function shouldForceLoginNow(): boolean {
   if (!isMobileNativePlatform()) return false;
+  if (!isOnlineForAuthSync()) return false;
   if (isSessionLoginRequired()) return true;
   const token = secureGet("auth_token");
   if (!token || !isAuthTokenExpired(token)) return false;
-  return isOnlineForAuthSync();
+  return true;
 }
 
 /** Expired JWT and the device can reach the server — user must sign in again. */
@@ -129,20 +135,20 @@ async function hashPin(pin: string): Promise<string> {
  * Re-check once; also treat a successful /health ping as online for auth policy.
  */
 async function isDeviceOnlineForAuthAsync(): Promise<boolean> {
+  if (getNativeNetworkConnected() === false) return false;
+  if (isManualOfflineModeActive()) return false;
   if (getServerReachable() === true) return true;
-  if (getNativeNetworkConnected() === false) {
-    try {
-      const { Network } = await import("@capacitor/network");
-      let status = await Network.getStatus();
-      if (status.connected !== false) return true;
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      status = await Network.getStatus();
-      return status.connected !== false;
-    } catch {
-      return false;
-    }
+  if (getNativeNetworkConnected() === true) return true;
+  try {
+    const { Network } = await import("@capacitor/network");
+    let status = await Network.getStatus();
+    if (status.connected !== false) return true;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    status = await Network.getStatus();
+    return status.connected !== false;
+  } catch {
+    return false;
   }
-  return true;
 }
 
 /**

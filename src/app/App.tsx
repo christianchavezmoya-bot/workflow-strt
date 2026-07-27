@@ -8,6 +8,8 @@ import {
   canEnterAppWithStoredSession,
   requiresOnlineLoginAsync,
   shouldForceLoginNow,
+  isOnlineForAuthSync,
+  isOfflineGraceValid,
   BiometricCheckResult,
 } from "../services/biometricAuth";
 import { initSecureStorage, secureGet, secureRemove } from "../services/secureStorage";
@@ -63,6 +65,10 @@ const App = () => {
     };
 
     const handleAuthError = () => {
+      if (isMobileNativePlatform() && !isOnlineForAuthSync() && isOfflineGraceValid()) {
+        console.log("[App] Auth error while offline within grace — keeping cached session");
+        return;
+      }
       console.log("[App] Auth error — switching to Login");
       forceLogin();
       // Do not call refreshAuthState here — it can revert to biometric-needed when

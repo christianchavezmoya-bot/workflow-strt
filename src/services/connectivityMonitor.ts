@@ -47,6 +47,13 @@ function startNativeNetworkTracking(): void {
   void Network.addListener("networkStatusChange", (status) => {
     const wasOff = nativeNetworkConnected === false;
     nativeNetworkConnected = status.connected;
+    // Radio off: clear stale reachable=true immediately. Without this, auth gates
+    // can treat the device as online for up to 30s (until the next ping tick)
+    // and force Login even though the user is actively working offline.
+    if (!status.connected) {
+      if (currentValue !== false) notify(false);
+      return;
+    }
     // When the radio comes back online after being down, ping immediately
     // so reconnect is detected instantly rather than waiting up to 30s.
     if (wasOff && status.connected) {
