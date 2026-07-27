@@ -46,6 +46,21 @@ export async function canEnterAppWithStoredSession(): Promise<boolean> {
   return !(await isDeviceOnlineForAuthAsync());
 }
 
+/** Sync online check for render gates — no awaits. */
+export function isOnlineForAuthSync(): boolean {
+  if (getServerReachable() === true) return true;
+  if (getNativeNetworkConnected() === false) return false;
+  return true;
+}
+
+/** True when Login must show immediately (expired JWT while online). */
+export function shouldForceLoginNow(): boolean {
+  if (!isMobileNativePlatform()) return false;
+  const token = secureGet("auth_token");
+  if (!token || !isAuthTokenExpired(token)) return false;
+  return isOnlineForAuthSync();
+}
+
 /** Expired JWT and the device can reach the server — user must sign in again. */
 export async function requiresOnlineLoginAsync(): Promise<boolean> {
   const token = secureGet("auth_token");
