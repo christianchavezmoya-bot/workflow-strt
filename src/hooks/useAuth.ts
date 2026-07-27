@@ -29,7 +29,16 @@ export const useAuth = () => {
   const memoized = useMemo(() => ({ user: effectiveUser, isAuthenticated, authReady }), [effectiveUser, isAuthenticated, authReady]);
 
   useEffect(() => {
-    const syncFromStorage = () => {
+    let cancelled = false;
+
+    const finish = (nextUser: User, authenticated: boolean) => {
+      if (cancelled) return;
+      setUser(nextUser);
+      setIsAuthenticated(authenticated);
+      setAuthReady(true);
+    };
+
+    const syncFromStorage = async () => {
       const storedBackendUser = secureGet("auth_user");
       const storedLocalUser = secureGet("local_auth_user");
       const token = secureGet("auth_token");
@@ -37,9 +46,10 @@ export const useAuth = () => {
       if (storedBackendUser) {
         try {
           const parsed = JSON.parse(storedBackendUser) as User;
-          setUser(parsed);
-          setIsAuthenticated(true);
-          return true;
+          if (parsed.id) {
+            finish(parsed, true);
+            return;
+          }
         } catch {
           // continue fallback
         }
@@ -48,50 +58,38 @@ export const useAuth = () => {
       if (storedLocalUser) {
         try {
           const parsed = JSON.parse(storedLocalUser) as User;
-          setUser(parsed);
-          setIsAuthenticated(true);
-          return true;
+          if (parsed.id) {
+            finish(parsed, true);
+            return;
+          }
         } catch {
           // continue fallback
         }
       }
 
       if (token && token !== "local") {
-        authService
-          .getProfile()
-          .then((profile) => {
-            setUser(profile);
-            setIsAuthenticated(true);
-            secureSet("auth_user", JSON.stringify(profile));
-          })
-          .catch(() => {
-            setUser(defaultUser);
-            setIsAuthenticated(false);
-          });
-        return true;
+        try {
+          const profile = await authService.getProfile();
+          if (cancelled) return;
+          finish(profile, true);
+          await secureSet("auth_user", JSON.stringify(profile));
+        } catch {
+          finish(defaultUser, false);
+        }
+        return;
       }
 
-      // Without a persisted session, stay logged out instead of booting into
-      // the old demo Project Manager identity (`u-100`).
-      setUser(defaultUser);
-      setIsAuthenticated(false);
-      return true;
+      finish(defaultUser, false);
     };
 
-    syncFromStorage();
-    setAuthReady(true);
+    void syncFromStorage();
 
-    const onAuthUserUpdated = () => {
-      syncFromStorage();
-    };
-
-    const onAuthChange = () => {
-      syncFromStorage();
-    };
+    const onAuthUserUpdated = () => { void syncFromStorage(); };
+    const onAuthChange = () => { void syncFromStorage(); };
 
     const onStorage = (event: StorageEvent) => {
       if (event.key === "auth_user" || event.key === "local_auth_user" || event.key === "auth_token") {
-        syncFromStorage();
+        void syncFromStorage();
       }
     };
 
@@ -105,6 +103,7 @@ export const useAuth = () => {
     window.addEventListener("storage", onStorage);
     window.addEventListener("dev-role-override-changed", onDevRoleOverride);
     return () => {
+      cancelled = true;
       window.removeEventListener("auth-user-updated", onAuthUserUpdated);
       window.removeEventListener("auth-change", onAuthChange);
       window.removeEventListener("storage", onStorage);

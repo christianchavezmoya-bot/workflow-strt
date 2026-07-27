@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { Box, Button, CircularProgress, Stack, Typography, TextField, Divider, Alert } from "@mui/material";
 import { FingerprintOutlined, WifiOffOutlined, LockOutlined, PinOutlined, WifiOutlined } from "@mui/icons-material";
-import { useNavigate } from "react-router-dom";
 import { Network } from "@capacitor/network";
 import { promptBiometric, verifyPin, isBiometricAvailable, isPinSet } from "../services/biometricAuth";
 import { secureGet, secureClearAuth } from "../services/secureStorage";
@@ -14,7 +13,6 @@ interface Props {
 }
 
 const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) => {
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<"biometric" | "pin">(() => 
@@ -103,10 +101,17 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
     : null;
 
   const finishUnlock = async () => {
-    if (!isOffline && isAuthTokenExpired()) {
+    const token = secureGet("auth_token");
+    if (!token) {
+      setError("No saved session. Sign in again.");
+      await secureClearAuth();
+      window.dispatchEvent(new Event("api-auth-error"));
+      return;
+    }
+    if (!isOffline && isAuthTokenExpired(token)) {
       setError("Your login session expired. Sign in again to sync.");
       await secureClearAuth();
-      navigate("/login", { replace: true });
+      window.dispatchEvent(new Event("api-auth-error"));
       return;
     }
     onUnlocked();
@@ -155,7 +160,7 @@ const BiometricLockScreen = ({ onUnlocked, authMode: initialAuthMode }: Props) =
 
   const handleSignOut = async () => {
     await secureClearAuth();
-    navigate("/login", { replace: true });
+    window.dispatchEvent(new Event("api-auth-error"));
   };
 
   return (

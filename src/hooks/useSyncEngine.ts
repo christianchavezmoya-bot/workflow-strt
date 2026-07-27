@@ -891,7 +891,9 @@ export function useSyncEngine(): SyncState {
     };
     const handleAuthError = () => setConnectivityState("token-expired");
     const handleAuthRecovered = () => {
-      setConnectivityState("online");
+      // Fresh login must unblock sync even if a prior 401 left token-expired set.
+      connectivityRef.current = "online";
+      setConnectivity("online");
       setLastSyncAt(new Date());
       void reconnectAndFlush();
     };

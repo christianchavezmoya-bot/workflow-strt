@@ -4,6 +4,7 @@ import { entityGetAllProjects, entityPutProject, entityPutProjects, reconcilePro
 import type { ProjectFilters, ProjectListResponse } from "../services/projectService";
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
+import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { webCachedGet, webCacheKey } from "../services/webFreshCache";
 
 export type ProjectRepositoryUpdateDetail = {
@@ -89,7 +90,11 @@ export const ProjectRepository = {
             detail: { items, total, requestKey }
           }));
         })
-        .catch(() => { window.dispatchEvent(new Event("repo:projects:fetch-failed")); });
+        .catch((err) => {
+          if (isOfflineNetworkError(err)) {
+            window.dispatchEvent(new Event("repo:projects:fetch-failed"));
+          }
+        });
     }
 
     if (local.length > 0) {
