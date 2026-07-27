@@ -9,6 +9,7 @@ import { secureGet, secureSet } from "./secureStorage";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isAuthTokenExpired } from "../utils/authToken";
 import { getNativeNetworkConnected, getServerReachable } from "./connectivityMonitor";
+import { isSessionLoginRequired } from "./sessionLoginRequired";
 
 // How long (ms) a session can be used offline before requiring a full re-login
 export const OFFLINE_GRACE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -53,9 +54,10 @@ export function isOnlineForAuthSync(): boolean {
   return true;
 }
 
-/** True when Login must show immediately (expired JWT while online). */
+/** True when Login must show immediately (expired JWT while online, or server rejected session). */
 export function shouldForceLoginNow(): boolean {
   if (!isMobileNativePlatform()) return false;
+  if (isSessionLoginRequired()) return true;
   const token = secureGet("auth_token");
   if (!token || !isAuthTokenExpired(token)) return false;
   return isOnlineForAuthSync();
