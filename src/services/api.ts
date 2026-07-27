@@ -389,7 +389,7 @@ api.interceptors.response.use(
         const allowOfflineSession =
           isMobileNativePlatform()
           && isOfflineGraceValid()
-          && (shouldSkipBlockingFetch() || isCircuitOpen());
+          && shouldSkipBlockingFetch();
         if (allowOfflineSession) {
           return Promise.reject(error);
         }

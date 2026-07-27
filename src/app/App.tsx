@@ -6,6 +6,7 @@ import { brandSettingsService } from "../services/brandSettingsService";
 import {
   getLaunchAuthModeAsync,
   canEnterAppWithStoredSession,
+  requiresOnlineLoginAsync,
   BiometricCheckResult,
 } from "../services/biometricAuth";
 import { initSecureStorage, secureGet, secureRemove } from "../services/secureStorage";
@@ -65,6 +66,8 @@ const App = () => {
     const handleAuthError = () => {
       console.log("[App] Auth error — switching to login/biometric gate");
       setJustAuthenticated(false);
+      // Immediate gate — do not stay on session-unlocked while async refresh runs.
+      setAuthState("no-session");
       void refreshAuthState();
     };
     
@@ -112,6 +115,32 @@ const App = () => {
     void init();
   }, [applyAuthMode]);
 
+  // While in the app with an expired JWT, re-check when connectivity improves.
+  useEffect(() => {
+    if (!isMobileNativePlatform()) return;
+    const inApp = justAuthenticated || authState === "session-unlocked";
+    if (!inApp) return;
+
+    const check = async () => {
+      if (justAuthenticatedRef.current) return;
+      if (!(await requiresOnlineLoginAsync())) return;
+      console.log("[App] Expired JWT while online — forcing Login");
+      setJustAuthenticated(false);
+      setAuthState("no-session");
+    };
+
+    void check();
+    const interval = window.setInterval(() => { void check(); }, 15_000);
+    const onReachable = () => { void check(); };
+    window.addEventListener("api-server-reachable", onReachable);
+    window.addEventListener("offline-mode-online", onReachable);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("api-server-reachable", onReachable);
+      window.removeEventListener("offline-mode-online", onReachable);
+    };
+  }, [authState, justAuthenticated]);
+
   // Re-check auth when native app returns to foreground (JWT may have expired while backgrounded).
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
@@ -129,15 +158,22 @@ const App = () => {
     };
   }, [refreshAuthState]);
 
-  // Periodic JWT expiry check while app is in use (online, native).
+  // Periodic JWT expiry check while app is in use (native).
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
     const interval = window.setInterval(() => {
       if (justAuthenticatedRef.current) return;
       const token = secureGet("auth_token");
       if (!token || !isAuthTokenExpired(token)) return;
-      void refreshAuthState();
-    }, 60_000);
+      void (async () => {
+        if (await requiresOnlineLoginAsync()) {
+          setJustAuthenticated(false);
+          setAuthState("no-session");
+          return;
+        }
+        void refreshAuthState();
+      })();
+    }, 15_000);
     return () => window.clearInterval(interval);
   }, [refreshAuthState]);
 
