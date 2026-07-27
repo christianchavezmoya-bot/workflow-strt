@@ -97,8 +97,9 @@ const silentRefresh = async () => {
     const online = !shouldSkipBlockingFetch() && !isCircuitOpen();
     if (isMobileNativePlatform() && online && !isSyncFlushing()) {
       window.dispatchEvent(new Event("api-auth-error"));
-      secureRemove("auth_token");
-      secureRemove("auth_user");
+      // Keep auth_token/auth_user in secure storage so offline reopen within the
+      // 30-day grace window can still use Face ID. Clearing them broke field
+      // workflows: expiry redirect → Login offline → cannot sign in or unlock.
       window.setTimeout(() => {
         window.location.href = "/login";
       }, 0);
@@ -362,8 +363,7 @@ api.interceptors.response.use(
           return Promise.reject(error);
         }
         window.dispatchEvent(new Event("api-auth-error"));
-        secureRemove("auth_token");
-        secureRemove("auth_user");
+        // Preserve stored session for offline Face ID within grace (see silentRefresh).
         window.setTimeout(() => {
           window.location.href = "/login";
         }, 0);

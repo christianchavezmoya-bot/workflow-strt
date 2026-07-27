@@ -59,6 +59,7 @@ const Login = () => {
   
   // Check if this is a first-time user (no previous session)
   const isFirstTimeUser = !secureGet("auth_user") && !secureGet("auth_token");
+  const hadPriorSession = !!secureGet("last_online_login") || !!secureGet("auth_user");
 
   // Check network and server status
   useEffect(() => {
@@ -297,7 +298,7 @@ const Login = () => {
   return (
     <PageWrapper>
       <Stack spacing={2.5}>
-        {/* Network status warning — first-time users need internet; returning users only warn when radio is off. */}
+        {/* Offline: first-time login always needs Wi‑Fi; returning users need online sign-in to refresh an expired server token. */}
         {networkStatus && (
           networkStatus.status === "offline"
           || (isFirstTimeUser && networkStatus.status === "server-unavailable")
@@ -311,7 +312,9 @@ const Login = () => {
               {getNetworkMessage(networkStatus).title}
             </Typography>
             <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
-              {getNetworkMessage(networkStatus).description}
+              {networkStatus.status === "offline" && hadPriorSession && !isFirstTimeUser
+                ? "Connect to Wi‑Fi to refresh your session and sync. If you only need cached field data, force-quit and reopen the app — Face ID may unlock offline."
+                : getNetworkMessage(networkStatus).description}
             </Typography>
           </Alert>
         )}
@@ -363,9 +366,9 @@ const Login = () => {
         {error    && <Typography variant="body2" color="error">{error}</Typography>}
         {resetSent && <Typography variant="body2" color="success.main">Reset link sent — check your email.</Typography>}
 
-        <Button variant="contained" size="large" fullWidth onClick={handleSubmit} disabled={loading}
+        <Button variant="contained" size="large" fullWidth onClick={handleSubmit} disabled={loading || (networkStatus?.status === "offline")}
           sx={{ py: 1.5, fontSize: "1rem" }}>
-          {loading ? "Signing in…" : "Sign in"}
+          {loading ? "Signing in…" : networkStatus?.status === "offline" ? "Sign in (Wi‑Fi required)" : "Sign in"}
         </Button>
 
         <Typography variant="caption" color="text.secondary" textAlign="center">
