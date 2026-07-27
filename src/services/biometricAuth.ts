@@ -8,6 +8,7 @@
 import { secureGet, secureSet } from "./secureStorage";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isAuthTokenExpired } from "../utils/authToken";
+import { getNativeNetworkConnected, getServerReachable } from "./connectivityMonitor";
 
 // How long (ms) a session can be used offline before requiring a full re-login
 export const OFFLINE_GRACE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -40,14 +41,16 @@ export async function canEnterAppWithStoredSession(): Promise<boolean> {
 
   if (!isAuthTokenExpired(token)) return true;
 
-  // Expired JWT is OK offline within grace; online requires fresh login.
-  try {
-    const { Network } = await import("@capacitor/network");
-    const status = await Network.getStatus();
-    return status.connected === false;
-  } catch {
-    return false;
-  }
+  // Expired JWT is OK offline within grace; online (or server reachable) requires Login.
+  if (getServerReachable() === true) return false;
+  return !(await isDeviceOnlineForAuthAsync());
+}
+
+/** Expired JWT and the device can reach the server — user must sign in again. */
+export async function requiresOnlineLoginAsync(): Promise<boolean> {
+  const token = secureGet("auth_token");
+  if (!token || !isAuthTokenExpired(token)) return false;
+  return isDeviceOnlineForAuthAsync();
 }
 
 /**
@@ -106,20 +109,23 @@ async function hashPin(pin: string): Promise<string> {
 
 /**
  * Capacitor network status on iOS cold start often reports disconnected briefly.
- * Re-check once before treating an expired JWT as an offline unlock.
+ * Re-check once; also treat a successful /health ping as online for auth policy.
  */
 async function isDeviceOnlineForAuthAsync(): Promise<boolean> {
-  try {
-    const { Network } = await import("@capacitor/network");
-    let status = await Network.getStatus();
-    if (status.connected !== false) return true;
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    status = await Network.getStatus();
-    return status.connected !== false;
-  } catch {
-    // When unsure, require Login — safer than Face ID with an expired JWT.
-    return true;
+  if (getServerReachable() === true) return true;
+  if (getNativeNetworkConnected() === false) {
+    try {
+      const { Network } = await import("@capacitor/network");
+      let status = await Network.getStatus();
+      if (status.connected !== false) return true;
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      status = await Network.getStatus();
+      return status.connected !== false;
+    } catch {
+      return false;
+    }
   }
+  return true;
 }
 
 /**

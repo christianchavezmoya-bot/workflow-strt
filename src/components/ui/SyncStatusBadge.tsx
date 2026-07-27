@@ -33,7 +33,7 @@ function timeAgo(date: Date): string {
 }
 
 export default function SyncStatusBadge() {
-  const { status, pendingCount, conflictCount, lastSyncAt, syncing, triggerSync } = useSyncEngine();
+  const { status, pendingCount, conflictCount, lastSyncAt, syncing, triggerSync, connectivity } = useSyncEngine();
   const [syncCenterOpen, setSyncCenterOpen] = useState(false);
 
   const iconSx = { fontSize: 13 };
@@ -92,8 +92,11 @@ export default function SyncStatusBadge() {
         <Stack direction="row" alignItems="center" spacing={0.5}>
           <ErrorOutlineOutlined sx={{ ...iconSx, color: "error.main" }} />
           <Typography variant="caption" sx={{ fontSize: "0.68rem", color: "error.main" }}>
-            Sync error
+            {connectivity === "token-expired"
+              ? "Sign in to sync"
+              : "Sync error"}
           </Typography>
+          {connectivity !== "token-expired" && (
           <Button
             size="small" variant="text" color="error"
             onClick={(e) => { e.stopPropagation(); void triggerSync(); }}
@@ -102,6 +105,7 @@ export default function SyncStatusBadge() {
           >
             Retry
           </Button>
+          )}
         </Stack>
       );
     }
