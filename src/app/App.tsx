@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useCallback, useRef } from "react";
+﻿import { useEffect, useState, useCallback } from "react";
 import { Box, CircularProgress, Typography } from "@mui/material";
 import { App as CapApp } from "@capacitor/app";
 import AppRoutes from "./routes";
@@ -7,6 +7,7 @@ import {
   getLaunchAuthModeAsync,
   canEnterAppWithStoredSession,
   requiresOnlineLoginAsync,
+  shouldForceLoginNow,
   BiometricCheckResult,
 } from "../services/biometricAuth";
 import { initSecureStorage, secureGet, secureRemove } from "../services/secureStorage";
@@ -18,26 +19,25 @@ import { isAuthTokenExpired } from "../utils/authToken";
 const App = () => {
   const [authState, setAuthState] = useState<BiometricCheckResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [justAuthenticated, setJustAuthenticated] = useState(false);
-  const justAuthenticatedRef = useRef(false);
-  justAuthenticatedRef.current = justAuthenticated;
+  // Ticks when JWT expiry / connectivity should re-evaluate the render gate.
+  const [loginGateTick, setLoginGateTick] = useState(0);
+
+  const forceLogin = useCallback(() => {
+    console.log("[App] Forcing Login — JWT expired while online");
+    setAuthState("no-session");
+  }, []);
 
   const applyAuthMode = useCallback((mode: BiometricCheckResult) => {
     console.log("[App] Auth mode:", mode);
     setAuthState(mode);
-    if (mode === "session-unlocked" || mode === "not-native") {
-      setJustAuthenticated(false);
-    }
   }, []);
 
-  // Function to re-check auth state (called after login success)
   const refreshAuthState = useCallback(async () => {
     const justAuth = secureGet("just_authenticated");
     if (justAuth === "true") {
       console.log("[App] User just authenticated, skipping biometric screen");
-      setJustAuthenticated(true);
-      setAuthState("session-unlocked");
       secureRemove("just_authenticated");
+      setAuthState("session-unlocked");
       return;
     }
 
@@ -56,7 +56,6 @@ const App = () => {
     applyAuthMode("session-unlocked");
   }, [applyAuthMode]);
 
-  // Listen for storage changes (login success from Login component)
   useEffect(() => {
     const handleStorageChange = () => {
       console.log("[App] Storage change detected, refreshing auth state");
@@ -64,23 +63,21 @@ const App = () => {
     };
 
     const handleAuthError = () => {
-      console.log("[App] Auth error — switching to login/biometric gate");
-      setJustAuthenticated(false);
-      // Immediate gate — do not stay on session-unlocked while async refresh runs.
-      setAuthState("no-session");
+      console.log("[App] Auth error — switching to Login");
+      forceLogin();
       void refreshAuthState();
     };
-    
+
     window.addEventListener("storage", handleStorageChange);
     window.addEventListener("auth-change", handleStorageChange);
     window.addEventListener("api-auth-error", handleAuthError);
-    
+
     return () => {
       window.removeEventListener("storage", handleStorageChange);
       window.removeEventListener("auth-change", handleStorageChange);
       window.removeEventListener("api-auth-error", handleAuthError);
     };
-  }, [refreshAuthState]);
+  }, [refreshAuthState, forceLogin]);
 
   useEffect(() => {
     brandSettingsService.get().then((s) => {
@@ -93,15 +90,6 @@ const App = () => {
         await initSecureStorage();
         console.log("[App] Secure storage initialized");
 
-        const token = secureGet("auth_token");
-        const user = secureGet("auth_user");
-        const lastLogin = secureGet("last_online_login");
-        console.log("[App] Storage contents:", {
-          hasToken: !!token,
-          hasUser: !!user,
-          lastLogin: lastLogin ? new Date(parseInt(lastLogin, 10)).toISOString() : null,
-        });
-
         const mode = await getLaunchAuthModeAsync();
         applyAuthMode(mode);
       } catch (error) {
@@ -111,71 +99,57 @@ const App = () => {
         setLoading(false);
       }
     };
-    
+
     void init();
   }, [applyAuthMode]);
 
-  // While in the app with an expired JWT, re-check when connectivity improves.
+  // Enforce Login when JWT expires while the device is online (every 5s + on reachability).
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
-    const inApp = justAuthenticated || authState === "session-unlocked";
-    if (!inApp) return;
+    if (authState !== "session-unlocked") return;
 
-    const check = async () => {
-      if (justAuthenticatedRef.current) return;
-      if (!(await requiresOnlineLoginAsync())) return;
-      console.log("[App] Expired JWT while online — forcing Login");
-      setJustAuthenticated(false);
-      setAuthState("no-session");
+    const check = () => {
+      if (shouldForceLoginNow()) forceLogin();
+      else setLoginGateTick((t) => t + 1);
     };
 
-    void check();
-    const interval = window.setInterval(() => { void check(); }, 15_000);
-    const onReachable = () => { void check(); };
+    check();
+    const interval = window.setInterval(() => { void requiresOnlineLoginAsync().then((needed) => {
+      if (needed) forceLogin();
+      else setLoginGateTick((t) => t + 1);
+    }); }, 5_000);
+
+    const onReachable = () => { void requiresOnlineLoginAsync().then((needed) => {
+      if (needed) forceLogin();
+    }); };
     window.addEventListener("api-server-reachable", onReachable);
     window.addEventListener("offline-mode-online", onReachable);
+
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("api-server-reachable", onReachable);
       window.removeEventListener("offline-mode-online", onReachable);
     };
-  }, [authState, justAuthenticated]);
+  }, [authState, forceLogin]);
 
-  // Re-check auth when native app returns to foreground (JWT may have expired while backgrounded).
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
     let handle: { remove: () => void } | undefined;
     void CapApp.addListener("appStateChange", ({ isActive }) => {
-      if (!isActive || justAuthenticatedRef.current) return;
+      if (!isActive) return;
       const token = secureGet("auth_token");
       if (!token || !isAuthTokenExpired(token)) return;
-      void refreshAuthState();
+      void requiresOnlineLoginAsync().then((needed) => {
+        if (needed) forceLogin();
+        else void refreshAuthState();
+      });
     }).then((listener) => {
       handle = listener;
     });
     return () => {
       handle?.remove();
     };
-  }, [refreshAuthState]);
-
-  // Periodic JWT expiry check while app is in use (native).
-  useEffect(() => {
-    if (!isMobileNativePlatform()) return;
-    const interval = window.setInterval(() => {
-      if (justAuthenticatedRef.current) return;
-      const token = secureGet("auth_token");
-      if (!token || !isAuthTokenExpired(token)) return;
-      void (async () => {
-        if (await requiresOnlineLoginAsync()) {
-          setJustAuthenticated(false);
-          setAuthState("no-session");
-          return;
-        }
-        void refreshAuthState();
-      })();
-    }, 15_000);
-    return () => window.clearInterval(interval);
-  }, [refreshAuthState]);
+  }, [refreshAuthState, forceLogin]);
 
   if (loading) {
     return (
@@ -194,8 +168,18 @@ const App = () => {
     );
   }
 
-  // Fresh login — skip biometric gate
-  if (justAuthenticated || authState === "session-unlocked") {
+  // Sync render gate — catches expiry between interval ticks (e.g. right after 401).
+  void loginGateTick;
+  if (
+    authState === "no-session"
+    || authState === "grace-expired"
+    || (isMobileNativePlatform() && authState === null)
+    || (authState === "session-unlocked" && shouldForceLoginNow())
+  ) {
+    return <Login />;
+  }
+
+  if (authState === "session-unlocked") {
     return <AppRoutes />;
   }
 
@@ -208,16 +192,6 @@ const App = () => {
     );
   }
 
-  // No session, grace expired, or unresolved init — always show Login on native
-  if (
-    authState === "no-session"
-    || authState === "grace-expired"
-    || (isMobileNativePlatform() && authState === null)
-  ) {
-    return <Login />;
-  }
-
-  // Web browser — no biometric gate
   return <AppRoutes />;
 };
 
