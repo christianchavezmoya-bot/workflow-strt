@@ -94,7 +94,7 @@ const formatAgo = (utcDate?: string | null) => {
 const Topbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, authReady } = useAuth();
   const { notifications, unreadNotifications, loading: notificationsLoading, fromCache: notificationsFromCache, acknowledge } = useNotificationInbox();
   const { complexViewActive, recordLogoTap } = useComplexView();
   const { viewMode, toggleViewMode } = useViewMode();
@@ -286,7 +286,7 @@ const Topbar = () => {
   }, []);
 
   const initials = useMemo(() => {
-    if (!isAuthenticated) return "";
+    if (!authReady || !isAuthenticated) return "";
     const fullName = user?.fullName?.trim();
     if (fullName) {
       const parts = fullName.split(" ").filter(Boolean);
@@ -300,7 +300,7 @@ const Topbar = () => {
       return email.slice(0, 2).toUpperCase();
     }
     return "";
-  }, [user?.fullName, user?.email, isAuthenticated]);
+  }, [user?.fullName, user?.email, isAuthenticated, authReady]);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);

@@ -16,6 +16,7 @@ const defaultUser: User = {
 export const useAuth = () => {
   const [user, setUser] = useState<User>(defaultUser);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
   const [devRoleOverride, setDevRoleOverride] = useState<string | null>(
     () => localStorage.getItem("dev_role_override")
   );
@@ -25,7 +26,7 @@ export const useAuth = () => {
     [user, devRoleOverride]
   );
 
-  const memoized = useMemo(() => ({ user: effectiveUser, isAuthenticated }), [effectiveUser, isAuthenticated]);
+  const memoized = useMemo(() => ({ user: effectiveUser, isAuthenticated, authReady }), [effectiveUser, isAuthenticated, authReady]);
 
   useEffect(() => {
     const syncFromStorage = () => {
@@ -78,6 +79,7 @@ export const useAuth = () => {
     };
 
     syncFromStorage();
+    setAuthReady(true);
 
     const onAuthUserUpdated = () => {
       syncFromStorage();

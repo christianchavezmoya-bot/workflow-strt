@@ -51,6 +51,8 @@ import {
   type AssetDocumentLinkUploadBody,
 } from "../services/assetDocumentLinkService";
 import { isMobileNativePlatform } from "../utils/platform";
+import { isAuthTokenExpired } from "../utils/authToken";
+import { secureGet } from "../services/secureStorage";
 import type { OpenIssueRecord } from "../services/assetWorkflowRunService";
 import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import {
@@ -141,6 +143,10 @@ function extractServerErrorMessage(error: unknown, fallback: string): string {
 
 async function reconnectAndFlush(): Promise<void> {
   await pendingResetRetrySchedule();
+  if (isMobileNativePlatform() && isAuthTokenExpired()) {
+    window.dispatchEvent(new Event("api-auth-error"));
+    return;
+  }
   void flushRef.current?.();
 }
 

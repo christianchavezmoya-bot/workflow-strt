@@ -113,6 +113,18 @@ const App = () => {
     };
   }, [refreshAuthState]);
 
+  // Periodic JWT expiry check while app is in use (online, native).
+  useEffect(() => {
+    if (!isMobileNativePlatform()) return;
+    const interval = window.setInterval(() => {
+      if (justAuthenticatedRef.current) return;
+      const token = secureGet("auth_token");
+      if (!token || !isAuthTokenExpired(token)) return;
+      void refreshAuthState();
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, [refreshAuthState]);
+
   // Still loading - show loading indicator
   if (loading) {
     return (

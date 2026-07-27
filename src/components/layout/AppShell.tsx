@@ -26,7 +26,9 @@ import { useCallback, useEffect } from "react";
 import { initTapFeedback } from "../../services/tapFeedback";
 
 function OnboardingLayer() {
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
+
+  if (!authReady || !user.id) return null;
 
   // When the user finishes or skips welcome, mark IsFirstLogin=false on backend
   // so an admin reset (setting IsFirstLogin=true) is the only way to re-trigger it.
