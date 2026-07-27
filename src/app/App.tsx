@@ -3,7 +3,11 @@ import { Box, CircularProgress, Typography } from "@mui/material";
 import { App as CapApp } from "@capacitor/app";
 import AppRoutes from "./routes";
 import { brandSettingsService } from "../services/brandSettingsService";
-import { getLaunchAuthModeAsync, BiometricCheckResult } from "../services/biometricAuth";
+import {
+  getLaunchAuthModeAsync,
+  canEnterAppWithStoredSession,
+  BiometricCheckResult,
+} from "../services/biometricAuth";
 import { initSecureStorage, secureGet, secureRemove } from "../services/secureStorage";
 import BiometricLockScreen from "../components/BiometricLockScreen";
 import Login from "../features/auth/Login";
@@ -13,10 +17,17 @@ import { isAuthTokenExpired } from "../utils/authToken";
 const App = () => {
   const [authState, setAuthState] = useState<BiometricCheckResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [initError, setInitError] = useState<string | null>(null);
   const [justAuthenticated, setJustAuthenticated] = useState(false);
   const justAuthenticatedRef = useRef(false);
   justAuthenticatedRef.current = justAuthenticated;
+
+  const applyAuthMode = useCallback((mode: BiometricCheckResult) => {
+    console.log("[App] Auth mode:", mode);
+    setAuthState(mode);
+    if (mode === "session-unlocked" || mode === "not-native") {
+      setJustAuthenticated(false);
+    }
+  }, []);
 
   // Function to re-check auth state (called after login success)
   const refreshAuthState = useCallback(async () => {
@@ -24,20 +35,31 @@ const App = () => {
     if (justAuth === "true") {
       console.log("[App] User just authenticated, skipping biometric screen");
       setJustAuthenticated(true);
+      setAuthState("session-unlocked");
       secureRemove("just_authenticated");
       return;
     }
 
     const mode = await getLaunchAuthModeAsync();
     console.log("[App] Refreshed auth mode:", mode);
-    setAuthState(mode);
-  }, []);
+    applyAuthMode(mode);
+  }, [applyAuthMode]);
+
+  const handleBiometricUnlocked = useCallback(async () => {
+    const allowed = await canEnterAppWithStoredSession();
+    if (!allowed) {
+      console.log("[App] Biometric unlock rejected — session invalid, showing Login");
+      applyAuthMode("no-session");
+      return;
+    }
+    applyAuthMode("session-unlocked");
+  }, [applyAuthMode]);
 
   // Listen for storage changes (login success from Login component)
   useEffect(() => {
     const handleStorageChange = () => {
       console.log("[App] Storage change detected, refreshing auth state");
-      refreshAuthState();
+      void refreshAuthState();
     };
 
     const handleAuthError = () => {
@@ -62,39 +84,33 @@ const App = () => {
       if (s.appName) document.title = s.appName;
     }).catch(() => {});
 
-    // Initialize secure storage first, then determine auth mode
     const init = async () => {
       try {
-        // Initialize secure storage (load from Keychain into memory)
         console.log("[App] Initializing secure storage...");
         await initSecureStorage();
         console.log("[App] Secure storage initialized");
-        
-        // Debug: Check what we have in storage
+
         const token = secureGet("auth_token");
         const user = secureGet("auth_user");
         const lastLogin = secureGet("last_online_login");
-        console.log("[App] Storage contents:", { 
-          hasToken: !!token, 
-          hasUser: !!user, 
-          lastLogin: lastLogin ? new Date(parseInt(lastLogin)).toISOString() : null 
+        console.log("[App] Storage contents:", {
+          hasToken: !!token,
+          hasUser: !!user,
+          lastLogin: lastLogin ? new Date(parseInt(lastLogin, 10)).toISOString() : null,
         });
-        
+
         const mode = await getLaunchAuthModeAsync();
-        console.log("[App] Auth mode:", mode);
-        setAuthState(mode);
+        applyAuthMode(mode);
       } catch (error) {
         console.error("[App] Auth init error:", error);
-        const mode = await getLaunchAuthModeAsync();
-        console.log("[App] Fallback auth mode:", mode);
-        setAuthState(mode);
+        applyAuthMode("no-session");
       } finally {
         setLoading(false);
       }
     };
     
-    init();
-  }, []);
+    void init();
+  }, [applyAuthMode]);
 
   // Re-check auth when native app returns to foreground (JWT may have expired while backgrounded).
   useEffect(() => {
@@ -125,17 +141,16 @@ const App = () => {
     return () => window.clearInterval(interval);
   }, [refreshAuthState]);
 
-  // Still loading - show loading indicator
   if (loading) {
     return (
-      <Box sx={{ 
-        minHeight: "100vh", 
-        display: "flex", 
+      <Box sx={{
+        minHeight: "100vh",
+        display: "flex",
         flexDirection: "column",
-        alignItems: "center", 
+        alignItems: "center",
         justifyContent: "center",
         bgcolor: "background.default",
-        gap: 2
+        gap: 2,
       }}>
         <CircularProgress />
         <Typography variant="body2" color="text.secondary">Loading...</Typography>
@@ -143,28 +158,30 @@ const App = () => {
     );
   }
 
-  // Show error state
-  if (initError) {
-    console.log("[App] Init error, showing login");
-  }
-
-  // If user just authenticated, skip biometric and go straight to app
-  if (justAuthenticated) {
-    console.log("[App] Just authenticated, showing app routes");
+  // Fresh login — skip biometric gate
+  if (justAuthenticated || authState === "session-unlocked") {
     return <AppRoutes />;
   }
 
-  // Show biometric/PIN lock screen if needed
   if (authState === "biometric-needed" || authState === "pin-needed") {
-    return <BiometricLockScreen onUnlocked={() => setAuthState("not-native")} authMode={authState} />;
+    return (
+      <BiometricLockScreen
+        onUnlocked={() => { void handleBiometricUnlocked(); }}
+        authMode={authState}
+      />
+    );
   }
 
-  // No session or grace expired - show login
-  if (authState === "no-session" || authState === "grace-expired") {
+  // No session, grace expired, or unresolved init — always show Login on native
+  if (
+    authState === "no-session"
+    || authState === "grace-expired"
+    || (isMobileNativePlatform() && authState === null)
+  ) {
     return <Login />;
   }
 
-  // "not-native" (web) or other states - show normal app routes
+  // Web browser — no biometric gate
   return <AppRoutes />;
 };
 

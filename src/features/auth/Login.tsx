@@ -131,8 +131,6 @@ const Login = () => {
       console.log("[Login] All data saved successfully");
       if (isMobileNativePlatform()) {
         localStorage.removeItem("test_mode_original_auth");
-        localStorage.removeItem("auth_user");
-        localStorage.removeItem("local_auth_user");
       }
     } catch (error) {
       console.warn("[Login] Storage save warning:", error);

@@ -15,6 +15,7 @@ import syncQueue from "../services/syncQueue";
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import { isMobileNativePlatform } from "../utils/platform";
+import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { webCachedGet, webCacheKey, invalidateWebCacheByPrefix } from "../services/webFreshCache";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
@@ -99,7 +100,11 @@ export const AssetRepository = {
           await syncMetaSet("assets");
           window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { productId } }));
         })
-        .catch(() => { window.dispatchEvent(new Event("repo:assets:fetch-failed")); });
+        .catch((err) => {
+          if (isOfflineNetworkError(err)) {
+            window.dispatchEvent(new Event("repo:assets:fetch-failed"));
+          }
+        });
     }
 
     if (local.length > 0) return local;
@@ -138,7 +143,11 @@ export const AssetRepository = {
           await syncMetaSet("assets");
           window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { projectId } }));
         })
-        .catch(() => { window.dispatchEvent(new Event("repo:assets:fetch-failed")); });
+        .catch((err) => {
+          if (isOfflineNetworkError(err)) {
+            window.dispatchEvent(new Event("repo:assets:fetch-failed"));
+          }
+        });
     }
 
     if (local.length > 0) return local;

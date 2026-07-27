@@ -24,14 +24,10 @@ import { useSseEvents } from "../../hooks/useSseEvents";
 import { useOfflineBootstrap } from "../../hooks/useOfflineBootstrap";
 import { useCallback, useEffect } from "react";
 import { initTapFeedback } from "../../services/tapFeedback";
+import type { User } from "../../types/user";
 
-function OnboardingLayer() {
-  const { user, authReady } = useAuth();
-
-  if (!authReady || !user.id) return null;
-
-  // When the user finishes or skips welcome, mark IsFirstLogin=false on backend
-  // so an admin reset (setting IsFirstLogin=true) is the only way to re-trigger it.
+/** Runs onboarding hooks only when a real user id exists (stable hook order per mount). */
+function OnboardingLayerContent({ user }: { user: User }) {
   const handleWelcomeDone = useCallback(() => {
     authService.updateProfile({ fullName: user.fullName, office: user.office }).catch(() => {});
   }, [user.fullName, user.office]);
@@ -54,6 +50,14 @@ function OnboardingLayer() {
       <HelpCenterLauncher controls={controls} />
     </>
   );
+}
+
+function OnboardingLayer() {
+  const { user, authReady } = useAuth();
+
+  if (!authReady || !user.id) return null;
+
+  return <OnboardingLayerContent user={user} />;
 }
 
 const AppShell = () => {

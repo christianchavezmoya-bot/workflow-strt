@@ -3,6 +3,7 @@ import type { OpenIssueRecord } from "../services/assetWorkflowRunService";
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { entityGetAllIssues, entityReplaceAllIssues, syncMetaSet } from "../services/localDB";
 import { isMobileNativePlatform } from "../utils/platform";
+import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { webCachedGet, webCacheKey } from "../services/webFreshCache";
 
 function toRecord(i: OpenIssueRecord) {
@@ -46,7 +47,11 @@ export const IssueRepository = {
           await syncMetaSet("issues");
           window.dispatchEvent(new Event("repo:issues:updated"));
         })
-        .catch(() => { window.dispatchEvent(new Event("repo:issues:fetch-failed")); });
+        .catch((err) => {
+          if (isOfflineNetworkError(err)) {
+            window.dispatchEvent(new Event("repo:issues:fetch-failed"));
+          }
+        });
     }
 
     if (local.length > 0) return local as OpenIssueRecord[];

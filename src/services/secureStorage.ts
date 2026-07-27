@@ -43,11 +43,12 @@ const cache = new Map<string, string | null>();
 let _initDone = false;
 let _initPromise: Promise<void> | null = null;
 
+const KEYCHAIN_READ_TIMEOUT_MS = 2_000;
+
 // Lazy-load the plugin so it doesn't break on web where the native layer is absent
 async function getPlugin(): Promise<SecureStoragePluginHandle | null> {
   if (!isMobileNativePlatform()) return null;
   try {
-    // Add timeout to plugin loading
     const pluginPromise = import("capacitor-secure-storage-plugin");
     const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000));
     const result = await Promise.race([pluginPromise, timeoutPromise]);
@@ -62,15 +63,35 @@ async function getPlugin(): Promise<SecureStoragePluginHandle | null> {
   }
 }
 
-// Wrap a promise with a timeout — resolves to fallback value on timeout
-function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([p, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+function readLocalStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+async function readKeychainValue(
+  plugin: SecureStoragePluginHandle["plugin"],
+  key: string,
+): Promise<string | null> {
+  try {
+    const result = await Promise.race([
+      plugin.get({ key }),
+      new Promise<{ value: null }>((resolve) =>
+        setTimeout(() => resolve({ value: null }), KEYCHAIN_READ_TIMEOUT_MS)
+      ),
+    ]);
+    return result.value;
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Call once before the app renders (in main.tsx).
- * Loads every secure key from Keychain into the in-memory cache.
- * Also migrates any values still in localStorage → Keychain (one-time).
+ * Call once before the app renders (in App.tsx).
+ * On native: loads Keychain first (authoritative), then mirrors to localStorage.
+ * On web: loads from localStorage only.
  */
 export async function initSecureStorage(): Promise<void> {
   if (_initDone) return;
@@ -78,40 +99,51 @@ export async function initSecureStorage(): Promise<void> {
 
   _initPromise = (async () => {
     console.log("[SecureStorage] Starting initialization...");
-    
-    // First, immediately load from localStorage to unblock the app
-    for (const key of SECURE_KEYS) {
-      const value = localStorage.getItem(key);
-      cache.set(key, value);
-    }
-    _initDone = true;
-    console.log("[SecureStorage] Loaded from localStorage, app can continue");
-    
-    // Then try to load from Keychain in background (non-blocking)
-    // This allows the app to start even if Keychain is slow
-    getPlugin().then(async (handle) => {
-      const plugin = handle?.plugin;
-      if (!plugin) return;
-      console.log("[SecureStorage] Keychain plugin loaded, checking for migrated data...");
-      
+
+    if (!isMobileNativePlatform()) {
       for (const key of SECURE_KEYS) {
-        try {
-          const result = await Promise.race([
-            plugin.get({ key }),
-            new Promise<{ value: null }>((resolve) => setTimeout(() => resolve({ value: null }), 500))
-          ]);
-          if (result.value !== null && !cache.get(key)) {
-            // Only update cache if we didn't have a value
-            cache.set(key, result.value);
-            console.log(`[SecureStorage] Loaded ${key} from Keychain`);
+        cache.set(key, readLocalStorage(key));
+      }
+      _initDone = true;
+      console.log("[SecureStorage] Loaded from localStorage (web)");
+      return;
+    }
+
+    // Native: Keychain is authoritative. localStorage is a fast mirror only.
+    const handle = await getPlugin();
+    const plugin = handle?.plugin;
+
+    if (plugin) {
+      console.log("[SecureStorage] Loading secure keys from Keychain...");
+      for (const key of SECURE_KEYS) {
+        const keychainValue = await readKeychainValue(plugin, key);
+        if (keychainValue !== null) {
+          cache.set(key, keychainValue);
+          try { localStorage.setItem(key, keychainValue); } catch { /* ignore */ }
+          console.log(`[SecureStorage] Loaded ${key} from Keychain`);
+          continue;
+        }
+        const localValue = readLocalStorage(key);
+        cache.set(key, localValue);
+        if (localValue !== null) {
+          // One-time migration: push legacy localStorage values into Keychain.
+          try {
+            await plugin.set({ key, value: localValue });
+            console.log(`[SecureStorage] Migrated ${key} from localStorage → Keychain`);
+          } catch (e) {
+            console.warn(`[SecureStorage] Keychain migration failed for ${key}:`, e);
           }
-        } catch {
-          // Ignore errors - localStorage is our fallback
         }
       }
-    }).catch(() => {
-      // Plugin failed to load, localStorage is our storage
-    });
+    } else {
+      console.warn("[SecureStorage] Keychain unavailable — falling back to localStorage");
+      for (const key of SECURE_KEYS) {
+        cache.set(key, readLocalStorage(key));
+      }
+    }
+
+    _initDone = true;
+    console.log("[SecureStorage] Initialization complete");
   })();
 
   return _initPromise;
@@ -124,74 +156,45 @@ export function secureGet(key: string): string | null {
 
 /** Write value — updates cache immediately, persists to localStorage, then Keychain in background. */
 export async function secureSet(key: string, value: string): Promise<void> {
-  // Always update cache first (synchronous, instant)
   cache.set(key, value);
-  
-  // Always save to localStorage immediately (synchronous, reliable)
-  localStorage.setItem(key, value);
-  console.log(`[SecureStorage] Saved ${key} to localStorage`);
-  
-  // Try Keychain in background (completely non-blocking)
-  // Don't wait for this - localStorage is our reliable storage
+
+  try { localStorage.setItem(key, value); } catch { /* ignore */ }
+
+  if (!isMobileNativePlatform()) return;
+
   getPlugin().then(async (handle) => {
     const plugin = handle?.plugin;
-    if (plugin) {
-      try {
-        await plugin.set({ key, value });
-        console.log(`[SecureStorage] Saved ${key} to Keychain`);
-      } catch (e) {
-        console.warn(`[SecureStorage] Keychain save failed for ${key}:`, e);
-      }
-    }
-  }).catch(() => {});
-}
-
-/** Background persistence - saves to both localStorage AND Keychain */
-async function persistToKeychain(key: string, value: string): Promise<void> {
-  // Always save to localStorage as backup (instant, reliable)
-  localStorage.setItem(key, value);
-  
-  const plugin = (await getPlugin())?.plugin;
-  if (plugin) {
+    if (!plugin) return;
     try {
       await plugin.set({ key, value });
       console.log(`[SecureStorage] Saved ${key} to Keychain`);
     } catch (e) {
-      // non-fatal - localStorage is our backup
-      console.warn("[SecureStorage] Failed to persist to Keychain:", key, e);
-    }
-  }
-}
-
-/** Remove value — clears cache immediately, removes from localStorage. */
-export async function secureRemove(key: string): Promise<void> {
-  // Update cache immediately (synchronous)
-  cache.set(key, null);
-  
-  // Always remove from localStorage immediately
-  localStorage.removeItem(key);
-  
-  // Remove from Keychain in background (non-blocking)
-  getPlugin().then(async (handle) => {
-    const plugin = handle?.plugin;
-    if (plugin) {
-      try { await plugin.remove({ key }); } catch { /* non-fatal */ }
+      console.warn(`[SecureStorage] Keychain save failed for ${key}:`, e);
     }
   }).catch(() => {});
 }
 
-/** Background removal - removes from both localStorage AND Keychain */
-async function removeFromKeychain(key: string): Promise<void> {
-  // Always remove from localStorage
-  localStorage.removeItem(key);
-  
-  const plugin = (await getPlugin())?.plugin;
-  if (plugin) {
+/** Remove value — clears cache immediately, removes from localStorage and Keychain. */
+export async function secureRemove(key: string): Promise<void> {
+  cache.set(key, null);
+
+  try { localStorage.removeItem(key); } catch { /* ignore */ }
+
+  if (!isMobileNativePlatform()) return;
+
+  getPlugin().then(async (handle) => {
+    const plugin = handle?.plugin;
+    if (!plugin) return;
     try { await plugin.remove({ key }); } catch { /* non-fatal */ }
-  }
+  }).catch(() => {});
 }
 
 /** Wipe all auth keys — call on logout. */
 export async function secureClearAuth(): Promise<void> {
   await Promise.all(SECURE_KEYS.map((key) => secureRemove(key)));
+}
+
+/** True when initSecureStorage() has finished populating the cache. */
+export function isSecureStorageReady(): boolean {
+  return _initDone;
 }
