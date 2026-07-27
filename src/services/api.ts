@@ -81,6 +81,28 @@ const pushDebugLog = (log: ApiDebugLog) => {
 // Refresh the token if it expires within this many minutes
 const REFRESH_THRESHOLD_MINUTES = 30;
 let refreshPromise: Promise<void> | null = null;
+/** Prevents api-auth-error storms while Login is already shown on native. */
+let nativeAuthExpiredSignaled = false;
+
+if (typeof window !== "undefined") {
+  window.addEventListener("auth-change", () => {
+    nativeAuthExpiredSignaled = false;
+  });
+}
+
+/** Native: switch App to Login via event — never hard-reload (reload loops with preserved token). Web: full redirect. */
+function handleSessionExpiredOnline(): void {
+  if (isMobileNativePlatform()) {
+    if (nativeAuthExpiredSignaled) return;
+    nativeAuthExpiredSignaled = true;
+    window.dispatchEvent(new Event("api-auth-error"));
+    return;
+  }
+  window.dispatchEvent(new Event("api-auth-error"));
+  secureRemove("auth_token");
+  secureRemove("auth_user");
+  window.location.href = "/login";
+}
 
 const silentRefresh = async () => {
   const token = secureGet("auth_token");
@@ -96,13 +118,7 @@ const silentRefresh = async () => {
     // Offline within the 30-day grace window keeps the cached session alive.
     const online = !shouldSkipBlockingFetch() && !isCircuitOpen();
     if (isMobileNativePlatform() && online && !isSyncFlushing()) {
-      window.dispatchEvent(new Event("api-auth-error"));
-      // Keep auth_token/auth_user in secure storage so offline reopen within the
-      // 30-day grace window can still use Face ID. Clearing them broke field
-      // workflows: expiry redirect → Login offline → cannot sign in or unlock.
-      window.setTimeout(() => {
-        window.location.href = "/login";
-      }, 0);
+      handleSessionExpiredOnline();
     }
     return;
   }
@@ -362,11 +378,7 @@ api.interceptors.response.use(
         if (allowOfflineSession) {
           return Promise.reject(error);
         }
-        window.dispatchEvent(new Event("api-auth-error"));
-        // Preserve stored session for offline Face ID within grace (see silentRefresh).
-        window.setTimeout(() => {
-          window.location.href = "/login";
-        }, 0);
+        handleSessionExpiredOnline();
       }
     }
     if (status >= 500) {
