@@ -1,6 +1,6 @@
 # Native N-go — Session, Timeout & Offline Sync Resolution Plan
 
-**Status:** In progress (field retest blocked until Mac rebuild @ `main` ≥ `15ddf75` + fixes below)  
+**Status:** P0 fixes merged @ `62da009` — Mac rebuild + T1–T7 retest in progress  
 **API test config:** `Jwt:ExpiresMinutes: 1` (Development, Windows PC)  
 **Production target:** `ExpiresMinutes: 720` (~12 h)
 
@@ -114,4 +114,4 @@
 | #29 | Fix reload loop (flash Loading) |
 | #30 | Stop 1-min JWT auto-refresh; launch Login fix |
 
-**Next PR:** P0-2–P0-4 (token-expired deadlock, auth gate, periodic check)
+**Next PR:** #31 — token-expired deadlock, auth gate, periodic check (merged @ `62da009`)
