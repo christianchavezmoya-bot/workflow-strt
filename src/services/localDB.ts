@@ -360,14 +360,14 @@ export function calcNextRetryAt(retryCount: number): string {
   return new Date(Date.now() + jitterMs(delay)).toISOString();
 }
 
-/** Clear backoff schedules so a reconnect can flush immediately. */
+/** Clear backoff schedules and stale "uploading" locks so reconnect can flush immediately. */
 export async function pendingResetRetrySchedule(): Promise<void> {
   try {
     const db = await getDB();
     const all = await pendingGetAll();
     await Promise.all(
       all
-        .filter((item) => item.status === "failed" || item.nextRetryAt)
+        .filter((item) => item.status === "failed" || item.status === "uploading" || item.nextRetryAt)
         .map((item) => db.put("pending_actions", {
           ...item,
           status: "pending",
