@@ -371,6 +371,14 @@ function buildRunConflictFields(
   return fields;
 }
 
+function conflictFetchErrorMessage(error: unknown): string {
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  if (status === 401) {
+    return "Session expired — sign in again to load the server version.";
+  }
+  return "Could not load the current server version.";
+}
+
 async function buildConflictDetail(action: PendingAction): Promise<ConflictDetail> {
   if (action.entityType === "asset") {
     const localRecord = await entityGetAsset(action.entityId);
@@ -380,8 +388,8 @@ async function buildConflictDetail(action: PendingAction): Promise<ConflictDetai
     try {
       const response = await api.get<ProjectAsset>(`/project-assets/${action.entityId}`);
       serverAsset = response.data;
-    } catch {
-      fetchError = "Could not load the current server version.";
+    } catch (error) {
+      fetchError = conflictFetchErrorMessage(error);
     }
 
     return {
@@ -402,8 +410,8 @@ async function buildConflictDetail(action: PendingAction): Promise<ConflictDetai
     try {
       const response = await api.get<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}`);
       serverRun = response.data;
-    } catch {
-      fetchError = "Could not load the current server version.";
+    } catch (error) {
+      fetchError = conflictFetchErrorMessage(error);
     }
 
     const localAsset = localRun?.assetId ? await entityGetAsset(localRun.assetId) : null;

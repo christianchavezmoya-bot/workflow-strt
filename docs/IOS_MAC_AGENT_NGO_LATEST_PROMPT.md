@@ -149,8 +149,9 @@ This test **requires real idle time**. Plan on day 1; finish on day 2.
 ### After 12+ hours idle
 
 1. Open **N-go** (radio ON if you left offline).
-2. If token expired → app should prompt **re-login** (connectivity may show **token expired**).
-3. Log in again with same user.
+2. If token expired while **online** → app shows **Login** (not Face ID). Sync overlay may show **token expired**.
+3. If token expired while **offline** (within 30-day grace) → Face ID unlock still works; re-login required once back online.
+4. Log in again with same user.
 
 | PASS if |
 |---------|

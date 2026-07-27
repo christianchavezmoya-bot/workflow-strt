@@ -9,6 +9,7 @@ import { formatPayloadSize } from "../utils/syncDiagnostics";
 import { isCircuitOpen, resetCircuitBreaker } from "../utils/circuitBreaker";
 import { isOfflineGraceValid } from "./biometricAuth";
 import { markOfflinePerf } from "../utils/offlinePerf";
+import { getTokenExpiry } from "../utils/authToken";
 
 export const API_BASE_URL: string = getApiBaseUrl();
 
@@ -76,16 +77,6 @@ const pushDebugLog = (log: ApiDebugLog) => {
 };
 
 // ── Silent token refresh ────────────────────────────────────────────
-// Decode JWT expiry without a library. Returns epoch seconds or null.
-const getTokenExpiry = (token: string): number | null => {
-  try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload.exp ?? null;
-  } catch {
-    return null;
-  }
-};
-
 // Refresh the token if it expires within this many minutes
 const REFRESH_THRESHOLD_MINUTES = 30;
 let refreshPromise: Promise<void> | null = null;
@@ -99,7 +90,18 @@ const silentRefresh = async () => {
 
   const remainingMs = exp * 1000 - Date.now();
   if (remainingMs > REFRESH_THRESHOLD_MINUTES * 60 * 1000) return; // not close to expiry
-  if (remainingMs < 0) return; // already expired — let 401 handler redirect
+  if (remainingMs < 0) {
+    // Online with an expired JWT: session is unusable — redirect to login.
+    // Offline within the 30-day grace window keeps the cached session alive.
+    const online = !shouldSkipBlockingFetch() && !isCircuitOpen();
+    if (isMobileNativePlatform() && online) {
+      window.dispatchEvent(new Event("api-auth-error"));
+      secureRemove("auth_token");
+      secureRemove("auth_user");
+      window.location.href = "/login";
+    }
+    return;
+  }
 
   // Deduplicate concurrent refresh calls
   if (refreshPromise) {
@@ -351,7 +353,8 @@ api.interceptors.response.use(
       if (!reqUrl.includes("/auth/login") && !reqUrl.includes("/auth/refresh") && !reqUrl.includes("/brand-settings")) {
         const allowOfflineSession =
           isMobileNativePlatform()
-          && (shouldSkipBlockingFetch() || isCircuitOpen() || isOfflineGraceValid());
+          && isOfflineGraceValid()
+          && (shouldSkipBlockingFetch() || isCircuitOpen());
         if (allowOfflineSession) {
           return Promise.reject(error);
         }
