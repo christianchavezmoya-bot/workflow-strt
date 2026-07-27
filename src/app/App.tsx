@@ -34,14 +34,21 @@ const App = () => {
       console.log("[App] Storage change detected, refreshing auth state");
       refreshAuthState();
     };
+
+    const handleAuthError = () => {
+      console.log("[App] Auth error — switching to login/biometric gate");
+      setJustAuthenticated(false);
+      void refreshAuthState();
+    };
     
     window.addEventListener("storage", handleStorageChange);
-    // Also listen for custom event from Login component
     window.addEventListener("auth-change", handleStorageChange);
+    window.addEventListener("api-auth-error", handleAuthError);
     
     return () => {
       window.removeEventListener("storage", handleStorageChange);
       window.removeEventListener("auth-change", handleStorageChange);
+      window.removeEventListener("api-auth-error", handleAuthError);
     };
   }, [refreshAuthState]);
 
