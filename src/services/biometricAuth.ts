@@ -100,13 +100,16 @@ export async function getLaunchAuthModeAsync(): Promise<BiometricCheckResult> {
   if (!isOfflineGraceValid()) return "grace-expired";
 
   // JWT expired while online → full re-login, not Face ID unlock.
+  // Only skip login when the device is DEFINITELY offline — iOS often reports
+  // disconnected briefly on cold start, which wrongly sent users to Face ID
+  // with an expired token instead of Login.
   if (isAuthTokenExpired(token)) {
     try {
       const { Network } = await import("@capacitor/network");
       const status = await Network.getStatus();
-      if (status.connected) return "no-session";
+      if (status.connected !== false) return "no-session";
     } catch {
-      if (typeof navigator !== "undefined" && navigator.onLine) return "no-session";
+      return "no-session";
     }
   }
 

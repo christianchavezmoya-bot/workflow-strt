@@ -1,17 +1,22 @@
-﻿import { useEffect, useState, useCallback } from "react";
+﻿import { useEffect, useState, useCallback, useRef } from "react";
 import { Box, CircularProgress, Typography } from "@mui/material";
+import { App as CapApp } from "@capacitor/app";
 import AppRoutes from "./routes";
 import { brandSettingsService } from "../services/brandSettingsService";
 import { getLaunchAuthModeAsync, BiometricCheckResult } from "../services/biometricAuth";
 import { initSecureStorage, secureGet, secureRemove } from "../services/secureStorage";
 import BiometricLockScreen from "../components/BiometricLockScreen";
 import Login from "../features/auth/Login";
+import { isMobileNativePlatform } from "../utils/platform";
+import { isAuthTokenExpired } from "../utils/authToken";
 
 const App = () => {
   const [authState, setAuthState] = useState<BiometricCheckResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [justAuthenticated, setJustAuthenticated] = useState(false);
+  const justAuthenticatedRef = useRef(false);
+  justAuthenticatedRef.current = justAuthenticated;
 
   // Function to re-check auth state (called after login success)
   const refreshAuthState = useCallback(async () => {
@@ -90,6 +95,23 @@ const App = () => {
     
     init();
   }, []);
+
+  // Re-check auth when native app returns to foreground (JWT may have expired while backgrounded).
+  useEffect(() => {
+    if (!isMobileNativePlatform()) return;
+    let handle: { remove: () => void } | undefined;
+    void CapApp.addListener("appStateChange", ({ isActive }) => {
+      if (!isActive || justAuthenticatedRef.current) return;
+      const token = secureGet("auth_token");
+      if (!token || !isAuthTokenExpired(token)) return;
+      void refreshAuthState();
+    }).then((listener) => {
+      handle = listener;
+    });
+    return () => {
+      handle?.remove();
+    };
+  }, [refreshAuthState]);
 
   // Still loading - show loading indicator
   if (loading) {
