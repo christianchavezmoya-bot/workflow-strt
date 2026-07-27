@@ -20,6 +20,7 @@ import { offlineBootstrapService } from "../../services/offlineBootstrapService"
 import { getNetworkStatus, getNetworkMessage, NetworkStatus } from "../../services/networkService";
 import strataLogo from "../../assets/strata_transparent.png";
 import { APP_NAME } from "../../constants/branding";
+import { isMobileNativePlatform } from "../../utils/platform";
 
 // Must be outside Login so it doesn't remount on every keystroke
 const PageWrapper = ({ children }: { children: React.ReactNode }) => (
@@ -128,6 +129,11 @@ const Login = () => {
       ]);
       
       console.log("[Login] All data saved successfully");
+      if (isMobileNativePlatform()) {
+        localStorage.removeItem("test_mode_original_auth");
+        localStorage.removeItem("auth_user");
+        localStorage.removeItem("local_auth_user");
+      }
     } catch (error) {
       console.warn("[Login] Storage save warning:", error);
       // Continue anyway - cache is updated

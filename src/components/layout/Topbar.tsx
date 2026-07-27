@@ -94,7 +94,7 @@ const formatAgo = (utcDate?: string | null) => {
 const Topbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { notifications, unreadNotifications, loading: notificationsLoading, fromCache: notificationsFromCache, acknowledge } = useNotificationInbox();
   const { complexViewActive, recordLogoTap } = useComplexView();
   const { viewMode, toggleViewMode } = useViewMode();
@@ -286,19 +286,21 @@ const Topbar = () => {
   }, []);
 
   const initials = useMemo(() => {
+    if (!isAuthenticated) return "";
     const fullName = user?.fullName?.trim();
     if (fullName) {
       const parts = fullName.split(" ").filter(Boolean);
-      const first = parts[0]?.[0] || "U";
+      const first = parts[0]?.[0] || "";
       const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
-      return `${first}${last}`.toUpperCase();
+      const value = `${first}${last}`.toUpperCase();
+      return value || "";
     }
     const email = user?.email?.trim();
     if (email) {
       return email.slice(0, 2).toUpperCase();
     }
-    return "U";
-  }, [user?.fullName, user?.email]);
+    return "";
+  }, [user?.fullName, user?.email, isAuthenticated]);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -676,7 +678,9 @@ const Topbar = () => {
               }
             }}
           >
-            <Avatar sx={{ bgcolor: "#2dd4bf", color: "#0b1d24" }}>{initials}</Avatar>
+            <Avatar sx={{ bgcolor: "#2dd4bf", color: "#0b1d24" }}>
+              {initials || "…"}
+            </Avatar>
           </Badge>
         </IconButton>
 
@@ -695,6 +699,8 @@ const Topbar = () => {
             </Stack>
           </MenuItem>
           <Divider />
+          {!isMobileNativePlatform() && (
+            <>
           <MenuItem onClick={openTestUserDialog} sx={{ justifyContent: "space-between" }}>
             <Stack direction="row" spacing={1} alignItems="center">
               <SwitchAccountOutlinedIcon fontSize="small" sx={{ color: "text.secondary" }} />
@@ -723,6 +729,8 @@ const Topbar = () => {
             )}
           </MenuItem>
           <Divider />
+            </>
+          )}
           <MenuItem
             onClick={() => {
               handleClose();

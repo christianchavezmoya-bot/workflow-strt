@@ -9,7 +9,7 @@ import { formatPayloadSize } from "../utils/syncDiagnostics";
 import { isCircuitOpen, resetCircuitBreaker } from "../utils/circuitBreaker";
 import { isOfflineGraceValid } from "./biometricAuth";
 import { markOfflinePerf } from "../utils/offlinePerf";
-import { getTokenExpiry } from "../utils/authToken";
+import { getTokenExpiry, getTokenLifetimeMs } from "../utils/authToken";
 import { isSyncFlushing } from "../utils/syncFlushLock";
 
 export const API_BASE_URL: string = getApiBaseUrl();
@@ -78,8 +78,10 @@ const pushDebugLog = (log: ApiDebugLog) => {
 };
 
 // ── Silent token refresh ────────────────────────────────────────────
-// Refresh the token if it expires within this many minutes
+// Refresh the token if it expires within this many minutes (capped by token lifetime).
 const REFRESH_THRESHOLD_MINUTES = 30;
+/** Tokens shorter than this are never silently refreshed (1-min JWT test / row 9). */
+const MIN_REFRESHABLE_LIFETIME_MS = 5 * 60 * 1000;
 let refreshPromise: Promise<void> | null = null;
 /** Prevents api-auth-error storms while Login is already shown on native. */
 let nativeAuthExpiredSignaled = false;
@@ -112,7 +114,20 @@ const silentRefresh = async () => {
   if (!exp) return;
 
   const remainingMs = exp * 1000 - Date.now();
-  if (remainingMs > REFRESH_THRESHOLD_MINUTES * 60 * 1000) return; // not close to expiry
+  const lifetimeMs = getTokenLifetimeMs(token);
+  if (lifetimeMs !== null && lifetimeMs < MIN_REFRESHABLE_LIFETIME_MS) {
+    if (remainingMs < 0) {
+      const online = !shouldSkipBlockingFetch() && !isCircuitOpen();
+      if (isMobileNativePlatform() && online && !isSyncFlushing()) {
+        handleSessionExpiredOnline();
+      }
+    }
+    return;
+  }
+  const refreshThresholdMs = lifetimeMs !== null
+    ? Math.min(REFRESH_THRESHOLD_MINUTES * 60 * 1000, lifetimeMs / 2)
+    : REFRESH_THRESHOLD_MINUTES * 60 * 1000;
+  if (remainingMs > refreshThresholdMs) return;
   if (remainingMs < 0) {
     // Online with an expired JWT: session is unusable — redirect to login.
     // Offline within the 30-day grace window keeps the cached session alive.

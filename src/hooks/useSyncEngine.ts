@@ -926,7 +926,7 @@ export function useSyncEngine(): SyncState {
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
     void refreshPending();
-    if (hasNetworkSignal()) void flush();
+    if (hasNetworkSignal() && !shouldSkipBlockingFetch()) void flush();
   }, [flush, refreshPending]);
 
   // ── queueOrSend ───────────────────────────────────────────────────────────
