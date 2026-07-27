@@ -52,6 +52,7 @@ import {
 } from "../services/assetDocumentLinkService";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isAuthTokenExpired } from "../utils/authToken";
+import { isOnlineForAuthSync } from "../services/biometricAuth";
 import { secureGet } from "../services/secureStorage";
 import type { OpenIssueRecord } from "../services/assetWorkflowRunService";
 import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
@@ -143,7 +144,7 @@ function extractServerErrorMessage(error: unknown, fallback: string): string {
 
 async function reconnectAndFlush(): Promise<void> {
   await pendingResetRetrySchedule();
-  if (isMobileNativePlatform() && isAuthTokenExpired()) {
+  if (isMobileNativePlatform() && isAuthTokenExpired() && isOnlineForAuthSync()) {
     window.dispatchEvent(new Event("api-auth-error"));
     return;
   }

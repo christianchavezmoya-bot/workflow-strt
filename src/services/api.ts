@@ -7,7 +7,7 @@ import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { formatPayloadSize } from "../utils/syncDiagnostics";
 import { isCircuitOpen, resetCircuitBreaker } from "../utils/circuitBreaker";
-import { isOfflineGraceValid } from "./biometricAuth";
+import { isOfflineGraceValid, isOnlineForAuthSync } from "./biometricAuth";
 import { markOfflinePerf } from "../utils/offlinePerf";
 import { getTokenExpiry, getTokenLifetimeMs } from "../utils/authToken";
 import { isSyncFlushing } from "../utils/syncFlushLock";
@@ -96,6 +96,7 @@ if (typeof window !== "undefined") {
 function handleSessionExpiredOnline(): void {
   if (isMobileNativePlatform()) {
     if (nativeAuthExpiredSignaled) return;
+    if (!isOnlineForAuthSync() && isOfflineGraceValid()) return;
     nativeAuthExpiredSignaled = true;
     window.dispatchEvent(new Event("api-auth-error"));
     return;
