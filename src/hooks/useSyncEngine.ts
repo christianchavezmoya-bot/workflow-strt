@@ -76,6 +76,7 @@ import {
 import { WorkflowAssignmentRepository } from "../repositories/WorkflowAssignmentRepository";
 import type { WorkflowAssignment } from "../types/workflowType";
 import type { WorkInstruction } from "../types/workInstruction";
+import { setSyncFlushing } from "../utils/syncFlushLock";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -540,45 +541,35 @@ export function useSyncEngine(): SyncState {
     const conn = connectivityRef.current;
     if (_flushing || conn === "offline" || conn === "server-unreachable" || conn === "token-expired") return;
 
-    // Claim the lock BEFORE the first await. flush() is called from four
-    // independent listeners (window "online", Capacitor Network status
-    // change, Capacitor App foreground, visibility change) that can all fire
-    // within the same tick when a phone regains signal. The old code set
-    // _flushing = true only after `await pendingGetDue()` returned, leaving a
-    // window where a second concurrent call could pass the guard above,
-    // read the same due actions, and send the same request twice — e.g. two
-    // RUN_COMPLETE POSTs for the same run, where the first succeeds and the
-    // second gets rejected by the server as a spurious "someone else edited
-    // this" conflict, even though nothing actually conflicted.
     _flushing = true;
+    setSyncFlushing(true);
     markOfflinePerf("queue_flush_start");
 
-    const due = await pendingGetDue();
-    if (due.length === 0) {
-      // Nothing to do — release the lock so a later real flush can proceed.
-      markOfflinePerf("queue_flush_end");
-      _flushing = false;
-      await refreshPending();
-      // Clear stale error badge when the queue is genuinely empty. hasError was
-      // previously only reset inside the "has work" path, so a past failure left
-      // "Sync error · Retry" stuck even after everything drained.
+    let due: PendingAction[] = [];
+    try {
+      due = await pendingGetDue();
+      if (due.length === 0) {
+        markOfflinePerf("queue_flush_end");
+        await refreshPending();
+        setHasError(false);
+        await scheduleRetryRef.current?.();
+        return;
+      }
+
+      setSyncing(true);
+      dispatchSyncEngineSyncing(true);
       setHasError(false);
-      await scheduleRetryRef.current?.();
-      return;
-    }
 
-    setSyncing(true);
-    dispatchSyncEngineSyncing(true);
-    setHasError(false);
+      let anyError = false;
+      let syncedAny = false;
+      let authExpired = false;
+      // Run entityIds whose op was rejected by the server this pass — dependent
+      // ops for the SAME run (e.g. signatures after a rejected RUN_COMPLETE)
+      // must not proceed against a run the server never actually completed.
+      const droppedRunEntityIds = new Set<string>();
 
-    let anyError = false;
-    let syncedAny = false;
-    // Run entityIds whose op was rejected by the server this pass — dependent
-    // ops for the SAME run (e.g. signatures after a rejected RUN_COMPLETE)
-    // must not proceed against a run the server never actually completed.
-    const droppedRunEntityIds = new Set<string>();
-
-    for (const action of due) {
+      for (const action of due) {
+        if (authExpired) break;
       // Skip if the action this depends on hasn't been synced yet
       if (action.dependsOnOpId) {
         const all = await pendingGetAll();
@@ -686,6 +677,12 @@ export function useSyncEngine(): SyncState {
             },
           }));
           anyError = true;
+        } else if (httpStatus === 401) {
+          // Session expired mid-flush — keep queued work for post-login retry.
+          await pendingSetStatus(action.id, "pending");
+          window.dispatchEvent(new Event("api-auth-error"));
+          anyError = true;
+          authExpired = true;
         } else if (httpStatus && httpStatus !== 429 && httpStatus >= 400 && httpStatus < 500) {
           const isWorkflowRunOp = action.entityType === "workflow-run";
           const isRejectableStatus = httpStatus === 422 || httpStatus === 400;
@@ -746,27 +743,29 @@ export function useSyncEngine(): SyncState {
       }
     }
 
-    // Poke the Dashboard + notifications to reconcile after a successful sync
-    // pass — they don't listen to workflow-runs-cache-updated (that's the
-    // Assets page's event), so without this they can stay stale post-sync
-    // until something else happens to trigger a refresh. Fired once per pass,
-    // not per-op, since the Dashboard has no in-flight guard of its own.
-    if (syncedAny) {
-      await refreshOpenIssuesCacheFromServer();
-      window.dispatchEvent(new Event("notifications:refresh"));
-      window.dispatchEvent(new Event("repo:assets:updated"));
+      // pass — they don't listen to workflow-runs-cache-updated (that's the
+      // Assets page's event), so without this they can stay stale post-sync
+      // until something else happens to trigger a refresh. Fired once per pass,
+      // not per-op, since the Dashboard has no in-flight guard of its own.
+      if (syncedAny) {
+        await refreshOpenIssuesCacheFromServer();
+        window.dispatchEvent(new Event("notifications:refresh"));
+        window.dispatchEvent(new Event("repo:assets:updated"));
+      }
+
+      await refreshPending();
+      setHasError(anyError);
+      if (due.length > 0) {
+        setLastSyncAt(new Date());
+      }
+      await scheduleRetryRef.current?.();
+    } finally {
+      setSyncing(false);
+      dispatchSyncEngineSyncing(false);
+      markOfflinePerf("queue_flush_end");
+      _flushing = false;
+      setSyncFlushing(false);
     }
-
-    await refreshPending();
-    setHasError(anyError);
-    setSyncing(false);
-    dispatchSyncEngineSyncing(false);
-    setLastSyncAt(new Date());
-    markOfflinePerf("queue_flush_end");
-    _flushing = false;
-
-    // Schedule next retry if there are still items with future nextRetryAt
-    await scheduleRetryRef.current?.();
   }, [refreshPending, setConnectivityState]);
 
   flushRef.current = flush;

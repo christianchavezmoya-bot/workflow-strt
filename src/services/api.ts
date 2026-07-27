@@ -10,6 +10,7 @@ import { isCircuitOpen, resetCircuitBreaker } from "../utils/circuitBreaker";
 import { isOfflineGraceValid } from "./biometricAuth";
 import { markOfflinePerf } from "../utils/offlinePerf";
 import { getTokenExpiry } from "../utils/authToken";
+import { isSyncFlushing } from "../utils/syncFlushLock";
 
 export const API_BASE_URL: string = getApiBaseUrl();
 
@@ -94,11 +95,13 @@ const silentRefresh = async () => {
     // Online with an expired JWT: session is unusable — redirect to login.
     // Offline within the 30-day grace window keeps the cached session alive.
     const online = !shouldSkipBlockingFetch() && !isCircuitOpen();
-    if (isMobileNativePlatform() && online) {
+    if (isMobileNativePlatform() && online && !isSyncFlushing()) {
       window.dispatchEvent(new Event("api-auth-error"));
       secureRemove("auth_token");
       secureRemove("auth_user");
-      window.location.href = "/login";
+      window.setTimeout(() => {
+        window.location.href = "/login";
+      }, 0);
     }
     return;
   }
@@ -361,7 +364,9 @@ api.interceptors.response.use(
         window.dispatchEvent(new Event("api-auth-error"));
         secureRemove("auth_token");
         secureRemove("auth_user");
-        window.location.href = "/login";
+        window.setTimeout(() => {
+          window.location.href = "/login";
+        }, 0);
       }
     }
     if (status >= 500) {
