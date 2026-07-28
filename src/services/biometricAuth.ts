@@ -13,7 +13,7 @@ import { isManualOfflineModeActive } from "./offlineModeState";
 import { isSessionLoginRequired } from "./sessionLoginRequired";
 
 // How long (ms) a session can be used offline before requiring a full re-login
-export const OFFLINE_GRACE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+export const OFFLINE_GRACE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 /** Call after every successful online login to record the timestamp. */
 export async function recordOnlineLogin(): Promise<void> {
@@ -30,7 +30,7 @@ export function isOfflineGraceValid(): boolean {
 export type BiometricCheckResult =
   | "not-native"       // running in browser — skip gate
   | "no-session"       // no token in keychain — show Login
-  | "grace-expired"    // >30 days offline — force re-login
+  | "grace-expired"    // >24 hours since last online login — force re-login
   | "biometric-needed" // session valid, show Face ID gate
   | "pin-needed"       // biometric unavailable, show PIN gate
   | "session-unlocked"; // Face ID / PIN passed — show app

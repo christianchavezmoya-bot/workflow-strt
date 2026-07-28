@@ -698,7 +698,7 @@ public class AuthController : ControllerBase
         var key = _config["Jwt:Key"] ?? "dev-only-change-me";
         var issuer = _config["Jwt:Issuer"] ?? "commtrac";
         var audience = _config["Jwt:Audience"] ?? "commtrac-ui";
-        var expiresMinutes = int.TryParse(_config["Jwt:ExpiresMinutes"], out var minutes) ? minutes : 720;
+        var expiresMinutes = int.TryParse(_config["Jwt:ExpiresMinutes"], out var minutes) ? minutes : 1440;
 
         var claims = new List<Claim>
         {

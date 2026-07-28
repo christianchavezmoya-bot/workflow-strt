@@ -207,7 +207,7 @@ If home shows red **action required** with **Re-queue**:
 | Offline reopen (2+ min, airplane) | **Face ID**, not Login |
 | Online reopen after JWT expiry (if Windows set short JWT) | **Login** screen |
 
-Skip if Windows kept `ExpiresMinutes: 720`.
+Skip if Windows kept `ExpiresMinutes: 1440`.
 
 ---
 

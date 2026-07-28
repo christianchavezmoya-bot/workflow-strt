@@ -46,7 +46,7 @@ Confirm local overrides (do **not** commit):
 | Setting | Expected |
 |---------|----------|
 | `.env` / `.env.production` → `VITE_API_BASE` | `http://172.20.8.16:4000/api` |
-| `appsettings.Development.json` → `Jwt:ExpiresMinutes` | **720** for this round (16 h field test) unless team asked for 2-min JWT test |
+| `appsettings.Development.json` → `Jwt:ExpiresMinutes` | **1440** (24 h) |
 
 Start servers:
 
@@ -105,13 +105,12 @@ If phone user no longer has a natural conflict:
 
 | Test goal | `ExpiresMinutes` | Notes |
 |-----------|------------------|-------|
-| **Default for PR #37** | **720** (12 h) | Matches 16 h field test; offline grace handles reopen |
-| Short JWT session test | **2** | Online idle → Login; **offline reopen still Face ID** (expected T3) |
-| 16 h offline field test | **960** | User re-login after reconnect if JWT expired |
+| **Default** | **1440** (24 h) | Matches native offline grace |
+| Short JWT session test | **2** | Online idle → Login; offline reopen still Face ID within 24 h grace |
 
-**This PR round:** use **720** unless Mac agent is explicitly running S8 with short JWT.
+**Use `ExpiresMinutes: 1440`** for normal field testing.
 
-After test pass, keep **720** (production-like dev default).
+After test pass, keep **1440** (24 h default).
 
 ---
 

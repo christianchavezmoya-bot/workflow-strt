@@ -93,7 +93,8 @@ Update [`AGENT_RETEST_INDEX.md`](./AGENT_RETEST_INDEX.md) current-round table.
 | Web dev | `http://172.20.8.16:5173` |
 | Native app name | **N-go** (Strata N-go in-app) |
 | Installer test user | `c_chavez_m@hotmail.com` |
-| Production JWT | `ExpiresMinutes: 720` (12 h) |
+| Production JWT | `ExpiresMinutes: 1440` (24 h) |
+| Offline session grace (native) | 24 h since last online login (`OFFLINE_GRACE_MS`) |
 | Short JWT test | `ExpiresMinutes: 2` or `960` (16 h) — **document which round uses which** |
 
 Device IP goes in **untracked** `.env.production.local` on Mac — never commit.

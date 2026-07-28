@@ -131,7 +131,7 @@ const silentRefresh = async () => {
   if (remainingMs > refreshThresholdMs) return;
   if (remainingMs < 0) {
     // Online with an expired JWT: session is unusable — redirect to login.
-    // Offline within the 30-day grace window keeps the cached session alive.
+    // Offline within the 24-hour grace window keeps the cached session alive.
     const online = !shouldSkipBlockingFetch() && !isCircuitOpen();
     if (isMobileNativePlatform() && online && !isSyncFlushing()) {
       handleSessionExpiredOnline();
