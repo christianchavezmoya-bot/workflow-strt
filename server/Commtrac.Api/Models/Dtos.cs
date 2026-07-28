@@ -1575,3 +1575,37 @@ public record AssignInspectionImportRequest(
     string? AssetId,
     string? ProjectAssetId
 );
+
+// ─── Asset report share / email (web desktop bulk reports only) ───────────────
+public record AssetReportShareRecipientRequest(
+    string Email,
+    string? Name
+);
+
+public record AssetReportShareAttachmentRequest(
+    string FileName,
+    string ContentBase64
+);
+
+public record CreateAssetReportShareRequest(
+    string? ProjectId,
+    string? JobLabel,
+    string? Message,
+    List<AssetReportShareRecipientRequest> Recipients,
+    List<AssetReportShareAttachmentRequest> Attachments,
+    bool SendEmail,
+    int ExpiresInHours
+);
+
+public record AssetReportShareEmailResultDto(
+    string Email,
+    bool Success,
+    string? Message
+);
+
+public record CreateAssetReportShareResponse(
+    string ShareId,
+    string ShareUrl,
+    DateTime ExpiresAtUtc,
+    List<AssetReportShareEmailResultDto> EmailResults
+);

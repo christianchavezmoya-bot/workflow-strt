@@ -6878,6 +6878,10 @@ ${words.slice(midpoint).join(" ")}`;
         assets={bulkReportSelectedAssets}
         buildReportContext={buildAssetReportContext}
         zipFileName={bulkReportZipFileName}
+        projectId={selectedProject?.id}
+        jobLabel={selectedProject?.jobNumber}
+        users={users}
+        canShareReports={currentUser.role === "Admin" || currentUser.role === "Project Manager"}
       />
 
       {/* Inspection Import Dialog — per-asset popup */}

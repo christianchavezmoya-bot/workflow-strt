@@ -126,6 +126,15 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
             cancellationToken);
     }
 
+    public Task<AssetReportEmailDeliveryResult> SendAssetReportShareAsync(
+        string toEmail,
+        string? recipientName,
+        string subject,
+        string body,
+        IReadOnlyList<EmailAttachment> attachments,
+        CancellationToken cancellationToken = default)
+        => SendWithAttachmentsResultAsync(toEmail, subject, body, attachments, cancellationToken);
+
     /// <summary>Used by the admin test endpoint to report which transport was selected.</summary>
     internal async Task<EmailSendResult> SendTestEmailWithResultAsync(string toEmail, CancellationToken cancellationToken = default)
     {
@@ -154,24 +163,34 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
         string body,
         CancellationToken cancellationToken)
     {
+        var result = await SendWithAttachmentsResultAsync(toEmail, subject, body, Array.Empty<EmailAttachment>(), cancellationToken);
+        return new EmailSendResult(result.Success, result.Mode, result.Message);
+    }
+
+    private async Task<AssetReportEmailDeliveryResult> SendWithAttachmentsResultAsync(
+        string toEmail,
+        string subject,
+        string body,
+        IReadOnlyList<EmailAttachment> attachments,
+        CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(toEmail))
         {
             _logger.LogWarning("Email skipped — recipient address is empty. Subject: {Subject}", subject);
-            return new EmailSendResult(false, "skipped", "Recipient email is required.");
+            return new AssetReportEmailDeliveryResult(false, "skipped", "Recipient email is required.");
         }
 
         var settings = await _settingsService.GetEmailSettingsAsync();
         var smtpFromAddress = ResolveSmtpFromAddress(settings);
-        var smtpFromName = ResolveSmtpFromName(settings);
         var resendFromHeader = FormatFromHeader(AppBranding.EmailFromName, AppBranding.EmailFromAddress);
 
         var apiKey = ResolveResendApiKey();
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
-            var sent = await TrySendViaResendAsync(apiKey, resendFromHeader, toEmail.Trim(), subject, body, cancellationToken);
+            var sent = await TrySendViaResendAsync(apiKey, resendFromHeader, toEmail.Trim(), subject, body, attachments, cancellationToken);
             if (sent.Success)
             {
-                return sent;
+                return new AssetReportEmailDeliveryResult(true, sent.Mode, sent.Message);
             }
 
             _logger.LogWarning(
@@ -182,10 +201,10 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
 
         if (!string.IsNullOrWhiteSpace(settings.SmtpHost))
         {
-            var sent = await TrySendViaSmtpAsync(settings, smtpFromAddress, toEmail.Trim(), subject, body, cancellationToken);
+            var sent = await TrySendViaSmtpAsync(settings, smtpFromAddress, toEmail.Trim(), subject, body, attachments, cancellationToken);
             if (sent.Success)
             {
-                return sent;
+                return new AssetReportEmailDeliveryResult(true, sent.Mode, sent.Message);
             }
 
             _logger.LogWarning(
@@ -195,13 +214,22 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
         }
 
         _logger.LogInformation(
-            "Email simulated (no Resend key and no SMTP host). To: {To} From: {From} Subject: {Subject} Body: {Body}",
+            "Email simulated (no Resend key and no SMTP host). To: {To} From: {From} Subject: {Subject} Attachments: {Count}",
             toEmail,
             resendFromHeader,
             subject,
-            body);
-        return new EmailSendResult(true, "simulated", "No Resend API key or SMTP host configured — message logged only.");
+            attachments.Count);
+        return new AssetReportEmailDeliveryResult(true, "simulated", "No Resend API key or SMTP host configured — message logged only.");
     }
+
+    private Task<EmailSendResult> TrySendViaResendAsync(
+        string apiKey,
+        string fromHeader,
+        string toEmail,
+        string subject,
+        string body,
+        CancellationToken cancellationToken)
+        => TrySendViaResendAsync(apiKey, fromHeader, toEmail, subject, body, Array.Empty<EmailAttachment>(), cancellationToken);
 
     private async Task<EmailSendResult> TrySendViaResendAsync(
         string apiKey,
@@ -209,6 +237,7 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
         string toEmail,
         string subject,
         string body,
+        IReadOnlyList<EmailAttachment> attachments,
         CancellationToken cancellationToken)
     {
         var payload = new ResendEmailPayload
@@ -218,6 +247,13 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
             Subject = subject,
             Text = body,
             ReplyTo = AppBranding.EmailReplyToAddress,
+            Attachments = attachments.Count == 0
+                ? null
+                : attachments.Select(a => new ResendAttachmentPayload
+                {
+                    Filename = a.FileName,
+                    Content = Convert.ToBase64String(a.Content),
+                }).ToList(),
         };
 
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
@@ -271,12 +307,22 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
         return new EmailSendResult(false, "resend", "Resend delivery failed after retries.");
     }
 
+    private static Task<EmailSendResult> TrySendViaSmtpAsync(
+        EmailSettings settings,
+        string fromAddress,
+        string toEmail,
+        string subject,
+        string body,
+        CancellationToken cancellationToken)
+        => TrySendViaSmtpAsync(settings, fromAddress, toEmail, subject, body, Array.Empty<EmailAttachment>(), cancellationToken);
+
     private static async Task<EmailSendResult> TrySendViaSmtpAsync(
         EmailSettings settings,
         string fromAddress,
         string toEmail,
         string subject,
         string body,
+        IReadOnlyList<EmailAttachment> attachments,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
@@ -294,6 +340,10 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
                 }
 
                 using var mail = new MailMessage(fromAddress, toEmail, subject, body);
+                foreach (var attachment in attachments)
+                {
+                    mail.Attachments.Add(new Attachment(new MemoryStream(attachment.Content), attachment.FileName));
+                }
                 await client.SendMailAsync(mail, cancellationToken);
                 return new EmailSendResult(true, "smtp", "Sent via SMTP.");
             }
@@ -358,6 +408,13 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
         public string Subject { get; set; } = "";
         public string Text { get; set; } = "";
         public string? ReplyTo { get; set; }
+        public List<ResendAttachmentPayload>? Attachments { get; set; }
+    }
+
+    private sealed class ResendAttachmentPayload
+    {
+        public string Filename { get; set; } = "";
+        public string Content { get; set; } = "";
     }
 
     internal sealed record EmailSendResult(bool Success, string Mode, string? Message);

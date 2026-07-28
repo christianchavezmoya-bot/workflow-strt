@@ -31,7 +31,20 @@ public interface IEmailService
         string completedByName,
         string? reportOrSignLink = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Share installation-record PDFs via link and/or attachment (web bulk reports only).</summary>
+    Task<AssetReportEmailDeliveryResult> SendAssetReportShareAsync(
+        string toEmail,
+        string? recipientName,
+        string subject,
+        string body,
+        IReadOnlyList<EmailAttachment> attachments,
+        CancellationToken cancellationToken = default);
 }
+
+public sealed record EmailAttachment(string FileName, byte[] Content);
+
+public sealed record AssetReportEmailDeliveryResult(bool Success, string Mode, string? Message);
 
 /// <summary>Legacy alias — existing controllers depend on this name.</summary>
 public interface IEmailSender : IEmailService
