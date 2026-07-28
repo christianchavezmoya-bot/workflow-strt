@@ -1004,6 +1004,15 @@ export function useSyncEngine(): SyncState {
     const action = all.find((item) => item.id === actionId);
     if (action) {
       await revertLocalEntityForConflict(action);
+      // Accepting server for a run drops every queued op for that run (e.g. stale time entries).
+      if (action.entityType === "workflow-run") {
+        const siblings = all.filter(
+          (item) => item.id !== actionId
+            && item.entityType === "workflow-run"
+            && item.entityId === action.entityId,
+        );
+        await Promise.all(siblings.map((item) => pendingRemove(item.id)));
+      }
     }
     await pendingRemove(actionId);
     await refreshPending();

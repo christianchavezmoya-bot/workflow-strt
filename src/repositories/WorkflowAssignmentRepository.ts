@@ -20,6 +20,30 @@ import { workflowConfigService } from "../services/workflowConfigService";
  * even though the assignment record itself is cached. Fire-and-forget,
  * idempotent (getById/prefetchConfig both skip already-cached work).
  */
+/** One assignment per workflow config — prefer server id over offline `local-*` temp rows. */
+function dedupeAssignmentsByConfig(assignments: WorkflowAssignment[]): WorkflowAssignment[] {
+  const byConfig = new Map<string, WorkflowAssignment>();
+  for (const assignment of assignments) {
+    const key = assignment.workflowConfigId;
+    const existing = byConfig.get(key);
+    if (!existing) {
+      byConfig.set(key, assignment);
+      continue;
+    }
+    const existingIsLocal = existing.id.startsWith("local-");
+    const currentIsLocal = assignment.id.startsWith("local-");
+    if (existingIsLocal && !currentIsLocal) {
+      byConfig.set(key, assignment);
+      continue;
+    }
+    if (!existingIsLocal && currentIsLocal) continue;
+    const existingAt = new Date(existing.assignedAt).getTime();
+    const currentAt = new Date(assignment.assignedAt).getTime();
+    if (currentAt >= existingAt) byConfig.set(key, assignment);
+  }
+  return Array.from(byConfig.values());
+}
+
 function prefetchAssignedConfigs(assignments: WorkflowAssignment[]): void {
   if (!isMobileNativePlatform()) return;
   const configIds = [...new Set(assignments.map((a) => a.workflowConfigId).filter(Boolean))];
@@ -40,16 +64,17 @@ function prefetchAssignedConfigs(assignments: WorkflowAssignment[]): void {
 export const WorkflowAssignmentRepository = {
   async getLocalByAsset(assetId: string): Promise<WorkflowAssignment[]> {
     const local = await entityGetAssignmentsByAsset(assetId);
-    return local as WorkflowAssignment[];
+    return dedupeAssignmentsByConfig(local as WorkflowAssignment[]);
   },
 
   /** Persist a freshly-fetched assignment list for an asset (used by bootstrap + refresh). */
   async replaceByAsset(assetId: string, assignments: WorkflowAssignment[]): Promise<void> {
+    const deduped = dedupeAssignmentsByConfig(assignments);
     await entityReplaceAssignmentsByAsset(
       assetId,
-      assignments.map((a) => ({ id: a.id, assetId: a.assetId, data: a }))
+      deduped.map((a) => ({ id: a.id, assetId: a.assetId, data: a }))
     );
-    prefetchAssignedConfigs(assignments);
+    prefetchAssignedConfigs(deduped);
   },
 
   async listByAsset(assetId: string): Promise<WorkflowAssignment[]> {

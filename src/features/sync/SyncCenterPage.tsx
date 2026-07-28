@@ -73,6 +73,10 @@ interface ConflictDetail {
   serverLabel: string;
   fields: ConflictFieldComparison[];
   fetchError?: string;
+  /** Installer-friendly card — hide JSON noise, one recommended action. */
+  simpleMode?: boolean;
+  installerGuidance?: string;
+  recommendedAction?: "accept-server" | "keep-local" | "retry";
 }
 
 function timeAgo(date: Date): string {
@@ -186,6 +190,35 @@ function formatBomSummary(raw: string | null | undefined): string {
 
 function isBusinessRuleConflict(action: PendingAction): boolean {
   return action.conflictKind === "business_rule" || action.conflictHttpStatus === 422 || action.conflictHttpStatus === 400;
+}
+
+function isRunCompletedOnServerConflict(
+  action: PendingAction,
+  localRun?: AssetWorkflowRun | null,
+  serverRun?: AssetWorkflowRun | null,
+): boolean {
+  if (action.entityType !== "workflow-run") return false;
+  const msg = (action.conflictMessage ?? "").toLowerCase();
+  const serverDone = serverRun?.status === "Complete" || serverRun?.isLocked === true;
+  const lockedMsg = msg.includes("locked") || msg.includes("completed");
+  return serverDone || (isBusinessRuleConflict(action) && lockedMsg);
+}
+
+function installerGuidanceForConflict(
+  action: PendingAction,
+  detail?: ConflictDetail,
+): string | undefined {
+  if (detail?.installerGuidance) return detail.installerGuidance;
+  if (detail?.simpleMode) {
+    return "The server already has the latest version of this job. Update this phone to match — your work on the server is safe.";
+  }
+  if (isBusinessRuleConflict(action)) {
+    const msg = action.conflictMessage ?? "";
+    if (/locked|completed/i.test(msg)) {
+      return "This job was already finished on the server (often from the web app). Your phone had an older copy open. Nothing is lost on the server — tap Update this phone to match the completed job.";
+    }
+  }
+  return undefined;
 }
 
 function conflictSummary(action: PendingAction): string {
@@ -433,6 +466,30 @@ async function buildConflictDetail(action: PendingAction): Promise<ConflictDetai
 
     const localAsset = localRun?.assetId ? await entityGetAsset(localRun.assetId) : null;
     const localAssetData = (localAsset?.data as ProjectAsset | undefined) ?? null;
+    const assetTag = localAssetData?.assetTag;
+    const completedOnServer = isRunCompletedOnServerConflict(action, localRun, serverRun);
+    const signedHint = serverRun?.customerSignedAt || serverRun?.installerSignedAt ? " (including signatures)" : "";
+
+    if (completedOnServer) {
+      return {
+        title: assetTag ? `Job ${assetTag}` : "Workflow job",
+        subtitle: assetTag ? undefined : resolvedRunId.slice(0, 8),
+        simpleMode: true,
+        recommendedAction: "accept-server",
+        installerGuidance:
+          `This job was already finished on the server${signedHint}. Your phone still had it open as "${localRun?.status ?? "In progress"}". `
+          + "Nothing was lost on the server. Tap Update this phone to download the completed job to this device.",
+        localLabel: "Your phone",
+        serverLabel: "Server (finished)",
+        fields: [{
+          label: "Status",
+          localValue: localRun?.status ?? "In progress",
+          serverValue: serverRun?.status ?? "Complete",
+        }],
+        fetchError,
+      };
+    }
+
     return {
       title: localAssetData?.assetTag ? `Run for ${localAssetData.assetTag}` : `Run ${resolvedRunId}`,
       subtitle: localRun?.status ? `${localRun.status} · ${action.method} ${action.url}` : action.url,
@@ -833,14 +890,16 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                 </Typography>
               </Stack>
 
-              <Alert severity="warning" sx={{ fontSize: "0.75rem", py: 0.5 }}>
-                Some queued changes could not sync automatically. Review each item below —
-                concurrency conflicts let you keep or discard your version; server rejections
-                (for example unresolved blocking issues) need to be fixed on the asset or run first.
+              <Alert severity="info" sx={{ fontSize: "0.75rem", py: 0.5 }}>
+                Your phone tried to send changes that the server could not apply. Pick an option below for each item.
+                When a job was already finished on the web, choose <strong>Update this phone</strong> — server data is safe.
               </Alert>
 
               {conflicted.map(action => {
                 const businessRule = isBusinessRuleConflict(action);
+                const detail = conflictDetails[action.id];
+                const guidance = installerGuidanceForConflict(action, detail);
+                const simple = detail?.simpleMode === true;
                 return (
                 <Box
                   key={action.id}
@@ -854,52 +913,64 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                 >
                   <Stack spacing={0.75}>
                     <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap">
-                      <Typography variant="caption" sx={{ fontWeight: 700, textTransform: "uppercase", color: "warning.main", fontSize: "0.65rem" }}>
-                        {actionLabels[action.id]?.title ?? action.entityType}
+                      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: "0.85rem" }}>
+                        {detail?.title ?? actionLabels[action.id]?.title ?? action.entityType}
                       </Typography>
-                      <Chip label={businessRule ? "rejected" : "conflict"} color="warning" size="small" sx={{ height: 16, fontSize: "0.62rem" }} />
-                      <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.65rem" }}>
-                        {actionLabels[action.id]?.subtitle ?? `${action.method} ${action.url}`}
-                      </Typography>
+                      {!simple && (
+                        <Chip label={businessRule ? "needs review" : "conflict"} color="warning" size="small" sx={{ height: 16, fontSize: "0.62rem" }} />
+                      )}
                     </Stack>
 
-                    <Alert severity={businessRule ? "error" : "info"} sx={{ py: 0.25, fontSize: "0.72rem" }}>
-                      {conflictSummary(action)}
-                    </Alert>
+                    {guidance ? (
+                      <Alert severity="info" sx={{ py: 0.5, fontSize: "0.78rem" }}>
+                        {guidance}
+                      </Alert>
+                    ) : (
+                      <Alert severity={businessRule ? "error" : "info"} sx={{ py: 0.25, fontSize: "0.72rem" }}>
+                        {conflictSummary(action)}
+                      </Alert>
+                    )}
 
-                    {loadingConflictIds[action.id] && !conflictDetails[action.id] ? (
+                    {loadingConflictIds[action.id] && !detail ? (
                       <Stack direction="row" alignItems="center" spacing={1} sx={{ py: 1 }}>
                         <CircularProgress size={14} />
                         <Typography variant="caption" sx={{ color: "text.secondary" }}>
                           Loading comparison…
                         </Typography>
                       </Stack>
-                    ) : conflictDetails[action.id] ? (
+                    ) : detail ? (
                       <Stack spacing={1} sx={{ pt: 0.5 }}>
-                        <Box>
-                          <Typography variant="body2" fontWeight={600}>
-                            {conflictDetails[action.id].title}
+                        {!simple && detail.subtitle && (
+                          <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                            {detail.subtitle}
                           </Typography>
-                          {conflictDetails[action.id].subtitle && (
-                            <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                              {conflictDetails[action.id].subtitle}
-                            </Typography>
-                          )}
-                        </Box>
+                        )}
 
-                        {conflictDetails[action.id].fetchError && (
+                        {detail.fetchError && !simple && (
                           <Alert severity="info" sx={{ py: 0.25, fontSize: "0.72rem" }}>
-                            {conflictDetails[action.id].fetchError}
+                            {detail.fetchError}
                           </Alert>
                         )}
 
+                        {simple ? (
+                          <Stack direction="row" spacing={2} sx={{ py: 0.5 }}>
+                            <Box>
+                              <Typography variant="caption" color="text.secondary">Your phone</Typography>
+                              <Typography variant="body2" fontWeight={600}>{detail.fields[0]?.localValue ?? "—"}</Typography>
+                            </Box>
+                            <Box>
+                              <Typography variant="caption" color="text.secondary">Server</Typography>
+                              <Typography variant="body2" fontWeight={600} color="success.main">{detail.fields[0]?.serverValue ?? "Complete"}</Typography>
+                            </Box>
+                          </Stack>
+                        ) : (
                         <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
                           <Box sx={{ flex: 1, border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1, bgcolor: "background.paper" }}>
                             <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>
-                              {conflictDetails[action.id].localLabel}
+                              {detail.localLabel}
                             </Typography>
                             <Stack spacing={0.75} sx={{ mt: 0.75 }}>
-                              {conflictDetails[action.id].fields.map((field) => (
+                              {detail.fields.map((field) => (
                                 <Box key={`${action.id}-local-${field.label}`}>
                                   <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }}>
                                     {field.label}
@@ -912,10 +983,10 @@ export default function SyncCenterPage({ open, onClose }: Props) {
 
                           <Box sx={{ flex: 1, border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1, bgcolor: "background.paper" }}>
                             <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>
-                              {conflictDetails[action.id].serverLabel}
+                              {detail.serverLabel}
                             </Typography>
                             <Stack spacing={0.75} sx={{ mt: 0.75 }}>
-                              {conflictDetails[action.id].fields.map((field) => (
+                              {detail.fields.map((field) => (
                                 <Box key={`${action.id}-server-${field.label}`}>
                                   <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }}>
                                     {field.label}
@@ -926,10 +997,34 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                             </Stack>
                           </Box>
                         </Stack>
+                        )}
                       </Stack>
                     ) : null}
 
                     <Stack direction="row" spacing={1} pt={0.5} flexWrap="wrap">
+                      {simple ? (
+                        <>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="primary"
+                            sx={{ fontSize: "0.78rem", py: 0.5 }}
+                            onClick={() => void resolveConflictDiscard(action.id).then(loadQueue)}
+                          >
+                            Update this phone
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="text"
+                            color="inherit"
+                            sx={{ fontSize: "0.7rem", py: 0.25 }}
+                            onClick={() => void dismissPendingKeepLocal(action.id).then(loadQueue)}
+                          >
+                            Dismiss (keep phone as-is)
+                          </Button>
+                        </>
+                      ) : (
+                        <>
                       <Button
                         size="small"
                         variant="contained"
@@ -966,6 +1061,8 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                       >
                         Dismiss
                       </Button>
+                        </>
+                      )}
                     </Stack>
                   </Stack>
                 </Box>
