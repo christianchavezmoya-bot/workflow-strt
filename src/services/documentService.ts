@@ -62,10 +62,10 @@ export function isBackendDocumentUrl(downloadUrl: string): boolean {
   return /\/api\/documents\/[^/]+\/download(?:\?|$)/.test(downloadUrl);
 }
 
-/** Rewrite absolute download URLs to the current API path so web preview works across hosts. */
+/** Rewrite stored download URLs to a path relative to axios baseURL (`…/api`). */
 export function normalizeDocumentDownloadUrl(downloadUrl: string): string {
-  const match = downloadUrl.match(/\/api\/documents\/[^/?#]+\/download(?:\?[^\s#]*)?/i);
-  if (match) return match[0];
+  const match = downloadUrl.match(/\/documents\/([^/?#]+)\/download(?:\?[^\s#]*)?/i);
+  if (match) return `/documents/${match[1]}/download`;
   return downloadUrl;
 }
 
