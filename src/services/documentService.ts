@@ -246,8 +246,24 @@ export async function copyDocumentFileCache(fromDownloadUrl: string, toDownloadU
   } satisfies CachedDocumentFile);
 }
 
+async function fetchDocumentBinaryBuffer(downloadUrl: string): Promise<ArrayBuffer> {
+  const response = await api.get<Blob>(normalizeDocumentDownloadUrl(downloadUrl), {
+    responseType: "blob",
+    // Field manuals / large docx can exceed the default 10s axios ceiling.
+    timeout: 0,
+  });
+  const blob = response.data instanceof Blob
+    ? response.data
+    : new Blob([response.data as BlobPart]);
+  const buffer = await blob.arrayBuffer();
+  return buffer.slice(0);
+}
+
 async function fetchAndCacheDocumentBlob(downloadUrl: string, record?: Pick<DocumentRecord, "contentType" | "fileSize">): Promise<Blob> {
-  const response = await api.get<Blob>(normalizeDocumentDownloadUrl(downloadUrl), { responseType: "blob" });
+  const response = await api.get<Blob>(normalizeDocumentDownloadUrl(downloadUrl), {
+    responseType: "blob",
+    timeout: 0,
+  });
   const blob = response.data instanceof Blob
     ? response.data
     : new Blob([response.data], { type: record?.contentType ?? "application/octet-stream" });
@@ -531,7 +547,10 @@ export const documentService = {
   /** Fetch a document file with the auth token and return a Blob object URL. */
   async openDocument(downloadUrl: string): Promise<string> {
     if (!isMobileNativePlatform() || !isBackendDocumentUrl(downloadUrl)) {
-      const response = await api.get<Blob>(normalizeDocumentDownloadUrl(downloadUrl), { responseType: "blob" });
+      const response = await api.get<Blob>(normalizeDocumentDownloadUrl(downloadUrl), {
+        responseType: "blob",
+        timeout: 0,
+      });
       return URL.createObjectURL(response.data);
     }
 
@@ -542,12 +561,11 @@ export const documentService = {
   /** Fetch a document file with the auth token and return the raw ArrayBuffer (for client-side parsing). */
   async openDocumentAsBuffer(downloadUrl: string): Promise<ArrayBuffer> {
     if (!isMobileNativePlatform() || !isBackendDocumentUrl(downloadUrl)) {
-      const response = await api.get<ArrayBuffer>(normalizeDocumentDownloadUrl(downloadUrl), { responseType: "arraybuffer" });
-      return response.data;
+      return fetchDocumentBinaryBuffer(downloadUrl);
     }
 
     const blob = await loadDocumentBlob(downloadUrl);
-    return await blob.arrayBuffer();
+    return (await blob.arrayBuffer()).slice(0);
   },
 
   /** Download a document while preserving auth for backend-hosted files. */
@@ -559,7 +577,7 @@ export const documentService = {
 
     const blob = isMobileNativePlatform()
       ? await loadDocumentBlob(downloadUrl)
-      : (await api.get<Blob>(normalizeDocumentDownloadUrl(downloadUrl), { responseType: "blob" })).data;
+      : (await api.get<Blob>(normalizeDocumentDownloadUrl(downloadUrl), { responseType: "blob", timeout: 0 })).data;
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
