@@ -3,6 +3,7 @@ import {
   documentFileCacheKey,
   documentSyncFingerprint,
   extractDocumentIdFromDownloadUrl,
+  isBackendDocumentUrl,
   listDocumentsNeedingPrefetch,
   normalizeDocumentDownloadUrl,
   sortDocumentsForLibraryPrefetch,
@@ -42,6 +43,12 @@ describe("documentFileCacheKey", () => {
     );
     expect(documentFileCacheKey("/api/documents/abc-123/download")).toBe("document-file:id:abc-123");
     expect(documentFileCacheKey("/documents/abc-123/download")).toBe("document-file:id:abc-123");
+  });
+
+  it("recognizes backend document URLs with or without /api prefix", () => {
+    expect(isBackendDocumentUrl("http://172.20.8.16:4000/api/documents/abc/download")).toBe(true);
+    expect(isBackendDocumentUrl("/documents/abc/download")).toBe(true);
+    expect(isBackendDocumentUrl("https://cdn.example.com/file.pdf")).toBe(false);
   });
 
   it("extracts document id from download URLs", () => {

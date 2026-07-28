@@ -2,7 +2,7 @@ import api from "./api";
 import { cacheGet, cachePut } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
 import { webCachedGet, invalidateWebCache } from "./webFreshCache";
-import { getServerReachable, shouldSkipBlockingFetch } from "./connectivityMonitor";
+import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import offlineStore from "./offlineStore";
 import { mediaStore, MEDIA_STORE_LIMITS } from "./mediaStore";
 
@@ -59,7 +59,7 @@ export function hydrateCustomValues(doc: DocumentRecord): DocumentRecord {
 }
 
 export function isBackendDocumentUrl(downloadUrl: string): boolean {
-  return /\/api\/documents\/[^/]+\/download(?:\?|$)/.test(downloadUrl);
+  return /\/documents\/[^/?#]+\/download(?:\?|$)/i.test(downloadUrl);
 }
 
 /** Rewrite stored download URLs to a path relative to axios baseURL (`…/api`). */
@@ -143,7 +143,9 @@ export async function isDocumentFileCached(downloadUrl: string): Promise<boolean
 }
 
 function shouldSkipNativeDocumentFetch(): boolean {
-  return shouldSkipBlockingFetch() || getServerReachable() === false;
+  // Document preview/download is a read — fail open when the radio is up even if
+  // the /health ping is stale (same policy as api.ts GET reads).
+  return shouldSkipBlockingFetch();
 }
 
 export function documentSyncFingerprint(

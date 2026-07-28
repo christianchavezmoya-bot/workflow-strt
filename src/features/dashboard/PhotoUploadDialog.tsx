@@ -503,12 +503,15 @@ export default function PhotoUploadDialog({
       if (appendedCount === 0) continue;
 
       const files = stagedFiles[key] ?? [];
-      if (files.length !== appendedCount) {
-        return { appendOnly: false, uploads: [] };
+      if (files.length > 0 && files.length === appendedCount) {
+        for (const file of files) {
+          uploads.push({ stepId: step.stepId, inputId: step.inputId, file });
+        }
+        continue;
       }
 
-      for (const file of files) {
-        uploads.push({ stepId: step.stepId, inputId: step.inputId, file });
+      if (appendedCount > 0 && files.length !== appendedCount) {
+        return { appendOnly: false, uploads: [] };
       }
     }
 
@@ -632,6 +635,13 @@ export default function PhotoUploadDialog({
   const progress = totalExpected > 0 ? Math.round((liveCaptured / totalExpected) * 100) : 0;
   const pendingStepResultsJson = buildPatchedStepResultsJson();
   const uploadPlan = analyzeCaptureChanges();
+  const hasPendingChanges = Object.entries(editedCaptures).some(([key, captures]) => {
+    const parsedKey = parseCaptureKey(key);
+    if (!parsedKey) return false;
+    const existing = getExistingCaptures(parsedKey.stepId, parsedKey.inputId);
+    if (captures.length !== existing.length) return true;
+    return captures.some((value, index) => value !== existing[index]);
+  });
   const pendingPayloadEstimate = measurePayload({
     stepResultsJson: pendingStepResultsJson,
     amendedByName: currentUserName ?? null,
@@ -642,7 +652,7 @@ export default function PhotoUploadDialog({
     pendingPayloadEstimate.payloadBytes > API_LARGE_PAYLOAD_WARNING_BYTES;
   const frontendBaseUrl = (publicFrontendBaseUrl || getFallbackPublicFrontendBaseUrl()).replace(/\/+$/, "");
   const qrUrl = phoneQrToken ? `${frontendBaseUrl}/mobile-upload?token=${phoneQrToken}` : "";
-  const installerSteps = isWebBrowser ? allPhotoSteps : effectiveMissingSteps;
+  const installerSteps = allPhotoSteps;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -858,10 +868,12 @@ export default function PhotoUploadDialog({
                           type="file"
                           accept={acceptForInputType("photo")}
                           multiple
-                          capture="environment"
                           style={{ display: "none" }}
                           ref={(el) => { photoInputRefs.current[key] = el; }}
-                          onChange={(e) => handleFilesSelected(stepId, inputId, e.target.files)}
+                          onChange={(e) => {
+                            void handleFilesSelected(stepId, inputId, e.target.files);
+                            e.target.value = "";
+                          }}
                         />
                         {isWebBrowser && (
                           <input
@@ -899,7 +911,7 @@ export default function PhotoUploadDialog({
                       </Stack>
                     </Stack>
 
-                    {currentCount > 0 && isWebBrowser && (
+                    {currentCount > 0 && (
                       <Stack spacing={1} mt={1.25}>
                         {getCurrentCaptures(stepId, inputId).map((capture, captureIndex) => {
                           const looksLikeVideo = capture.startsWith("data:video/");
@@ -974,7 +986,7 @@ export default function PhotoUploadDialog({
           <Button
             variant="contained"
             onClick={handleSave}
-            disabled={saving || loading}
+            disabled={saving || loading || !hasPendingChanges}
             startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
           >
             {saving ? "Saving..." : "Save Photos"}

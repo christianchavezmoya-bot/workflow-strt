@@ -89,17 +89,19 @@ function previewLoadErrorMessage(err: unknown): string {
   return "Could not load this file for preview.";
 }
 
-function buildDocxPreviewHtml(bodyHtml: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>
-    html, body { margin: 0; padding: 0; background: #eef1f4; }
-    body {
-      font-family: Calibri, Arial, sans-serif;
-      font-size: 11pt;
-      line-height: 1.45;
-      color: #111;
+function buildDocxPreviewHtml(bodyHtml: string, options?: { native?: boolean }): string {
+  const pageCss = options?.native
+    ? `.doc-page {
+      width: 100%;
+      max-width: 100%;
+      min-height: auto;
+      margin: 0;
+      padding: 20px 16px 28px;
+      background: #fff;
       box-sizing: border-box;
-    }
-    .doc-page {
+      overflow-wrap: anywhere;
+    }`
+    : `.doc-page {
       width: ${DOCX_PAGE_WIDTH_PX}px;
       min-height: ${DOCX_PAGE_HEIGHT_PX}px;
       margin: 0 auto 18px;
@@ -108,8 +110,19 @@ function buildDocxPreviewHtml(bodyHtml: string): string {
       box-sizing: border-box;
       box-shadow: 0 8px 28px rgba(0,0,0,0.12);
       overflow-wrap: anywhere;
+    }`;
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><style>
+    html, body { margin: 0; padding: 0; background: ${options?.native ? "#fff" : "#eef1f4"}; }
+    body {
+      font-family: Calibri, Arial, sans-serif;
+      font-size: ${options?.native ? "10pt" : "11pt"};
+      line-height: 1.45;
+      color: #111;
+      box-sizing: border-box;
     }
-    table { border-collapse: collapse; width: 100%; }
+    ${pageCss}
+    table { border-collapse: collapse; width: 100%; max-width: 100%; }
     td, th { border: 1px solid #ccc; padding: 6px 10px; word-break: break-word; }
     img { max-width: 100%; height: auto; display: block; }
     p, li, h1, h2, h3, h4 { margin-top: 0.35em; margin-bottom: 0.35em; }
@@ -260,53 +273,47 @@ function NativeHtmlDocumentPreview({
   title?: string;
   fitMode: "docx-page" | "spreadsheet";
 }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const [layout, setLayout] = useState({
-    width: fitMode === "docx-page" ? DOCX_PAGE_WIDTH_PX : 480,
-    height: fitMode === "docx-page" ? DOCX_PAGE_HEIGHT_PX : 320,
-  });
+  const [iframeHeight, setIframeHeight] = useState(fitMode === "docx-page" ? DOCX_PAGE_HEIGHT_PX : 320);
 
   useEffect(() => {
     const iframe = iframeRef.current;
+    const container = containerRef.current;
     if (!iframe) return;
 
     const measureContent = () => {
       const doc = iframe.contentDocument;
       if (!doc?.body) return;
 
-      const contentWidth = Math.max(
-        fitMode === "docx-page" ? DOCX_PAGE_WIDTH_PX : 0,
-        doc.documentElement.scrollWidth,
-        doc.body.scrollWidth,
-      );
       const contentHeight = Math.max(
-        fitMode === "docx-page" ? DOCX_PAGE_HEIGHT_PX : 320,
+        fitMode === "docx-page" ? 240 : 320,
         doc.documentElement.scrollHeight,
         doc.body.scrollHeight,
       );
-
-      setLayout({
-        width: Math.ceil(contentWidth * zoom),
-        height: Math.ceil(contentHeight * zoom),
-      });
+      setIframeHeight(Math.ceil(contentHeight * zoom));
     };
 
     const onLoad = () => window.setTimeout(measureContent, 0);
     iframe.addEventListener("load", onLoad);
+
+    const resizeObserver = container ? new ResizeObserver(() => measureContent()) : null;
+    if (container) resizeObserver?.observe(container);
     measureContent();
 
-    return () => iframe.removeEventListener("load", onLoad);
+    return () => {
+      iframe.removeEventListener("load", onLoad);
+      resizeObserver?.disconnect();
+    };
   }, [fitMode, html, zoom]);
 
   return (
     <Box
+      ref={containerRef}
       sx={{
         flex: 1,
         overflow: "auto",
         WebkitOverflowScrolling: "touch",
-        display: "flex",
-        justifyContent: fitMode === "docx-page" ? "center" : "flex-start",
-        alignItems: "flex-start",
         p: { xs: 1.25, sm: 2 },
         bgcolor: "rgba(15,23,42,0.35)",
       }}
@@ -318,15 +325,13 @@ function NativeHtmlDocumentPreview({
         title={title ?? "Preview"}
         sandbox="allow-same-origin"
         sx={{
-          width: layout.width,
-          height: layout.height,
-          minWidth: fitMode === "spreadsheet" ? "100%" : undefined,
+          width: "100%",
+          height: iframeHeight,
           border: "none",
           borderRadius: 3,
           bgcolor: "#fff",
           boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
           display: "block",
-          flexShrink: 0,
         }}
       />
     </Box>
@@ -447,6 +452,7 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pageCount, setPageCount] = useState(0);
+  const [nativePdfIframeUrl, setNativePdfIframeUrl] = useState<string | null>(null);
 
   const fileType = useMemo(
     () => getFileType(doc?.contentType, doc?.name),
@@ -478,6 +484,10 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
       });
       setZoom(1);
       setPageCount(0);
+      setNativePdfIframeUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
       return;
     }
 
@@ -493,6 +503,10 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
     });
     setHtmlPreview(null);
     setPdfData(null);
+    setNativePdfIframeUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return null;
+    });
 
     async function loadPreview() {
       try {
@@ -507,11 +521,21 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
             return;
           }
 
-          const buffer = await documentService.openDocumentAsBuffer(activeDownloadUrl!);
-          if (cancelled) return;
-          if (buffer.byteLength === 0) throw new Error("This PDF file is empty.");
-          setPdfData(buffer.slice(0));
-          return;
+          try {
+            const buffer = await documentService.openDocumentAsBuffer(activeDownloadUrl!);
+            if (cancelled) return;
+            if (buffer.byteLength === 0) throw new Error("This PDF file is empty.");
+            setPdfData(buffer.slice(0));
+            return;
+          } catch {
+            const url = await documentService.openDocument(activeDownloadUrl!);
+            if (cancelled) {
+              URL.revokeObjectURL(url);
+              return;
+            }
+            setNativePdfIframeUrl(url);
+            return;
+          }
         }
 
         if (previewMode === "html") {
@@ -521,7 +545,7 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
           if (fileType === "docx") {
             const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
             if (cancelled) return;
-            setHtmlPreview(buildDocxPreviewHtml(result.value));
+            setHtmlPreview(buildDocxPreviewHtml(result.value, { native: isMobileNativePlatform() }));
             return;
           }
 
@@ -719,7 +743,18 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
           </Box>
         )}
 
-        {!loading && !error && previewMode === "pdf" && isMobileNativePlatform() && pdfData && (
+        {!loading && !error && previewMode === "pdf" && isMobileNativePlatform() && nativePdfIframeUrl && (
+          <Box sx={{ flex: 1, overflow: "hidden", bgcolor: "#525659" }}>
+            <Box
+              component="iframe"
+              src={`${nativePdfIframeUrl}#view=FitH`}
+              title={doc?.name ?? "PDF preview"}
+              sx={{ width: "100%", height: "100%", border: "none", bgcolor: "#525659" }}
+            />
+          </Box>
+        )}
+
+        {!loading && !error && previewMode === "pdf" && isMobileNativePlatform() && pdfData && !nativePdfIframeUrl && (
           <>
             <Stack
               direction="row"
@@ -746,7 +781,18 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
               data={pdfData}
               zoom={zoom}
               onPageCount={setPageCount}
-              onError={setError}
+              onError={(message) => {
+                void (async () => {
+                  try {
+                    const url = await documentService.openDocument(doc!.downloadUrl!);
+                    setNativePdfIframeUrl(url);
+                    setPdfData(null);
+                    setError(null);
+                  } catch {
+                    setError(message);
+                  }
+                })();
+              }}
             />
           </>
         )}
