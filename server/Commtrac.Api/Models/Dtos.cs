@@ -1606,6 +1606,20 @@ public record AssetReportShareEmailResultDto(
 public record CreateAssetReportShareResponse(
     string ShareId,
     string ShareUrl,
+    string DownloadUrl,
     DateTime ExpiresAtUtc,
     List<AssetReportShareEmailResultDto> EmailResults
+);
+
+public record AssetReportShareFileDto(
+    string FileName,
+    string Label
+);
+
+public record AssetReportShareManifestDto(
+    string ShareId,
+    string? JobLabel,
+    DateTime ExpiresAtUtc,
+    List<AssetReportShareFileDto> Files,
+    string DownloadUrl
 );

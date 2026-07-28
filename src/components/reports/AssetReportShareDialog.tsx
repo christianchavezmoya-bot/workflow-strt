@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ContentCopyOutlined,
   EmailOutlined,
@@ -27,11 +27,15 @@ import {
   assetReportShareService,
   type AssetReportShareRecipient,
 } from "../../services/assetReportShareService";
+import type { ProjectAsset } from "../../types/projectAsset";
 import type { ProjectContact } from "../../types/projectContact";
 import type { User } from "../../types/user";
 import { blobToBase64 } from "../../utils/blobBase64";
-import type { WorkflowReportDownloadItem } from "../../utils/bulkWorkflowReportDownload";
-import { workflowReportPdfFileName } from "../../utils/bulkWorkflowReportDownload";
+import {
+  buildWorkflowReportPdfBlob,
+  workflowReportPdfFileName,
+} from "../../utils/bulkWorkflowReportDownload";
+import type { WorkflowReportExportContext } from "../../utils/workflowReportExport";
 
 type RecipientTab = "users" | "contacts" | "custom";
 
@@ -41,7 +45,8 @@ export type AssetReportShareDialogProps = {
   projectId?: string;
   jobLabel?: string;
   users: User[];
-  reports: WorkflowReportDownloadItem[];
+  reportContexts: WorkflowReportExportContext[];
+  buildReportContext: (asset: ProjectAsset) => Promise<WorkflowReportExportContext>;
 };
 
 function defaultShareMessage(jobLabel?: string, count = 1): string {
@@ -58,7 +63,8 @@ export function AssetReportShareDialog({
   projectId,
   jobLabel,
   users,
-  reports,
+  reportContexts,
+  buildReportContext,
 }: AssetReportShareDialogProps) {
   const [tab, setTab] = useState<RecipientTab>("contacts");
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
@@ -72,7 +78,10 @@ export function AssetReportShareDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const buildReportContextRef = useRef(buildReportContext);
+  buildReportContextRef.current = buildReportContext;
 
   const activeUsers = useMemo(
     () => users.filter((user) => user.isActive && user.email.trim()),
@@ -108,11 +117,12 @@ export function AssetReportShareDialog({
     setCustomEmail("");
     setCustomName("");
     setCustomRecipients([]);
-    setMessage(defaultShareMessage(jobLabel, reports.length));
+    setMessage(defaultShareMessage(jobLabel, reportContexts.length));
     setSendEmail(true);
     setBusy(false);
     setError(null);
     setShareUrl(null);
+    setDownloadUrl(null);
     setStatusMessage(null);
 
     if (!projectId) {
@@ -129,7 +139,7 @@ export function AssetReportShareDialog({
         setSelectedContacts(primary ? [primary] : []);
       })
       .catch(() => setContacts([]));
-  }, [open, projectId, jobLabel, reports.length]);
+  }, [open, projectId, jobLabel, reportContexts.length]);
 
   function addCustomRecipient() {
     const email = customEmail.trim();
@@ -144,15 +154,19 @@ export function AssetReportShareDialog({
 
   async function buildAttachments() {
     return Promise.all(
-      reports.map(async (item) => ({
-        fileName: workflowReportPdfFileName(item.context),
-        contentBase64: await blobToBase64(item.blob),
-      })),
+      reportContexts.map(async (initialContext) => {
+        const context = await buildReportContextRef.current(initialContext.asset);
+        const blob = await buildWorkflowReportPdfBlob(context);
+        return {
+          fileName: workflowReportPdfFileName(context),
+          contentBase64: await blobToBase64(blob),
+        };
+      }),
     );
   }
 
   async function handleCreateShare(options: { sendEmail: boolean }) {
-    if (reports.length === 0) {
+    if (reportContexts.length === 0) {
       setError("No reports are ready to share.");
       return null;
     }
@@ -165,7 +179,9 @@ export function AssetReportShareDialog({
     setError(null);
     setStatusMessage(null);
     try {
+      setStatusMessage("Regenerating reports with latest signatures…");
       const attachments = await buildAttachments();
+      setStatusMessage(null);
       const response = await assetReportShareService.createShare({
         projectId,
         jobLabel,
@@ -176,6 +192,7 @@ export function AssetReportShareDialog({
         expiresInHours: 168,
       });
       setShareUrl(response.shareUrl);
+      setDownloadUrl(response.downloadUrl);
 
       if (options.sendEmail) {
         const sent = response.emailResults.filter((item) => item.success).length;
@@ -213,8 +230,8 @@ export function AssetReportShareDialog({
       <DialogContent dividers>
         <Stack spacing={2}>
           <Alert severity="info">
-            {reports.length} report{reports.length !== 1 ? "s" : ""} will be shared
-            {jobLabel ? ` for job ${jobLabel}` : ""}. Recipients receive a secure download link; single small PDFs may be attached directly.
+            {reportContexts.length} report{reportContexts.length !== 1 ? "s" : ""} will be regenerated and shared
+            {jobLabel ? ` for job ${jobLabel}` : ""}. Recipients get a preview link in the browser plus a ZIP download; single small PDFs may also be attached to the email.
           </Alert>
 
           <Tabs value={tab} onChange={(_, value: RecipientTab) => setTab(value)} variant="fullWidth">
@@ -307,11 +324,20 @@ export function AssetReportShareDialog({
 
           {shareUrl && (
             <TextField
-              label="Share link"
+              label="Preview link"
               value={shareUrl}
               fullWidth
               InputProps={{ readOnly: true }}
-              helperText="Anyone with this link can download the report ZIP until it expires."
+              helperText="Opens an in-browser PDF preview with explorer navigation. ZIP download is also available on that page."
+            />
+          )}
+
+          {downloadUrl && (
+            <TextField
+              label="ZIP download link"
+              value={downloadUrl}
+              fullWidth
+              InputProps={{ readOnly: true }}
             />
           )}
 
@@ -324,15 +350,15 @@ export function AssetReportShareDialog({
         <Button
           variant="outlined"
           startIcon={busy ? <CircularProgress size={14} /> : <ContentCopyOutlined fontSize="small" />}
-          disabled={busy || reports.length === 0}
+          disabled={busy || reportContexts.length === 0}
           onClick={() => void handleCopyLink()}
         >
-          Copy share link
+          Copy preview link
         </Button>
         <Button
           variant="contained"
           startIcon={busy ? <CircularProgress size={14} /> : <EmailOutlined fontSize="small" />}
-          disabled={busy || reports.length === 0 || (sendEmail && recipients.length === 0)}
+          disabled={busy || reportContexts.length === 0 || (sendEmail && recipients.length === 0)}
           onClick={() => void handleCreateShare({ sendEmail })}
         >
           {sendEmail ? "Send email" : "Create link"}

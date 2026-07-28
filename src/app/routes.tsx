@@ -21,6 +21,7 @@ const Settings = lazy(() => import("../features/settings/Settings"));
 const Login = lazy(() => import("../features/auth/Login"));
 const ResetPassword = lazy(() => import("../features/auth/ResetPassword"));
 const ExternalSignPage = lazy(() => import("../features/sign/ExternalSignPage"));
+const AssetReportShareViewPage = lazy(() => import("../features/reports/AssetReportShareViewPage"));
 const IssuesBoard = lazy(() => import("../features/issues/IssuesBoard"));
 const MobileUploadPage = lazy(() => import("../features/mobile-upload/MobileUploadPage"));
 
@@ -75,6 +76,7 @@ const AppRoutes = () => {
       <Route path="/login" element={<LazyRoute><Login /></LazyRoute>} />
       <Route path="/reset-password" element={<LazyRoute><ResetPassword /></LazyRoute>} />
       <Route path="/sign/:tokenId" element={<LazyRoute><ExternalSignPage /></LazyRoute>} />
+      <Route path="/share/reports/:shareId" element={<LazyRoute><AssetReportShareViewPage /></LazyRoute>} />
 
       <Route element={<AppShell />}>
         <Route index element={<LazyRoute><Dashboard /></LazyRoute>} />

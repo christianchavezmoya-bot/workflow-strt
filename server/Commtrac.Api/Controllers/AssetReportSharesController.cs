@@ -1,4 +1,7 @@
 using System.IO.Compression;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Claims;
 using System.Text.Json;
 using Commtrac.Api.Models;
@@ -19,15 +22,18 @@ public class AssetReportSharesController : ControllerBase
 
     private readonly IWebHostEnvironment _env;
     private readonly IEmailSender _email;
+    private readonly NotificationSettingsService _notificationSettings;
     private readonly ILogger<AssetReportSharesController> _logger;
 
     public AssetReportSharesController(
         IWebHostEnvironment env,
         IEmailSender email,
+        NotificationSettingsService notificationSettings,
         ILogger<AssetReportSharesController> logger)
     {
         _env = env;
         _email = email;
+        _notificationSettings = notificationSettings;
         _logger = logger;
     }
 
@@ -107,7 +113,8 @@ public class AssetReportSharesController : ControllerBase
             Path.Combine(shareDir, "manifest.json"),
             JsonSerializer.Serialize(manifest, JsonOptions));
 
-        var shareUrl = BuildShareUrl(shareId);
+        var viewerUrl = await BuildViewerUrlAsync(shareId);
+        var downloadUrl = BuildDownloadUrl(shareId);
         var emailResults = new List<AssetReportShareEmailResultDto>();
 
         if (request.SendEmail)
@@ -124,7 +131,8 @@ public class AssetReportSharesController : ControllerBase
                 var body = BuildEmailBody(
                     greeting,
                     request.Message,
-                    shareUrl,
+                    viewerUrl,
+                    downloadUrl,
                     expiresAtUtc,
                     decodedFiles.Count,
                     attachDirectly);
@@ -154,9 +162,54 @@ public class AssetReportSharesController : ControllerBase
 
         return Ok(new CreateAssetReportShareResponse(
             shareId,
-            shareUrl,
+            viewerUrl,
+            downloadUrl,
             expiresAtUtc,
             emailResults));
+    }
+
+    [HttpGet("{shareId}")]
+    [AllowAnonymous]
+    public async Task<ActionResult<AssetReportShareManifestDto>> GetManifest(string shareId)
+    {
+        var manifest = await TryReadManifestAsync(shareId);
+        if (manifest is null) return NotFound(new { message = "Share link not found or expired." });
+        if (manifest.ExpiresAtUtc <= DateTime.UtcNow)
+        {
+            TryDeleteShareDirectory(shareId);
+            return NotFound(new { message = "Share link has expired." });
+        }
+
+        return Ok(new AssetReportShareManifestDto(
+            manifest.ShareId,
+            manifest.JobLabel,
+            manifest.ExpiresAtUtc,
+            manifest.FileNames.Select(f => new AssetReportShareFileDto(f, FileLabelFromName(f))).ToList(),
+            BuildDownloadUrl(shareId)));
+    }
+
+    [HttpGet("{shareId}/files/{fileName}")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetFile(string shareId, string fileName)
+    {
+        var manifest = await TryReadManifestAsync(shareId);
+        if (manifest is null) return NotFound(new { message = "Share link not found or expired." });
+        if (manifest.ExpiresAtUtc <= DateTime.UtcNow)
+        {
+            TryDeleteShareDirectory(shareId);
+            return NotFound(new { message = "Share link has expired." });
+        }
+
+        var safeName = SanitizeFileName(fileName);
+        if (!manifest.FileNames.Any(f => string.Equals(f, safeName, StringComparison.OrdinalIgnoreCase)))
+            return NotFound(new { message = "Report file not found in this share." });
+
+        var fullPath = Path.Combine(GetShareDirectory(shareId), safeName);
+        if (!System.IO.File.Exists(fullPath)) return NotFound(new { message = "Report file not found." });
+
+        var bytes = await System.IO.File.ReadAllBytesAsync(fullPath);
+        Response.Headers.ContentDisposition = $"inline; filename=\"{safeName}\"";
+        return File(bytes, "application/pdf");
     }
 
     [HttpGet("{shareId}/download")]
@@ -191,10 +244,40 @@ public class AssetReportSharesController : ControllerBase
         return File(zipStream.ToArray(), "application/zip", zipFileName);
     }
 
-    private string BuildShareUrl(string shareId)
+    private async Task<string> BuildViewerUrlAsync(string shareId)
+    {
+        var frontendBase = await ResolveFrontendBaseUrlAsync();
+        return $"{frontendBase}/share/reports/{shareId}";
+    }
+
+    private string BuildDownloadUrl(string shareId)
     {
         var apiBase = $"{Request.Scheme}://{Request.Host}".TrimEnd('/');
         return $"{apiBase}/api/asset-report-shares/{shareId}/download";
+    }
+
+    private async Task<string> ResolveFrontendBaseUrlAsync()
+    {
+        var baseUrl = (await _notificationSettings.GetFrontendBaseUrlAsync()).TrimEnd('/');
+        var requestHostBaseUrl = GetRequestHostFrontendBaseUrl(Request.Scheme);
+        var detectedLanBaseUrl = DetectLanFrontendBaseUrl(Request.Scheme);
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            baseUrl = !string.IsNullOrWhiteSpace(requestHostBaseUrl)
+                ? requestHostBaseUrl
+                : detectedLanBaseUrl;
+        }
+        else if (ShouldPreferRequestHostBaseUrl(baseUrl, requestHostBaseUrl))
+        {
+            baseUrl = requestHostBaseUrl;
+        }
+
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            baseUrl = "http://localhost:5173";
+        }
+
+        return baseUrl.TrimEnd('/');
     }
 
     private async Task<AssetReportShareManifest?> TryReadManifestAsync(string shareId)
@@ -244,6 +327,20 @@ public class AssetReportSharesController : ControllerBase
         return trimmed;
     }
 
+    private static string FileLabelFromName(string fileName)
+    {
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        const string prefix = "installation-record_";
+        if (stem.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = stem[prefix.Length..];
+            var runIdx = rest.LastIndexOf("_run", StringComparison.OrdinalIgnoreCase);
+            if (runIdx > 0) return rest[..runIdx];
+            return rest;
+        }
+        return stem;
+    }
+
     private static string BuildZipFileName(string? jobLabel, string shareId)
     {
         var safeJob = string.IsNullOrWhiteSpace(jobLabel)
@@ -261,28 +358,106 @@ public class AssetReportSharesController : ControllerBase
     private static string BuildEmailBody(
         string greeting,
         string? message,
-        string shareUrl,
+        string viewerUrl,
+        string downloadUrl,
         DateTime expiresAtUtc,
         int count,
         bool attachedDirectly)
     {
         var custom = string.IsNullOrWhiteSpace(message) ? "" : $"\n{message.Trim()}\n";
-        var deliveryLine = attachedDirectly
-            ? "The installation report PDF is attached to this email."
-            : count == 1
-                ? "Use the secure link below to download the installation report PDF:"
-                : $"Use the secure link below to download all {count} installation report PDFs as a ZIP archive:";
-        var linkBlock = attachedDirectly ? "" : $"\n{shareUrl}\n";
+        var deliveryLine = count == 1
+            ? "Open the link below to preview the installation report PDF in your browser."
+            : $"Open the link below to preview all {count} installation report PDFs in your browser.";
+        var attachmentLine = attachedDirectly
+            ? "The report PDF is also attached to this email.\n"
+            : "";
         var expires = expiresAtUtc.ToString("dddd, MMMM d yyyy 'at' h:mm tt 'UTC'");
         return
             $"{greeting},\n" +
             custom +
             "\n" +
-            $"{deliveryLine}" +
-            linkBlock +
+            $"{deliveryLine}\n" +
+            attachmentLine +
+            $"\nPreview reports:\n{viewerUrl}\n" +
+            $"\nDownload ZIP archive:\n{downloadUrl}\n" +
             "\n" +
-            $"This link expires on {expires}.\n\n" +
+            $"These links expire on {expires}.\n\n" +
             $"— {AppBranding.AppName}";
+    }
+
+    private string GetRequestHostFrontendBaseUrl(string requestScheme)
+    {
+        var requestHostIp = GetRequestHostPrivateIpv4();
+        if (string.IsNullOrWhiteSpace(requestHostIp)) return "";
+        var scheme = string.IsNullOrWhiteSpace(requestScheme) ? "http" : requestScheme;
+        return $"{scheme}://{requestHostIp}:5173";
+    }
+
+    private string GetRequestHostPrivateIpv4()
+    {
+        var host = Request.Host.Host?.Trim();
+        if (string.IsNullOrWhiteSpace(host)) return "";
+        if (!IPAddress.TryParse(host, out var address)) return "";
+        return IsPrivateIpv4Address(address) ? address.ToString() : "";
+    }
+
+    private static bool ShouldPreferRequestHostBaseUrl(string configuredBaseUrl, string requestHostBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(requestHostBaseUrl)) return false;
+        if (!Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configuredUri) ||
+            !Uri.TryCreate(requestHostBaseUrl, UriKind.Absolute, out var requestHostUri))
+        {
+            return false;
+        }
+
+        return IsPrivateIpv4Host(configuredUri.Host) &&
+               !string.Equals(configuredUri.Host, requestHostUri.Host, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DetectLanFrontendBaseUrl(string requestScheme)
+    {
+        var detectedIp = DetectLanIpv4Address();
+        if (string.IsNullOrWhiteSpace(detectedIp)) return "";
+        var scheme = string.IsNullOrWhiteSpace(requestScheme) ? "http" : requestScheme;
+        return $"{scheme}://{detectedIp}:5173";
+    }
+
+    private static string DetectLanIpv4Address()
+    {
+        try
+        {
+            var interfaces = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic =>
+                    nic.OperationalStatus == OperationalStatus.Up &&
+                    nic.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
+                    nic.NetworkInterfaceType != NetworkInterfaceType.Tunnel);
+
+            foreach (var nic in interfaces)
+            {
+                var candidate = nic.GetIPProperties().UnicastAddresses
+                    .Select(addr => addr.Address)
+                    .FirstOrDefault(IsPrivateIpv4Address);
+                if (candidate is not null) return candidate.ToString();
+            }
+        }
+        catch { /* fall through */ }
+
+        return "";
+    }
+
+    private static bool IsPrivateIpv4Address(IPAddress address)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetwork) return false;
+        var bytes = address.GetAddressBytes();
+        return bytes[0] == 10 ||
+               (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
+               (bytes[0] == 192 && bytes[1] == 168);
+    }
+
+    private static bool IsPrivateIpv4Host(string host)
+    {
+        if (!IPAddress.TryParse(host, out var address)) return false;
+        return IsPrivateIpv4Address(address);
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()

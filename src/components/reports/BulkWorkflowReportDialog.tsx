@@ -721,7 +721,8 @@ export function BulkWorkflowReportDialog({
         projectId={projectId}
         jobLabel={jobLabel}
         users={users}
-        reports={filteredDownloadItems}
+        reportContexts={filteredDownloadItems.map((item) => item.context)}
+        buildReportContext={buildReportContext}
       />
     </>
   );
