@@ -527,7 +527,10 @@ export default function PhotoUploadDialog({
     const key = buildCaptureKey(stepId, inputId);
     const preparedFiles = await Promise.all(Array.from(files).map((file) => prepareWorkflowMediaFile(file)));
     const dataUrls = await Promise.all(preparedFiles.map((file) => fileToDataUrl(file)));
-    setEditedCaptures((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), ...dataUrls] }));
+    setEditedCaptures((prev) => {
+      const current = prev[key] ?? getExistingCaptures(stepId, inputId);
+      return { ...prev, [key]: [...current, ...dataUrls] };
+    });
     setStagedFiles((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), ...preparedFiles] }));
   }
 
@@ -635,13 +638,6 @@ export default function PhotoUploadDialog({
   const progress = totalExpected > 0 ? Math.round((liveCaptured / totalExpected) * 100) : 0;
   const pendingStepResultsJson = buildPatchedStepResultsJson();
   const uploadPlan = analyzeCaptureChanges();
-  const hasPendingChanges = Object.entries(editedCaptures).some(([key, captures]) => {
-    const parsedKey = parseCaptureKey(key);
-    if (!parsedKey) return false;
-    const existing = getExistingCaptures(parsedKey.stepId, parsedKey.inputId);
-    if (captures.length !== existing.length) return true;
-    return captures.some((value, index) => value !== existing[index]);
-  });
   const pendingPayloadEstimate = measurePayload({
     stepResultsJson: pendingStepResultsJson,
     amendedByName: currentUserName ?? null,
@@ -918,21 +914,13 @@ export default function PhotoUploadDialog({
                           return (
                             <Card key={`${key}-capture-${captureIndex}`} variant="outlined" sx={{ borderColor: "divider", bgcolor: "background.default" }}>
                               <CardContent sx={{ py: 1, "&:last-child": { pb: 1 } }}>
-                                <Stack direction="row" spacing={1.5} alignItems="flex-start">
+                                <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
                                   <Box sx={{ width: 92, height: 68, borderRadius: 1, overflow: "hidden", bgcolor: "common.black", flexShrink: 0 }}>
                                     {looksLikeVideo ? (
                                       <video src={capture} controls style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                                     ) : (
                                       <img src={capture} alt={`${inputLabel} ${captureIndex + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                                     )}
-                                  </Box>
-                                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                                    <Typography variant="body2" fontWeight={600}>
-                                      {looksLikeVideo ? `Video ${captureIndex + 1}` : `Photo ${captureIndex + 1}`}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                      Remove this item if the user wants to replace it, then add a new one.
-                                    </Typography>
                                   </Box>
                                   <Button
                                     size="small"
@@ -944,6 +932,9 @@ export default function PhotoUploadDialog({
                                     Delete
                                   </Button>
                                 </Stack>
+                                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                                  {looksLikeVideo ? `Video ${captureIndex + 1}` : `Photo ${captureIndex + 1}`} — remove to replace, then add a new one.
+                                </Typography>
                               </CardContent>
                             </Card>
                           );
@@ -986,7 +977,7 @@ export default function PhotoUploadDialog({
           <Button
             variant="contained"
             onClick={handleSave}
-            disabled={saving || loading || !hasPendingChanges}
+            disabled={saving || loading}
             startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
           >
             {saving ? "Saving..." : "Save Photos"}

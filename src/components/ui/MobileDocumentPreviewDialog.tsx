@@ -89,6 +89,20 @@ function previewLoadErrorMessage(err: unknown): string {
   return "Could not load this file for preview.";
 }
 
+function sanitizeNativeDocxBodyHtml(bodyHtml: string): string {
+  return bodyHtml
+    .replace(/(<table\b[^>]*?)\swidth="[^"]*"/gi, "$1")
+    .replace(/(<col\b[^>]*?)\swidth="[^"]*"/gi, "$1")
+    .replace(/\sstyle="([^"]*)"/gi, (_match, styleContent: string) => {
+      const cleaned = styleContent
+        .split(";")
+        .map((rule: string) => rule.trim())
+        .filter((rule: string) => rule && !/^width\s*:/i.test(rule) && !/^min-width\s*:/i.test(rule))
+        .join("; ");
+      return cleaned ? ` style="${cleaned}"` : "";
+    });
+}
+
 function buildDocxPreviewHtml(bodyHtml: string, options?: { native?: boolean }): string {
   const pageCss = options?.native
     ? `.doc-page {
@@ -96,11 +110,19 @@ function buildDocxPreviewHtml(bodyHtml: string, options?: { native?: boolean }):
       max-width: 100%;
       min-height: auto;
       margin: 0;
-      padding: 20px 16px 28px;
+      padding: 16px 12px 24px;
       background: #fff;
       box-sizing: border-box;
       overflow-wrap: anywhere;
-    }`
+    }
+    .doc-page * { max-width: 100%; box-sizing: border-box; }
+    .doc-page table { table-layout: fixed !important; width: 100% !important; }
+    .doc-page td, .doc-page th {
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      white-space: normal !important;
+    }
+    .doc-page img { width: auto !important; height: auto !important; max-width: 100% !important; }`
     : `.doc-page {
       width: ${DOCX_PAGE_WIDTH_PX}px;
       min-height: ${DOCX_PAGE_HEIGHT_PX}px;
@@ -112,8 +134,8 @@ function buildDocxPreviewHtml(bodyHtml: string, options?: { native?: boolean }):
       overflow-wrap: anywhere;
     }`;
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><style>
-    html, body { margin: 0; padding: 0; background: ${options?.native ? "#fff" : "#eef1f4"}; }
+  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" /><style>
+    html, body { margin: 0; padding: 0; background: ${options?.native ? "#fff" : "#eef1f4"}; width: 100%; overflow-x: hidden; }
     body {
       font-family: Calibri, Arial, sans-serif;
       font-size: ${options?.native ? "10pt" : "11pt"};
@@ -253,6 +275,7 @@ function PdfCanvasPreview({
       sx={{
         flex: 1,
         overflow: "auto",
+        overflowX: "hidden",
         px: { xs: 1.25, sm: 2.5 },
         py: { xs: 1.25, sm: 2 },
       }}
@@ -313,27 +336,36 @@ function NativeHtmlDocumentPreview({
       sx={{
         flex: 1,
         overflow: "auto",
+        overflowX: "hidden",
         WebkitOverflowScrolling: "touch",
         p: { xs: 1.25, sm: 2 },
         bgcolor: "rgba(15,23,42,0.35)",
       }}
     >
       <Box
-        component="iframe"
-        ref={iframeRef}
-        srcDoc={html}
-        title={title ?? "Preview"}
-        sandbox="allow-same-origin"
         sx={{
+          zoom,
           width: "100%",
-          height: iframeHeight,
-          border: "none",
-          borderRadius: 3,
-          bgcolor: "#fff",
-          boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
-          display: "block",
+          maxWidth: "100%",
         }}
-      />
+      >
+        <Box
+          component="iframe"
+          ref={iframeRef}
+          srcDoc={html}
+          title={title ?? "Preview"}
+          sandbox="allow-same-origin"
+          sx={{
+            width: "100%",
+            height: iframeHeight,
+            border: "none",
+            borderRadius: 3,
+            bgcolor: "#fff",
+            boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
+            display: "block",
+          }}
+        />
+      </Box>
     </Box>
   );
 }
@@ -521,21 +553,11 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
             return;
           }
 
-          try {
-            const buffer = await documentService.openDocumentAsBuffer(activeDownloadUrl!);
-            if (cancelled) return;
-            if (buffer.byteLength === 0) throw new Error("This PDF file is empty.");
-            setPdfData(buffer.slice(0));
-            return;
-          } catch {
-            const url = await documentService.openDocument(activeDownloadUrl!);
-            if (cancelled) {
-              URL.revokeObjectURL(url);
-              return;
-            }
-            setNativePdfIframeUrl(url);
-            return;
-          }
+          const buffer = await documentService.openDocumentAsBuffer(activeDownloadUrl!);
+          if (cancelled) return;
+          if (buffer.byteLength === 0) throw new Error("This PDF file is empty.");
+          setPdfData(buffer.slice(0));
+          return;
         }
 
         if (previewMode === "html") {
@@ -545,7 +567,10 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
           if (fileType === "docx") {
             const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
             if (cancelled) return;
-            setHtmlPreview(buildDocxPreviewHtml(result.value, { native: isMobileNativePlatform() }));
+            const bodyHtml = isMobileNativePlatform()
+              ? sanitizeNativeDocxBodyHtml(result.value)
+              : result.value;
+            setHtmlPreview(buildDocxPreviewHtml(bodyHtml, { native: isMobileNativePlatform() }));
             return;
           }
 
@@ -744,13 +769,31 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         )}
 
         {!loading && !error && previewMode === "pdf" && isMobileNativePlatform() && nativePdfIframeUrl && (
-          <Box sx={{ flex: 1, overflow: "hidden", bgcolor: "#525659" }}>
-            <Box
-              component="iframe"
-              src={`${nativePdfIframeUrl}#view=FitH`}
-              title={doc?.name ?? "PDF preview"}
-              sx={{ width: "100%", height: "100%", border: "none", bgcolor: "#525659" }}
-            />
+          <Box
+            sx={{
+              flex: 1,
+              overflow: "auto",
+              overflowX: "hidden",
+              WebkitOverflowScrolling: "touch",
+              bgcolor: "#525659",
+              p: { xs: 1.25, sm: 2 },
+            }}
+          >
+            <Box sx={{ zoom, width: "100%", maxWidth: "100%" }}>
+              <Box
+                component="iframe"
+                src={`${nativePdfIframeUrl}#view=FitH&zoom=${Math.round(zoom * 100)}`}
+                title={doc?.name ?? "PDF preview"}
+                sx={{
+                  width: "100%",
+                  minHeight: "calc(100vh - 120px)",
+                  border: "none",
+                  bgcolor: "#fff",
+                  borderRadius: 2,
+                  display: "block",
+                }}
+              />
+            </Box>
           </Box>
         )}
 

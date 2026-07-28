@@ -36,12 +36,21 @@ const MORE_ITEMS = [
   { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,      to: "/profile" },
 ];
 
+const MORE_PATHS = MORE_ITEMS.map((item) => item.to);
+
 const BottomTabBar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
 
   const value = useMemo(() => {
+    const onMoreRoute = MORE_PATHS.some(
+      (path) => location.pathname === path || location.pathname.startsWith(`${path}/`),
+    );
+    if (onMoreRoute) {
+      return PRIMARY_TABS.findIndex((tab) => tab.path === "__more__");
+    }
+
     const idx = PRIMARY_TABS.findIndex(
       (t) =>
         t.path !== "__more__" &&
