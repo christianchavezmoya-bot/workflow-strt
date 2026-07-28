@@ -1,7 +1,12 @@
 import type { OpenIssueRecord } from "../services/assetWorkflowRunService";
 import type { AssetIssue, ProjectAsset } from "../types/projectAsset";
 
-export function deriveOpenIssuesFromAsset(asset: ProjectAsset): Array<{
+export type IssueProjectMeta = { jobNumber?: string; customerName?: string };
+
+export function deriveOpenIssuesFromAsset(
+  asset: ProjectAsset,
+  projectMeta?: IssueProjectMeta,
+): Array<{
   id: string; assetId: string; projectId: string; data: unknown;
 }> {
   let issues: AssetIssue[] = [];
@@ -27,8 +32,8 @@ export function deriveOpenIssuesFromAsset(asset: ProjectAsset): Array<{
         assetName: asset.assetName ?? "",
         assetLocation: asset.location ?? "",
         projectId: asset.projectId,
-        jobNumber: "",
-        customerName: "",
+        jobNumber: projectMeta?.jobNumber ?? "",
+        customerName: projectMeta?.customerName ?? "",
         source: "asset" as const,
       } satisfies OpenIssueRecord,
     }));

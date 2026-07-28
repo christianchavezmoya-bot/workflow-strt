@@ -641,6 +641,14 @@ async function deriveOpenIssuesFromRun(run: AssetWorkflowRun): Promise<Array<{
   const assetRecord = await entityGetAsset(run.assetId);
   const projectId = assetRecord?.projectId ?? "";
   const asset = (assetRecord?.data as ProjectAsset | null) ?? null;
+  let jobNumber = "";
+  let customerName = "";
+  if (projectId) {
+    const projects = await entityGetAllProjects() as Project[];
+    const project = projects.find((p) => p.id === projectId);
+    jobNumber = project?.jobNumber ?? "";
+    customerName = project?.customerName ?? "";
+  }
 
   return issues
     .filter((i) => !i.resolved)
@@ -663,8 +671,8 @@ async function deriveOpenIssuesFromRun(run: AssetWorkflowRun): Promise<Array<{
         assetName: asset?.assetName ?? "",
         assetLocation: asset?.location ?? "",
         projectId,
-        jobNumber: "",
-        customerName: "",
+        jobNumber,
+        customerName,
         source: "run" as const,
       } satisfies OpenIssueRecord,
     }));

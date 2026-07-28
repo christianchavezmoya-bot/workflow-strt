@@ -27,7 +27,15 @@ async function persistAssetIssuesLocally(asset: ProjectAsset, dirty: boolean): P
     data: asset,
     dirty,
   });
-  const openRecords = deriveOpenIssuesFromAsset(asset);
+  let projectMeta: { jobNumber?: string; customerName?: string } | undefined;
+  if (isMobileNativePlatform() && asset.projectId) {
+    const projects = await entityGetAllProjects() as Project[];
+    const project = projects.find((p) => p.id === asset.projectId);
+    if (project) {
+      projectMeta = { jobNumber: project.jobNumber, customerName: project.customerName };
+    }
+  }
+  const openRecords = deriveOpenIssuesFromAsset(asset, projectMeta);
   await entityReplaceIssuesForAsset(asset.id, openRecords);
   window.dispatchEvent(new Event("repo:issues:updated"));
   window.dispatchEvent(new Event("notifications:run-state-changed"));
@@ -58,13 +66,14 @@ export async function pendingAssetIds(): Promise<Set<string>> {
   return new Set(all.filter((a) => a.entityType === "asset").map((a) => a.entityId));
 }
 
-function toOpenAssetItem(asset: ProjectAsset): OpenAssetItem {
+function toOpenAssetItem(asset: ProjectAsset, projectById?: Map<string, Project>): OpenAssetItem {
+  const project = projectById?.get(asset.projectId);
   return {
     id: asset.id,
     projectId: asset.projectId,
-    jobNumber: (asset as unknown as { jobNumber?: string }).jobNumber ?? "",
-    office: (asset as unknown as { office?: string }).office ?? "",
-    officeId: (asset as unknown as { officeId?: string }).officeId,
+    jobNumber: project?.jobNumber ?? "",
+    office: project?.office ?? (asset as unknown as { office?: string }).office ?? "",
+    officeId: project?.officeId ?? (asset as unknown as { officeId?: string }).officeId,
     assetTag: asset.assetTag,
     assetName: asset.assetName,
     assetModel: asset.assetModel,
@@ -147,11 +156,17 @@ async function buildTechnicianWorkloadSummaryFromLocal(): Promise<TechnicianWork
   return [...byUser.values()].map(({ jobNumberSet, ...rest }) => ({ ...rest, jobNumbers: [...jobNumberSet] }));
 }
 
-function buildDashboardWorkspaceFromAssets(cached: ProjectAsset[], userId?: string): DashboardWorkspace {
-  const toWorkspaceItem = (asset: ProjectAsset): DashboardWorkspaceAssetItem => ({
+function buildDashboardWorkspaceFromAssets(
+  cached: ProjectAsset[],
+  userId?: string,
+  projectById?: Map<string, Project>,
+): DashboardWorkspace {
+  const toWorkspaceItem = (asset: ProjectAsset): DashboardWorkspaceAssetItem => {
+    const project = projectById?.get(asset.projectId);
+    return {
     id: asset.id,
     projectId: asset.projectId,
-    jobNumber: (asset as unknown as { jobNumber?: string }).jobNumber ?? "",
+    jobNumber: project?.jobNumber ?? "",
     assetTag: asset.assetTag,
     assetName: asset.assetName,
     assetModel: asset.assetModel,
@@ -180,7 +195,8 @@ function buildDashboardWorkspaceFromAssets(cached: ProjectAsset[], userId?: stri
     signatureStatus:
       (asset as unknown as { signatureStatus?: string; workflowSummary?: { signatureStatus?: string } }).signatureStatus
       ?? (asset as unknown as { signatureStatus?: string; workflowSummary?: { signatureStatus?: string } }).workflowSummary?.signatureStatus,
-  });
+  };
+  };
 
   const allItems = cached
     .map((asset) => toWorkspaceItem(asset))
@@ -595,9 +611,13 @@ export const projectAssetService = {
   async listOpenLocal(): Promise<OpenAssetItem[]> {
     if (!isMobileNativePlatform()) return [];
     try {
-      const cached = await entityGetAllAssets();
+      const [cached, projects] = await Promise.all([
+        entityGetAllAssets(),
+        entityGetAllProjects() as Promise<Project[]>,
+      ]);
+      const projectById = new Map(projects.map((p) => [p.id, p]));
       return cached
-        .map((asset) => toOpenAssetItem(asset as ProjectAsset))
+        .map((asset) => toOpenAssetItem(asset as ProjectAsset, projectById))
         .filter((asset) => asset.status !== "Complete" && asset.status !== "Closed");
     } catch {
       return [];
@@ -637,8 +657,12 @@ export const projectAssetService = {
     }
 
     try {
-      const cached = await entityGetAllAssets() as ProjectAsset[];
-      return buildDashboardWorkspaceFromAssets(cached, userId);
+      const [cached, projects] = await Promise.all([
+        entityGetAllAssets() as Promise<ProjectAsset[]>,
+        entityGetAllProjects() as Promise<Project[]>,
+      ]);
+      const projectById = new Map(projects.map((p) => [p.id, p]));
+      return buildDashboardWorkspaceFromAssets(cached, userId, projectById);
     } catch {
       return {
         currentInstalls: [],

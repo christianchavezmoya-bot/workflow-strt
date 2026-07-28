@@ -404,6 +404,25 @@ export async function pendingSetStatus(id: string, status: PendingAction["status
   } catch { /* ignore */ }
 }
 
+/** Reset one queued action for an immediate retry (clears backoff + conflict flags). */
+export async function pendingRetryNow(id: string): Promise<void> {
+  try {
+    const db = await getDB();
+    const item = await db.get("pending_actions", id);
+    if (!item) return;
+    await db.put("pending_actions", {
+      ...item,
+      status: "pending",
+      nextRetryAt: undefined,
+      conflictDetected: undefined,
+      conflictHttpStatus: undefined,
+      conflictMessage: undefined,
+      conflictKind: undefined,
+    });
+    window.dispatchEvent(new Event("sync-pending-changed"));
+  } catch { /* ignore */ }
+}
+
 /** Get all pending actions for a specific entity (for per-record state). */
 export async function pendingGetByEntityId(entityId: string): Promise<PendingAction[]> {
   try {

@@ -7,6 +7,8 @@ import { randomId } from "../utils/randomId";
 import { invalidateWebCache } from "./webFreshCache";
 import { WorkflowAssignmentRepository } from "../repositories/WorkflowAssignmentRepository";
 import { isOfflineNetworkError } from "../utils/offlineNetworkError";
+import { workflowConfigService } from "./workflowConfigService";
+import { workflowTypeService } from "./workflowTypeService";
 
 export const assetWorkflowAssignmentService = {
   /**
@@ -34,13 +36,21 @@ export const assetWorkflowAssignmentService = {
     // 1. Optimistically write a temp assignment to the local cache so the
     //    UI updates immediately (the workflow becomes startable offline).
     const tempId = `local-${randomId()}`;
-    const optimistic = {
+    const [config, types] = await Promise.all([
+      workflowConfigService.getByIdLocalFirst(workflowConfigId),
+      workflowTypeService.list(),
+    ]);
+    const workflowType = types.find((t) => t.id === workflowTypeId);
+    const optimistic: WorkflowAssignment = {
       id: tempId,
       assetId,
       workflowConfigId,
       workflowTypeId,
-      createdAt: new Date().toISOString(),
-    } as unknown as WorkflowAssignment;
+      workflowConfigName: config?.name ?? workflowConfigId,
+      workflowTypeName: workflowType?.name ?? workflowTypeId,
+      active: true,
+      assignedAt: new Date().toISOString(),
+    };
 
     try {
       const current = await WorkflowAssignmentRepository.getLocalByAsset(assetId);

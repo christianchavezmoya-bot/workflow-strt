@@ -32,6 +32,7 @@ import {
   pendingGetConflicted,
   pendingRemove,
   pendingResetRetrySchedule,
+  pendingRetryNow,
   pendingSetStatus,
   syncMetaSet,
   type PendingAction,
@@ -117,6 +118,10 @@ export interface SyncState {
   resolveConflictKeep: (actionId: string) => Promise<void>;
   /** Discard a conflicted action (accept server version). */
   resolveConflictDiscard: (actionId: string) => Promise<void>;
+  /** Retry one queued action immediately (failed or conflict). */
+  retryPendingAction: (actionId: string) => Promise<void>;
+  /** Remove from sync queue but keep local changes (stop retrying). */
+  dismissPendingKeepLocal: (actionId: string) => Promise<void>;
   /**
    * Queue or send a write operation.
    * If online: sends immediately, returns server response.
@@ -996,6 +1001,18 @@ export function useSyncEngine(): SyncState {
     await refreshPending();
   }, [refreshPending]);
 
+  const retryPendingAction = useCallback(async (actionId: string) => {
+    await pendingRetryNow(actionId);
+    await refreshPending();
+    void flush();
+  }, [flush, refreshPending]);
+
+  /** Drop from queue without reverting local optimistic data. */
+  const dismissPendingKeepLocal = useCallback(async (actionId: string) => {
+    await pendingRemove(actionId);
+    await refreshPending();
+  }, [refreshPending]);
+
   // ── Derived status ────────────────────────────────────────────────────────
   const isOnline = connectivity !== "offline";
 
@@ -1019,6 +1036,8 @@ export function useSyncEngine(): SyncState {
     triggerSync: flush,
     resolveConflictKeep,
     resolveConflictDiscard,
+    retryPendingAction,
+    dismissPendingKeepLocal,
     queueOrSend,
   };
 }
