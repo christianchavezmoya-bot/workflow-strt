@@ -31,6 +31,11 @@ import axios from "axios";
 import * as pdfjsLib from "pdfjs-dist";
 import { documentService, type DocumentRecord } from "../../services/documentService";
 import { isMobileNativePlatform } from "../../utils/platform";
+import {
+  DOCX_PAGE_HEIGHT_PX,
+  DOCX_PAGE_WIDTH_PX,
+  getDocumentPreviewFileType,
+} from "../../utils/documentPreview";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.mjs",
@@ -51,17 +56,7 @@ function isPdf(contentType?: string | null, name?: string) {
 }
 
 function getFileType(contentType?: string | null, name?: string): string | undefined {
-  const type = (contentType ?? "").toLowerCase();
-  const ext = (name ?? "").split(".").pop()?.toLowerCase();
-  if (type.includes("pdf")) return "pdf";
-  if (type.startsWith("image/")) return ext ?? "jpg";
-  if (type.startsWith("video/")) return ext ?? "mp4";
-  if (type.includes("openxmlformats") || ext === "docx") return "docx";
-  if (type.includes("word") || type.includes("msword") || ext === "doc") return "doc";
-  if (type.includes("sheet") || type.includes("excel") || type.includes("spreadsheet") || ext === "xlsx" || ext === "xls") return ext ?? "xlsx";
-  if (type.includes("json")) return "json";
-  if (type.startsWith("text/")) return ext ?? "txt";
-  return ext;
+  return getDocumentPreviewFileType(contentType, name);
 }
 
 function formatSize(bytes?: number | null) {
@@ -96,23 +91,29 @@ function previewLoadErrorMessage(err: unknown): string {
 
 function buildDocxPreviewHtml(bodyHtml: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>
-    html, body { margin: 0; padding: 0; background: #fff; }
+    html, body { margin: 0; padding: 0; background: #eef1f4; }
     body {
-      font-family: Arial, sans-serif;
-      padding: 20px 24px 32px;
-      line-height: 1.55;
+      font-family: Calibri, Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.45;
       color: #111;
       box-sizing: border-box;
-      overflow-wrap: anywhere;
-      width: max-content;
-      min-width: min(100%, 640px);
-      max-width: none;
     }
-    table { border-collapse: collapse; width: auto; max-width: none; }
+    .doc-page {
+      width: ${DOCX_PAGE_WIDTH_PX}px;
+      min-height: ${DOCX_PAGE_HEIGHT_PX}px;
+      margin: 0 auto 18px;
+      padding: 48px 56px;
+      background: #fff;
+      box-sizing: border-box;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+      overflow-wrap: anywhere;
+    }
+    table { border-collapse: collapse; width: 100%; }
     td, th { border: 1px solid #ccc; padding: 6px 10px; word-break: break-word; }
     img { max-width: 100%; height: auto; display: block; }
-    p, li, h1, h2, h3, h4 { max-width: 100%; margin-top: 0.35em; margin-bottom: 0.35em; }
-  </style></head><body>${bodyHtml}</body></html>`;
+    p, li, h1, h2, h3, h4 { margin-top: 0.35em; margin-bottom: 0.35em; }
+  </style></head><body><div class="doc-page">${bodyHtml}</div></body></html>`;
 }
 
 function buildXlsxPreviewHtml(rawHtml: string): string {
@@ -124,8 +125,8 @@ function buildXlsxPreviewHtml(rawHtml: string): string {
       "</head>",
       `<meta charset="utf-8" /><style>
         html, body { margin: 0; padding: 0; background: #fff; }
-        body { font-family: Arial, sans-serif; padding: 16px; overflow: visible; width: max-content; min-width: min(100%, 480px); }
-        table { border-collapse: collapse; font-size: 12px; }
+        body { font-family: Arial, sans-serif; padding: 16px; background: #fff; margin: 0; }
+        table { border-collapse: collapse; font-size: 12px; width: max-content; max-width: none; }
         td, th { border: 1px solid #d0d0d0; padding: 6px 10px; white-space: nowrap; vertical-align: top; background: #fff !important; color: #000 !important; }
         tr:first-child td, tr:first-child th { font-weight: 700; background: #f4f4f4 !important; }
       </style></head>`,
@@ -174,7 +175,7 @@ function PdfCanvasPreview({
       onPageCount(0);
 
       try {
-        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(data) });
+        const loadingTask = pdfjsLib.getDocument({ data, disableFontFace: true });
         const pdf = await loadingTask.promise;
         if (cancelled) {
           void loadingTask.destroy();
@@ -206,6 +207,8 @@ function PdfCanvasPreview({
 
           canvas.width = Math.floor(viewport.width);
           canvas.height = Math.floor(viewport.height);
+          context.fillStyle = "#ffffff";
+          context.fillRect(0, 0, canvas.width, canvas.height);
           canvas.style.display = "block";
           canvas.style.width = "100%";
           canvas.style.height = "auto";
@@ -250,14 +253,16 @@ function HtmlDocumentPreview({
   html,
   zoom,
   title,
+  fitMode,
 }: {
   html: string;
   zoom: number;
   title?: string;
+  fitMode: "docx-page" | "spreadsheet";
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const [layout, setLayout] = useState({ scale: 1, width: 800, height: 600 });
+  const [layout, setLayout] = useState({ scale: 1, width: DOCX_PAGE_WIDTH_PX, height: DOCX_PAGE_HEIGHT_PX });
 
   useEffect(() => {
     const container = containerRef.current;
@@ -268,29 +273,29 @@ function HtmlDocumentPreview({
       const doc = iframe.contentDocument;
       if (!doc?.body) return;
 
-      const contentWidth = Math.max(
-        doc.documentElement.scrollWidth,
-        doc.body.scrollWidth,
-        doc.documentElement.offsetWidth,
-        480,
-      );
-      const contentHeight = Math.max(
-        doc.documentElement.scrollHeight,
-        doc.body.scrollHeight,
-        doc.documentElement.offsetHeight,
-        320,
-      );
-
       const pad = 32;
       const availW = Math.max(240, container.clientWidth - pad);
       const availH = Math.max(240, container.clientHeight - pad);
-      const fitScale = Math.min(availW / contentWidth, availH / contentHeight, 1);
 
-      setLayout({
-        scale: fitScale * zoom,
-        width: contentWidth,
-        height: contentHeight,
-      });
+      if (fitMode === "docx-page") {
+        const scale = Math.min(availW / DOCX_PAGE_WIDTH_PX, availH / DOCX_PAGE_HEIGHT_PX, 1) * zoom;
+        const contentHeight = Math.max(
+          DOCX_PAGE_HEIGHT_PX,
+          doc.documentElement.scrollHeight,
+          doc.body.scrollHeight,
+        );
+        setLayout({
+          scale,
+          width: DOCX_PAGE_WIDTH_PX,
+          height: contentHeight,
+        });
+        return;
+      }
+
+      const contentWidth = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth, 480);
+      const contentHeight = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 320);
+      const scale = Math.min(availW / contentWidth, 1) * zoom;
+      setLayout({ scale, width: contentWidth, height: contentHeight });
     };
 
     const onLoad = () => window.setTimeout(measureAndFit, 0);
@@ -303,7 +308,7 @@ function HtmlDocumentPreview({
       iframe.removeEventListener("load", onLoad);
       resizeObserver.disconnect();
     };
-  }, [html, zoom]);
+  }, [fitMode, html, zoom]);
 
   return (
     <Box
@@ -403,13 +408,21 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
       return null;
     });
     setHtmlPreview(null);
-
-    setHtmlPreview(null);
     setPdfData(null);
 
     async function loadPreview() {
       try {
         if (previewMode === "pdf") {
+          if (!isMobileNativePlatform()) {
+            const url = await documentService.openDocument(activeDownloadUrl!);
+            if (cancelled) {
+              URL.revokeObjectURL(url);
+              return;
+            }
+            setBlobUrl(url);
+            return;
+          }
+
           const buffer = await documentService.openDocumentAsBuffer(activeDownloadUrl!);
           if (cancelled) return;
           if (buffer.byteLength === 0) throw new Error("This PDF file is empty.");
@@ -611,7 +624,18 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
           </Box>
         )}
 
-        {!loading && !error && previewMode === "pdf" && pdfData && (
+        {!loading && !error && previewMode === "pdf" && !isMobileNativePlatform() && blobUrl && (
+          <Box sx={{ flex: 1, overflow: "hidden", bgcolor: "#525659" }}>
+            <Box
+              component="iframe"
+              src={`${blobUrl}#view=FitH`}
+              title={doc?.name ?? "PDF preview"}
+              sx={{ width: "100%", height: "100%", border: "none", bgcolor: "#525659" }}
+            />
+          </Box>
+        )}
+
+        {!loading && !error && previewMode === "pdf" && isMobileNativePlatform() && pdfData && (
           <>
             <Stack
               direction="row"
@@ -679,7 +703,12 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         )}
 
         {!loading && !error && previewMode === "html" && htmlPreview && (
-          <HtmlDocumentPreview html={htmlPreview} zoom={zoom} title={doc?.name ?? undefined} />
+          <HtmlDocumentPreview
+            html={htmlPreview}
+            zoom={zoom}
+            title={doc?.name ?? undefined}
+            fitMode={fileType === "xlsx" || fileType === "xls" ? "spreadsheet" : "docx-page"}
+          />
         )}
 
         {!loading && !error && previewMode === "iframe" && blobUrl && (

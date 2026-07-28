@@ -1,0 +1,22 @@
+import { describe, expect, it } from "vitest";
+import { getDocumentPreviewFileType } from "./documentPreview";
+
+describe("getDocumentPreviewFileType", () => {
+  it("detects xlsx before generic openxmlformats docx", () => {
+    expect(
+      getDocumentPreviewFileType(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "AIM100_Motherboard RevD BOM.xlsx",
+      ),
+    ).toBe("xlsx");
+  });
+
+  it("detects docx from extension", () => {
+    expect(
+      getDocumentPreviewFileType(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Shuttle Car.docx",
+      ),
+    ).toBe("docx");
+  });
+});
