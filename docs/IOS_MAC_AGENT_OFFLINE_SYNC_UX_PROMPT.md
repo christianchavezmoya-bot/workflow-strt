@@ -1,10 +1,10 @@
-# Mac iOS agent — offline labels + sync conflict UX (PR #37)
+# Mac iOS agent — offline labels + sync conflict UX (final test on main)
 
 **Copy everything below the line into your Mac Cursor agent.**
 
-**Branch:** `cursor/offline-labels-sync-ux-cd21` @ **`705209e`** or newer
+**Branch:** **`main` @ `bdf5135`** or newer (PR #37 merged)
 
-**PR:** [#37](https://github.com/christianchavezmoya-bot/workflow-strt/pull/37)
+**PR:** [#37](https://github.com/christianchavezmoya-bot/workflow-strt/pull/37) — merged to `main`
 
 **API (Windows PC):** `http://172.20.8.16:4000/api` — Windows agent confirms health + JWT before you install
 
@@ -17,18 +17,18 @@
 **References:**
 - [`AGENT_RETEST_INDEX.md`](./AGENT_RETEST_INDEX.md)
 - [`WINDOWS_AGENT_OFFLINE_SYNC_UX_PROMPT.md`](./WINDOWS_AGENT_OFFLINE_SYNC_UX_PROMPT.md) — Windows runs first
-- PR #36 auth fixes on `cursor/fix-native-launch-login-cd21` if testing full stack
+- PR #36 auth fixes — already on `main`
 
 ---
 
 ## PROMPT START
 
-You are the **Mac iOS field agent** for **N-go** offline label and sync conflict UX verification (PR #37).
+You are the **Mac iOS field agent** for **N-go** final verification on **`main`** (PR #37 merged).
 
 ### Your job (Mac + Xcode only)
 
-1. Wait for **Windows agent** to confirm API @ `172.20.8.16` is up and commit hash matches
-2. Pull **`cursor/offline-labels-sync-ux-cd21` @ 705209e+**, build, **install on physical iPhone**
+1. Wait for **Windows agent** to confirm API @ `172.20.8.16` is up on **`main`**
+2. Pull **`main` @ bdf5135+**, build, **install on physical iPhone**
 3. Phone user runs **S1–S8** below — you facilitate rebuild; they execute on device
 4. Post filled results table + screenshots on PR #37
 5. Fix S0/S1 in `src/`/`ios/` only if blocking — report first
@@ -44,9 +44,9 @@ You are the **Mac iOS field agent** for **N-go** offline label and sync conflict
 ```bash
 cd ~/path/to/workflow-strt   # adjust path
 git fetch origin
-git checkout cursor/offline-labels-sync-ux-cd21
-git pull origin cursor/offline-labels-sync-ux-cd21
-git log -1 --oneline    # MUST show 705209e or newer
+git checkout main
+git pull origin main
+git log -1 --oneline    # MUST show bdf5135 or newer
 npm ci
 ```
 
@@ -82,7 +82,7 @@ Reply to team: **"N-go installed @ `<commit hash>` — start S1"**
 | Dropped sync actions | **Re-queue** on home banner; `offline-skip` does not burn retry budget |
 | Accept server for run | Clears **all** queued ops for that workflow run |
 
-**If phone still shows raw JSON conflicts or duplicate workflows, build is stale — rebuild @ 705209e+.**
+**If phone still shows raw JSON conflicts or duplicate workflows, build is stale — rebuild from `main` @ bdf5135+.**
 
 ---
 
@@ -215,18 +215,18 @@ Skip if Windows kept `ExpiresMinutes: 720`.
 
 | Check | Pass/Fail | Notes |
 |-------|-----------|-------|
-| `git log -1` ≥ 705209e | | hash |
+| `git log -1` ≥ bdf5135 | | hash |
 | Home screen **N-go** | | |
 | `npm run build` clean on Mac | | |
 | No desktop sidebar on native | | |
 
 ---
 
-## Part 5 — Deliverables (post on PR #37)
+## Part 5 — Deliverables (post to team / close PR #37)
 
 | Test | Pass/Fail | Notes |
 |------|-----------|-------|
-| Mac install @ 705209e+ | | commit |
+| Mac install @ main bdf5135+ | | commit |
 | S1 Offline labels | | |
 | S2 Sync Center not locked | | |
 | S3 CAD0017 simple conflict + Update phone | | |
@@ -238,7 +238,7 @@ Skip if Windows kept `ExpiresMinutes: 720`.
 
 Attach screenshots for S2, S3, S5 minimum.
 
-**If S1–S6 pass:** comment **"Mac retest GO for PR #37"**
+**If S1–S6 pass:** comment **"Mac final retest GO on main"**
 
 **If S0/S1 FAIL:** screenshots + Sync Center export; do **not** sign off.
 
@@ -248,8 +248,8 @@ Attach screenshots for S2, S3, S5 minimum.
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| Raw JSON in Sync Center | Pre-705209e build | Rebuild branch |
-| Bottom toast over Sync Center | Pre-705209e build | Rebuild branch |
+| Raw JSON in Sync Center | Stale build (not `main`) | `git checkout main && git pull` then rebuild |
+| Bottom toast over Sync Center | Stale build | Rebuild from `main` |
 | Duplicate workflows | Stale IndexedDB | Reinstall app or clear app data; retest |
 | CAD0017 conflict won't clear | Server not Complete | Windows verify web state |
 | API unreachable | Wrong IP / firewall | `curl` health; check `.env.production.local` |

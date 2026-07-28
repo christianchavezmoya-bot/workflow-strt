@@ -1,10 +1,10 @@
-# Windows agent — offline labels + sync conflict UX (PR #37)
+# Windows agent — offline labels + sync conflict UX (final test on main)
 
 **Copy everything below the line into your Windows Cursor agent.**
 
-**Branch:** `cursor/offline-labels-sync-ux-cd21` @ **`705209e`** or newer
+**Branch:** **`main` @ `bdf5135`** or newer (PR #37 merged)
 
-**PR:** [#37](https://github.com/christianchavezmoya-bot/workflow-strt/pull/37)
+**PR:** [#37](https://github.com/christianchavezmoya-bot/workflow-strt/pull/37) — merged to `main`
 
 **Repo:** `https://github.com/christianchavezmoya-bot/workflow-strt` (local folder may be `Codex/915`)
 
@@ -20,7 +20,7 @@
 
 ## PROMPT START
 
-You are the **Windows web/API agent** for PR #37 offline sync UX verification.
+You are the **Windows web/API agent** for final verification on **`main`** (PR #37 merged).
 
 **Rules:**
 - Do **not** commit machine-specific IP overrides
@@ -35,9 +35,9 @@ You are the **Windows web/API agent** for PR #37 offline sync UX verification.
 ```powershell
 cd C:\Users\cchavez\Documents\Commtrac\Codex\915   # adjust path
 git fetch origin
-git checkout cursor/offline-labels-sync-ux-cd21
-git pull origin cursor/offline-labels-sync-ux-cd21
-git log -1 --oneline    # expect 705209e or newer
+git checkout main
+git pull origin main
+git log -1 --oneline    # expect bdf5135 or newer
 npm ci
 ```
 
@@ -70,7 +70,7 @@ Post to team:
 Windows ready @ <commit hash>
 API: http://172.20.8.16:4000/api/health OK
 Jwt:ExpiresMinutes = <value>
-Mac: install cursor/offline-labels-sync-ux-cd21 @ <hash>
+Mac: install main @ <hash>
 ```
 
 ---
@@ -81,7 +81,7 @@ PR #37 is **native-first**, but web is the source of truth for **CAD0017 complet
 
 | ID | Check | Steps | PASS if |
 |----|-------|-------|---------|
-| W1 | API serves PR branch | `git log -1` on running API folder matches 705209e+ | Yes |
+| W1 | API serves `main` | `git log -1` on running API folder matches bdf5135+ | Yes |
 | W2 | CAD0017 web state | Login web → find asset **CAD0017** → workflow run | **Complete** with installer + customer signatures (or complete during test) |
 | W3 | Web completion sticks | After Mac **Update this phone**, refresh web CAD0017 | Still Complete; signatures intact |
 | W4 | Job number on web | Project assets / dashboard for installer project | Job number **JO000999** (or expected) visible — not UUID |
@@ -95,7 +95,7 @@ If phone user no longer has a natural conflict:
 
 1. On **web**: ensure CAD0017 run is **Complete** + signed
 2. On **phone** (old build or offline): had run **In Progress** with queued time entry
-3. After Mac installs **705209e+**, reconnect phone → Sync Center should show simple conflict
+3. After Mac installs **`main` @ bdf5135+**, reconnect phone → Sync Center should show simple conflict
 
 **Do not delete server data.** Server Complete state is authoritative.
 
@@ -132,7 +132,7 @@ Confirm ports **4000** (API) and **5173** (Vite) open on `172.20.8.16`.
 
 | Check | Pass/Fail | Notes |
 |-------|-----------|-------|
-| Checkout @ 705209e+ | | commit |
+| Checkout @ main bdf5135+ | | commit |
 | API health | | |
 | W2 CAD0017 Complete on web | | |
 | W3 Web unchanged after phone sync | | |
@@ -144,15 +144,15 @@ When Mac posts retest results, reply with:
 
 ```
 Windows W1–W5: <pass/fail>
-Ready for merge: <yes/no>
+Ready for production sign-off: <yes/no>
 ```
 
 ---
 
-## Part 6 — Merge rubric (with Mac results)
+## Part 6 — Sign-off rubric (with Mac results)
 
-| Severity | Merge PR #37? |
-|----------|----------------|
+| Severity | Ship from `main`? |
+|----------|-----------------|
 | S0 — server data overwritten by stale phone | **NO** |
 | S0 — phone work lost after Update this phone | **NO** |
 | S1 — Sync Center still locked / raw JSON for completed run | **NO** |
@@ -169,7 +169,7 @@ Ready for merge: <yes/no>
 | Mac can't reach API | Check IP, firewall, `allow-network-access.ps1` |
 | CAD0017 not Complete on web | Complete on web first; then test phone sync |
 | 2-min JWT "doesn't work" offline | Expected: offline grace ≠ JWT expiry; document for team |
-| `offline-skip` on banner | Mac S7; ensure 705209e+ build |
+| `offline-skip` on banner | Mac S7; ensure `main` @ bdf5135+ build |
 
 ---
 

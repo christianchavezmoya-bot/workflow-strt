@@ -19,7 +19,7 @@ Use this index whenever the cloud agent finishes a change set and field agents n
 
 | Round | Branch | PR | Mac prompt | Windows prompt |
 |-------|--------|-----|------------|----------------|
-| **Offline labels + sync conflict UX** | `cursor/offline-labels-sync-ux-cd21` | [#37](https://github.com/christianchavezmoya-bot/workflow-strt/pull/37) | [`IOS_MAC_AGENT_OFFLINE_SYNC_UX_PROMPT.md`](./IOS_MAC_AGENT_OFFLINE_SYNC_UX_PROMPT.md) | [`WINDOWS_AGENT_OFFLINE_SYNC_UX_PROMPT.md`](./WINDOWS_AGENT_OFFLINE_SYNC_UX_PROMPT.md) |
+| **Offline labels + sync conflict UX** | **`main` @ `bdf5135+`** (merged [#37](https://github.com/christianchavezmoya-bot/workflow-strt/pull/37)) | #37 ✅ | [`IOS_MAC_AGENT_OFFLINE_SYNC_UX_PROMPT.md`](./IOS_MAC_AGENT_OFFLINE_SYNC_UX_PROMPT.md) | [`WINDOWS_AGENT_OFFLINE_SYNC_UX_PROMPT.md`](./WINDOWS_AGENT_OFFLINE_SYNC_UX_PROMPT.md) |
 | Session timeout + auth (prior) | `main` @ `62da009+` | #25–#36 | [`IOS_MAC_AGENT_SESSION_SYNC_PROMPT.md`](./IOS_MAC_AGENT_SESSION_SYNC_PROMPT.md) | (Windows: set `ExpiresMinutes` per that prompt) |
 
 When a new round ships, add a row here and archive or supersede the old “current” prompts.

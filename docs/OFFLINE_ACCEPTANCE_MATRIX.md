@@ -4,7 +4,7 @@ Record results on a **physical device** before each native app release. Attach a
 
 **Automated CI** covers smoke, login, and offline-open perf contract (`npm run release-gates`). This matrix covers scenarios that still require manual native QA.
 
-**Mac agent:** copy-paste instructions in [`IOS_MAC_AGENT_PROMPT.md`](./IOS_MAC_AGENT_PROMPT.md) (install + retest + Finding 3 scope). Legacy full-matrix prompt: [`IOS_PRE_MERGE_ACCEPTANCE_PROMPT.md`](./IOS_PRE_MERGE_ACCEPTANCE_PROMPT.md).
+**Mac agent:** copy-paste instructions in [`IOS_MAC_AGENT_OFFLINE_SYNC_UX_PROMPT.md`](./IOS_MAC_AGENT_OFFLINE_SYNC_UX_PROMPT.md) (final test on `main`). Index: [`AGENT_RETEST_INDEX.md`](./AGENT_RETEST_INDEX.md). Legacy: [`IOS_MAC_AGENT_PROMPT.md`](./IOS_MAC_AGENT_PROMPT.md), [`IOS_PRE_MERGE_ACCEPTANCE_PROMPT.md`](./IOS_PRE_MERGE_ACCEPTANCE_PROMPT.md).
 
 Related: [`OFFLINE_DEVICE_MEASUREMENT.md`](./OFFLINE_DEVICE_MEASUREMENT.md) (p95 resume latency), [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md) Layer C.
 
