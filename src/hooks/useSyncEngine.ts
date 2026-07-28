@@ -32,6 +32,7 @@ import {
   pendingGetConflicted,
   pendingRemove,
   pendingResetRetrySchedule,
+  pendingRetryNow,
   pendingSetStatus,
   syncMetaSet,
   type PendingAction,
@@ -117,6 +118,10 @@ export interface SyncState {
   resolveConflictKeep: (actionId: string) => Promise<void>;
   /** Discard a conflicted action (accept server version). */
   resolveConflictDiscard: (actionId: string) => Promise<void>;
+  /** Retry one queued action immediately (failed or conflict). */
+  retryPendingAction: (actionId: string) => Promise<void>;
+  /** Remove from sync queue but keep local changes (stop retrying). */
+  dismissPendingKeepLocal: (actionId: string) => Promise<void>;
   /**
    * Queue or send a write operation.
    * If online: sends immediately, returns server response.
@@ -743,6 +748,14 @@ export function useSyncEngine(): SyncState {
             if (timedOutAgainstReachableServer) {
               continue;
             }
+            // Deliberate offline fast-bail — don't burn retry budget; try again on reconnect.
+            const isOfflineSkip = (e as { isOfflineSkip?: boolean; message?: string }).isOfflineSkip
+              || (e instanceof Error && e.message === "offline-skip");
+            if (isOfflineSkip) {
+              await pendingSetStatus(action.id, "pending");
+              setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
+              break;
+            }
             setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
             break;
           }
@@ -991,7 +1004,28 @@ export function useSyncEngine(): SyncState {
     const action = all.find((item) => item.id === actionId);
     if (action) {
       await revertLocalEntityForConflict(action);
+      // Accepting server for a run drops every queued op for that run (e.g. stale time entries).
+      if (action.entityType === "workflow-run") {
+        const siblings = all.filter(
+          (item) => item.id !== actionId
+            && item.entityType === "workflow-run"
+            && item.entityId === action.entityId,
+        );
+        await Promise.all(siblings.map((item) => pendingRemove(item.id)));
+      }
     }
+    await pendingRemove(actionId);
+    await refreshPending();
+  }, [refreshPending]);
+
+  const retryPendingAction = useCallback(async (actionId: string) => {
+    await pendingRetryNow(actionId);
+    await refreshPending();
+    void flush();
+  }, [flush, refreshPending]);
+
+  /** Drop from queue without reverting local optimistic data. */
+  const dismissPendingKeepLocal = useCallback(async (actionId: string) => {
     await pendingRemove(actionId);
     await refreshPending();
   }, [refreshPending]);
@@ -1019,6 +1053,8 @@ export function useSyncEngine(): SyncState {
     triggerSync: flush,
     resolveConflictKeep,
     resolveConflictDiscard,
+    retryPendingAction,
+    dismissPendingKeepLocal,
     queueOrSend,
   };
 }

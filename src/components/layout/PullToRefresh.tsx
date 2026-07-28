@@ -23,6 +23,7 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
   const syncingRef     = useRef(syncing);
   const triggerRef     = useRef(triggerSync);
   const refreshingRef  = useRef(refreshing);
+  const dialogOpenRef  = useRef(false);
 
   isOnlineRef.current   = isOnline;
   pendingRef.current    = pendingCount;
@@ -39,6 +40,17 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
       setPullY(0);
       pullDeltaRef.current = 0;
     }
+  }, []);
+
+  // Pull-to-refresh must not show bottom toasts over open dialogs (e.g. Sync Center).
+  useEffect(() => {
+    const syncDialogState = () => {
+      dialogOpenRef.current = !!document.querySelector(".MuiDialog-root, .MuiModal-root");
+    };
+    syncDialogState();
+    const observer = new MutationObserver(syncDialogState);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -97,10 +109,16 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
         !syncingRef.current &&
         pendingRef.current === 0;
 
+      if (dialogOpenRef.current) {
+        setPullY(0);
+        pullDeltaRef.current = 0;
+        return;
+      }
+
       if (!canRefresh) {
         const reason =
           !isOnlineRef.current      ? "You're offline — connect to sync" :
-          pendingRef.current > 0    ? "Finish your current changes before syncing" :
+          pendingRef.current > 0    ? "Tap SYNC at the top to review queued changes" :
                                       "Sync already in progress";
         setToast(reason);
         setPullY(0);
