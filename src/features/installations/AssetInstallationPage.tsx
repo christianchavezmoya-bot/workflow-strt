@@ -106,6 +106,7 @@ import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, entityReplaceIssuesForAsset } from "../../services/localDB";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
+import { BulkWorkflowReportDialog } from "../../components/reports/BulkWorkflowReportDialog";
 import { buildWorkflowReportJson, createWorkflowReportDocx, workflowReportBaseFileName, type WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
@@ -660,6 +661,7 @@ const AssetInstallationPage = () => {
   const [reportPreviewError, setReportPreviewError] = useState<string | null>(null);
   const [reportPreviewContext, setReportPreviewContext] = useState<WorkflowReportExportContext | null>(null);
   const [reportPreviewFileBase, setReportPreviewFileBase] = useState<string | null>(null);
+  const [bulkWorkflowReportsOpen, setBulkWorkflowReportsOpen] = useState(false);
   // Extra context passed into WorkflowRunHistoryDialog for the PDF download
   const [runHistoryProject, setRunHistoryProject] = useState<{ customerName: string; jobNumber: string; siteName?: string } | null>(null);
   const [runHistoryCustomerLogo, setRunHistoryCustomerLogo] = useState<string | null>(null);
@@ -1631,6 +1633,17 @@ const AssetInstallationPage = () => {
       return true;
     });
   }, [assets, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode, captureSearchByAsset]);
+
+  const bulkReportSelectedAssets = useMemo(
+    () => visibleAssets.filter((asset) => selectedAssetIds.has(asset.id)),
+    [visibleAssets, selectedAssetIds],
+  );
+
+  const bulkReportZipFileName = useMemo(() => {
+    const job = selectedProject?.jobNumber?.trim();
+    const stamp = new Date().toISOString().slice(0, 10);
+    return job ? `${job}-workflow-reports-${stamp}` : `workflow-reports-${stamp}`;
+  }, [selectedProject?.jobNumber]);
 
   // Projects linked to the active product (used in add/edit dialogs and the project selector).
   const productProjects = useMemo(
@@ -5115,6 +5128,17 @@ ${words.slice(midpoint).join(" ")}`;
             Upload documents
           </Button>
 
+          {showAdvancedAssetActions && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<ArticleOutlined fontSize="small" />}
+              onClick={() => setBulkWorkflowReportsOpen(true)}
+            >
+              View / Print Reports
+            </Button>
+          )}
+
           {!archiveMode && (
             <Button
               size="small"
@@ -5162,6 +5186,20 @@ ${words.slice(midpoint).join(" ")}`;
                 >
                   Print / PDF
                 </Button>
+              </Tooltip>
+              <Tooltip title={selectedAssetIds.size === 0 ? "Select one or more assets first" : "Preview and download workflow installation reports for selected assets"}>
+                <span>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<ArticleOutlined fontSize="small" />}
+                    disabled={selectedAssetIds.size === 0}
+                    onClick={() => setBulkWorkflowReportsOpen(true)}
+                    sx={{ fontSize: 12 }}
+                  >
+                    View / Print Reports
+                  </Button>
+                </span>
               </Tooltip>
               <Tooltip title="Export the current filtered asset view">
                 <span>
@@ -6833,6 +6871,14 @@ ${words.slice(midpoint).join(" ")}`;
           </Stack>
         </DialogActions>
       </Dialog>
+
+      <BulkWorkflowReportDialog
+        open={bulkWorkflowReportsOpen}
+        onClose={() => setBulkWorkflowReportsOpen(false)}
+        assets={bulkReportSelectedAssets}
+        buildReportContext={buildAssetReportContext}
+        zipFileName={bulkReportZipFileName}
+      />
 
       {/* Inspection Import Dialog — per-asset popup */}
       {importDialogAsset && selectedProject && (
