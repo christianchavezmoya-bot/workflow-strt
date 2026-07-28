@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  documentFileCacheKey,
   documentSyncFingerprint,
+  extractDocumentIdFromDownloadUrl,
   listDocumentsNeedingPrefetch,
   normalizeDocumentDownloadUrl,
   sortDocumentsForLibraryPrefetch,
@@ -30,6 +32,29 @@ describe("normalizeDocumentDownloadUrl", () => {
 
   it("leaves already-normalized paths unchanged", () => {
     expect(normalizeDocumentDownloadUrl("/documents/abc/download")).toBe("/documents/abc/download");
+  });
+});
+
+describe("documentFileCacheKey", () => {
+  it("uses stable id-based keys regardless of host", () => {
+    expect(documentFileCacheKey("http://172.20.8.16:4000/api/documents/abc-123/download")).toBe(
+      "document-file:id:abc-123",
+    );
+    expect(documentFileCacheKey("/api/documents/abc-123/download")).toBe("document-file:id:abc-123");
+    expect(documentFileCacheKey("/documents/abc-123/download")).toBe("document-file:id:abc-123");
+  });
+
+  it("extracts document id from download URLs", () => {
+    expect(extractDocumentIdFromDownloadUrl("http://localhost:4000/api/documents/uuid-here/download")).toBe(
+      "uuid-here",
+    );
+    expect(extractDocumentIdFromDownloadUrl("https://example.com/other")).toBeNull();
+  });
+
+  it("falls back to encoded URL when id cannot be parsed", () => {
+    expect(documentFileCacheKey("https://cdn.example.com/file.xlsx")).toBe(
+      "document-file:https%3A%2F%2Fcdn.example.com%2Ffile.xlsx",
+    );
   });
 });
 

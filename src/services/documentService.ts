@@ -69,15 +69,77 @@ export function normalizeDocumentDownloadUrl(downloadUrl: string): string {
   return downloadUrl;
 }
 
+/** Extract document UUID from any backend download URL shape. */
+export function extractDocumentIdFromDownloadUrl(downloadUrl: string): string | null {
+  const match = downloadUrl.match(/\/documents\/([^/?#]+)\/download/i);
+  return match?.[1] ?? null;
+}
+
+/** Stable cache key by document id so host/path changes do not break offline blobs. */
+export function documentFileCacheKey(downloadUrl: string): string {
+  const id = extractDocumentIdFromDownloadUrl(downloadUrl);
+  if (id) return `${DOCUMENT_FILE_CACHE_PREFIX}id:${id}`;
+  return `${DOCUMENT_FILE_CACHE_PREFIX}${encodeURIComponent(downloadUrl)}`;
+}
+
+function legacyDocumentFileCacheKey(downloadUrl: string): string {
+  return `${DOCUMENT_FILE_CACHE_PREFIX}${encodeURIComponent(downloadUrl)}`;
+}
+
+/** Lookup keys: canonical id key first, then legacy URL-encoded keys for migration. */
+function documentFileCacheKeysToTry(downloadUrl: string): string[] {
+  const keys: string[] = [documentFileCacheKey(downloadUrl)];
+  const seen = new Set(keys);
+
+  const addKey = (key: string) => {
+    if (!seen.has(key)) {
+      seen.add(key);
+      keys.push(key);
+    }
+  };
+
+  addKey(legacyDocumentFileCacheKey(downloadUrl));
+
+  const id = extractDocumentIdFromDownloadUrl(downloadUrl);
+  if (id) {
+    for (const variant of [
+      `/api/documents/${id}/download`,
+      `/documents/${id}/download`,
+      `http://localhost:4000/api/documents/${id}/download`,
+    ]) {
+      addKey(legacyDocumentFileCacheKey(variant));
+    }
+  }
+
+  return keys;
+}
+
+async function readCachedDocumentFile(downloadUrl: string): Promise<CachedDocumentFile | null> {
+  const canonicalKey = documentFileCacheKey(downloadUrl);
+
+  for (const key of documentFileCacheKeysToTry(downloadUrl)) {
+    const cached = await offlineStore.getCache<CachedDocumentFile>(key);
+    if (!cached?.storedValue) continue;
+
+    if (key !== canonicalKey) {
+      await offlineStore.saveCache(canonicalKey, {
+        ...cached,
+        downloadUrl,
+        cachedAt: new Date().toISOString(),
+      } satisfies CachedDocumentFile);
+    }
+
+    return cached;
+  }
+
+  return null;
+}
+
 /** True when a backend-hosted file blob is stored locally (native offline preview). */
 export async function isDocumentFileCached(downloadUrl: string): Promise<boolean> {
   if (!downloadUrl || !isBackendDocumentUrl(downloadUrl)) return true;
-  const cached = await offlineStore.getCache<CachedDocumentFile>(documentFileCacheKey(downloadUrl));
+  const cached = await readCachedDocumentFile(downloadUrl);
   return !!cached?.storedValue;
-}
-
-function documentFileCacheKey(downloadUrl: string): string {
-  return `${DOCUMENT_FILE_CACHE_PREFIX}${encodeURIComponent(downloadUrl)}`;
 }
 
 function shouldSkipNativeDocumentFetch(): boolean {
@@ -139,7 +201,7 @@ async function blobFromStoredValue(storedValue: string, mimeType: string): Promi
 }
 
 async function getCachedDocumentBlob(downloadUrl: string): Promise<Blob | null> {
-  const cached = await offlineStore.getCache<CachedDocumentFile>(documentFileCacheKey(downloadUrl));
+  const cached = await readCachedDocumentFile(downloadUrl);
   if (!cached?.storedValue) return null;
   try {
     return await blobFromStoredValue(cached.storedValue, cached.contentType);
@@ -175,7 +237,7 @@ export async function seedDocumentFileCache(
 }
 
 export async function copyDocumentFileCache(fromDownloadUrl: string, toDownloadUrl: string): Promise<void> {
-  const cached = await offlineStore.getCache<CachedDocumentFile>(documentFileCacheKey(fromDownloadUrl));
+  const cached = await readCachedDocumentFile(fromDownloadUrl);
   if (!cached?.storedValue) return;
   await offlineStore.saveCache(documentFileCacheKey(toDownloadUrl), {
     ...cached,
@@ -205,7 +267,7 @@ async function prefetchDocumentRecord(record: DocumentRecord): Promise<void> {
   const downloadUrl = record.downloadUrl;
   if (!downloadUrl || !isBackendDocumentUrl(downloadUrl)) return;
   if (shouldSkipNativeDocumentFetch()) return;
-  const cached = await offlineStore.getCache<CachedDocumentFile>(documentFileCacheKey(downloadUrl));
+  const cached = await readCachedDocumentFile(downloadUrl);
   if (cached?.storedValue) return;
   await fetchAndCacheDocumentBlob(downloadUrl, record);
 }
@@ -280,7 +342,7 @@ async function prefetchDocumentBlobs(
     if (seen.has(downloadUrl)) continue;
     seen.add(downloadUrl);
 
-    const cached = await offlineStore.getCache<CachedDocumentFile>(documentFileCacheKey(downloadUrl));
+    const cached = await readCachedDocumentFile(downloadUrl);
     if (cached?.storedValue) {
       prefetched += 1;
       continue;

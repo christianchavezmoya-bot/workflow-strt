@@ -249,6 +249,90 @@ function PdfCanvasPreview({
   );
 }
 
+function NativeHtmlDocumentPreview({
+  html,
+  zoom,
+  title,
+  fitMode,
+}: {
+  html: string;
+  zoom: number;
+  title?: string;
+  fitMode: "docx-page" | "spreadsheet";
+}) {
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [layout, setLayout] = useState({
+    width: fitMode === "docx-page" ? DOCX_PAGE_WIDTH_PX : 480,
+    height: fitMode === "docx-page" ? DOCX_PAGE_HEIGHT_PX : 320,
+  });
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const measureContent = () => {
+      const doc = iframe.contentDocument;
+      if (!doc?.body) return;
+
+      const contentWidth = Math.max(
+        fitMode === "docx-page" ? DOCX_PAGE_WIDTH_PX : 0,
+        doc.documentElement.scrollWidth,
+        doc.body.scrollWidth,
+      );
+      const contentHeight = Math.max(
+        fitMode === "docx-page" ? DOCX_PAGE_HEIGHT_PX : 320,
+        doc.documentElement.scrollHeight,
+        doc.body.scrollHeight,
+      );
+
+      setLayout({
+        width: Math.ceil(contentWidth * zoom),
+        height: Math.ceil(contentHeight * zoom),
+      });
+    };
+
+    const onLoad = () => window.setTimeout(measureContent, 0);
+    iframe.addEventListener("load", onLoad);
+    measureContent();
+
+    return () => iframe.removeEventListener("load", onLoad);
+  }, [fitMode, html, zoom]);
+
+  return (
+    <Box
+      sx={{
+        flex: 1,
+        overflow: "auto",
+        WebkitOverflowScrolling: "touch",
+        display: "flex",
+        justifyContent: fitMode === "docx-page" ? "center" : "flex-start",
+        alignItems: "flex-start",
+        p: { xs: 1.25, sm: 2 },
+        bgcolor: "rgba(15,23,42,0.35)",
+      }}
+    >
+      <Box
+        component="iframe"
+        ref={iframeRef}
+        srcDoc={html}
+        title={title ?? "Preview"}
+        sandbox="allow-same-origin"
+        sx={{
+          width: layout.width,
+          height: layout.height,
+          minWidth: fitMode === "spreadsheet" ? "100%" : undefined,
+          border: "none",
+          borderRadius: 3,
+          bgcolor: "#fff",
+          boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
+          display: "block",
+          flexShrink: 0,
+        }}
+      />
+    </Box>
+  );
+}
+
 function HtmlDocumentPreview({
   html,
   zoom,
@@ -703,12 +787,21 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         )}
 
         {!loading && !error && previewMode === "html" && htmlPreview && (
-          <HtmlDocumentPreview
-            html={htmlPreview}
-            zoom={zoom}
-            title={doc?.name ?? undefined}
-            fitMode={fileType === "xlsx" || fileType === "xls" ? "spreadsheet" : "docx-page"}
-          />
+          isMobileNativePlatform() ? (
+            <NativeHtmlDocumentPreview
+              html={htmlPreview}
+              zoom={zoom}
+              title={doc?.name ?? undefined}
+              fitMode={fileType === "xlsx" || fileType === "xls" ? "spreadsheet" : "docx-page"}
+            />
+          ) : (
+            <HtmlDocumentPreview
+              html={htmlPreview}
+              zoom={zoom}
+              title={doc?.name ?? undefined}
+              fitMode={fileType === "xlsx" || fileType === "xls" ? "spreadsheet" : "docx-page"}
+            />
+          )
         )}
 
         {!loading && !error && previewMode === "iframe" && blobUrl && (
