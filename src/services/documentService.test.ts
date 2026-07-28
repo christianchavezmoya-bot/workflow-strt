@@ -18,14 +18,18 @@ function record(partial: Partial<DocumentPrefetchRecord> & Pick<DocumentPrefetch
 }
 
 describe("normalizeDocumentDownloadUrl", () => {
-  it("rewrites absolute backend URLs to the current API path", () => {
+  it("rewrites absolute backend URLs without duplicating /api", () => {
     expect(
       normalizeDocumentDownloadUrl("http://172.20.8.16:4000/api/documents/abc/download"),
-    ).toBe("/api/documents/abc/download");
+    ).toBe("/documents/abc/download");
   });
 
-  it("leaves relative paths unchanged", () => {
-    expect(normalizeDocumentDownloadUrl("/api/documents/abc/download")).toBe("/api/documents/abc/download");
+  it("rewrites /api-prefixed paths for axios baseURL …/api", () => {
+    expect(normalizeDocumentDownloadUrl("/api/documents/abc/download")).toBe("/documents/abc/download");
+  });
+
+  it("leaves already-normalized paths unchanged", () => {
+    expect(normalizeDocumentDownloadUrl("/documents/abc/download")).toBe("/documents/abc/download");
   });
 });
 
