@@ -33,6 +33,8 @@ import {
   pendingRemove,
   droppedActionsGetAll,
   droppedActionDismiss,
+  droppedActionRequeue,
+  referenceDataGet,
   type PendingAction,
   type DroppedAction,
 } from "../../services/localDB";
@@ -51,6 +53,7 @@ import {
   downloadSyncSupportBundle,
 } from "../../services/syncSupportBundleService";
 import { resolvePendingActionLabel } from "../../utils/syncActionLabels";
+import type { User } from "../../types/user";
 
 interface Props {
   open: boolean;
@@ -217,10 +220,17 @@ function getQueuedFieldValue<T extends object>(
   return fallback;
 }
 
+function formatUserId(userId: unknown, userMap: Map<string, User>): string {
+  if (userId == null || userId === "") return "—";
+  const id = String(userId);
+  return userMap.get(id)?.fullName ?? id;
+}
+
 function buildAssetConflictFields(
   action: PendingAction,
   localAsset?: ProjectAsset | null,
   serverAsset?: ProjectAsset | null,
+  userMap?: Map<string, User>,
 ): ConflictFieldComparison[] {
   const changedKeys = deriveChangedKeys(action);
   const fields: ConflictFieldComparison[] = [];
@@ -247,7 +257,11 @@ function buildAssetConflictFields(
         addField("Location", getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.location), serverAsset?.location);
         break;
       case "assignedUserId":
-        addField("Assigned User", getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.assignedUserId), serverAsset?.assignedUserId);
+        addField(
+          "Assigned User",
+          formatUserId(getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.assignedUserId), userMap ?? new Map()),
+          formatUserId(serverAsset?.assignedUserId, userMap ?? new Map()),
+        );
         break;
       case "workOrderId":
         addField("Work Order", getQueuedFieldValue<ProjectAsset>(action, key, localAsset?.workOrderId), serverAsset?.workOrderId);
@@ -384,6 +398,8 @@ async function buildConflictDetail(action: PendingAction): Promise<ConflictDetai
   if (action.entityType === "asset") {
     const localRecord = await entityGetAsset(action.entityId);
     const localAsset = (localRecord?.data as ProjectAsset | undefined) ?? null;
+    const users = (await referenceDataGet<User[]>("users")) ?? [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
     let serverAsset: ProjectAsset | null = null;
     let fetchError: string | undefined;
     try {
@@ -398,7 +414,7 @@ async function buildConflictDetail(action: PendingAction): Promise<ConflictDetai
       subtitle: localAsset?.assetName ?? serverAsset?.assetName ?? action.url,
       localLabel: "Your offline version",
       serverLabel: "Current server version",
-      fields: buildAssetConflictFields(action, localAsset, serverAsset),
+      fields: buildAssetConflictFields(action, localAsset, serverAsset, userMap),
       fetchError,
     };
   }
@@ -521,6 +537,7 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   const [conflictDetails, setConflictDetails] = useState<Record<string, ConflictDetail>>({});
   const [loadingConflictIds, setLoadingConflictIds] = useState<Record<string, boolean>>({});
   const [actionLabels, setActionLabels] = useState<Record<string, { title: string; subtitle: string }>>({});
+  const [droppedLabels, setDroppedLabels] = useState<Record<string, { title: string; subtitle: string }>>({});
   const [expandedDiagIds, setExpandedDiagIds] = useState<Record<string, boolean>>({});
   const [copiedDiagId, setCopiedDiagId] = useState<string | null>(null);
   const [exportState, setExportState] = useState<"idle" | "copying" | "downloading" | "copied" | "error">("idle");
@@ -577,6 +594,34 @@ export default function SyncCenterPage({ open, onClose }: Props) {
     })();
     return () => { active = false; };
   }, [queue]);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const entries = await Promise.all(
+        droppedActions.map(async (d) => {
+          if (!d.url) return [d.id, { title: droppedActionLabel(d), subtitle: d.entityId.slice(0, 8) }] as const;
+          const label = await resolvePendingActionLabel({
+            id: d.id,
+            url: d.url,
+            method: d.method ?? "POST",
+            body: d.body,
+            entityType: d.entityType,
+            entityId: d.entityId,
+            optimisticPatch: d.optimisticPatch ?? {},
+            createdAt: d.createdAt,
+            retries: 0,
+            status: "failed",
+            opType: d.opType,
+          });
+          return [d.id, label] as const;
+        }),
+      );
+      if (!active) return;
+      setDroppedLabels(Object.fromEntries(entries));
+    })();
+    return () => { active = false; };
+  }, [droppedActions]);
 
   useEffect(() => {
     if (!open || conflicted.length === 0) return;
@@ -680,18 +725,40 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                 {droppedActions.length} change{droppedActions.length !== 1 ? "s" : ""} permanently failed to sync — manual action required
               </Typography>
               {droppedActions.map((d) => (
-                <Stack key={d.id} direction="row" alignItems="center" spacing={1} justifyContent="space-between">
+                <Stack key={d.id} direction="row" alignItems="center" spacing={1} justifyContent="space-between" sx={{ mt: 0.5 }}>
                   <Typography variant="caption" display="block" sx={{ flex: 1 }}>
-                    {droppedActionLabel(d)} · {new Date(d.createdAt).toLocaleTimeString()} · {d.lastError ?? "server unreachable after 20 retries"}
+                    {droppedLabels[d.id]?.title ?? droppedActionLabel(d)}
+                    {droppedLabels[d.id]?.subtitle ? ` · ${droppedLabels[d.id].subtitle}` : ""}
+                    {" · "}{new Date(d.createdAt).toLocaleTimeString()}
+                    {" · "}{d.lastError ?? "server unreachable after 20 retries"}
                   </Typography>
-                  <Button
-                    size="small"
-                    color="inherit"
-                    onClick={() => { droppedActionDismiss(d.id); void loadDropped(); }}
-                    sx={{ fontSize: "0.68rem", color: "error.light", minWidth: 0, px: 0.5 }}
-                  >
-                    Dismiss
-                  </Button>
+                  <Stack direction="row" spacing={0.5} flexShrink={0}>
+                    {d.url && d.method && (
+                      <Button
+                        size="small"
+                        color="error"
+                        variant="text"
+                        onClick={() => {
+                          void droppedActionRequeue(d.id).then((ok) => {
+                            if (ok) window.dispatchEvent(new Event("sync-request-flush"));
+                            void loadDropped();
+                            void loadQueue();
+                          });
+                        }}
+                        sx={{ fontSize: "0.68rem", minWidth: 0, px: 0.5 }}
+                      >
+                        Re-queue
+                      </Button>
+                    )}
+                    <Button
+                      size="small"
+                      color="inherit"
+                      onClick={() => { droppedActionDismiss(d.id); void loadDropped(); }}
+                      sx={{ fontSize: "0.68rem", color: "error.light", minWidth: 0, px: 0.5 }}
+                    >
+                      Dismiss
+                    </Button>
+                  </Stack>
                 </Stack>
               ))}
             </Alert>

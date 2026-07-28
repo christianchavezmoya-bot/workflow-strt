@@ -74,6 +74,11 @@ export interface DroppedAction {
   lastError?: string;
   createdAt: string;
   droppedAt: string; // ISO wall-clock time the action was permanently dropped
+  /** Present on drops after this field was added — enough to re-queue manually. */
+  url?: string;
+  method?: PendingActionMethod;
+  body?: unknown;
+  optimisticPatch?: Record<string, unknown>;
 }
 
 // ── Cache age thresholds ──────────────────────────────────────────────────────
@@ -474,6 +479,10 @@ export async function pendingMarkRetry(
         lastError: error || item.lastError,
         createdAt: item.createdAt,
         droppedAt: new Date().toISOString(),
+        url: item.url,
+        method: item.method,
+        body: item.body,
+        optimisticPatch: item.optimisticPatch,
       };
       await db.put("dropped_actions", dropped);
       await db.delete("pending_actions", id);
@@ -528,6 +537,34 @@ export async function droppedActionsDismissAll(): Promise<void> {
     await db.clear("dropped_actions");
     window.dispatchEvent(new Event("sync-pending-changed"));
   } catch { /* ignore */ }
+}
+
+/** Move a dropped action back into the pending queue for another sync attempt. */
+export async function droppedActionRequeue(id: string): Promise<boolean> {
+  try {
+    const db = await getDB();
+    const dropped = await db.get("dropped_actions", id);
+    if (!dropped?.url || !dropped.method) return false;
+    const pending: PendingAction = {
+      id: dropped.id,
+      url: dropped.url,
+      method: dropped.method,
+      body: dropped.body,
+      entityType: dropped.entityType,
+      entityId: dropped.entityId,
+      optimisticPatch: dropped.optimisticPatch ?? {},
+      createdAt: dropped.createdAt,
+      retries: 0,
+      status: "pending",
+      opType: dropped.opType,
+    };
+    await db.put("pending_actions", pending);
+    await db.delete("dropped_actions", id);
+    window.dispatchEvent(new Event("sync-pending-changed"));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ── Sync meta helpers ─────────────────────────────────────────────────────────

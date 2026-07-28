@@ -748,6 +748,14 @@ export function useSyncEngine(): SyncState {
             if (timedOutAgainstReachableServer) {
               continue;
             }
+            // Deliberate offline fast-bail — don't burn retry budget; try again on reconnect.
+            const isOfflineSkip = (e as { isOfflineSkip?: boolean; message?: string }).isOfflineSkip
+              || (e instanceof Error && e.message === "offline-skip");
+            if (isOfflineSkip) {
+              await pendingSetStatus(action.id, "pending");
+              setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
+              break;
+            }
             setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
             break;
           }
