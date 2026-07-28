@@ -27,7 +27,15 @@ import {
 } from "@mui/material";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
+import axios from "axios";
+import * as pdfjsLib from "pdfjs-dist";
 import { documentService, type DocumentRecord } from "../../services/documentService";
+import { isMobileNativePlatform } from "../../utils/platform";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.mjs",
+  import.meta.url,
+).toString();
 
 type PreviewMode = "pdf" | "image" | "video" | "html" | "iframe" | "unsupported";
 
@@ -72,14 +80,70 @@ function formatDate(iso?: string | null) {
   }
 }
 
+function previewLoadErrorMessage(err: unknown): string {
+  if (isMobileNativePlatform()) {
+    return "Could not load this file. If the phone is offline, make sure the document was previously synced to the device.";
+  }
+  if (axios.isAxiosError(err)) {
+    const status = err.response?.status;
+    if (status === 401 || status === 403) return "You don't have permission to view this file. Try signing in again.";
+    if (status === 404) return "This file was not found on the server.";
+    if (err.code === "ERR_NETWORK") return "Could not reach the server. Check your connection and try again.";
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return "Could not load this file for preview.";
+}
+
+function buildDocxPreviewHtml(bodyHtml: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>
+    html, body { margin: 0; padding: 0; background: #fff; }
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px 24px 32px;
+      line-height: 1.55;
+      color: #111;
+      box-sizing: border-box;
+      overflow-wrap: anywhere;
+      width: max-content;
+      min-width: min(100%, 640px);
+      max-width: none;
+    }
+    table { border-collapse: collapse; width: auto; max-width: none; }
+    td, th { border: 1px solid #ccc; padding: 6px 10px; word-break: break-word; }
+    img { max-width: 100%; height: auto; display: block; }
+    p, li, h1, h2, h3, h4 { max-width: 100%; margin-top: 0.35em; margin-bottom: 0.35em; }
+  </style></head><body>${bodyHtml}</body></html>`;
+}
+
+function buildXlsxPreviewHtml(rawHtml: string): string {
+  const withDoc = rawHtml.includes("<html")
+    ? rawHtml
+    : `<!DOCTYPE html><html><head></head><body>${rawHtml}</body></html>`;
+  if (withDoc.includes("</head>")) {
+    return withDoc.replace(
+      "</head>",
+      `<meta charset="utf-8" /><style>
+        html, body { margin: 0; padding: 0; background: #fff; }
+        body { font-family: Arial, sans-serif; padding: 16px; overflow: visible; width: max-content; min-width: min(100%, 480px); }
+        table { border-collapse: collapse; font-size: 12px; }
+        td, th { border: 1px solid #d0d0d0; padding: 6px 10px; white-space: nowrap; vertical-align: top; background: #fff !important; color: #000 !important; }
+        tr:first-child td, tr:first-child th { font-weight: 700; background: #f4f4f4 !important; }
+      </style></head>`,
+    );
+  }
+  return buildDocxPreviewHtml(rawHtml);
+}
+
 function PdfCanvasPreview({
-  blobUrl,
+  data,
   zoom,
   onPageCount,
+  onError,
 }: {
-  blobUrl: string;
+  data: ArrayBuffer;
   zoom: number;
   onPageCount: (count: number) => void;
+  onError: (message: string) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const pagesRef = useRef<HTMLDivElement | null>(null);
@@ -103,21 +167,14 @@ function PdfCanvasPreview({
     let cancelled = false;
 
     async function renderPdf() {
-      if (!blobUrl || !pagesRef.current || containerWidth <= 0) return;
+      if (!data || data.byteLength === 0 || !pagesRef.current || containerWidth <= 0) return;
 
       const host = pagesRef.current;
       host.innerHTML = "";
       onPageCount(0);
 
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/build/pdf.worker.min.mjs",
-        import.meta.url,
-      ).toString();
-
-      const loadingTask = pdfjsLib.getDocument({ url: blobUrl });
-
       try {
+        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(data) });
         const pdf = await loadingTask.promise;
         if (cancelled) {
           void loadingTask.destroy();
@@ -158,9 +215,10 @@ function PdfCanvasPreview({
 
           await page.render({ canvas, canvasContext: context, viewport } as never).promise;
         }
-      } catch {
+      } catch (err) {
         if (!cancelled) {
           host.innerHTML = "";
+          onError(previewLoadErrorMessage(err));
         }
       }
     }
@@ -171,7 +229,7 @@ function PdfCanvasPreview({
       cancelled = true;
       if (pagesRef.current) pagesRef.current.innerHTML = "";
     };
-  }, [blobUrl, containerWidth, onPageCount, zoom]);
+  }, [data, containerWidth, onError, onPageCount, zoom]);
 
   return (
     <Box
@@ -188,10 +246,113 @@ function PdfCanvasPreview({
   );
 }
 
+function HtmlDocumentPreview({
+  html,
+  zoom,
+  title,
+}: {
+  html: string;
+  zoom: number;
+  title?: string;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [layout, setLayout] = useState({ scale: 1, width: 800, height: 600 });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const iframe = iframeRef.current;
+    if (!container || !iframe) return;
+
+    const measureAndFit = () => {
+      const doc = iframe.contentDocument;
+      if (!doc?.body) return;
+
+      const contentWidth = Math.max(
+        doc.documentElement.scrollWidth,
+        doc.body.scrollWidth,
+        doc.documentElement.offsetWidth,
+        480,
+      );
+      const contentHeight = Math.max(
+        doc.documentElement.scrollHeight,
+        doc.body.scrollHeight,
+        doc.documentElement.offsetHeight,
+        320,
+      );
+
+      const pad = 32;
+      const availW = Math.max(240, container.clientWidth - pad);
+      const availH = Math.max(240, container.clientHeight - pad);
+      const fitScale = Math.min(availW / contentWidth, availH / contentHeight, 1);
+
+      setLayout({
+        scale: fitScale * zoom,
+        width: contentWidth,
+        height: contentHeight,
+      });
+    };
+
+    const onLoad = () => window.setTimeout(measureAndFit, 0);
+    iframe.addEventListener("load", onLoad);
+    const resizeObserver = new ResizeObserver(() => measureAndFit());
+    resizeObserver.observe(container);
+    measureAndFit();
+
+    return () => {
+      iframe.removeEventListener("load", onLoad);
+      resizeObserver.disconnect();
+    };
+  }, [html, zoom]);
+
+  return (
+    <Box
+      ref={containerRef}
+      sx={{
+        flex: 1,
+        overflow: "auto",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "flex-start",
+        p: { xs: 1.25, sm: 2 },
+        bgcolor: "rgba(15,23,42,0.35)",
+      }}
+    >
+      <Box
+        sx={{
+          transform: `scale(${layout.scale})`,
+          transformOrigin: "top center",
+          width: layout.width,
+          height: layout.height,
+          flexShrink: 0,
+        }}
+      >
+        <Box
+          component="iframe"
+          ref={iframeRef}
+          srcDoc={html}
+          title={title ?? "Preview"}
+          sandbox="allow-same-origin"
+          sx={{
+            width: layout.width,
+            height: layout.height,
+            border: "none",
+            borderRadius: 3,
+            bgcolor: "#fff",
+            boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
+            display: "block",
+          }}
+        />
+      </Box>
+    </Box>
+  );
+}
+
 export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Props) {
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
   const [htmlPreview, setHtmlPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -221,6 +382,7 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
       setLoading(false);
       setError(null);
       setHtmlPreview(null);
+      setPdfData(null);
       setBlobUrl((current) => {
         if (current) URL.revokeObjectURL(current);
         return null;
@@ -242,42 +404,34 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
     });
     setHtmlPreview(null);
 
+    setHtmlPreview(null);
+    setPdfData(null);
+
     async function loadPreview() {
       try {
+        if (previewMode === "pdf") {
+          const buffer = await documentService.openDocumentAsBuffer(activeDownloadUrl!);
+          if (cancelled) return;
+          if (buffer.byteLength === 0) throw new Error("This PDF file is empty.");
+          setPdfData(buffer.slice(0));
+          return;
+        }
+
         if (previewMode === "html") {
           const buffer = await documentService.openDocumentAsBuffer(activeDownloadUrl!);
+          if (buffer.byteLength === 0) throw new Error("This file is empty.");
 
           if (fileType === "docx") {
             const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
             if (cancelled) return;
-            setHtmlPreview(
-              `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1" /><style>
-                html { overflow: auto; background: #fff; }
-                body {
-                  font-family: Arial, sans-serif;
-                  padding: 20px 24px 32px;
-                  line-height: 1.55;
-                  background: #fff;
-                  color: #111;
-                  margin: 0 auto;
-                  max-width: 920px;
-                  width: 100%;
-                  box-sizing: border-box;
-                  overflow-wrap: anywhere;
-                }
-                table { border-collapse: collapse; width: 100%; max-width: 100%; table-layout: fixed; }
-                td, th { border: 1px solid #ccc; padding: 6px 10px; word-break: break-word; }
-                img { max-width: 100%; height: auto; display: block; }
-                p, li, h1, h2, h3, h4 { max-width: 100%; }
-              </style></head><body>${result.value}</body></html>`,
-            );
+            setHtmlPreview(buildDocxPreviewHtml(result.value));
             return;
           }
 
           if (fileType === "doc") {
             if (cancelled) return;
             setHtmlPreview(
-              `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1" /><style>
+              `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>
                 body{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fff;color:#444}
                 .wrap{max-width:520px;padding:32px;text-align:center}
                 .title{font-size:18px;font-weight:700;color:#222;margin:0 0 10px}
@@ -287,22 +441,16 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
             return;
           }
 
-          const workbook = XLSX.read(new Uint8Array(buffer), { type: "array" });
-          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-          const rawHtml = XLSX.utils.sheet_to_html(firstSheet);
-          if (cancelled) return;
-          setHtmlPreview(
-            rawHtml.replace(
-              "</head>",
-              `<meta name="viewport" content="width=device-width, initial-scale=1" /><style>
-                body{font-family:Arial,sans-serif;padding:16px;background:#fff;margin:0;overflow:auto}
-                table{border-collapse:collapse;font-size:12px;min-width:100%}
-                td,th{border:1px solid #d0d0d0;padding:6px 10px;white-space:nowrap;vertical-align:top;background:#fff!important;color:#000!important}
-                tr:first-child td,tr:first-child th{font-weight:700;background:#f4f4f4!important}
-              </style></head>`,
-            ),
-          );
-          return;
+          if (fileType === "xlsx" || fileType === "xls") {
+            const workbook = XLSX.read(new Uint8Array(buffer), { type: "array" });
+            if (!workbook.SheetNames.length) throw new Error("This spreadsheet has no worksheets.");
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            if (!firstSheet) throw new Error("Could not read the first worksheet.");
+            const rawHtml = XLSX.utils.sheet_to_html(firstSheet);
+            if (cancelled) return;
+            setHtmlPreview(buildXlsxPreviewHtml(rawHtml));
+            return;
+          }
         }
 
         const nextBlobUrl = await documentService.openDocument(activeDownloadUrl!);
@@ -311,9 +459,9 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
           return;
         }
         setBlobUrl(nextBlobUrl);
-      } catch {
+      } catch (err) {
         if (!cancelled) {
-          setError("Could not load this file. If the phone is offline, make sure the document was previously synced to the device.");
+          setError(previewLoadErrorMessage(err));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -463,7 +611,7 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
           </Box>
         )}
 
-        {!loading && !error && previewMode === "pdf" && blobUrl && (
+        {!loading && !error && previewMode === "pdf" && pdfData && (
           <>
             <Stack
               direction="row"
@@ -478,7 +626,7 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
             >
               <PictureAsPdfOutlined sx={{ fontSize: 18, color: "#f87171" }} />
               <Typography variant="caption">
-                Opens fit-to-page first, then you can zoom in or out.
+                Fit-to-page preview — zoom in or out as needed.
               </Typography>
               {pageCount > 0 && (
                 <Typography variant="caption" sx={{ ml: "auto" }}>
@@ -486,7 +634,12 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
                 </Typography>
               )}
             </Stack>
-            <PdfCanvasPreview blobUrl={blobUrl} zoom={zoom} onPageCount={setPageCount} />
+            <PdfCanvasPreview
+              data={pdfData}
+              zoom={zoom}
+              onPageCount={setPageCount}
+              onError={setError}
+            />
           </>
         )}
 
@@ -526,31 +679,7 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         )}
 
         {!loading && !error && previewMode === "html" && htmlPreview && (
-          <Box sx={{ flex: 1, overflow: "auto", p: { xs: 1.25, sm: 2.5 } }}>
-            <Box
-              sx={{
-                width: `${Math.max(100, zoom * 100)}%`,
-                minHeight: "100%",
-                mx: "auto",
-              }}
-            >
-              <Box
-                component="iframe"
-                srcDoc={htmlPreview}
-                title={doc?.name ?? "Preview"}
-                sandbox="allow-same-origin"
-                sx={{
-                  width: "100%",
-                  minHeight: "100%",
-                  height: zoom >= 1 ? `${Math.max(100, zoom * 100)}%` : "100%",
-                  border: "none",
-                  borderRadius: 3,
-                  bgcolor: "#fff",
-                  boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
-                }}
-              />
-            </Box>
-          </Box>
+          <HtmlDocumentPreview html={htmlPreview} zoom={zoom} title={doc?.name ?? undefined} />
         )}
 
         {!loading && !error && previewMode === "iframe" && blobUrl && (

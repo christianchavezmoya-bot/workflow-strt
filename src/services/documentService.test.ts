@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   documentSyncFingerprint,
   listDocumentsNeedingPrefetch,
+  normalizeDocumentDownloadUrl,
   sortDocumentsForLibraryPrefetch,
   type DocumentPrefetchRecord,
   type DocumentRecord,
@@ -15,6 +16,18 @@ function record(partial: Partial<DocumentPrefetchRecord> & Pick<DocumentPrefetch
     ...partial,
   };
 }
+
+describe("normalizeDocumentDownloadUrl", () => {
+  it("rewrites absolute backend URLs to the current API path", () => {
+    expect(
+      normalizeDocumentDownloadUrl("http://172.20.8.16:4000/api/documents/abc/download"),
+    ).toBe("/api/documents/abc/download");
+  });
+
+  it("leaves relative paths unchanged", () => {
+    expect(normalizeDocumentDownloadUrl("/api/documents/abc/download")).toBe("/api/documents/abc/download");
+  });
+});
 
 describe("sortDocumentsForLibraryPrefetch", () => {
   it("prioritizes tips before other library documents", () => {

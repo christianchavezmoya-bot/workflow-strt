@@ -62,6 +62,13 @@ export function isBackendDocumentUrl(downloadUrl: string): boolean {
   return /\/api\/documents\/[^/]+\/download(?:\?|$)/.test(downloadUrl);
 }
 
+/** Rewrite absolute download URLs to the current API path so web preview works across hosts. */
+export function normalizeDocumentDownloadUrl(downloadUrl: string): string {
+  const match = downloadUrl.match(/\/api\/documents\/[^/?#]+\/download(?:\?[^\s#]*)?/i);
+  if (match) return match[0];
+  return downloadUrl;
+}
+
 /** True when a backend-hosted file blob is stored locally (native offline preview). */
 export async function isDocumentFileCached(downloadUrl: string): Promise<boolean> {
   if (!downloadUrl || !isBackendDocumentUrl(downloadUrl)) return true;
@@ -178,7 +185,7 @@ export async function copyDocumentFileCache(fromDownloadUrl: string, toDownloadU
 }
 
 async function fetchAndCacheDocumentBlob(downloadUrl: string, record?: Pick<DocumentRecord, "contentType" | "fileSize">): Promise<Blob> {
-  const response = await api.get<Blob>(downloadUrl, { responseType: "blob" });
+  const response = await api.get<Blob>(normalizeDocumentDownloadUrl(downloadUrl), { responseType: "blob" });
   const blob = response.data instanceof Blob
     ? response.data
     : new Blob([response.data], { type: record?.contentType ?? "application/octet-stream" });
@@ -462,7 +469,7 @@ export const documentService = {
   /** Fetch a document file with the auth token and return a Blob object URL. */
   async openDocument(downloadUrl: string): Promise<string> {
     if (!isMobileNativePlatform() || !isBackendDocumentUrl(downloadUrl)) {
-      const response = await api.get<Blob>(downloadUrl, { responseType: "blob" });
+      const response = await api.get<Blob>(normalizeDocumentDownloadUrl(downloadUrl), { responseType: "blob" });
       return URL.createObjectURL(response.data);
     }
 
@@ -473,7 +480,7 @@ export const documentService = {
   /** Fetch a document file with the auth token and return the raw ArrayBuffer (for client-side parsing). */
   async openDocumentAsBuffer(downloadUrl: string): Promise<ArrayBuffer> {
     if (!isMobileNativePlatform() || !isBackendDocumentUrl(downloadUrl)) {
-      const response = await api.get<ArrayBuffer>(downloadUrl, { responseType: "arraybuffer" });
+      const response = await api.get<ArrayBuffer>(normalizeDocumentDownloadUrl(downloadUrl), { responseType: "arraybuffer" });
       return response.data;
     }
 
@@ -490,7 +497,7 @@ export const documentService = {
 
     const blob = isMobileNativePlatform()
       ? await loadDocumentBlob(downloadUrl)
-      : (await api.get<Blob>(downloadUrl, { responseType: "blob" })).data;
+      : (await api.get<Blob>(normalizeDocumentDownloadUrl(downloadUrl), { responseType: "blob" })).data;
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
