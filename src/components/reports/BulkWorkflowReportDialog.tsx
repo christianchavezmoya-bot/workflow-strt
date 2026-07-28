@@ -523,6 +523,7 @@ export function BulkWorkflowReportDialog({
                                 <Chip size="small" label="Retry needed" color="error" variant="outlined" sx={{ height: 20, fontSize: 10, alignSelf: "flex-start" }} />
                               </Stack>
                             )}
+                            secondaryTypographyProps={{ component: "div" }}
                           />
                         </ListItemButton>
                       </ListItem>
@@ -564,6 +565,7 @@ export function BulkWorkflowReportDialog({
                             </Stack>
                           </Stack>
                         )}
+                        secondaryTypographyProps={{ component: "div" }}
                       />
                     </ListItemButton>
                   );

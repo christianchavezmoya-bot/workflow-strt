@@ -93,7 +93,7 @@ Sign in as **Admin** (or **Project Manager** for email/share tests).
 |-------|---------|
 | **View / Print Reports** visible in table toolbar (desktop) | Yes, next to Print / PDF |
 | Button **disabled** with zero selection | Yes |
-| Narrow browser / mobile emulation | Button **not** shown (or desktop toolbar hidden) |
+| Narrow browser / mobile emulation | Button **not** shown (`useMobileWebLayout` + native hide) |
 | Select 1+ assets → bulk bar appears | Shows **View / Print Reports** in selection bar too |
 
 ---

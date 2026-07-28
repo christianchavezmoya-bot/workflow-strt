@@ -154,6 +154,7 @@ import {
 import { buildProjectCaptureTable } from "../../utils/projectCaptureTable";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
+import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
 import {
   loadWorkflowOpenPayload,
@@ -432,6 +433,8 @@ const AssetInstallationPage = () => {
   const isNativePlatform = isMobileNativePlatform();
   const showComplexControls = complexViewActive && isNativePlatform;
   const showAdvancedAssetActions = isDesktopLikePlatform() || showComplexControls;
+  const mobileWebLayout = useMobileWebLayout();
+  const showBulkWorkflowReports = showAdvancedAssetActions && !mobileWebLayout;
   const productsState = useAppSelector((s) => s.products);
   const projects = useAppSelector((s) => s.projects.items);
   const users = useAppSelector((s) => s.users.items);
@@ -5128,7 +5131,7 @@ ${words.slice(midpoint).join(" ")}`;
             Upload documents
           </Button>
 
-          {showAdvancedAssetActions && (
+          {showBulkWorkflowReports && (
             <Button
               size="small"
               variant="outlined"
@@ -5187,20 +5190,22 @@ ${words.slice(midpoint).join(" ")}`;
                   Print / PDF
                 </Button>
               </Tooltip>
-              <Tooltip title={selectedAssetIds.size === 0 ? "Select one or more assets first" : "Preview and download workflow installation reports for selected assets"}>
-                <span>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<ArticleOutlined fontSize="small" />}
-                    disabled={selectedAssetIds.size === 0}
-                    onClick={() => setBulkWorkflowReportsOpen(true)}
-                    sx={{ fontSize: 12 }}
-                  >
-                    View / Print Reports
-                  </Button>
-                </span>
-              </Tooltip>
+              {showBulkWorkflowReports && (
+                <Tooltip title={selectedAssetIds.size === 0 ? "Select one or more assets first" : "Preview and download workflow installation reports for selected assets"}>
+                  <span>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<ArticleOutlined fontSize="small" />}
+                      disabled={selectedAssetIds.size === 0}
+                      onClick={() => setBulkWorkflowReportsOpen(true)}
+                      sx={{ fontSize: 12 }}
+                    >
+                      View / Print Reports
+                    </Button>
+                  </span>
+                </Tooltip>
+              )}
               <Tooltip title="Export the current filtered asset view">
                 <span>
                   <Button
