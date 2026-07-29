@@ -1,11 +1,8 @@
 /**
- * SyncTelemetryPanel — always-on, read-only debugging strip that shows, per
- * data domain, how much has come DOWN from the server (download / hydration)
- * and how much is waiting to go UP to the server (upload / queue). Sits below
- * the ConnectivityDebugBar. Every number comes from useSyncTelemetry, which
- * only reads existing sync signals — this renders nothing that isn't real.
+ * SyncTelemetryPanel — read-only per-domain sync telemetry (download/upload progress).
+ * Embedded in Sync Center on native; no longer shown in the top bar.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Box, Collapse, IconButton, LinearProgress, Stack, Tooltip, Typography } from "@mui/material";
 import ExpandMoreOutlinedIcon from "@mui/icons-material/ExpandMoreOutlined";
 import ExpandLessOutlinedIcon from "@mui/icons-material/ExpandLessOutlined";
@@ -66,7 +63,6 @@ function DomainCard({ d }: { d: DomainTelemetry }) {
         {d.label}
       </Typography>
 
-      {/* Download (server → phone) */}
       <Tooltip title="Downloaded from server (hydration when online / cached data on device)">
         <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 0.4 }}>
           <SouthOutlinedIcon sx={{ fontSize: 12, color: dlColor }} />
@@ -87,7 +83,6 @@ function DomainCard({ d }: { d: DomainTelemetry }) {
         </Stack>
       </Tooltip>
 
-      {/* Upload (phone → server) */}
       <Tooltip title="Changes waiting to upload to the server">
         <Stack direction="row" alignItems="center" spacing={0.5}>
           <NorthOutlinedIcon sx={{ fontSize: 12, color: upColor }} />
@@ -101,9 +96,46 @@ function DomainCard({ d }: { d: DomainTelemetry }) {
   );
 }
 
-export default function SyncTelemetryPanel() {
+function readPersistedOpen(key: string, defaultOpen: boolean): boolean {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+  } catch {
+    // ignore
+  }
+  return defaultOpen;
+}
+
+interface Props {
+  /** When false, inner collapse content is hidden but header can still show if parent expanded. */
+  enabled?: boolean;
+  /** Initial expanded state for the domain cards row. Defaults to collapsed. */
+  defaultOpen?: boolean;
+  /** sessionStorage key for persisting expand/collapse within the session. */
+  persistKey?: string;
+  /** Embedded layout for Sync Center (no outer border strip styling). */
+  embedded?: boolean;
+}
+
+export default function SyncTelemetryPanel({
+  enabled = true,
+  defaultOpen = false,
+  persistKey = "sync-telemetry-panel-open",
+  embedded = false,
+}: Props) {
   const t = useSyncTelemetry();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(() => readPersistedOpen(persistKey, defaultOpen));
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(persistKey, String(open));
+    } catch {
+      // ignore
+    }
+  }, [open, persistKey]);
+
+  if (!enabled) return null;
 
   const offline = t.connectivity === "offline";
   const signalColor = offline ? TONE.bad : TONE.ok;
@@ -120,8 +152,15 @@ export default function SyncTelemetryPanel() {
           : "All synced";
 
   return (
-    <Box sx={{ width: "100%", px: 1, py: 0.5, borderTop: "0.5px solid rgba(255,255,255,0.06)" }}>
-      {/* Header row: overall signal + server + one-line summary + collapse */}
+    <Box
+      sx={{
+        width: "100%",
+        px: embedded ? 0 : 1,
+        py: embedded ? 0 : 0.5,
+        borderTop: embedded ? "none" : "0.5px solid rgba(255,255,255,0.06)",
+        mt: embedded ? 1.5 : 0,
+      }}
+    >
       <Stack direction="row" alignItems="center" spacing={0.75}>
         <Tooltip title={offline ? "No WiFi/cellular signal" : "Device has signal"}>
           {offline ? <WifiOffOutlinedIcon sx={{ fontSize: 14, color: signalColor }} /> : <WifiOutlinedIcon sx={{ fontSize: 14, color: signalColor }} />}
@@ -142,14 +181,13 @@ export default function SyncTelemetryPanel() {
             ↑ {t.uploadDrainPct}%
           </Typography>
         )}
-        <IconButton size="small" onClick={() => setOpen((o) => !o)} sx={{ p: 0.25 }}>
+        <IconButton size="small" onClick={() => setOpen((o) => !o)} sx={{ p: 0.25 }} aria-label={open ? "Collapse sync telemetry" : "Expand sync telemetry"}>
           {open ? <ExpandLessOutlinedIcon sx={{ fontSize: 16 }} /> : <ExpandMoreOutlinedIcon sx={{ fontSize: 16 }} />}
         </IconButton>
       </Stack>
 
       <Collapse in={open}>
         <Stack direction="row" spacing={0.75} sx={{ mt: 0.75, overflowX: "auto", pb: 0.5 }}>
-          {/* Overview card */}
           <Box sx={CARD_SX}>
             <Typography sx={{ fontSize: "0.66rem", fontWeight: 700, color: "text.secondary", mb: 0.5 }}>
               Overview
