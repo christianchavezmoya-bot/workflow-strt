@@ -17,13 +17,39 @@ public class FeatureDependenciesController : ControllerBase
 
     public FeatureDependenciesController(AppDbContext db) => _db = db;
 
-    /// <summary>GET /api/feature-dependencies?featureId=xxx</summary>
+    /// <summary>
+    /// GET /api/feature-dependencies?featureId=xxx
+    /// GET /api/feature-dependencies?productId=xxx  (batch: all deps for features linked to a product)
+    /// </summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<FeatureDependencyDto>>> GetByFeature([FromQuery] string featureId)
+    public async Task<ActionResult<IEnumerable<FeatureDependencyDto>>> Get(
+        [FromQuery] string? featureId,
+        [FromQuery] string? productId)
     {
-        if (string.IsNullOrWhiteSpace(featureId)) return BadRequest("featureId is required");
+        if (!string.IsNullOrWhiteSpace(productId))
+        {
+            var featureIds = await _db.ProductFeatures
+                .AsNoTracking()
+                .Where(pf => pf.ProductId == productId)
+                .Select(pf => pf.FeatureId)
+                .ToListAsync();
+
+            if (featureIds.Count == 0) return Ok(Array.Empty<FeatureDependencyDto>());
+
+            var productDeps = await _db.FeatureDependencies
+                .AsNoTracking()
+                .Where(d => featureIds.Contains(d.FeatureId))
+                .OrderBy(d => d.FeatureId)
+                .ThenBy(d => d.SortOrder)
+                .ToListAsync();
+
+            return Ok(productDeps.Select(ToDto));
+        }
+
+        if (string.IsNullOrWhiteSpace(featureId)) return BadRequest("featureId or productId is required");
 
         var deps = await _db.FeatureDependencies
+            .AsNoTracking()
             .Where(d => d.FeatureId == featureId)
             .OrderBy(d => d.SortOrder)
             .ToListAsync();
@@ -49,7 +75,7 @@ public class FeatureDependenciesController : ControllerBase
 
         _db.FeatureDependencies.Add(dep);
         await _db.SaveChangesAsync();
-        return CreatedAtAction(nameof(GetByFeature), new { featureId = dep.FeatureId }, ToDto(dep));
+        return CreatedAtAction(nameof(Get), new { featureId = dep.FeatureId }, ToDto(dep));
     }
 
     [HttpPut("{id}")]

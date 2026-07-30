@@ -174,6 +174,22 @@ export const assetDocumentLinkService = {
     }
   },
 
+  /**
+   * Batch document counts for a project or product — one request instead of N listByAsset calls.
+   * Returns { [assetId]: count }. Assets with zero docs are omitted.
+   */
+  async countsByScope(scope: { projectId?: string; productId?: string }): Promise<Record<string, number>> {
+    if (!scope.projectId && !scope.productId) return {};
+    try {
+      const res = await api.get<Record<string, number>>("/asset-document-links/counts", {
+        params: scope.projectId ? { projectId: scope.projectId } : { productId: scope.productId },
+      });
+      return res.data ?? {};
+    } catch {
+      return {};
+    }
+  },
+
   /** Attach an existing library document to an asset (max 3). */
   async attach(assetId: string, documentId: string, attachedBy?: string): Promise<AssetDocumentLink> {
     if (!isMobileNativePlatform()) {

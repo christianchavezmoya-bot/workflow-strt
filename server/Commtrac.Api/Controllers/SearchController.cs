@@ -93,8 +93,7 @@ public class SearchController : ControllerBase
                     ["Site Location"] = i.SiteLocation,
                     ["Status"] = i.Status,
                     ["Assigned Team"] = i.AssignedTeam,
-                    ["Installer Notes"] = i.InstallerNotes,
-                    ["Project ID"] = i.ProjectId
+                    ["Installer Notes"] = i.InstallerNotes
                 });
         }
 
@@ -124,9 +123,9 @@ public class SearchController : ControllerBase
                     ["Manufacturer"] = a.Manufacturer,
                     ["Location"] = a.Location,
                     ["Notes"] = a.Notes,
-                    ["Feature Values"] = a.FeatureValuesJson,
-                    ["As-Built Captures"] = a.AsBuiltJson,
-                    ["Workflow Step Results"] = latestRun?.StepResultsJson
+                    ["Feature Values"] = ExtractReadableJsonText(a.FeatureValuesJson),
+                    ["As-Built Captures"] = ExtractAsBuiltSearchText(a.AsBuiltJson),
+                    ["Workflow Step Results"] = ExtractReadableJsonText(latestRun?.StepResultsJson)
                 });
         }
 
@@ -148,7 +147,7 @@ public class SearchController : ControllerBase
                     ["Linked To"] = d.LinkedTo,
                     ["Created By"] = d.CreatedBy,
                     ["Notes"] = d.Notes,
-                    ["Custom Values"] = d.CustomValuesJson
+                    ["Custom Values"] = ExtractReadableJsonText(d.CustomValuesJson)
                 });
         }
 
@@ -213,8 +212,8 @@ public class SearchController : ControllerBase
                     ["Title"] = wi.Title,
                     ["Summary"] = wi.Summary,
                     ["Status"] = wi.Status,
-                    ["Steps"] = wi.StepsJson,
-                    ["Feature Values"] = wi.FeatureValuesJson
+                    ["Steps"] = ExtractReadableJsonText(wi.StepsJson),
+                    ["Feature Values"] = ExtractReadableJsonText(wi.FeatureValuesJson)
                 });
         }
 
@@ -234,8 +233,7 @@ public class SearchController : ControllerBase
                     ["Job Reference"] = wo.JobReference,
                     ["Status"] = wo.Status,
                     ["Notes"] = wo.Notes,
-                    ["Steps"] = wo.StepsDataJson,
-                    ["Product ID"] = wo.ProductId
+                    ["Steps"] = ExtractReadableJsonText(wo.StepsDataJson)
                 });
         }
 
@@ -517,7 +515,11 @@ CREATE TABLE IF NOT EXISTS SearchDocumentChunks (
         Dictionary<string, string?> fields)
     {
         var normalizedTitle = title ?? string.Empty;
-        var allText = string.Join(" ", fields.Values.Where(v => !string.IsNullOrWhiteSpace(v)));
+        var searchableFields = fields
+            .Where(kv => !string.IsNullOrWhiteSpace(kv.Value))
+            .ToDictionary(kv => kv.Key, kv => SanitizeSearchText(kv.Value!));
+
+        var allText = string.Join(" ", searchableFields.Values);
         var normalizedAll = Normalize(allText).ToLowerInvariant();
 
         if (!terms.All(t => normalizedAll.Contains(t)))
@@ -525,14 +527,17 @@ CREATE TABLE IF NOT EXISTS SearchDocumentChunks (
             return;
         }
 
-        var matchedFields = fields
+        var matchedFields = searchableFields
             .Where(kv => FieldContainsTerm(kv.Value, terms))
             .Select(kv => kv.Key)
             .ToList();
 
-        var snippetSource = fields.FirstOrDefault(kv => FieldContainsTerm(kv.Value, terms));
-        var snippet = BuildSnippet(snippetSource.Value ?? normalizedTitle, terms);
-        var score = ComputeScore(normalizedTitle, matchedFields.Count, terms);
+        var snippetSource = PreferHumanSnippetField(searchableFields, terms);
+        var body = BuildSnippet(snippetSource.Value ?? normalizedTitle, terms);
+        var snippet = string.IsNullOrWhiteSpace(snippetSource.Key) || string.IsNullOrWhiteSpace(body)
+            ? body
+            : $"{snippetSource.Key}: {body}";
+        var score = ComputeScore(normalizedTitle, matchedFields, terms, searchableFields);
 
         target.Add(new GlobalSearchResultDto(
             Id: $"{entityType}:{entityId}",
@@ -547,6 +552,31 @@ CREATE TABLE IF NOT EXISTS SearchDocumentChunks (
         ));
     }
 
+    private static KeyValuePair<string, string?> PreferHumanSnippetField(
+        Dictionary<string, string> fields,
+        List<string> terms)
+    {
+        // Prefer identity / brand fields over capture blobs so snippets stay readable.
+        string[] preferred =
+        [
+            "Asset Tag", "Asset Name", "Serial Number", "Manufacturer", "Model",
+            "Name", "Title", "Job Number", "Job Reference", "Customer",
+            "Location", "Notes", "As-Built Captures", "Feature Values"
+        ];
+        foreach (var key in preferred)
+        {
+            if (fields.TryGetValue(key, out var value) && FieldContainsTerm(value, terms))
+            {
+                return new KeyValuePair<string, string?>(key, value);
+            }
+        }
+
+        var first = fields.FirstOrDefault(kv => FieldContainsTerm(kv.Value, terms));
+        return first.Key is null
+            ? default
+            : new KeyValuePair<string, string?>(first.Key, first.Value);
+    }
+
     private static bool FieldContainsTerm(string? value, List<string> terms)
     {
         if (string.IsNullOrWhiteSpace(value)) return false;
@@ -554,7 +584,11 @@ CREATE TABLE IF NOT EXISTS SearchDocumentChunks (
         return terms.Any(text.Contains);
     }
 
-    private static int ComputeScore(string title, int matchedFieldCount, List<string> terms)
+    private static int ComputeScore(
+        string title,
+        List<string> matchedFields,
+        List<string> terms,
+        Dictionary<string, string> fields)
     {
         var titleNorm = Normalize(title).ToLowerInvariant();
         var score = 0;
@@ -572,13 +606,30 @@ CREATE TABLE IF NOT EXISTS SearchDocumentChunks (
             }
         }
 
-        score += matchedFieldCount * 4;
+        foreach (var field in matchedFields)
+        {
+            score += field switch
+            {
+                "Asset Tag" or "Name" or "Title" or "Job Number" or "Job Reference" => 12,
+                "Asset Name" or "Serial Number" or "Manufacturer" or "Customer" => 10,
+                "Model" or "Location" or "Notes" => 6,
+                _ => 3
+            };
+        }
+
+        // Brand / manufacturer exact-ish hits should beat accidental long-blob matches.
+        if (fields.TryGetValue("Manufacturer", out var mfr) &&
+            terms.Any(t => Normalize(mfr).Equals(t, StringComparison.OrdinalIgnoreCase)))
+        {
+            score += 25;
+        }
+
         return score;
     }
 
     private static string BuildSnippet(string text, List<string> terms)
     {
-        var normalized = Normalize(text);
+        var normalized = SanitizeSearchText(text);
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return string.Empty;
@@ -612,7 +663,7 @@ CREATE TABLE IF NOT EXISTS SearchDocumentChunks (
 
     private static string BuildSnippetFromChunk(string chunkText, List<string> terms)
     {
-        var normalized = Normalize(chunkText);
+        var normalized = SanitizeSearchText(chunkText);
         if (string.IsNullOrWhiteSpace(normalized)) return string.Empty;
         var lower = normalized.ToLowerInvariant();
         var idx = terms
@@ -633,6 +684,171 @@ CREATE TABLE IF NOT EXISTS SearchDocumentChunks (
 
     private static string Normalize(string text)
         => Regex.Replace(text ?? string.Empty, "\\s+", " ").Trim();
+
+    /// <summary>
+    /// Strip UUIDs / JSON punctuation so snippets stay human-readable.
+    /// </summary>
+    private static string SanitizeSearchText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        var cleaned = text;
+        // UUID / GUID tokens
+        cleaned = Regex.Replace(cleaned, @"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", " ");
+        // Long hex / base64-ish blobs
+        cleaned = Regex.Replace(cleaned, @"\b[A-Za-z0-9+/=_-]{48,}\b", " ");
+        // JSON structural noise
+        cleaned = Regex.Replace(cleaned, @"[{}\[\]""]", " ");
+        cleaned = Regex.Replace(cleaned, @"\\[nrt]", " ");
+        cleaned = Regex.Replace(cleaned, @"[,:;]+", " ");
+        return Normalize(cleaned);
+    }
+
+    /// <summary>
+    /// Walk JSON and collect readable string leaves (skip ids / keys that look like UUIDs).
+    /// </summary>
+    private static string ExtractReadableJsonText(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return string.Empty;
+        var trimmed = json.Trim();
+        if (trimmed is "{}" or "[]" or "null") return string.Empty;
+        if (trimmed[0] is not ('{' or '['))
+        {
+            return SanitizeSearchText(trimmed);
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(trimmed);
+            var parts = new List<string>();
+            CollectReadableJsonValues(doc.RootElement, parts);
+            return SanitizeSearchText(string.Join(" ", parts));
+        }
+        catch
+        {
+            return SanitizeSearchText(trimmed);
+        }
+    }
+
+    private static void CollectReadableJsonValues(System.Text.Json.JsonElement el, List<string> parts)
+    {
+        switch (el.ValueKind)
+        {
+            case System.Text.Json.JsonValueKind.Object:
+                foreach (var prop in el.EnumerateObject())
+                {
+                    // Prefer human labels over raw ids when both exist nearby.
+                    if (IsNoiseJsonKey(prop.Name)) continue;
+                    if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        var s = prop.Value.GetString();
+                        if (IsReadableString(s))
+                        {
+                            // Include the property name when it looks like a field label.
+                            if (LooksLikeLabelKey(prop.Name)) parts.Add(HumanizeKey(prop.Name));
+                            parts.Add(s!);
+                        }
+                    }
+                    else
+                    {
+                        CollectReadableJsonValues(prop.Value, parts);
+                    }
+                }
+                break;
+            case System.Text.Json.JsonValueKind.Array:
+                foreach (var item in el.EnumerateArray())
+                    CollectReadableJsonValues(item, parts);
+                break;
+            case System.Text.Json.JsonValueKind.String:
+                {
+                    var s = el.GetString();
+                    if (IsReadableString(s)) parts.Add(s!);
+                    break;
+                }
+            case System.Text.Json.JsonValueKind.Number:
+                parts.Add(el.ToString());
+                break;
+            case System.Text.Json.JsonValueKind.True:
+            case System.Text.Json.JsonValueKind.False:
+                parts.Add(el.GetBoolean() ? "Yes" : "No");
+                break;
+        }
+    }
+
+    private static string ExtractAsBuiltSearchText(string? asBuiltJson)
+    {
+        if (string.IsNullOrWhiteSpace(asBuiltJson)) return string.Empty;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(asBuiltJson);
+            if (!doc.RootElement.TryGetProperty("fields", out var fields) ||
+                fields.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return ExtractReadableJsonText(asBuiltJson);
+            }
+
+            var parts = new List<string>();
+            foreach (var field in fields.EnumerateArray())
+            {
+                var label = field.TryGetProperty("label", out var labelEl) ? labelEl.GetString()
+                    : field.TryGetProperty("Label", out var labelEl2) ? labelEl2.GetString()
+                    : null;
+                var value = field.TryGetProperty("value", out var valueEl) ? valueEl.GetString()
+                    : field.TryGetProperty("Value", out var valueEl2) ? valueEl2.GetString()
+                    : field.TryGetProperty("selectedValue", out var selEl) ? selEl.GetString()
+                    : null;
+                var feature = field.TryGetProperty("featureName", out var featEl) ? featEl.GetString()
+                    : field.TryGetProperty("FeatureName", out var featEl2) ? featEl2.GetString()
+                    : null;
+
+                if (IsReadableString(feature)) parts.Add(feature!);
+                if (IsReadableString(label) && IsReadableString(value))
+                    parts.Add($"{label}: {value}");
+                else if (IsReadableString(value))
+                    parts.Add(value!);
+                else if (IsReadableString(label))
+                    parts.Add(label!);
+            }
+
+            return SanitizeSearchText(string.Join(" · ", parts));
+        }
+        catch
+        {
+            return ExtractReadableJsonText(asBuiltJson);
+        }
+    }
+
+    private static bool IsNoiseJsonKey(string key)
+    {
+        var k = key.Trim().ToLowerInvariant();
+        return k is "id" or "uuid" or "guid" or "stepid" or "assetid" or "featureid"
+            or "productid" or "projectid" or "runid" or "inputid" or "documentid"
+            or "downloadurl" or "filepath" or "contenttype" or "iterationindex";
+    }
+
+    private static bool LooksLikeLabelKey(string key)
+    {
+        var k = key.Trim().ToLowerInvariant();
+        return k is "label" or "name" or "title" or "featurename" or "inputlabel"
+            or "fieldlabel" or "description" or "value" or "selectedvalue";
+    }
+
+    private static string HumanizeKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return key;
+        return Regex.Replace(key, "([a-z])([A-Z])", "$1 $2");
+    }
+
+    private static bool IsReadableString(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var v = value.Trim();
+        if (v.Length < 2) return false;
+        if (Regex.IsMatch(v, @"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+            return false;
+        if (v.Length >= 48 && Regex.IsMatch(v, @"^[A-Za-z0-9+/=_-]+$")) return false;
+        if (v.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) return false;
+        return true;
+    }
 }
 
 internal record IndexedChunkRow(
