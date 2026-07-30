@@ -132,9 +132,9 @@ body {
     z-index: 150;
   }
 
-  /* Push page content below the fixed mobile topbar (~80px). */
+  /* Push page content below the fixed mobile topbar (main row ~80px + debug bar ~30px). */
   .app-main {
-    padding-top: 80px !important;
+    padding-top: 114px !important;
   }
 }
 

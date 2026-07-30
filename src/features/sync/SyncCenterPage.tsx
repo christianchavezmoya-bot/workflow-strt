@@ -40,8 +40,6 @@ import {
 } from "../../services/localDB";
 import ApiDebugPanel from "../../components/ui/ApiDebugPanel";
 import OfflineReadinessPanel from "../../components/layout/OfflineReadinessPanel";
-import SyncCenterConnectivitySection from "../../components/layout/SyncCenterConnectivitySection";
-import ConnectivityPerfReadout from "../../components/layout/ConnectivityPerfReadout";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { AssetWorkflowRun, RunIssue, StepResult } from "../../types/assetWorkflowRun";
 import offlineStore from "../../services/offlineStore";
@@ -111,6 +109,27 @@ function statusChipColor(
   if (status === "uploading") return "info";
   if (status === "failed")    return "error";
   return "warning";
+}
+
+function connectivityLabel(
+  status: string,
+  pendingCount: number
+): { label: string; color: "success" | "warning" | "error" | "default" } {
+  switch (status) {
+    case "synced":
+    case "syncing":
+    case "pending":
+      return { label: "Online", color: "success" };
+    case "offline":
+      return {
+        label: pendingCount > 0 ? `Offline · ${pendingCount} queued` : "Offline",
+        color: "warning",
+      };
+    case "error":
+      return { label: "Sync error", color: "error" };
+    default:
+      return { label: "Unknown", color: "default" };
+  }
 }
 
 function parseJsonArray<T>(raw: string | null | undefined): T[] {
@@ -558,6 +577,7 @@ async function copyDiagnostics(action: PendingAction): Promise<void> {
 
 export default function SyncCenterPage({ open, onClose }: Props) {
   const {
+    status,
     pendingCount,
     conflictCount,
     lastSyncAt,
@@ -570,13 +590,6 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   } = useSyncEngine();
   const [queue, setQueue]         = useState<PendingAction[]>([]);
   const [debugOpen, setDebugOpen] = useState(false);
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(() => {
-    try {
-      return sessionStorage.getItem("sync-center-diagnostics-open") === "true";
-    } catch {
-      return false;
-    }
-  });
   const [droppedActions, setDroppedActions] = useState<DroppedAction[]>([]);
   const [conflictDetails, setConflictDetails] = useState<Record<string, ConflictDetail>>({});
   const [loadingConflictIds, setLoadingConflictIds] = useState<Record<string, boolean>>({});
@@ -597,14 +610,6 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   }, [open]);
 
   useEffect(() => {
-    try {
-      sessionStorage.setItem("sync-center-diagnostics-open", String(diagnosticsOpen));
-    } catch {
-      // ignore
-    }
-  }, [diagnosticsOpen]);
-
-  useEffect(() => {
     void loadQueue();
     void loadDropped();
     const h = () => { void loadQueue(); void loadDropped(); };
@@ -622,6 +627,7 @@ export default function SyncCenterPage({ open, onClose }: Props) {
     await loadQueue();
   };
 
+  const { label: connLabel, color: connColor } = connectivityLabel(status, pendingCount);
   // Memoized on `queue` so these keep a stable reference across renders that
   // don't actually change the queue (e.g. the syncing indicator ticking) —
   // conflicted is a useEffect dependency below, and a fresh array on every
@@ -725,15 +731,26 @@ export default function SyncCenterPage({ open, onClose }: Props) {
 
         <DialogContent sx={{ px: 2, pt: 1, pb: 4 }}>
           <OfflineReadinessPanel />
-          <SyncCenterConnectivitySection />
+          {/* Connection status */}
+          <Stack spacing={1} mb={2}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="body2" color="text.secondary">Connection</Typography>
+              <Chip
+                label={connLabel}
+                color={connColor}
+                size="small"
+                sx={{ fontWeight: 600, fontSize: "0.72rem" }}
+              />
+            </Stack>
 
-          <Stack spacing={0.5} mb={2}>
             <Typography variant="body2" color="text.secondary">
               Last sync:{" "}
               <Box component="span" sx={{ color: "text.primary", fontWeight: 500 }}>
                 {lastSyncAt ? timeAgo(lastSyncAt) : "Never"}
               </Box>
-              {" · "}
+            </Typography>
+
+            <Typography variant="body2" color="text.secondary">
               Pending:{" "}
               <Box component="span" sx={{ color: "text.primary", fontWeight: 500 }}>
                 {pendingCount} action{pendingCount !== 1 ? "s" : ""}
@@ -1206,38 +1223,19 @@ export default function SyncCenterPage({ open, onClose }: Props) {
 
           <Divider sx={{ mt: 4, mb: 2 }} />
 
-          <Box sx={{ mb: 2 }}>
-            <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: diagnosticsOpen ? 1 : 0 }}>
-              <Typography variant="subtitle2" fontWeight={700} sx={{ flex: 1 }}>
-                Diagnostics
-              </Typography>
-              <Button
-                size="small"
-                variant="text"
-                sx={{ textTransform: "none", fontSize: "0.72rem", minWidth: 0 }}
-                onClick={() => setDiagnosticsOpen((v) => !v)}
-              >
-                {diagnosticsOpen ? "Hide" : "Show"}
-              </Button>
-            </Stack>
-            <Collapse in={diagnosticsOpen}>
-              <Stack spacing={2} sx={{ pt: 0.5 }}>
-                <ConnectivityPerfReadout />
-                <Typography variant="caption" color="text.secondary" display="block">
-                  Support bundle excludes tokens, passwords, and step/photo content. Attach the JSON to tickets per{" "}
-                  <Box component="span" sx={{ fontFamily: "monospace" }}>docs/BUG_TRIAGE.md</Box>.
-                </Typography>
-                <Button
-                  variant="text"
-                  size="small"
-                  sx={{ textTransform: "none", color: "text.secondary", fontSize: "0.72rem", alignSelf: "flex-start" }}
-                  onClick={() => setDebugOpen(true)}
-                >
-                  View API Debug Log
-                </Button>
-              </Stack>
-            </Collapse>
-          </Box>
+          {/* Link to API Debug Log */}
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+            Support bundle excludes tokens, passwords, and step/photo content. Attach the JSON to tickets per{" "}
+            <Box component="span" sx={{ fontFamily: "monospace" }}>docs/BUG_TRIAGE.md</Box>.
+          </Typography>
+          <Button
+            variant="text"
+            size="small"
+            sx={{ textTransform: "none", color: "text.secondary", fontSize: "0.72rem" }}
+            onClick={() => setDebugOpen(true)}
+          >
+            View API Debug Log
+          </Button>
         </DialogContent>
       </Dialog>
 

@@ -26,6 +26,8 @@ import strataLogo from "../../assets/strata_transparent.png";
 import SyncStatusBadge from "../ui/SyncStatusBadge";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
+import ConnectivityDebugBar from "./ConnectivityDebugBar";
+import SyncTelemetryPanel from "./SyncTelemetryPanel";
 
 function getRolesFromCache(): string[] {
   try {
@@ -779,6 +781,9 @@ const Topbar = () => {
           )}
         </Menu>
       </Stack>
+      {isNativeMobile && <ConnectivityDebugBar />}
+      {/* Sync telemetry: per-domain download/upload progress (always on; debug aid) */}
+      <SyncTelemetryPanel />
       {/* Test mode banner */}
       {isTestMode && (
         <Box sx={{
