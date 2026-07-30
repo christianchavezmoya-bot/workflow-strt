@@ -93,6 +93,9 @@ export const AssetRepository = {
     if (!shouldSkipBlockingFetch()) {
       api.get<ProjectAsset[]>(`/project-assets/by-product/${productId}`, { params: { includeDeleted: includeDeleted || undefined } })
         .then(async (res) => {
+          // A background refresh returning empty must not wipe a non-empty
+          // cache — that's indistinguishable from a bad/partial server response.
+          if (res.data.length === 0 && local.length > 0) return;
           await entityReplaceAssetsByProduct(
             productId,
             res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
@@ -136,6 +139,9 @@ export const AssetRepository = {
     if (!shouldSkipBlockingFetch()) {
       api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, { params: { includeDeleted: includeDeleted || undefined } })
         .then(async (res) => {
+          // A background refresh returning empty must not wipe a non-empty
+          // cache — that's indistinguishable from a bad/partial server response.
+          if (res.data.length === 0 && local.length > 0) return;
           await entityReplaceAssetsByProject(
             projectId,
             res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))

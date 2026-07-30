@@ -129,6 +129,9 @@ export const workflowConfigService = {
     if (!shouldSkipBlockingFetch()) {
       api.get<WorkflowConfig[]>(`/workflow-configs/by-product/${productId}`)
         .then(async (res) => {
+          // A background refresh returning empty must not wipe a non-empty
+          // cache — that's indistinguishable from a bad/partial server response.
+          if (res.data.length === 0 && cached && cached.length > 0) return;
           lsWrite(productId, res.data);
           await offlineStore.saveCache(CACHE_PRODUCT_KEY(productId), res.data);
           await cacheConfigs(res.data);

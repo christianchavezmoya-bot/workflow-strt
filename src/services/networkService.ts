@@ -40,12 +40,21 @@ export async function hasInternetConnection(): Promise<boolean> {
 export async function isServerReachable(): Promise<boolean> {
   const attempt = async (): Promise<boolean> => {
     if (isMobileNativePlatform()) {
-      const response = await CapacitorHttp.get({
+      // CapacitorHttp's connectTimeout/readTimeout params are not reliably
+      // honored on iOS — a request to an unroutable address (e.g. a LAN-only
+      // dev backend reached over cellular) can hang far longer than 5s,
+      // leaving the app looking "online" indefinitely. Race against our own
+      // hard timeout so a stuck native call can't block detection at all.
+      const request = CapacitorHttp.get({
         url: `${getApiBaseUrl()}/health`,
-        connectTimeout: 5000,
-        readTimeout: 5000,
+        connectTimeout: 4000,
+        readTimeout: 4000,
         responseType: "json",
       });
+      const timeout = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("health ping timed out")), 4000);
+      });
+      const response = await Promise.race([request, timeout]);
       return response.status >= 200 && response.status < 500;
     }
 

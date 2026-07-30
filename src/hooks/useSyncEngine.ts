@@ -942,7 +942,18 @@ export function useSyncEngine(): SyncState {
   // starts its internal timer once regardless of how many subscribers exist.
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
-    return subscribeServerReachable((reachable) => setServerReachable(reachable));
+    return subscribeServerReachable((reachable) => {
+      setServerReachable(reachable);
+      // The ping is the only signal that catches "link up, server unreachable"
+      // (e.g. Wi-Fi off, fell back to cellular, backend is LAN-only) without
+      // waiting for the user to trigger a real request via navigation.
+      if (!reachable) {
+        setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
+      } else {
+        setConnectivityUnlessTokenExpired("online");
+        void reconnectAndFlush();
+      }
+    });
   }, []);
 
   // ── Initial load ───────────────────────────────────────────────────────────

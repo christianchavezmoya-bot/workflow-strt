@@ -20,26 +20,43 @@ import { workflowConfigService } from "../services/workflowConfigService";
  * even though the assignment record itself is cached. Fire-and-forget,
  * idempotent (getById/prefetchConfig both skip already-cached work).
  */
-/** One assignment per workflow config — prefer server id over offline `local-*` temp rows. */
+function isLocalId(id: unknown): boolean {
+  return typeof id === "string" && id.startsWith("local-");
+}
+
+/** Reads later than any real timestamp lose every tie-break, instead of throwing on NaN. */
+function assignedAtMs(assignment: WorkflowAssignment): number {
+  const raw = assignment.assignedAt ?? (assignment as { createdAt?: string }).createdAt;
+  const ms = raw ? new Date(raw).getTime() : NaN;
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+/**
+ * One assignment per workflow config — prefer server id over offline `local-*`
+ * temp rows. Defensive against malformed records (missing/non-string id,
+ * unparseable assignedAt) instead of throwing, since a thrown error here gets
+ * swallowed upstream into "no assignment" by callers' `.catch(() => [])`.
+ */
 function dedupeAssignmentsByConfig(assignments: WorkflowAssignment[]): WorkflowAssignment[] {
   const byConfig = new Map<string, WorkflowAssignment>();
   for (const assignment of assignments) {
+    if (!assignment || typeof assignment.workflowConfigId !== "string" || !assignment.workflowConfigId) {
+      continue;
+    }
     const key = assignment.workflowConfigId;
     const existing = byConfig.get(key);
     if (!existing) {
       byConfig.set(key, assignment);
       continue;
     }
-    const existingIsLocal = existing.id.startsWith("local-");
-    const currentIsLocal = assignment.id.startsWith("local-");
+    const existingIsLocal = isLocalId(existing.id);
+    const currentIsLocal = isLocalId(assignment.id);
     if (existingIsLocal && !currentIsLocal) {
       byConfig.set(key, assignment);
       continue;
     }
     if (!existingIsLocal && currentIsLocal) continue;
-    const existingAt = new Date(existing.assignedAt).getTime();
-    const currentAt = new Date(assignment.assignedAt).getTime();
-    if (currentAt >= existingAt) byConfig.set(key, assignment);
+    if (assignedAtMs(assignment) >= assignedAtMs(existing)) byConfig.set(key, assignment);
   }
   return Array.from(byConfig.values());
 }

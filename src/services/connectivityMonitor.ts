@@ -63,6 +63,19 @@ function startNativeNetworkTracking(): void {
       resetCircuitBreaker();
       if (currentValue === false) currentValue = null;
       pingNow();
+      return;
+    }
+    // The link stayed "connected" but its type changed (e.g. Wi-Fi turned off
+    // and the device fell back to cellular). The server may be unreachable from
+    // the new connection (e.g. a LAN-only dev backend) even though the OS still
+    // reports a network. Re-check immediately instead of waiting up to 30s —
+    // and if that first check doesn't confirm reachable, check again right away
+    // rather than waiting for the next 30s tick to cross the 2-signal threshold.
+    if (status.connected) {
+      void (async () => {
+        await runPingIfForeground();
+        if (currentValue !== true) await runPingIfForeground();
+      })();
     }
   });
 }
@@ -94,6 +107,11 @@ async function runPingIfForeground() {
     if (wasBlocked && typeof window !== "undefined") {
       window.dispatchEvent(new Event("api-server-reachable"));
     }
+  } else if (typeof window !== "undefined") {
+    // Route through the same event real request failures use, so the existing
+    // consecutive-signal threshold below still guards against one slow ping
+    // false-flagging the app offline.
+    window.dispatchEvent(new Event("api-server-unreachable"));
   }
 }
 
