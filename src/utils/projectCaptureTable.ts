@@ -34,6 +34,15 @@ export interface ProjectCaptureRow {
   runId?: string;
   cells: Record<string, string>;
   searchText: string;
+  /** Structured hits for word-start search UI (feature / field / value). */
+  searchHits: ProjectCaptureSearchHit[];
+}
+
+/** One searchable capture cell — used to show "Feature · Field" context on match. */
+export interface ProjectCaptureSearchHit {
+  featureName: string;
+  fieldLabel: string;
+  value: string;
 }
 
 export interface ProjectCaptureTable {
@@ -117,6 +126,7 @@ export function buildProjectCaptureTable(
     const capturedFields = run ? buildCapturedFields(captureContext(run, asset, productFeatures)) : [];
     const rowCells: Record<string, string> = {};
     const searchParts: string[] = [asset.assetTag, asset.assetName ?? "", asset.serialNumber ?? ""];
+    const searchHits: ProjectCaptureSearchHit[] = [];
 
     for (const field of capturedFields) {
       if (field.inputType === "photo") continue;
@@ -172,6 +182,11 @@ export function buildProjectCaptureTable(
       rowCells[columnKey] = value;
       searchParts.push(displayName, fieldLabel, value, field.businessPartNumber ?? "", field.manufacturerPartNumber ?? "");
       if (field.allOptions?.length) searchParts.push(...field.allOptions);
+      searchHits.push({
+        featureName: displayName,
+        fieldLabel,
+        value,
+      });
     }
 
     rows.push({
@@ -179,6 +194,7 @@ export function buildProjectCaptureTable(
       runId: run?.id,
       cells: rowCells,
       searchText: searchParts.join(" ").toLowerCase(),
+      searchHits,
     });
   }
 
@@ -214,4 +230,47 @@ export function buildProjectCaptureTable(
     groups: finalGroups,
     rows,
   };
+}
+
+export type CaptureMatchKind = "value" | "feature" | "field" | "part";
+
+export interface CaptureMatchInfo {
+  kind: CaptureMatchKind;
+  featureName: string;
+  fieldLabel: string;
+  value: string;
+  label: string;
+}
+
+/**
+ * Find the best word-start match in capture hits.
+ * Priority: value > feature name > field label (so brand/value beats "Location" label noise).
+ */
+export function findCaptureMatch(
+  hits: ProjectCaptureSearchHit[] | undefined,
+  query: string,
+  matchesWordStart: (haystack: string | undefined | null, query: string) => boolean,
+): CaptureMatchInfo | null {
+  if (!hits?.length || !query.trim()) return null;
+
+  const tryKind = (kind: CaptureMatchKind): CaptureMatchInfo | null => {
+    for (const hit of hits) {
+      const haystack =
+        kind === "value" ? hit.value
+          : kind === "feature" ? hit.featureName
+            : kind === "field" ? hit.fieldLabel
+              : undefined;
+      if (!matchesWordStart(haystack, query)) continue;
+      const label =
+        kind === "value"
+          ? `${hit.featureName} · ${hit.fieldLabel}: ${hit.value}`
+          : kind === "feature"
+            ? `Feature: ${hit.featureName}`
+            : `${hit.featureName} · ${hit.fieldLabel}`;
+      return { kind, featureName: hit.featureName, fieldLabel: hit.fieldLabel, value: hit.value, label };
+    }
+    return null;
+  };
+
+  return tryKind("value") ?? tryKind("feature") ?? tryKind("field");
 }

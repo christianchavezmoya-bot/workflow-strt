@@ -151,7 +151,8 @@ import {
   computeMaxUnitsByFeature,
   pickCaptureRun,
 } from "../../utils/captureSpreadsheet";
-import { buildProjectCaptureTable } from "../../utils/projectCaptureTable";
+import { buildProjectCaptureTable, findCaptureMatch, type ProjectCaptureSearchHit } from "../../utils/projectCaptureTable";
+import { anyMatchesWordStart, matchesWordStart } from "../../utils/textMatch";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
@@ -626,7 +627,6 @@ const AssetInstallationPage = () => {
   const [capturePopupOpen, setCapturePopupOpen] = useState(false);
   const [libFeatures, setLibFeatures] = useState<LibFeature[]>([]);
   const [depsByFeature, setDepsByFeature] = useState<Record<string, FeatureDependency[]>>({});
-  const [captureSearchByAsset, setCaptureSearchByAsset] = useState<Record<string, string>>({});
   const [assetExportDialogOpen, setAssetExportDialogOpen] = useState(false);
   const [assetExportFormat, setAssetExportFormat] = useState<"pdf" | "json" | "excel">("pdf");
   const [assetExportSelectedColumnIds, setAssetExportSelectedColumnIds] = useState<string[]>([]);
@@ -693,6 +693,14 @@ const AssetInstallationPage = () => {
     () => (productsState.items.length ? productsState.items : demoProducts),
     [productsState.items],
   );
+  // Stable product-id key so Redux array identity churn doesn't re-trigger the
+  // full assets/configs/runs/docs load storm on every unrelated store update.
+  const productsKey = useMemo(
+    () => products.map((p) => p.id).sort().join("|"),
+    [products],
+  );
+  const productsRef = useRef(products);
+  productsRef.current = products;
 
   // The runner needs the *asset's own* product, not the page-level Project-filter-derived
   // activeProduct — activeProduct is undefined while viewing "All projects", which would
@@ -740,12 +748,13 @@ const AssetInstallationPage = () => {
   // Trigger a background pull when asset data is more than 15 minutes old.
   // Uses the stable useCallback identity of the pull function to avoid re-registration.
   useStaleOnResume("assets", useCallback(() => {
+    const products = productsRef.current;
     if (selectedProjectId) {
       AssetRepository.getByProject(selectedProjectId).catch(() => {});
     } else {
       products.forEach((p) => AssetRepository.getByProduct(p.id).catch(() => {}));
     }
-  }, [selectedProjectId, products]));
+  }, [selectedProjectId, productsKey]));
 
   // Restore selected project from URL params (priority) or sessionStorage (fallback).
   useEffect(() => {
@@ -913,26 +922,25 @@ const AssetInstallationPage = () => {
     featureService.getByProduct(activeProduct.id).then((feats) => {
       if (cancelled) return;
       // Set features immediately — this is what the asset/capture table needs to
-      // render. Do NOT block on the per-feature dependency fetch here.
+      // render. Do NOT block on the dependency fetch here.
       setLibFeatures(feats);
 
-      // PERF (web first paint): the dependency fetch is one request PER feature
-      // (getByFeature per feature). On a product with many features that is a burst
-      // of parallel round-trips that used to sit on the critical path, delaying the
-      // moment the table could paint. Dependencies are only needed for capture-column
-      // metadata, not to render the rows — so defer the whole storm to a background
-      // task that runs after the current paint. Nothing depends on it being present
-      // for the first render; depsByFeature simply fills in shortly after.
+      // PERF: one batched request by productId (was N getByFeature calls).
+      // Dependencies are only needed for capture-column metadata — defer so the
+      // feature-driven render commits first.
       const loadDeps = async () => {
-        const depLists = await Promise.all(
-          feats.map((f) => featureDependencyService.getByFeature(f.id).catch(() => [] as FeatureDependency[])),
-        );
-        if (cancelled) return;
-        const map: Record<string, FeatureDependency[]> = {};
-        feats.forEach((f, i) => { map[f.id] = depLists[i] ?? []; });
-        setDepsByFeature(map);
+        try {
+          const map = await featureDependencyService.mapByProduct(activeProduct.id);
+          if (cancelled) return;
+          // Ensure every feature has an entry (even if empty) so callers don't
+          // treat missing keys as "not loaded yet".
+          const complete: Record<string, FeatureDependency[]> = {};
+          for (const f of feats) complete[f.id] = map[f.id] ?? [];
+          setDepsByFeature(complete);
+        } catch {
+          if (!cancelled) setDepsByFeature({});
+        }
       };
-      // Yield first so the feature-driven render commits before the dependency burst.
       setTimeout(() => { void loadDeps(); }, 0);
     }).catch(() => {
       if (!cancelled) {
@@ -978,6 +986,7 @@ const AssetInstallationPage = () => {
   }, [requestedWorkflowType]);
 
   useEffect(() => {
+    const products = productsRef.current;
     if (products.length === 0) {
       setAssets([]);
       setConfigs([]);
@@ -1151,7 +1160,7 @@ const AssetInstallationPage = () => {
           })
           .catch(() => {/* non-blocking */});
       });
-  }, [activeProduct?.id, archiveMode, products, selectedProjectId]);
+  }, [activeProduct?.id, archiveMode, productsKey, selectedProjectId]);
 
   // Document counts per asset — fetched in a fully independent effect that
   // runs after the asset list is already shown. Counts are cosmetic
@@ -1170,26 +1179,31 @@ const AssetInstallationPage = () => {
   useEffect(() => {
     if (assetsKey === "") return;
     const myLoadId = ++docCountLoadIdRef.current;
-    // PERF (web first paint): document counts are cosmetic (badge only) and this
-    // is one request PER asset. Yield to the event loop first so the asset table
-    // commits to screen before this request burst starts, instead of the two
-    // competing for the browser's connection pool on cold load.
+    // PERF: one batched counts request per project/product instead of N listByAsset.
     const timer = setTimeout(() => {
       const snapshot = assetsRef.current;
-      const countMap: Record<string, number> = {};
-      Promise.all(snapshot.map(async (asset) => {
-        const docs = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
-        countMap[asset.id] = docs.length;
-      })).then(() => {
-        if (myLoadId !== docCountLoadIdRef.current) return; // Stale — a newer doc-count pass is in flight
+      const load = async () => {
+        const countMap: Record<string, number> = {};
+        if (selectedProjectId) {
+          const counts = await assetDocumentLinkService.countsByScope({ projectId: selectedProjectId });
+          Object.assign(countMap, counts);
+        } else {
+          const productIds = [...new Set(snapshot.map((a) => a.productId).filter(Boolean))];
+          const batches = await Promise.all(
+            productIds.map((pid) => assetDocumentLinkService.countsByScope({ productId: pid })),
+          );
+          for (const counts of batches) Object.assign(countMap, counts);
+        }
+        if (myLoadId !== docCountLoadIdRef.current) return;
         setDocsCountMap(countMap);
-      });
+      };
+      void load();
     }, 0);
     return () => clearTimeout(timer);
     // assetsRef.current is intentionally read at run-time; only assetsKey
     // (the set of asset IDs) should trigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assetsKey]);
+  }, [assetsKey, selectedProjectId]);
 
   // Mobile only: prime assignmentsMap from the offline cache for every visible
   // asset so the "Start workflow" action works instantly offline — even for
@@ -1234,6 +1248,7 @@ const AssetInstallationPage = () => {
       // page is responsive while the network refresh is in flight. The
       // local-first service call returns from IndexedDB without touching
       // the network when the cache is warm.
+      const products = productsRef.current;
       const localScopes: Array<{
         scopeKind: "project" | "product";
         scopeId: string;
@@ -1384,7 +1399,7 @@ const AssetInstallationPage = () => {
       // Defensive — release the guard on any unexpected error.
       isRefreshingRef.current = false;
     }
-  }, [selectedProjectId, archiveMode, products, activeProduct?.id]);
+  }, [selectedProjectId, archiveMode, productsKey, activeProduct?.id]);
 
   // Fix 1 — Listen for background refresh event from AssetRepository.
   // IMPORTANT: must read from local IndexedDB only here — calling refreshAssets() would
@@ -1620,6 +1635,39 @@ const AssetInstallationPage = () => {
     );
   }, [currentUser.fullName, currentUser.id, projects]);
 
+  // Build capture index once from the full asset set (not search-filtered).
+  // Filtering display rows is cheap; rebuilding from workflow runs is expensive
+  // and used to re-run on every search keystroke via displayAssets.
+  const captureTableBase = useMemo(
+    () => (libFeatures.length ? buildProjectCaptureTable(assets, runsMap, libFeatures) : null),
+    [assets, runsMap, libFeatures],
+  );
+
+  const captureIndexByAsset = useMemo(() => {
+    const next: Record<string, { searchText: string; hits: ProjectCaptureSearchHit[] }> = {};
+    if (!captureTableBase) {
+      for (const asset of assets) {
+        next[asset.id] = {
+          searchText: [asset.assetTag, asset.assetName ?? "", asset.serialNumber ?? ""].join(" ").toLowerCase(),
+          hits: [],
+        };
+      }
+      return next;
+    }
+    for (const row of captureTableBase.rows) {
+      next[row.assetId] = { searchText: row.searchText, hits: row.searchHits };
+    }
+    for (const asset of assets) {
+      if (!next[asset.id]) {
+        next[asset.id] = {
+          searchText: [asset.assetTag, asset.assetName ?? "", asset.serialNumber ?? ""].join(" ").toLowerCase(),
+          hits: [],
+        };
+      }
+    }
+    return next;
+  }, [assets, captureTableBase]);
+
   const visibleAssets = useMemo(() => {
     const q = search.trim().toLowerCase();
     return assets.filter((a) => {
@@ -1631,11 +1679,18 @@ const AssetInstallationPage = () => {
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
         if (showNoWorkflow && assetHasConfiguredWorkflow(a)) return false;
       }
-      if (q && !([a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer].some((f) => f?.toLowerCase().includes(q))
-        || (captureSearchByAsset[a.id]?.includes(q) ?? false))) return false;
+      if (q) {
+        const identityHit = anyMatchesWordStart(
+          [a.assetTag, a.serialNumber, a.location, a.assetModel, a.manufacturer, a.assetName],
+          q,
+        );
+        const captureHits = captureIndexByAsset[a.id]?.hits;
+        const captureHit = identityHit ? null : findCaptureMatch(captureHits, q, matchesWordStart);
+        if (!identityHit && !captureHit) return false;
+      }
       return true;
     });
-  }, [assets, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode, captureSearchByAsset]);
+  }, [assets, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode, captureIndexByAsset]);
 
   const bulkReportSelectedAssets = useMemo(
     () => visibleAssets.filter((asset) => selectedAssetIds.has(asset.id)),
@@ -1673,21 +1728,6 @@ const AssetInstallationPage = () => {
     if (manageableProjectIds.has(asset.projectId)) return true;
     return asset.assignedUserId === currentUser.id;
   }, [canEditCaptureData, can.installationAssets?.editCaptureScope, currentUser.id, manageableProjectIds]);
-
-  useEffect(() => {
-    if (!libFeatures.length) {
-      setCaptureSearchByAsset({});
-      return;
-    }
-    const table = buildProjectCaptureTable(assets, runsMap, libFeatures);
-    const next: Record<string, string> = {};
-    for (const asset of assets) {
-      const row = table.rows.find((item) => item.assetId === asset.id);
-      next[asset.id] = row?.searchText ?? [asset.assetTag, asset.assetName ?? "", asset.serialNumber ?? ""].join(" ").toLowerCase();
-    }
-    setCaptureSearchByAsset(next);
-  }, [assets, runsMap, libFeatures]);
-
 
   const canManageAssetDocuments = can.documents.view || can.documents.upload || can.documents.delete;
 
@@ -1767,10 +1807,17 @@ const AssetInstallationPage = () => {
     return displayAssets.filter((a) => a.assignedUserId === currentUser.id);
   }, [displayAssets, isNativePlatform, mobileScope, currentUser.id]);
 
-  const captureExportTable = useMemo(
-    () => buildProjectCaptureTable(displayAssets, runsMap, libFeatures),
-    [displayAssets, runsMap, libFeatures],
-  );
+  const captureExportTable = useMemo(() => {
+    if (!captureTableBase) {
+      return { columns: [], groups: [], rows: [] as ReturnType<typeof buildProjectCaptureTable>["rows"] };
+    }
+    const idSet = new Set(displayAssets.map((a) => a.id));
+    return {
+      columns: captureTableBase.columns,
+      groups: captureTableBase.groups,
+      rows: captureTableBase.rows.filter((row) => idSet.has(row.assetId)),
+    };
+  }, [captureTableBase, displayAssets]);
 
   const captureExportGroups = useMemo(() => {
     const groups = captureExportTable.groups;
@@ -2343,10 +2390,10 @@ const AssetInstallationPage = () => {
     try {
       const productFeatures = await featureService.getByProduct(productId);
       if (productFeatures.length === 0) return [];
-      const depLists = await Promise.all(productFeatures.map((f) => featureDependencyService.getByFeature(f.id)));
+      const depsByFeat = await featureDependencyService.mapByProduct(productId);
       const items: BomItem[] = [];
-      depLists.forEach((deps, idx) => {
-        const feature = productFeatures[idx];
+      productFeatures.forEach((feature) => {
+        const deps = depsByFeat[feature.id] ?? [];
         deps.forEach((dep) => {
           items.push({
             id: `dep-${dep.id}`,
@@ -6593,7 +6640,7 @@ ${words.slice(midpoint).join(" ")}`;
             autoFocus
             fullWidth
             size="small"
-            placeholder="Asset tag, serial number, or installer name…"
+            placeholder="Tag, serial, brand, feature, or field (min 2 chars)…"
             value={assetSearchQuery}
             onChange={(e) => setAssetSearchQuery(e.target.value)}
             InputProps={{
@@ -6614,18 +6661,45 @@ ${words.slice(midpoint).join(" ")}`;
                 </Typography>
               );
             }
-            const results = assets
-              .filter((a) => !a.isDeleted)
-              .filter((a) => {
-                const installerName = (a.installedBy ?? users.find((u) => u.id === a.assignedUserId)?.fullName ?? "").toLowerCase();
-                return (
-                  a.assetTag?.toLowerCase().includes(q) ||
-                  a.serialNumber?.toLowerCase().includes(q) ||
-                  installerName.includes(q) ||
-                  (captureSearchByAsset[a.id]?.includes(q) ?? false)
-                );
-              })
-              .slice(0, 50);
+            type Ranked = {
+              asset: ProjectAsset;
+              score: number;
+              matchLabel?: string;
+            };
+            const ranked: Ranked[] = [];
+            for (const a of assets) {
+              if (a.isDeleted) continue;
+              const installerName = a.installedBy ?? users.find((u) => u.id === a.assignedUserId)?.fullName ?? "";
+              const tagHit = matchesWordStart(a.assetTag, q);
+              const serialHit = matchesWordStart(a.serialNumber, q);
+              const nameHit = matchesWordStart(a.assetName, q);
+              const brandHit = matchesWordStart(a.manufacturer, q) || matchesWordStart(a.assetModel, q);
+              const installerHit = matchesWordStart(installerName, q);
+              const locationHit = matchesWordStart(a.location, q);
+              const captureMatch = findCaptureMatch(captureIndexByAsset[a.id]?.hits, q, matchesWordStart);
+
+              if (!tagHit && !serialHit && !nameHit && !brandHit && !installerHit && !locationHit && !captureMatch) {
+                continue;
+              }
+
+              // Brand / identity beats accidental field-label noise (word-start already
+              // stops "cat"→"location"; score still ranks CAT brand above value hits).
+              let score = 0;
+              let matchLabel: string | undefined;
+              if (tagHit) { score += 100; matchLabel = "Asset tag"; }
+              else if (brandHit) { score += 90; matchLabel = a.manufacturer ? `Brand: ${a.manufacturer}` : `Model: ${a.assetModel}`; }
+              else if (serialHit) { score += 80; matchLabel = `S/N: ${a.serialNumber}`; }
+              else if (nameHit) { score += 70; matchLabel = a.assetName; }
+              else if (installerHit) { score += 50; matchLabel = `Installer: ${installerName}`; }
+              else if (locationHit) { score += 40; matchLabel = `Location: ${a.location}`; }
+              else if (captureMatch) {
+                score += captureMatch.kind === "value" ? 35 : captureMatch.kind === "feature" ? 25 : 15;
+                matchLabel = captureMatch.label;
+              }
+              ranked.push({ asset: a, score, matchLabel });
+            }
+            ranked.sort((a, b) => b.score - a.score || a.asset.assetTag.localeCompare(b.asset.assetTag));
+            const results = ranked.slice(0, 50);
             if (results.length === 0) {
               return (
                 <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
@@ -6635,7 +6709,7 @@ ${words.slice(midpoint).join(" ")}`;
             }
             return (
               <List dense disablePadding sx={{ maxHeight: 360, overflowY: "auto" }}>
-                {results.map((a) => {
+                {results.map(({ asset: a, matchLabel }) => {
                   const proj = projects.find((p) => p.id === a.projectId);
                   const installer = a.installedBy ?? users.find((u) => u.id === a.assignedUserId)?.fullName;
                   const statusColor: Record<string, "default" | "primary" | "success" | "error"> = {
@@ -6665,9 +6739,16 @@ ${words.slice(midpoint).join(" ")}`;
                             </Stack>
                           }
                           secondary={
-                            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                              {proj && <Typography variant="caption" color="text.secondary">{proj.jobNumber}</Typography>}
-                              {installer && <Typography variant="caption" color="text.secondary">· {installer}</Typography>}
+                            <Stack spacing={0.25}>
+                              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                                {proj && <Typography variant="caption" color="text.secondary">{proj.jobNumber}</Typography>}
+                                {installer && <Typography variant="caption" color="text.secondary">· {installer}</Typography>}
+                              </Stack>
+                              {matchLabel && (
+                                <Typography variant="caption" color="primary.main" sx={{ display: "block" }}>
+                                  {matchLabel}
+                                </Typography>
+                              )}
                             </Stack>
                           }
                         />

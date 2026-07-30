@@ -62,6 +62,38 @@ public class AssetDocumentLinksController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// GET /api/asset-document-links/counts?projectId=xxx
+    /// GET /api/asset-document-links/counts?productId=xxx
+    /// Returns { [assetId]: count } for non-orphan links — one query instead of N+1.
+    /// </summary>
+    [HttpGet("counts")]
+    public async Task<ActionResult<Dictionary<string, int>>> GetCounts(
+        [FromQuery] string? projectId,
+        [FromQuery] string? productId)
+    {
+        if (string.IsNullOrWhiteSpace(projectId) && string.IsNullOrWhiteSpace(productId))
+            return BadRequest("projectId or productId is required");
+
+        IQueryable<string> assetIdsQuery = _db.ProjectAssets.AsNoTracking().Select(a => a.Id);
+        if (!string.IsNullOrWhiteSpace(projectId))
+            assetIdsQuery = _db.ProjectAssets.AsNoTracking().Where(a => a.ProjectId == projectId).Select(a => a.Id);
+        else if (!string.IsNullOrWhiteSpace(productId))
+            assetIdsQuery = _db.ProjectAssets.AsNoTracking().Where(a => a.ProductId == productId).Select(a => a.Id);
+
+        var assetIds = await assetIdsQuery.ToListAsync();
+        if (assetIds.Count == 0) return Ok(new Dictionary<string, int>());
+
+        var counts = await _db.AssetDocumentLinks
+            .AsNoTracking()
+            .Where(l => assetIds.Contains(l.AssetId) && _db.Documents.Any(d => d.Id == l.DocumentId))
+            .GroupBy(l => l.AssetId)
+            .Select(g => new { AssetId = g.Key, Count = g.Count() })
+            .ToListAsync();
+
+        return Ok(counts.ToDictionary(c => c.AssetId, c => c.Count));
+    }
+
     // ── POST / — attach existing library document ──────────────────────────────
     [HttpPost]
     public async Task<ActionResult<AssetDocumentLinkDto>> Attach([FromBody] CreateAssetDocumentLinkRequest request)
