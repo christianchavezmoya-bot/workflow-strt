@@ -39,10 +39,12 @@ import type { FeatureDependency } from "../../types/featureDependency";
 import type { FeatureSelection } from "../../services/productConfigService";
 import {
   buildProjectCaptureTable,
+  findCaptureMatch,
   type ProjectCaptureColumn,
   type ProjectCaptureGroup,
   type ProjectCaptureRow,
 } from "../../utils/projectCaptureTable";
+import { anyMatchesWordStart, matchesWordStart } from "../../utils/textMatch";
 import { computeCaptureHeaderStickyTops } from "../../utils/captureSpreadsheet";
 import { STATUS_LABELS, STATUS_COLORS } from "./assetStatusDisplay";
 
@@ -185,8 +187,10 @@ function stickyCell(left: number, width: number, zIndex: number) {
 
 function rowSearchMatch(row: ProjectCaptureRow, asset: ProjectAsset, query: string) {
   if (!query) return true;
-  const base = [asset.assetTag, asset.assetName ?? "", asset.serialNumber ?? "", asset.status].join(" ").toLowerCase();
-  return base.includes(query) || row.searchText.includes(query);
+  if (anyMatchesWordStart([asset.assetTag, asset.assetName, asset.serialNumber, asset.status], query)) {
+    return true;
+  }
+  return Boolean(findCaptureMatch(row.searchHits, query, matchesWordStart));
 }
 
 function splitLabelIntoTwoLines(label: string) {
@@ -326,7 +330,7 @@ export default function CaptureSpreadsheetDialog({
     const rowMap = new Map(table.rows.map((row) => [row.assetId, row]));
     return assets.map((asset) => ({
       asset,
-      capture: rowMap.get(asset.id) ?? { assetId: asset.id, cells: {}, searchText: [asset.assetTag, asset.assetName ?? ""].join(" ").toLowerCase() },
+      capture: rowMap.get(asset.id) ?? { assetId: asset.id, cells: {}, searchText: [asset.assetTag, asset.assetName ?? ""].join(" ").toLowerCase(), searchHits: [] },
     }));
   }, [assets, table.rows]);
 
