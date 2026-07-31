@@ -138,9 +138,25 @@ export const signatureService = {
           optimisticPatch: { signerRole: payload.signerRole, signedAtUtc: now },
         });
       } else {
-        const dependsOnOpId = (await syncQueue.listByEntityId(resolvedRunId))
+        const dependsOnRunComplete = (await syncQueue.listByEntityId(resolvedRunId))
           .filter((op) => op.opType === "RUN_COMPLETE" && op.status !== "uploading")
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.id;
+
+        // The customer signature must not reach the server ahead of the installer's — if the
+        // installer's own submission fails or ends up flagged as a conflict, the flush loop just
+        // skips past it and keeps going, so without this the customer's op can sync on its own
+        // and the run can look locally "Complete" while the server never received the installer
+        // signature.
+        let dependsOnInstallerSignature: string | undefined;
+        if (payload.signerRole === "Customer") {
+          dependsOnInstallerSignature = (await syncQueue.listByEntityId(resolvedRunId))
+            .filter((op) =>
+              op.opType === "SIGNATURE_SUBMIT" &&
+              op.status !== "uploading" &&
+              (op.body as SubmitSignaturePayload | undefined)?.signerRole === "Installer"
+            )
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.id;
+        }
 
         await syncQueue.enqueue({
           opType: "SIGNATURE_SUBMIT",
@@ -150,7 +166,7 @@ export const signatureService = {
           entityId: resolvedRunId,
           body: queuedPayload,
           optimisticPatch: { signerRole: payload.signerRole, signedAtUtc: now },
-          dependsOnOpId,
+          dependsOnOpId: dependsOnInstallerSignature ?? dependsOnRunComplete,
         });
       }
 

@@ -77,6 +77,7 @@ const BOOTSTRAP_SUMMARY_CACHE_KEY = "bootstrap-summary";
 const REFRESH_STALE_MS = CACHE_SOFT_LIMIT_MS; // 4h — re-run bootstrap on foreground if older
 
 let _running = false;
+let _lastCompletedAtMs: number | null = null;
 
 function emit(name: string, detail?: unknown): void {
   try {
@@ -129,6 +130,11 @@ export const offlineBootstrapService = {
   /** Whether a bootstrap pass is currently executing. */
   isRunning(): boolean {
     return _running;
+  },
+
+  /** In-memory completion time of the last successful pass this session, or null. */
+  getLastCompletedAtMs(): number | null {
+    return _lastCompletedAtMs;
   },
 
   /** True when the last completed bootstrap is older than the refresh window. */
@@ -332,6 +338,7 @@ export const offlineBootstrapService = {
       };
       await saveBootstrapSummary(summary);
       await syncMetaSet(BOOTSTRAP_META_KEY);
+      _lastCompletedAtMs = Date.now();
       emit("bootstrap:complete", summary);
     } catch (err) {
       emit("bootstrap:error", { message: (err as Error)?.message });

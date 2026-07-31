@@ -18,10 +18,20 @@ export function useOfflineBootstrap(): void {
 
     let cancelled = false;
 
+    // A flapping reachability signal can report several offline→online transitions in a short
+    // burst (e.g. Wi-Fi re-associating). Each one is a legitimate "came back online" event on its
+    // own, but runOnReconnect() is a full re-download of every project/asset/assignment/config —
+    // firing it once per blip stacks redundant full downloads instead of running once. This
+    // cooldown caps how often a reconnect can trigger a full resync, well under the 4h isStale()
+    // foreground safety net that still catches anything a cooldown skips.
+    const RECONNECT_SYNC_COOLDOWN_MS = 90_000;
+
     const runFullSync = () => {
       if (cancelled) return;
       if (typeof navigator !== "undefined" && !navigator.onLine) return;
       if (offlineBootstrapService.isRunning()) return;
+      const lastMs = offlineBootstrapService.getLastCompletedAtMs();
+      if (lastMs !== null && Date.now() - lastMs < RECONNECT_SYNC_COOLDOWN_MS) return;
       void offlineBootstrapService.runOnReconnect();
     };
 

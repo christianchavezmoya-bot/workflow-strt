@@ -27,6 +27,7 @@ import { isCircuitOpen, resetCircuitBreaker, tripCircuitBreaker } from "../utils
 
 const PING_INTERVAL_MS = 30_000;
 const UNREACHABLE_SIGNAL_THRESHOLD = 2;
+const RETRY_PING_DELAY_MS = 1500;
 
 type Listener = (reachable: boolean) => void;
 
@@ -69,12 +70,20 @@ function startNativeNetworkTracking(): void {
     // and the device fell back to cellular). The server may be unreachable from
     // the new connection (e.g. a LAN-only dev backend) even though the OS still
     // reports a network. Re-check immediately instead of waiting up to 30s —
-    // and if that first check doesn't confirm reachable, check again right away
-    // rather than waiting for the next 30s tick to cross the 2-signal threshold.
+    // and if that first check doesn't confirm reachable, check again shortly
+    // after rather than waiting for the next 30s tick to cross the 2-signal
+    // threshold. The retry is delayed (not immediate) because right as an
+    // interface re-associates there's a brief window where iOS reports
+    // "connected" before DNS/routing is actually live — firing both checks
+    // back-to-back can land entirely inside that window and both fail,
+    // false-flagging "offline" moments before a genuinely-fine connection.
     if (status.connected) {
       void (async () => {
         await runPingIfForeground();
-        if (currentValue !== true) await runPingIfForeground();
+        if (currentValue !== true) {
+          await new Promise((resolve) => setTimeout(resolve, RETRY_PING_DELAY_MS));
+          await runPingIfForeground();
+        }
       })();
     }
   });
