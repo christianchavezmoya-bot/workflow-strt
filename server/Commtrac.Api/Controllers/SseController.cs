@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -20,6 +21,16 @@ public class SseController : ControllerBase
 {
     private readonly SseHub       _hub;
     private readonly IConfiguration _config;
+
+    // Hard ceiling on a single SSE stream's lifetime. A client that vanishes ungracefully
+    // (mobile Wi-Fi drop, device sleep) may never trigger RequestAborted; without a ceiling
+    // the stream — and its socket handle + channel — could live forever. At the deadline we
+    // close cleanly and EventSource reconnects automatically.
+    private static readonly TimeSpan MaxConnectionLifetime = TimeSpan.FromMinutes(30);
+
+    // A write to a dead-but-not-yet-reset socket can hang; time it out so the connection is
+    // reaped promptly instead of lingering.
+    private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(15);
 
     public SseController(SseHub hub, IConfiguration config)
     {
@@ -52,29 +63,36 @@ public class SseController : ControllerBase
         Response.Headers["X-Accel-Buffering"] = "no";   // nginx: disable proxy buffering
         Response.Headers["Connection"]        = "keep-alive";
 
+        // Cap this stream's lifetime (see MaxConnectionLifetime). linkedCt fires on client
+        // abort OR at the deadline, guaranteeing the stream cannot live indefinitely.
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        lifetime.CancelAfter(MaxConnectionLifetime);
+        var linkedCt = lifetime.Token;
+
         var conn = _hub.Connect(userId);
 
         // Heartbeat loop — writes to the channel every 30 s so the TCP socket stays alive
         // behind reverse proxies / firewalls that would otherwise close idle connections.
         using var hbTimer = new PeriodicTimer(TimeSpan.FromSeconds(30));
-        var heartbeat = HeartbeatLoopAsync(conn, hbTimer, ct);
+        var heartbeat = HeartbeatLoopAsync(conn, hbTimer, linkedCt);
 
         try
         {
             // Send a connected event so the client knows the stream is live
-            await WriteLineAsync($"event: connected\ndata: {{\"userId\":\"{userId}\"}}\n\n", ct);
+            await WriteEventAsync($"event: connected\ndata: {{\"userId\":\"{userId}\"}}\n\n", linkedCt);
 
-            await foreach (var msg in conn.Channel.Reader.ReadAllAsync(ct))
+            await foreach (var msg in conn.Channel.Reader.ReadAllAsync(linkedCt))
             {
-                await WriteLineAsync($"event: {msg.Event}\ndata: {msg.Data}\n\n", ct);
-                await Response.Body.FlushAsync(ct);
+                await WriteEventAsync($"event: {msg.Event}\ndata: {msg.Data}\n\n", linkedCt);
             }
         }
-        catch (OperationCanceledException) { /* client disconnected — normal */ }
+        catch (OperationCanceledException) { /* client disconnected / lifetime elapsed / write timed out — normal */ }
+        catch (Exception) { /* broken pipe or write failure — reaped by finally */ }
         finally
         {
-            _hub.Disconnect(conn);
-            await heartbeat; // let the heartbeat task finish cleanly
+            lifetime.Cancel();       // stop the heartbeat loop
+            _hub.Disconnect(conn);   // remove from hub + complete the channel
+            try { await heartbeat; } catch { /* already torn down */ }
         }
     }
 
@@ -85,10 +103,15 @@ public class SseController : ControllerBase
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private async Task WriteLineAsync(string text, CancellationToken ct)
+    private async Task WriteEventAsync(string text, CancellationToken ct)
     {
+        // Guard every write with a timeout so a dead socket that never faults the write
+        // (client gone but TCP not yet reset) unblocks the loop and gets reaped.
+        using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        writeCts.CancelAfter(WriteTimeout);
         var bytes = Encoding.UTF8.GetBytes(text);
-        await Response.Body.WriteAsync(bytes, ct);
+        await Response.Body.WriteAsync(bytes, writeCts.Token);
+        await Response.Body.FlushAsync(writeCts.Token);
     }
 
     private static async Task HeartbeatLoopAsync(
@@ -104,7 +127,8 @@ public class SseController : ControllerBase
                     new SseMessage { Event = "heartbeat", Data = "{}" }, ct);
             }
         }
-        catch (OperationCanceledException) { /* expected on disconnect */ }
+        catch (OperationCanceledException) { /* expected on disconnect / lifetime end */ }
+        catch (ChannelClosedException) { /* channel completed during reap — expected */ }
     }
 
     private ClaimsPrincipal? ValidateToken(string? token)

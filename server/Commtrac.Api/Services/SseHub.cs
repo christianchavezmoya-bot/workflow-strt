@@ -14,10 +14,20 @@ public sealed class SseConnection
 {
     public string Id     { get; } = Guid.NewGuid().ToString();
     public string UserId { get; init; } = "";
+    public DateTime CreatedAtUtc { get; } = DateTime.UtcNow;
 
-    // Unbounded, multi-writer (heartbeat + broadcast), single reader (stream loop)
-    public Channel<SseMessage> Channel { get; } = System.Threading.Channels.Channel.CreateUnbounded<SseMessage>(
-        new UnboundedChannelOptions { SingleReader = true, SingleWriter = false }
+    // Bounded (was unbounded). A stuck/dead reader used to let this grow without limit as
+    // broadcasts kept enqueuing — the memory half of the connection leak. Multi-writer
+    // (heartbeat + broadcast), single reader (stream loop). DropOldest: on a backed-up
+    // connection we shed the oldest push events rather than block broadcasters or grow
+    // forever; the client re-syncs full state when it reconnects.
+    public Channel<SseMessage> Channel { get; } = System.Threading.Channels.Channel.CreateBounded<SseMessage>(
+        new BoundedChannelOptions(256)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
+        }
     );
 }
 
@@ -35,12 +45,30 @@ public sealed class SseHub
     // Key = SseConnection.Id (GUID), not userId, so multi-tab users work correctly
     private readonly ConcurrentDictionary<string, SseConnection> _connections = new();
 
+    // Defensive cap so a single client reconnecting in a storm (flaky mobile network)
+    // cannot accumulate connections faster than they are reaped.
+    private const int MaxConnectionsPerUser = 6;
+
     public int ConnectionCount => _connections.Count;
 
     public SseConnection Connect(string userId)
     {
         var conn = new SseConnection { UserId = userId };
         _connections[conn.Id] = conn;
+
+        // Reap this user's oldest connections beyond the per-user limit. Completing the
+        // channel unblocks that connection's stream loop, which then disconnects cleanly.
+        var stale = _connections.Values
+            .Where(c => c.UserId == userId)
+            .OrderByDescending(c => c.CreatedAtUtc)
+            .Skip(MaxConnectionsPerUser)
+            .ToList();
+        foreach (var old in stale)
+        {
+            if (_connections.TryRemove(old.Id, out _))
+                old.Channel.Writer.TryComplete();
+        }
+
         return conn;
     }
 
