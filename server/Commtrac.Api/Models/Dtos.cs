@@ -1017,7 +1017,11 @@ public record CompleteRunRequest(
     string StepResultsJson,
     string IssuesJson,
     string? CompletedByName,
-    string? BomActualJson
+    string? BomActualJson,
+    // Real completion moment. Offline-completed runs send when the installer actually
+    // finished so the server closes the final time segment at that instant instead of at
+    // sync time (which would inflate it). Online callers omit it and fall back to now.
+    string? CompletedAtUtc = null
 );
 
 public record PatchTimeEntriesRequest(string TimeEntriesJson);

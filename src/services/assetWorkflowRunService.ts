@@ -1240,7 +1240,9 @@ export const assetWorkflowRunService = {
         opType: "RUN_COMPLETE",
         method: "POST",
         url: `/asset-workflow-runs/${resolvedRunId}/complete`,
-        body,
+        // Send the real completion instant so the server closes the final time segment at
+        // that moment instead of at sync time (which would inflate the last segment).
+        body: { ...body, completedAtUtc: now },
         optimisticPatch: {
           stepResultsJson,
           issuesJson,
@@ -1560,14 +1562,23 @@ export const assetWorkflowRunService = {
       await offlineStore.saveRun(offlineRun);
       signalLocalRunUpdate(offlineRun);
       await syncOfflineAssetWorkflowStateFromRun(offlineRun, deriveOfflineAssetStatusFromRun(offlineRun));
-      await enqueueTimeEntry(resolvedRunId, body, {
-        timeTrackingJson: offlineRun.timeTrackingJson,
-        productiveSeconds: offlineRun.productiveSeconds,
-        downtimeSeconds: offlineRun.downtimeSeconds,
-        downtimeEvents: offlineRun.downtimeEvents,
-        status: offlineRun.status,
-        updatedAt: offlineRun.updatedAt,
-      });
+      // Queue the REAL offline event timestamps (startAt/endAt), not the caller's nulls. When this
+      // replays on reconnect the server parses them (ParseUtcOr) instead of falling back to
+      // DateTime.UtcNow = the sync moment. Sending null made every replayed entry land at ~sync
+      // time, collapsing all offline productive/downtime durations to ~0 — the "time resets to
+      // zero after sync" bug. The web path is unaffected because online, now IS the event time.
+      await enqueueTimeEntry(
+        resolvedRunId,
+        { ...body, startedAtUtc: startAt, endedAtUtc: endAt },
+        {
+          timeTrackingJson: offlineRun.timeTrackingJson,
+          productiveSeconds: offlineRun.productiveSeconds,
+          downtimeSeconds: offlineRun.downtimeSeconds,
+          downtimeEvents: offlineRun.downtimeEvents,
+          status: offlineRun.status,
+          updatedAt: offlineRun.updatedAt,
+        },
+      );
       return offlineRun;
     }
   },

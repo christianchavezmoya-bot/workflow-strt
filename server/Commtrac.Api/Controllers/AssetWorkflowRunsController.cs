@@ -794,18 +794,23 @@ public class AssetWorkflowRunsController : ControllerBase
             });
 
         var now = DateTime.UtcNow;
+        // Close the final time segment at the REAL completion moment, not sync time. Offline
+        // runs pass completedAtUtc (when the installer finished); online callers omit it and
+        // fall back to now. Without this an offline run synced hours later would stretch its
+        // last productive segment to the sync moment, inflating the reported time.
+        var completedAt = ParseUtcOr(req.CompletedAtUtc, now);
         run.StepResultsJson  = req.StepResultsJson;
         run.IssuesJson       = req.IssuesJson;
         run.Status           = "Complete";
         run.IsLocked         = true;
         run.CompletedByName  = req.CompletedByName;
         run.SignatureStatus  = "PendingInstaller";
-        run.CompletedAt      = now;
+        run.CompletedAt      = completedAt;
         run.UpdatedAt        = now;
         if (!string.IsNullOrWhiteSpace(req.BomActualJson))
             run.BomActualJson = req.BomActualJson;
-        CloseAnyOpenTimeEntry(run, now);
-        RecomputeRunTimeMetrics(run, now);
+        CloseAnyOpenTimeEntry(run, completedAt);
+        RecomputeRunTimeMetrics(run, completedAt);
 
         // Update asset status — Complete only if no open issues remain across all runs
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
