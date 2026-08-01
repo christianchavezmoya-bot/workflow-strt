@@ -216,19 +216,16 @@ async function enqueueTimeEntry(
   body: Record<string, unknown>,
   optimisticPatch: Record<string, unknown>,
 ): Promise<void> {
-  const dependsOnOpId = await resolvePendingRunCreateOpId(runId);
-  const existing = (await syncQueue.listByEntityId(runId))
-    .filter((op) => op.opType === "TIME_ENTRY" && op.url.endsWith("/time-entry"))
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+  const dependsOnRunCreate = await resolvePendingRunCreateOpId(runId);
 
-  if (existing && existing.status !== "uploading") {
-    await syncQueue.updateQueuedOp(existing.id, {
-      body,
-      optimisticPatch,
-      dependsOnOpId: dependsOnOpId ?? existing.dependsOnOpId,
-    });
-    return;
-  }
+  // Each time-entry action is a distinct, dated event that must reach the server in order —
+  // collapsing a sequence into "just the latest" (the old behavior here) silently discards the
+  // earlier ones, undercounting time relative to what actually happened. Chain to whatever
+  // time-entry action is still pending for this run so they always flush in order, and so a
+  // failed/conflicted earlier entry blocks later ones instead of racing ahead.
+  const dependsOnPriorTimeEntry = (await syncQueue.listByEntityId(runId))
+    .filter((op) => op.opType === "TIME_ENTRY" && op.status !== "uploading")
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.id;
 
   await syncQueue.enqueue({
     opType: "TIME_ENTRY",
@@ -238,7 +235,7 @@ async function enqueueTimeEntry(
     entityId: runId,
     body,
     optimisticPatch,
-    dependsOnOpId,
+    dependsOnOpId: dependsOnPriorTimeEntry ?? dependsOnRunCreate,
   });
 }
 
@@ -1194,6 +1191,15 @@ export const assetWorkflowRunService = {
       assertNoBlockingIssuesForComplete(issuesJson);
 
       const now = new Date().toISOString();
+
+      // Mirror what the server's CompleteRun does (AssetWorkflowRunsController.cs:807-808) —
+      // close out whatever time segment was left open and recompute the totals — so an
+      // offline-completed run doesn't stay stuck at its initial productiveSeconds: 0 just
+      // because the run never happened to pause/resume during the session.
+      const timeEntries = parseTimeEntries(cachedRun.timeTrackingJson ?? "[]");
+      closeAnyOpenTimeEntry(timeEntries, now);
+      const timeMetrics = recomputeTimeMetrics(timeEntries, now);
+
       const offlineRun: OfflineRun = {
         ...cachedRun,
         stepResultsJson,
@@ -1202,6 +1208,10 @@ export const assetWorkflowRunService = {
         bomActualJson: bomActualJson ?? cachedRun.bomActualJson,
         status: "Complete",
         isLocked: true,
+        timeTrackingJson: serializeTimeEntries(timeEntries),
+        productiveSeconds: timeMetrics.productiveSeconds,
+        downtimeSeconds: timeMetrics.downtimeSeconds,
+        downtimeEvents: timeMetrics.downtimeEvents,
         // Fix: the server always sets this to "PendingInstaller" on completion
         // (see AssetWorkflowRunsController.CompleteRun). The offline fallback
         // previously never set it, so the run stayed on whatever signatureStatus

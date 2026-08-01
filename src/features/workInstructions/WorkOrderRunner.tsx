@@ -697,6 +697,20 @@ export default function WorkOrderRunner({
         const localRun = await assetWorkflowRunService.getByIdLocalFirst(activeRunId);
         if (localRun && !localRun.isLocked) {
           applyRunProgressFromRun(localRun);
+
+          // Start productive tracking synchronously here instead of relying solely on the
+          // fire-and-forget reconcileRunWithServer() below — that call isn't on the critical
+          // path and nothing guarantees it resolves before the user starts working, which left
+          // offline-resumed runs with no time recorded at all.
+          const timeEntries = parseRunTimeEntries(localRun.timeTrackingJson ?? "[]");
+          const hasOpenEntry = timeEntries.some((e) => !e.endedAtUtc);
+          if (!hasOpenEntry && localRun.id) {
+            try {
+              const resumed = await assetWorkflowRunService.trackTimeEntry(localRun.id, "ResumeProductive", "Continued");
+              if (resumed) syncRunTimeState(resumed);
+            } catch { /* non-fatal — reconcileRunWithServer below will retry */ }
+          }
+
           markOfflinePerf("interactive_ready", "runner-local");
           setStage("running");
           void reconcileRunWithServer();

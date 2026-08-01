@@ -13,6 +13,10 @@ import type { User } from "../types/user";
 import { shouldSkipRunMutation } from "./connectivityMonitor";
 import { mediaStore } from "./mediaStore";
 import { isOfflineNetworkError as isOfflineNetworkErrorShape } from "../utils/offlineNetworkError";
+import offlineStore from "./offlineStore";
+import { dashboardWorkspaceHasRows } from "../utils/dashboardWorkspaceMerge";
+
+const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:${userId}`;
 
 function isOfflineNetworkError(error: unknown): boolean {
   if (shouldSkipRunMutation()) return true;
@@ -682,9 +686,22 @@ export const projectAssetService = {
       const res = await api.get<DashboardWorkspace>("/project-assets/dashboard-workspace", {
         params: Object.keys(params).length > 0 ? params : undefined,
       });
+      // Persist the full response for offline reuse. This endpoint doesn't go through the
+      // generic AssetRepository/entityReplaceAssetsByProduct cache, so an asset only ever seen
+      // via the Dashboard (never independently opened via Projects/Assets) would otherwise have
+      // no offline copy at all once dashboardCache's in-memory, restart-clearing cache is gone.
+      if (isMobileNativePlatform() && userId && dashboardWorkspaceHasRows(res.data)) {
+        await offlineStore.saveCache(DASHBOARD_WORKSPACE_CACHE_KEY(userId), res.data);
+      }
       return res.data;
     } catch {
-      if (isMobileNativePlatform()) return await this.dashboardWorkspaceLocal(userId);
+      if (isMobileNativePlatform()) {
+        if (userId) {
+          const cached = await offlineStore.getCache<DashboardWorkspace>(DASHBOARD_WORKSPACE_CACHE_KEY(userId));
+          if (cached && dashboardWorkspaceHasRows(cached)) return cached;
+        }
+        return await this.dashboardWorkspaceLocal(userId);
+      }
       throw new Error("dashboard-workspace-failed");
     }
   },
