@@ -197,6 +197,7 @@ public class ProjectsController : ControllerBase
             Office = request.Office,
             OfficeId = request.OfficeId,
             Region = request.Region,
+            TimeZoneId = request.TimeZoneId,
             ProjectType = request.ProjectType,
             Status = request.Status,
             ApprovalDecision = request.ApprovalDecision,
@@ -248,6 +249,7 @@ public class ProjectsController : ControllerBase
         project.Office = request.Office;
         project.OfficeId = request.OfficeId;
         project.Region = request.Region;
+        project.TimeZoneId = request.TimeZoneId;
         project.ProjectType = request.ProjectType;
         project.Status = request.Status;
         project.ApprovalDecision = request.ApprovalDecision;
@@ -621,7 +623,8 @@ public class ProjectsController : ControllerBase
             project.IsDeleted,
             project.DeletedAtUtc,
             project.DeletedByUserId,
-            project.DeleteReason
+            project.DeleteReason,
+            project.TimeZoneId
         );
     }
 

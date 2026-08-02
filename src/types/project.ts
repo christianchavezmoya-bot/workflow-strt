@@ -35,6 +35,9 @@ export interface Project {
   office: Office;
   officeId?: string;
   region?: string;
+  /** IANA timezone id for the project site (e.g. "Australia/Sydney"). Reports/timestamps
+   *  render in this zone. Undefined = fall back to UTC. Instants are always stored in UTC. */
+  timeZoneId?: string;
   projectType: ProjectType;
   status: ProjectStatus;
   approvalDecision?: ApprovalDecision;

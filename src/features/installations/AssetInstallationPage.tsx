@@ -666,7 +666,7 @@ const AssetInstallationPage = () => {
   const [reportPreviewFileBase, setReportPreviewFileBase] = useState<string | null>(null);
   const [bulkWorkflowReportsOpen, setBulkWorkflowReportsOpen] = useState(false);
   // Extra context passed into WorkflowRunHistoryDialog for the PDF download
-  const [runHistoryProject, setRunHistoryProject] = useState<{ customerName: string; jobNumber: string; siteName?: string } | null>(null);
+  const [runHistoryProject, setRunHistoryProject] = useState<{ customerName: string; jobNumber: string; siteName?: string; timeZoneId?: string } | null>(null);
   const [runHistoryCustomerLogo, setRunHistoryCustomerLogo] = useState<string | null>(null);
   // Inspection import dialog (per-asset popup)
   const [importDialogAsset, setImportDialogAsset] = useState<ProjectAsset | null>(null);
@@ -2920,7 +2920,7 @@ const AssetInstallationPage = () => {
 
   function _openRunHistoryProjectContext(asset: ProjectAsset) {
     const proj = projects.find((p) => p.id === asset.projectId);
-    setRunHistoryProject(proj ? { customerName: proj.customerName, jobNumber: proj.jobNumber, siteName: proj.siteName } : null);
+    setRunHistoryProject(proj ? { customerName: proj.customerName, jobNumber: proj.jobNumber, siteName: proj.siteName, timeZoneId: proj.timeZoneId } : null);
     setRunHistoryCustomerLogo(null);
     if (proj?.customerId) {
       customerService.getCustomers()
@@ -3488,6 +3488,7 @@ ${words.slice(midpoint).join(" ")}`;
       siteLocation: asset.location ?? undefined,
       assignedTechnician: tech?.fullName,
       documentType: docType,
+      timeZoneId: proj?.timeZoneId,
       signatureEvents,
       productFeatures,
     };

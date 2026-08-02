@@ -2,6 +2,7 @@ import {
   Alert,
   Box,
   Button,
+  Autocomplete,
   Checkbox,
   Dialog,
   DialogActions,
@@ -55,6 +56,9 @@ import type { ProductFeatureDefinition } from "../../types/product";
 import type { Office as GlobalOffice } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { randomId } from "../../utils/randomId";
+import { getDeviceTimeZone, listTimeZones } from "../../utils/datetime";
+
+const TIMEZONE_OPTIONS = listTimeZones();
 import type { Site } from "../../types/site";
 import type { FieldDefinition } from "../../services/fieldService";
 
@@ -73,6 +77,7 @@ const schema = z
     finishDate: z.string().optional(),
     office: z.string().optional(),
     region: z.string().optional(),
+    timeZoneId: z.string().optional(),
     projectManager: z.string().optional(),
     projectType: z.enum(["Internal", "External"]).optional(),
     status: z
@@ -194,6 +199,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       finishDate: "",
       office: "",
       region: "",
+      timeZoneId: getDeviceTimeZone(),
       projectManager: "",
       projectType: "Internal",
       status: "Draft",
@@ -236,6 +242,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         finishDate: "",
         office: "",
         region: "",
+        timeZoneId: getDeviceTimeZone(),
         projectManager: "",
         projectType: "Internal",
         status: "Draft",
@@ -261,6 +268,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         finishDate: localProject.finishDate,
         office: localProject.officeId || globalOffices.find((o) => o.city === localProject.office)?.id || "",
         region: localProject.region,
+        timeZoneId: localProject.timeZoneId || getDeviceTimeZone(),
         projectManager: localProject.projectManager,
         projectType: localProject.projectType,
         status: localProject.status,
@@ -286,6 +294,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         finishDate: project.finishDate,
         office: project.officeId || globalOffices.find((o) => o.city === project.office)?.id || "",
         region: project.region,
+        timeZoneId: project.timeZoneId || getDeviceTimeZone(),
         projectManager: project.projectManager,
         projectType: project.projectType,
         status: project.status,
@@ -636,6 +645,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       officeId: data.office || undefined,
       office: globalOffices.find((o) => o.id === data.office)?.city || data.office || "",
       region: data.region,
+      timeZoneId: data.timeZoneId || undefined,
       projectType: (data.projectType as any) || "Internal",
       status: derivedStatus,
       approvalDecision: requestedDecision,
@@ -877,6 +887,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       "products",
       "office",
       "region",
+      "timeZoneId",
       "projectManager",
       "teamMembers",
       "description",
@@ -1200,6 +1211,35 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
                   fullWidth
                   error={!!errors.region}
                   helperText={errors.region?.message || "Auto-filled from Office. Override if needed."}
+                />
+              )}
+            />
+          </Grid>
+        );
+      case "timeZoneId":
+        return (
+          <Grid item xs={12} md={6} key={fieldId}>
+            <Controller
+              name="timeZoneId"
+              control={control}
+              render={({ field }) => (
+                <Autocomplete
+                  options={TIMEZONE_OPTIONS}
+                  value={field.value || null}
+                  onChange={(_, v) => field.onChange(v ?? "")}
+                  autoHighlight
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label={labelWithRequired("timeZoneId", "Project Time Zone")}
+                      fullWidth
+                      error={!!errors.timeZoneId}
+                      helperText={
+                        errors.timeZoneId?.message ||
+                        "Reports show wall-clock times in this zone. Defaults to your device zone."
+                      }
+                    />
+                  )}
                 />
               )}
             />
@@ -1530,6 +1570,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
 
             {visibleIdSet.has("teamMembers") && renderFormField("teamMembers")}
             {visibleIdSet.has("region") ? renderFormField("region") : <Grid item xs={12} md={6} />}
+            {visibleIdSet.has("timeZoneId") ? renderFormField("timeZoneId") : <Grid item xs={12} md={6} />}
 
             {visibleIdSet.has("startDate") && renderFormField("startDate")}
             {visibleIdSet.has("finishDate") ? renderFormField("finishDate") : <Grid item xs={12} md={6} />}
@@ -1688,6 +1729,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
           { id: "products", name: "Product name", type: "multi-select", required: true },
           { id: "office", name: "Office", type: "text", required: true },
           { id: "region", name: "Country/State", type: "text", required: false },
+          { id: "timeZoneId", name: "Time Zone", type: "single select", required: false },
           { id: "projectManager", name: "Project Manager", type: "text", required: false },
           { id: "teamMembers", name: "Project Team Members", type: "multi-select", required: false },
           { id: "description", name: "Description", type: "text", required: true },

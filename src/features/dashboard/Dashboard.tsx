@@ -1515,6 +1515,7 @@ const Dashboard = () => {
         siteName: projects.find((project) => project.id === asset.projectId)?.siteName,
         siteLocation: asset.location ?? undefined,
         assignedTechnician: user.fullName ?? undefined,
+        timeZoneId: projects.find((project) => project.id === asset.projectId)?.timeZoneId,
         signatureEvents,
         productFeatures,
         outputMode: "open",

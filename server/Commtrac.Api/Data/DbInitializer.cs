@@ -32,6 +32,7 @@ public static class DbInitializer
         EnsureMarch15Columns(db);
         EnsureFeatureProcurementColumns(db);
         EnsureProjectMinimumCompletionPercentColumn(db);
+        EnsureProjectTimeZoneColumn(db);
         EnsureLinkableKeyFieldDefinitions(db);
         // Soft-delete columns are model-only (no migration creates them); add them
         // BEFORE any seeding query below hits a !IsDeleted query filter, or a fresh
@@ -747,6 +748,28 @@ public static class DbInitializer
                     FieldsJson TEXT NOT NULL DEFAULT '[]'
                 )";
             cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    // Model-only column (added via entity, not a migration) — add it idempotently so both
+    // fresh and existing databases have it. Null default; instants stay UTC, this is display-only.
+    private static void EnsureProjectTimeZoneColumn(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Projects') WHERE name='TimeZoneId'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Projects ADD COLUMN TimeZoneId TEXT NULL";
+                cmd.ExecuteNonQuery();
+            }
         }
         finally
         {

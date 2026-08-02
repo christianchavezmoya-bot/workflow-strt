@@ -226,6 +226,13 @@ public class ProjectEntity
     public string? OfficeId { get; set; }
     [MaxLength(120)]
     public string? Region { get; set; }
+    /// <summary>
+    /// IANA timezone id for the project site (e.g. "Australia/Sydney"). Wall-clock
+    /// timestamps in reports/UI render in this zone. Null = fall back to UTC.
+    /// Instants are always stored in UTC; this only affects display.
+    /// </summary>
+    [MaxLength(64)]
+    public string? TimeZoneId { get; set; }
     [MaxLength(40)]
     public string ProjectType { get; set; } = "Internal";
     [MaxLength(40)]

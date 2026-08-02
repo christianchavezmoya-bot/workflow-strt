@@ -445,7 +445,10 @@ public record ProjectDto(
     bool IsDeleted = false,
     DateTime? DeletedAtUtc = null,
     string? DeletedByUserId = null,
-    string? DeleteReason = null
+    string? DeleteReason = null,
+    // IANA timezone id for the project site (e.g. "Australia/Sydney"). Display-only;
+    // instants stay UTC. Null falls back to UTC when rendering reports/timestamps.
+    string? TimeZoneId = null
 );
 
 public record UpdateProjectStatusRequest(

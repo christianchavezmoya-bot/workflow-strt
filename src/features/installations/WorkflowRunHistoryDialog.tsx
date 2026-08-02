@@ -83,7 +83,7 @@ interface Props {
   onContinue?: (run: AssetWorkflowRun) => void;
   onAddMissingMedia?: (run: AssetWorkflowRun) => void;
   /** Customer / project context forwarded from the parent page for the PDF report. */
-  project?: { customerName: string; jobNumber: string; siteName?: string };
+  project?: { customerName: string; jobNumber: string; siteName?: string; timeZoneId?: string };
   customerLogoBase64?: string | null;
   assignedTechnician?: string;
   allowRerun?: boolean;
@@ -455,6 +455,7 @@ export default function WorkflowRunHistoryDialog({
         siteLocation: asset.location ?? undefined,
         assignedTechnician,
         includeAllSteps,
+        timeZoneId: project?.timeZoneId,
         signatureEvents,
         productFeatures,
       });

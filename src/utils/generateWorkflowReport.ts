@@ -20,6 +20,7 @@ import type { WorkflowStep } from "../types/workflow";
 import type { SignatureEvent } from "../types/signature";
 import { getMissingWorkflowItems } from "./workflowCompleteness";
 import { openObjectUrl } from "./printWindow";
+import { formatInstant, resolveProjectTimeZone, zoneAbbreviation } from "./datetime";
 
 // â”€â”€â”€ Colour palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const NAVY: [number, number, number]       = [26,  39,  68];   // header band / step card header
@@ -169,22 +170,8 @@ function fmtDur(totalSeconds: number): string {
   return `${m}m`;
 }
 
-function fmt(date: string | undefined): string {
-  if (!date) return "—";
-  return new Date(date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
-
-function fmtFull(date: string | undefined): string {
-  if (!date) return "—";
-  return new Date(date).toLocaleString(undefined, {
-    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-  });
-}
-
-function fmtTime(date: string | undefined): string {
-  if (!date) return "";
-  return new Date(date).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
+// Date/time helpers are defined as closures inside generateWorkflowReport so they render in
+// the project's timezone (reportTz) rather than whatever device generates the PDF. See below.
 
 const CHOICE_ROW_PREFIX = "__choice_boxes__:";
 
@@ -261,6 +248,8 @@ export interface GenerateReportParams {
   productFeatures?: Feature[];
   /** Optional document type tag (e.g. "inspection") for report labelling. */
   documentType?: string;
+  /** IANA timezone id (project site) to render all wall-clock timestamps in. Undefined = UTC. */
+  timeZoneId?: string;
   /** "download" saves the PDF; "open" opens it in a browser viewer/tab; "blob" returns a Blob for in-app preview/export. */
   outputMode?: "download" | "open" | "blob";
   /** If preview opening fails, optionally fall back to downloading the PDF. */
@@ -277,7 +266,18 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     productFeatures = [],
     outputMode = "download",
     allowDownloadFallback = true,
+    timeZoneId,
   } = params;
+
+  // All wall-clock timestamps render in the project's timezone so the report reads identically
+  // to every office. Instants remain UTC; only display is localized here.
+  const reportTz = resolveProjectTimeZone(timeZoneId);
+  const fmt = (date?: string): string =>
+    date ? formatInstant(date, reportTz, { time: false, withZone: false }) : "—";
+  const fmtFull = (date?: string): string =>
+    date ? formatInstant(date, reportTz, { withZone: true }) : "—";
+  const fmtTime = (date?: string): string =>
+    date ? formatInstant(date, reportTz, { date: false, withZone: false }) : "";
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const totalPages = () => (doc.internal as unknown as { getNumberOfPages: () => number }).getNumberOfPages();
@@ -405,6 +405,15 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   // â”€â”€ 2b. Time Tracking summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   y = ensureSpace(y, 20);
   y = drawSectionBar(y, "TIME TRACKING");
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "italic");
+  doc.setTextColor(...GREY_LABEL);
+  doc.text(
+    `All times shown in ${reportTz} (${zoneAbbreviation(reportTz, run.completedAt ?? run.startedAt)})`,
+    MARGIN + 2,
+    y + 0.5,
+  );
+  y += 4;
 
   const totalDurationSecs = run.completedAt && run.startedAt
     ? Math.max(0, Math.floor((new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime()) / 1000))
@@ -451,10 +460,8 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       const endMs   = e.endedAtUtc ? new Date(e.endedAtUtc).getTime() : (run.completedAt ? new Date(run.completedAt).getTime() : null);
       const startMs = new Date(e.startedAtUtc).getTime();
       const durSecs = endMs ? Math.max(0, Math.floor((endMs - startMs) / 1000)) : null;
-      const startLabel = new Date(e.startedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-      const endLabel   = e.endedAtUtc
-        ? new Date(e.endedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-        : "Open";
+      const startLabel = fmtTime(e.startedAtUtc);
+      const endLabel   = e.endedAtUtc ? fmtTime(e.endedAtUtc) : "Open";
       return [
         e.reason ?? "—",
         startLabel,
@@ -1057,10 +1064,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     doc.setTextColor(...GREY_LABEL);
 
     if (event) {
-      const dateStr = new Date(event.signedAtUtc).toLocaleString(undefined, {
-        year: "numeric", month: "short", day: "numeric",
-        hour: "2-digit", minute: "2-digit",
-      });
+      const dateStr = fmtFull(event.signedAtUtc);
       const lines: string[] = [
         `Name: ${event.signerName}`,
         event.signerTitle ? `Title: ${event.signerTitle}` : "",
