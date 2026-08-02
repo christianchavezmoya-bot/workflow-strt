@@ -232,6 +232,7 @@ export default function ExternalSignPage() {
         workflowConfigName: summary.workflowName,
         customerName: summary.customerName,
         jobNumber: summary.projectJobNumber,
+        timeZoneId: summary.timeZoneId,
         signatureEvents,
         includeAllSteps: true,
       });

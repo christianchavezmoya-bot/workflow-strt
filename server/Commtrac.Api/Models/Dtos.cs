@@ -1245,7 +1245,9 @@ public record PublicRunSummaryDto(
     string? InstallerSignatureData,
     string? InstallerReasonCode,
     string? InstallerNotes,
-    DateTime? InstallerSignedAt
+    DateTime? InstallerSignedAt,
+    // Project site timezone so the customer-facing PDF renders wall-clock times consistently.
+    string? TimeZoneId = null
 );
 
 public record PublicSubmitSignatureRequest(

@@ -84,7 +84,8 @@ public class PublicSignController : ControllerBase
             installerEvt?.SignatureData,
             installerEvt?.ReasonCode,
             installerEvt?.Notes,
-            installerEvt?.SignedAtUtc
+            installerEvt?.SignedAtUtc,
+            project?.TimeZoneId
         ));
     }
 

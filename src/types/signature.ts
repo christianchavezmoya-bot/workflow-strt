@@ -64,4 +64,6 @@ export interface PublicRunSummary {
   installerReasonCode?: string;
   installerNotes?: string;
   installerSignedAt?: string;
+  /** Project site IANA timezone so the customer PDF renders wall-clock times consistently. */
+  timeZoneId?: string;
 }
