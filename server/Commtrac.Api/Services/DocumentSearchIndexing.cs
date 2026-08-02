@@ -222,36 +222,46 @@ public class DocumentSearchIndexWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await EnsureIndexTableAsync(stoppingToken);
-        _channel.Enqueue(new DocumentIndexWorkItem(DocumentIndexWorkType.FullRebuild));
-        _status.OnQueueDepthChanged(_metrics.QueueDepth);
-
-        while (await _channel.WaitToReadAsync(stoppingToken))
+        try
         {
-            while (_channel.TryRead(out var workItem))
+            await EnsureIndexTableAsync(stoppingToken);
+            _channel.Enqueue(new DocumentIndexWorkItem(DocumentIndexWorkType.FullRebuild));
+            _status.OnQueueDepthChanged(_metrics.QueueDepth);
+
+            while (await _channel.WaitToReadAsync(stoppingToken))
             {
-                if (workItem is null) continue;
-                _status.OnQueueDepthChanged(_metrics.QueueDepth);
-                try
+                while (_channel.TryRead(out var workItem))
                 {
-                    _status.OnWorkStarted(workItem.Type);
-                    await ProcessWorkItemAsync(workItem, stoppingToken);
-                    _status.OnWorkCompleted(workItem.Type);
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    _status.OnWorkError(workItem.Type, ex.Message);
-                    _logger.LogError(ex, "Document search indexing failed for work item {Type} {Id}", workItem.Type, workItem.Id);
-                }
-                finally
-                {
+                    if (workItem is null) continue;
                     _status.OnQueueDepthChanged(_metrics.QueueDepth);
+                    try
+                    {
+                        _status.OnWorkStarted(workItem.Type);
+                        await ProcessWorkItemAsync(workItem, stoppingToken);
+                        _status.OnWorkCompleted(workItem.Type);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        _status.OnWorkError(workItem.Type, ex.Message);
+                        _logger.LogError(ex, "Document search indexing failed for work item {Type} {Id}", workItem.Type, workItem.Id);
+                    }
+                    finally
+                    {
+                        _status.OnQueueDepthChanged(_metrics.QueueDepth);
+                    }
                 }
             }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown: WaitToReadAsync (or EnsureIndexTableAsync) is cancelled when the
+            // host stops. Exit quietly so the default BackgroundServiceExceptionBehavior.StopHost
+            // isn't tripped by a benign cancellation — that was logging an alarming "unhandled
+            // exception, the IHost instance is stopping" trace on every shutdown.
         }
     }
 
