@@ -1,54 +1,63 @@
 ﻿import { useCallback, useEffect, useState } from "react";
-import { isMobileNativePlatform } from "../utils/platform";
+import { useAuth } from "./useAuth";
 
 export type ActiveOffice = string;
 
-const STORAGE_KEY = "active_office";
-const DEFAULT_OFFICE = "All";
+const LEGACY_STORAGE_KEY = "active_office";
 
-/** Desktop-only: phone + mobile web always default to "All" (no persisted office filter). */
-function shouldPersistActiveOffice(): boolean {
-  if (typeof window === "undefined") return false;
-  if (isMobileNativePlatform()) return false;
-  return window.matchMedia("(min-width: 769px)").matches;
+function storageKey(userId: string): string {
+  return `active_office_${userId}`;
+}
+
+/** Default active global office from the signed-in user's profile office. */
+export function defaultOfficeForUser(userOffice?: string): ActiveOffice {
+  const trimmed = userOffice?.trim();
+  return trimmed || "All";
+}
+
+function readStoredOffice(userId: string, userOffice?: string): ActiveOffice {
+  const scoped = localStorage.getItem(storageKey(userId));
+  if (scoped) return scoped;
+
+  // Legacy shared key (pre per-user prefs) — keep one release for desktop filters.
+  const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+  if (legacy) return legacy;
+
+  return defaultOfficeForUser(userOffice);
 }
 
 export const useActiveOffice = () => {
-  const [activeOffice, setActiveOffice] = useState<ActiveOffice>(DEFAULT_OFFICE);
+  const { user, authReady } = useAuth();
+  const [activeOffice, setActiveOffice] = useState<ActiveOffice>(() =>
+    defaultOfficeForUser(user.office),
+  );
 
   useEffect(() => {
-    if (!shouldPersistActiveOffice()) {
-      setActiveOffice(DEFAULT_OFFICE);
+    if (!authReady || !user.id) {
+      setActiveOffice(defaultOfficeForUser(user.office));
       return;
     }
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      setActiveOffice(stored);
-    }
-  }, []);
+    setActiveOffice(readStoredOffice(user.id, user.office));
+  }, [authReady, user.id, user.office]);
 
   useEffect(() => {
     const handler = () => {
-      if (!shouldPersistActiveOffice()) {
-        setActiveOffice(DEFAULT_OFFICE);
-        return;
-      }
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        setActiveOffice(stored);
-      }
+      if (!user.id) return;
+      setActiveOffice(readStoredOffice(user.id, user.office));
     };
     window.addEventListener("active-office-changed", handler);
     return () => window.removeEventListener("active-office-changed", handler);
-  }, []);
+  }, [user.id, user.office]);
 
   const updateActiveOffice = useCallback((office: ActiveOffice) => {
     setActiveOffice(office);
-    if (shouldPersistActiveOffice()) {
-      localStorage.setItem(STORAGE_KEY, office);
+    if (user.id) {
+      localStorage.setItem(storageKey(user.id), office);
+    } else {
+      localStorage.setItem(LEGACY_STORAGE_KEY, office);
     }
     window.dispatchEvent(new Event("active-office-changed"));
-  }, []);
+  }, [user.id]);
 
   return { activeOffice, updateActiveOffice };
 };
