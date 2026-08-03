@@ -859,14 +859,18 @@ public class AssetWorkflowRunsController : ControllerBase
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
         if (asset is not null)
         {
-            // Check all runs for this asset for any open issues (blocking OR non-blocking)
-            var allRuns    = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
-            var anyBlock   = allRuns.Any(r =>
-                ParseIssues(r.IssuesJson).Any(i =>
+            // IssuesJson only — avoid loading full run rows (snapshots are large).
+            var issueJsonRows = await _db.AssetWorkflowRuns
+                .Where(r => r.AssetId == run.AssetId)
+                .Select(r => r.IssuesJson)
+                .AsNoTracking()
+                .ToListAsync();
+            var anyBlock = issueJsonRows.Any(json =>
+                ParseIssues(json).Any(i =>
                     i.TryGetProperty("isBlocking", out var b) && b.GetBoolean() &&
                     i.TryGetProperty("resolved",   out var rv) && !rv.GetBoolean()));
-            var anyOpenIssue = allRuns.Any(r =>
-                ParseIssues(r.IssuesJson).Any(i =>
+            var anyOpenIssue = issueJsonRows.Any(json =>
+                ParseIssues(json).Any(i =>
                     i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean()));
 
             asset.Status    = anyOpenIssue ? "Issue" : "Pending";
