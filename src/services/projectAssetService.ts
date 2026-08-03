@@ -210,6 +210,11 @@ function buildDashboardWorkspaceFromAssets(
     ? allItems.filter((item) => item.assignedUserId === userId)
     : allItems;
 
+  return bucketWorkspaceItems(userFiltered);
+}
+
+/** Splits already-built workspace items into current/history x installation/inspection buckets. */
+function bucketWorkspaceItems(items: DashboardWorkspaceAssetItem[]): DashboardWorkspace {
   const isInstallationWorkflow = (mode?: string) =>
     !mode || mode === "INSTALLATION_ONLY" || mode === "MIXED";
   const isInspectionWorkflow = (mode?: string) =>
@@ -222,11 +227,37 @@ function buildDashboardWorkspaceFromAssets(
     item.status === "Complete" || item.status === "Completed";
 
   return {
-    currentInstalls: userFiltered.filter((item) => isCurrent(item) && isInstallationWorkflow(item.workflowMode)),
-    currentInspections: userFiltered.filter((item) => isCurrent(item) && isInspectionWorkflow(item.workflowMode)),
-    installHistory: userFiltered.filter((item) => isHistory(item) && isInstallationWorkflow(item.workflowMode)),
-    inspectionHistory: userFiltered.filter((item) => isHistory(item) && isInspectionWorkflow(item.workflowMode)),
+    currentInstalls: items.filter((item) => isCurrent(item) && isInstallationWorkflow(item.workflowMode)),
+    currentInspections: items.filter((item) => isCurrent(item) && isInspectionWorkflow(item.workflowMode)),
+    installHistory: items.filter((item) => isHistory(item) && isInstallationWorkflow(item.workflowMode)),
+    inspectionHistory: items.filter((item) => isHistory(item) && isInspectionWorkflow(item.workflowMode)),
   };
+}
+
+/**
+ * Re-buckets a persisted (frozen) dashboard-workspace snapshot against the freshest locally-known
+ * asset status. A job completed offline after the snapshot was captured must still move from
+ * "My Jobs Today" to "Job History" immediately - the snapshot alone can't reflect that, since it's
+ * only refreshed on the next successful online fetch, but the generic asset cache (kept live by
+ * every offline write path, e.g. applyOfflineAssetStatusUpdate) already has the true status.
+ */
+async function reconcileWorkspaceWithLocalStatus(data: DashboardWorkspace): Promise<DashboardWorkspace> {
+  const allItems = [
+    ...data.currentInstalls, ...data.currentInspections,
+    ...data.installHistory, ...data.inspectionHistory,
+  ];
+  if (allItems.length === 0) return data;
+
+  let changed = false;
+  const reconciled = await Promise.all(allItems.map(async (item) => {
+    const cached = await entityGetAsset(item.id);
+    const freshStatus = (cached?.data as ProjectAsset | undefined)?.status;
+    if (!freshStatus || freshStatus === item.status) return item;
+    changed = true;
+    return { ...item, status: freshStatus, historyStatus: freshStatus };
+  }));
+
+  return changed ? bucketWorkspaceItems(reconciled) : data;
 }
 
 export const projectAssetService = {
@@ -698,7 +729,9 @@ export const projectAssetService = {
       if (isMobileNativePlatform()) {
         if (userId) {
           const cached = await offlineStore.getCache<DashboardWorkspace>(DASHBOARD_WORKSPACE_CACHE_KEY(userId));
-          if (cached && dashboardWorkspaceHasRows(cached)) return cached;
+          if (cached && dashboardWorkspaceHasRows(cached)) {
+            return await reconcileWorkspaceWithLocalStatus(cached);
+          }
         }
         return await this.dashboardWorkspaceLocal(userId);
       }
