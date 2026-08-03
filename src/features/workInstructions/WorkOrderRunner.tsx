@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AccessTimeOutlined,
   AttachMoneyOutlined,
@@ -61,8 +61,11 @@ import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
+import RunTimeline from "../../components/ui/RunTimeline";
 import SignaturePad from "../../components/ui/SignaturePad";
+import { useAuth } from "../../hooks/useAuth";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
+import { canEditRun } from "../../utils/runEditPermissions";
 import { getMissingWorkflowItems, getRunMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
 import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
 import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
@@ -304,6 +307,7 @@ export default function WorkOrderRunner({
   }, [open, productId]);
 
   // Run tracking
+  const { user } = useAuth();
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
   const [activeRun, setActiveRun] = useState<AssetWorkflowRun | null>(null);
   const [timeEditorOpen, setTimeEditorOpen] = useState(false);
@@ -2378,6 +2382,11 @@ export default function WorkOrderRunner({
                     <Chip size="small" color={downtimeSecondsLive > 0 ? "warning" : "default"} variant="outlined" label={`Downtime ${formatDuration(downtimeSecondsLive)}`} />
                   </Stack>
                 )}
+                {activeRun?.timeTrackingJson && (
+                  <Box sx={{ mt: 0.5 }}>
+                    <RunTimeline entries={parseRunTimeEntries(activeRun.timeTrackingJson)} />
+                  </Box>
+                )}
               </Stack>
             </Paper>
 
@@ -3214,6 +3223,7 @@ export default function WorkOrderRunner({
         <TimeEntriesEditorDialog
           open={timeEditorOpen}
           run={activeRun}
+          readOnly={!canEditRun(activeRun, user.role).time}
           onClose={() => setTimeEditorOpen(false)}
           onSaved={(updated) => {
             setActiveRun(updated);

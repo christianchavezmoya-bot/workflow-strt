@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import { useAuth } from "../../hooks/useAuth";
+import { canEditRun } from "../../utils/runEditPermissions";
 import {
   AccessTimeOutlined,
   CheckCircleOutlined,
@@ -236,6 +238,7 @@ export default function WorkflowRunHistoryDialog({
 }: Props) {
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
+  const { user } = useAuth();
   const [runs, setRuns] = useState<AssetWorkflowRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
@@ -748,7 +751,7 @@ export default function WorkflowRunHistoryDialog({
                           alignItems="center"
                           sx={{ width: isPhone ? "100%" : "auto" }}
                         >
-                        <Tooltip title="Edit / correct time entries">
+                        <Tooltip title={canEditRun(run, user.role).time ? "Edit / correct time entries" : "View time entries"}>
                           <IconButton
                             size="small"
                             onClick={(e) => {
@@ -1371,6 +1374,7 @@ export default function WorkflowRunHistoryDialog({
         <TimeEntriesEditorDialog
           open={Boolean(timeEditorRun)}
           run={timeEditorRun}
+          readOnly={!canEditRun(timeEditorRun, user.role).time}
           onClose={() => setTimeEditorRun(null)}
           onSaved={(updated) => {
             setRuns((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
