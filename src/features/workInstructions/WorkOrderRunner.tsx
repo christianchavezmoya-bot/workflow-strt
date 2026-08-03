@@ -65,6 +65,7 @@ import RunTimeline from "../../components/ui/RunTimeline";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useAuth } from "../../hooks/useAuth";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
+import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { canEditRun } from "../../utils/runEditPermissions";
 import { getMissingWorkflowItems, getRunMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
 import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
@@ -125,7 +126,9 @@ interface WorkOrderRunnerProps {
   assetTag?: string;
   /** Job number shown in dashboard flags. */
   jobNumber?: string;
-  /** IANA timezone for run timeline display (project site). */
+  /** Project id — used to resolve site timezone when timeZoneId prop is not passed. */
+  projectId?: string;
+  /** IANA timezone for run timeline display (project site). Overrides hook when set. */
   timeZoneId?: string;
   /** Product feature definitions â€" used to look up feature names for repeatFeatureId steps. */
   productFeatures?: RunnerProductFeature[];
@@ -235,12 +238,14 @@ export default function WorkOrderRunner({
   currentUserId,
   assetTag,
   jobNumber,
-  timeZoneId,
+  projectId: projectIdProp,
+  timeZoneId: timeZoneIdProp,
   productFeatures,
   featureSelections,
   teamMembers,
   allUsers,
 }: WorkOrderRunnerProps) {
+  const resolvedTimeZone = useProjectTimeZone(projectIdProp) ?? timeZoneIdProp;
   const userSelectOptions = (teamMembers && teamMembers.length > 0 ? teamMembers : (allUsers ?? [])).map((u) => u.fullName);
   const stepsSorted = useMemo(
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
@@ -2411,7 +2416,7 @@ export default function WorkOrderRunner({
                 )}
                 {activeRun?.timeTrackingJson && (
                   <Box sx={{ mt: 0.5 }}>
-                    <RunTimeline entries={parseRunTimeEntries(activeRun.timeTrackingJson)} timeZoneId={timeZoneId} />
+                    <RunTimeline entries={parseRunTimeEntries(activeRun.timeTrackingJson)} timeZoneId={resolvedTimeZone} />
                   </Box>
                 )}
               </Stack>
@@ -3270,7 +3275,7 @@ export default function WorkOrderRunner({
         <TimeEntriesEditorDialog
           open={timeEditorOpen}
           run={activeRun}
-          timeZoneId={timeZoneId}
+          timeZoneId={resolvedTimeZone}
           readOnly={!runEditPerms.time}
           onClose={() => setTimeEditorOpen(false)}
           onSaved={(updated) => {

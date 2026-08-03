@@ -7006,6 +7006,7 @@ ${words.slice(midpoint).join(" ")}`;
           currentUserId={currentUser.id}
           assetTag={runnerAsset.assetTag || (runnerAsset as any).assetName || ""}
           jobNumber={(runnerAsset as any).jobNumber || ""}
+          projectId={runnerAsset.projectId}
           timeZoneId={runnerProjectTimeZone ?? selectedProject?.timeZoneId}
           productFeatures={runnerProductFeatures}
           featureSelections={runnerFeatureSelections}

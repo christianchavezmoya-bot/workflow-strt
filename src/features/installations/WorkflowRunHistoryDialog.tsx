@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
+import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { canEditRun } from "../../utils/runEditPermissions";
 import {
   AccessTimeOutlined,
@@ -27,6 +28,7 @@ import type { SignatureEvent } from "../../types/signature";
 import { projectContactService } from "../../services/projectContactService";
 import { resolvePublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import type { ProjectContact } from "../../types/projectContact";
+import { formatInstant } from "../../utils/datetime";
 import {
   Alert,
   Box,
@@ -140,10 +142,8 @@ function timeEntryDuration(entry: RunTimeEntry, fallbackEndUtc?: string): number
   return Math.max(0, Math.floor((new Date(end).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000));
 }
 
-function fmtTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  } catch { return iso; }
+function fmtTime(iso: string, timeZoneId?: string | null): string {
+  return formatInstant(iso, timeZoneId, { date: false, time: true, withZone: true });
 }
 
 function parseSnapshot(snapshotJson: string): WorkflowConfig | null {
@@ -239,6 +239,8 @@ export default function WorkflowRunHistoryDialog({
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const { user } = useAuth();
+  const fetchedTimeZone = useProjectTimeZone(asset.projectId);
+  const resolvedTimeZone = fetchedTimeZone ?? project?.timeZoneId;
   const [runs, setRuns] = useState<AssetWorkflowRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
@@ -458,7 +460,7 @@ export default function WorkflowRunHistoryDialog({
         siteLocation: asset.location ?? undefined,
         assignedTechnician,
         includeAllSteps,
-        timeZoneId: project?.timeZoneId,
+        timeZoneId: resolvedTimeZone,
         signatureEvents,
         productFeatures,
       });
@@ -632,15 +634,7 @@ export default function WorkflowRunHistoryDialog({
                               v{run.workflowVersion}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              {new Date(run.startedAt).toLocaleDateString(undefined, {
-                                year: "numeric",
-                                month: "short",
-                                day: "numeric",
-                              })}{" "}
-                              {new Date(run.startedAt).toLocaleTimeString(undefined, {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
+                              {formatInstant(run.startedAt, resolvedTimeZone, { withZone: true })}
                             </Typography>
                             {run.completedByName && (
                               <Typography variant="caption" color="text.secondary">
@@ -938,11 +932,11 @@ export default function WorkflowRunHistoryDialog({
                                             {e.reason || "No reason recorded"}
                                           </Typography>
                                           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                                            <Chip size="small" variant="outlined" label={`Start ${fmtTime(e.startedAtUtc)}`} sx={{ height: 22 }} />
+                                            <Chip size="small" variant="outlined" label={`Start ${fmtTime(e.startedAtUtc, resolvedTimeZone)}`} sx={{ height: 22 }} />
                                             <Chip
                                               size="small"
                                               variant="outlined"
-                                              label={`End ${e.endedAtUtc ? fmtTime(e.endedAtUtc) : "Open"}`}
+                                              label={`End ${e.endedAtUtc ? fmtTime(e.endedAtUtc, resolvedTimeZone) : "Open"}`}
                                               color={e.endedAtUtc ? "default" : "warning"}
                                               sx={{ height: 22 }}
                                             />
@@ -986,10 +980,10 @@ export default function WorkflowRunHistoryDialog({
                                           {e.reason || <Typography component="span" variant="caption" color="text.disabled">—</Typography>}
                                         </TableCell>
                                         <TableCell sx={{ fontSize: 11, py: 0.75, color: "text.secondary", whiteSpace: "nowrap" }}>
-                                          {fmtTime(e.startedAtUtc)}
+                                          {fmtTime(e.startedAtUtc, resolvedTimeZone)}
                                         </TableCell>
                                         <TableCell sx={{ fontSize: 11, py: 0.75, color: "text.secondary", whiteSpace: "nowrap" }}>
-                                          {e.endedAtUtc ? fmtTime(e.endedAtUtc) : <Typography component="span" variant="caption" color="warning.main">Open</Typography>}
+                                          {e.endedAtUtc ? fmtTime(e.endedAtUtc, resolvedTimeZone) : <Typography component="span" variant="caption" color="warning.main">Open</Typography>}
                                         </TableCell>
                                         <TableCell sx={{ fontSize: 11, py: 0.75, color: "warning.main", whiteSpace: "nowrap" }}>
                                           {dur > 0 ? formatDuration(dur) : "—"}
@@ -1075,10 +1069,7 @@ export default function WorkflowRunHistoryDialog({
                                                 variant="outlined"
                                                 label={
                                                   sr.completedAt
-                                                    ? new Date(sr.completedAt).toLocaleTimeString(undefined, {
-                                                        hour: "2-digit",
-                                                        minute: "2-digit",
-                                                      })
+                                                    ? formatInstant(sr.completedAt, resolvedTimeZone, { date: false, time: true, withZone: false })
                                                     : "No time"
                                                 }
                                                 sx={{ height: 18, fontSize: 10 }}
@@ -1311,7 +1302,7 @@ export default function WorkflowRunHistoryDialog({
                                       color="text.disabled"
                                       display="block"
                                     >
-                                      {new Date(issue.reportedAt).toLocaleString()} ·{" "}
+                                      {formatInstant(issue.reportedAt, resolvedTimeZone, { withZone: true })} ·{" "}
                                       {issue.severity}
                                       {issue.resolved ? " · resolved" : ""}
                                     </Typography>
@@ -1374,6 +1365,7 @@ export default function WorkflowRunHistoryDialog({
         <TimeEntriesEditorDialog
           open={Boolean(timeEditorRun)}
           run={timeEditorRun}
+          timeZoneId={resolvedTimeZone}
           readOnly={!canEditRun(timeEditorRun, user.role).time}
           onClose={() => setTimeEditorRun(null)}
           onSaved={(updated) => {
