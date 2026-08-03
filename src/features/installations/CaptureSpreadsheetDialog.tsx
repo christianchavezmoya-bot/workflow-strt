@@ -616,16 +616,19 @@ export default function CaptureSpreadsheetDialog({
               }
               void saveCaptureCell(asset, column, next);
             }}
-            inputProps={{ sx: { fontSize: 12, py: 0.35, px: 0.5 } }}
-            sx={{ width: "100%" }}
+            inputProps={{ sx: { fontSize: 12, py: 0.35, px: 0.5, color: ASSET_JOB_PALETTE.text } }}
+            sx={{
+              width: "100%",
+              "& .MuiInputBase-input": { color: ASSET_JOB_PALETTE.text },
+              "& .MuiInputBase-input::placeholder": { color: "rgba(22,52,71,0.45)", opacity: 1 },
+            }}
           />
         ) : (
           <Typography
             variant="caption"
-            color={isBlank ? "rgba(22,52,71,0.62)" : ASSET_JOB_PALETTE.text}
             fontStyle={isBlank ? "italic" : "normal"}
             fontWeight={500}
-            sx={{ fontSize: 12, lineHeight: 1.25 }}
+            sx={{ fontSize: 12, lineHeight: 1.25, color: isBlank ? "rgba(22,52,71,0.62)" : ASSET_JOB_PALETTE.text }}
           >
             {isBlank ? "-" : value}
           </Typography>
@@ -688,8 +691,8 @@ export default function CaptureSpreadsheetDialog({
         </Alert>
       )}
 
-      <Box sx={{ overflow: "auto", maxHeight: embedded ? undefined : (fullScreen ? "calc(100vh - 200px)" : "70vh"), WebkitOverflowScrolling: "touch" }}>
-        <Table size="small" stickyHeader sx={{ minWidth: 760, borderCollapse: "separate", borderSpacing: 0 }}>
+      <Box sx={{ overflow: "auto", maxHeight: embedded ? undefined : (fullScreen ? "calc(100vh - 200px)" : "70vh"), WebkitOverflowScrolling: "touch", color: ASSET_JOB_PALETTE.text }}>
+        <Table size="small" stickyHeader sx={{ minWidth: 760, borderCollapse: "separate", borderSpacing: 0, color: ASSET_JOB_PALETTE.text }}>
           <TableHead sx={{ position: "relative", zIndex: HEADER_Z.row1 }}>
             <TableRow ref={headerRow1Ref}>
               {selectionEnabled && (
@@ -984,7 +987,7 @@ export default function CaptureSpreadsheetDialog({
                       ...bodyCellHoverSx(rowBg),
                     }}
                   >
-                    <Typography variant="body2" fontWeight={700} color={ASSET_JOB_PALETTE.text} sx={{ fontSize: 12, lineHeight: 1.2 }}>{asset.assetTag}</Typography>
+                    <Typography variant="body2" fontWeight={700} sx={{ fontSize: 12, lineHeight: 1.2, color: ASSET_JOB_PALETTE.text }}>{asset.assetTag}</Typography>
                   </TableCell>
                   {assetJobColumns.map((column, index) => (
                     <TableCell
@@ -1033,7 +1036,7 @@ export default function CaptureSpreadsheetDialog({
                       ...bodyCellHoverSx(rowBg),
                     }}
                   >
-                    {renderActions ? renderActions(asset) : <Typography variant="caption" color="rgba(22,52,71,0.62)">-</Typography>}
+                    {renderActions ? renderActions(asset) : <Typography variant="caption" sx={{ color: "rgba(22,52,71,0.62)" }}>-</Typography>}
                   </TableCell>
                 </TableRow>
                 );

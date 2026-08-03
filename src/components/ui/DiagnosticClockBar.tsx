@@ -9,6 +9,8 @@ type Props = {
   projectLabel?: string;
   /** `compact` fits mobile headers; `inline` sits next to the app title on desktop. */
   variant?: "compact" | "inline";
+  /** When true, hide UTC and office clocks and show only the project/site clock. */
+  siteOnly?: boolean;
 };
 
 function ClockChip({ label, value, zoneId }: { label: string; value: string; zoneId?: string }) {
@@ -47,6 +49,7 @@ export default function DiagnosticClockBar({
   projectTimeZoneId,
   projectLabel = "Project",
   variant = "inline",
+  siteOnly = false,
 }: Props) {
   const [now, setNow] = useState(() => new Date());
   const { zone: officeZone, label: officeLabel } = useOfficeTimeZone();
@@ -66,6 +69,15 @@ export default function DiagnosticClockBar({
 
   const spacing = variant === "compact" ? 0.5 : 1;
   const direction = variant === "compact" ? "column" : "row";
+
+  if (siteOnly) {
+    if (!projectText) return null;
+    return (
+      <Stack direction={direction} spacing={spacing} alignItems={variant === "compact" ? "flex-start" : "center"} sx={{ minWidth: 0 }}>
+        <ClockChip label={projectLabel} value={projectText} zoneId={projectTimeZoneId ?? undefined} />
+      </Stack>
+    );
+  }
 
   return (
     <Stack direction={direction} spacing={spacing} alignItems={variant === "compact" ? "flex-start" : "center"} sx={{ minWidth: 0 }}>
