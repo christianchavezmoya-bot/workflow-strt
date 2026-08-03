@@ -88,6 +88,7 @@ import * as XLSX from "xlsx";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
+import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
@@ -135,6 +136,7 @@ import PhotoUploadDialog, { type MissingMediaFlag } from "../dashboard/PhotoUplo
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
+import AssetAddDialog from "./AssetAddDialog";
 import InspectionImportDialog from "../projects/InspectionImportDialog";
 import { useStaleOnResume } from "../../hooks/useStaleOnResume";
 import { AssetRepository } from "../../repositories/AssetRepository";
@@ -487,12 +489,8 @@ const AssetInstallationPage = () => {
   const [expandedAssetId, setExpandedAssetId] = useState<string | null>(null);
   const [expandedBomAsgnId, setExpandedBomAsgnId] = useState<string | null>(null);
 
-  // Add dialog
+  // Add dialog — form state lives in AssetAddDialog so keystrokes don't re-render this page.
   const [addOpen, setAddOpen] = useState(false);
-  const [addForm, setAddForm] = useState<AssetForm>(emptyForm());
-  const [addError, setAddError] = useState<string | null>(null);
-  const [addSaving, setAddSaving] = useState(false);
-  const [configFeatureInputs, setConfigFeatureInputs] = useState<StepInput[]>([]);
 
   // Edit dialog
   const [editOpen, setEditOpen] = useState(false);
@@ -734,6 +732,9 @@ const AssetInstallationPage = () => {
       .filter((item) => item.isActive && project.teamMemberIds?.includes(item.id))
       .map((item) => ({ id: item.id, fullName: item.fullName }));
   }, [projects, runnerAsset?.projectId, users]);
+  const runnerProjectTimeZone = useProjectTimeZone(
+    runnerAsset?.projectId ?? selectedProjectId ?? undefined,
+  );
   const runnerAllUsers = useMemo(
     () => users.filter((item) => item.isActive).map((item) => ({ id: item.id, fullName: item.fullName })),
     [users],
@@ -1596,29 +1597,6 @@ const AssetInstallationPage = () => {
     void check();
   }, [isNativePlatform, products, selectedProjectId, serverReachable]);
 
-  const selectedAddConfig = useMemo(
-    () => configs.find((c) => c.id === addForm.configId) ?? null,
-    [configs, addForm.configId],
-  );
-
-  useEffect(() => {
-    if (!selectedAddConfig?.workflowTemplateId) { setConfigFeatureInputs([]); return; }
-    workflowTemplateService.getById(selectedAddConfig.workflowTemplateId).then((wf) => {
-      if (!wf) { setConfigFeatureInputs([]); return; }
-      const seen = new Set<string>();
-      const inputs: StepInput[] = [];
-      for (const step of wf.steps) {
-        for (const inp of step.inputs ?? []) {
-          if (inp.featureId && !seen.has(inp.featureId)) {
-            seen.add(inp.featureId);
-            inputs.push(inp);
-          }
-        }
-      }
-      setConfigFeatureInputs(inputs);
-    });
-  }, [selectedAddConfig?.workflowTemplateId]);
-
   const isAdminUser = currentUser.role === "Admin";
 
   // Phone-only: "mine" filters cards to assets assigned to this user; "all" shows everything.
@@ -2132,9 +2110,6 @@ const AssetInstallationPage = () => {
   // ------------------------------------------------------------------
 
   function openAdd() {
-    setAddForm({ ...emptyForm(), projectId: selectedProjectId || "" });
-    setAddError(null);
-    setConfigFeatureInputs([]);
     setAddOpen(true);
   }
 
@@ -2151,39 +2126,6 @@ const AssetInstallationPage = () => {
     setColSettingsOpen(false);
   }
 
-  async function saveAsset() {
-    if (!activeProduct) return;
-    const tag = addForm.assetTag.trim();
-    if (!tag) { setAddError("Asset tag is required."); return; }
-    if (!addForm.projectId) { setAddError("Select a project."); return; }
-    setAddSaving(true);
-    setAddError(null);
-    try {
-      await projectAssetService.create({
-        projectId: addForm.projectId,
-        productId: activeProduct.id,
-        productConfigId: addForm.configId || undefined,
-        workflowTemplateId: selectedAddConfig?.workflowTemplateId || undefined,
-        assetTag: tag,
-        assetName: addForm.assetName.trim() || undefined,
-        serialNumber: addForm.serialNumber.trim() || undefined,
-        assetModel: addForm.assetModel.trim() || undefined,
-        manufacturer: addForm.manufacturer.trim() || undefined,
-        location: addForm.location.trim() || undefined,
-        assignedUserId: addForm.assignedUserId || undefined,
-        notes: addForm.notes.trim() || undefined,
-        featureValuesJson: Object.keys(addForm.featureValues).length
-          ? JSON.stringify(addForm.featureValues)
-          : undefined,
-      });
-      setAddOpen(false);
-      refreshAssets();
-    } catch {
-      setAddError("Failed to create asset. Check your connection.");
-    } finally {
-      setAddSaving(false);
-    }
-  }
 
   // ------------------------------------------------------------------
   // Edit asset
@@ -6056,149 +5998,21 @@ ${words.slice(midpoint).join(" ")}`;
         })()}
       </Popover>
 
-      {/* Add asset dialog */}
-      <Dialog open={addOpen} onClose={() => !addSaving && setAddOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Add asset</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <FormControl size="small" fullWidth required>
-              <InputLabel shrink>Project *</InputLabel>
-              <Select
-                label="Project *"
-                value={addForm.projectId}
-                onChange={(e) => {
-                  const projId = e.target.value;
-                  const proj = productProjects.find((p) => p.id === projId);
-                  setAddForm((p) => ({
-                    ...p,
-                    projectId: projId,
-                    location: p.location || getSiteLocation(proj?.siteId) || proj?.siteName || "",
-                  }));
-                }}
-              >
-                {productProjects.length === 0 && (
-                  <MenuItem disabled value="">
-                    No projects linked to {activeProduct?.name ?? "this product"}
-                  </MenuItem>
-                )}
-                {productProjects.map((proj) => (
-                  <MenuItem key={proj.id} value={proj.id}>
-                    {proj.jobNumber} - {proj.customerName}
-                    {proj.siteName ? ` (${proj.siteName})` : ""}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl size="small" fullWidth>
-              <InputLabel shrink>Configuration Type</InputLabel>
-              <Select
-                label="Configuration Type"
-                value={addForm.configId}
-                onChange={(e) => setAddForm((p) => ({ ...p, configId: e.target.value }))}
-              >
-                <MenuItem value="">(None)</MenuItem>
-                {latestPublishedWfConfigs.map((wc) => (
-                  <MenuItem key={wc.id} value={wc.id}>
-                    {wc.configType ? `${wc.configType} - ` : ""}{wc.name}{wc.version > 1 ? ` (v${wc.version})` : ""}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            {publishedWfConfigs.length === 0 && (
-              <Alert severity="info" sx={{ fontSize: 12 }}>
-                No published work instructions for {activeProduct?.name ?? "this product"} yet. Publish one in Work Instructions first.
-              </Alert>
-            )}
-
-            {/* Auto-filled project info */}
-            {addForm.projectId && (() => {
-              const proj = projects.find((p) => p.id === addForm.projectId);
-              if (!proj) return null;
-              return (
-                <Stack direction="row" spacing={1.5}>
-                  <TextField
-                    label="Project #" size="small" fullWidth
-                    value={proj.jobNumber}
-                    InputProps={{ readOnly: true }}
-                    sx={{ "& .MuiInputBase-input": { color: "text.secondary" } }}
-                  />
-                  {proj.siteName && (
-                    <TextField
-                      label="Site Name" size="small" fullWidth
-                      value={proj.siteName}
-                      InputProps={{ readOnly: true }}
-                      sx={{ "& .MuiInputBase-input": { color: "text.secondary" } }}
-                    />
-                  )}
-                </Stack>
-              );
-            })()}
-
-            <TextField label="Asset Tag *" size="small" fullWidth required
-              value={addForm.assetTag}
-              onChange={(e) => setAddForm((p) => ({ ...p, assetTag: e.target.value }))}
-              placeholder="e.g. VEH-001"
-              InputLabelProps={{ shrink: true }} />
-            <TextField label="Asset Name" size="small" fullWidth
-              value={addForm.assetName}
-              onChange={(e) => setAddForm((p) => ({ ...p, assetName: e.target.value }))}
-              placeholder="e.g. AGI-10, Shuttle Car, Skid Steer"
-              helperText="Equipment type or model name"
-              InputLabelProps={{ shrink: true }} />
-            <TextField label="Serial Number" size="small" fullWidth
-              value={addForm.serialNumber}
-              onChange={(e) => setAddForm((p) => ({ ...p, serialNumber: e.target.value }))} />
-            <TextField label="Asset Model" size="small" fullWidth
-              value={addForm.assetModel}
-              onChange={(e) => setAddForm((p) => ({ ...p, assetModel: e.target.value }))}
-              placeholder="e.g. Axis P3245-V"
-              InputLabelProps={{ shrink: true }} />
-            <TextField label="Manufacturer" size="small" fullWidth
-              value={addForm.manufacturer}
-              onChange={(e) => setAddForm((p) => ({ ...p, manufacturer: e.target.value }))}
-              placeholder="e.g. Axis, Cisco"
-              InputLabelProps={{ shrink: true }} />
-            <TextField
-              label="Location" size="small" fullWidth
-              value={addForm.location}
-              onChange={(e) => setAddForm((p) => ({ ...p, location: e.target.value }))}
-              placeholder="i.e LV workshop, U/G"
-              InputLabelProps={{ shrink: true }}
-              helperText={
-                addForm.projectId && projects.find((p) => p.id === addForm.projectId)?.siteName
-                  ? `Site: ${projects.find((p) => p.id === addForm.projectId)?.siteName}`
-                  : undefined
-              }
-            />
-            <FormControl size="small" fullWidth>
-              <InputLabel shrink>Assigned User</InputLabel>
-              <Select label="Assigned User" value={addForm.assignedUserId}
-                onChange={(e) => setAddForm((p) => ({ ...p, assignedUserId: e.target.value }))}>
-                <MenuItem value="">(Unassigned)</MenuItem>
-                {users.filter((u) => u.isActive).map((u) => (
-                  <MenuItem key={u.id} value={u.id}>{u.fullName}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField label="Notes" size="small" fullWidth multiline rows={2}
-              value={addForm.notes}
-              onChange={(e) => setAddForm((p) => ({ ...p, notes: e.target.value }))} />
-
-            {renderFeatureInputs(configFeatureInputs, addForm.featureValues, (fid, val) =>
-              setAddForm((p) => ({ ...p, featureValues: { ...p.featureValues, [fid]: val } }))
-            )}
-            {addError && <Alert severity="error" sx={{ fontSize: 12 }}>{addError}</Alert>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAddOpen(false)} disabled={addSaving}>Cancel</Button>
-          <Button variant="contained" onClick={saveAsset} disabled={addSaving}
-            startIcon={addSaving ? <CircularProgress size={14} /> : undefined}>
-            {addSaving ? "Saving..." : "Add asset"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Add asset dialog — isolated so typing doesn't re-render the operations table */}
+      <AssetAddDialog
+        open={addOpen}
+        defaultProjectId={selectedProjectId || ""}
+        activeProduct={activeProduct ?? null}
+        productProjects={productProjects}
+        projects={projects}
+        users={users}
+        latestPublishedWfConfigs={latestPublishedWfConfigs}
+        publishedWfConfigs={publishedWfConfigs}
+        configs={configs}
+        getSiteLocation={getSiteLocation}
+        onClose={() => setAddOpen(false)}
+        onSaved={refreshAssets}
+      />
 
       {/* Edit asset dialog */}
       <Dialog open={editOpen} onClose={() => !editSaving && setEditOpen(false)} maxWidth="sm" fullWidth>
@@ -7173,7 +6987,7 @@ ${words.slice(midpoint).join(" ")}`;
           currentUserId={currentUser.id}
           assetTag={runnerAsset.assetTag || (runnerAsset as any).assetName || ""}
           jobNumber={(runnerAsset as any).jobNumber || ""}
-          timeZoneId={projects.find((p) => p.id === runnerAsset.projectId)?.timeZoneId}
+          timeZoneId={runnerProjectTimeZone ?? selectedProject?.timeZoneId}
           productFeatures={runnerProductFeatures}
           featureSelections={runnerFeatureSelections}
           teamMembers={runnerTeamMembers}

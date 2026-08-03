@@ -11,8 +11,8 @@
 
 | # | Issue | Severity | Verdict |
 |---|--------|----------|---------|
-| 1 | Web keystroke lag (~6s) | **S0** | **Partial fix only** — #44 stopped API storms; UI still re-renders entire 7.8k-line asset page per keystroke |
-| 2 | Web summary UTC times (CAD-0041) | **S1** | **Expected with missing project zone** — `RunTimeline` falls back to UTC when `project.timeZoneId` is null |
+| 1 | Web keystroke lag (~6s) | **S0** | **Partial fix in PR** — add-asset dialog isolated; edit dialog still re-renders page; backend run query optimized |
+| 2 | Web summary UTC times (CAD-0041) | **S1** | **Fixed in PR** — project has `Australia/Sydney`; `timeZoneId` was not reaching `RunTimeline` / editor at runtime |
 | 3 | Adjust time = old table, not draggable timeline | **S2 (gap)** | **Not implemented** — mockup is future work; Phase A shipped read-only bar + table editor |
 | 4 | Back to steps works | **PASS** | — |
 | 5 | Phone UTC times (CAD-0042) | **S1** | Same root cause as #2 |
@@ -42,14 +42,22 @@ Asset create/edit dialog: each keystroke takes several seconds.
 
 **No API calls fire per keystroke** — this is pure React reconciliation cost.
 
-### Proposed fix (P0 web perf v2)
-1. Extract add/edit asset form into a **memoized child** (or route) so typing does not re-render the table
-2. Pass full `assets` into `CaptureSpreadsheetDialog`; filter rows inside (mirror export path)
-3. Memoize asset-search dialog filtering
+### Fix in PR (partial)
+1. **Add asset:** `AssetAddDialog` holds form state — typing no longer re-renders the 7.8k-line page
+2. **Backend:** `GET /asset-workflow-runs/by-project/{id}` now loads lightweight run keys first, then fetches full rows only for the 1–2 representative runs per asset (was loading **all** historical runs with JSON blobs — 708ms–1368ms in API logs for ~1300 assets)
+3. **Still TODO:** Extract **edit** asset dialog the same way; memoize capture spreadsheet when open
+
+### API log evidence (JO00991 slowness)
+When the web app felt slow, the API showed repeated heavy queries for the Yancoal project (~1327 assets):
+- `AssetWorkflowRuns` bulk SELECT with `ORDER BY StartedAt DESC` — **708ms** and **1368ms**
+- Duplicate dashboard workspace fetches (assets + runs + assignments)
+- Notification inbox queries — **194ms**, **315ms**
+
+The run-list optimization targets the 708ms/1368ms queries directly.
 
 ---
 
-## 2 & 5. UTC times on web (CAD-0041) and phone (CAD-0042) — FAIL
+## 2 & 5. UTC times on web (CAD-0041) and phone (CAD-0042) — FAIL (fix in progress)
 
 ### What you saw
 - Summary **Start/Finish:** `Aug 3, 2026, 5:46 AM` (reads as UTC)
@@ -57,19 +65,22 @@ Asset create/edit dialog: each keystroke takes several seconds.
 
 That **10–11 hour gap** is exactly “UTC display vs Sydney local” for the same instant.
 
-### Root cause
-| Component | Timezone source | When project has no `timeZoneId` |
-|-----------|-----------------|-----------------------------------|
-| `RunTimeline` (summary bar) | `project.timeZoneId` via `formatInstant` → `resolveProjectTimeZone` | **Renders UTC** (`datetime.ts:37-38`) |
-| `TimeEntriesEditorDialog` | `toLocaleString` / `datetime-local` | **Device local** (browser/phone TZ) |
+### Corrected root cause (2026-08-03 retest)
+JO00991 **does** have `Australia/Sydney` set in the project edit UI. The bug is **not** missing DB configuration.
 
-JO00991 (Yancoal / Moolarben) likely has **`timeZoneId` null** in the database. Column exists (`Projects.TimeZoneId`) but is optional and not set on existing projects.
+| Component | Timezone source | What went wrong |
+|-----------|-----------------|-----------------|
+| `RunTimeline` (summary bar) | `timeZoneId` prop → `formatInstant` | Prop was **undefined at runtime** (Redux list cache / no single-project fetch fallback) → falls back to UTC |
+| `TimeEntriesEditorDialog` | Was `toLocaleString` / device `datetime-local` | Used **device local**, not project zone — matched Sydney by coincidence on AU devices |
 
-### Proposed fix
-1. **Data:** Set project site zone (e.g. `Australia/Sydney`) on JO00991 and peers in admin/PM UI
-2. **Code:** Pass `timeZoneId` into `TimeEntriesEditorDialog`; format/edit in project zone (not device local)
-3. **Code:** Show zone label on summary (`withZone: true`) so UTC vs local is obvious
-4. **Optional:** Default new AU projects from office/region mapping
+### Fix (PR `cursor/timezone-and-run-query-perf-cd21`)
+1. `useProjectTimeZone(projectId)` — Redux first, then `GET /projects/{id}` if zone missing from list cache
+2. Pass zone into `TimeEntriesEditorDialog`; format and edit in project wall-clock via `utcToDatetimeLocalInZone` / `datetimeLocalInZoneToUtc`
+3. Dashboard + Assets runner wired through the hook; Assets also falls back to `selectedProject.timeZoneId`
+
+### Retest after pull
+- Summary Start/Finish on CAD-0041 should show **~3:46 PM AEST**, matching Adjust time table
+- Phone: rebuild Capacitor bundle from same commit and retest
 
 ---
 

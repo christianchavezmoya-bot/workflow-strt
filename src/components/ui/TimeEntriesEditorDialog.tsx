@@ -35,10 +35,18 @@ import {
 import type { AssetWorkflowRun, RunTimeEntry } from "../../types/assetWorkflowRun";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { randomId } from "../../utils/randomId";
+import {
+  datetimeLocalInZoneToUtc,
+  formatInstant,
+  utcToDatetimeLocalInZone,
+  zoneAbbreviation,
+} from "../../utils/datetime";
 
 interface Props {
   open: boolean;
   run: AssetWorkflowRun;
+  /** IANA project site zone for wall-clock display/editing. */
+  timeZoneId?: string | null;
   /** If true, no edits allowed — only view. */
   readOnly?: boolean;
   onClose: () => void;
@@ -55,27 +63,18 @@ function fmtDuration(seconds: number): string {
   return `${m}m`;
 }
 
-function fmtDatetime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      month: "short", day: "numeric", year: "numeric",
-      hour: "2-digit", minute: "2-digit",
-    });
-  } catch { return iso; }
+function fmtDatetime(iso: string, timeZoneId?: string | null): string {
+  return formatInstant(iso, timeZoneId, { withZone: true });
 }
 
-/** Convert UTC ISO string → value for <input type="datetime-local"> (local time) */
-function toDatetimeLocal(utcIso: string | null | undefined): string {
-  if (!utcIso) return "";
-  const d = new Date(utcIso);
-  if (isNaN(d.getTime())) return "";
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/** Convert UTC ISO string → value for <input type="datetime-local"> in project zone. */
+function toDatetimeLocal(utcIso: string | null | undefined, timeZoneId?: string | null): string {
+  return utcToDatetimeLocalInZone(utcIso, timeZoneId);
 }
 
-/** Convert datetime-local string (local time) → UTC ISO string */
-function fromDatetimeLocal(localStr: string): string {
-  return new Date(localStr).toISOString();
+/** Convert datetime-local string (project wall clock) → UTC ISO string. */
+function fromDatetimeLocal(localStr: string, timeZoneId?: string | null): string {
+  return datetimeLocalInZoneToUtc(localStr, timeZoneId);
 }
 
 function entryDurationSeconds(entry: RunTimeEntry, nowIso: string): number {
@@ -138,7 +137,14 @@ const BLANK_FORM = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function TimeEntriesEditorDialog({ open, run, readOnly = false, onClose, onSaved }: Props) {
+export default function TimeEntriesEditorDialog({
+  open,
+  run,
+  timeZoneId,
+  readOnly = false,
+  onClose,
+  onSaved,
+}: Props) {
   const [entries, setEntries] = useState<RunTimeEntry[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null); // null = add-new mode when formOpen
   const [formOpen, setFormOpen] = useState(false);
@@ -169,7 +175,7 @@ export default function TimeEntriesEditorDialog({ open, run, readOnly = false, o
 
   function openAddForm() {
     setEditingId(null);
-    setForm({ ...BLANK_FORM, startStr: toDatetimeLocal(new Date().toISOString()) });
+    setForm({ ...BLANK_FORM, startStr: toDatetimeLocal(new Date().toISOString(), timeZoneId) });
     setFormError(null);
     setFormOpen(true);
   }
@@ -179,8 +185,8 @@ export default function TimeEntriesEditorDialog({ open, run, readOnly = false, o
     setForm({
       category: entry.category,
       reason: entry.reason ?? "",
-      startStr: toDatetimeLocal(entry.startedAtUtc),
-      endStr: toDatetimeLocal(entry.endedAtUtc ?? null),
+      startStr: toDatetimeLocal(entry.startedAtUtc, timeZoneId),
+      endStr: toDatetimeLocal(entry.endedAtUtc ?? null, timeZoneId),
     });
     setFormError(null);
     setFormOpen(true);
@@ -194,8 +200,8 @@ export default function TimeEntriesEditorDialog({ open, run, readOnly = false, o
 
   function handleFormSave() {
     if (!form.startStr) { setFormError("Start time is required."); return; }
-    const startIso = fromDatetimeLocal(form.startStr);
-    const endIso = form.endStr ? fromDatetimeLocal(form.endStr) : null;
+    const startIso = fromDatetimeLocal(form.startStr, timeZoneId);
+    const endIso = form.endStr ? fromDatetimeLocal(form.endStr, timeZoneId) : null;
     if (endIso && new Date(endIso) <= new Date(startIso)) {
       setFormError("End time must be after start time.");
       return;
@@ -261,6 +267,7 @@ export default function TimeEntriesEditorDialog({ open, run, readOnly = false, o
             </Typography>
             <Typography variant="caption" color="text.secondary">
               {readOnly ? "View only — run is locked" : "Add, edit or remove time entries to correct tracking."}
+              {timeZoneId ? ` Times shown in ${zoneAbbreviation(timeZoneId)}.` : ""}
             </Typography>
           </Box>
           {!readOnly && (
@@ -403,13 +410,13 @@ export default function TimeEntriesEditorDialog({ open, run, readOnly = false, o
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2">{fmtDatetime(entry.startedAtUtc)}</Typography>
+                      <Typography variant="body2">{fmtDatetime(entry.startedAtUtc, timeZoneId)}</Typography>
                     </TableCell>
                     <TableCell>
                       {isOpen ? (
                         <Chip size="small" label="Open" color="warning" variant="outlined" sx={{ fontSize: "0.7rem" }} />
                       ) : (
-                        <Typography variant="body2">{fmtDatetime(entry.endedAtUtc!)}</Typography>
+                        <Typography variant="body2">{fmtDatetime(entry.endedAtUtc!, timeZoneId)}</Typography>
                       )}
                     </TableCell>
                     <TableCell align="right">
