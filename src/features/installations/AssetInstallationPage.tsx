@@ -5685,6 +5685,8 @@ ${words.slice(midpoint).join(" ")}`;
           readOnly={false}
           canEditCapture={canEditCaptureData}
           canEditAsset={canEditCaptureForAsset}
+          userRole={currentUser.role}
+          currentUserName={currentUser.fullName ?? currentUser.email ?? ""}
           onRunUpdated={(run) => {
             setRunsMap((prev) => {
               const list = prev[run.assetId] ?? [];

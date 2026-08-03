@@ -37,6 +37,7 @@ import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 import type { Feature } from "../../types/feature";
 import type { FeatureDependency } from "../../types/featureDependency";
 import type { FeatureSelection } from "../../services/productConfigService";
+import type { UserRole } from "../../types/user";
 import {
   buildProjectCaptureTable,
   findCaptureMatch,
@@ -47,6 +48,10 @@ import {
 import { anyMatchesWordStart, matchesWordStart } from "../../utils/textMatch";
 import { computeCaptureHeaderStickyTops } from "../../utils/captureSpreadsheet";
 import { STATUS_LABELS, STATUS_COLORS } from "./assetStatusDisplay";
+import { canEditRun } from "../../utils/runEditPermissions";
+import { isCaptureColumnEditable, patchCaptureCellValue } from "../../utils/captureTableEdit";
+import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { pickCaptureRun } from "../../utils/captureSpreadsheet";
 
 export type CaptureSpreadsheetAssetJobColumn = {
   id: string;
@@ -69,6 +74,8 @@ export type CaptureSpreadsheetDialogProps = {
   readOnly?: boolean;
   canEditCapture?: boolean;
   canEditAsset?: (asset: ProjectAsset) => boolean;
+  userRole?: UserRole | null;
+  currentUserName?: string;
   onRunUpdated?: (run: AssetWorkflowRun) => void;
   renderStatus?: (asset: ProjectAsset) => React.ReactNode;
   renderActions?: (asset: ProjectAsset) => React.ReactNode;
@@ -227,6 +234,12 @@ export default function CaptureSpreadsheetDialog({
   assets,
   runsMap,
   features,
+  readOnly = false,
+  canEditCapture = false,
+  canEditAsset,
+  userRole = null,
+  currentUserName = "",
+  onRunUpdated,
   renderStatus,
   renderActions,
   assetJobColumns = [],
@@ -239,6 +252,9 @@ export default function CaptureSpreadsheetDialog({
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
   const [filterMenu, setFilterMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({ anchorEl: null, key: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [draftValues, setDraftValues] = useState<Record<string, string>>({});
+  const [savingCellKey, setSavingCellKey] = useState<string | null>(null);
+  const [cellError, setCellError] = useState<string | null>(null);
   const headerRow1Ref = useRef<HTMLTableRowElement>(null);
   const headerRow2Ref = useRef<HTMLTableRowElement>(null);
   const [headerStickyTops, setHeaderStickyTops] = useState(DEFAULT_HEADER_STICKY_TOPS);
@@ -250,7 +266,11 @@ export default function CaptureSpreadsheetDialog({
   }, []);
 
   useEffect(() => {
-    if (!open) setSearch("");
+    if (!open) {
+      setSearch("");
+      setDraftValues({});
+      setCellError(null);
+    }
   }, [open]);
 
   const table = useMemo(
@@ -504,10 +524,63 @@ export default function CaptureSpreadsheetDialog({
     </Box>
   );
 
-  const renderValueCell = (capture: ProjectCaptureRow, column: ProjectCaptureColumn, group: ProjectCaptureGroup, rowBg: string) => {
+  const canEditCaptureCell = useCallback((
+    asset: ProjectAsset,
+    column: ProjectCaptureColumn,
+  ): boolean => {
+    if (readOnly || !canEditCapture || !canEditAsset?.(asset)) return false;
+    if (!column.stepId || !column.inputId || !isCaptureColumnEditable(column.inputType)) return false;
+    const run = pickCaptureRun(runsMap[asset.id] ?? []);
+    if (!run) return false;
+    return canEditRun(run, userRole).data;
+  }, [canEditAsset, canEditCapture, readOnly, runsMap, userRole]);
+
+  const cellKey = (assetId: string, columnId: string) => `${assetId}::${columnId}`;
+
+  const saveCaptureCell = useCallback(async (
+    asset: ProjectAsset,
+    column: ProjectCaptureColumn,
+    value: string,
+  ) => {
+    const run = pickCaptureRun(runsMap[asset.id] ?? []);
+    if (!run || !column.stepId || !column.inputId) return;
+    const key = cellKey(asset.id, column.id);
+    setSavingCellKey(key);
+    setCellError(null);
+    try {
+      const nextJson = patchCaptureCellValue(run.stepResultsJson, {
+        stepId: column.stepId,
+        inputId: column.inputId,
+        iterationIndex: column.iterationIndex,
+      }, value);
+      const updated = await assetWorkflowRunService.patchStepResults(
+        run.id,
+        nextJson,
+        currentUserName || undefined,
+        true,
+      );
+      onRunUpdated?.(updated);
+      setDraftValues((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    } catch {
+      setCellError(`Could not save ${asset.assetTag} · ${column.fieldLabel}. Try again.`);
+    } finally {
+      setSavingCellKey(null);
+    }
+  }, [currentUserName, onRunUpdated, runsMap]);
+
+  const renderValueCell = (asset: ProjectAsset, capture: ProjectCaptureRow, column: ProjectCaptureColumn, group: ProjectCaptureGroup, rowBg: string) => {
     const value = capture.cells[column.id] ?? "";
     const palette = groupPalette(group);
     const isBlank = value.trim().length === 0;
+    const editable = canEditCaptureCell(asset, column);
+    const key = cellKey(asset.id, column.id);
+    const displayValue = draftValues[key] ?? value;
+    const saving = savingCellKey === key;
+
     return (
       <TableCell
         key={column.id}
@@ -524,15 +597,39 @@ export default function CaptureSpreadsheetDialog({
           ...bodyCellHoverSx(rowBg),
         }}
       >
-        <Typography
-          variant="caption"
-          color={isBlank ? "rgba(22,52,71,0.62)" : ASSET_JOB_PALETTE.text}
-          fontStyle={isBlank ? "italic" : "normal"}
-          fontWeight={500}
-          sx={{ fontSize: 12, lineHeight: 1.25 }}
-        >
-          {isBlank ? "-" : value}
-        </Typography>
+        {editable ? (
+          <TextField
+            size="small"
+            value={displayValue}
+            disabled={saving}
+            placeholder="-"
+            onChange={(e) => setDraftValues((prev) => ({ ...prev, [key]: e.target.value }))}
+            onBlur={() => {
+              const next = (draftValues[key] ?? value).trim();
+              if (next === value.trim()) {
+                setDraftValues((prev) => {
+                  const copy = { ...prev };
+                  delete copy[key];
+                  return copy;
+                });
+                return;
+              }
+              void saveCaptureCell(asset, column, next);
+            }}
+            inputProps={{ sx: { fontSize: 12, py: 0.35, px: 0.5 } }}
+            sx={{ width: "100%" }}
+          />
+        ) : (
+          <Typography
+            variant="caption"
+            color={isBlank ? "rgba(22,52,71,0.62)" : ASSET_JOB_PALETTE.text}
+            fontStyle={isBlank ? "italic" : "normal"}
+            fontWeight={500}
+            sx={{ fontSize: 12, lineHeight: 1.25 }}
+          >
+            {isBlank ? "-" : value}
+          </Typography>
+        )}
       </TableCell>
     );
   };
@@ -570,6 +667,18 @@ export default function CaptureSpreadsheetDialog({
       </Stack>
 
       {columnPickerOpen && renderGroupPicker()}
+
+      {cellError && (
+        <Alert severity="error" onClose={() => setCellError(null)} sx={{ py: 0.25 }}>
+          {cellError}
+        </Alert>
+      )}
+
+      {!readOnly && canEditCapture && (
+        <Typography variant="caption" color="text.secondary">
+          Editable cells: Admin / PM / Supervisor may correct captured text before customer sign-off. Installers and other roles are read-only after installer sign-off.
+        </Typography>
+      )}
 
       {visibleGroups.length === 0 && (
         <Alert severity={table.columns.length > 0 ? 'warning' : 'info'}>
@@ -896,7 +1005,7 @@ export default function CaptureSpreadsheetDialog({
                       </Typography>
                     </TableCell>
                   ))}
-                  {orderedGroups.flatMap((group) => group.columns.map((column) => renderValueCell(capture, column, group, rowBg)))}
+                  {orderedGroups.flatMap((group) => group.columns.map((column) => renderValueCell(asset, capture, column, group, rowBg)))}
                   <TableCell
                     sx={{
                       minWidth: STATUS_W,

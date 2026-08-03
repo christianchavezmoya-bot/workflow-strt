@@ -314,8 +314,9 @@ export default function SignatureDialog({
             }
             label={
               <Typography variant="body2">
-                I confirm that the information above is correct and I am authorised to sign
-                this document on behalf of the named party.
+                {signerRole === "Installer"
+                  ? "I confirm all recorded time and captured field data are correct, and I understand I cannot edit time or field captures after signing (PM/Admin may correct until customer sign-off)."
+                  : "I confirm that the information above is correct and I am authorised to sign this document on behalf of the named party."}
               </Typography>
             }
           />
