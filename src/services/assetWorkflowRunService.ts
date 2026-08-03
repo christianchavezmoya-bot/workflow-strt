@@ -1236,6 +1236,16 @@ export const assetWorkflowRunService = {
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
       await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);
       window.dispatchEvent(new Event("repo:issues:updated"));
+
+      // Must not sync ahead of a still-pending time-entry action for this run — otherwise the
+      // server closes out whatever segment it currently has open (possibly just the initial
+      // "Run started" entry, if a pause/resume action hasn't landed yet) at the completion
+      // instant, folding real downtime into productive time. Same chaining pattern already used
+      // in enqueueTimeEntry() above.
+      const dependsOnPriorTimeEntry = (await syncQueue.listByEntityId(resolvedRunId))
+        .filter((op) => op.opType === "TIME_ENTRY" && op.status !== "uploading")
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.id;
+
       await enqueueRunMutation(resolvedRunId, {
         opType: "RUN_COMPLETE",
         method: "POST",
@@ -1252,6 +1262,7 @@ export const assetWorkflowRunService = {
           updatedAt: now,
           bomActualJson: bomActualJson ?? cachedRun.bomActualJson,
         },
+        dependsOnOpId: dependsOnPriorTimeEntry,
       });
       return offlineRun;
     }
