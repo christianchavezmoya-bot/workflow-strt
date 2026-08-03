@@ -40,6 +40,105 @@
 
 ---
 
+## 2b. Signature lifecycle & edit rights
+
+This section is the plain-language contract for **who can change what, when**, and how that relates to dashboard bucketing. It complements the shipped ladder in §3 (Phase 1) and the deferred **corrected run** work in §6 Phase F.
+
+### Lifecycle stages (run + asset)
+
+| Stage | Trigger | `run.isLocked` | `run.signatureStatus` | `asset.status` | Typical UI |
+|-------|---------|----------------|----------------------|----------------|------------|
+| **In progress** | Installer starts run | `false` | `None` | `InProgress` | Runner steps, live timer |
+| **Summary review** | All steps done, not yet saved | `false` | `None` | `InProgress` | Summary → **Adjust time** / **Back to steps** |
+| **Locked — awaiting installer** | `completeRun` succeeds | `true` | `PendingInstaller` | **`Pending`** | Installer sign screen |
+| **Locked — awaiting customer** | Installer signs | `true` | `PendingCustomer` | **`Complete`** | Customer sign / send link |
+| **Finalized** | Customer signs (or decline/waive path) | `true` | `Signed` / `Declined` / `WaivedCustomer` | **`Closed`** (or `Complete` on decline) | Read-only history |
+
+**Key server transitions** (`AssetWorkflowRunsController.CompleteRun`, `SignatureEventsController`):
+
+- Completing a run **locks** it and sets `signatureStatus = PendingInstaller`. Asset becomes **`Pending`**, not `Complete` — field work is done but sign-off chain is not.
+- **Installer sign** advances to `PendingCustomer` and promotes asset to **`Complete`**.
+- **Customer sign** finalizes the run and sets asset to **`Closed`** (accepted) or back to **`Complete`** (declined).
+
+`isLocked` means the run row rejects further step/time mutations on the server. **`signatureStatus`** drives the edit ladder (`canEditRun`); they are related but not identical — a run is locked from the moment of completion, while edit rights change again at each signature milestone.
+
+### Edit rights matrix (plain language)
+
+Source: `src/utils/runEditPermissions.ts`. Roles: **Installer/Engineer** vs **Admin / PM / Supervisor**.
+
+| Stage | Adjust / edit **time** | Edit **field captures** (steps) | Notes |
+|-------|------------------------|----------------------------------|-------|
+| Before installer sign (`None`, `PendingInstaller`) | Installer + PM | Installer + PM | Full access via summary **Adjust time** and **Back to steps** |
+| After installer sign, before customer (`PendingCustomer`) | **PM only** | **PM only** (ladder) | Installer sees read-only time and captures |
+| After customer sign (`Signed`, `Declined`, `WaivedCustomer`) | **Nobody** | **Nobody** | Corrections require a **new run** (§6 Phase F — not built) |
+
+### Where edits happen in the UI
+
+| Action | Location | Gate |
+|--------|----------|------|
+| **Adjust time** | Run summary footer (`WorkOrderRunner`) | `runEditPerms.time` |
+| **Edit Times** (live) | Runner header while tracking | `runEditPerms.time` |
+| **Back to steps** | Run summary footer | `runEditPerms.data` |
+| Capture autosave | Runner step inputs | `runEditPerms.data` (`setInputValue` no-ops when false) |
+| **Clock icon → time editor** | `WorkflowRunHistoryDialog` per run | `canEditRun(...).time` → `TimeEntriesEditorDialog readOnly` |
+| **Continue** (resume in-progress run) | Run history | Only `!run.isLocked && run.status === "InProgress"` |
+
+### Known gaps (do not assume these work today)
+
+1. **PM capture edit on locked `PendingCustomer` runs** — The ladder grants `.data` to PM/Admin, but a locked completed run routes to the **customer-sign** stage (`transitionToLockedRunStage`), not back to running steps. There is no first-class “reopen captures on locked run” flow; PM time correction via history clock icon works, capture correction on the same run does not.
+2. **Opening a locked run from dashboard** — `openQuickActionOrStart` resumes only **unlocked** active runs. Locked runs open the quick-action dialog / sign flow instead of the step editor.
+3. **Post–customer-sign corrections** — Deferred Phase F: **Re-run / corrected run** with prefill + justification. Until then, finalized runs are immutable; any fix needs a new workflow run.
+4. **Client offline rebucket** — `reconcileWorkspaceWithLocalStatus` treats only `Complete`/`Completed` as history; `Closed` assets can fall out of both buckets until the next online workspace fetch (server handles `Closed` → history correctly).
+
+### My Jobs Today vs Job History — why “100% completed” stays in My Jobs
+
+**Observed (phone, online):** Asset card in **My Jobs Today** shows **“100% completed”** even though the installer expects it under **Job History**.
+
+**Root cause — two different “completion” concepts:**
+
+| What the card shows | What controls the bucket |
+|---------------------|---------------------------|
+| `formatMyJobsStepCompletionLabel(completedSteps, totalSteps)` → e.g. **“100% completed”** | **`asset.status`**, not step % |
+
+Bucketing rules:
+
+- **Client** (`projectAssetService.bucketWorkspaceItems`): **My Jobs Today** = status **not** `Complete` / `Completed` / `Closed`; **Job History** = `Complete` or `Completed` only.
+- **Server** (`ProjectAssetsController.IsCurrentWorkspaceAsset`): Same terminal check, plus locked run with `PendingInstaller` **stays current** intentionally (installer must sign from My Jobs).
+
+**Typical sequence that produces the confusion:**
+
+```
+All workflow steps finished  →  card shows "100% completed"
+        ↓
+completeRun (lock)           →  asset.status = "Pending"  →  STILL in My Jobs Today
+        ↓
+installer signs              →  asset.status = "Complete" →  moves to Job History
+        ↓
+customer signs               →  asset.status = "Closed"   →  server → Job History
+```
+
+So **100% on the card means “all workflow steps captured”**, not “asset lifecycle finished”. Until installer sign promotes the asset to `Complete`, the job correctly (by current rules) remains in **My Jobs Today** — but the **“100% completed”** label reads like Job History material.
+
+**Less common variants:**
+
+- Steps at 100% but run not yet completed (`completeRun` not called) — asset still `InProgress`, stays in My Jobs.
+- `pendingSigs` not loaded / not matching asset id — card chip may show **In Progress** instead of **Pending sign** even though the run is locked awaiting signature.
+
+**Product fix options (not implemented — pick one before coding):**
+
+| Option | Behavior |
+|--------|----------|
+| **A. Clearer label** | When locked + all steps done, show **“Awaiting sign-off”** instead of **“100% completed”** on My Jobs cards |
+| **B. Rebucket after lock** | Move to Job History when `run.isLocked && completedSteps >= totalSteps`, even if `asset.status === Pending` |
+| **C. Earlier status promotion** | Set `asset.status = Complete` at `completeRun` (conflicts with today’s `Pending` = awaiting installer semantics) |
+| **D. Hybrid** | Keep in My Jobs until installer sign, but replace step-% with signature-stage chip text |
+
+**Recommended for next UX pass:** **A + D** (label fix, low risk) unless product wants sign-off items out of My Jobs entirely (**B**).
+
+**Files to touch for a fix:** `Dashboard.tsx` (`formatMyJobsStepCompletionLabel`, `getMyJobsCardAction`), optionally `ProjectAssetsController.IsCurrentWorkspaceAsset` / `BuildHistoryStatus` for server-driven rebucket.
+
+---
+
 ## 3. Shipped on main (do not re-implement)
 
 ### Fix 1 + 2 — Offline / client start time (`242f0c7`)
@@ -194,11 +293,12 @@ Use project **JO00991** (Yancoal, `Australia/Sydney`) and asset **CAD-0052** or 
 - [ ] Adjust time → subtitle: `Times shown in AEST (Australia/Sydney)`.
 - [ ] Diagnostic UTC clock matches external reference; site clock = UTC + offset.
 
-### Edit ladder
+### Edit ladder (see §2b)
 
-- [ ] Before installer sign: Engineer can Adjust time.
-- [ ] After installer sign, before customer: Engineer read-only; Admin editable.
-- [ ] After customer sign: everyone read-only.
+- [ ] Before installer sign: Engineer can Adjust time and Back to steps.
+- [ ] After installer sign, before customer: Engineer read-only; Admin can Adjust time via run history clock.
+- [ ] After customer sign: everyone read-only; corrections need Re-run (Phase F).
+- [ ] My Jobs card at 100% steps + locked run: confirm expected bucket (§2b) or apply label fix.
 
 ### Timeline editor
 
@@ -251,3 +351,4 @@ Field retest on JO00991 after build.
 | Date | Change |
 |------|--------|
 | 2026-08-03 | **V2 finalized** — reflects main through #52; field OK; §5 polish backlog + §6 deferred phases |
+| 2026-08-03 | **§2b added** — signature lifecycle, edit-rights UI map, known gaps, My Jobs vs Job History bucketing |
