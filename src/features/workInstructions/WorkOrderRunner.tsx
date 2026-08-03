@@ -3275,6 +3275,7 @@ export default function WorkOrderRunner({
         <TimeEntriesEditorDialog
           open={timeEditorOpen}
           run={activeRun}
+          projectId={projectIdProp}
           timeZoneId={resolvedTimeZone}
           readOnly={!runEditPerms.time}
           onClose={() => setTimeEditorOpen(false)}

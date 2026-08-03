@@ -6,6 +6,7 @@ import { entityDeleteProject, entityPutProject } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
+import { isValidTimeZone } from "../utils/datetime";
 
 export interface ProjectFilters {
   office?: string;
@@ -46,7 +47,9 @@ export const projectService = {
     }
 
     const cached = await ProjectRepository.getById(id);
-    if (cached) {
+    const cachedHasZone = isValidTimeZone(cached?.timeZoneId);
+
+    if (cached && cachedHasZone) {
       if (!shouldSkipBlockingFetch()) {
         void api.get<Project>(`/projects/${id}`)
           .then(async (response) => {
@@ -60,14 +63,17 @@ export const projectService = {
       return cached;
     }
 
-    if (shouldSkipBlockingFetch()) return null;
+    if (shouldSkipBlockingFetch()) return cached;
 
     try {
       const response = await api.get<Project>(`/projects/${id}`);
       await entityPutProject({ id: response.data.id, data: response.data });
+      window.dispatchEvent(new CustomEvent("repo:projects:updated", {
+        detail: { items: [response.data], total: 1, requestKey: id },
+      }));
       return response.data;
     } catch {
-      return null;
+      return cached;
     }
   },
   async createProject(payload: Project) {

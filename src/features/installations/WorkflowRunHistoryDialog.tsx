@@ -1365,6 +1365,7 @@ export default function WorkflowRunHistoryDialog({
         <TimeEntriesEditorDialog
           open={Boolean(timeEditorRun)}
           run={timeEditorRun}
+          projectId={asset.projectId}
           timeZoneId={resolvedTimeZone}
           readOnly={!canEditRun(timeEditorRun, user.role).time}
           onClose={() => setTimeEditorRun(null)}
