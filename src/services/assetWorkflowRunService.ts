@@ -589,7 +589,7 @@ async function listPendingSignaturesLocalImpl(userId?: string): Promise<PendingS
 async function enqueueRunMutation(
   runId: string,
   input: {
-    opType: "RUN_UPDATE" | "RUN_COMPLETE" | "STEP_RESULTS" | "ISSUE_UPDATE";
+    opType: "RUN_UPDATE" | "RUN_COMPLETE" | "RUN_ABANDON" | "STEP_RESULTS" | "ISSUE_UPDATE";
     method: "PUT" | "POST" | "PATCH";
     url: string;
     body: Record<string, unknown>;
@@ -1117,6 +1117,79 @@ export const assetWorkflowRunService = {
           stepResultsJson,
           issuesJson: issuesJson ?? cachedRun.issuesJson,
           status: status ?? cachedRun.status,
+          updatedAt: now,
+        },
+      });
+      return offlineRun;
+    }
+  },
+
+  /** Discard all captured progress, photos, issues, and time entries for an in-progress run. */
+  async abandonRun(runId: string): Promise<AssetWorkflowRun> {
+    if (!isMobileNativePlatform()) {
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/abandon`, {}, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
+      invalidateWebCache(`/asset-workflow-runs/${runId}`);
+      invalidateWebRunReadCaches(res.data.assetId);
+      return res.data;
+    }
+
+    const resolvedRunId = await resolveRunId(runId);
+    try {
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/abandon`, {}, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
+      await syncQueue.removeByEntityId(resolvedRunId);
+      await syncQueue.removeByEntityId(runId);
+      const updatedRun = await cacheServerRun(res.data);
+      signalLocalRunUpdate(updatedRun);
+      await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));
+      return updatedRun;
+    } catch (error) {
+      if (!isOfflineNetworkError(error)) throw error;
+
+      const cachedRun = await getCachedRun(runId);
+      if (!cachedRun) throw error;
+
+      const now = new Date().toISOString();
+      const offlineRun: OfflineRun = {
+        ...cachedRun,
+        stepResultsJson: "[]",
+        issuesJson: "[]",
+        timeTrackingJson: "[]",
+        productiveSeconds: 0,
+        downtimeSeconds: 0,
+        downtimeEvents: 0,
+        status: "InProgress",
+        updatedAt: now,
+        lastLocalSavedAt: now,
+        dirty: true,
+        localStatus: "PendingSync",
+        syncError: undefined,
+      };
+
+      await offlineStore.saveRun(offlineRun);
+      await syncQueue.removeByEntityId(resolvedRunId);
+      await syncQueue.removeByEntityId(runId);
+      signalLocalRunUpdate(offlineRun);
+      await syncOfflineAssetWorkflowStateFromRun(offlineRun, deriveOfflineAssetStatusFromRun(offlineRun));
+      await entityReplaceIssuesForAsset(offlineRun.assetId, []);
+      window.dispatchEvent(new Event("repo:issues:updated"));
+      await enqueueRunMutation(resolvedRunId, {
+        opType: "RUN_ABANDON",
+        method: "POST",
+        url: `/asset-workflow-runs/${resolvedRunId}/abandon`,
+        body: {},
+        optimisticPatch: {
+          stepResultsJson: "[]",
+          issuesJson: "[]",
+          timeTrackingJson: "[]",
+          productiveSeconds: 0,
+          downtimeSeconds: 0,
+          downtimeEvents: 0,
+          status: "InProgress",
           updatedAt: now,
         },
       });

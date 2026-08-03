@@ -10,6 +10,7 @@ export type SyncOpType =
   | "RUN_CREATE"
   | "RUN_UPDATE"
   | "RUN_COMPLETE"
+  | "RUN_ABANDON"
   | "STEP_RESULTS"
   | "ISSUE_CREATE"
   | "ISSUE_UPDATE"
@@ -205,6 +206,19 @@ export const syncQueue = {
           serverEntityId: op.serverEntityId === oldEntityId ? newEntityId : op.serverEntityId,
           url: op.url.split(oldEntityId).join(newEntityId),
         }))
+    );
+    await tx.done;
+    window.dispatchEvent(new Event("sync-pending-changed"));
+  },
+
+  async removeByEntityId(entityId: string): Promise<void> {
+    const db = await getDB();
+    const tx = db.transaction("pending_actions", "readwrite");
+    const all = (await tx.store.getAll()) as SyncQueueOp[];
+    await Promise.all(
+      all
+        .filter((op) => op.entityId === entityId || op.url.includes(entityId) || op.serverEntityId === entityId)
+        .map((op) => tx.store.delete(op.id))
     );
     await tx.done;
     window.dispatchEvent(new Event("sync-pending-changed"));

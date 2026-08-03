@@ -1140,6 +1140,38 @@ public class AssetWorkflowRunsController : ControllerBase
         return Ok(ToDto(run));
     }
 
+    // POST api/asset-workflow-runs/{id}/abandon — discard captured progress and reset time tracking
+    [HttpPost("{id}/abandon")]
+    public async Task<IActionResult> AbandonRun(string id)
+    {
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
+        if (run is null) return NotFound();
+        if (run.IsLocked)
+            return BadRequest(new { message = "Cannot abandon a locked run." });
+
+        var now = DateTime.UtcNow;
+        run.StepResultsJson = "[]";
+        run.IssuesJson = "[]";
+        run.TimeTrackingJson = "[]";
+        run.ProductiveSeconds = 0;
+        run.DowntimeSeconds = 0;
+        run.DowntimeEvents = 0;
+        run.Status = "InProgress";
+        run.UpdatedAt = now;
+        StartProductivePeriod(run, now, "Run restarted");
+
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        if (asset is not null && asset.Status is "InProgress" or "Issue")
+        {
+            asset.Status = "InProgress";
+            asset.UpdatedAt = now;
+        }
+
+        await _db.SaveChangesAsync();
+        RecomputeRunTimeMetrics(run, now);
+        return Ok(ToDto(run));
+    }
+
     // POST api/asset-workflow-runs/{id}/reopen  — Admin creates a new run from a locked run
     [HttpPost("{id}/reopen")]
     [Authorize(Roles = "Admin,Project Manager")]

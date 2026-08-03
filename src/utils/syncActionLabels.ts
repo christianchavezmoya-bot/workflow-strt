@@ -59,6 +59,8 @@ export function describeSyncOpType(action: PendingAction): string {
       return "Save workflow progress";
     case "RUN_COMPLETE":
       return "Complete run";
+    case "RUN_ABANDON":
+      return "Discard run progress";
     case "STEP_RESULTS":
       return "Save captured step data";
     case "SIGNATURE_SUBMIT":

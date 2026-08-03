@@ -75,6 +75,7 @@ import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { randomId } from "../../utils/randomId";
 import { markOfflinePerf } from "../../utils/offlinePerf";
+import { formatInstant } from "../../utils/datetime";
 import { shouldSkipRunMutation } from "../../services/connectivityMonitor";
 
 // Types
@@ -370,6 +371,9 @@ export default function WorkOrderRunner({
   const [trackingCategory, setTrackingCategory] = useState<"productive" | "downtime" | null>(null);
   const [trackingStartedAt, setTrackingStartedAt] = useState<string | null>(null);
   const [tickNow, setTickNow] = useState(Date.now());
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [discardError, setDiscardError] = useState<string | null>(null);
 
   const isRealRun = Boolean(projectAssetId && workflowConfigId);
 
@@ -606,6 +610,41 @@ export default function WorkOrderRunner({
       await flushAutosave();
     }
     onClose();
+  }
+
+  async function handleDiscardRun() {
+    if (!activeRunId || !isRealRun) {
+      reset();
+      onClose();
+      return;
+    }
+    setDiscarding(true);
+    setDiscardError(null);
+    try {
+      const updated = await assetWorkflowRunService.abandonRun(activeRunId);
+      setActiveRun(updated);
+      syncRunTimeState(updated);
+      setValues(prefillValues ?? {});
+      setIssues([]);
+      setHistory([]);
+      setCurrentStepId(stepsSorted[0]?.id ?? null);
+      setResumingRun(false);
+      setDiscardConfirmOpen(false);
+      reset();
+      onClose();
+    } catch {
+      setDiscardError("Failed to discard run progress. Please try again.");
+    } finally {
+      setDiscarding(false);
+    }
+  }
+
+  function requestDiscardRun() {
+    if (activeRunId && isRealRun && !activeRun?.isLocked) {
+      setDiscardConfirmOpen(true);
+      return;
+    }
+    void handleClose();
   }
 
   async function handlePause() {
@@ -1701,6 +1740,7 @@ export default function WorkOrderRunner({
           <Box sx={{ mt: 1 }}>
             <DiagnosticClockBar
               variant="compact"
+              siteOnly
               projectTimeZoneId={resolvedTimeZone}
               projectLabel="Site"
             />
@@ -2178,7 +2218,7 @@ export default function WorkOrderRunner({
                           </Stack>
                           <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
                           <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
-                            {issue.createdBy ? `${issue.createdBy} - ` : ""}{new Date(issue.reportedAt).toLocaleString()}
+                            {issue.createdBy ? `${issue.createdBy} - ` : ""}{formatInstant(issue.reportedAt, resolvedTimeZone, { withZone: false })}
                           </Typography>
                         </Stack>
                       )}
@@ -2326,8 +2366,8 @@ export default function WorkOrderRunner({
                 Pause
               </Button>
             </Tooltip>
-            <Tooltip title="Close without saving current step inputs">
-              <Button size="small" color="inherit" onClick={onClose}>
+            <Tooltip title="Discard all captured data, photos, and reset the time tracker">
+              <Button size="small" color="inherit" onClick={requestDiscardRun}>
                 Cancel
               </Button>
             </Tooltip>
@@ -2510,7 +2550,7 @@ export default function WorkOrderRunner({
                             </Stack>
                             <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
                             <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
-                              {issue.createdBy ? `${issue.createdBy} - ` : ""}{new Date(issue.reportedAt).toLocaleString()}
+                              {issue.createdBy ? `${issue.createdBy} - ` : ""}{formatInstant(issue.reportedAt, resolvedTimeZone, { withZone: false })}
                             </Typography>
                           </Stack>
                         )}
@@ -2630,7 +2670,7 @@ export default function WorkOrderRunner({
         </DialogContent>
         <DialogActions sx={{ justifyContent: "space-between", position: "sticky", bottom: 0, zIndex: 1, bgcolor: "background.paper", borderTop: "1px solid", borderColor: "divider" }}>
           <Stack direction="row" spacing={1} alignItems="center">
-            <Button onClick={handleClose} disabled={saving}>
+            <Button onClick={requestDiscardRun} disabled={saving || discarding}>
               {saved ? "Close" : "Discard"}
             </Button>
             {!saved && runEditPerms.data && (
@@ -3317,6 +3357,28 @@ export default function WorkOrderRunner({
           }}
         />
       )}
+
+      {/* Discard run confirmation */}
+      <Dialog open={discardConfirmOpen} onClose={() => !discarding && setDiscardConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Discard workflow run?</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ mt: 0.5 }}>
+            {discardError && <Alert severity="error">{discardError}</Alert>}
+            <Typography variant="body2">
+              This will permanently delete all captured field data, photos, flagged issues, and time tracker entries for this run. You cannot undo this action.
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Use <strong>Pause</strong> instead if you want to save progress and resume later.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDiscardConfirmOpen(false)} disabled={discarding}>Keep progress</Button>
+          <Button color="error" variant="contained" onClick={() => void handleDiscardRun()} disabled={discarding}>
+            {discarding ? <CircularProgress size={18} /> : "Discard run"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Modify qty dialog â€" for feature-linked repeatable steps */}
       <Dialog open={modifyQtyOpen} onClose={() => setModifyQtyOpen(false)} maxWidth="xs" fullWidth>
