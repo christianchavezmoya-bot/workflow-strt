@@ -7,6 +7,8 @@ import {
   DialogTitle,
   Stack,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import type { RunTimeEntry } from "../../types/assetWorkflowRun";
 import { formatInstant, zoneAbbreviation } from "../../utils/datetime";
@@ -29,6 +31,8 @@ export default function SegmentTimeEditorDialog({
   onClose,
   onSave,
 }: Props) {
+  const theme = useTheme();
+  const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const [startMinutes, setStartMinutes] = useState(0);
   const [endMinutes, setEndMinutes] = useState(0);
 
@@ -52,9 +56,9 @@ export default function SegmentTimeEditorDialog({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth fullScreen={isPhone}>
       <DialogTitle sx={{ pb: 0.5 }}>
-        Adjust segment times
+        Edit segment
         {timeZoneId && (
           <Typography variant="caption" color="text.secondary" display="block">
             {zoneAbbreviation(timeZoneId)} · {entry.category === "productive" ? "Productive" : "Downtime"}

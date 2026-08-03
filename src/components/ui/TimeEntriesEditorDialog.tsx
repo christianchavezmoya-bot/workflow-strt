@@ -41,11 +41,14 @@ import {
   utcToDatetimeLocalInZone,
   zoneAbbreviation,
 } from "../../utils/datetime";
+import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import TimeEntriesTimelineEditor from "./TimeEntriesTimelineEditor";
 
 interface Props {
   open: boolean;
   run: AssetWorkflowRun;
+  /** Project id — used to resolve site timezone when timeZoneId is not passed. */
+  projectId?: string | null;
   /** IANA project site zone for wall-clock display/editing. */
   timeZoneId?: string | null;
   /** If true, no edits allowed — only view. */
@@ -153,11 +156,14 @@ const DURATION_PRESETS = [
 export default function TimeEntriesEditorDialog({
   open,
   run,
-  timeZoneId,
+  projectId,
+  timeZoneId: timeZoneIdProp,
   readOnly = false,
   onClose,
   onSaved,
 }: Props) {
+  const fetchedTimeZone = useProjectTimeZone(projectId ?? undefined);
+  const timeZoneId = timeZoneIdProp ?? fetchedTimeZone;
   const [entries, setEntries] = useState<RunTimeEntry[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null); // null = add-new mode when formOpen
   const [formOpen, setFormOpen] = useState(false);
