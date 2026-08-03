@@ -19,7 +19,7 @@ Use this index whenever the cloud agent finishes a change set and field agents n
 
 | Round | Branch | PR | Mac prompt | Windows prompt |
 |-------|--------|-----|------------|----------------|
-| **Phase 0 time-tracker smoke** | **`cursor/time-tracker-handover-plan-cd21` @ `f994388`** | [#45](https://github.com/christianchavezmoya-bot/workflow-strt/pull/45) | (T1 offline: use same branch; Mac prompt TBD if needed) | [`WINDOWS_AGENT_PHASE0_TIME_TRACKER_PROMPT.md`](./WINDOWS_AGENT_PHASE0_TIME_TRACKER_PROMPT.md) |
+| **Phase 0 time-tracker smoke** | **`cursor/time-tracker-handover-plan-cd21` @ `dfe06e6`** | [#45](https://github.com/christianchavezmoya-bot/workflow-strt/pull/45) | [`IOS_MAC_AGENT_PHASE0_TIME_TRACKER_PROMPT.md`](./IOS_MAC_AGENT_PHASE0_TIME_TRACKER_PROMPT.md) | [`WINDOWS_AGENT_PHASE0_TIME_TRACKER_PROMPT.md`](./WINDOWS_AGENT_PHASE0_TIME_TRACKER_PROMPT.md) |
 | **Connectivity UI + bulk email share** | **`main` @ `c39f674+`** (merged #42 + #43) | #42, #43 ✅ | [`IOS_MAC_AGENT_MAIN_COMBINED_TEST_PROMPT.md`](./IOS_MAC_AGENT_MAIN_COMBINED_TEST_PROMPT.md) | [`WINDOWS_AGENT_MAIN_COMBINED_TEST_PROMPT.md`](./WINDOWS_AGENT_MAIN_COMBINED_TEST_PROMPT.md) |
 | **Offline labels + sync conflict UX** | **`main` @ `bdf5135+`** (merged [#37](https://github.com/christianchavezmoya-bot/workflow-strt/pull/37)) | #37 ✅ | [`IOS_MAC_AGENT_OFFLINE_SYNC_UX_PROMPT.md`](./IOS_MAC_AGENT_OFFLINE_SYNC_UX_PROMPT.md) | [`WINDOWS_AGENT_OFFLINE_SYNC_UX_PROMPT.md`](./WINDOWS_AGENT_OFFLINE_SYNC_UX_PROMPT.md) |
 | Session timeout + auth (prior) | `main` @ `62da009+` | #25–#36 | [`IOS_MAC_AGENT_SESSION_SYNC_PROMPT.md`](./IOS_MAC_AGENT_SESSION_SYNC_PROMPT.md) | (Windows: set `ExpiresMinutes` per that prompt) |

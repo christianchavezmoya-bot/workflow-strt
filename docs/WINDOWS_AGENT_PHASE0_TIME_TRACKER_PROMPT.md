@@ -10,7 +10,7 @@
 **API host (this PC — adjust if needed):** `http://10.7.62.140:4000/api`  
 **Web:** `http://localhost:5173` (or `http://10.7.62.140:5173`)  
 **Login:** `admin@commtrac.local` / `Admin123!`  
-**Reference:** `docs/PHASE0_TIME_TRACKER_SMOKE_REPORT.md`
+**Mac agent prompt:** [`IOS_MAC_AGENT_PHASE0_TIME_TRACKER_PROMPT.md`](./IOS_MAC_AGENT_PHASE0_TIME_TRACKER_PROMPT.md) — run **after** you confirm API ready + post the commit hash
 
 ---
 
