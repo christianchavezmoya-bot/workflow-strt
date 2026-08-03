@@ -1687,11 +1687,11 @@ export default function WorkOrderRunner({
     return (
       <>
         <DialogTitle>
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
+          <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
             <Typography variant="subtitle1" fontWeight={600}>
               Step {currentIndex + 1} of {stepsSorted.length}
             </Typography>
-            <Stack direction="row" spacing={0.75} alignItems="center">
+            <Stack direction="row" spacing={0.75} alignItems="flex-start" flexWrap="wrap" useFlexGap>
               {issues.length > 0 && (
                 <Tooltip title="Right-click for details">
                   <Chip
@@ -1703,6 +1703,12 @@ export default function WorkOrderRunner({
                   />
                 </Tooltip>
               )}
+              <DiagnosticClockBar
+                variant="compact"
+                siteOnly
+                projectTimeZoneId={resolvedTimeZone}
+                projectLabel="Site"
+              />
               <Menu
                 anchorEl={issueMenuAnchor}
                 open={Boolean(issueMenuAnchor)}
@@ -1737,14 +1743,6 @@ export default function WorkOrderRunner({
             </Stack>
           </Stack>
           {renderAssetIdentifier(assetTag)}
-          <Box sx={{ mt: 1 }}>
-            <DiagnosticClockBar
-              variant="compact"
-              siteOnly
-              projectTimeZoneId={resolvedTimeZone}
-              projectLabel="Site"
-            />
-          </Box>
           <LinearProgress variant="determinate" value={progress} sx={{ mt: 1, borderRadius: 1 }} />
 {isRealRun && activeRunId && (
             <Stack spacing={1} sx={{ mt: 1.25 }}>

@@ -63,6 +63,7 @@ import { brandSettingsService } from "../../services/brandSettingsService";
 import { featureService } from "../../services/featureService";
 import type { Feature as LibFeature } from "../../types/feature";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
+import { resolveReportTimeZone } from "../../utils/datetime";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
 import {
@@ -1540,7 +1541,7 @@ const Dashboard = () => {
         siteName: projects.find((project) => project.id === asset.projectId)?.siteName,
         siteLocation: asset.location ?? undefined,
         assignedTechnician: user.fullName ?? undefined,
-        timeZoneId: projects.find((project) => project.id === asset.projectId)?.timeZoneId,
+        timeZoneId: resolveReportTimeZone(projects.find((project) => project.id === asset.projectId)),
         signatureEvents,
         productFeatures,
         outputMode: "open",

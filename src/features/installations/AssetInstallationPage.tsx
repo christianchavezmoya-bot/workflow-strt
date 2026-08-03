@@ -107,6 +107,7 @@ import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, entityReplaceIssuesForAsset } from "../../services/localDB";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
+import { resolveReportTimeZone } from "../../utils/datetime";
 import { BulkWorkflowReportDialog } from "../../components/reports/BulkWorkflowReportDialog";
 import { buildWorkflowReportJson, createWorkflowReportDocx, workflowReportBaseFileName, type WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
@@ -3514,7 +3515,7 @@ ${words.slice(midpoint).join(" ")}`;
       siteLocation: asset.location ?? undefined,
       assignedTechnician: tech?.fullName,
       documentType: docType,
-      timeZoneId: proj?.timeZoneId,
+      timeZoneId: resolveReportTimeZone(proj),
       signatureEvents,
       productFeatures,
     };
@@ -4124,7 +4125,7 @@ ${words.slice(midpoint).join(" ")}`;
         />
       </Tooltip>
     ) : null;
-    if (!primaryAction) return <Typography variant="caption" color="text.secondary">No workflow</Typography>;
+    if (!primaryAction) return <Typography variant="caption" sx={{ color: "#5a6b7a" }}>No workflow</Typography>;
     return (
       <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
         {progressBadge}
