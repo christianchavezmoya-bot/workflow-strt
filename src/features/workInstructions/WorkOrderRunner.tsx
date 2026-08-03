@@ -61,6 +61,7 @@ import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
+import DiagnosticClockBar from "../../components/ui/DiagnosticClockBar";
 import RunTimeline from "../../components/ui/RunTimeline";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useAuth } from "../../hooks/useAuth";
@@ -1695,6 +1696,13 @@ export default function WorkOrderRunner({
             </Stack>
           </Stack>
           {renderAssetIdentifier(assetTag)}
+          <Box sx={{ mt: 1 }}>
+            <DiagnosticClockBar
+              variant="compact"
+              projectTimeZoneId={resolvedTimeZone}
+              projectLabel="Site"
+            />
+          </Box>
           <LinearProgress variant="determinate" value={progress} sx={{ mt: 1, borderRadius: 1 }} />
 {isRealRun && activeRunId && (
             <Stack spacing={1} sx={{ mt: 1.25 }}>

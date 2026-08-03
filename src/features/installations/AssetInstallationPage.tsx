@@ -440,6 +440,7 @@ const AssetInstallationPage = () => {
   const showBulkWorkflowReports = showAdvancedAssetActions && !mobileWebLayout;
   const productsState = useAppSelector((s) => s.products);
   const projects = useAppSelector((s) => s.projects.items);
+  const projectsLoading = useAppSelector((s) => s.projects.loading);
   const users = useAppSelector((s) => s.users.items);
   const [searchParams] = useSearchParams();
   const canEditAssetStatus = can.installationAssets?.editScope === "all";
@@ -464,9 +465,15 @@ const AssetInstallationPage = () => {
   const isRefreshingRef = useRef(false);   // in-flight guard — prevents concurrent refreshAssets calls
   const serverWasOfflineRef = useRef(false); // tracks offline→online transition for api-server-reachable
 
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(
-    () => { try { return sessionStorage.getItem("installations_selected_project_id") ?? ""; } catch { return ""; } }
-  );
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
+    try {
+      const fromUrl = new URLSearchParams(window.location.search).get("project");
+      if (fromUrl) return fromUrl;
+      return sessionStorage.getItem("installations_selected_project_id") ?? "";
+    } catch {
+      return "";
+    }
+  });
   const [statusFilter, setStatusFilter] = useState<ProjectAssetStatus | "All">("All");
   const [showNoWorkflow, setShowNoWorkflow] = useState(false);
   const [autoSort,    setAutoSort]    = useState({ key: "", dir: "asc" as "asc" | "desc" });
@@ -688,8 +695,8 @@ const AssetInstallationPage = () => {
   }, [dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const products = useMemo(
-    () => (productsState.items.length ? productsState.items : demoProducts),
-    [productsState.items],
+    () => (productsState.items.length ? productsState.items : productsState.loading ? [] : demoProducts),
+    [productsState.items, productsState.loading],
   );
   // Stable product-id key so Redux array identity churn doesn't re-trigger the
   // full assets/configs/runs/docs load storm on every unrelated store update.
@@ -771,13 +778,14 @@ const AssetInstallationPage = () => {
     [projects, selectedProjectId]
   );
   const activeProduct = useMemo(() => {
+    const productIdFromUrl = searchParams.get("product");
+    if (productIdFromUrl) {
+      const fromUrl = products.find((p) => p.id === productIdFromUrl);
+      if (fromUrl) return fromUrl;
+    }
     const projectProductId = selectedProject?.productIds?.[0];
     if (projectProductId) {
       return products.find((p) => p.id === projectProductId);
-    }
-    const productIdFromUrl = searchParams.get("product");
-    if (productIdFromUrl) {
-      return products.find((p) => p.id === productIdFromUrl);
     }
     return undefined;
   }, [products, searchParams, selectedProject]);
@@ -989,6 +997,10 @@ const AssetInstallationPage = () => {
   useEffect(() => {
     const products = productsRef.current;
     if (products.length === 0) {
+      if (productsState.loading || projectsLoading) {
+        setLoadingAssets(true);
+        return;
+      }
       setAssets([]);
       setConfigs([]);
       setPublishedWfConfigs([]);
@@ -1061,20 +1073,24 @@ const AssetInstallationPage = () => {
 
     localLookupPromise.then((results) => {
       if (loadId !== assetLoadIdRef.current) return; // Stale — a newer load is in flight
+      const localSeed = results.flatMap((r) => r.assets);
       setAssets((prev) => {
         // Keep any scope slices the remote already filled; seed the rest from local.
         const keptRemote = prev.filter((a) => remoteAnsweredScopes.has(scopeIdOfAsset(a)));
-        const localSeed = results
+        const nextLocalSeed = results
           .filter((r) => !remoteAnsweredScopes.has(r.scope.scopeId))
           .flatMap((r) => r.assets);
-        const next = [...keptRemote, ...localSeed];
+        const next = [...keptRemote, ...nextLocalSeed];
         if (activeProduct?.id) {
           setHealthMap((hmPrev) => ({ ...hmPrev, [activeProduct.id]: computeHealth(next) }));
         }
         return next;
       });
       setLastFetchedAt(new Date());
-      clearLoadingOnce();
+      // Web has no IndexedDB asset cache — keep the spinner until the server responds.
+      if (isNativePlatform || localSeed.length > 0) {
+        clearLoadingOnce();
+      }
     });
 
     // ─── TIER 2: SERVER REFRESH (background, per-scope) ───────────────────
@@ -1100,7 +1116,9 @@ const AssetInstallationPage = () => {
           setLastFetchedAt(new Date());
           clearLoadingOnce();
         })
-        .catch(() => {/* non-blocking — local data is the source of truth */});
+        .catch(() => {
+          if (loadId === assetLoadIdRef.current) clearLoadingOnce();
+        });
     });
 
     // ─── TIER 3: CONFIGS (independent, unchanged from Phase A) ────────────
@@ -1161,7 +1179,7 @@ const AssetInstallationPage = () => {
           })
           .catch(() => {/* non-blocking */});
       });
-  }, [activeProduct?.id, archiveMode, productsKey, selectedProjectId]);
+  }, [activeProduct?.id, archiveMode, productsKey, selectedProjectId, productsState.loading, projectsLoading]);
 
   // Document counts per asset — fetched in a fully independent effect that
   // runs after the asset list is already shown. Counts are cosmetic

@@ -24,8 +24,10 @@ import { APP_NAME } from "../../constants/branding";
 import { secureClearAuth } from "../../services/secureStorage";
 import strataLogo from "../../assets/strata_transparent.png";
 import SyncStatusBadge from "../ui/SyncStatusBadge";
+import DiagnosticClockBar from "../ui/DiagnosticClockBar";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
+import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 
 function getRolesFromCache(): string[] {
   try {
@@ -170,6 +172,14 @@ const Topbar = () => {
     }
     return parts.join(" — ");
   }, [location.pathname, location.search, products, projects]);
+
+  const projectIdFromUrl = useMemo(() => new URLSearchParams(location.search).get("project"), [location.search]);
+  const projectTimeZoneFromUrl = useProjectTimeZone(projectIdFromUrl);
+  const projectLabelFromUrl = useMemo(() => {
+    if (!projectIdFromUrl) return "Project";
+    const proj = projects.find((p) => p.id === projectIdFromUrl);
+    return proj?.jobNumber ? `Site · ${proj.jobNumber}` : "Site";
+  }, [projectIdFromUrl, projects]);
 
   const [starAnchor, setStarAnchor] = useState<null | HTMLElement>(null);
   const [favLabel, setFavLabel] = useState("");
@@ -385,19 +395,23 @@ const Topbar = () => {
     <Box className="topbar">
       <Stack direction="row" spacing={2} alignItems="center">
         {isNativeMobile ? (
-          <Box
-            component="img"
-            src={strataLogo}
-            alt="Business Logo"
-            onClick={() => recordLogoTap(user?.role ?? "")}
-            sx={{
-              height: 52, maxWidth: 180, objectFit: "contain", userSelect: "none",
-              cursor: "pointer",
-              outline: complexViewActive ? "2px solid rgba(45,212,191,0.7)" : "2px solid transparent",
-              borderRadius: 1,
-              transition: "outline 0.2s",
-            }}
-          />
+          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+            <Box
+              component="img"
+              src={strataLogo}
+              alt="Business Logo"
+              onClick={() => recordLogoTap(user?.role ?? "")}
+              sx={{
+                height: 52, maxWidth: 140, objectFit: "contain", userSelect: "none",
+                cursor: "pointer",
+                outline: complexViewActive ? "2px solid rgba(45,212,191,0.7)" : "2px solid transparent",
+                borderRadius: 1,
+                transition: "outline 0.2s",
+                flexShrink: 0,
+              }}
+            />
+            <DiagnosticClockBar variant="compact" projectTimeZoneId={projectTimeZoneFromUrl} projectLabel={projectLabelFromUrl} />
+          </Stack>
         ) : (
           <>
             {!mobileWebLayout && (
@@ -414,10 +428,17 @@ const Topbar = () => {
               }}
             />
             )}
-            <Stack spacing={0.5}>
-              <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
-                {appName}
-              </Typography>
+            <Stack spacing={0.5} sx={{ minWidth: 0 }}>
+              <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
+                  {appName}
+                </Typography>
+                <DiagnosticClockBar
+                  variant="inline"
+                  projectTimeZoneId={projectTimeZoneFromUrl}
+                  projectLabel={projectLabelFromUrl}
+                />
+              </Stack>
               <Typography variant="body2" color="text.secondary">
                 {autoLabel}
               </Typography>
