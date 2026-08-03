@@ -127,6 +127,67 @@ export function formatInstant(
   }
 }
 
+function zonedWallClockParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)?.value ?? 0);
+  const hour = get("hour");
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: hour === 24 ? 0 : hour,
+    minute: get("minute"),
+    second: get("second"),
+  };
+}
+
+/** UTC ISO → `datetime-local` value rendered in the project zone (not device local). */
+export function utcToDatetimeLocalInZone(
+  isoUtc: string | null | undefined,
+  timeZoneId?: string | null,
+): string {
+  if (!isoUtc) return "";
+  const d = new Date(isoUtc);
+  if (Number.isNaN(d.getTime())) return "";
+  const zone = resolveProjectTimeZone(timeZoneId);
+  const p = zonedWallClockParts(d, zone);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
+}
+
+/** `datetime-local` wall clock in the project zone → UTC ISO. */
+export function datetimeLocalInZoneToUtc(
+  localStr: string,
+  timeZoneId?: string | null,
+): string {
+  if (!localStr) return "";
+  const zone = resolveProjectTimeZone(timeZoneId);
+  const [datePart, timePart] = localStr.split("T");
+  if (!datePart || !timePart) return new Date(localStr).toISOString();
+  const [y, mo, d] = datePart.split("-").map(Number);
+  const [h, mi] = timePart.split(":").map(Number);
+  if ([y, mo, d, h, mi].some((n) => Number.isNaN(n))) return new Date(localStr).toISOString();
+
+  let utcGuess = Date.UTC(y, mo - 1, d, h, mi, 0);
+  for (let i = 0; i < 4; i++) {
+    const p = zonedWallClockParts(new Date(utcGuess), zone);
+    const targetMs = Date.UTC(y, mo - 1, d, h, mi, 0);
+    const actualMs = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, 0);
+    utcGuess += targetMs - actualMs;
+  }
+  return new Date(utcGuess).toISOString();
+}
+
 /** Short zone label alone, e.g. "AEST", for report headers ("All times in Australia/Sydney (AEST)"). */
 export function zoneAbbreviation(timeZoneId?: string | null, at?: string | number | Date): string {
   const zone = resolveProjectTimeZone(timeZoneId);

@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { useRepoSubscription } from "../../hooks/useRepoSubscription";
+import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { Link, useNavigate } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
@@ -1813,6 +1814,7 @@ const Dashboard = () => {
   const [runnerWorkflow, setRunnerWorkflow] = useState<Workflow | null>(null);
   const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>();
   const [runnerExistingRunId, setRunnerExistingRunId] = useState<string | undefined>();
+  const runnerProjectTimeZone = useProjectTimeZone(runnerAsset?.projectId);
   const runnerTeamMembers = useMemo(() => {
     const project = runnerAsset?.projectId ? projectById.get(runnerAsset.projectId) : undefined;
     if (!project?.teamMemberIds?.length) return [];
@@ -6275,7 +6277,7 @@ const Dashboard = () => {
           currentUserId={user.id}
           assetTag={runnerAsset.assetTag}
           jobNumber={runnerAsset.jobNumber}
-          timeZoneId={projectById.get(runnerAsset.projectId)?.timeZoneId}
+          timeZoneId={runnerProjectTimeZone}
           teamMembers={runnerTeamMembers}
           onComplete={refreshLiveDashboardDataNow}
           onPause={refreshLiveDashboardDataNow}

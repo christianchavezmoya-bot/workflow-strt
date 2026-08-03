@@ -273,42 +273,56 @@ public class AssetWorkflowRunsController : ControllerBase
                 .Select(a => a.Id)
                 .ToListAsync();
 
-            var runs = await _db.AssetWorkflowRuns
+            if (assetIds.Count == 0)
+            {
+                return Ok(Array.Empty<AssetWorkflowRunDto>());
+            }
+
+            // Phase 1: lightweight keys only — avoid loading WorkflowSnapshotJson /
+            // StepResultsJson for every historical run (can be thousands on large jobs).
+            var runKeys = await _db.AssetWorkflowRuns
                 .Where(r => assetIds.Contains(r.AssetId))
-                .OrderByDescending(r => r.StartedAt)
+                .Select(r => new RunSelectionKey(r.Id, r.AssetId, r.WorkflowConfigId, r.StartedAt, r.UpdatedAt, r.IsLocked, r.Status))
                 .AsNoTracking()
                 .ToListAsync();
 
-            // Per (asset, workflow config): the newest run drives status, action
-            // buttons and signature chips. But the CAPTURE table sources its as-built
-            // values from the newest COMPLETED run — and when a newer in-progress run
-            // sits on top of a completed one, that newest run carries no capture data.
-            // Returning only the newest run therefore blanks the web capture table
-            // (the phone is unaffected: it keeps every run in its local store). So we
-            // ALSO include the newest completed run when it differs, letting the client
-            // (pickCaptureRun) show as-built data while the newest run still drives
-            // status. `runs` is ordered newest-started first, so First()/FirstOrDefault
-            // over each group already resolve "newest" and "newest completed".
-            static bool HasAsBuiltData(AssetWorkflowRunEntity r) =>
+            static bool HasAsBuiltData(RunSelectionKey r) =>
                 r.IsLocked || string.Equals(r.Status, "Complete", StringComparison.OrdinalIgnoreCase);
 
-            var selected = new List<AssetWorkflowRunEntity>();
-            foreach (var group in runs.GroupBy(r => new { r.AssetId, r.WorkflowConfigId }))
+            var selectedIds = new HashSet<string>();
+            foreach (var group in runKeys.GroupBy(r => new { r.AssetId, r.WorkflowConfigId }))
             {
-                var newest = group.First();
-                selected.Add(newest);
+                var newest = group
+                    .OrderByDescending(r => r.StartedAt)
+                    .ThenByDescending(r => r.UpdatedAt)
+                    .First();
+                selectedIds.Add(newest.Id);
 
                 if (!HasAsBuiltData(newest))
                 {
-                    var newestCompleted = group.FirstOrDefault(HasAsBuiltData);
+                    var newestCompleted = group
+                        .Where(HasAsBuiltData)
+                        .OrderByDescending(r => r.StartedAt)
+                        .ThenByDescending(r => r.UpdatedAt)
+                        .FirstOrDefault();
                     if (newestCompleted is not null && newestCompleted.Id != newest.Id)
                     {
-                        selected.Add(newestCompleted);
+                        selectedIds.Add(newestCompleted.Id);
                     }
                 }
             }
 
-            return Ok(selected.Select(ToDto));
+            if (selectedIds.Count == 0)
+            {
+                return Ok(Array.Empty<AssetWorkflowRunDto>());
+            }
+
+            var runs = await _db.AssetWorkflowRuns
+                .Where(r => selectedIds.Contains(r.Id))
+                .AsNoTracking()
+                .ToListAsync();
+
+            return Ok(runs.Select(ToDto));
         }
         catch (Exception ex)
         {
@@ -316,6 +330,15 @@ public class AssetWorkflowRunsController : ControllerBase
             return Ok(Array.Empty<AssetWorkflowRunDto>());
         }
     }
+
+    private sealed record RunSelectionKey(
+        string Id,
+        string AssetId,
+        string WorkflowConfigId,
+        DateTime StartedAt,
+        DateTime UpdatedAt,
+        bool IsLocked,
+        string Status);
 
     // GET api/asset-workflow-runs/open-issues — all unresolved issues across every run, with project context
     // Optional ?userId={id} filters to issues on assets assigned to that user
