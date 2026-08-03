@@ -136,6 +136,18 @@ const BLANK_FORM = {
   endStr: "",
 };
 
+const DURATION_PRESETS = [
+  { label: "30m", minutes: 30 },
+  { label: "1h", minutes: 60 },
+  { label: "1.5h", minutes: 90 },
+  { label: "2h", minutes: 120 },
+  { label: "3h", minutes: 180 },
+  { label: "4h", minutes: 240 },
+  { label: "6h", minutes: 360 },
+  { label: "8h", minutes: 480 },
+  { label: "12h", minutes: 720 },
+] as const;
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function TimeEntriesEditorDialog({
@@ -154,6 +166,10 @@ export default function TimeEntriesEditorDialog({
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"timeline" | "table">("timeline");
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addCategory, setAddCategory] = useState<"productive" | "downtime">("productive");
+  const [addDurationMin, setAddDurationMin] = useState(60);
+  const [addReason, setAddReason] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -177,10 +193,32 @@ export default function TimeEntriesEditorDialog({
   );
 
   function openAddForm() {
-    setEditingId(null);
-    setForm({ ...BLANK_FORM, startStr: toDatetimeLocal(new Date().toISOString(), timeZoneId) });
-    setFormError(null);
-    setFormOpen(true);
+    setAddCategory("productive");
+    setAddDurationMin(60);
+    setAddReason("");
+    setAddDialogOpen(true);
+  }
+
+  function appendDurationEntry() {
+    const sorted = [...entries].sort(
+      (a, b) => new Date(a.startedAtUtc).getTime() - new Date(b.startedAtUtc).getTime(),
+    );
+    const lastEndMs = sorted.reduce((max, e) => {
+      const end = e.endedAtUtc ? new Date(e.endedAtUtc).getTime() : new Date(nowIso).getTime();
+      return Math.max(max, end);
+    }, sorted.length ? new Date(sorted[0].startedAtUtc).getTime() : Date.now());
+    const startMs = sorted.length ? lastEndMs : Date.now();
+    const endMs = startMs + addDurationMin * 60_000;
+    const newEntry: RunTimeEntry = {
+      id: randomId(),
+      category: addCategory,
+      reason: addReason.trim() || (addCategory === "downtime" ? "Downtime" : "Productive"),
+      startedAtUtc: new Date(startMs).toISOString(),
+      endedAtUtc: new Date(endMs).toISOString(),
+    };
+    setEntries((prev) => [...prev, newEntry]);
+    setAddDialogOpen(false);
+    setViewMode("timeline");
   }
 
   function openEditForm(entry: RunTimeEntry) {
@@ -270,7 +308,9 @@ export default function TimeEntriesEditorDialog({
             </Typography>
             <Typography variant="caption" color="text.secondary">
               {readOnly ? "View only — run is locked" : "Add, edit or remove time entries to correct tracking."}
-              {timeZoneId ? ` Times shown in ${zoneAbbreviation(timeZoneId)}.` : ""}
+              {timeZoneId
+                ? ` Times shown in ${zoneAbbreviation(timeZoneId)} (${timeZoneId}).`
+                : " Warning: project timezone not loaded — times may show as UTC."}
             </Typography>
           </Box>
           {!readOnly ? (
@@ -526,6 +566,58 @@ export default function TimeEntriesEditorDialog({
           </Button>
         )}
       </DialogActions>
+
+      {/* Quick add: category + duration preset, appended after last segment */}
+      <Dialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Add time segment</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl size="small" fullWidth>
+              <InputLabel shrink>Category</InputLabel>
+              <Select
+                label="Category"
+                value={addCategory}
+                onChange={(e) => setAddCategory(e.target.value as "productive" | "downtime")}
+              >
+                <MenuItem value="productive">Productive</MenuItem>
+                <MenuItem value="downtime">Downtime</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              label="Reason / note (optional)"
+              value={addReason}
+              onChange={(e) => setAddReason(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+            />
+            <Box>
+              <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ display: "block", mb: 1 }}>
+                Duration — placed after the last recorded segment
+              </Typography>
+              <Stack direction="row" flexWrap="wrap" useFlexGap spacing={0.75}>
+                {DURATION_PRESETS.map((p) => (
+                  <Chip
+                    key={p.minutes}
+                    label={p.label}
+                    clickable
+                    color={addDurationMin === p.minutes ? "primary" : "default"}
+                    variant={addDurationMin === p.minutes ? "filled" : "outlined"}
+                    onClick={() => setAddDurationMin(p.minutes)}
+                    sx={{ fontWeight: addDurationMin === p.minutes ? 700 : 400 }}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" startIcon={<AddOutlined />} onClick={appendDurationEntry}>
+            Add to timeline
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 }

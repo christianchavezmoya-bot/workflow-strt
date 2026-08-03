@@ -6277,6 +6277,7 @@ const Dashboard = () => {
           currentUserId={user.id}
           assetTag={runnerAsset.assetTag}
           jobNumber={runnerAsset.jobNumber}
+          projectId={runnerAsset.projectId}
           timeZoneId={runnerProjectTimeZone}
           teamMembers={runnerTeamMembers}
           onComplete={refreshLiveDashboardDataNow}

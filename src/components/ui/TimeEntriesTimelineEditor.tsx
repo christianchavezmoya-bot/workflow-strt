@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Box, Stack, Typography } from "@mui/material";
+import { Box, IconButton, Stack, Tooltip, Typography } from "@mui/material";
+import { ZoomInOutlined, ZoomOutOutlined } from "@mui/icons-material";
 import type { RunTimeEntry } from "../../types/assetWorkflowRun";
-import { formatInstant } from "../../utils/datetime";
+import { formatInstant, zoneAbbreviation } from "../../utils/datetime";
 import { formatDuration } from "../../utils/timelineModel";
+import SegmentTimeEditorDialog from "./SegmentTimeEditorDialog";
 
 interface Props {
   entries: RunTimeEntry[];
@@ -12,31 +14,25 @@ interface Props {
   onChange: (entries: RunTimeEntry[]) => void;
 }
 
-const TRACK_HEIGHT = 36;
-const HANDLE_WIDTH = 8;
+const TRACK_HEIGHT = 44;
+const HANDLE_WIDTH = 10;
 const MIN_SEGMENT_MS = 60_000;
-const COLORS = { productive: "#2e9b5e", downtime: "#d79b24", break: "#c2ccd6" };
+const BASE_PX_PER_HOUR = 120;
+const COLORS = { productive: "#2e9b5e", downtime: "#d79b24" };
 
-type DragState = {
-  entryId: string;
-  edge: "start" | "end";
-  pointerId: number;
-};
+type DragMode =
+  | { kind: "resize"; entryId: string; edge: "start" | "end"; pointerId: number; startX: number }
+  | { kind: "move"; entryId: string; pointerId: number; startX: number; origStartMs: number; origEndMs: number };
 
 function toMs(iso: string): number {
   const t = new Date(iso).getTime();
   return Number.isNaN(t) ? 0 : t;
 }
 
-function clampMs(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
 function snapMinute(ms: number): number {
   return Math.round(ms / MIN_SEGMENT_MS) * MIN_SEGMENT_MS;
 }
 
-/** Sorted segments with resolved end times for layout. */
 function layoutSegments(entries: RunTimeEntry[], nowIso: string) {
   return [...entries]
     .filter((e) => e.startedAtUtc)
@@ -57,8 +53,12 @@ export default function TimeEntriesTimelineEditor({
   onChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [drag, setDrag] = useState<DragState | null>(null);
+  const [zoom, setZoom] = useState(1);
   const [scrollLeft, setScrollLeft] = useState(0);
+  const [drag, setDrag] = useState<DragMode | null>(null);
+  const [wheelEntry, setWheelEntry] = useState<RunTimeEntry | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressEntryId = useRef<string | null>(null);
 
   const segments = useMemo(() => layoutSegments(entries, nowIso), [entries, nowIso]);
 
@@ -66,9 +66,13 @@ export default function TimeEntriesTimelineEditor({
     if (segments.length === 0) return null;
     const startMs = segments[0].startMs;
     const endMs = Math.max(...segments.map((s) => s.endMs));
-    const spanMs = Math.max(endMs - startMs, MIN_SEGMENT_MS);
-    return { startMs, endMs, spanMs };
+    const spanMs = Math.max(endMs - startMs, MIN_SEGMENT_MS * 2);
+    const padMs = Math.max(spanMs * 0.15, MIN_SEGMENT_MS * 5);
+    return { startMs: startMs - padMs, endMs: endMs + padMs, spanMs: spanMs + padMs * 2 };
   }, [segments]);
+
+  const pxPerMs = bounds ? (BASE_PX_PER_HOUR / 3_600_000) * zoom : 0;
+  const timelineWidth = bounds ? Math.max(bounds.spanMs * pxPerMs, 320) : 320;
 
   const totals = useMemo(() => {
     let productive = 0;
@@ -78,39 +82,32 @@ export default function TimeEntriesTimelineEditor({
       if (s.entry.category === "downtime") downtime += secs;
       else productive += secs;
     }
-    return { productive, downtime, elapsed: bounds ? Math.round(bounds.spanMs / 1000) : 0 };
-  }, [segments, bounds]);
+    return { productive, downtime };
+  }, [segments]);
 
-  const pxPerMs = 0.00008; // ~288px per hour
-  const timelineWidth = bounds ? Math.max(bounds.spanMs * pxPerMs, 480) : 480;
+  const msToX = useCallback((ms: number) => (bounds ? (ms - bounds.startMs) * pxPerMs : 0), [bounds, pxPerMs]);
+  const xToMs = useCallback((x: number) => (bounds ? bounds.startMs + x / pxPerMs : 0), [bounds, pxPerMs]);
 
-  const msToX = useCallback(
-    (ms: number) => (bounds ? (ms - bounds.startMs) * pxPerMs : 0),
-    [bounds, pxPerMs],
+  const updateEntry = useCallback(
+    (entryId: string, patch: Partial<RunTimeEntry>) => {
+      onChange(entries.map((e) => (e.id === entryId ? { ...e, ...patch } : e)));
+    },
+    [entries, onChange],
   );
 
-  const xToMs = useCallback(
-    (x: number) => (bounds ? bounds.startMs + x / pxPerMs : 0),
-    [bounds, pxPerMs],
-  );
-
-  const applyBoundaryMove = useCallback(
+  const applyResize = useCallback(
     (entryId: string, edge: "start" | "end", targetMs: number) => {
       const sorted = layoutSegments(entries, nowIso);
       const idx = sorted.findIndex((s) => s.entry.id === entryId);
       if (idx < 0 || !bounds) return;
-
       const seg = sorted[idx];
       const prev = sorted[idx - 1];
       const next = sorted[idx + 1];
 
-      let newStart = seg.startMs;
-      let newEnd = seg.endMs;
-
       if (edge === "start") {
         const minStart = prev ? prev.endMs : bounds.startMs;
         const maxStart = seg.endMs - MIN_SEGMENT_MS;
-        newStart = snapMinute(clampMs(targetMs, minStart, maxStart));
+        const newStart = snapMinute(Math.min(Math.max(targetMs, minStart), maxStart));
         if (prev) {
           onChange(
             entries.map((e) => {
@@ -119,19 +116,15 @@ export default function TimeEntriesTimelineEditor({
               return e;
             }),
           );
-          return;
+        } else {
+          updateEntry(entryId, { startedAtUtc: new Date(newStart).toISOString() });
         }
-        onChange(
-          entries.map((e) =>
-            e.id === entryId ? { ...e, startedAtUtc: new Date(newStart).toISOString() } : e,
-          ),
-        );
         return;
       }
 
       const minEnd = seg.startMs + MIN_SEGMENT_MS;
       const maxEnd = next ? next.startMs : bounds.endMs;
-      newEnd = snapMinute(clampMs(targetMs, minEnd, maxEnd));
+      const newEnd = snapMinute(Math.min(Math.max(targetMs, minEnd), maxEnd));
       if (next) {
         onChange(
           entries.map((e) => {
@@ -140,36 +133,82 @@ export default function TimeEntriesTimelineEditor({
             return e;
           }),
         );
-        return;
+      } else {
+        updateEntry(entryId, { endedAtUtc: new Date(newEnd).toISOString() });
       }
-      onChange(
-        entries.map((e) =>
-          e.id === entryId ? { ...e, endedAtUtc: new Date(newEnd).toISOString() } : e,
-        ),
-      );
     },
-    [bounds, entries, nowIso, onChange],
+    [bounds, entries, nowIso, onChange, updateEntry],
   );
 
-  const onPointerDown = (entryId: string, edge: "start" | "end") => (event: React.PointerEvent) => {
-    if (readOnly) return;
-    event.preventDefault();
-    (event.target as HTMLElement).setPointerCapture(event.pointerId);
-    setDrag({ entryId, edge, pointerId: event.pointerId });
-  };
+  const applyMove = useCallback(
+    (entryId: string, origStartMs: number, origEndMs: number, deltaMs: number) => {
+      const duration = origEndMs - origStartMs;
+      let newStart = snapMinute(origStartMs + deltaMs);
+      let newEnd = newStart + duration;
+      if (!bounds) return;
+      if (newStart < bounds.startMs) {
+        newStart = bounds.startMs;
+        newEnd = newStart + duration;
+      }
+      if (newEnd > bounds.endMs) {
+        newEnd = bounds.endMs;
+        newStart = newEnd - duration;
+      }
+      updateEntry(entryId, {
+        startedAtUtc: new Date(newStart).toISOString(),
+        endedAtUtc: new Date(newEnd).toISOString(),
+      });
+    },
+    [bounds, updateEntry],
+  );
 
   const onPointerMove = (event: React.PointerEvent) => {
-    if (!drag || !containerRef.current || !bounds) return;
+    if (!drag || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const x = event.clientX - rect.left + scrollLeft;
-    applyBoundaryMove(drag.entryId, drag.edge, xToMs(x));
+    if (drag.kind === "resize") {
+      applyResize(drag.entryId, drag.edge, xToMs(x));
+    } else {
+      const deltaMs = xToMs(x) - xToMs(drag.startX);
+      applyMove(drag.entryId, drag.origStartMs, drag.origEndMs, deltaMs);
+    }
   };
 
-  const onPointerUp = (event: React.PointerEvent) => {
+  const endDrag = (event: React.PointerEvent) => {
     if (!drag) return;
-    (event.target as HTMLElement).releasePointerCapture(drag.pointerId);
+    try {
+      (event.target as HTMLElement).releasePointerCapture(drag.pointerId);
+    } catch { /* ignore */ }
     setDrag(null);
   };
+
+  const clearLongPress = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+    longPressEntryId.current = null;
+  };
+
+  const startLongPress = (entry: RunTimeEntry) => {
+    if (readOnly) return;
+    clearLongPress();
+    longPressEntryId.current = entry.id;
+    longPressTimer.current = setTimeout(() => {
+      setWheelEntry(entry);
+      clearLongPress();
+    }, 2000);
+  };
+
+  const axisTicks = useMemo(() => {
+    if (!bounds) return [];
+    const ticks: number[] = [];
+    const stepMs = zoom >= 2 ? MIN_SEGMENT_MS * 15 : zoom >= 1 ? MIN_SEGMENT_MS * 30 : MIN_SEGMENT_MS * 60;
+    let t = Math.ceil(bounds.startMs / stepMs) * stepMs;
+    while (t <= bounds.endMs) {
+      ticks.push(t);
+      t += stepMs;
+    }
+    return ticks;
+  }, [bounds, zoom]);
 
   if (!bounds || segments.length === 0) {
     return (
@@ -179,25 +218,39 @@ export default function TimeEntriesTimelineEditor({
     );
   }
 
-  const boundaryMs = new Set<number>();
-  segments.forEach((s) => {
-    boundaryMs.add(s.startMs);
-    boundaryMs.add(s.endMs);
-  });
-  const boundaries = [...boundaryMs].sort((a, b) => a - b);
+  const zoneLabel = timeZoneId ? zoneAbbreviation(timeZoneId) : "UTC";
 
   return (
     <Box sx={{ px: 2.5, py: 2 }}>
-      <Stack direction="row" flexWrap="wrap" useFlexGap spacing={2} sx={{ mb: 1.5 }}>
-        <Stat label="Start" value={formatInstant(new Date(bounds.startMs).toISOString(), timeZoneId, { withZone: false })} />
-        <Stat label="Finish" value={formatInstant(new Date(bounds.endMs).toISOString(), timeZoneId, { withZone: false })} />
+      <Stack direction="row" flexWrap="wrap" useFlexGap spacing={2} alignItems="flex-end" sx={{ mb: 1.5 }}>
+        <Stat label="Start" value={formatInstant(new Date(segments[0].startMs).toISOString(), timeZoneId, { withZone: true })} />
+        <Stat label="Finish" value={formatInstant(new Date(segments[segments.length - 1].endMs).toISOString(), timeZoneId, { withZone: true })} />
         <Stat label="Productive" value={formatDuration(totals.productive)} color={COLORS.productive} />
         <Stat label="Downtime" value={formatDuration(totals.downtime)} color={COLORS.downtime} />
+        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: "auto" }}>
+          <Tooltip title="Zoom out">
+            <span>
+              <IconButton size="small" disabled={zoom <= 0.25} onClick={() => setZoom((z) => Math.max(0.25, z / 1.5))}>
+                <ZoomOutOutlined fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Typography variant="caption" color="text.secondary" sx={{ minWidth: 36, textAlign: "center" }}>
+            {Math.round(zoom * 100)}%
+          </Typography>
+          <Tooltip title="Zoom in">
+            <span>
+              <IconButton size="small" disabled={zoom >= 8} onClick={() => setZoom((z) => Math.min(8, z * 1.5))}>
+                <ZoomInOutlined fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Stack>
       </Stack>
 
       {!readOnly && (
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-          Drag segment edges to adjust times. Scroll horizontally to pan the timeline.
+          Drag edges to resize · drag segment body to move · hold 2s for time wheels · scroll to pan · times in {zoneLabel}
         </Typography>
       )}
 
@@ -205,8 +258,8 @@ export default function TimeEntriesTimelineEditor({
         ref={containerRef}
         onScroll={(e) => setScrollLeft((e.target as HTMLDivElement).scrollLeft)}
         onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
         sx={{
           overflowX: "auto",
           overflowY: "hidden",
@@ -214,14 +267,14 @@ export default function TimeEntriesTimelineEditor({
           borderColor: "divider",
           borderRadius: 1,
           bgcolor: "background.default",
-          cursor: drag ? "col-resize" : "default",
+          cursor: drag?.kind === "move" ? "grabbing" : drag ? "col-resize" : "default",
           userSelect: "none",
+          touchAction: "pan-x",
         }}
       >
-        <Box sx={{ position: "relative", width: timelineWidth + 32, minHeight: TRACK_HEIGHT * 2 + 48, px: 2, py: 1 }}>
-          {/* Time axis labels */}
-          <Box sx={{ position: "relative", height: 20, mb: 0.5 }}>
-            {boundaries.map((ms) => (
+        <Box sx={{ position: "relative", width: timelineWidth + 48, minHeight: TRACK_HEIGHT * 2 + 56, px: 3, py: 1.5 }}>
+          <Box sx={{ position: "relative", height: 22, mb: 0.5 }}>
+            {axisTicks.map((ms) => (
               <Typography
                 key={ms}
                 variant="caption"
@@ -231,7 +284,7 @@ export default function TimeEntriesTimelineEditor({
                   left: msToX(ms),
                   transform: "translateX(-50%)",
                   whiteSpace: "nowrap",
-                  fontSize: "0.65rem",
+                  fontSize: "0.68rem",
                 }}
               >
                 {formatInstant(new Date(ms).toISOString(), timeZoneId, { date: false, time: true, withZone: false })}
@@ -239,62 +292,70 @@ export default function TimeEntriesTimelineEditor({
             ))}
           </Box>
 
-          {/* Productive track */}
-          <TrackRow label="Productive" color={COLORS.productive} />
-          <Box sx={{ position: "relative", height: TRACK_HEIGHT, mb: 0.5 }}>
-            {segments
-              .filter((s) => s.entry.category === "productive")
-              .map((s) => (
-                <SegmentBlock
-                  key={s.entry.id}
-                  left={msToX(s.startMs)}
-                  width={Math.max(msToX(s.endMs) - msToX(s.startMs), 4)}
-                  color={COLORS.productive}
-                  label={s.entry.reason ?? "Productive"}
-                  readOnly={readOnly}
-                  onPointerDownStart={onPointerDown(s.entry.id, "start")}
-                  onPointerDownEnd={onPointerDown(s.entry.id, "end")}
-                />
-              ))}
-          </Box>
-
-          {/* Downtime track */}
-          <TrackRow label="Downtime" color={COLORS.downtime} />
-          <Box sx={{ position: "relative", height: TRACK_HEIGHT }}>
-            {segments
-              .filter((s) => s.entry.category === "downtime")
-              .map((s) => (
-                <SegmentBlock
-                  key={s.entry.id}
-                  left={msToX(s.startMs)}
-                  width={Math.max(msToX(s.endMs) - msToX(s.startMs), 4)}
-                  color={COLORS.downtime}
-                  label={s.entry.reason ?? "Downtime"}
-                  readOnly={readOnly}
-                  onPointerDownStart={onPointerDown(s.entry.id, "start")}
-                  onPointerDownEnd={onPointerDown(s.entry.id, "end")}
-                />
-              ))}
-          </Box>
-
-          {/* Shared boundary guides */}
-          {boundaries.map((ms) => (
-            <Box
-              key={`guide-${ms}`}
-              sx={{
-                position: "absolute",
-                top: 24,
-                left: msToX(ms),
-                width: 0,
-                height: TRACK_HEIGHT * 2 + 8,
-                borderLeft: "1px dashed",
-                borderColor: "rgba(255,255,255,0.12)",
-                pointerEvents: "none",
-              }}
-            />
+          {(["productive", "downtime"] as const).map((cat) => (
+            <Box key={cat} sx={{ mb: 0.75 }}>
+              <TrackRow label={cat === "productive" ? "Productive" : "Downtime"} color={COLORS[cat]} />
+              <Box sx={{ position: "relative", height: TRACK_HEIGHT }}>
+                {segments
+                  .filter((s) => s.entry.category === cat)
+                  .map((s) => {
+                    const left = msToX(s.startMs);
+                    const width = Math.max(msToX(s.endMs) - left, 24);
+                    return (
+                      <SegmentBlock
+                        key={s.entry.id}
+                        left={left}
+                        width={width}
+                        color={COLORS[cat]}
+                        label={s.entry.reason ?? (cat === "productive" ? "Productive" : "Downtime")}
+                        duration={formatDuration(Math.round((s.endMs - s.startMs) / 1000))}
+                        readOnly={readOnly}
+                        onResizeStart={(e) => {
+                          e.stopPropagation();
+                          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+                          setDrag({ kind: "resize", entryId: s.entry.id, edge: "start", pointerId: e.pointerId, startX: 0 });
+                        }}
+                        onResizeEnd={(e) => {
+                          e.stopPropagation();
+                          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+                          setDrag({ kind: "resize", entryId: s.entry.id, edge: "end", pointerId: e.pointerId, startX: 0 });
+                        }}
+                        onMoveStart={(e) => {
+                          if (readOnly) return;
+                          const rect = containerRef.current!.getBoundingClientRect();
+                          const x = e.clientX - rect.left + scrollLeft;
+                          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                          setDrag({
+                            kind: "move",
+                            entryId: s.entry.id,
+                            pointerId: e.pointerId,
+                            startX: x,
+                            origStartMs: s.startMs,
+                            origEndMs: s.endMs,
+                          });
+                        }}
+                        onLongPressStart={() => startLongPress(s.entry)}
+                        onLongPressEnd={clearLongPress}
+                      />
+                    );
+                  })}
+              </Box>
+            </Box>
           ))}
         </Box>
       </Box>
+
+      <SegmentTimeEditorDialog
+        open={Boolean(wheelEntry)}
+        entry={wheelEntry}
+        timeZoneId={timeZoneId}
+        nowIso={nowIso}
+        onClose={() => setWheelEntry(null)}
+        onSave={(updated) => {
+          onChange(entries.map((e) => (e.id === updated.id ? updated : e)));
+          setWheelEntry(null);
+        }}
+      />
     </Box>
   );
 }
@@ -303,76 +364,62 @@ function TrackRow({ label, color }: { label: string; color: string }) {
   return (
     <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.25 }}>
       <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: color }} />
-      <Typography variant="caption" color="text.secondary" fontWeight={600}>
-        {label}
-      </Typography>
+      <Typography variant="caption" color="text.secondary" fontWeight={600}>{label}</Typography>
     </Stack>
   );
 }
 
 function SegmentBlock({
-  left,
-  width,
-  color,
-  label,
-  readOnly,
-  onPointerDownStart,
-  onPointerDownEnd,
+  left, width, color, label, duration, readOnly,
+  onResizeStart, onResizeEnd, onMoveStart, onLongPressStart, onLongPressEnd,
 }: {
-  left: number;
-  width: number;
-  color: string;
-  label: string;
-  readOnly?: boolean;
-  onPointerDownStart: (e: React.PointerEvent) => void;
-  onPointerDownEnd: (e: React.PointerEvent) => void;
+  left: number; width: number; color: string; label: string; duration: string; readOnly?: boolean;
+  onResizeStart: (e: React.PointerEvent) => void;
+  onResizeEnd: (e: React.PointerEvent) => void;
+  onMoveStart: (e: React.PointerEvent) => void;
+  onLongPressStart: () => void;
+  onLongPressEnd: () => void;
 }) {
   return (
     <Box
-      title={label}
+      onPointerDown={(e) => {
+        if ((e.target as HTMLElement).dataset.handle) return;
+        onMoveStart(e);
+        onLongPressStart();
+      }}
+      onPointerUp={onLongPressEnd}
+      onPointerLeave={onLongPressEnd}
+      onPointerCancel={onLongPressEnd}
       sx={{
         position: "absolute",
         left,
         width,
         height: "100%",
         bgcolor: color,
-        borderRadius: 0.75,
-        opacity: 0.92,
+        borderRadius: 1,
+        opacity: 0.95,
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
         overflow: "hidden",
+        cursor: readOnly ? "default" : "grab",
+        boxShadow: "0 1px 4px rgba(0,0,0,0.25)",
+        "&:active": { cursor: readOnly ? "default" : "grabbing" },
       }}
     >
-      <Typography variant="caption" sx={{ color: "#fff", fontSize: "0.65rem", px: 0.5, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-        {label}
+      <Typography variant="caption" sx={{ color: "#fff", fontSize: "0.65rem", fontWeight: 700, px: 0.5, lineHeight: 1.2, textAlign: "center" }}>
+        {duration}
       </Typography>
+      {width > 60 && (
+        <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.85)", fontSize: "0.6rem", px: 0.5, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", maxWidth: "100%" }}>
+          {label}
+        </Typography>
+      )}
       {!readOnly && (
         <>
-          <Box
-            onPointerDown={onPointerDownStart}
-            sx={{
-              position: "absolute",
-              left: 0,
-              top: 0,
-              width: HANDLE_WIDTH,
-              height: "100%",
-              cursor: "col-resize",
-              bgcolor: "rgba(0,0,0,0.15)",
-            }}
-          />
-          <Box
-            onPointerDown={onPointerDownEnd}
-            sx={{
-              position: "absolute",
-              right: 0,
-              top: 0,
-              width: HANDLE_WIDTH,
-              height: "100%",
-              cursor: "col-resize",
-              bgcolor: "rgba(0,0,0,0.15)",
-            }}
-          />
+          <Box data-handle="start" onPointerDown={onResizeStart} sx={{ position: "absolute", left: 0, top: 0, width: HANDLE_WIDTH, height: "100%", cursor: "col-resize", bgcolor: "rgba(0,0,0,0.2)" }} />
+          <Box data-handle="end" onPointerDown={onResizeEnd} sx={{ position: "absolute", right: 0, top: 0, width: HANDLE_WIDTH, height: "100%", cursor: "col-resize", bgcolor: "rgba(0,0,0,0.2)" }} />
         </>
       )}
     </Box>
@@ -382,12 +429,8 @@ function SegmentBlock({
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <Box>
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block", lineHeight: 1 }}>
-        {label}
-      </Typography>
-      <Typography variant="body2" sx={{ fontWeight: 600, color: color ?? "text.primary" }}>
-        {value}
-      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", lineHeight: 1 }}>{label}</Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600, color: color ?? "text.primary", fontSize: "0.82rem" }}>{value}</Typography>
     </Box>
   );
 }
