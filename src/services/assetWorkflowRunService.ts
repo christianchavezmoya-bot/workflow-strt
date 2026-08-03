@@ -1,4 +1,4 @@
-﻿import api from "./api";
+import api from "./api";
 import { IssueRepository } from "../repositories/IssueRepository";
 import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
 import type { ProjectAsset, ProjectAssetStatus, ProjectAssetWorkflowSummary } from "../types/projectAsset";
@@ -948,22 +948,23 @@ export const assetWorkflowRunService = {
   },
 
   async startRun(assetId: string, workflowConfigId: string, technicianUserId?: string): Promise<AssetWorkflowRun> {
+    const startedAtUtc = new Date().toISOString();
+    const initialTimeTrackingJson = buildInitialTimeTracking(startedAtUtc);
+    const body = {
+      assetId,
+      workflowConfigId,
+      technicianUserId: technicianUserId ?? null,
+      startedAtUtc,
+      timeTrackingJson: initialTimeTrackingJson,
+    };
+
     if (!isMobileNativePlatform()) {
-      const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", {
-        assetId,
-        workflowConfigId,
-        technicianUserId: technicianUserId ?? null,
-      });
+      const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", body);
       invalidateWebCache(`/asset-workflow-runs/by-asset/${assetId}`);
       invalidateWebRunReadCaches(assetId);
       return res.data;
     }
 
-    const body = {
-      assetId,
-      workflowConfigId,
-      technicianUserId: technicianUserId ?? null,
-    };
     try {
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", body);
@@ -987,7 +988,6 @@ export const assetWorkflowRunService = {
       const config = await workflowConfigService.getById(workflowConfigId);
       if (!config) throw error;
 
-      const now = new Date().toISOString();
       const localRunId = `offline-run-${randomId()}`;
       const projectId = await resolveProjectId(assetId);
       const existingRuns = await offlineStore.listRunsByAsset(assetId);
@@ -1002,7 +1002,7 @@ export const assetWorkflowRunService = {
         technicianUserId,
         stepResultsJson: "[]",
         issuesJson: "[]",
-        timeTrackingJson: buildInitialTimeTracking(now),
+        timeTrackingJson: initialTimeTrackingJson,
         productiveSeconds: 0,
         downtimeSeconds: 0,
         downtimeEvents: 0,
@@ -1011,15 +1011,15 @@ export const assetWorkflowRunService = {
         signatureStatus: "None",
         installerSignedAt: undefined,
         customerSignedAt: undefined,
-        startedAt: now,
+        startedAt: startedAtUtc,
         completedAt: undefined,
-        createdAt: now,
-        updatedAt: now,
+        createdAt: startedAtUtc,
+        updatedAt: startedAtUtc,
         projectId,
         localRunId,
         serverRunId: undefined,
         localStatus: "PendingSync",
-        lastLocalSavedAt: now,
+        lastLocalSavedAt: startedAtUtc,
         dirty: true,
         syncError: undefined,
       };
@@ -1041,8 +1041,8 @@ export const assetWorkflowRunService = {
         optimisticPatch: {
           status: "InProgress",
           isLocked: false,
-          startedAt: now,
-          updatedAt: now,
+          startedAt: startedAtUtc,
+          updatedAt: startedAtUtc,
         },
       });
       return offlineRun;

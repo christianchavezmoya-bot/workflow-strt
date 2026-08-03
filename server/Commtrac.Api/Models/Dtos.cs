@@ -1007,7 +1007,9 @@ public record AssetWorkflowRunDto(
 public record StartRunRequest(
     string AssetId,
     string WorkflowConfigId,
-    string? TechnicianUserId
+    string? TechnicianUserId,
+    string? StartedAtUtc,
+    string? TimeTrackingJson
 );
 
 public record SaveRunProgressRequest(

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -656,6 +657,17 @@ public class AssetWorkflowRunsController : ControllerBase
             .CountAsync(r => r.AssetId == req.AssetId && r.WorkflowConfigId == req.WorkflowConfigId);
 
         var now = DateTime.UtcNow;
+        var startedAt = now;
+        if (!string.IsNullOrWhiteSpace(req.StartedAtUtc)
+            && DateTimeOffset.TryParse(
+                req.StartedAtUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var parsedStart))
+        {
+            startedAt = parsedStart.UtcDateTime;
+        }
+
         var run = new AssetWorkflowRunEntity
         {
             Id                   = Guid.NewGuid().ToString(),
@@ -673,11 +685,19 @@ public class AssetWorkflowRunsController : ControllerBase
             DowntimeSeconds      = 0,
             DowntimeEvents       = 0,
             RunNumber            = runCount + 1,
-            StartedAt            = now,
+            StartedAt            = startedAt,
             CreatedAt            = now,
             UpdatedAt            = now,
         };
-        StartProductivePeriod(run, now, "Run started");
+        if (!string.IsNullOrWhiteSpace(req.TimeTrackingJson) && req.TimeTrackingJson != "[]")
+        {
+            run.TimeTrackingJson = req.TimeTrackingJson;
+        }
+        else
+        {
+            StartProductivePeriod(run, startedAt, "Run started");
+        }
+        RecomputeRunTimeMetrics(run, now);
         _db.AssetWorkflowRuns.Add(run);
 
         // Update asset status to InProgress whenever a new run is created
@@ -1445,10 +1465,18 @@ public class AssetWorkflowRunsController : ControllerBase
         var productive = 0;
         var downtime = 0;
         var downtimeEvents = 0;
+        var anomaly = false;
         foreach (var entry in entries)
         {
             var end = entry.EndedAtUtc ?? nowUtc;
-            var seconds = (int)Math.Max(0, (end - entry.StartedAtUtc).TotalSeconds);
+            var rawSeconds = (end - entry.StartedAtUtc).TotalSeconds;
+            if (rawSeconds < 0)
+            {
+                anomaly = true;
+                continue;
+            }
+
+            var seconds = (int)Math.Max(0, rawSeconds);
             if (entry.Category == "downtime")
             {
                 downtime += seconds;
@@ -1463,6 +1491,10 @@ public class AssetWorkflowRunsController : ControllerBase
         run.ProductiveSeconds = productive;
         run.DowntimeSeconds = downtime;
         run.DowntimeEvents = downtimeEvents;
+        if (anomaly)
+        {
+            System.Diagnostics.Debug.WriteLine($"Run {run.Id} has time entry anomaly: end before start.");
+        }
         SaveTimeEntries(run, entries);
     }
 
