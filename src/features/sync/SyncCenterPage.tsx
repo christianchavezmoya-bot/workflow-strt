@@ -54,7 +54,11 @@ import {
   copySyncSupportBundle,
   downloadSyncSupportBundle,
 } from "../../services/syncSupportBundleService";
-import { resolvePendingActionLabel } from "../../utils/syncActionLabels";
+import {
+  describeSyncOpType,
+  formatPendingActionTechnicalDetail,
+  resolvePendingActionLabel,
+} from "../../utils/syncActionLabels";
 import type { User } from "../../types/user";
 
 interface Props {
@@ -472,8 +476,10 @@ async function buildConflictDetail(action: PendingAction): Promise<ConflictDetai
     }
 
     return {
-      title: localAssetData?.assetTag ? `Run for ${localAssetData.assetTag}` : `Run ${resolvedRunId}`,
-      subtitle: localRun?.status ? `${localRun.status} · ${action.method} ${action.url}` : action.url,
+      title: localAssetData?.assetTag ? `Run for ${localAssetData.assetTag}` : `Run ${resolvedRunId.slice(0, 8)}`,
+      subtitle: localRun?.status
+        ? `${describeSyncOpType(action)} · ${localRun.status}`
+        : describeSyncOpType(action),
       localLabel: "Your offline version",
       serverLabel: "Current server version",
       fields: buildRunConflictFields(action, localRun, serverRun),
@@ -523,7 +529,11 @@ async function buildConflictDetail(action: PendingAction): Promise<ConflictDetai
       }))
       : [{
         label: "Queued change",
-        localValue: `${action.method} ${action.url}`,
+        localValue: describeSyncOpType(action),
+        serverValue: "Unavailable",
+      }, {
+        label: "Technical detail",
+        localValue: formatPendingActionTechnicalDetail(action),
         serverValue: "Unavailable",
       }],
     fetchError: "Detailed comparison is not available for this record type yet.",
@@ -532,6 +542,7 @@ async function buildConflictDetail(action: PendingAction): Promise<ConflictDetai
 
 function diagnosticDetailRows(action: PendingAction): Array<{ label: string; value: string }> {
   const rows: Array<{ label: string; value: string }> = [];
+  rows.push({ label: "API", value: formatPendingActionTechnicalDetail(action) });
   if (action.lastOpType) rows.push({ label: "Op type", value: action.lastOpType });
   if (action.lastPayloadBytes != null) rows.push({ label: "Payload", value: formatPayloadSize(action.lastPayloadBytes) });
   if (action.lastStepResultsBytes != null) rows.push({ label: "stepResultsJson", value: formatPayloadSize(action.lastStepResultsBytes) });
@@ -688,12 +699,16 @@ export default function SyncCenterPage({ open, onClose }: Props) {
         } catch {
           return [action.id, {
             title: `${action.entityType} conflict`,
-            subtitle: `${action.method} ${action.url}`,
+            subtitle: describeSyncOpType(action),
             localLabel: "Your queued change",
             serverLabel: "Current server version",
             fields: [{
               label: "Queued change",
-              localValue: `${action.method} ${action.url}`,
+              localValue: describeSyncOpType(action),
+              serverValue: "Unavailable",
+            }, {
+              label: "Technical detail",
+              localValue: formatPendingActionTechnicalDetail(action),
               serverValue: "Unavailable",
             }],
             fetchError: "Could not build the comparison for this conflict.",
@@ -1092,9 +1107,6 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                           size="small"
                           sx={{ height: 16, fontSize: "0.62rem" }}
                         />
-                        <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.65rem" }}>
-                          {action.method}
-                        </Typography>
                       </Stack>
 
                       <Typography
@@ -1107,7 +1119,7 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {actionLabels[action.id]?.subtitle ?? action.url}
+                        {actionLabels[action.id]?.subtitle ?? describeSyncOpType(action)}
                       </Typography>
 
                       {action.lastError && (
@@ -1128,8 +1140,7 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                         </Typography>
                       )}
 
-                      {(action.status === "failed" || action.lastPayloadBytes != null) && diagnosticDetailRows(action).length > 0 && (
-                        <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+                      <Stack spacing={0.5} sx={{ mt: 0.5 }}>
                           <Stack direction="row" alignItems="center" spacing={0.5}>
                             <Button
                               size="small"
@@ -1137,8 +1148,9 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                               sx={{ fontSize: "0.62rem", py: 0, minWidth: 0, textTransform: "none" }}
                               onClick={() => setExpandedDiagIds(prev => ({ ...prev, [action.id]: !prev[action.id] }))}
                             >
-                              {expandedDiagIds[action.id] ? "Hide diagnostics" : "Show diagnostics"}
+                              {expandedDiagIds[action.id] ? "Hide technical details" : "Technical details"}
                             </Button>
+                            {(action.status === "failed" || action.lastPayloadBytes != null) && (
                             <Button
                               size="small"
                               variant="text"
@@ -1153,18 +1165,18 @@ export default function SyncCenterPage({ open, onClose }: Props) {
                             >
                               {copiedDiagId === action.id ? "Copied" : "Copy diagnostics"}
                             </Button>
+                            )}
                           </Stack>
                           <Collapse in={!!expandedDiagIds[action.id]}>
                             <Stack spacing={0.25} sx={{ pl: 0.5 }}>
                               {diagnosticDetailRows(action).map(row => (
-                                <Typography key={row.label} variant="caption" sx={{ fontSize: "0.62rem", color: "text.secondary" }}>
+                                <Typography key={row.label} variant="caption" sx={{ fontSize: "0.62rem", color: "text.secondary", fontFamily: row.label === "API" ? "monospace" : undefined }}>
                                   <Box component="span" sx={{ fontWeight: 600 }}>{row.label}:</Box> {row.value}
                                 </Typography>
                               ))}
                             </Stack>
                           </Collapse>
                         </Stack>
-                      )}
                     </Stack>
 
                     <Stack alignItems="flex-end" spacing={0.5} flexShrink={0}>
