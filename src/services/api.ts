@@ -195,9 +195,11 @@ api.interceptors.request.use(async (config) => {
   // service's isOfflineNetworkError() (see utils/offlineNetworkError.ts) still
   // routes to the offline path.
   // Auth calls are exempt — login must keep working to recover.
+  const isSyncEngineWrite = config.syncMeta?.source === "sync-engine";
   const skipBlocking =
     !url.includes("/auth/")
     && isMobileNativePlatform()
+    && !isSyncEngineWrite
     && (shouldSkipBlockingFetch() || isCircuitOpen());
 
   if (skipBlocking) {

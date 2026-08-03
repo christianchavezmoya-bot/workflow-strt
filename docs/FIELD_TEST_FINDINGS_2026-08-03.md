@@ -207,5 +207,6 @@ Sync Center also used `action.url` as subtitle fallback while labels were loadin
 
 - Time tracker handover: `docs/TIME_TRACKER_HANDOVER_PLAN.md`
 - Phase 0 smoke: `docs/PHASE0_TIME_TRACKER_SMOKE_REPORT.md`
-- Web perf PR: [#44](https://github.com/christianchavezmoya-bot/workflow-strt/pull/44) (cherry-pick only)
-- Sync labels PR: (this branch)
+- Web perf: cherry-picked to `main` @ `2bee417` (PR #44 superseded)
+- Sync labels: merged to `main` @ `d94c8de` (PR #46)
+- P1/P2 sync + time-tracker: branch `cursor/sync-flush-and-time-tracker-p1p2-cd21`

@@ -303,6 +303,7 @@ export default function ProjectAssetInspectionPage() {
               currentUserName={user.fullName}
               assetTag={asset.assetTag}
               jobNumber={project?.jobNumber}
+              timeZoneId={project?.timeZoneId}
               teamMembers={runnerTeamMembers}
             />
           </DialogContent>

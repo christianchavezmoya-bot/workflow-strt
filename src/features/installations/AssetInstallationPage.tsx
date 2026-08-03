@@ -7173,6 +7173,7 @@ ${words.slice(midpoint).join(" ")}`;
           currentUserId={currentUser.id}
           assetTag={runnerAsset.assetTag || (runnerAsset as any).assetName || ""}
           jobNumber={(runnerAsset as any).jobNumber || ""}
+          timeZoneId={projects.find((p) => p.id === runnerAsset.projectId)?.timeZoneId}
           productFeatures={runnerProductFeatures}
           featureSelections={runnerFeatureSelections}
           teamMembers={runnerTeamMembers}

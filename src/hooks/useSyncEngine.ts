@@ -148,12 +148,34 @@ function extractServerErrorMessage(error: unknown, fallback: string): string {
 }
 
 async function reconnectAndFlush(): Promise<void> {
-  await pendingResetRetrySchedule();
-  if (isMobileNativePlatform() && isAuthTokenExpired() && isOnlineForAuthSync()) {
-    window.dispatchEvent(new Event("api-auth-error"));
-    return;
+  scheduleReconnectFlush();
+}
+
+let reconnectFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectFlushInFlight = false;
+const RECONNECT_FLUSH_DEBOUNCE_MS = 1500;
+
+function scheduleReconnectFlush(): void {
+  if (reconnectFlushTimer) clearTimeout(reconnectFlushTimer);
+  reconnectFlushTimer = setTimeout(() => {
+    reconnectFlushTimer = null;
+    void reconnectAndFlushNow();
+  }, RECONNECT_FLUSH_DEBOUNCE_MS);
+}
+
+async function reconnectAndFlushNow(): Promise<void> {
+  if (reconnectFlushInFlight) return;
+  reconnectFlushInFlight = true;
+  try {
+    await pendingResetRetrySchedule();
+    if (isMobileNativePlatform() && isAuthTokenExpired() && isOnlineForAuthSync()) {
+      window.dispatchEvent(new Event("api-auth-error"));
+      return;
+    }
+    await flushRef.current?.();
+  } finally {
+    reconnectFlushInFlight = false;
   }
-  void flushRef.current?.();
 }
 
 const flushRef = { current: null as (() => Promise<void>) | null };
@@ -551,13 +573,18 @@ export function useSyncEngine(): SyncState {
   // ── Flush queue ────────────────────────────────────────────────────────────
   const flush = useCallback(async () => {
     const conn = connectivityRef.current;
-    if (_flushing || conn === "offline" || conn === "server-unreachable" || conn === "token-expired") return;
+    if (_flushing || conn === "token-expired") return;
+    // Allow flush when the device has radio — don't block on a stale
+    // server-unreachable flag from a background read or health ping.
+    if (!hasNetworkSignal()) return;
 
     _flushing = true;
     setSyncFlushing(true);
     markOfflinePerf("queue_flush_start");
 
     let due: PendingAction[] = [];
+    let syncedAny = false;
+    let anyError = false;
     try {
       due = await pendingGetDue();
       if (due.length === 0) {
@@ -572,8 +599,6 @@ export function useSyncEngine(): SyncState {
       dispatchSyncEngineSyncing(true);
       setHasError(false);
 
-      let anyError = false;
-      let syncedAny = false;
       let authExpired = false;
       // Run entityIds whose op was rejected by the server this pass — dependent
       // ops for the SAME run (e.g. signatures after a rejected RUN_COMPLETE)
@@ -585,9 +610,7 @@ export function useSyncEngine(): SyncState {
       // Skip if the action this depends on hasn't been synced yet
       if (action.dependsOnOpId) {
         const all = await pendingGetAll();
-        const depStillPending = all.some(
-          (a) => a.id === action.dependsOnOpId && a.status !== "uploading"
-        );
+        const depStillPending = all.some((a) => a.id === action.dependsOnOpId);
         if (depStillPending) continue;
       }
 
@@ -785,6 +808,10 @@ export function useSyncEngine(): SyncState {
       markOfflinePerf("queue_flush_end");
       _flushing = false;
       setSyncFlushing(false);
+      const pendingRemaining = await pendingCount();
+      window.dispatchEvent(new CustomEvent("sync-engine:flush-complete", {
+        detail: { syncedAny, pendingRemaining, anyError },
+      }));
     }
   }, [refreshPending, setConnectivityState]);
 
@@ -794,7 +821,7 @@ export function useSyncEngine(): SyncState {
   const scheduleRetry = useCallback(async () => {
     // Don't schedule retry timers while offline — the connectivity-restored
     // subscription will trigger flush() the instant the server comes back.
-    if (connectivity === "offline" || connectivity === "server-unreachable") return;
+    if (!hasNetworkSignal()) return;
     const all = await pendingGetAll();
     if (all.length === 0) return;
     const future = all
@@ -803,7 +830,7 @@ export function useSyncEngine(): SyncState {
     if (future.length === 0) return;
     const nextMs = Math.max(Math.min(...future) - Date.now(), 1000);
     setTimeout(() => void flush(), Math.min(nextMs, 300_000)); // cap at 5 min
-  }, [flush, connectivity]);
+  }, [flush]);
 
   // Wire up the ref so flush can call scheduleRetry without circular deps
   useEffect(() => {
@@ -896,7 +923,10 @@ export function useSyncEngine(): SyncState {
   // ── Server reachability / auth error state machine ────────────────────────
   useEffect(() => {
     const handleUnreachable = () => {
-      setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
+      // Background read failures while radio is up must not block sync flush.
+      if (!hasNetworkSignal()) {
+        setConnectivityState("offline");
+      }
     };
     const handleReachable   = () => {
       setConnectivityState("online");

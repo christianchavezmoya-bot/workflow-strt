@@ -1057,6 +1057,13 @@ const Dashboard = () => {
     // stayed wrong until a manual reload.
     window.addEventListener("repo:assignments:updated", refreshLiveDashboardData);
     window.addEventListener("repo:runs:updated", refreshLiveDashboardData);
+    const onFlushComplete = (event: Event) => {
+      const detail = (event as CustomEvent<{ syncedAny?: boolean; pendingRemaining?: number }>).detail;
+      if (detail?.syncedAny && detail.pendingRemaining === 0) {
+        refreshLiveDashboardData();
+      }
+    };
+    window.addEventListener("sync-engine:flush-complete", onFlushComplete);
     return () => {
       window.removeEventListener("notifications:run-state-changed", refreshLiveDashboardData);
       window.removeEventListener("notifications:refresh", refreshLiveDashboardData);
@@ -1064,6 +1071,7 @@ const Dashboard = () => {
       window.removeEventListener("repo:issues:updated", refreshAttentionFromIssueCache);
       window.removeEventListener("repo:assignments:updated", refreshLiveDashboardData);
       window.removeEventListener("repo:runs:updated", refreshLiveDashboardData);
+      window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
     };
   }, [dashboardBootPhase, refreshAttentionFromIssueCache, refreshLiveDashboardData]);
 
@@ -6267,6 +6275,7 @@ const Dashboard = () => {
           currentUserId={user.id}
           assetTag={runnerAsset.assetTag}
           jobNumber={runnerAsset.jobNumber}
+          timeZoneId={projectById.get(runnerAsset.projectId)?.timeZoneId}
           teamMembers={runnerTeamMembers}
           onComplete={refreshLiveDashboardDataNow}
           onPause={refreshLiveDashboardDataNow}

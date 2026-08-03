@@ -125,6 +125,8 @@ interface WorkOrderRunnerProps {
   assetTag?: string;
   /** Job number shown in dashboard flags. */
   jobNumber?: string;
+  /** IANA timezone for run timeline display (project site). */
+  timeZoneId?: string;
   /** Product feature definitions â€" used to look up feature names for repeatFeatureId steps. */
   productFeatures?: RunnerProductFeature[];
   /** Feature selections from the workflow config â€" provides expected qty per feature. */
@@ -233,6 +235,7 @@ export default function WorkOrderRunner({
   currentUserId,
   assetTag,
   jobNumber,
+  timeZoneId,
   productFeatures,
   featureSelections,
   teamMembers,
@@ -311,6 +314,12 @@ export default function WorkOrderRunner({
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
   const [activeRun, setActiveRun] = useState<AssetWorkflowRun | null>(null);
   const [timeEditorOpen, setTimeEditorOpen] = useState(false);
+  const runEditPerms = useMemo(
+    () => (activeRun && user ? canEditRun(activeRun, user.role) : { time: true, data: true, finalized: false }),
+    [activeRun, user],
+  );
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const autosaveInFlightRef = useRef<Promise<void> | null>(null);
   const [resumingRun, setResumingRun] = useState(Boolean(existingRunId));
   const [startingRun, setStartingRun] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -551,7 +560,7 @@ export default function WorkOrderRunner({
 
   function deleteIssue(id: string) {
     setIssues((prev) => prev.filter((i) => i.id !== id));
-    autosaveProgress();
+    scheduleAutosave();
   }
 
   function startEditIssue(issue: RunIssue) {
@@ -572,12 +581,12 @@ export default function WorkOrderRunner({
     setEditingIssueId(null);
     setEditIssueDesc("");
     setEditIssueSeverity("medium");
-    autosaveProgress();
+    scheduleAutosave();
   }
 
   function handleIssueDetailSave(updated: RunIssue) {
     setIssues((prev) => prev.map((i) => i.id === updated.id ? updated : i));
-    autosaveProgress();
+    scheduleAutosave();
   }
 
   async function handleClose() {
@@ -587,7 +596,7 @@ export default function WorkOrderRunner({
     // Only autosave during "running" stage - other stages (setup, summary, sign flows)
     // have their own save paths or nothing to save.
     if (activeRunId && isRealRun && stage === "running") {
-      await autosaveProgress();
+      await flushAutosave();
     }
     onClose();
   }
@@ -599,7 +608,7 @@ export default function WorkOrderRunner({
         syncRunTimeState(updated);
       }
     }
-    await autosaveProgress(undefined, undefined, "Paused");
+    await flushAutosave(undefined, undefined, "Paused");
     const completedTitles = history
       .map((id) => stepsSorted.find((s) => s.id === id)?.title ?? "")
       .filter(Boolean);
@@ -762,6 +771,7 @@ export default function WorkOrderRunner({
   }
 
   function setInputValue(stepId: string, inputId: string, val: string) {
+    if (activeRun && !runEditPerms.data) return;
     setValues((prev) => ({
       ...prev,
       [stepId]: { ...(prev[stepId] ?? {}), [inputId]: val },
@@ -856,7 +866,7 @@ export default function WorkOrderRunner({
     }
 
     if (isLastStep || !currentStep.nextStepId) {
-      autosaveProgress();
+      void flushAutosave();
       setStage("summary");
     } else {
       const nextStepId = currentStep.nextStepId;
@@ -864,7 +874,7 @@ export default function WorkOrderRunner({
       setHistory(nextHistory);
       setCurrentStepId(nextStepId);
       setRepeatIter((prev) => ({ ...prev, [nextStepId]: 0 }));
-      autosaveProgress(nextStepId, nextHistory);
+      flushAutosave(nextStepId, nextHistory);
     }
   }
 
@@ -874,9 +884,9 @@ export default function WorkOrderRunner({
       const nextHistory = [...history, currentStep.id];
       setHistory(nextHistory);
       setCurrentStepId(targetId);
-      autosaveProgress(targetId, nextHistory);
+      flushAutosave(targetId, nextHistory);
     } else {
-      autosaveProgress();
+      scheduleAutosave();
       setStage("summary");
     }
   }
@@ -1042,6 +1052,21 @@ export default function WorkOrderRunner({
     } catch {
       // silent â€" not critical
     }
+  }
+
+  function scheduleAutosave(navStepId?: string, navHistory?: string[], status?: "InProgress" | "Paused") {
+    clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      autosaveInFlightRef.current = autosaveProgress(navStepId, navHistory, status).finally(() => {
+        autosaveInFlightRef.current = null;
+      });
+    }, 400);
+  }
+
+  async function flushAutosave(navStepId?: string, navHistory?: string[], status?: "InProgress" | "Paused") {
+    clearTimeout(autosaveTimerRef.current);
+    if (autosaveInFlightRef.current) await autosaveInFlightRef.current;
+    await autosaveProgress(navStepId, navHistory, status);
   }
 
   function transitionToLockedRunStage(run: AssetWorkflowRun) {
@@ -1732,6 +1757,7 @@ export default function WorkOrderRunner({
               </Stack>
               {/* Controls row â€" single toggle button */}
               <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap>
+                {runEditPerms.time && (
                 <Button
                   size="small"
                   variant="text"
@@ -1741,6 +1767,7 @@ export default function WorkOrderRunner({
                 >
                   Edit Times
                 </Button>
+                )}
                 {/* Single toggle: downtime â†" productive */}
                 {trackingCategory === "downtime" ? (
                   <Button
@@ -2384,7 +2411,7 @@ export default function WorkOrderRunner({
                 )}
                 {activeRun?.timeTrackingJson && (
                   <Box sx={{ mt: 0.5 }}>
-                    <RunTimeline entries={parseRunTimeEntries(activeRun.timeTrackingJson)} />
+                    <RunTimeline entries={parseRunTimeEntries(activeRun.timeTrackingJson)} timeZoneId={timeZoneId} />
                   </Box>
                 )}
               </Stack>
@@ -2582,9 +2609,29 @@ export default function WorkOrderRunner({
           </Stack>
         </DialogContent>
         <DialogActions sx={{ justifyContent: "space-between", position: "sticky", bottom: 0, zIndex: 1, bgcolor: "background.paper", borderTop: "1px solid", borderColor: "divider" }}>
-          <Button onClick={handleClose} disabled={saving}>
-            {saved ? "Close" : "Discard"}
-          </Button>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button onClick={handleClose} disabled={saving}>
+              {saved ? "Close" : "Discard"}
+            </Button>
+            {!saved && runEditPerms.data && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => setStage("running")}
+              >
+                Back to steps
+              </Button>
+            )}
+            {!saved && runEditPerms.time && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => setTimeEditorOpen(true)}
+              >
+                Adjust time
+              </Button>
+            )}
+          </Stack>
           {!saved && (
             <Stack direction="row" spacing={1}>
               {primaryBlockingIssue && (
@@ -2621,7 +2668,7 @@ export default function WorkOrderRunner({
                   onClick={async () => {
                     setSaving(true);
                     try {
-                      await autosaveProgress(undefined, undefined, "InProgress");
+                      await flushAutosave(undefined, undefined, "InProgress");
                       onClose();
                     } catch { setSaveError("Failed to save progress."); }
                     finally { setSaving(false); }
@@ -3223,7 +3270,7 @@ export default function WorkOrderRunner({
         <TimeEntriesEditorDialog
           open={timeEditorOpen}
           run={activeRun}
-          readOnly={!canEditRun(activeRun, user.role).time}
+          readOnly={!runEditPerms.time}
           onClose={() => setTimeEditorOpen(false)}
           onSaved={(updated) => {
             setActiveRun(updated);

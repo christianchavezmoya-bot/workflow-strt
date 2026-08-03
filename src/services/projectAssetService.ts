@@ -724,6 +724,9 @@ export const projectAssetService = {
       if (isMobileNativePlatform() && userId && dashboardWorkspaceHasRows(res.data)) {
         await offlineStore.saveCache(DASHBOARD_WORKSPACE_CACHE_KEY(userId), res.data);
       }
+      if (isMobileNativePlatform()) {
+        return await reconcileWorkspaceWithLocalStatus(res.data);
+      }
       return res.data;
     } catch {
       if (isMobileNativePlatform()) {
