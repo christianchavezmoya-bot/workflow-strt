@@ -41,14 +41,15 @@ import type { PublicRunSummary, SignatureEvent } from "../../types/signature";
 import { generateWorkflowReport } from "../../utils/generateWorkflowReport";
 import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 import type { ProjectAsset } from "../../types/projectAsset";
-import { formatInstant } from "../../utils/datetime";
+import { formatInstant, resolveReportTimeZone } from "../../utils/datetime";
 
 const PAGE = {
-  bg: "#0f2a33",
-  panel: "#ffffff",
-  text: "#163447",
-  textMuted: "#5a6b7a",
-  border: "#e0e0e0",
+  bg: "#0b1d24",
+  panel: "#0f1c22",
+  text: "#e4edf2",
+  textMuted: "rgba(228,237,242,0.72)",
+  border: "rgba(255,255,255,0.12)",
+  accent: "#2dd4bf",
 };
 
 function buildReportContext(summary: PublicRunSummary) {
@@ -231,7 +232,7 @@ export default function ExternalSignPage() {
         workflowConfigName: data.workflowName,
         customerName: data.customerName,
         jobNumber: data.projectJobNumber,
-        timeZoneId: data.timeZoneId,
+        timeZoneId: resolveReportTimeZone({ timeZoneId: data.timeZoneId }),
         signatureEvents,
         includeAllSteps: true,
         outputMode: "blob",
@@ -281,7 +282,7 @@ export default function ExternalSignPage() {
         workflowConfigName: summary.workflowName,
         customerName: summary.customerName,
         jobNumber: summary.projectJobNumber,
-        timeZoneId: summary.timeZoneId,
+        timeZoneId: resolveReportTimeZone({ timeZoneId: summary.timeZoneId }),
         signatureEvents,
         includeAllSteps: true,
       });
@@ -329,8 +330,9 @@ export default function ExternalSignPage() {
     (inputMode === "typed" || drawnData !== null);
 
   const assetTagLabel = summary?.assetTag ?? summary?.assetName ?? "Asset";
+  const reportTimeZone = resolveReportTimeZone({ timeZoneId: summary?.timeZoneId });
   const completedLabel = summary?.completedAt
-    ? formatInstant(summary.completedAt, summary.timeZoneId, { withZone: true })
+    ? formatInstant(summary.completedAt, reportTimeZone, { withZone: true })
     : null;
 
   if (stage === "loading") {
@@ -478,150 +480,152 @@ export default function ExternalSignPage() {
 
   // ─── Stage: sign ───────────────────────────────────────────────────────────
   return (
-    <Box sx={{ maxWidth: 560, mx: "auto", mt: 4, p: 3, bgcolor: PAGE.panel, borderRadius: 2, color: PAGE.text, minHeight: "100vh" }}>
-      <Button size="small" variant="text" onClick={() => setStage("review")} sx={{ mb: 1, ml: -1, color: PAGE.text }}>
-        ← Back to review
-      </Button>
-      <Typography variant="h5" fontWeight={700} gutterBottom sx={{ color: PAGE.text }}>
-        Sign Document — {assetTagLabel}
-      </Typography>
+    <Box sx={{ minHeight: "100vh", bgcolor: PAGE.bg, color: PAGE.text, px: { xs: 2, sm: 3 }, py: 3 }}>
+      <Box sx={{ maxWidth: 560, mx: "auto" }}>
+        <Button size="small" variant="text" onClick={() => setStage("review")} sx={{ mb: 1, ml: -1, color: PAGE.accent }}>
+          ← Back to review
+        </Button>
+        <Typography variant="h5" fontWeight={700} gutterBottom sx={{ color: PAGE.text }}>
+          Sign Document — {assetTagLabel}
+        </Typography>
 
-      <Box sx={{ border: `1px solid ${PAGE.border}`, borderRadius: 2, p: 2, mb: 3, bgcolor: "#fafafa" }}>
-        <SummaryMeta />
-      </Box>
+        <Box sx={{ border: `1px solid ${PAGE.border}`, borderRadius: 2, p: 2, mb: 3, bgcolor: PAGE.panel }}>
+          <SummaryMeta />
+        </Box>
 
-      <Divider sx={{ mb: 3 }} />
+        <Divider sx={{ mb: 3, borderColor: PAGE.border }} />
 
-      <Stack spacing={2}>
-        {submitError && <Alert severity="error">{submitError}</Alert>}
+        <Stack spacing={2}>
+          {submitError && <Alert severity="error">{submitError}</Alert>}
 
-        <Stack direction="row" spacing={1}>
-          <TextField
-            label="Your full name *"
-            value={signerName}
-            onChange={(e) => setSignerName(e.target.value)}
-            size="small"
-            fullWidth
-          />
-          <TextField
-            label="Title / Role"
-            value={signerTitle}
-            onChange={(e) => setSignerTitle(e.target.value)}
-            size="small"
-            fullWidth
-          />
-        </Stack>
+          <Stack direction="row" spacing={1}>
+            <TextField
+              label="Your full name *"
+              value={signerName}
+              onChange={(e) => setSignerName(e.target.value)}
+              size="small"
+              fullWidth
+            />
+            <TextField
+              label="Title / Role"
+              value={signerTitle}
+              onChange={(e) => setSignerTitle(e.target.value)}
+              size="small"
+              fullWidth
+            />
+          </Stack>
 
-        <FormControl size="small" fullWidth>
-          <InputLabel shrink>Decision</InputLabel>
-          <Select value={reasonCode} label="Decision" onChange={(e) => setReasonCode(e.target.value)}>
-            <MenuItem value="Completed">Accept — work completed satisfactorily</MenuItem>
-            <MenuItem value="Conditional">Accept with reservations</MenuItem>
-            <MenuItem value="ReworkAccepted">Accept rework</MenuItem>
-            <MenuItem value="Declined">Decline — needs rework</MenuItem>
-          </Select>
-        </FormControl>
+          <FormControl size="small" fullWidth>
+            <InputLabel shrink>Decision</InputLabel>
+            <Select value={reasonCode} label="Decision" onChange={(e) => setReasonCode(e.target.value)}>
+              <MenuItem value="Completed">Accept — work completed satisfactorily</MenuItem>
+              <MenuItem value="Conditional">Accept with reservations</MenuItem>
+              <MenuItem value="ReworkAccepted">Accept rework</MenuItem>
+              <MenuItem value="Declined">Decline — needs rework</MenuItem>
+            </Select>
+          </FormControl>
 
-        {(reasonCode === "Declined" || reasonCode === "Conditional") && (
-          <TextField
-            label={reasonCode === "Declined" ? "Reason for declining *" : "Comments / reservations"}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            size="small"
-            fullWidth
-            multiline
-            minRows={2}
-          />
-        )}
-
-        <Divider>
-          <Typography variant="caption" sx={{ color: PAGE.textMuted }}>Signature</Typography>
-        </Divider>
-
-        <Stack direction="row" spacing={1}>
-          <Button
-            variant={inputMode === "typed" ? "contained" : "outlined"}
-            size="small"
-            startIcon={<KeyboardOutlined />}
-            onClick={() => setInputMode("typed")}
-          >
-            Type name
-          </Button>
-          <Button
-            variant={inputMode === "drawn" ? "contained" : "outlined"}
-            size="small"
-            startIcon={<GestureOutlined />}
-            onClick={() => setInputMode("drawn")}
-          >
-            Draw signature
-          </Button>
-        </Stack>
-
-        {inputMode === "typed" && (
-          <Box sx={{
-            border: "2px solid #ccc",
-            borderRadius: 1,
-            p: 2,
-            fontFamily: "cursive",
-            fontSize: "1.5rem",
-            color: signerName ? "#1a2744" : "#aaa",
-            minHeight: 60,
-            textAlign: "center",
-            background: "#f9f9f9",
-          }}
-          >
-            {signerName || "— your name will appear here —"}
-          </Box>
-        )}
-
-        {inputMode === "drawn" && (
-          <SignaturePad
-            onCapture={setDrawnData}
-            onClear={() => setDrawnData(null)}
-          />
-        )}
-
-        {needsOtp && (
-          <TextField
-            label="OTP code (sent to your email)"
-            value={otpCode}
-            onChange={(e) => setOtpCode(e.target.value)}
-            size="small"
-            fullWidth
-            inputProps={{ maxLength: 6 }}
-          />
-        )}
-
-        <FormControlLabel
-          control={<Checkbox checked={consent} onChange={(e) => setConsent(e.target.checked)} />}
-          label={
-            <Typography variant="body2" sx={{ color: PAGE.text }}>
-              I confirm that I am authorised to sign this document and the information is correct.
-            </Typography>
-          }
-        />
-
-        <Stack direction="row" spacing={1} justifyContent="flex-end">
-          {!needsOtp && (
-            <Button size="small" variant="text" onClick={() => void handleRequestOtp()}>
-              Require OTP verification
-            </Button>
+          {(reasonCode === "Declined" || reasonCode === "Conditional") && (
+            <TextField
+              label={reasonCode === "Declined" ? "Reason for declining *" : "Comments / reservations"}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              size="small"
+              fullWidth
+              multiline
+              minRows={2}
+            />
           )}
-          <Button
-            variant="contained"
-            color={reasonCode === "Declined" ? "error" : "primary"}
-            onClick={() => void handleSubmit()}
-            disabled={!canSubmit || submitting}
-            sx={{ minWidth: 140 }}
-          >
-            {submitting
-              ? <CircularProgress size={18} />
-              : reasonCode === "Declined"
-                ? "Decline & Submit"
-                : "Submit Signature"}
-          </Button>
+
+          <Divider sx={{ borderColor: PAGE.border }}>
+            <Typography variant="caption" sx={{ color: PAGE.textMuted }}>Signature</Typography>
+          </Divider>
+
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant={inputMode === "typed" ? "contained" : "outlined"}
+              size="small"
+              startIcon={<KeyboardOutlined />}
+              onClick={() => setInputMode("typed")}
+            >
+              Type name
+            </Button>
+            <Button
+              variant={inputMode === "drawn" ? "contained" : "outlined"}
+              size="small"
+              startIcon={<GestureOutlined />}
+              onClick={() => setInputMode("drawn")}
+            >
+              Draw signature
+            </Button>
+          </Stack>
+
+          {inputMode === "typed" && (
+            <Box sx={{
+              border: "2px solid rgba(255,255,255,0.2)",
+              borderRadius: 1,
+              p: 2,
+              fontFamily: "cursive",
+              fontSize: "1.5rem",
+              color: signerName ? "#e4edf2" : PAGE.textMuted,
+              minHeight: 60,
+              textAlign: "center",
+              background: PAGE.panel,
+            }}
+            >
+              {signerName || "— your name will appear here —"}
+            </Box>
+          )}
+
+          {inputMode === "drawn" && (
+            <SignaturePad
+              onCapture={setDrawnData}
+              onClear={() => setDrawnData(null)}
+            />
+          )}
+
+          {needsOtp && (
+            <TextField
+              label="OTP code (sent to your email)"
+              value={otpCode}
+              onChange={(e) => setOtpCode(e.target.value)}
+              size="small"
+              fullWidth
+              inputProps={{ maxLength: 6 }}
+            />
+          )}
+
+          <FormControlLabel
+            control={<Checkbox checked={consent} onChange={(e) => setConsent(e.target.checked)} />}
+            label={
+              <Typography variant="body2" sx={{ color: PAGE.text }}>
+                I confirm that I am authorised to sign this document and the information is correct.
+              </Typography>
+            }
+          />
+
+          <Stack direction="row" spacing={1} justifyContent="flex-end">
+            {!needsOtp && (
+              <Button size="small" variant="text" onClick={() => void handleRequestOtp()} sx={{ color: PAGE.accent }}>
+                Require OTP verification
+              </Button>
+            )}
+            <Button
+              variant="contained"
+              color={reasonCode === "Declined" ? "error" : "primary"}
+              onClick={() => void handleSubmit()}
+              disabled={!canSubmit || submitting}
+              sx={{ minWidth: 140 }}
+            >
+              {submitting
+                ? <CircularProgress size={18} />
+                : reasonCode === "Declined"
+                  ? "Decline & Submit"
+                  : "Submit Signature"}
+            </Button>
+          </Stack>
         </Stack>
-      </Stack>
+      </Box>
     </Box>
   );
 }

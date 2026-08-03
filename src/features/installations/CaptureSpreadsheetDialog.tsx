@@ -25,6 +25,7 @@ import {
   TableHead,
   TableRow,
   TextField,
+  ThemeProvider,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -52,6 +53,7 @@ import { canEditRun } from "../../utils/runEditPermissions";
 import { isCaptureColumnEditable, patchCaptureCellValue } from "../../utils/captureTableEdit";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { pickCaptureRun } from "../../utils/captureSpreadsheet";
+import { captureSpreadsheetTheme } from "../../theme/captureSpreadsheetTheme";
 
 export type CaptureSpreadsheetAssetJobColumn = {
   id: string;
@@ -179,7 +181,7 @@ function bodyCellHoverSx(rowBg: string) {
   } as const;
 }
 
-function stickyCell(left: number, width: number, zIndex: number) {
+function stickyCell(left: number, width: number, zIndex: number, rowBg?: string) {
   return {
     position: "sticky" as const,
     left,
@@ -187,7 +189,7 @@ function stickyCell(left: number, width: number, zIndex: number) {
     minWidth: width,
     width,
     maxWidth: width,
-    bgcolor: "background.paper",
+    bgcolor: rowBg ?? ASSET_JOB_PALETTE.tint,
   };
 }
 
@@ -458,6 +460,7 @@ export default function CaptureSpreadsheetDialog({
             lineHeight: 1.25,
             minHeight: 24,
             flex: 1,
+            color: "inherit",
           }}
         >
           {splitLabelIntoTwoLines(label)}
@@ -912,7 +915,7 @@ export default function CaptureSpreadsheetDialog({
                       position: "sticky",
                       zIndex: HEADER_Z.row3,
                       bgcolor: solidFieldHeaderBg(group),
-                      color: "text.primary",
+                      color: palette.border,
                       fontWeight: 700,
                       fontSize: 11.5,
                       minWidth: CAPTURE_COL_W,
@@ -929,6 +932,7 @@ export default function CaptureSpreadsheetDialog({
                         whiteSpace: "pre-line",
                         lineHeight: 1.2,
                         minHeight: 24,
+                        color: palette.border,
                       }}
                     >
                       {renderHeaderLabel(column.displayLabel, `capture:${column.id}`)}
@@ -962,7 +966,7 @@ export default function CaptureSpreadsheetDialog({
                     <TableCell
                       padding="checkbox"
                       sx={{
-                        ...stickyCell(0, CHECKBOX_W, HEADER_Z.bodyStickyLeft),
+                        ...stickyCell(0, CHECKBOX_W, HEADER_Z.bodyStickyLeft, rowBg),
                         borderRight: '1px solid #D8DEE7',
                         borderBottom: '1px solid #D8DEE7',
                         px: 0.25,
@@ -974,12 +978,13 @@ export default function CaptureSpreadsheetDialog({
                         size="small"
                         checked={selectedAssetIds?.has(asset.id) ?? false}
                         onChange={(event) => onToggleAssetSelection?.(asset.id, event.target.checked)}
+                        sx={{ color: "#224F88", "&.Mui-checked": { color: "#224F88" } }}
                       />
                     </TableCell>
                   )}
                   <TableCell
                     sx={{
-                      ...stickyCell(selectionEnabled ? CHECKBOX_W : 0, TAG_W, HEADER_Z.bodyStickyLeft),
+                      ...stickyCell(selectionEnabled ? CHECKBOX_W : 0, TAG_W, HEADER_Z.bodyStickyLeft, rowBg),
                       borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
                       borderBottom: '1px solid #D8DEE7',
                       px: 0.75,
@@ -1077,9 +1082,15 @@ export default function CaptureSpreadsheetDialog({
     </Stack>
   );
 
+  const themedInner = (
+    <ThemeProvider theme={captureSpreadsheetTheme}>
+      {inner}
+    </ThemeProvider>
+  );
+
   if (embedded) {
     if (!open) return null;
-    return <Paper className="glass-card" sx={{ overflow: "hidden", p: 1.5 }}>{inner}</Paper>;
+    return <Paper className="glass-card" sx={{ overflow: "hidden", p: 1.5 }}>{themedInner}</Paper>;
   }
 
   return (
@@ -1100,7 +1111,7 @@ export default function CaptureSpreadsheetDialog({
         </Stack>
       </DialogTitle>
       <DialogContent sx={{ px: 2, pb: 2, pt: 0 }}>
-        {inner}
+        {themedInner}
       </DialogContent>
     </Dialog>
   );

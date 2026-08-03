@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
@@ -62,6 +63,25 @@ public class PublicSignController : ControllerBase
         }
         catch { /* fallback to configId */ }
 
+        string? officeCountry = null;
+        string? officeState = null;
+        if (!string.IsNullOrWhiteSpace(project?.OfficeId))
+        {
+            var officeEntity = await _db.Offices.FirstOrDefaultAsync(o => o.Id == project!.OfficeId);
+            if (officeEntity is not null)
+            {
+                officeCountry = officeEntity.Country;
+                officeState = officeEntity.State;
+            }
+        }
+
+        var resolvedTimeZone = ProjectTimeZoneResolver.Resolve(
+            project?.TimeZoneId,
+            project?.Office,
+            project?.Region,
+            officeCountry,
+            officeState) ?? "UTC";
+
         return Ok(new PublicRunSummaryDto(
             run.Id,
             asset?.AssetName ?? asset?.AssetTag ?? "Asset",
@@ -85,7 +105,7 @@ public class PublicSignController : ControllerBase
             installerEvt?.ReasonCode,
             installerEvt?.Notes,
             installerEvt?.SignedAtUtc,
-            project?.TimeZoneId
+            resolvedTimeZone
         ));
     }
 

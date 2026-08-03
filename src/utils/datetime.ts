@@ -1,3 +1,9 @@
+import {
+  firstValidTimeZone,
+  inferTimeZoneFromLocation,
+  inferTimeZoneFromOfficeLabel,
+} from "./officeTimeZone";
+
 // Timezone-aware date/time rendering.
 //
 // Instants are always stored and transported in UTC (ISO-8601 with a Z). Wall-clock
@@ -36,6 +42,44 @@ export function isValidTimeZone(tz: string | null | undefined): tz is string {
  */
 export function resolveProjectTimeZone(timeZoneId: string | null | undefined): string {
   return isValidTimeZone(timeZoneId) ? timeZoneId : UTC_ZONE;
+}
+
+/** Project fields used to infer site timezone for reports and public pages (sync, no network). */
+export type ProjectTimeZoneSource = {
+  timeZoneId?: string | null;
+  office?: string | null;
+  officeId?: string | null;
+  region?: string | null;
+  officeCountry?: string | null;
+  officeState?: string | null;
+};
+
+/** Infer site IANA zone from explicit id, office label, or region — without async office lookup. */
+export function inferProjectTimeZoneSync(
+  source: ProjectTimeZoneSource | null | undefined,
+): string | undefined {
+  if (!source) return undefined;
+  if (isValidTimeZone(source.timeZoneId)) return source.timeZoneId;
+
+  if (source.officeCountry || source.officeState) {
+    const fromOfficeEntity = inferTimeZoneFromLocation(source.officeCountry, source.officeState);
+    if (isValidTimeZone(fromOfficeEntity)) return fromOfficeEntity;
+  }
+
+  const fromLabel = inferTimeZoneFromOfficeLabel(source.office);
+  if (isValidTimeZone(fromLabel)) return fromLabel;
+
+  const fromRegion = inferTimeZoneFromLocation(source.region, undefined);
+  if (isValidTimeZone(fromRegion)) return fromRegion;
+
+  return undefined;
+}
+
+/** Resolve the zone reports and customer-facing pages should render in. Falls back to UTC only when unknown. */
+export function resolveReportTimeZone(
+  source: ProjectTimeZoneSource | null | undefined,
+): string {
+  return inferProjectTimeZoneSync(source) ?? UTC_ZONE;
 }
 
 /** Full IANA zone list for pickers; falls back to a curated set on older runtimes. */
