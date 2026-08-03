@@ -73,6 +73,10 @@ Phone + web still share `src/`. Time work below is frontend-first unless noted.
 
 ### Phase 0 — Smoke / close the verification gap (before new features)
 
+**Status (2026-08-03):** Code/unit verification **PASS**. Manual device checklist
+is in `docs/PHASE0_TIME_TRACKER_SMOKE_REPORT.md` (T1–T6). Finding: `canEditRun().data`
+is not yet consumed anywhere — wire in Phase A with Back-to-steps / data lock.
+
 **Goal:** Prove Fix 1/2 + ladder + timeline on device/web. Builds-clean ≠ behavior-proven.
 
 1. Fresh **offline** run as Engineer (installer stand-in) → sync → Run History productive/downtime ≠ 0.  
