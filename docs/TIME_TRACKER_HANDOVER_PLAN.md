@@ -180,4 +180,37 @@ Gate `PATCH /time-entries` by role + `signatureStatus`; audit trail. Do when tim
 ## 4. Suggested execution order (next agent)
 
 ```
-0  Smoke Fix1/2 + ladder + timeline (Engineer + Admin, web 
+0  Smoke Fix1/2 + ladder + timeline (Engineer + Admin, web + phone, offline)
+A  Complete Phase 2 gaps (tz + Adjust time / Back to steps)
+B  Fix "Yes instead of value"
+C  Live run clock
+D  Minimizable run window
+E  Path B review → corrected run
+F  UTC audit + display-zone rollout
+G  Backend enforcement (later)
+```
+
+Parallel optional: rebase/merge PR #44 (search/perf) — independent of time tracker.
+
+---
+
+## 5. Standing engineering rules
+
+- Frontend phases: **no `server/`**  
+- One logical fix per commit; explicit staging; keep lockfile/`ARCHITECTURE.md` churn out unless required  
+- Gates: `npx tsc -b`, `dotnet build`  
+- Display work times with `formatInstant` + project zone  
+- Always re-`git fetch` and verify files — do not trust handover “unpushed” claims without checking  
+
+---
+
+## 6. Key files (unchanged map)
+
+- `src/utils/runEditPermissions.ts` — ladder  
+- `src/utils/timelineModel.ts` / `src/components/ui/RunTimeline.tsx` — Model B UI  
+- `src/components/ui/TimeEntriesEditorDialog.tsx` — only editor  
+- `src/features/workInstructions/WorkOrderRunner.tsx` — run + summary + tick (~352/433)  
+- `src/features/installations/WorkflowRunHistoryDialog.tsx` — history, §5B, Path B  
+- `src/services/assetWorkflowRunService.ts` — offline start/sync  
+- `src/utils/datetime.ts` — `formatInstant`  
+- `server/.../AssetWorkflowRunsController.cs` — Fix 1/2 done; Phase 5 later  
