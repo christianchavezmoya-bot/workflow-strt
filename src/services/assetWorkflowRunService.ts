@@ -791,7 +791,7 @@ export const assetWorkflowRunService = {
       return webCachedGet(`/asset-workflow-runs/by-project/${projectId}`, async () => {
         const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
         return res.data;
-      });
+      }, { ttlMs: 5_000 });
     }
 
     const cachedRuns = await offlineStore.listRunsByProject(projectId);
@@ -1126,12 +1126,14 @@ export const assetWorkflowRunService = {
 
   async completeRun(runId: string, stepResultsJson: string, issuesJson: string, completedByName?: string, bomActualJson?: string): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
-      const requestBody = await mediaStore.resolveUploadPayload({
+      const body = {
         stepResultsJson,
         issuesJson,
         completedByName: completedByName ?? null,
         bomActualJson: bomActualJson ?? null,
-      });
+      };
+      // Web sends inline base64 — no native media:// refs to resolve.
+      const requestBody = body;
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/complete`, requestBody, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });

@@ -41,6 +41,7 @@ import {
   utcToDatetimeLocalInZone,
   zoneAbbreviation,
 } from "../../utils/datetime";
+import TimeEntriesTimelineEditor from "./TimeEntriesTimelineEditor";
 
 interface Props {
   open: boolean;
@@ -152,6 +153,7 @@ export default function TimeEntriesEditorDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"timeline" | "table">("timeline");
 
   useEffect(() => {
     if (open) {
@@ -160,6 +162,7 @@ export default function TimeEntriesEditorDialog({
       setEditingId(null);
       setError(null);
       setFormError(null);
+      setViewMode("timeline");
     }
   }, [open, run.timeTrackingJson]);
 
@@ -270,10 +273,43 @@ export default function TimeEntriesEditorDialog({
               {timeZoneId ? ` Times shown in ${zoneAbbreviation(timeZoneId)}.` : ""}
             </Typography>
           </Box>
-          {!readOnly && (
-            <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={openAddForm}>
-              Add Entry
-            </Button>
+          {!readOnly ? (
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                variant={viewMode === "timeline" ? "contained" : "outlined"}
+                onClick={() => setViewMode("timeline")}
+              >
+                Timeline
+              </Button>
+              <Button
+                size="small"
+                variant={viewMode === "table" ? "contained" : "outlined"}
+                onClick={() => setViewMode("table")}
+              >
+                Table
+              </Button>
+              <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={openAddForm}>
+                Add Entry
+              </Button>
+            </Stack>
+          ) : (
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                variant={viewMode === "timeline" ? "contained" : "outlined"}
+                onClick={() => setViewMode("timeline")}
+              >
+                Timeline
+              </Button>
+              <Button
+                size="small"
+                variant={viewMode === "table" ? "contained" : "outlined"}
+                onClick={() => setViewMode("table")}
+              >
+                Table
+              </Button>
+            </Stack>
           )}
         </Stack>
       </DialogTitle>
@@ -358,7 +394,22 @@ export default function TimeEntriesEditorDialog({
           </Box>
         )}
 
+        {/* Interactive timeline editor */}
+        {viewMode === "timeline" && (
+          <>
+            <TimeEntriesTimelineEditor
+              entries={entries}
+              timeZoneId={timeZoneId}
+              nowIso={nowIso}
+              readOnly={readOnly}
+              onChange={setEntries}
+            />
+            <Divider />
+          </>
+        )}
+
         {/* Entries table */}
+        {viewMode === "table" && (
         <Box sx={{ overflowX: "auto" }}>
           <Table size="small">
             <TableHead>
@@ -446,6 +497,7 @@ export default function TimeEntriesEditorDialog({
             </TableBody>
           </Table>
         </Box>
+        )}
 
         {/* Totals summary */}
         <Box sx={{ px: 2.5, py: 1.5, borderTop: "1px solid rgba(255,255,255,0.08)" }}>

@@ -76,8 +76,21 @@ export const signatureService = {
       invalidateWebCacheByPrefix("/asset-workflow-runs/by-project/");
       invalidateWebCacheByPrefix("/project-assets/by-product/");
       invalidateWebCacheByPrefix("/project-assets/by-project/");
+      // Push the updated run into any open Assets page so signature status
+      // advances immediately without waiting for a stale SWR cache window.
+      try {
+        const runRes = await api.get<import("../types/assetWorkflowRun").AssetWorkflowRun>(
+          `/asset-workflow-runs/${runId}`,
+        );
+        window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+          detail: { assetId: runRes.data.assetId, runs: [runRes.data], mergeById: true },
+        }));
+      } catch {
+        // Non-fatal — notifications:run-state-changed still triggers refresh.
+      }
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
+      window.dispatchEvent(new Event("repo:runs:updated"));
       return r.data;
     }
 

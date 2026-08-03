@@ -30,14 +30,22 @@ public sealed class ProjectLifecycleService
             return project;
         }
 
-        var assets = await _db.ProjectAssets
-            .Where(a => a.ProjectId == projectId && !a.IsDeleted)
-            .ToListAsync();
+        // Count-only — CompleteRun fires this on every lock; loading every asset row
+        // for large jobs (1000+) added multi-second latency to the save button.
+        var totalAssets = await _db.ProjectAssets
+            .CountAsync(a => a.ProjectId == projectId && !a.IsDeleted);
+        if (totalAssets == 0)
+        {
+            return project;
+        }
 
-        var hasAssets = assets.Count > 0;
-        var allComplete = hasAssets && assets.All(a =>
-            string.Equals(a.Status, "Complete", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(a.Status, "Completed", StringComparison.OrdinalIgnoreCase));
+        var incompleteAssets = await _db.ProjectAssets
+            .CountAsync(a =>
+                a.ProjectId == projectId
+                && !a.IsDeleted
+                && a.Status != "Complete"
+                && a.Status != "Completed");
+        var allComplete = incompleteAssets == 0;
 
         if (allComplete)
         {
