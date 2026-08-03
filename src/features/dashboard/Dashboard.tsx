@@ -48,6 +48,7 @@ import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
+import { WorkflowAssignmentRepository } from "../../repositories/WorkflowAssignmentRepository";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag, type PhotoUpdateNotification } from "./PhotoUploadDialog";
 import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
@@ -193,6 +194,21 @@ type MyJobsCardAction = {
   helperText: string;
   widgets: MyJobsCardWidget[];
 };
+
+function myJobsAssetIdsKey(assets: Array<{ id: string }>): string {
+  return assets.map((a) => a.id).sort().join(",");
+}
+
+function assetLikelyHasWorkflow(
+  asset: { totalSteps?: number; workflowSummary?: { hasWorkflow?: boolean } },
+  cachedAsset?: ProjectAsset | null,
+): boolean {
+  if ((asset.totalSteps ?? 0) > 0) return true;
+  if (asset.workflowSummary?.hasWorkflow) return true;
+  if (cachedAsset?.productConfigId || cachedAsset?.workflowTemplateId) return true;
+  if (cachedAsset?.workflowSummary?.hasWorkflow) return true;
+  return false;
+}
 
 type NativeMyJobsCardContext = {
   asset: ProjectAsset;
@@ -1701,6 +1717,9 @@ const Dashboard = () => {
     [dashboardWorkspace]
   );
   const [nativeMyJobsCardContext, setNativeMyJobsCardContext] = useState<Record<string, NativeMyJobsCardContext>>({});
+  const [dashboardAssignmentsMap, setDashboardAssignmentsMap] = useState<Record<string, WorkflowAssignment[]>>({});
+
+  const myInstallAssetIdsKey = useMemo(() => myJobsAssetIdsKey(myInstallAssets), [myInstallAssets]);
 
   useEffect(() => {
     if (!isNativePlatform) {
@@ -1750,7 +1769,59 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [isNativePlatform, myInstallAssets]);
+  }, [isNativePlatform, myInstallAssetIdsKey, myInstallAssets]);
+
+  // Prime assignment cache for My Jobs cards so offline opens don't treat empty
+  // IndexedDB as "no workflow assigned" when bootstrap hasn't filled this asset yet.
+  useEffect(() => {
+    if (!isNativePlatform || myInstallAssets.length === 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      const entries = await Promise.all(
+        myInstallAssets.map(async (asset) => {
+          const local = await WorkflowAssignmentRepository.getLocalByAsset(asset.id).catch(() => []);
+          return [asset.id, local] as const;
+        }),
+      );
+      if (cancelled) return;
+      setDashboardAssignmentsMap((prev) => {
+        const next = { ...prev };
+        for (const [assetId, local] of entries) {
+          if (local.length > 0) next[assetId] = local;
+        }
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isNativePlatform, myInstallAssetIdsKey, myInstallAssets]);
+
+  // While online, refresh assignments for visible My Jobs assets in background.
+  useEffect(() => {
+    if (!isNativePlatform || myInstallAssets.length === 0 || shouldSkipBlockingFetch()) return;
+    for (const asset of myInstallAssets) {
+      void assetWorkflowAssignmentService.listByAsset(asset.id);
+    }
+  }, [isNativePlatform, myInstallAssetIdsKey, myInstallAssets]);
+
+  useEffect(() => {
+    if (!isNativePlatform) return;
+    const onAssignmentsUpdated = (event: Event) => {
+      const assetId = (event as CustomEvent<{ assetId?: string }>).detail?.assetId;
+      if (!assetId) return;
+      void WorkflowAssignmentRepository.getLocalByAsset(assetId)
+        .then((local) => {
+          if (local.length === 0) return;
+          setDashboardAssignmentsMap((prev) => ({ ...prev, [assetId]: local }));
+        })
+        .catch(() => {});
+    };
+    window.addEventListener("repo:assignments:updated", onAssignmentsUpdated);
+    return () => window.removeEventListener("repo:assignments:updated", onAssignmentsUpdated);
+  }, [isNativePlatform]);
 
   const renderHistoryCard = useCallback((asset: DashboardWorkspaceAssetItem) => (
     <Paper
@@ -2022,7 +2093,10 @@ const Dashboard = () => {
   ): Promise<DashboardProductWorkflow> {
     if (assignments.length > 0 || !fullAsset?.productConfigId) return null;
     try {
-      const cfg = await workflowConfigService.getById(fullAsset.productConfigId);
+      let cfg = await workflowConfigService.getByIdLocalFirst(fullAsset.productConfigId);
+      if (!cfg && !shouldSkipBlockingFetch()) {
+        cfg = await workflowConfigService.getById(fullAsset.productConfigId);
+      }
       if (!cfg) return null;
       return {
         configId: cfg.id,
@@ -2033,6 +2107,50 @@ const Dashboard = () => {
       return null;
     }
   }
+
+  async function loadQuickActionContext(asset: QuickActionAsset) {
+    const [localAssignments, runs, cachedEntity] = await Promise.all([
+      WorkflowAssignmentRepository.getLocalByAsset(asset.id).catch(() => []),
+      assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
+      entityGetAsset(asset.id),
+    ]);
+
+    let assignments = localAssignments.length > 0
+      ? localAssignments
+      : (dashboardAssignmentsMap[asset.id] ?? []);
+
+    if (assignments.length === 0 && !shouldSkipBlockingFetch()) {
+      assignments = await assetWorkflowAssignmentService.listByAsset(asset.id);
+    }
+
+    const cachedAsset = (cachedEntity?.data as ProjectAsset | undefined)
+      ?? nativeMyJobsCardContext[asset.id]?.asset
+      ?? null;
+
+    let fullAsset: ProjectAsset | null = cachedAsset;
+    if (!fullAsset && !shouldSkipBlockingFetch()) {
+      fullAsset = await projectAssetService.getById(asset.id).catch(() => null);
+    }
+
+    const resolvedProductWorkflow = await resolveProductWorkflowForAsset(fullAsset, assignments);
+    return { assignments, runs, fullAsset, resolvedProductWorkflow };
+  }
+
+  useEffect(() => {
+    if (!isNativePlatform || !quickActionOpen || !quickActionAsset) return;
+    const asset = quickActionAsset;
+    const onAssignmentsUpdated = (event: Event) => {
+      const assetId = (event as CustomEvent<{ assetId?: string }>).detail?.assetId;
+      if (assetId !== asset.id) return;
+      void loadQuickActionContext(asset).then((ctx) => {
+        setQuickActionAssignments(ctx.assignments);
+        setQuickActionRuns(ctx.runs);
+        setProductWorkflow(ctx.resolvedProductWorkflow);
+      });
+    };
+    window.addEventListener("repo:assignments:updated", onAssignmentsUpdated);
+    return () => window.removeEventListener("repo:assignments:updated", onAssignmentsUpdated);
+  }, [isNativePlatform, quickActionAsset, quickActionOpen]);
 
   function getQuickActionAttentionForAsset(asset: QuickActionAsset, runs: AssetWorkflowRun[]) {
     const sortedRuns = [...runs].sort(
@@ -2090,17 +2208,12 @@ const Dashboard = () => {
     setDocsLoading(true);
     setProductWorkflow(null);
     try {
-      const [assignments, runs, docs, fullAsset] = await Promise.all([
-        assetWorkflowAssignmentService.listByAsset(asset.id),
-        assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
-        assetDocumentLinkService.listByAsset(asset.id).catch(() => []),
-        projectAssetService.getById(asset.id).catch(() => null),
-      ]);
+      const { assignments, runs, resolvedProductWorkflow } = await loadQuickActionContext(asset);
+      const docs = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
       setQuickActionAssignments(assignments);
       setQuickActionRuns(runs);
       setDocsCount(Array.isArray(docs) ? docs.length : 0);
-      
-      setProductWorkflow(await resolveProductWorkflowForAsset(fullAsset, assignments));
+      setProductWorkflow(resolvedProductWorkflow);
     } catch {
       setQuickActionAssignments([]);
       setQuickActionRuns([]);
@@ -2140,11 +2253,7 @@ const Dashboard = () => {
     setDocsLoading(true);
     let docsLoadDeferred = false;
     try {
-      const [assignments, runs] = await Promise.all([
-        assetWorkflowAssignmentService.listByAsset(asset.id),
-        // Local-first: paint and act from IndexedDB immediately; never block open on network.
-        assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
-      ]);
+      const { assignments, runs, resolvedProductWorkflow } = await loadQuickActionContext(asset);
 
       // Authoritative refresh in background — reconciles resume-vs-start without blocking UI.
       void assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => []);
@@ -2164,12 +2273,6 @@ const Dashboard = () => {
         await startWorkflowFromDashboard(asset, assignments[0], runs);
         return;
       }
-
-      let fullAsset: Awaited<ReturnType<typeof projectAssetService.getById>> = null;
-      if (assignments.length === 0) {
-        fullAsset = await projectAssetService.getById(asset.id).catch(() => null);
-      }
-      const resolvedProductWorkflow = await resolveProductWorkflowForAsset(fullAsset, assignments);
 
       if (canStartDirectlyFromDashboard({
         asset,
@@ -5980,6 +6083,22 @@ const Dashboard = () => {
 
               {/* Workflow assignments */}
               {quickActionAssignments.length === 0 && quickActionRuns.length === 0 && !productWorkflow ? (
+                quickActionAsset && assetLikelyHasWorkflow(
+                  quickActionAsset,
+                  nativeMyJobsCardContext[quickActionAsset.id]?.asset,
+                ) && isOfflineConfigMissingContext() ? (
+                  <Stack spacing={1.5}>
+                    <Alert severity="warning">
+                      {OFFLINE_CONFIG_MISSING_MESSAGE}
+                    </Alert>
+                    <Button
+                      variant="outlined"
+                      onClick={() => retryOfflineDownload()}
+                    >
+                      Retry download when online
+                    </Button>
+                  </Stack>
+                ) : (
                 <Stack spacing={1.5}>
                   <Alert severity="info">
                     No workflow assigned to this asset yet.
@@ -5993,6 +6112,7 @@ const Dashboard = () => {
                     Assign Workflow
                   </Button>
                 </Stack>
+                )
               ) : quickActionAssignments.length === 0 && quickActionRuns.length === 0 && productWorkflow ? (
                 // Product-linked workflow (no explicit assignment)
                 <Box>
