@@ -336,6 +336,7 @@ export default function WorkOrderRunner({
   const [instName,      setInstName]      = useState("");
   const [instOutcome,   setInstOutcome]   = useState<"Completed" | "Conditional">("Completed");
   const [instNotes,     setInstNotes]     = useState("");
+  const [instConsent,   setInstConsent]   = useState(false);
   const [instSaving,    setInstSaving]    = useState(false);
   const [instError,     setInstError]     = useState<string | null>(null);
   // stable ref so canvas onChange doesn't re-add listeners on every render
@@ -1084,6 +1085,7 @@ export default function WorkOrderRunner({
 
     if (run.signatureStatus === "PendingInstaller") {
       setInstName(currentUserName ?? "");
+      setInstConsent(false);
       setStage("installer-sign");
       return;
     }
@@ -1240,7 +1242,7 @@ export default function WorkOrderRunner({
         signatureData: instPadData ?? undefined,
         reasonCode: instOutcome,
         notes: instNotes.trim() || undefined,
-        consentConfirmed: true,
+        consentConfirmed: instConsent,
       });
       // Advance to customer sign step
       setCustMode("options");
@@ -2614,6 +2616,11 @@ export default function WorkOrderRunner({
 
             {blockingError && <Alert severity="error" sx={{ fontSize: 12 }}>{blockingError}</Alert>}
             {saveError && <Alert severity="error" sx={{ fontSize: 12 }}>{saveError}</Alert>}
+            {!saved && activeRunId && (
+              <Alert severity="warning" sx={{ fontSize: 12 }}>
+                Review recorded time and captured fields before locking. Use <strong>Adjust time</strong> or <strong>Back to steps</strong> if anything needs correction. After you sign as installer, you will not be able to edit time or field captures (Project Managers and Admins may still correct data until customer sign-off).
+              </Alert>
+            )}
             {saved && (
               <Alert severity="success" sx={{ fontSize: 12 }} icon={<LockOutlined fontSize="small" />}>
                 Run locked and saved successfully.
@@ -3083,13 +3090,30 @@ export default function WorkOrderRunner({
             />
             <TextField label="Notes (optional)" size="small" fullWidth multiline minRows={2}
               value={instNotes} onChange={e => setInstNotes(e.target.value)} />
+            <Alert severity="info" sx={{ fontSize: 12 }}>
+              Signing confirms that all recorded time entries and captured field data are correct. After you sign, you will not be able to edit time or field captures. Project Managers and Admins may still make corrections until customer sign-off.
+            </Alert>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={instConsent}
+                  onChange={(e) => setInstConsent(e.target.checked)}
+                  size="small"
+                />
+              }
+              label={
+                <Typography variant="body2" sx={{ fontSize: 12 }}>
+                  I confirm all recorded time and captured field data are correct, and I understand I cannot edit them after signing.
+                </Typography>
+              }
+            />
             {instError && <Alert severity="error" sx={{ fontSize: 12 }}>{instError}</Alert>}
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleClose}>Skip &amp; close</Button>
           <Button variant="contained" onClick={handleInstallerSign}
-            disabled={instSaving || !instName.trim()}
+            disabled={instSaving || !instName.trim() || !instConsent}
             startIcon={instSaving ? <CircularProgress size={14} /> : undefined}>
             {instSaving ? "Signing..." : "Sign &amp; continue"}
           </Button>

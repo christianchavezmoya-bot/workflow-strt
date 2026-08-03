@@ -14,6 +14,11 @@ export interface ProjectCaptureColumn {
   displayLabel: string;
   sequence: number;
   groupType: "feature" | "general";
+  /** Source run field — used for inline capture-table edits */
+  stepId?: string;
+  inputId?: string;
+  inputType?: string;
+  iterationIndex?: number;
 }
 
 export interface ProjectCaptureGroup {
@@ -174,6 +179,10 @@ export function buildProjectCaptureTable(
           displayLabel: fieldLabel,
           sequence: sequence++,
           groupType,
+          stepId: field.stepId,
+          inputId: field.inputId,
+          inputType: field.inputType,
+          iterationIndex: field.iterationIndex,
         });
         group.seenColumnKeys.add(columnKey);
       }
