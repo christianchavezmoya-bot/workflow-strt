@@ -42,6 +42,7 @@ import type { FeatureSelection } from "../../services/productConfigService";
 import type { UserRole } from "../../types/user";
 import {
   buildProjectCaptureTable,
+  buildSchemaCaptureTableSkeleton,
   findCaptureMatch,
   type ProjectCaptureColumn,
   type ProjectCaptureGroup,
@@ -73,6 +74,9 @@ export type CaptureSpreadsheetDialogProps = {
   /** True while paginated web loads full run blobs for capture columns. */
   captureRunsLoading?: boolean;
   captureRunsError?: string | null;
+  /** When true (web paginated path only), show schema headers while run blobs load. */
+  schemaFallback?: boolean;
+  maxUnitsByFeature?: Record<string, number>;
   features: Feature[];
   depsByFeature: Record<string, FeatureDependency[]>;
   featureSelectionsByConfig: FeatureSelection[][];
@@ -241,7 +245,11 @@ export default function CaptureSpreadsheetDialog({
   runsMap,
   captureRunsLoading = false,
   captureRunsError = null,
+  schemaFallback = false,
+  maxUnitsByFeature = {},
   features,
+  depsByFeature,
+  featureSelectionsByConfig,
   readOnly = false,
   canEditCapture = false,
   canEditAsset,
@@ -281,10 +289,13 @@ export default function CaptureSpreadsheetDialog({
     }
   }, [open]);
 
-  const table = useMemo(
-    () => buildProjectCaptureTable(assets, runsMap, features),
-    [assets, runsMap, features],
-  );
+  const table = useMemo(() => {
+    const fromRuns = buildProjectCaptureTable(assets, runsMap, features);
+    if (fromRuns.groups.length > 0 || !schemaFallback) return fromRuns;
+    if (Object.keys(depsByFeature).length === 0) return fromRuns;
+    const skeleton = buildSchemaCaptureTableSkeleton(assets, features, depsByFeature, maxUnitsByFeature);
+    return skeleton.groups.length > 0 ? skeleton : fromRuns;
+  }, [assets, depsByFeature, features, maxUnitsByFeature, runsMap, schemaFallback]);
 
   const visibleGroups = useMemo(() => {
     return table.groups
@@ -697,7 +708,7 @@ export default function CaptureSpreadsheetDialog({
         </Alert>
       )}
 
-      {captureRunsLoading && (
+      {captureRunsLoading && visibleGroups.length === 0 && (
         <Stack direction="row" alignItems="center" spacing={1} sx={{ py: 0.5 }}>
           <CircularProgress size={18} />
           <Typography variant="caption" color="text.secondary">
