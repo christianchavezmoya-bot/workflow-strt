@@ -843,6 +843,23 @@ export const assetWorkflowRunService = {
     return summaries.map(runSummaryToPlaceholderRun);
   },
 
+  /** Batch slim runs for multiple projects — one request instead of N fan-out calls (web perf F2). */
+  async listRunSummariesByProjects(projectIds: string[]): Promise<AssetWorkflowRun[]> {
+    const ids = [...new Set(projectIds.filter(Boolean))];
+    if (ids.length === 0) return [];
+    if (ids.length === 1) return this.listRunSummariesByProject(ids[0]);
+    const sorted = ids.slice().sort();
+    const cacheKey = `/asset-workflow-runs/by-projects/runs-summary?${sorted.join(",")}`;
+    const summaries = await webCachedGet(cacheKey, async () => {
+      const res = await api.get<AssetWorkflowRunSummary[]>(
+        "/asset-workflow-runs/by-projects/runs-summary",
+        { params: { projectIds: sorted.join(",") } },
+      );
+      return res.data;
+    }, { ttlMs: 5_000 });
+    return summaries.map(runSummaryToPlaceholderRun);
+  },
+
   /** Full run blobs for capture editing — scoped to visible assets only. */
   async loadRunDetailsForAssets(projectId: string, assetIds: string[]): Promise<AssetWorkflowRun[]> {
     if (assetIds.length === 0) return [];

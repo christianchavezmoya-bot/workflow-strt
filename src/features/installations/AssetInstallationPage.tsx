@@ -1213,11 +1213,16 @@ const AssetInstallationPage = () => {
     // ─── TIER 5: LATEST RUNS PER PROJECT ───────────────────────────────────
     const loadRunsForProjects = (projectIds: string[]) => {
       if (projectIds.length === 0) return;
-      Promise.all(projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
-        .then((results) => {
+      const loadPromise = isNativePlatform
+        ? Promise.all(projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
+            .then((results) => results.flat())
+        : assetWorkflowRunService.listRunSummariesByProjects(projectIds);
+
+      loadPromise
+        .then((runs) => {
           if (loadId !== assetLoadIdRef.current) return; // Stale
           const runMap: Record<string, AssetWorkflowRun[]> = {};
-          results.flat().forEach((run) => {
+          runs.forEach((run) => {
             if (!runMap[run.assetId]) runMap[run.assetId] = [];
             runMap[run.assetId].push(run);
           });
@@ -1454,9 +1459,12 @@ const AssetInstallationPage = () => {
         const projectIds = selectedProjectId
           ? [selectedProjectId]
           : [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
-        return Promise.all(
-          projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)),
-        );
+        if (isNativePlatform) {
+          return Promise.all(
+            projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)),
+          ).then((results) => results.flat());
+        }
+        return assetWorkflowRunService.listRunSummariesByProjects(projectIds);
       });
 
       // Apply Tier 1 (local) to the UI immediately.
@@ -1502,9 +1510,9 @@ const AssetInstallationPage = () => {
 
       // Re-load runs so signature chips stay current — fire-and-forget, non-blocking.
       void runsPromise
-        .then((results) => {
+        .then((runs) => {
           const runMap: Record<string, AssetWorkflowRun[]> = {};
-          results.flat().forEach((run) => {
+          runs.forEach((run) => {
             if (!runMap[run.assetId]) runMap[run.assetId] = [];
             runMap[run.assetId].push(run);
           });

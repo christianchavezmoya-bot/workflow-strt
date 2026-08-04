@@ -313,6 +313,59 @@ public class AssetWorkflowRunsController : ControllerBase
         }
     }
 
+    // GET api/asset-workflow-runs/by-projects/runs-summary?projectIds=a,b,c — batch slim runs (web perf F2)
+    [HttpGet("by-projects/runs-summary")]
+    public async Task<IActionResult> ListRunSummariesByProjects([FromQuery] string? projectIds = null)
+    {
+        try
+        {
+            var projectIdList = ParseCommaSeparatedIds(projectIds).Take(50).ToList();
+            if (projectIdList.Count == 0)
+            {
+                return Ok(Array.Empty<AssetWorkflowRunSummaryDto>());
+            }
+
+            var assetIds = await _db.ProjectAssets
+                .Where(a => projectIdList.Contains(a.ProjectId))
+                .Select(a => a.Id)
+                .ToListAsync();
+
+            if (assetIds.Count == 0)
+            {
+                return Ok(Array.Empty<AssetWorkflowRunSummaryDto>());
+            }
+
+            var selectedIds = await SelectRepresentativeRunIdsAsync(assetIds);
+            if (selectedIds.Count == 0)
+            {
+                return Ok(Array.Empty<AssetWorkflowRunSummaryDto>());
+            }
+
+            var summaries = await _db.AssetWorkflowRuns
+                .Where(r => selectedIds.Contains(r.Id))
+                .Select(r => new AssetWorkflowRunSummaryDto(
+                    r.Id,
+                    r.AssetId,
+                    r.WorkflowConfigId,
+                    r.Status,
+                    r.IsLocked,
+                    r.SignatureStatus,
+                    r.StartedAt,
+                    r.CompletedAt,
+                    r.UpdatedAt,
+                    r.RunNumber))
+                .AsNoTracking()
+                .ToListAsync();
+
+            return Ok(summaries);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list run summaries for projects {ProjectIds}", projectIds);
+            return Ok(Array.Empty<AssetWorkflowRunSummaryDto>());
+        }
+    }
+
     // GET api/asset-workflow-runs/by-project/{projectId}/runs-detail — full run blobs for capture/edit (max 100 assets)
     [HttpGet("by-project/{projectId}/runs-detail")]
     public async Task<IActionResult> ListRunDetailsByProject(string projectId, [FromQuery] string assetIds)
