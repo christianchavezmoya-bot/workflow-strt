@@ -41,7 +41,7 @@ Use Chrome on LAN against field API (`http://<server-ip>:4000/api`).
 
 1. **Login** — `jose.lopez@strataworldwide.com`; shell interactive without long freeze.
 2. **Assets** — Navigate to Installations → Assets; open project dropdown, select **JO00991**.
-3. **Capture** — Toggle **Capture** view; search `CAD` (or `CAD-0039` after Phase 5 search fix).
+3. **Capture** — Toggle **Capture** view; search **`CAD-0039`** (full tag with hyphen).
 4. **Edit 3 cells** on CAD-0039:
    - Open Network tab; filter `capture-cell`.
    - Edit a text field; tab out (blur).
@@ -63,4 +63,23 @@ PM_SMOKE_STRICT=1 npm run test:e2e:pm-smoke  # fail on threshold breaches
 
 Report written to `e2e-results/pm-field-smoke-report.json`.
 
-**Strict thresholds (Phase 1):** `captureSave*Ms` < 100 ms each; no `step-results` PATCH during capture edits.
+**Strict thresholds (Phase 1):** `captureSave*Ms` < 100 ms each; no `step-results` PATCH during capture edits.  
+**Strict thresholds (Phase 5):** `captureSearchMs` < 200 ms when searching full asset tag.
+
+---
+
+## Field sign-off checklist (Jose — JO00991)
+
+Run on **LAN** against the field API build (`npm run build && npm run preview` or deployed bundle).
+
+| # | Step | Pass criteria |
+|---|------|---------------|
+| 1 | Login as PM | Shell ready in < 2 s; lands on **Assets** (not Dashboard) |
+| 2 | Select **JO00991** | First rows or honest spinner within **1 s** |
+| 3 | Open **Capture** view | Toggle < **500 ms** |
+| 4 | Search **`CAD-0039`** | Row visible in **< 200 ms** |
+| 5 | Edit 3 cells on CAD-0039 | Each blur feels instant (< 100 ms); Network shows `capture-cell` PATCH only |
+| 6 | Open **Issues** → close **CC-0012** | Save < **500 ms** |
+| 7 | Hard refresh | Capture edits persisted; no false *"No assets added"* |
+
+**Sign-off = all seven pass.** Record results in the table above when re-baselining.

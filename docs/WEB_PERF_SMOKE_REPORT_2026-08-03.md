@@ -1,6 +1,7 @@
 # Web performance smoke test & fix plan
 
-**Date:** 2026-08-03  
+**Date:** 2026-08-03 (updated 2026-08-04)  
+**Related docs:** [`WEB_PERF_IMPLEMENTATION_PLAN.md`](./WEB_PERF_IMPLEMENTATION_PLAN.md) · [`WEB_PERF_BASELINE.md`](./WEB_PERF_BASELINE.md)  
 **Context:** After merge of PR #52 (diagnostic clocks + assets first-load spinner fix), field tester still reports slow web loads and Assets page showing *"No assets added for AIM-100 yet"* before a manual refresh recovers data.  
 **Target:** **<1 s** from navigation to meaningful content on all primary web routes (cold in-session cache, not full page reload).
 

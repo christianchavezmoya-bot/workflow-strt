@@ -183,16 +183,20 @@ test.describe("PM field smoke — JO00991 capture + issues", () => {
       markUnacceptable("Switching to Capture view took >5s — spreadsheet render too slow", report.steps.captureViewMs as number);
     }
 
-    // Filter to asset (capture view has its own search field)
+    // Filter to asset (full hyphenated tag — Phase 5 word-start fix)
     const searchField = page.getByPlaceholder(/Search asset, feature/i);
     await expect(searchField).toBeVisible({ timeout: 10_000 });
     await searchField.fill("");
-    // Hyphenated tags fail word-start search (Phase 5); use prefix until fixed.
-    const searchTerm = ASSET_TAG.includes("-") ? ASSET_TAG.split("-")[0] : ASSET_TAG;
-    await searchField.fill(searchTerm);
-    await page.waitForTimeout(600);
+    const searchStart = Date.now();
+    await searchField.fill(ASSET_TAG);
+    await expect(page.getByText(ASSET_TAG, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+    report.steps.captureSearchMs = Date.now() - searchStart;
+    if ((report.steps.captureSearchMs as number) > 2000) {
+      markUnacceptable("Capture search for full asset tag took >2s", report.steps.captureSearchMs as number);
+    } else if (process.env.PM_SMOKE_STRICT === "1" && (report.steps.captureSearchMs as number) > 200) {
+      markUnacceptable("Capture search for full asset tag took >200ms (Phase 5 target)", report.steps.captureSearchMs as number);
+    }
 
-    await expect(page.getByText(ASSET_TAG, { exact: true }).first()).toBeVisible({ timeout: 20_000 }).catch(() => {});
     const assetRow = page.locator("tbody tr").filter({ hasText: ASSET_TAG }).first();
     if (await assetRow.count() === 0) {
       findings.push(`Asset ${ASSET_TAG} not visible in capture table after search`);
