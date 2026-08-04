@@ -205,7 +205,7 @@ function buildDashboardWorkspaceFromAssets(
 
   const allItems = cached
     .map((asset) => toWorkspaceItem(asset))
-    .filter((item) => !item.isDeleted && item.status !== "Cancelled" && item.status !== "Closed");
+    .filter((item) => !item.isDeleted);
 
   const userFiltered = userId
     ? allItems.filter((item) => item.assignedUserId === userId)
