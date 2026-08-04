@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   dashboardWorkspaceHasRows,
+  mergeDashboardWorkspace,
   mergeDashboardWorkspaceItems,
   stabilizeDashboardWorkspace,
   dedupeDashboardWorkspace,
@@ -103,5 +104,45 @@ describe("dedupeDashboardWorkspace", () => {
     const deduped = dedupeDashboardWorkspace(workspace, authoritative);
     expect(deduped.currentInstalls.map((row) => row.id)).toEqual(["a1"]);
     expect(deduped.installHistory).toHaveLength(0);
+  });
+});
+
+describe("mergeDashboardWorkspace", () => {
+  it("stabilizes card signals then dedupes using incoming bucket placement", () => {
+    const previous = {
+      currentInstalls: [{ ...item("a1"), completedSteps: 5, totalSteps: 5 }],
+      currentInspections: [],
+      installHistory: [],
+      inspectionHistory: [],
+    };
+    const incoming = {
+      currentInstalls: [],
+      currentInspections: [],
+      installHistory: [{ ...item("a1"), status: "Complete", historyStatus: "Field Work Complete", completedSteps: 0, totalSteps: 0 }],
+      inspectionHistory: [],
+    };
+    const merged = mergeDashboardWorkspace(previous, incoming);
+    expect(merged.currentInstalls).toHaveLength(0);
+    expect(merged.installHistory).toHaveLength(1);
+    expect(merged.installHistory[0]?.completedSteps).toBe(5);
+    expect(merged.installHistory[0]?.totalSteps).toBe(5);
+  });
+
+  it("skips dedupe when incoming workspace is empty (failed fetch guard)", () => {
+    const previous = {
+      currentInstalls: [item("a1")],
+      currentInspections: [],
+      installHistory: [item("a1")],
+      inspectionHistory: [],
+    };
+    const incoming = {
+      currentInstalls: [],
+      currentInspections: [],
+      installHistory: [],
+      inspectionHistory: [],
+    };
+    const merged = mergeDashboardWorkspace(previous, incoming);
+    expect(merged.currentInstalls).toHaveLength(1);
+    expect(merged.installHistory).toHaveLength(1);
   });
 });

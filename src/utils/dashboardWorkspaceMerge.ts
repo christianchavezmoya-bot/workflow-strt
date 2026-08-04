@@ -56,6 +56,27 @@ export function stabilizeDashboardWorkspace(
   };
 }
 
+/**
+ * Stabilize card signals from the previous snapshot, then dedupe across buckets.
+ * Incoming `data` is the tie-breaker for bucket placement when an asset id appears
+ * in more than one array. Dedupe is skipped when the incoming workspace is empty so
+ * the "never regress to blank on failed fetch" guard in stabilize remains effective.
+ */
+export function mergeDashboardWorkspace(
+  previous: DashboardWorkspace,
+  incoming: DashboardWorkspace,
+  options?: { stabilize?: boolean },
+): DashboardWorkspace {
+  const shouldStabilize = options?.stabilize ?? true;
+  const merged = shouldStabilize
+    ? stabilizeDashboardWorkspace(previous, incoming)
+    : incoming;
+  if (!dashboardWorkspaceHasRows(incoming)) {
+    return merged;
+  }
+  return dedupeDashboardWorkspace(merged, incoming);
+}
+
 const WORKSPACE_BUCKETS = [
   "currentInstalls",
   "currentInspections",
@@ -89,6 +110,40 @@ function pickWorkspaceItem(
     if (match) return match;
   }
   return undefined;
+}
+
+function mergeWorkspaceItemCardSignals(
+  primary: DashboardWorkspaceAssetItem,
+  fallback?: DashboardWorkspaceAssetItem,
+): DashboardWorkspaceAssetItem {
+  if (!fallback) return primary;
+  if (!dashboardWorkspaceItemHasCardSignals(fallback) || dashboardWorkspaceItemHasCardSignals(primary)) {
+    return primary;
+  }
+  return {
+    ...primary,
+    completedSteps: fallback.completedSteps,
+    totalSteps: fallback.totalSteps,
+    missingItems: fallback.missingItems,
+    evidenceStatus: fallback.evidenceStatus,
+    signatureStatus: fallback.signatureStatus,
+    hasOpenIssues: fallback.hasOpenIssues,
+  };
+}
+
+function pickRichestWorkspaceItem(
+  id: string,
+  workspace: DashboardWorkspace,
+): DashboardWorkspaceAssetItem | undefined {
+  let best: DashboardWorkspaceAssetItem | undefined;
+  for (const bucket of WORKSPACE_BUCKETS) {
+    const match = workspace[bucket].find((item) => item.id === id);
+    if (!match) continue;
+    if (!best || (dashboardWorkspaceItemHasCardSignals(match) && !dashboardWorkspaceItemHasCardSignals(best))) {
+      best = match;
+    }
+  }
+  return best;
 }
 
 /**
@@ -134,8 +189,11 @@ export function dedupeDashboardWorkspace(
     }
     if (!targetBucket) continue;
 
-    const row = pickWorkspaceItem(id, authoritative ?? workspace, authoritativeBucket)
-      ?? pickWorkspaceItem(id, workspace, targetBucket);
+    const signalSource = pickRichestWorkspaceItem(id, workspace);
+    const authoritativeRow = authoritative
+      ? pickWorkspaceItem(id, authoritative, authoritativeBucket)
+      : undefined;
+    const row = mergeWorkspaceItemCardSignals(authoritativeRow ?? signalSource!, signalSource);
     if (row) result[targetBucket].push(row);
   }
 
