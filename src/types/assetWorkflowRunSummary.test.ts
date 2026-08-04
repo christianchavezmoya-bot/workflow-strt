@@ -19,6 +19,9 @@ const summary: AssetWorkflowRunSummary = {
   completedAt: "2026-01-02T00:00:00Z",
   updatedAt: "2026-01-02T00:00:00Z",
   runNumber: 1,
+  productiveSeconds: 3600,
+  downtimeSeconds: 0,
+  hasBomActual: false,
 };
 
 const fullRun: AssetWorkflowRun = {

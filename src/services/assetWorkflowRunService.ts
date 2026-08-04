@@ -804,10 +804,7 @@ export const assetWorkflowRunService = {
 
   async listLatestByProject(projectId: string): Promise<AssetWorkflowRun[]> {
     if (!isMobileNativePlatform()) {
-      return webCachedGet(`/asset-workflow-runs/by-project/${projectId}`, async () => {
-        const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
-        return res.data;
-      }, { ttlMs: 5_000 });
+      return this.listRunSummariesByProject(projectId);
     }
 
     const cachedRuns = await offlineStore.listRunsByProject(projectId);

@@ -300,7 +300,13 @@ public class AssetWorkflowRunsController : ControllerBase
                     r.StartedAt,
                     r.CompletedAt,
                     r.UpdatedAt,
-                    r.RunNumber))
+                    r.RunNumber,
+                    r.ProductiveSeconds,
+                    r.DowntimeSeconds,
+                    r.BomActualJson != null && r.BomActualJson.Length > 2,
+                    r.CompletedByName,
+                    r.InstallerSignedAt,
+                    r.CustomerSignedAt))
                 .AsNoTracking()
                 .ToListAsync();
 
@@ -353,7 +359,13 @@ public class AssetWorkflowRunsController : ControllerBase
                     r.StartedAt,
                     r.CompletedAt,
                     r.UpdatedAt,
-                    r.RunNumber))
+                    r.RunNumber,
+                    r.ProductiveSeconds,
+                    r.DowntimeSeconds,
+                    r.BomActualJson != null && r.BomActualJson.Length > 2,
+                    r.CompletedByName,
+                    r.InstallerSignedAt,
+                    r.CustomerSignedAt))
                 .AsNoTracking()
                 .ToListAsync();
 

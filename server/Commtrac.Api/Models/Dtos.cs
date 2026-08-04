@@ -883,7 +883,13 @@ public record AssetWorkflowRunSummaryDto(
     DateTime StartedAt,
     DateTime? CompletedAt,
     DateTime UpdatedAt,
-    int RunNumber
+    int RunNumber,
+    int ProductiveSeconds,
+    int DowntimeSeconds,
+    bool HasBomActual,
+    string? CompletedByName,
+    DateTime? InstallerSignedAt,
+    DateTime? CustomerSignedAt
 );
 
 public record UpsertProjectAssetRequest(
