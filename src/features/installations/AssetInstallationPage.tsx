@@ -109,6 +109,7 @@ import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, ent
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { resolveReportTimeZone } from "../../utils/datetime";
 import { BulkWorkflowReportDialog } from "../../components/reports/BulkWorkflowReportDialog";
+import ProjectJobSelect from "../../components/ProjectJobSelect";
 import { buildWorkflowReportJson, createWorkflowReportDocx, workflowReportBaseFileName, type WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
@@ -443,6 +444,7 @@ const AssetInstallationPage = () => {
   const projects = useAppSelector((s) => s.projects.items);
   const projectsLoading = useAppSelector((s) => s.projects.loading);
   const users = useAppSelector((s) => s.users.items);
+  const usersLoading = useAppSelector((s) => s.users.loading);
   const [searchParams] = useSearchParams();
   const canEditAssetStatus = can.installationAssets?.editScope === "all";
   const canViewInstallationAssets = !!can.installationAssets?.view;
@@ -464,6 +466,7 @@ const AssetInstallationPage = () => {
   const docCountLoadIdRef = useRef(0);
   const lastRefreshTsRef = useRef(0);
   const isRefreshingRef = useRef(false);   // in-flight guard — prevents concurrent refreshAssets calls
+  const allProjectsExplicitRef = useRef(false); // true once user picks "All projects" from dropdown
   const serverWasOfflineRef = useRef(false); // tracks offline→online transition for api-server-reachable
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
@@ -492,6 +495,7 @@ const AssetInstallationPage = () => {
   const [configs, setConfigs] = useState<ProductConfig[]>([]);
   const [publishedWfConfigs, setPublishedWfConfigs] = useState<WorkflowConfig[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
+  const [assetLoadError, setAssetLoadError] = useState<string | null>(null);
   const [healthMap, setHealthMap] = useState<Record<string, AssetHealth>>({});
 
   const [expandedAssetId, setExpandedAssetId] = useState<string | null>(null);
@@ -689,11 +693,11 @@ const AssetInstallationPage = () => {
   const [serverReachable, setServerReachable] = useState<boolean | null>(null); // null = unknown (first load)
 
   useEffect(() => {
-    if (!productsState.items.length) dispatch(fetchProducts());
-    if (!projects.length) dispatch(fetchProjects());
-    if (!users.length) dispatch(fetchUsers());
+    if (!productsState.items.length && !productsState.loading) dispatch(fetchProducts());
+    if (!projects.length && !projectsLoading) dispatch(fetchProjects());
+    if (!users.length && !usersLoading) dispatch(fetchUsers());
     siteService.getSites().then(setSites).catch(() => {});
-  }, [dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dispatch, productsState.items.length, productsState.loading, projects.length, projectsLoading, users.length, usersLoading]);
 
   const products = useMemo(
     () => (productsState.items.length ? productsState.items : productsState.loading ? [] : demoProducts),
@@ -760,7 +764,7 @@ const AssetInstallationPage = () => {
     const products = productsRef.current;
     if (selectedProjectId) {
       AssetRepository.getByProject(selectedProjectId).catch(() => {});
-    } else {
+    } else if (allProjectsExplicitRef.current) {
       products.forEach((p) => AssetRepository.getByProduct(p.id).catch(() => {}));
     }
   }, [selectedProjectId, productsKey]));
@@ -773,6 +777,13 @@ const AssetInstallationPage = () => {
       try { sessionStorage.setItem("installations_selected_project_id", projectIdFromUrl); } catch {}
     }
   }, [searchParams]);
+
+  const handleProjectChange = useCallback((projectId: string) => {
+    if (projectId === "") allProjectsExplicitRef.current = true;
+    setSelectedProjectId(projectId);
+    setAssetLoadError(null);
+    try { sessionStorage.setItem("installations_selected_project_id", projectId); } catch { /* ignore */ }
+  }, []);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId) ?? null,
@@ -997,7 +1008,14 @@ const AssetInstallationPage = () => {
 
   useEffect(() => {
     const products = productsRef.current;
-    if (products.length === 0) {
+    // Defer expensive all-product fan-out until the user explicitly picks "All projects".
+    if (!selectedProjectId && !allProjectsExplicitRef.current) {
+      setAssets([]);
+      setLoadingAssets(false);
+      setAssetLoadError(null);
+      return;
+    }
+    if (products.length === 0 && !selectedProjectId) {
       if (productsState.loading || projectsLoading) {
         setLoadingAssets(true);
         return;
@@ -1011,6 +1029,7 @@ const AssetInstallationPage = () => {
     // Increment the load ID so any in-flight load from a previous product is ignored
     const loadId = ++assetLoadIdRef.current;
     setLoadingAssets(true);
+    setAssetLoadError(null);
 
     // ─── Phase F — TIER 1: LOCAL-ONLY (instant) ───────────────────────────
     // Read from IndexedDB for every scope in parallel. The phone is offline-
@@ -1118,7 +1137,9 @@ const AssetInstallationPage = () => {
           clearLoadingOnce();
         })
         .catch(() => {
-          if (loadId === assetLoadIdRef.current) clearLoadingOnce();
+          if (loadId !== assetLoadIdRef.current) return;
+          setAssetLoadError("Could not load assets. Check your connection and try again.");
+          clearLoadingOnce();
         });
     });
 
@@ -1146,39 +1167,40 @@ const AssetInstallationPage = () => {
       setPublishedWfConfigs([]);
     }
 
-    // ─── TIER 5: LATEST RUNS PER PROJECT (chained off LOCAL asset list) ──
-    // Uses the local asset list (just read in Tier 1) for projectIds so the
-    // runs fetch starts immediately. Each listLatestByProject is itself
-    // local-first internally (offlineStore.listRunsByProject), so warm
-    // caches return instantly. Was previously chained off the full
-    // listByProduct, which made runs wait for the slow server asset call.
+    // ─── TIER 5: LATEST RUNS PER PROJECT ───────────────────────────────────
+    const loadRunsForProjects = (projectIds: string[]) => {
+      if (projectIds.length === 0) return;
+      Promise.all(projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
+        .then((results) => {
+          if (loadId !== assetLoadIdRef.current) return; // Stale
+          const runMap: Record<string, AssetWorkflowRun[]> = {};
+          results.flat().forEach((run) => {
+            if (!runMap[run.assetId]) runMap[run.assetId] = [];
+            runMap[run.assetId].push(run);
+          });
+          setRunsMap((prev) => {
+            const merged = { ...runMap };
+            Object.keys(prev).forEach((id) => {
+              if (prev[id].length > 1) merged[id] = prev[id];
+            });
+            return merged;
+          });
+        })
+        .catch(() => {/* non-blocking */});
+    };
+
+    if (selectedProjectId) {
+      // Project-scoped: start runs immediately — don't wait for asset list (web perf).
+      loadRunsForProjects([selectedProjectId]);
+    }
+
     localLookupPromise
       .then((localSlices) => {
         if (loadId !== assetLoadIdRef.current) return; // Stale
+        if (selectedProjectId) return;
         const localAssets = localSlices.flatMap((s) => s.assets);
-        const uniqueProjectIds = selectedProjectId
-          ? [selectedProjectId]
-          : [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
-        if (uniqueProjectIds.length === 0) return;
-        Promise.all(uniqueProjectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
-          .then((results) => {
-            if (loadId !== assetLoadIdRef.current) return; // Stale
-            const runMap: Record<string, AssetWorkflowRun[]> = {};
-            results.flat().forEach((run) => {
-              if (!runMap[run.assetId]) runMap[run.assetId] = [];
-              runMap[run.assetId].push(run);
-            });
-            setRunsMap((prev) => {
-              const merged = { ...runMap };
-              // Only preserve entries that were fully loaded via loadAssignmentsForAsset
-              // (those have ALL runs, not just the latest). Batch load always wins otherwise.
-              Object.keys(prev).forEach((id) => {
-                if (prev[id].length > 1) merged[id] = prev[id];
-              });
-              return merged;
-            });
-          })
-          .catch(() => {/* non-blocking */});
+        const uniqueProjectIds = [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
+        loadRunsForProjects(uniqueProjectIds);
       });
   }, [activeProduct?.id, archiveMode, productsKey, selectedProjectId, productsState.loading, projectsLoading]);
 
@@ -1722,11 +1744,16 @@ const AssetInstallationPage = () => {
   // Projects linked to the active product (used in add/edit dialogs and the project selector).
   const productProjects = useMemo(
     () => {
-      return activeProduct?.id
+      const filtered = activeProduct?.id
         ? projects.filter((p) => p.productIds?.includes(activeProduct.id))
         : projects;
+      if (selectedProjectId && !filtered.some((p) => p.id === selectedProjectId)) {
+        const selected = projects.find((p) => p.id === selectedProjectId);
+        if (selected) return [selected, ...filtered];
+      }
+      return filtered;
     },
-    [projects, activeProduct?.id],
+    [projects, activeProduct?.id, selectedProjectId],
   );
 
   const canEditAssetFromWebTable = useMemo(() => (asset: ProjectAsset) => {
@@ -4925,17 +4952,13 @@ ${words.slice(midpoint).join(" ")}`;
         <Stack spacing={0.75}>
           {/* Row 1: project picker + search */}
           <Stack direction="row" spacing={1} alignItems="center">
-            <FormControl size="small" sx={{ flex: 1 }}>
-              <InputLabel shrink>Project</InputLabel>
-              <Select label="Project" value={productProjects.length > 0 ? selectedProjectId : ""} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
-                <MenuItem value="">All projects</MenuItem>
-                {productProjects.map((p) => (
-                  <MenuItem key={p.id} value={p.id}>
-                    {p.jobNumber}{p.customerName ? ` · ${p.customerName}` : ""}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <ProjectJobSelect
+              projects={productProjects}
+              value={selectedProjectId}
+              onChange={handleProjectChange}
+              labelStyle="mobile"
+              sx={{ flex: 1 }}
+            />
             <IconButton
               size="small"
               onClick={() => { setAssetSearchQuery(""); setAssetSearchOpen(true); }}
@@ -5004,13 +5027,12 @@ ${words.slice(midpoint).join(" ")}`;
         </Stack>
       ) : (
         <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
-          <FormControl size="small" sx={{ flex: 1, minWidth: 150 }}>
-            <InputLabel shrink>Project</InputLabel>
-            <Select label="Project" value={productProjects.length > 0 ? selectedProjectId : ""} onChange={(e) => { setSelectedProjectId(e.target.value); try { sessionStorage.setItem("installations_selected_project_id", e.target.value); } catch {} }}>
-              <MenuItem value="">All projects</MenuItem>
-              {productProjects.map((p) => <MenuItem key={p.id} value={p.id}>{p.jobNumber} - {p.customerName}</MenuItem>)}
-            </Select>
-          </FormControl>
+          <ProjectJobSelect
+            projects={productProjects}
+            value={selectedProjectId}
+            onChange={handleProjectChange}
+            labelStyle="desktop"
+          />
           <Tooltip title={statusFilter !== "All" ? "Reset status filter to use this" : ""}>
             <span>
               <Button
@@ -5392,6 +5414,20 @@ ${words.slice(midpoint).join(" ")}`;
         </Typography>
       )}
 
+      {assetLoadError && (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={() => { setAssetLoadError(null); void refreshAssets(); }}>
+              Retry
+            </Button>
+          }
+          sx={{ mb: 1 }}
+        >
+          {assetLoadError}
+        </Alert>
+      )}
+
       {/* Web keeps the original table workspace; native keeps the mobile card list. */}
       {loadingAssets ? (
         isNativePlatform ? (
@@ -5417,12 +5453,20 @@ ${words.slice(midpoint).join(" ")}`;
             <CircularProgress size={32} />
           </Stack>
         )
+      ) : !selectedProjectId && !allProjectsExplicitRef.current ? (
+        <Alert severity="info">
+          Select a project to view assets, or choose &quot;All projects&quot; to browse every product.
+        </Alert>
+      ) : assetLoadError && assets.length === 0 ? (
+        null
       ) : mobileAssets.length === 0 ? (
         <Alert severity="info">
           {assets.length === 0
             ? archiveMode
               ? "No archived assets found for this product."
-              : `No assets added for ${activeProduct?.name ?? "this product"} yet.`
+              : selectedProject
+                ? `No assets added for ${selectedProject.jobNumber} yet.`
+                : `No assets added for ${activeProduct?.name ?? "this product"} yet.`
             : "No assets match the current filters."}
         </Alert>
       ) : isNativePlatform ? (

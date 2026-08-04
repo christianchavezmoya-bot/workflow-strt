@@ -136,9 +136,11 @@ test.describe("PM field smoke — JO00991 capture + issues", () => {
       markUnacceptable("Project dropdown open/select took >5s — MUI select feels stuck", report.steps.projectSelectMs as number);
     } else if ((report.steps.projectSelectMs as number) > 2000) {
       markUnacceptable("Project dropdown open/select took >2s — noticeable delay before data load starts", report.steps.projectSelectMs as number);
+    } else if (process.env.PM_SMOKE_STRICT === "1" && (report.steps.projectSelectMs as number) > 300) {
+      markUnacceptable("Project dropdown open/select took >300ms (Phase 2 target)", report.steps.projectSelectMs as number);
     }
 
-    // Wait for content (table, capture, empty banner, or spinner gone)
+    const assetsLoadApiStart = apiCalls.length;
     const assetsLoadStart = Date.now();
     await page.waitForFunction(() => {
       const spinner = document.querySelector(".MuiCircularProgress-root");
@@ -148,6 +150,15 @@ test.describe("PM field smoke — JO00991 capture + issues", () => {
       return Boolean(table || empty || capture || !spinner);
     }, undefined, { timeout: 120_000 }).catch(() => {});
     report.steps.assetsContentMs = Date.now() - assetsLoadStart;
+
+    const assetsLoadApiCalls = apiCalls.slice(assetsLoadApiStart);
+    const byProductDuringProjectLoad = assetsLoadApiCalls.filter(
+      (c) => c.method === "GET" && c.path.includes("/project-assets/by-product/"),
+    );
+    report.steps.assetsLoadByProductCount = byProductDuringProjectLoad.length;
+    if (byProductDuringProjectLoad.length > 0) {
+      markUnacceptable(`Project-scoped assets load still triggered ${byProductDuringProjectLoad.length} by-product call(s) (Phase 2)`);
+    }
 
     if ((report.steps.assetsContentMs as number) > 8000) {
       markUnacceptable("Assets page content took >8s after project select — unacceptable for daily PM use", report.steps.assetsContentMs as number);
