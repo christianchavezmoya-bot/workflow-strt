@@ -45,6 +45,7 @@ import {
   dedupeDashboardWorkspace,
 } from "../../utils/dashboardWorkspaceMerge";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
+import { pickCaptureRun } from "../../utils/captureSpreadsheet";
 import { randomId } from "../../utils/randomId";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
@@ -1071,6 +1072,7 @@ const Dashboard = () => {
     // stayed wrong until a manual reload.
     window.addEventListener("repo:assignments:updated", refreshLiveDashboardData);
     window.addEventListener("repo:runs:updated", refreshLiveDashboardData);
+    window.addEventListener("workflow-runs-cache-updated", refreshLiveDashboardData);
     const onFlushComplete = (event: Event) => {
       const detail = (event as CustomEvent<{ syncedAny?: boolean; pendingRemaining?: number }>).detail;
       if (detail?.syncedAny && detail.pendingRemaining === 0) {
@@ -1085,6 +1087,7 @@ const Dashboard = () => {
       window.removeEventListener("repo:issues:updated", refreshAttentionFromIssueCache);
       window.removeEventListener("repo:assignments:updated", refreshLiveDashboardData);
       window.removeEventListener("repo:runs:updated", refreshLiveDashboardData);
+      window.removeEventListener("workflow-runs-cache-updated", refreshLiveDashboardData);
       window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
     };
   }, [dashboardBootPhase, refreshAttentionFromIssueCache, refreshLiveDashboardData]);
@@ -1726,9 +1729,21 @@ const Dashboard = () => {
     return ids;
   }, [myInstallAssets, myInstallHistory]);
   const [nativeMyJobsCardContext, setNativeMyJobsCardContext] = useState<Record<string, NativeMyJobsCardContext>>({});
+  const [nativeCardContextEpoch, setNativeCardContextEpoch] = useState(0);
   const [dashboardAssignmentsMap, setDashboardAssignmentsMap] = useState<Record<string, WorkflowAssignment[]>>({});
 
   const myInstallAssetIdsKey = useMemo(() => myJobsAssetIdsKey(myInstallAssets), [myInstallAssets]);
+
+  useEffect(() => {
+    if (!isNativePlatform) return;
+    const bumpCardContext = () => setNativeCardContextEpoch((epoch) => epoch + 1);
+    window.addEventListener("workflow-runs-cache-updated", bumpCardContext);
+    window.addEventListener("repo:assets:updated", bumpCardContext);
+    return () => {
+      window.removeEventListener("workflow-runs-cache-updated", bumpCardContext);
+      window.removeEventListener("repo:assets:updated", bumpCardContext);
+    };
+  }, [isNativePlatform]);
 
   useEffect(() => {
     if (!isNativePlatform) {
@@ -1778,7 +1793,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [isNativePlatform, myInstallAssetIdsKey, myInstallAssets]);
+  }, [isNativePlatform, myInstallAssetIdsKey, myInstallAssets, nativeCardContextEpoch]);
 
   // Prime assignment cache for My Jobs cards so offline opens don't treat empty
   // IndexedDB as "no workflow assigned" when bootstrap hasn't filled this asset yet.
@@ -1999,8 +2014,9 @@ const Dashboard = () => {
     if (isNativePlatform) {
       const nativeContext = nativeMyJobsCardContext[asset.id];
       if (nativeContext) {
+        const latestCachedRun = pickCaptureRun(nativeContext.runs);
         const displayState = getWorkflowDisplayState(nativeContext.asset, nativeContext.runs, {
-          paused: isPausedAsset(asset.runStatus),
+          paused: isPausedAsset(asset.runStatus) || isPausedAsset(latestCachedRun?.status),
           inspectionMode: asset.workflowMode === "INSPECTION_ONLY",
           hasRunnableWorkflowSource:
             nativeContext.runs.length > 0
