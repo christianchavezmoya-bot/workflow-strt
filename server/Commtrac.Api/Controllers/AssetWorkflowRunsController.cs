@@ -1002,7 +1002,13 @@ public class AssetWorkflowRunsController : ControllerBase
         // fall back to now. Without this an offline run synced hours later would stretch its
         // last productive segment to the sync moment, inflating the reported time.
         var completedAt = ParseUtcOr(req.CompletedAtUtc, now);
-        run.StepResultsJson  = req.StepResultsJson;
+        var stepResultsJson = req.UseStoredStepResults && !string.IsNullOrWhiteSpace(run.StepResultsJson)
+            ? run.StepResultsJson
+            : req.StepResultsJson ?? run.StepResultsJson;
+        if (string.IsNullOrWhiteSpace(stepResultsJson))
+            return BadRequest(new { message = "StepResultsJson is required when UseStoredStepResults is false." });
+
+        run.StepResultsJson  = stepResultsJson;
         run.IssuesJson       = req.IssuesJson;
         run.Status           = "Complete";
         run.IsLocked         = true;
@@ -1044,7 +1050,7 @@ public class AssetWorkflowRunsController : ControllerBase
             // Build as-built JSON from capture fields defined in the workflow snapshot
             if (!anyBlock)
             {
-                asset.AsBuiltJson = BuildAsBuiltJson(run.WorkflowSnapshotJson, req.StepResultsJson, now);
+                asset.AsBuiltJson = BuildAsBuiltJson(run.WorkflowSnapshotJson, stepResultsJson, now);
             }
         }
 

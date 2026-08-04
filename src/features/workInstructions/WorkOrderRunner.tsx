@@ -1191,8 +1191,10 @@ export default function WorkOrderRunner({
       }
 
       if (activeRunId) {
-        // Flush any queued time-tracking actions before locking â€" run rejects changes once locked.
+        // Flush any queued time-tracking actions before locking — run rejects changes once locked.
         await flushTimeQueue();
+        // Persist latest step captures, then lock without re-uploading the full blob (web F4).
+        await flushAutosave();
         const lockedRun = await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName, bomJson);
         transitionToLockedRunStage(lockedRun);
 
