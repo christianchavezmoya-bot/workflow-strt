@@ -22,7 +22,7 @@ import { fetchProjects, setProjects, updateProjectStatus } from "../../store/pro
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { officesService } from "../../services/officesService";
-import { assetWorkflowRunService, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
+import { assetWorkflowRunService, isAssetSignatureStatusFinalized, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
 import { IssueRepository } from "../../repositories/IssueRepository";
 import {
   projectAssetService,
@@ -73,7 +73,7 @@ import {
   isOfflineConfigMissingContext,
   retryOfflineDownload,
 } from "../../services/workflowOpenService";
-import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
+import { getWorkflowDisplayState, myJobsCardChipFromDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import { mediaStore } from "../../services/mediaStore";
 import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import { get as dcGet, put as dcPut, DASHBOARD_CACHE_KEYS } from "../../services/dashboardCache";
@@ -265,13 +265,8 @@ function myJobsCardHelperTextFromDisplayState(displayState: WorkflowDisplayState
 function myJobsCardActionFromDisplayState(displayState: WorkflowDisplayState): MyJobsCardAction {
   const actionKind = displayState.action?.kind ?? "run-details";
   const widgets = myJobsCardWidgetsFromDisplayState(displayState);
+  const chip = myJobsCardChipFromDisplayState(displayState);
   const hasMissingMedia = actionKind === "add-missing-photos";
-  const chipLabel = hasMissingMedia ? displayState.feature.label : displayState.status.label;
-  const chipColor = hasMissingMedia
-    ? "warning"
-    : displayState.gates.blockingIssueCount > 0
-      ? "error"
-      : displayState.status.color;
 
   let resolvedActionKind: MyJobsCardAction["actionKind"] = "default";
   if (actionKind === "add-missing-photos") resolvedActionKind = "missing-media";
@@ -280,8 +275,8 @@ function myJobsCardActionFromDisplayState(displayState: WorkflowDisplayState): M
 
   return {
     actionKind: resolvedActionKind,
-    chipLabel,
-    chipColor,
+    chipLabel: chip.label,
+    chipColor: chip.color,
     buttonLabel: displayState.action?.label ?? "Run Details",
     buttonColor:
       actionKind === "add-missing-photos" || actionKind === "installer-sign" || actionKind === "customer-sign"
@@ -841,8 +836,8 @@ const Dashboard = () => {
   // ── Native cache: persist state to cache whenever it changes ──
   useEffect(() => {
     if (!isNativePlatform) return;
-    if (openIssues.length > 0) dcPut(DASHBOARD_CACHE_KEYS.openIssues, openIssues);
-    if (pendingSigs.length > 0) dcPut(DASHBOARD_CACHE_KEYS.pendingSigs, pendingSigs);
+    dcPut(DASHBOARD_CACHE_KEYS.openIssues, openIssues);
+    dcPut(DASHBOARD_CACHE_KEYS.pendingSigs, pendingSigs);
   }, [isNativePlatform, openIssues, pendingSigs]);
 
   // When the background project refresh completes, apply the authoritative list directly to
@@ -2075,6 +2070,18 @@ const Dashboard = () => {
       };
     }
 
+    if (isAssetSignatureStatusFinalized(asset.signatureStatus)) {
+      return {
+        actionKind: "default",
+        chipLabel: "Complete",
+        chipColor: "success",
+        buttonLabel: "Run Details",
+        buttonColor: "inherit",
+        helperText: "Field work complete",
+        widgets,
+      };
+    }
+
     return {
       actionKind: "default",
       chipLabel: isPendingAsset(asset.status) ? "Pending sign" : "Not Started",
@@ -2604,9 +2611,10 @@ const Dashboard = () => {
       !issue.isBlocking &&
       issue.severity === "high" &&
       issue.issueType === "observation" &&
+      (issue.createdBy ?? "") === user.fullName &&
       myInstallAssets.some((asset) => asset.id === issue.assetId)
     ),
-    [openIssues, myInstallAssets]
+    [openIssues, myInstallAssets, user.fullName]
   );
   const myInstallAttentionCount = myInstallBlocking.length + myInstallPendingSigs.length + myInstallHighObservations.length;
   const myInstallMissingMediaCount = useMemo(
@@ -2633,9 +2641,10 @@ const Dashboard = () => {
       !issue.isBlocking &&
       issue.severity === "high" &&
       issue.issueType === "observation" &&
+      (issue.createdBy ?? "") === user.fullName &&
       myInspectionAssets.some((asset) => asset.id === issue.assetId)
     ),
-    [openIssues, myInspectionAssets]
+    [openIssues, myInspectionAssets, user.fullName]
   );
   const myInspectionAttentionCount = myInspectionBlocking.length + myInspectionPendingSigs.length + myInspectionHighObservations.length;
 

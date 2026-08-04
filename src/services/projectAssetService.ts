@@ -15,6 +15,7 @@ import { mediaStore } from "./mediaStore";
 import { isOfflineNetworkError as isOfflineNetworkErrorShape } from "../utils/offlineNetworkError";
 import offlineStore from "./offlineStore";
 import { dashboardWorkspaceHasRows } from "../utils/dashboardWorkspaceMerge";
+import { bucketDashboardWorkspaceItems } from "../utils/dashboardWorkspaceBucket";
 
 const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:${userId}`;
 
@@ -210,28 +211,7 @@ function buildDashboardWorkspaceFromAssets(
     ? allItems.filter((item) => item.assignedUserId === userId)
     : allItems;
 
-  return bucketWorkspaceItems(userFiltered);
-}
-
-/** Splits already-built workspace items into current/history x installation/inspection buckets. */
-function bucketWorkspaceItems(items: DashboardWorkspaceAssetItem[]): DashboardWorkspace {
-  const isInstallationWorkflow = (mode?: string) =>
-    !mode || mode === "INSTALLATION_ONLY" || mode === "MIXED";
-  const isInspectionWorkflow = (mode?: string) =>
-    mode === "INSPECTION_ONLY" || mode === "MIXED";
-
-  const isCurrent = (item: DashboardWorkspaceAssetItem) =>
-    item.status !== "Complete" && item.status !== "Completed" && item.status !== "Closed";
-
-  const isHistory = (item: DashboardWorkspaceAssetItem) =>
-    item.status === "Complete" || item.status === "Completed";
-
-  return {
-    currentInstalls: items.filter((item) => isCurrent(item) && isInstallationWorkflow(item.workflowMode)),
-    currentInspections: items.filter((item) => isCurrent(item) && isInspectionWorkflow(item.workflowMode)),
-    installHistory: items.filter((item) => isHistory(item) && isInstallationWorkflow(item.workflowMode)),
-    inspectionHistory: items.filter((item) => isHistory(item) && isInspectionWorkflow(item.workflowMode)),
-  };
+  return bucketDashboardWorkspaceItems(userFiltered);
 }
 
 /**
@@ -257,7 +237,7 @@ async function reconcileWorkspaceWithLocalStatus(data: DashboardWorkspace): Prom
     return { ...item, status: freshStatus, historyStatus: freshStatus };
   }));
 
-  return changed ? bucketWorkspaceItems(reconciled) : data;
+  return changed ? bucketDashboardWorkspaceItems(reconciled) : data;
 }
 
 export const projectAssetService = {

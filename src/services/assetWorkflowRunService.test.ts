@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertNoBlockingIssuesForComplete,
   deriveOfflineAssetStatusFromRun,
+  isAssetSignatureStatusFinalized,
   isRunSignatureFinalized,
 } from "./assetWorkflowRunService";
 
@@ -57,6 +58,15 @@ describe("isRunSignatureFinalized", () => {
     expect(isRunSignatureFinalized({ signatureStatus: "PendingCustomer", customerSignedAt: "2026-01-01T00:00:00.000Z" })).toBe(true);
     expect(isRunSignatureFinalized({ signatureStatus: "Signed" })).toBe(true);
     expect(isRunSignatureFinalized({ signatureStatus: "PendingInstaller" })).toBe(false);
+  });
+});
+
+describe("isAssetSignatureStatusFinalized", () => {
+  it("detects terminal workspace signature statuses", () => {
+    expect(isAssetSignatureStatusFinalized("Signed")).toBe(true);
+    expect(isAssetSignatureStatusFinalized("Declined")).toBe(true);
+    expect(isAssetSignatureStatusFinalized("PendingInstaller")).toBe(false);
+    expect(isAssetSignatureStatusFinalized(undefined)).toBe(false);
   });
 });
 
