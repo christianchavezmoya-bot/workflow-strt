@@ -75,6 +75,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   ToggleButton,
@@ -124,6 +125,7 @@ import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/p
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
+import { mergeRunsIntoMap } from "../../types/assetWorkflowRunSummary";
 import type { BomItem, StepInput, Workflow } from "../../types/workflow";
 import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
@@ -496,6 +498,10 @@ const AssetInstallationPage = () => {
   const [publishedWfConfigs, setPublishedWfConfigs] = useState<WorkflowConfig[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null);
+  const PROJECT_ASSET_PAGE_SIZE = 50;
+  const [projectAssetPage, setProjectAssetPage] = useState(1);
+  const [projectAssetTotal, setProjectAssetTotal] = useState(0);
+  const paginatedWebProject = !isNativePlatform && !!selectedProjectId;
   const [healthMap, setHealthMap] = useState<Record<string, AssetHealth>>({});
 
   const [expandedAssetId, setExpandedAssetId] = useState<string | null>(null);
@@ -781,9 +787,14 @@ const AssetInstallationPage = () => {
   const handleProjectChange = useCallback((projectId: string) => {
     if (projectId === "") allProjectsExplicitRef.current = true;
     setSelectedProjectId(projectId);
+    setProjectAssetPage(1);
     setAssetLoadError(null);
     try { sessionStorage.setItem("installations_selected_project_id", projectId); } catch { /* ignore */ }
   }, []);
+
+  useEffect(() => {
+    setProjectAssetPage(1);
+  }, [search]);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId) ?? null,
@@ -1044,7 +1055,25 @@ const AssetInstallationPage = () => {
       scopeId: string;
       fetchLocal: () => Promise<ProjectAsset[]>;
       fetchRemote: () => Promise<ProjectAsset[]>;
-    }> = selectedProjectId
+    }> = paginatedWebProject
+      ? [
+          {
+            scopeKind: "project",
+            scopeId: selectedProjectId,
+            fetchLocal: () => Promise.resolve([]),
+            fetchRemote: async () => {
+              const result = await projectAssetService.listByProjectPage(selectedProjectId, {
+                page: projectAssetPage,
+                pageSize: PROJECT_ASSET_PAGE_SIZE,
+                search: search.trim() || undefined,
+                includeDeleted: archiveMode,
+              });
+              setProjectAssetTotal(result.total);
+              return result.items;
+            },
+          },
+        ]
+      : selectedProjectId
       ? [
           {
             scopeKind: "project",
@@ -1135,6 +1164,15 @@ const AssetInstallationPage = () => {
           });
           setLastFetchedAt(new Date());
           clearLoadingOnce();
+          if (paginatedWebProject && freshAssets.length > 0) {
+            const assetIds = freshAssets.map((a) => a.id);
+            assetWorkflowRunService.listRunSummariesByProject(selectedProjectId, assetIds)
+              .then((runs) => {
+                if (loadId !== assetLoadIdRef.current) return;
+                setRunsMap((prev) => mergeRunsIntoMap(prev, runs));
+              })
+              .catch(() => {/* non-blocking */});
+          }
         })
         .catch(() => {
           if (loadId !== assetLoadIdRef.current) return;
@@ -1189,8 +1227,8 @@ const AssetInstallationPage = () => {
         .catch(() => {/* non-blocking */});
     };
 
-    if (selectedProjectId) {
-      // Project-scoped: start runs immediately — don't wait for asset list (web perf).
+    if (selectedProjectId && !paginatedWebProject) {
+      // Project-scoped full load: start runs immediately — don't wait for asset list.
       loadRunsForProjects([selectedProjectId]);
     }
 
@@ -1202,7 +1240,20 @@ const AssetInstallationPage = () => {
         const uniqueProjectIds = [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
         loadRunsForProjects(uniqueProjectIds);
       });
-  }, [activeProduct?.id, archiveMode, productsKey, selectedProjectId, productsState.loading, projectsLoading]);
+  }, [activeProduct?.id, archiveMode, productsKey, selectedProjectId, productsState.loading, projectsLoading, projectAssetPage, search, paginatedWebProject]);
+
+  // Paginated web: load full run blobs when Capture view needs step results.
+  useEffect(() => {
+    if (!paginatedWebProject || assetTableViewMode !== "capture" || assets.length === 0) return;
+    let cancelled = false;
+    const assetIds = assets.map((a) => a.id);
+    assetWorkflowRunService.loadRunDetailsForAssets(selectedProjectId, assetIds)
+      .then((runs) => {
+        if (!cancelled) setRunsMap((prev) => mergeRunsIntoMap(prev, runs));
+      })
+      .catch(() => {/* non-blocking */});
+    return () => { cancelled = true; };
+  }, [assetTableViewMode, assets, paginatedWebProject, selectedProjectId]);
 
   // Document counts per asset — fetched in a fully independent effect that
   // runs after the asset list is already shown. Counts are cosmetic
@@ -6009,6 +6060,16 @@ ${words.slice(midpoint).join(" ")}`;
               </TableBody>
             </Table>
           </Box>
+          {paginatedWebProject && projectAssetTotal > 0 && (
+            <TablePagination
+              component="div"
+              count={projectAssetTotal}
+              page={Math.max(0, projectAssetPage - 1)}
+              onPageChange={(_, nextPage) => setProjectAssetPage(nextPage + 1)}
+              rowsPerPage={PROJECT_ASSET_PAGE_SIZE}
+              rowsPerPageOptions={[PROJECT_ASSET_PAGE_SIZE]}
+            />
+          )}
         </Paper>
       )}
 

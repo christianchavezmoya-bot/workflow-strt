@@ -16,6 +16,7 @@ import { isOfflineNetworkError as isOfflineNetworkErrorShape } from "../utils/of
 import offlineStore from "./offlineStore";
 import { dashboardWorkspaceHasRows, dedupeDashboardWorkspaceItemsById, dashboardWorkspaceLayoutEqual } from "../utils/dashboardWorkspaceMerge";
 import { bucketDashboardWorkspaceItems } from "../utils/dashboardWorkspaceBucket";
+import type { PaginatedResult, ProjectAssetPageQuery } from "../types/paginatedList";
 
 const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:${userId}`;
 
@@ -267,6 +268,16 @@ export const projectAssetService = {
   async listByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
     try { return await AssetRepository.getByProject(projectId, includeDeleted); }
     catch { return []; }
+  },
+
+  async listByProjectPage(
+    projectId: string,
+    query: ProjectAssetPageQuery = {},
+  ): Promise<PaginatedResult<ProjectAsset>> {
+    try { return await AssetRepository.getByProjectPage(projectId, query); }
+    catch {
+      return { items: [], total: 0, page: query.page ?? 1, pageSize: query.pageSize ?? 50, hasMore: false };
+    }
   },
 
   async listByProduct(productId: string, includeDeleted = false): Promise<ProjectAsset[]> {

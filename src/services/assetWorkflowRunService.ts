@@ -22,6 +22,8 @@ import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead, shouldSkipRunMu
 import { boundedFreshRead, BOUNDED_FRESH_TIMEOUT_MS } from "../utils/boundedFreshRead";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
+import type { AssetWorkflowRunSummary } from "../types/assetWorkflowRunSummary";
+import { mergeRunsIntoMap, runSummaryToPlaceholderRun } from "../types/assetWorkflowRunSummary";
 import {
   countMissingWorkflowItems,
   getWorkflowStepCompletion,
@@ -825,6 +827,30 @@ export const assetWorkflowRunService = {
     } catch {
       return await offlineStore.listRunsByProject(projectId);
     }
+  },
+
+  /** Slim latest-run rows for a project page — no StepResultsJson blobs (web perf). */
+  async listRunSummariesByProject(projectId: string, assetIds?: string[]): Promise<AssetWorkflowRun[]> {
+    const params = assetIds?.length ? { assetIds: assetIds.join(",") } : undefined;
+    const cacheKey = `/asset-workflow-runs/by-project/${projectId}/runs-summary${params?.assetIds ? `?${params.assetIds}` : ""}`;
+    const summaries = await webCachedGet(cacheKey, async () => {
+      const res = await api.get<AssetWorkflowRunSummary[]>(
+        `/asset-workflow-runs/by-project/${projectId}/runs-summary`,
+        { params },
+      );
+      return res.data;
+    }, { ttlMs: 5_000 });
+    return summaries.map(runSummaryToPlaceholderRun);
+  },
+
+  /** Full run blobs for capture editing — scoped to visible assets only. */
+  async loadRunDetailsForAssets(projectId: string, assetIds: string[]): Promise<AssetWorkflowRun[]> {
+    if (assetIds.length === 0) return [];
+    const res = await api.get<AssetWorkflowRun[]>(
+      `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
+      { params: { assetIds: assetIds.join(",") } },
+    );
+    return res.data;
   },
 
   async listByAsset(assetId: string): Promise<AssetWorkflowRun[]> {

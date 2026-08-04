@@ -13,8 +13,8 @@ Measured on cloud agent VM with seeded JO00991 data. Production-like builds (`np
 | Metric | Median (est.) | p95 (est.) | Notes |
 |--------|---------------|------------|-------|
 | Login → shell | ~2 s | ~3 s | Includes onboarding dismiss |
-| Project select (JO00991) | ~3 s | **~1.9 s** (Phase 2 seed) | MUI Select + load; target < 300 ms (Phase 2 partial) |
-| Assets content after select | ~0.8 s | ~1.8 s | 152 seed assets |
+| Project select (JO00991) | ~3 s | **~1.3 s** (Phase 3 seed) | Target < 300 ms |
+| Assets content after select | ~0.8 s | **~335 ms** (Phase 3 paginated) | Target < 1 s ✓ |
 | Capture view toggle | ~1.5 s | **~2 s** | Full table render |
 | Capture cell blur save | **Not measured** | **3–5 s (est.)** | 288 KB PATCH + cache wipe + refetch |
 | **Capture cell blur (post Phase 1)** | **~75 ms** | **~108 ms** | `capture-cell` PATCH; seed DB, CI fresh servers |

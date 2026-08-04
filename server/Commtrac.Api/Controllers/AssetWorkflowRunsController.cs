@@ -262,6 +262,89 @@ public class AssetWorkflowRunsController : ControllerBase
         return Ok(items.ToList());
     }
 
+    // GET api/asset-workflow-runs/by-project/{projectId}/runs-summary — slim latest run per asset (no JSON blobs)
+    [HttpGet("by-project/{projectId}/runs-summary")]
+    public async Task<IActionResult> ListRunSummariesByProject(string projectId, [FromQuery] string? assetIds = null)
+    {
+        try
+        {
+            var assetIdList = ParseCommaSeparatedIds(assetIds);
+            if (assetIdList.Count == 0)
+            {
+                assetIdList = await _db.ProjectAssets
+                    .Where(a => a.ProjectId == projectId)
+                    .Select(a => a.Id)
+                    .ToListAsync();
+            }
+
+            if (assetIdList.Count == 0)
+            {
+                return Ok(Array.Empty<AssetWorkflowRunSummaryDto>());
+            }
+
+            var selectedIds = await SelectRepresentativeRunIdsAsync(assetIdList);
+            if (selectedIds.Count == 0)
+            {
+                return Ok(Array.Empty<AssetWorkflowRunSummaryDto>());
+            }
+
+            var summaries = await _db.AssetWorkflowRuns
+                .Where(r => selectedIds.Contains(r.Id))
+                .Select(r => new AssetWorkflowRunSummaryDto(
+                    r.Id,
+                    r.AssetId,
+                    r.WorkflowConfigId,
+                    r.Status,
+                    r.IsLocked,
+                    r.SignatureStatus,
+                    r.StartedAt,
+                    r.CompletedAt,
+                    r.UpdatedAt,
+                    r.RunNumber))
+                .AsNoTracking()
+                .ToListAsync();
+
+            return Ok(summaries);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list run summaries for project {ProjectId}", projectId);
+            return Ok(Array.Empty<AssetWorkflowRunSummaryDto>());
+        }
+    }
+
+    // GET api/asset-workflow-runs/by-project/{projectId}/runs-detail — full run blobs for capture/edit (max 100 assets)
+    [HttpGet("by-project/{projectId}/runs-detail")]
+    public async Task<IActionResult> ListRunDetailsByProject(string projectId, [FromQuery] string assetIds)
+    {
+        try
+        {
+            var assetIdList = ParseCommaSeparatedIds(assetIds).Take(100).ToList();
+            if (assetIdList.Count == 0)
+            {
+                return BadRequest(new { message = "assetIds query parameter is required." });
+            }
+
+            var selectedIds = await SelectRepresentativeRunIdsAsync(assetIdList);
+            if (selectedIds.Count == 0)
+            {
+                return Ok(Array.Empty<AssetWorkflowRunDto>());
+            }
+
+            var runs = await _db.AssetWorkflowRuns
+                .Where(r => selectedIds.Contains(r.Id))
+                .AsNoTracking()
+                .ToListAsync();
+
+            return Ok(runs.Select(ToDto));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list run details for project {ProjectId}", projectId);
+            return Ok(Array.Empty<AssetWorkflowRunDto>());
+        }
+    }
+
     // GET api/asset-workflow-runs/by-project/{projectId} — representative run(s) per asset for a project
     [HttpGet("by-project/{projectId}")]
     public async Task<IActionResult> ListByProject(string projectId)
@@ -278,40 +361,7 @@ public class AssetWorkflowRunsController : ControllerBase
                 return Ok(Array.Empty<AssetWorkflowRunDto>());
             }
 
-            // Phase 1: lightweight keys only — avoid loading WorkflowSnapshotJson /
-            // StepResultsJson for every historical run (can be thousands on large jobs).
-            var runKeys = await _db.AssetWorkflowRuns
-                .Where(r => assetIds.Contains(r.AssetId))
-                .Select(r => new RunSelectionKey(r.Id, r.AssetId, r.WorkflowConfigId, r.StartedAt, r.UpdatedAt, r.IsLocked, r.Status))
-                .AsNoTracking()
-                .ToListAsync();
-
-            static bool HasAsBuiltData(RunSelectionKey r) =>
-                r.IsLocked || string.Equals(r.Status, "Complete", StringComparison.OrdinalIgnoreCase);
-
-            var selectedIds = new HashSet<string>();
-            foreach (var group in runKeys.GroupBy(r => new { r.AssetId, r.WorkflowConfigId }))
-            {
-                var newest = group
-                    .OrderByDescending(r => r.StartedAt)
-                    .ThenByDescending(r => r.UpdatedAt)
-                    .First();
-                selectedIds.Add(newest.Id);
-
-                if (!HasAsBuiltData(newest))
-                {
-                    var newestCompleted = group
-                        .Where(HasAsBuiltData)
-                        .OrderByDescending(r => r.StartedAt)
-                        .ThenByDescending(r => r.UpdatedAt)
-                        .FirstOrDefault();
-                    if (newestCompleted is not null && newestCompleted.Id != newest.Id)
-                    {
-                        selectedIds.Add(newestCompleted.Id);
-                    }
-                }
-            }
-
+            var selectedIds = await SelectRepresentativeRunIdsAsync(assetIds);
             if (selectedIds.Count == 0)
             {
                 return Ok(Array.Empty<AssetWorkflowRunDto>());
@@ -329,6 +379,51 @@ public class AssetWorkflowRunsController : ControllerBase
             _logger.LogError(ex, "Failed to list workflow runs for project {ProjectId}", projectId);
             return Ok(Array.Empty<AssetWorkflowRunDto>());
         }
+    }
+
+    private static List<string> ParseCommaSeparatedIds(string? raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? []
+            : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+    private async Task<HashSet<string>> SelectRepresentativeRunIdsAsync(IReadOnlyList<string> assetIds)
+    {
+        var runKeys = await _db.AssetWorkflowRuns
+            .Where(r => assetIds.Contains(r.AssetId))
+            .Select(r => new RunSelectionKey(r.Id, r.AssetId, r.WorkflowConfigId, r.StartedAt, r.UpdatedAt, r.IsLocked, r.Status))
+            .AsNoTracking()
+            .ToListAsync();
+
+        static bool HasAsBuiltData(RunSelectionKey r) =>
+            r.IsLocked || string.Equals(r.Status, "Complete", StringComparison.OrdinalIgnoreCase);
+
+        var selectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in runKeys.GroupBy(r => new { r.AssetId, r.WorkflowConfigId }))
+        {
+            var newest = group
+                .OrderByDescending(r => r.StartedAt)
+                .ThenByDescending(r => r.UpdatedAt)
+                .First();
+            selectedIds.Add(newest.Id);
+
+            if (!HasAsBuiltData(newest))
+            {
+                var newestCompleted = group
+                    .Where(HasAsBuiltData)
+                    .OrderByDescending(r => r.StartedAt)
+                    .ThenByDescending(r => r.UpdatedAt)
+                    .FirstOrDefault();
+                if (newestCompleted is not null && newestCompleted.Id != newest.Id)
+                {
+                    selectedIds.Add(newestCompleted.Id);
+                }
+            }
+        }
+
+        return selectedIds;
     }
 
     private sealed record RunSelectionKey(

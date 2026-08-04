@@ -544,16 +544,48 @@ public class ProjectAssetsController : ControllerBase
     }
 
     // GET api/project-assets/by-project/{projectId}
+    // Optional ?page=&pageSize=&sort=assetTag&search= — when page is set, returns PaginatedProjectAssetsResponse.
     [HttpGet("by-project/{projectId}")]
-    public async Task<ActionResult<IEnumerable<ProjectAssetDto>>> GetByProject(string projectId, [FromQuery] bool includeDeleted = false)
+    public async Task<IActionResult> GetByProject(
+        string projectId,
+        [FromQuery] bool includeDeleted = false,
+        [FromQuery] int? page = null,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] string sort = "assetTag",
+        [FromQuery] string? search = null)
     {
-        var assetsQuery = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
-        var assets = await assetsQuery
-            .Where(a => a.ProjectId == projectId)
-            .OrderByDescending(a => a.CreatedAt)
-            .ToListAsync();
+        pageSize = Math.Clamp(pageSize, 1, 100);
 
-        return Ok(await MapAssetsToDtosAsync(assets));
+        var assetsQuery = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
+        var query = assetsQuery.Where(a => a.ProjectId == projectId);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(a =>
+                a.AssetTag.Contains(term)
+                || (a.AssetName != null && a.AssetName.Contains(term))
+                || (a.SerialNumber != null && a.SerialNumber.Contains(term))
+                || (a.Location != null && a.Location.Contains(term)));
+        }
+
+        query = sort.Trim().ToLowerInvariant() switch
+        {
+            "createdat" => query.OrderByDescending(a => a.CreatedAt),
+            _ => query.OrderBy(a => a.AssetTag),
+        };
+
+        if (page is null)
+        {
+            var all = await query.ToListAsync();
+            return Ok(await MapAssetsToDtosAsync(all));
+        }
+
+        var pageNum = Math.Max(1, page.Value);
+        var total = await query.CountAsync();
+        var pageItems = await query.Skip((pageNum - 1) * pageSize).Take(pageSize).ToListAsync();
+        var dtos = await MapAssetsToDtosAsync(pageItems, lightweightSummaries: true);
+        return Ok(new PaginatedProjectAssetsResponse(dtos, total, pageNum, pageSize, pageNum * pageSize < total));
     }
 
     // GET api/project-assets/by-product/{productId}
@@ -896,10 +928,12 @@ public class ProjectAssetsController : ControllerBase
         return NoContent();
     }
 
-    private async Task<List<ProjectAssetDto>> MapAssetsToDtosAsync(IEnumerable<ProjectAssetEntity> assets)
+    private async Task<List<ProjectAssetDto>> MapAssetsToDtosAsync(
+        IEnumerable<ProjectAssetEntity> assets,
+        bool lightweightSummaries = false)
     {
         var assetList = assets.ToList();
-        var summaries = await BuildWorkflowSummariesAsync(assetList);
+        var summaries = await BuildWorkflowSummariesAsync(assetList, lightweightSummaries);
         return assetList.Select(asset => ToDto(asset, summaries.GetValueOrDefault(asset.Id))).ToList();
     }
 
@@ -1019,13 +1053,17 @@ public class ProjectAssetsController : ControllerBase
         }
     }
 
-    private async Task<Dictionary<string, ProjectAssetWorkflowSummaryDto>> BuildWorkflowSummariesAsync(IEnumerable<ProjectAssetEntity> assets)
+    private async Task<Dictionary<string, ProjectAssetWorkflowSummaryDto>> BuildWorkflowSummariesAsync(
+        IEnumerable<ProjectAssetEntity> assets,
+        bool lightweight = false)
     {
         var assetList = assets.ToList();
         if (assetList.Count == 0) return new();
 
         var assetIds = assetList.Select(a => a.Id).Distinct().ToList();
-        var latestRunByAsset = await GetLatestRunsByAssetAsync(assetIds);
+        var latestRunByAsset = lightweight
+            ? await GetLatestRunSummariesByAssetAsync(assetIds)
+            : await GetLatestRunsByAssetAsync(assetIds);
         var assignedWorkflowAssetIds = await _db.AssetWorkflowAssignments
             .Where(a => assetIds.Contains(a.AssetId) && a.Active)
             .Select(a => a.AssetId)
@@ -1038,10 +1076,72 @@ public class ProjectAssetsController : ControllerBase
         foreach (var asset in assetList)
         {
             latestRunByAsset.TryGetValue(asset.Id, out var latestRun);
-            summaries[asset.Id] = BuildWorkflowSummary(asset, latestRun, assignedWorkflowAssetIdSet.Contains(asset.Id));
+            summaries[asset.Id] = BuildWorkflowSummary(asset, latestRun, assignedWorkflowAssetIdSet.Contains(asset.Id), lightweight);
         }
 
         return summaries;
+    }
+
+    private sealed record LatestRunSummaryRow(
+        string Id,
+        string AssetId,
+        string Status,
+        bool IsLocked,
+        string SignatureStatus,
+        DateTime StartedAt,
+        DateTime? CompletedAt,
+        string IssuesJson);
+
+    private async Task<Dictionary<string, AssetWorkflowRunEntity>> GetLatestRunSummariesByAssetAsync(IEnumerable<string> assetIds)
+    {
+        var ids = assetIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToList();
+        if (ids.Count == 0) return new();
+
+        var latestRunIds = (await _db.AssetWorkflowRuns
+            .Where(r => ids.Contains(r.AssetId))
+            .Select(r => new LatestRunKey(r.Id, r.AssetId, r.StartedAt, r.UpdatedAt))
+            .AsNoTracking()
+            .ToListAsync())
+            .GroupBy(r => r.AssetId)
+            .Select(g => g
+                .OrderByDescending(r => r.StartedAt)
+                .ThenByDescending(r => r.UpdatedAt)
+                .Select(r => r.Id)
+                .First())
+            .ToList();
+
+        if (latestRunIds.Count == 0) return new();
+
+        var rows = await _db.AssetWorkflowRuns
+            .Where(r => latestRunIds.Contains(r.Id))
+            .Select(r => new LatestRunSummaryRow(
+                r.Id,
+                r.AssetId,
+                r.Status,
+                r.IsLocked,
+                r.SignatureStatus,
+                r.StartedAt,
+                r.CompletedAt,
+                r.IssuesJson))
+            .AsNoTracking()
+            .ToListAsync();
+
+        return rows.ToDictionary(
+            r => r.AssetId,
+            r => new AssetWorkflowRunEntity
+            {
+                Id = r.Id,
+                AssetId = r.AssetId,
+                Status = r.Status,
+                IsLocked = r.IsLocked,
+                SignatureStatus = r.SignatureStatus,
+                StartedAt = r.StartedAt,
+                CompletedAt = r.CompletedAt,
+                IssuesJson = r.IssuesJson,
+                StepResultsJson = "[]",
+                WorkflowSnapshotJson = "{}",
+                WorkflowConfigId = string.Empty,
+            });
     }
 
     private async Task<Dictionary<string, AssetWorkflowRunEntity>> GetLatestRunsByAssetAsync(IEnumerable<string> assetIds, bool onlyUnlocked = false)
