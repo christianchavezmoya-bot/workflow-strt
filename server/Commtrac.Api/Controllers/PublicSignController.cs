@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Commtrac.Api.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,8 +19,21 @@ namespace Commtrac.Api.Controllers;
 public class PublicSignController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly NotificationFeedService _feed;
+    private readonly SseHub _sse;
+    private readonly ProjectLifecycleService _projectLifecycle;
 
-    public PublicSignController(AppDbContext db) => _db = db;
+    public PublicSignController(
+        AppDbContext db,
+        NotificationFeedService feed,
+        SseHub sse,
+        ProjectLifecycleService projectLifecycle)
+    {
+        _db = db;
+        _feed = feed;
+        _sse = sse;
+        _projectLifecycle = projectLifecycle;
+    }
 
     private async Task<(SignatureTokenEntity? token, string? error)> ResolveToken(string tokenId)
     {
@@ -119,6 +133,10 @@ public class PublicSignController : ControllerBase
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == token.RunId);
         if (run is null) return NotFound();
         if (!run.IsLocked) return BadRequest(new { message = "Run is not completed." });
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        var project = asset is null
+            ? null
+            : await _db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
 
         if (!req.ConsentConfirmed) return BadRequest(new { message = "Consent must be confirmed." });
         if (string.IsNullOrWhiteSpace(req.SignerName)) return BadRequest(new { message = "Signer name required." });
@@ -163,10 +181,94 @@ public class PublicSignController : ControllerBase
         run.CustomerSignedAt = now;
         run.UpdatedAt        = now;
 
+        if (asset is not null)
+        {
+            asset.Status = req.ReasonCode == "Declined" ? "Complete" : "Closed";
+            asset.UpdatedAt = now;
+        }
+
         token.UsedAtUtc = now;
 
         await _db.SaveChangesAsync();
+
+        if (asset is not null)
+        {
+            var actorName = req.SignerName;
+            await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId: null, actorName);
+
+            if (req.ReasonCode == "Declined")
+            {
+                await NotifyAssetEventAsync(
+                    asset,
+                    "asset-signature-declined",
+                    "warning",
+                    "Customer sign-off declined",
+                    $"{asset.AssetTag} customer sign-off was declined on job {{job}}.",
+                    run.Id,
+                    actorName,
+                    project?.JobNumber);
+            }
+            else
+            {
+                await NotifyAssetEventAsync(
+                    asset,
+                    "asset-closed",
+                    "info",
+                    "Asset closed",
+                    $"{asset.AssetTag} was customer-signed and closed on job {{job}}.",
+                    run.Id,
+                    actorName,
+                    project?.JobNumber);
+            }
+
+            await _sse.BroadcastAsync("assets:updated", new { projectId = asset.ProjectId });
+        }
+
         return Ok(new { message = "Signature recorded successfully.", status = run.SignatureStatus });
+    }
+
+    private async Task NotifyAssetEventAsync(
+        ProjectAssetEntity asset,
+        string eventType,
+        string severity,
+        string title,
+        string template,
+        string runId,
+        string actorName,
+        string? jobNumber)
+    {
+        var message = template.Replace("{job}", jobNumber ?? "unknown", StringComparison.Ordinal);
+
+        await _feed.NotifyRolesAsync(
+            eventType,
+            severity,
+            title,
+            message,
+            ["Admin", "Project Manager"],
+            asset.ProjectId,
+            asset.Id,
+            runId,
+            "project-asset",
+            asset.Id,
+            null,
+            actorName);
+
+        if (!string.IsNullOrWhiteSpace(asset.AssignedUserId))
+        {
+            await _feed.NotifyUsersAsync(
+                eventType,
+                severity,
+                title,
+                message,
+                [asset.AssignedUserId],
+                asset.ProjectId,
+                asset.Id,
+                runId,
+                "project-asset",
+                asset.Id,
+                null,
+                actorName);
+        }
     }
 
     // POST /api/public/sign/{tokenId}/request-otp  — sends OTP to token's recipient email
