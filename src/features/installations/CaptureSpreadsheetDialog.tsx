@@ -57,13 +57,16 @@ import { assetWorkflowRunService } from "../../services/assetWorkflowRunService"
 import { pickCaptureRun } from "../../utils/captureSpreadsheet";
 import { captureSpreadsheetTheme } from "../../theme/captureSpreadsheetTheme";
 import CaptureSpreadsheetRow from "./CaptureSpreadsheetRow";
+import CaptureVirtualizedTableBody from "./CaptureVirtualizedTableBody";
 import { captureCellKey } from "./CaptureEditableCell";
+import { isMobileNativePlatform } from "../../utils/platform";
 import {
   type CaptureSpreadsheetAssetJobColumn,
   ACTIONS_W,
   ASSET_JOB_COL_W,
   ASSET_JOB_PALETTE,
   CAPTURE_COL_W,
+  CAPTURE_VIRTUALIZE_MIN_ROWS,
   CHECKBOX_W,
   HEADER_Z,
   STATIC_HEADER_BG,
@@ -204,6 +207,7 @@ export default function CaptureSpreadsheetDialog({
   const [cellError, setCellError] = useState<string | null>(null);
   const headerRow1Ref = useRef<HTMLTableRowElement>(null);
   const headerRow2Ref = useRef<HTMLTableRowElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const runsMapRef = useRef(runsMap);
   runsMapRef.current = runsMap;
   const [headerStickyTops, setHeaderStickyTops] = useState(DEFAULT_HEADER_STICKY_TOPS);
@@ -396,6 +400,13 @@ export default function CaptureSpreadsheetDialog({
 
   const selectionEnabled = !hideSelectionColumn && Boolean(selectedAssetIds && onToggleAssetSelection && onToggleVisibleAssetSelection);
   const filteredAssetIds = useMemo(() => filteredRows.map(({ asset }) => asset.id), [filteredRows]);
+  const shouldVirtualizeRows = !isMobileNativePlatform()
+    && filteredRows.length >= CAPTURE_VIRTUALIZE_MIN_ROWS;
+  const tableBodyColSpan = visibleColumns.length + assetJobColumns.length + (selectionEnabled ? 4 : 3);
+  const tableScrollMaxHeight = embedded
+    ? (shouldVirtualizeRows ? "min(70vh, 720px)" : undefined)
+    : (fullScreen ? "calc(100vh - 200px)" : "70vh");
+
   const selectedVisibleCount = useMemo(
     () => selectionEnabled ? filteredAssetIds.filter((id) => selectedAssetIds?.has(id) ?? false).length : 0,
     [filteredAssetIds, selectedAssetIds, selectionEnabled],
@@ -550,6 +561,28 @@ export default function CaptureSpreadsheetDialog({
     }
   }, [currentUserName, onRunUpdated, runsMap]);
 
+  const virtualRowProps = useMemo(() => ({
+    orderedGroups,
+    assetJobColumns,
+    selectionEnabled,
+    onToggleAssetSelection,
+    editableForColumn: canEditCaptureCell,
+    onSaveCell: saveCaptureCell,
+    onPatchCell: onPatchCell,
+    renderStatus,
+    renderActions,
+  }), [
+    assetJobColumns,
+    canEditCaptureCell,
+    onPatchCell,
+    onToggleAssetSelection,
+    orderedGroups,
+    renderActions,
+    renderStatus,
+    saveCaptureCell,
+    selectionEnabled,
+  ]);
+
   const inner = (
     <Stack spacing={1.5} sx={embedded ? { width: "100%" } : undefined}>
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
@@ -619,7 +652,15 @@ export default function CaptureSpreadsheetDialog({
         </Alert>
       )}
 
-      <Box sx={{ overflow: "auto", maxHeight: embedded ? undefined : (fullScreen ? "calc(100vh - 200px)" : "70vh"), WebkitOverflowScrolling: "touch", color: ASSET_JOB_PALETTE.text }}>
+      <Box
+        ref={scrollContainerRef}
+        sx={{
+          overflow: "auto",
+          maxHeight: tableScrollMaxHeight,
+          WebkitOverflowScrolling: "touch",
+          color: ASSET_JOB_PALETTE.text,
+        }}
+      >
         <Table size="small" stickyHeader sx={{ minWidth: 760, borderCollapse: "separate", borderSpacing: 0, color: ASSET_JOB_PALETTE.text }}>
           <TableHead sx={{ position: "relative", zIndex: HEADER_Z.row1 }}>
             <TableRow ref={headerRow1Ref}>
@@ -867,17 +908,27 @@ export default function CaptureSpreadsheetDialog({
               })}
             </TableRow>
           </TableHead>
-          <TableBody sx={{ position: "relative", zIndex: 0 }}>
-            {filteredRows.length === 0 ? (
+          {filteredRows.length === 0 ? (
+            <TableBody sx={{ position: "relative", zIndex: 0 }}>
               <TableRow>
-                <TableCell colSpan={visibleColumns.length + assetJobColumns.length + (selectionEnabled ? 4 : 3)}>
+                <TableCell colSpan={tableBodyColSpan}>
                   <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
                     No assets match.
                   </Typography>
                 </TableCell>
               </TableRow>
-            ) : (
-              filteredRows.map(({ asset, capture, mergedCells }, rowIndex) => (
+            </TableBody>
+          ) : shouldVirtualizeRows ? (
+            <CaptureVirtualizedTableBody
+              scrollRef={scrollContainerRef}
+              rows={filteredRows}
+              colSpan={tableBodyColSpan}
+              selectedAssetIds={selectedAssetIds}
+              rowProps={virtualRowProps}
+            />
+          ) : (
+            <TableBody sx={{ position: "relative", zIndex: 0 }}>
+              {filteredRows.map(({ asset, capture, mergedCells }, rowIndex) => (
                 <CaptureSpreadsheetRow
                   key={asset.id}
                   asset={asset}
@@ -895,9 +946,9 @@ export default function CaptureSpreadsheetDialog({
                   renderStatus={renderStatus}
                   renderActions={renderActions}
                 />
-              ))
-            )}
-          </TableBody>
+              ))}
+            </TableBody>
+          )}
         </Table>
       </Box>
 
