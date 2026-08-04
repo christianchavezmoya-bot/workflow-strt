@@ -14,7 +14,6 @@ function normalizeDashboardStatus(value?: string | null): string {
 export function isDashboardWorkspaceCurrentItem(item: DashboardWorkspaceAssetItem): boolean {
   const assetStatus = normalizeDashboardStatus(item.status);
   const runStatus = normalizeDashboardStatus(item.runStatus);
-  const signatureStatus = (item.signatureStatus ?? "").trim().toLowerCase();
 
   if (
     assetStatus === "complete"
@@ -25,16 +24,12 @@ export function isDashboardWorkspaceCurrentItem(item: DashboardWorkspaceAssetIte
     return false;
   }
 
-  // Mirror server order: active run states before signature-only heuristics.
-  if (runStatus === "paused" || runStatus === "inprogress") {
+  if ((item.signatureStatus ?? "").trim().toLowerCase() === "pendinginstaller") {
     return true;
   }
 
-  // Server requires locked run + PendingInstaller; approximate with asset awaiting sign-off.
-  if (signatureStatus === "pendinginstaller") {
-    return assetStatus === "pending"
-      || assetStatus === "complete"
-      || assetStatus === "completed";
+  if (runStatus === "paused" || runStatus === "inprogress") {
+    return true;
   }
 
   return assetStatus === "notstarted"
