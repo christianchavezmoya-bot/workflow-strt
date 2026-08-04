@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { bucketDashboardWorkspaceItems } from "./dashboardWorkspaceBucket";
+import {
+  bucketDashboardWorkspaceItems,
+  isDashboardWorkspaceCurrentItem,
+  isDashboardWorkspaceHistoryItem,
+} from "./dashboardWorkspaceBucket";
 import type { DashboardWorkspaceAssetItem } from "../services/projectAssetService";
 
 function item(
@@ -25,6 +29,40 @@ function item(
   };
 }
 
+describe("isDashboardWorkspaceCurrentItem", () => {
+  it("keeps active assigned work in current", () => {
+    expect(isDashboardWorkspaceCurrentItem(item("a1", "NotStarted"))).toBe(true);
+    expect(isDashboardWorkspaceCurrentItem(item("a1", "InProgress"))).toBe(true);
+    expect(isDashboardWorkspaceCurrentItem(item("a1", "Pending"))).toBe(true);
+    expect(isDashboardWorkspaceCurrentItem(item("a1", "Issue"))).toBe(true);
+    expect(isDashboardWorkspaceCurrentItem(item("a1", "OnHold"))).toBe(true);
+  });
+
+  it("treats paused runs as current even when asset status is ambiguous", () => {
+    expect(isDashboardWorkspaceCurrentItem(item("a1", "InProgress", { runStatus: "Paused" }))).toBe(true);
+  });
+
+  it("keeps PendingInstaller signature work in current", () => {
+    expect(isDashboardWorkspaceCurrentItem(item("a1", "Pending", { signatureStatus: "PendingInstaller" }))).toBe(true);
+  });
+
+  it("routes terminal assets out of current", () => {
+    expect(isDashboardWorkspaceCurrentItem(item("a1", "Complete"))).toBe(false);
+    expect(isDashboardWorkspaceCurrentItem(item("a1", "Closed"))).toBe(false);
+    expect(isDashboardWorkspaceCurrentItem(item("a1", "Cancelled"))).toBe(false);
+  });
+});
+
+describe("isDashboardWorkspaceHistoryItem", () => {
+  it("includes terminal asset statuses", () => {
+    expect(isDashboardWorkspaceHistoryItem(item("a1", "Complete"))).toBe(true);
+    expect(isDashboardWorkspaceHistoryItem(item("a1", "Completed"))).toBe(true);
+    expect(isDashboardWorkspaceHistoryItem(item("a1", "Closed"))).toBe(true);
+    expect(isDashboardWorkspaceHistoryItem(item("a1", "Cancelled"))).toBe(true);
+    expect(isDashboardWorkspaceHistoryItem(item("a1", "InProgress"))).toBe(false);
+  });
+});
+
 describe("bucketDashboardWorkspaceItems", () => {
   it("places assigned NotStarted assets in current installs", () => {
     const bucketed = bucketDashboardWorkspaceItems([item("a1", "NotStarted", { assignedUserId: "u1" })]);
@@ -48,17 +86,16 @@ describe("bucketDashboardWorkspaceItems", () => {
     expect(bucketed.installHistory.map((row) => row.id)).toEqual(["a1"]);
   });
 
-  // Phase 2 will route Closed assets into history instead of dropping them.
-  it.skip("places Closed assets in install history (phase 2)", () => {
+  it("places Closed assets in install history", () => {
     const bucketed = bucketDashboardWorkspaceItems([item("a1", "Closed")]);
     expect(bucketed.installHistory.map((row) => row.id)).toEqual(["a1"]);
     expect(bucketed.currentInstalls).toHaveLength(0);
   });
 
-  it("currently excludes Closed assets from both buckets", () => {
-    const bucketed = bucketDashboardWorkspaceItems([item("a1", "Closed")]);
+  it("places Cancelled assets in install history", () => {
+    const bucketed = bucketDashboardWorkspaceItems([item("a1", "Cancelled")]);
+    expect(bucketed.installHistory.map((row) => row.id)).toEqual(["a1"]);
     expect(bucketed.currentInstalls).toHaveLength(0);
-    expect(bucketed.installHistory).toHaveLength(0);
   });
 
   it("routes inspection-only assets to current inspections", () => {
@@ -67,5 +104,13 @@ describe("bucketDashboardWorkspaceItems", () => {
     ]);
     expect(bucketed.currentInspections.map((row) => row.id)).toEqual(["a1"]);
     expect(bucketed.currentInstalls).toHaveLength(0);
+  });
+
+  it("places closed inspection assets in inspection history", () => {
+    const bucketed = bucketDashboardWorkspaceItems([
+      item("a1", "Closed", { workflowMode: "INSPECTION_ONLY" }),
+    ]);
+    expect(bucketed.inspectionHistory.map((row) => row.id)).toEqual(["a1"]);
+    expect(bucketed.currentInspections).toHaveLength(0);
   });
 });
