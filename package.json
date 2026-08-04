@@ -16,6 +16,7 @@
     "test:e2e": "playwright test",
     "test:e2e:full": "playwright test --config playwright.full.config.ts",
     "test:e2e:perf": "playwright test --config playwright.perf.config.ts",
+    "test:e2e:pm-smoke": "playwright test --config playwright.pm-field.config.ts",
     "release-gates": "node .claude/skills/enterprise-dev-practices/scripts/check-gates.mjs typecheck backend test e2e e2eperf",
     "version:sync": "node scripts/sync-version.mjs",
     "gates": "node .claude/skills/enterprise-dev-practices/scripts/check-gates.mjs",
