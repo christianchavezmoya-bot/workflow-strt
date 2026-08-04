@@ -40,7 +40,9 @@ import { assetDocumentLinkService } from "../../services/assetDocumentLinkServic
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
 import {
   dashboardWorkspaceHasRows,
-  stabilizeDashboardWorkspace,
+  mergeDashboardWorkspace,
+  mergeDashboardWorkspaceItems,
+  dedupeDashboardWorkspace,
 } from "../../utils/dashboardWorkspaceMerge";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
@@ -606,11 +608,10 @@ const Dashboard = () => {
     data: DashboardWorkspace,
     options?: { persist?: boolean; stabilize?: boolean },
   ) => {
-    const shouldStabilize = options?.stabilize ?? true;
     const previous = dashboardWorkspaceRef.current;
-    const next = shouldStabilize
-      ? stabilizeDashboardWorkspace(previous, data)
-      : data;
+    const next = mergeDashboardWorkspace(previous, data, {
+      stabilize: options?.stabilize ?? true,
+    });
     dashboardWorkspaceRef.current = next;
     setDashboardWorkspace(next);
     if (options?.persist === false) return;
