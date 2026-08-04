@@ -1,7 +1,8 @@
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import type { Feature } from "../types/feature";
+import type { FeatureDependency } from "../types/featureDependency";
 import type { ProjectAsset } from "../types/projectAsset";
-import { pickCaptureRun } from "./captureSpreadsheet";
+import { labelForCaptureField, pickCaptureRun } from "./captureSpreadsheet";
 import { buildCapturedFields, type CapturedFieldExport, type WorkflowReportExportContext } from "./workflowReportExport";
 
 export interface ProjectCaptureColumn {
@@ -237,6 +238,88 @@ export function buildProjectCaptureTable(
   return {
     columns: finalGroups.flatMap((group) => group.columns),
     groups: finalGroups,
+    rows,
+  };
+}
+
+/**
+ * Web-only fallback: column headers from product feature dependencies while full run
+ * blobs are still loading. Cells are empty and not editable until blob-derived table
+ * replaces this (same path native always uses — never call on phone).
+ */
+export function buildSchemaCaptureTableSkeleton(
+  assets: ProjectAsset[],
+  features: Feature[],
+  depsByFeature: Record<string, FeatureDependency[]>,
+  maxUnitsByFeature: Record<string, number>,
+): ProjectCaptureTable {
+  const groups: ProjectCaptureGroup[] = [];
+  let sequence = 0;
+  let tintIndex = 0;
+
+  const inventoryFeatures = features
+    .filter((f) => f.isInventory)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const feat of inventoryFeatures) {
+    const maxUnits = Math.max(1, maxUnitsByFeature[feat.id] ?? 1);
+    const featureDeps = (depsByFeature[feat.id] ?? [])
+      .slice()
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+
+    const captureKeys = feat.captureFields?.length
+      ? feat.captureFields.map(String)
+      : featureDeps.length
+        ? featureDeps.map((d) => d.name)
+        : ["serialNo", "firmware"];
+
+    const groupKey = `feature:${feat.id}`;
+    const columns: ProjectCaptureColumn[] = [];
+
+    for (let unit = 1; unit <= maxUnits; unit += 1) {
+      for (const fieldKey of captureKeys) {
+        const fieldLabel = labelForCaptureField(fieldKey);
+        const columnKey = `${groupKey}:u${unit}:${normalizeKeyPart(fieldLabel)}`;
+        columns.push({
+          id: columnKey,
+          groupKey,
+          featureId: feat.id,
+          featureName: feat.name,
+          unitIndex: unit,
+          fieldLabel,
+          displayLabel: maxUnits > 1 ? `U${unit} · ${fieldLabel}` : fieldLabel,
+          sequence: sequence++,
+          groupType: "feature",
+        });
+      }
+    }
+
+    if (columns.length === 0) continue;
+
+    groups.push({
+      key: groupKey,
+      featureId: feat.id,
+      featureName: feat.name,
+      displayName: feat.name,
+      groupType: "feature",
+      businessPartNumber: feat.alternativePartNumber,
+      manufacturerPartNumber: feat.manufacturerPartNumber,
+      unitCount: maxUnits,
+      columns,
+      tintIndex: tintIndex++,
+    });
+  }
+
+  const rows: ProjectCaptureRow[] = assets.map((asset) => ({
+    assetId: asset.id,
+    cells: {},
+    searchText: [asset.assetTag, asset.assetName ?? "", asset.serialNumber ?? ""].join(" ").toLowerCase(),
+    searchHits: [],
+  }));
+
+  return {
+    columns: groups.flatMap((g) => g.columns),
+    groups,
     rows,
   };
 }
