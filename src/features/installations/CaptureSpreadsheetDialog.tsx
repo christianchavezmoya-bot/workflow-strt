@@ -9,6 +9,7 @@ import {
   Button,
   Checkbox,
   Chip,
+  CircularProgress,
   Dialog,
   Menu,
   MenuItem,
@@ -69,6 +70,9 @@ export type CaptureSpreadsheetDialogProps = {
   hideSelectionColumn?: boolean;
   assets: ProjectAsset[];
   runsMap: Record<string, AssetWorkflowRun[]>;
+  /** True while paginated web loads full run blobs for capture columns. */
+  captureRunsLoading?: boolean;
+  captureRunsError?: string | null;
   features: Feature[];
   depsByFeature: Record<string, FeatureDependency[]>;
   featureSelectionsByConfig: FeatureSelection[][];
@@ -235,6 +239,8 @@ export default function CaptureSpreadsheetDialog({
   hideSelectionColumn = false,
   assets,
   runsMap,
+  captureRunsLoading = false,
+  captureRunsError = null,
   features,
   readOnly = false,
   canEditCapture = false,
@@ -685,7 +691,22 @@ export default function CaptureSpreadsheetDialog({
         </Typography>
       )}
 
-      {visibleGroups.length === 0 && (
+      {captureRunsError && (
+        <Alert severity="error" sx={{ py: 0.25 }}>
+          {captureRunsError}
+        </Alert>
+      )}
+
+      {captureRunsLoading && (
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ py: 0.5 }}>
+          <CircularProgress size={18} />
+          <Typography variant="caption" color="text.secondary">
+            Loading capture columns…
+          </Typography>
+        </Stack>
+      )}
+
+      {visibleGroups.length === 0 && !captureRunsLoading && (
         <Alert severity={table.columns.length > 0 ? 'warning' : 'info'}>
           {table.columns.length > 0
             ? 'Capture columns are currently hidden by saved column preferences. The page has reset invalid saved keys automatically; if you still only see the four fixed columns, hard-refresh this tab.'
