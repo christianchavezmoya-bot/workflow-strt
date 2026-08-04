@@ -2,6 +2,7 @@ import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import type { Feature } from "../types/feature";
 import type { FeatureDependency } from "../types/featureDependency";
 import type { ProjectAsset } from "../types/projectAsset";
+import type { StepResult } from "../types/assetWorkflowRun";
 import { labelForCaptureField, pickCaptureRun } from "./captureSpreadsheet";
 import { buildCapturedFields, type CapturedFieldExport, type WorkflowReportExportContext } from "./workflowReportExport";
 
@@ -114,6 +115,47 @@ function captureContext(run: AssetWorkflowRun, asset: ProjectAsset, productFeatu
 
 function groupSortName(group: GroupAccumulator): string {
   return group.groupType === "general" ? "~~~~" : group.displayName.toLowerCase();
+}
+
+function parseStepResultsForStructure(json: string): StepResult[] {
+  try {
+    return (JSON.parse(json || "[]") as StepResult[]).filter((item) => item.stepId !== "__nav__");
+  } catch {
+    return [];
+  }
+}
+
+/** Fingerprint stepResultsJson shape (step/input keys) without cell values — stable across inline edits. */
+export function stepResultsStructureFingerprint(stepResultsJson: string): string {
+  const results = parseStepResultsForStructure(stepResultsJson);
+  return results
+    .map((result) => {
+      const inputKeys = Object.keys(result.values ?? {}).sort().join(",");
+      return `${result.stepId}:${result.iterationIndex ?? 0}:${inputKeys}`;
+    })
+    .sort()
+    .join(";");
+}
+
+/**
+ * Rebuild capture table columns/rows only when workflow structure changes — not on every
+ * stepResultsJson value edit (F3 render perf).
+ */
+export function getCaptureTableStructureKey(
+  runsByAsset: Record<string, AssetWorkflowRun[]>,
+  assetIds: string[],
+): string {
+  const parts = assetIds
+    .slice()
+    .sort()
+    .map((assetId) => {
+      const run = pickCaptureRun(runsByAsset[assetId] ?? []);
+      if (!run) return `${assetId}:none`;
+      const snapshotLen = (run.workflowSnapshotJson ?? "").length;
+      const structure = stepResultsStructureFingerprint(run.stepResultsJson ?? "[]");
+      return `${assetId}:${run.id}:${snapshotLen}:${structure}`;
+    });
+  return parts.join("|");
 }
 
 export function buildProjectCaptureTable(

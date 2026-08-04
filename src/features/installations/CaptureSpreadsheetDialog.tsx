@@ -8,7 +8,6 @@ import {
   Box,
   Button,
   Checkbox,
-  Chip,
   CircularProgress,
   Dialog,
   Menu,
@@ -44,24 +43,39 @@ import {
   buildProjectCaptureTable,
   buildSchemaCaptureTableSkeleton,
   findCaptureMatch,
+  getCaptureTableStructureKey,
   type ProjectCaptureColumn,
   type ProjectCaptureGroup,
   type ProjectCaptureRow,
 } from "../../utils/projectCaptureTable";
 import { anyMatchesWordStart, matchesWordStart } from "../../utils/textMatch";
 import { computeCaptureHeaderStickyTops } from "../../utils/captureSpreadsheet";
-import { STATUS_LABELS, STATUS_COLORS } from "./assetStatusDisplay";
+import { STATUS_LABELS } from "./assetStatusDisplay";
 import { canEditRun } from "../../utils/runEditPermissions";
 import { isCaptureColumnEditable } from "../../utils/captureTableEdit";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { pickCaptureRun } from "../../utils/captureSpreadsheet";
 import { captureSpreadsheetTheme } from "../../theme/captureSpreadsheetTheme";
+import CaptureSpreadsheetRow from "./CaptureSpreadsheetRow";
+import { captureCellKey } from "./CaptureEditableCell";
+import {
+  type CaptureSpreadsheetAssetJobColumn,
+  ACTIONS_W,
+  ASSET_JOB_COL_W,
+  ASSET_JOB_PALETTE,
+  CAPTURE_COL_W,
+  CHECKBOX_W,
+  HEADER_Z,
+  STATIC_HEADER_BG,
+  STATIC_HEADER_BORDER,
+  STATIC_HEADER_TEXT,
+  STATUS_W,
+  TAG_W,
+  groupPalette,
+  stickyCell,
+} from "./captureSpreadsheetTableLayout";
 
-export type CaptureSpreadsheetAssetJobColumn = {
-  id: string;
-  label: string;
-  valueFor: (asset: ProjectAsset) => string;
-};
+export type { CaptureSpreadsheetAssetJobColumn };
 
 export type CaptureSpreadsheetDialogProps = {
   open: boolean;
@@ -96,34 +110,11 @@ export type CaptureSpreadsheetDialogProps = {
 };
 
 const LS_HIDDEN_KEY = "capture_spreadsheet_hidden_groups_v1";
-const CHECKBOX_W = 40;
-const TAG_W = 98;
-const ASSET_JOB_COL_W = 118;
-const CAPTURE_COL_W = 104;
-const STATUS_W = 112;
-const ACTIONS_W = 132;
-const HEADER_Z = {
-  corner: 120,
-  row1: 115,
-  row2: 110,
-  row3: 105,
-  bodyStickyLeft: 5,
-} as const;
 const DEFAULT_HEADER_STICKY_TOPS = { name: 0, pn: 36, fields: 72 };
-const STATIC_HEADER_BG = "#1F4E78";
-const STATIC_HEADER_TEXT = "#F4FBFF";
-const STATIC_HEADER_BORDER = "#4F6F8B";
-const ASSET_JOB_PALETTE = {
-  header: "#224F88",
-  subHeader: "#E6EEF8",
-  border: "#224F88",
-  tint: "#F7FAFD",
-  tintAlt: "#EFF5FB",
-  text: "#163447",
-};
 
-const ROW_HOVER_BG = "rgba(255,255,255,0.985)";
-const CELL_HOVER_BORDER = "rgba(34,79,136,0.32)";
+function solidFieldHeaderBg(group: ProjectCaptureGroup): string {
+  return groupPalette(group).subHeader;
+}
 
 function loadHiddenGroups(): Set<string> {
   try {
@@ -142,65 +133,6 @@ function saveHiddenGroups(next: Set<string>) {
     // ignore
   }
 }
-
-function hexToRgba(hex: string, alpha: number) {
-  const value = hex.replace("#", "");
-  const n = Number.parseInt(value, 16);
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function groupPalette(group: ProjectCaptureGroup) {
-  if (group.groupType === "general") {
-    return {
-      header: "#5B6576",
-      subHeader: "#EEF1F5",
-      border: "#5B6576",
-      tint: hexToRgba("#5B6576", 0.07),
-    };
-  }
-
-  const featurePalettes = [
-    { header: "#1F4E78", subHeader: "#E7F0F8", border: "#1F4E78", tint: hexToRgba("#1F4E78", 0.08) },
-    { header: "#1D6F68", subHeader: "#E5F4F1", border: "#1D6F68", tint: hexToRgba("#1D6F68", 0.085) },
-    { header: "#556B7B", subHeader: "#EDF1F4", border: "#556B7B", tint: hexToRgba("#556B7B", 0.08) },
-    { header: "#8A6B2D", subHeader: "#F8F1E2", border: "#8A6B2D", tint: hexToRgba("#8A6B2D", 0.08) },
-  ];
-
-  return featurePalettes[Math.abs(group.tintIndex) % featurePalettes.length];
-}
-
-function solidFieldHeaderBg(group: ProjectCaptureGroup): string {
-  return groupPalette(group).subHeader;
-}
-
-
-
-function bodyCellHoverSx(rowBg: string) {
-  return {
-    bgcolor: rowBg,
-    transition: "background-color 120ms ease, box-shadow 120ms ease",
-    "&:hover": {
-      bgcolor: `${ROW_HOVER_BG} !important`,
-      boxShadow: `inset 0 0 0 2px ${CELL_HOVER_BORDER}`,
-    },
-  } as const;
-}
-
-function stickyCell(left: number, width: number, zIndex: number, rowBg?: string) {
-  return {
-    position: "sticky" as const,
-    left,
-    zIndex,
-    minWidth: width,
-    width,
-    maxWidth: width,
-    bgcolor: rowBg ?? ASSET_JOB_PALETTE.tint,
-  };
-}
-
 
 function rowSearchMatch(row: ProjectCaptureRow, asset: ProjectAsset, query: string) {
   if (!query) return true;
@@ -268,11 +200,12 @@ export default function CaptureSpreadsheetDialog({
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
   const [filterMenu, setFilterMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({ anchorEl: null, key: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
-  const [draftValues, setDraftValues] = useState<Record<string, string>>({});
-  const [savingCellKey, setSavingCellKey] = useState<string | null>(null);
+  const [cellPatches, setCellPatches] = useState<Record<string, string>>({});
   const [cellError, setCellError] = useState<string | null>(null);
   const headerRow1Ref = useRef<HTMLTableRowElement>(null);
   const headerRow2Ref = useRef<HTMLTableRowElement>(null);
+  const runsMapRef = useRef(runsMap);
+  runsMapRef.current = runsMap;
   const [headerStickyTops, setHeaderStickyTops] = useState(DEFAULT_HEADER_STICKY_TOPS);
 
   const measureHeaderStickyTops = useCallback(() => {
@@ -284,18 +217,29 @@ export default function CaptureSpreadsheetDialog({
   useEffect(() => {
     if (!open) {
       setSearch("");
-      setDraftValues({});
+      setCellPatches({});
       setCellError(null);
     }
   }, [open]);
 
+  const assetIds = useMemo(() => assets.map((asset) => asset.id), [assets]);
+  const tableStructureKey = useMemo(
+    () => getCaptureTableStructureKey(runsMap, assetIds),
+    [assetIds, runsMap],
+  );
+
+  useEffect(() => {
+    setCellPatches({});
+  }, [tableStructureKey]);
+
   const table = useMemo(() => {
-    const fromRuns = buildProjectCaptureTable(assets, runsMap, features);
+    const fromRuns = buildProjectCaptureTable(assets, runsMapRef.current, features);
     if (fromRuns.groups.length > 0 || !schemaFallback) return fromRuns;
     if (Object.keys(depsByFeature).length === 0) return fromRuns;
     const skeleton = buildSchemaCaptureTableSkeleton(assets, features, depsByFeature, maxUnitsByFeature);
     return skeleton.groups.length > 0 ? skeleton : fromRuns;
-  }, [assets, depsByFeature, features, maxUnitsByFeature, runsMap, schemaFallback]);
+    // Rebuild when column structure changes — not on every stepResultsJson value edit.
+  }, [assets, depsByFeature, features, maxUnitsByFeature, schemaFallback, tableStructureKey]);
 
   const visibleGroups = useMemo(() => {
     return table.groups
@@ -365,15 +309,39 @@ export default function CaptureSpreadsheetDialog({
     }
   }, [hiddenGroups, table.columns.length, table.groups, visibleGroups.length]);
 
+  const applyCellPatches = useCallback((cells: Record<string, string>, assetId: string) => {
+    const merged = { ...cells };
+    for (const key of Object.keys(cellPatches)) {
+      if (!key.startsWith(`${assetId}::`)) continue;
+      const columnId = key.slice(assetId.length + 2);
+      merged[columnId] = cellPatches[key];
+    }
+    return merged;
+  }, [cellPatches]);
+
   const rows = useMemo(() => {
     const rowMap = new Map(table.rows.map((row) => [row.assetId, row]));
-    return assets.map((asset) => ({
-      asset,
-      capture: rowMap.get(asset.id) ?? { assetId: asset.id, cells: {}, searchText: [asset.assetTag, asset.assetName ?? ""].join(" ").toLowerCase(), searchHits: [] },
-    }));
-  }, [assets, table.rows]);
+    return assets.map((asset) => {
+      const capture = rowMap.get(asset.id) ?? {
+        assetId: asset.id,
+        cells: {},
+        searchText: [asset.assetTag, asset.assetName ?? ""].join(" ").toLowerCase(),
+        searchHits: [],
+      };
+      return {
+        asset,
+        capture,
+        mergedCells: applyCellPatches(capture.cells, asset.id),
+      };
+    });
+  }, [applyCellPatches, assets, table.rows]);
 
-  const getColumnFilterValue = useCallback((key: string, asset: ProjectAsset, capture: ProjectCaptureRow) => {
+  const getColumnFilterValue = useCallback((
+    key: string,
+    asset: ProjectAsset,
+    capture: ProjectCaptureRow,
+    mergedCells: Record<string, string>,
+  ) => {
     if (key == "assetTag") return asset.assetTag || "-";
     if (key == "status") return STATUS_LABELS[asset.status] ?? asset.status;
     if (key == "actions") return renderActions ? "Available" : "-";
@@ -384,7 +352,7 @@ export default function CaptureSpreadsheetDialog({
     }
     if (key.startsWith("capture:")) {
       const columnId = key.slice("capture:".length);
-      const value = capture.cells[columnId] ?? "";
+      const value = mergedCells[columnId] ?? "";
       return value.trim().length > 0 ? value : "-";
     }
     return "-";
@@ -396,16 +364,16 @@ export default function CaptureSpreadsheetDialog({
       if (!next[key]) next[key] = [];
       if (!next[key].includes(value)) next[key].push(value);
     };
-    for (const { asset, capture } of rows) {
-      ensure("assetTag", getColumnFilterValue("assetTag", asset, capture));
-      ensure("status", getColumnFilterValue("status", asset, capture));
-      ensure("actions", getColumnFilterValue("actions", asset, capture));
+    for (const { asset, capture, mergedCells } of rows) {
+      ensure("assetTag", getColumnFilterValue("assetTag", asset, capture, mergedCells));
+      ensure("status", getColumnFilterValue("status", asset, capture, mergedCells));
+      ensure("actions", getColumnFilterValue("actions", asset, capture, mergedCells));
       for (const column of assetJobColumns) {
-        ensure(`asset-job:${column.id}`, getColumnFilterValue(`asset-job:${column.id}`, asset, capture));
+        ensure(`asset-job:${column.id}`, getColumnFilterValue(`asset-job:${column.id}`, asset, capture, mergedCells));
       }
       for (const group of orderedGroups) {
         for (const column of group.columns) {
-          ensure(`capture:${column.id}`, getColumnFilterValue(`capture:${column.id}`, asset, capture));
+          ensure(`capture:${column.id}`, getColumnFilterValue(`capture:${column.id}`, asset, capture, mergedCells));
         }
       }
     }
@@ -415,11 +383,11 @@ export default function CaptureSpreadsheetDialog({
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return rows.filter(({ asset, capture }) => {
+    return rows.filter(({ asset, capture, mergedCells }) => {
       if (!rowSearchMatch(capture, asset, query)) return false;
       for (const [key, selectedValues] of Object.entries(columnFilters)) {
         if (selectedValues.length === 0) continue;
-        const value = getColumnFilterValue(key, asset, capture);
+        const value = getColumnFilterValue(key, asset, capture, mergedCells);
         if (!selectedValues.includes(value)) return false;
       }
       return true;
@@ -493,15 +461,6 @@ export default function CaptureSpreadsheetDialog({
     );
   }, [columnFilters]);
 
-  const defaultStatus = (asset: ProjectAsset) => (
-    <Chip
-      size="small"
-      label={STATUS_LABELS[asset.status] ?? asset.status}
-      color={STATUS_COLORS[asset.status] ?? "default"}
-      sx={{ height: 20, fontSize: 10 }}
-    />
-  );
-
   const renderGroupPicker = () => (
     <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: "rgba(255,255,255,0.04)", maxHeight: 260, overflowY: "auto" }}>
       <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
@@ -555,7 +514,9 @@ export default function CaptureSpreadsheetDialog({
     return canEditRun(run, userRole).data;
   }, [canEditAsset, canEditCapture, readOnly, runsMap, userRole]);
 
-  const cellKey = (assetId: string, columnId: string) => `${assetId}::${columnId}`;
+  const onPatchCell = useCallback((assetId: string, columnId: string, value: string) => {
+    setCellPatches((prev) => ({ ...prev, [captureCellKey(assetId, columnId)]: value }));
+  }, []);
 
   const saveCaptureCell = useCallback(async (
     asset: ProjectAsset,
@@ -564,8 +525,7 @@ export default function CaptureSpreadsheetDialog({
   ) => {
     const run = pickCaptureRun(runsMap[asset.id] ?? []);
     if (!run || !column.stepId || !column.inputId) return;
-    const key = cellKey(asset.id, column.id);
-    setSavingCellKey(key);
+    const patchKey = captureCellKey(asset.id, column.id);
     setCellError(null);
     try {
       const updated = await assetWorkflowRunService.patchCaptureCell(
@@ -579,82 +539,16 @@ export default function CaptureSpreadsheetDialog({
         currentUserName || undefined,
       );
       onRunUpdated?.(updated);
-      setDraftValues((prev) => {
+    } catch {
+      setCellPatches((prev) => {
         const next = { ...prev };
-        delete next[key];
+        delete next[patchKey];
         return next;
       });
-    } catch {
       setCellError(`Could not save ${asset.assetTag} · ${column.fieldLabel}. Try again.`);
-    } finally {
-      setSavingCellKey(null);
+      throw new Error("capture cell save failed");
     }
   }, [currentUserName, onRunUpdated, runsMap]);
-
-  const renderValueCell = (asset: ProjectAsset, capture: ProjectCaptureRow, column: ProjectCaptureColumn, group: ProjectCaptureGroup, rowBg: string) => {
-    const value = capture.cells[column.id] ?? "";
-    const palette = groupPalette(group);
-    const isBlank = value.trim().length === 0;
-    const editable = canEditCaptureCell(asset, column);
-    const key = cellKey(asset.id, column.id);
-    const displayValue = draftValues[key] ?? value;
-    const saving = savingCellKey === key;
-
-    return (
-      <TableCell
-        key={column.id}
-        sx={{
-          minWidth: CAPTURE_COL_W,
-          borderLeft: column === group.columns[0] ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
-          borderRight: column === group.columns[group.columns.length - 1] ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
-          borderBottom: "1px solid #D8DEE7",
-          verticalAlign: "top",
-          px: 0.75,
-          py: 0.45,
-          position: "relative",
-          zIndex: 0,
-          ...bodyCellHoverSx(rowBg),
-        }}
-      >
-        {editable ? (
-          <TextField
-            size="small"
-            value={displayValue}
-            disabled={saving}
-            placeholder="-"
-            onChange={(e) => setDraftValues((prev) => ({ ...prev, [key]: e.target.value }))}
-            onBlur={() => {
-              const next = (draftValues[key] ?? value).trim();
-              if (next === value.trim()) {
-                setDraftValues((prev) => {
-                  const copy = { ...prev };
-                  delete copy[key];
-                  return copy;
-                });
-                return;
-              }
-              void saveCaptureCell(asset, column, next);
-            }}
-            inputProps={{ sx: { fontSize: 12, py: 0.35, px: 0.5, color: ASSET_JOB_PALETTE.text } }}
-            sx={{
-              width: "100%",
-              "& .MuiInputBase-input": { color: ASSET_JOB_PALETTE.text },
-              "& .MuiInputBase-input::placeholder": { color: "rgba(22,52,71,0.45)", opacity: 1 },
-            }}
-          />
-        ) : (
-          <Typography
-            variant="caption"
-            fontStyle={isBlank ? "italic" : "normal"}
-            fontWeight={500}
-            sx={{ fontSize: 12, lineHeight: 1.25, color: isBlank ? "rgba(22,52,71,0.62)" : ASSET_JOB_PALETTE.text }}
-          >
-            {isBlank ? "-" : value}
-          </Typography>
-        )}
-      </TableCell>
-    );
-  };
 
   const inner = (
     <Stack spacing={1.5} sx={embedded ? { width: "100%" } : undefined}>
@@ -983,100 +877,25 @@ export default function CaptureSpreadsheetDialog({
                 </TableCell>
               </TableRow>
             ) : (
-              filteredRows.map(({ asset, capture }, rowIndex) => {
-                const rowBg = rowIndex % 2 === 0 ? ASSET_JOB_PALETTE.tint : ASSET_JOB_PALETTE.tintAlt;
-                return (
-                <TableRow
+              filteredRows.map(({ asset, capture, mergedCells }, rowIndex) => (
+                <CaptureSpreadsheetRow
                   key={asset.id}
-                  hover
-                  sx={{
-                    backgroundColor: rowBg,
-                  }}
-                >
-                  {selectionEnabled && (
-                    <TableCell
-                      padding="checkbox"
-                      sx={{
-                        ...stickyCell(0, CHECKBOX_W, HEADER_Z.bodyStickyLeft, rowBg),
-                        borderRight: '1px solid #D8DEE7',
-                        borderBottom: '1px solid #D8DEE7',
-                        px: 0.25,
-                        py: 0.35,
-                        ...bodyCellHoverSx(rowBg),
-                      }}
-                    >
-                      <Checkbox
-                        size="small"
-                        checked={selectedAssetIds?.has(asset.id) ?? false}
-                        onChange={(event) => onToggleAssetSelection?.(asset.id, event.target.checked)}
-                        sx={{ color: "#224F88", "&.Mui-checked": { color: "#224F88" } }}
-                      />
-                    </TableCell>
-                  )}
-                  <TableCell
-                    sx={{
-                      ...stickyCell(selectionEnabled ? CHECKBOX_W : 0, TAG_W, HEADER_Z.bodyStickyLeft, rowBg),
-                      borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
-                      borderBottom: '1px solid #D8DEE7',
-                      px: 0.75,
-                      py: 0.45,
-                      ...bodyCellHoverSx(rowBg),
-                    }}
-                  >
-                    <Typography variant="body2" fontWeight={700} sx={{ fontSize: 12, lineHeight: 1.2, color: ASSET_JOB_PALETTE.text }}>{asset.assetTag}</Typography>
-                  </TableCell>
-                  {assetJobColumns.map((column, index) => (
-                    <TableCell
-                      key={`asset-job:${column.id}`}
-                      sx={{
-                        minWidth: ASSET_JOB_COL_W,
-                        borderLeft: index === 0 ? `2px solid ${ASSET_JOB_PALETTE.border}` : '1px solid #D8DEE7',
-                        borderRight: index === assetJobColumns.length - 1 ? `2px solid ${ASSET_JOB_PALETTE.border}` : '1px solid #D8DEE7',
-                        borderBottom: '1px solid #D8DEE7',
-                        px: 0.75,
-                        py: 0.45,
-                        verticalAlign: 'top',
-                        ...bodyCellHoverSx(rowBg),
-                      }}
-                    >
-                      <Typography sx={{ fontSize: 12, lineHeight: 1.25, color: ASSET_JOB_PALETTE.text, fontWeight: 500 }}>
-                        {column.valueFor(asset) || '-'}
-                      </Typography>
-                    </TableCell>
-                  ))}
-                  {orderedGroups.flatMap((group) => group.columns.map((column) => renderValueCell(asset, capture, column, group, rowBg)))}
-                  <TableCell
-                    sx={{
-                      minWidth: STATUS_W,
-                      width: STATUS_W,
-                      maxWidth: STATUS_W,
-                      borderLeft: `2px solid ${STATIC_HEADER_BORDER}`,
-                      borderRight: `1px solid #D8DEE7`,
-                      borderBottom: '1px solid #D8DEE7',
-                      px: 0.6,
-                      py: 0.45,
-                      ...bodyCellHoverSx(rowBg),
-                    }}
-                  >
-                    {renderStatus ? renderStatus(asset) : defaultStatus(asset)}
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      minWidth: ACTIONS_W,
-                      width: ACTIONS_W,
-                      maxWidth: ACTIONS_W,
-                      borderLeft: `1px solid #D8DEE7`,
-                      borderBottom: '1px solid #D8DEE7',
-                      px: 0.6,
-                      py: 0.45,
-                      ...bodyCellHoverSx(rowBg),
-                    }}
-                  >
-                    {renderActions ? renderActions(asset) : <Typography variant="caption" sx={{ color: "rgba(22,52,71,0.62)" }}>-</Typography>}
-                  </TableCell>
-                </TableRow>
-                );
-              })
+                  asset={asset}
+                  capture={capture}
+                  rowIndex={rowIndex}
+                  orderedGroups={orderedGroups}
+                  assetJobColumns={assetJobColumns}
+                  mergedCells={mergedCells}
+                  selectionEnabled={selectionEnabled}
+                  isSelected={selectedAssetIds?.has(asset.id) ?? false}
+                  onToggleAssetSelection={onToggleAssetSelection}
+                  editableForColumn={canEditCaptureCell}
+                  onSaveCell={saveCaptureCell}
+                  onPatchCell={onPatchCell}
+                  renderStatus={renderStatus}
+                  renderActions={renderActions}
+                />
+              ))
             )}
           </TableBody>
         </Table>

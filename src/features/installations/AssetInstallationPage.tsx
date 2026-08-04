@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import {
   AddOutlined,
   ArrowDropDown,
@@ -5841,12 +5841,14 @@ ${words.slice(midpoint).join(" ")}`;
           userRole={currentUser.role}
           currentUserName={currentUser.fullName ?? currentUser.email ?? ""}
           onRunUpdated={(run) => {
-            setRunsMap((prev) => {
-              const list = prev[run.assetId] ?? [];
-              const next = list.some((r) => r.id === run.id)
-                ? list.map((r) => (r.id === run.id ? run : r))
-                : [...list, run];
-              return { ...prev, [run.assetId]: next };
+            startTransition(() => {
+              setRunsMap((prev) => {
+                const list = prev[run.assetId] ?? [];
+                const next = list.some((r) => r.id === run.id)
+                  ? list.map((r) => (r.id === run.id ? run : r))
+                  : [...list, run];
+                return { ...prev, [run.assetId]: next };
+              });
             });
           }}
           assetJobColumns={assetCaptureJobColumns}
@@ -7794,12 +7796,14 @@ ${words.slice(midpoint).join(" ")}`;
           readOnly
           canEditCapture={false}
           onRunUpdated={(run) => {
-            setRunsMap((prev) => {
-              const list = prev[run.assetId] ?? [];
-              const next = list.some((r) => r.id === run.id)
-                ? list.map((r) => (r.id === run.id ? run : r))
-                : [...list, run];
-              return { ...prev, [run.assetId]: next };
+            startTransition(() => {
+              setRunsMap((prev) => {
+                const list = prev[run.assetId] ?? [];
+                const next = list.some((r) => r.id === run.id)
+                  ? list.map((r) => (r.id === run.id ? run : r))
+                  : [...list, run];
+                return { ...prev, [run.assetId]: next };
+              });
             });
           }}
           assetJobColumns={assetCaptureJobColumns}
