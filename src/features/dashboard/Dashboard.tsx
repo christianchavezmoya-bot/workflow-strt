@@ -1703,6 +1703,12 @@ const Dashboard = () => {
     () => dashboardWorkspace.inspectionHistory,
     [dashboardWorkspace]
   );
+  const myInspectionScopedAssetIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const asset of myInspectionAssets) ids.add(asset.id);
+    for (const asset of myInspectionHistory) ids.add(asset.id);
+    return ids;
+  }, [myInspectionAssets, myInspectionHistory]);
 
   // Install assets = assigned assets that are NOT in an inspection project
   const myInstallAssets = useMemo(
@@ -1713,6 +1719,12 @@ const Dashboard = () => {
     () => dashboardWorkspace.installHistory,
     [dashboardWorkspace]
   );
+  const myInstallScopedAssetIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const asset of myInstallAssets) ids.add(asset.id);
+    for (const asset of myInstallHistory) ids.add(asset.id);
+    return ids;
+  }, [myInstallAssets, myInstallHistory]);
   const [nativeMyJobsCardContext, setNativeMyJobsCardContext] = useState<Record<string, NativeMyJobsCardContext>>({});
   const [dashboardAssignmentsMap, setDashboardAssignmentsMap] = useState<Record<string, WorkflowAssignment[]>>({});
 
@@ -2603,8 +2615,8 @@ const Dashboard = () => {
     [openIssues, myInstallAssets]
   );
   const myInstallPendingSigs = useMemo(
-    () => pendingSigs.filter((sig) => myInstallAssets.some((asset) => asset.id === sig.assetId)),
-    [pendingSigs, myInstallAssets]
+    () => pendingSigs.filter((sig) => myInstallScopedAssetIds.has(sig.assetId)),
+    [pendingSigs, myInstallScopedAssetIds]
   );
   // High-severity observations on user's assigned assets (created by the current user)
   const myInstallHighObservations = useMemo(
@@ -2627,8 +2639,8 @@ const Dashboard = () => {
     [openIssues, myInspectionAssets]
   );
   const myInspectionPendingSigs = useMemo(
-    () => pendingSigs.filter((sig) => myInspectionAssets.some((asset) => asset.id === sig.assetId)),
-    [pendingSigs, myInspectionAssets]
+    () => pendingSigs.filter((sig) => myInspectionScopedAssetIds.has(sig.assetId)),
+    [pendingSigs, myInspectionScopedAssetIds]
   );
   const myInspectionMissingMediaCount = useMemo(
     () => missingMediaFlags.filter((flag) => myInspectionAssets.some((asset) => asset.id === flag.assetId)).length,
