@@ -22,7 +22,13 @@ import { fetchProjects, setProjects, updateProjectStatus } from "../../store/pro
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { officesService } from "../../services/officesService";
-import { assetWorkflowRunService, isAssetSignatureStatusFinalized, type OpenIssueRecord, type PendingSignatureRecord } from "../../services/assetWorkflowRunService";
+import {
+  assetWorkflowRunService,
+  isAssetSignatureStatusFinalized,
+  isPendingInstallerSignature,
+  type OpenIssueRecord,
+  type PendingSignatureRecord,
+} from "../../services/assetWorkflowRunService";
 import { IssueRepository } from "../../repositories/IssueRepository";
 import {
   projectAssetService,
@@ -2028,7 +2034,9 @@ const Dashboard = () => {
 
     const isActive = isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status);
     const isPaused = isPausedAsset(asset.runStatus);
-    const pendingSignature = pendingSigs.find((sig) => sig.assetId === asset.id) ?? null;
+    const pendingSignature = pendingSigs.find(
+      (sig) => sig.assetId === asset.id && isPendingInstallerSignature(sig.signatureStatus),
+    ) ?? null;
     const missingMediaFlag = missingMediaFlags.find((flag) => flag.assetId === asset.id) ?? null;
     const evidenceMissing = (asset.evidenceStatus ?? "").toLowerCase() === "missingdata";
     const hasMissingMediaFallback = asset.totalSteps > 0 && asset.completedSteps >= asset.totalSteps && asset.missingItems > 0;
@@ -2629,8 +2637,10 @@ const Dashboard = () => {
     [openIssues, myInstallAssets]
   );
   const myInstallPendingSigs = useMemo(
-    () => pendingSigs.filter((sig) => myInstallScopedAssetIds.has(sig.assetId)),
-    [pendingSigs, myInstallScopedAssetIds]
+    () => pendingSigs.filter((sig) =>
+      isPendingInstallerSignature(sig.signatureStatus)
+      && myInstallAssets.some((asset) => asset.id === sig.assetId)),
+    [pendingSigs, myInstallAssets],
   );
   // High-severity observations on user's assigned assets (created by the current user)
   const myInstallHighObservations = useMemo(
@@ -2653,8 +2663,10 @@ const Dashboard = () => {
     [openIssues, myInspectionAssets]
   );
   const myInspectionPendingSigs = useMemo(
-    () => pendingSigs.filter((sig) => myInspectionScopedAssetIds.has(sig.assetId)),
-    [pendingSigs, myInspectionScopedAssetIds]
+    () => pendingSigs.filter((sig) =>
+      isPendingInstallerSignature(sig.signatureStatus)
+      && myInspectionAssets.some((asset) => asset.id === sig.assetId)),
+    [pendingSigs, myInspectionAssets],
   );
   const myInspectionMissingMediaCount = useMemo(
     () => missingMediaFlags.filter((flag) => myInspectionAssets.some((asset) => asset.id === flag.assetId)).length,
