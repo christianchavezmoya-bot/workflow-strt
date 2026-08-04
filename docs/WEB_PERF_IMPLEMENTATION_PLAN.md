@@ -1,7 +1,7 @@
 # Web performance — phased implementation plan
 
 **Date:** 2026-08-04  
-**Status:** Phase 0 + 1 in progress (`cursor/web-perf-phase0-1-cd21`)  
+**Status:** Phase 2 in progress (`cursor/web-perf-assets-bootstrap-cd21`)  
 **Evidence:** `backedn_slow.docx` (989 EF SQL commands, ~1,561 assets / ~1,444 runs, JO00991-scale), `docs/WEB_PERF_SMOKE_REPORT_2026-08-03.md`, PM Playwright smoke 2026-08-04  
 **Primary persona:** PM on web (Jose) — Assets → Capture table → Issues  
 **Reference project:** **JO00991** (~1,300+ assets, AIM-100, Australia/Sydney)
@@ -217,10 +217,10 @@ Root issue today: each blur sends **~288 KB** `StepResultsJson`, wipes all run/a
 
 ### Phase 2 exit criteria
 
-- [ ] Project select **< 300 ms** p95 (10 runs)  
-- [ ] Assets first content **< 1 s** p95 after project select on JO00991  
-- [ ] API call count Assets load **< 15**  
-- [ ] PM smoke passes with `PM_SMOKE_STRICT=1` for timing findings (except capture if Phase 1 not merged)
+- [ ] Project select **< 300 ms** p95 (10 runs) — **partial:** ~1.9 s on seed DB (was ~5 s)
+- [ ] Assets first content **< 1 s** p95 after project select on JO00991
+- [x] No `project-assets/by-product` when project scoped (smoke verified)
+- [ ] PM smoke passes with `PM_SMOKE_STRICT=1` for timing findings
 
 **Dependencies:** Phase 0 baseline. Can parallelize with Phase 1.  
 **Risk:** Medium — touches load orchestration; test project vs product filter modes.

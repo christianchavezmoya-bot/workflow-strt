@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
 // workflow run) additionally need the API on :4000 (see references/testing.md).
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: /smoke\.spec\.ts/,
+  testMatch: "**/smoke.spec.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

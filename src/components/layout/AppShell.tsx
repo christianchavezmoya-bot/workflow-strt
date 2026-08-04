@@ -22,6 +22,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { authService } from "../../services/authService";
 import { useSseEvents } from "../../hooks/useSseEvents";
 import { useOfflineBootstrap } from "../../hooks/useOfflineBootstrap";
+import { useShellCatalogBootstrap } from "../../hooks/useShellCatalogBootstrap";
 import { useCallback, useEffect } from "react";
 import { initTapFeedback } from "../../services/tapFeedback";
 import type { User } from "../../types/user";
@@ -66,6 +67,7 @@ const AppShell = () => {
   const mobileWebLayout = useMobileWebLayout();
   useSseEvents(); // real-time push from server
   useOfflineBootstrap(); // keep offline cache warm (native only)
+  useShellCatalogBootstrap(); // warm Redux catalog once after auth (web perf)
 
   useEffect(() => { initTapFeedback(); }, []);
 
