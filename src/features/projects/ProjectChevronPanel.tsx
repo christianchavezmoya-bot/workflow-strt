@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -69,6 +69,7 @@ import type {
 import type { GoodsMovement } from "../../types/goodsMovement";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
+import { mergeRunRecord } from "../../types/assetWorkflowRunSummary";
 import type { BomActualItem } from "../../types/workflow";
 import {
   exportBomPdf,
@@ -361,6 +362,42 @@ export default function ProjectChevronPanel({
   const [installAssets,        setInstallAssets]        = useState<ProjectAsset[]>([]);
   const [installAssetsLoading, setInstallAssetsLoading] = useState(false);
   const [latestRuns,           setLatestRuns]           = useState<AssetWorkflowRun[]>([]);
+  const fullRunsLoadedRef = useRef(false);
+  const fullRunsLoadingRef = useRef<Promise<void> | null>(null);
+
+  const collapseNewestRunPerAsset = useCallback((runs: AssetWorkflowRun[]) => {
+    const newestByAsset = new Map<string, AssetWorkflowRun>();
+    for (const r of runs) {
+      const cur = newestByAsset.get(r.assetId);
+      if (!cur || new Date(r.startedAt).getTime() > new Date(cur.startedAt).getTime()) {
+        newestByAsset.set(r.assetId, r);
+      }
+    }
+    return [...newestByAsset.values()];
+  }, []);
+
+  const ensureFullRunDetails = useCallback(async () => {
+    if (fullRunsLoadedRef.current || installAssets.length === 0) return;
+    if (fullRunsLoadingRef.current) return fullRunsLoadingRef.current;
+    fullRunsLoadingRef.current = (async () => {
+      try {
+        const assetIds = installAssets.map((a) => a.id);
+        if (assetIds.length === 0) return;
+        const full = await assetWorkflowRunService.loadRunDetailsForAssets(projectId, assetIds);
+        setLatestRuns((prev) => {
+          const byId = new Map(prev.map((run) => [run.id, run]));
+          for (const run of full) {
+            byId.set(run.id, mergeRunRecord(byId.get(run.id), run));
+          }
+          return collapseNewestRunPerAsset([...byId.values()]);
+        });
+        fullRunsLoadedRef.current = true;
+      } finally {
+        fullRunsLoadingRef.current = null;
+      }
+    })();
+    return fullRunsLoadingRef.current;
+  }, [collapseNewestRunPerAsset, installAssets, projectId]);
 
   const runByAsset = useMemo(() => {
     // Group all runs by assetId, then pick the most relevant one per asset.
@@ -387,7 +424,7 @@ export default function ProjectChevronPanel({
   const bomSummary = useMemo((): BomExportRow[] => {
     const map: Record<string, BomExportRow> = {};
     for (const run of latestRuns) {
-      if (!run.bomActualJson) continue;
+      if (!run.bomActualJson || run.bomActualJson === "[]") continue;
       let items: BomActualItem[] = [];
       try { items = JSON.parse(run.bomActualJson) as BomActualItem[]; } catch { continue; }
       const asset = installAssets.find(a => a.id === run.assetId);
@@ -447,6 +484,7 @@ export default function ProjectChevronPanel({
   const [exportingReport,  setExportingReport]   = useState(false);
 
   const buildExportData = async (withLogo: boolean): Promise<BomExportData> => {
+    await ensureFullRunDetails();
     let logoBase64: string | null = null;
     if (withLogo) {
       try { logoBase64 = (await brandSettingsService.get()).logoBase64 ?? null; } catch { /* ignore */ }
@@ -458,7 +496,7 @@ export default function ProjectChevronPanel({
       projectManager:     projectManager,
       exportDate:         new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
       totalAssets:        installAssets.length,
-      assetsWithBom:      latestRuns.filter(r => r.isLocked && r.bomActualJson).length,
+      assetsWithBom:      latestRuns.filter(r => r.isLocked && r.bomActualJson && r.bomActualJson !== "[]").length,
       rows:               bomSummary,
       missingBomAssets,
       businessLogoBase64: logoBase64,
@@ -468,6 +506,7 @@ export default function ProjectChevronPanel({
   const handleGenerateProjectReport = async (withLogo: boolean) => {
     setExportingReport(true);
     try {
+      await ensureFullRunDetails();
       let logoBase64: string | null = null;
       if (withLogo) {
         try { logoBase64 = (await brandSettingsService.get()).logoBase64 ?? null; } catch { /* ignore */ }
@@ -515,6 +554,8 @@ export default function ProjectChevronPanel({
 
   const loadInstallAssets = useCallback(async () => {
     setInstallAssetsLoading(true);
+    fullRunsLoadedRef.current = false;
+    fullRunsLoadingRef.current = null;
     try {
       let assets: ProjectAsset[];
       if (productId) {
@@ -525,21 +566,10 @@ export default function ProjectChevronPanel({
       }
       setInstallAssets(assets);
       const runs = await assetWorkflowRunService.listLatestByProject(projectId);
-      // by-project may now return an extra completed run per asset (so the capture
-      // table on the installations page can source as-built data even when a newer
-      // in-progress run masks it). This panel's stats want ONE representative run
-      // per asset, so collapse to the newest run per asset to preserve prior counts.
-      const newestByAsset = new Map<string, AssetWorkflowRun>();
-      for (const r of runs) {
-        const cur = newestByAsset.get(r.assetId);
-        if (!cur || new Date(r.startedAt).getTime() > new Date(cur.startedAt).getTime()) {
-          newestByAsset.set(r.assetId, r);
-        }
-      }
-      setLatestRuns([...newestByAsset.values()]);
+      setLatestRuns(collapseNewestRunPerAsset(runs));
     } catch { /* silently fail */ }
     finally { setInstallAssetsLoading(false); }
-  }, [projectId, productId]);
+  }, [collapseNewestRunPerAsset, projectId, productId]);
 
   // ── Inbound (local) ────────────────────────────────────────────────────────
   const [inbounds,        setInbounds]        = useState<ProjectInboundItem[]>([]);
@@ -562,6 +592,7 @@ export default function ProjectChevronPanel({
     if (tab === "contacts" && contacts.length === 0 && !contactsLoading) loadContacts();
     if ((tab === "goodsMovements" || tab === "inbound") && !qbLoaded && !qbLoading) syncQb();
     if (tab === "inbound" && inbounds.length === 0 && !inboundsLoading) loadInbounds();
+    if ((tab === "bom" || tab === "history") && installAssets.length > 0) void ensureFullRunDetails();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 

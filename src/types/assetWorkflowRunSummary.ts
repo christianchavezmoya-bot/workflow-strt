@@ -12,6 +12,12 @@ export interface AssetWorkflowRunSummary {
   completedAt?: string;
   updatedAt: string;
   runNumber: number;
+  productiveSeconds: number;
+  downtimeSeconds: number;
+  hasBomActual: boolean;
+  completedByName?: string;
+  installerSignedAt?: string;
+  customerSignedAt?: string;
 }
 
 /** True when a run carries enough JSON to derive capture / sign-off columns. */
@@ -31,13 +37,17 @@ export function runSummaryToPlaceholderRun(summary: AssetWorkflowRunSummary): As
     stepResultsJson: "[]",
     issuesJson: "[]",
     timeTrackingJson: "[]",
-    productiveSeconds: 0,
-    downtimeSeconds: 0,
+    productiveSeconds: summary.productiveSeconds ?? 0,
+    downtimeSeconds: summary.downtimeSeconds ?? 0,
     downtimeEvents: 0,
     runNumber: summary.runNumber,
     signatureStatus: summary.signatureStatus,
     startedAt: summary.startedAt,
     completedAt: summary.completedAt,
+    completedByName: summary.completedByName,
+    installerSignedAt: summary.installerSignedAt,
+    customerSignedAt: summary.customerSignedAt,
+    bomActualJson: summary.hasBomActual ? "[]" : undefined,
     createdAt: summary.startedAt,
     updatedAt: summary.updatedAt,
   };
