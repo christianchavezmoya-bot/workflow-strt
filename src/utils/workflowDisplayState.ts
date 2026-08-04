@@ -377,3 +377,37 @@ function computeAction(i: ActionInput): WorkflowDisplayState["action"] {
 
   return null;
 }
+
+/** Chip label/color for Dashboard My Jobs cards — keeps chip aligned with action/run state. */
+export function myJobsCardChipFromDisplayState(displayState: WorkflowDisplayState): {
+  label: string;
+  color: ChipColor;
+} {
+  const actionKind = displayState.action?.kind ?? "run-details";
+
+  if (actionKind === "add-missing-photos") {
+    return { label: displayState.feature.label, color: "warning" };
+  }
+  if (actionKind === "installer-sign" || actionKind === "customer-sign") {
+    return { label: "Pending sign", color: "info" };
+  }
+  if (displayState.gates.blockingIssueCount > 0) {
+    return { label: "In Progress", color: "error" };
+  }
+  if (displayState.status.key === "Pending" && actionKind === "run-details") {
+    return {
+      label: displayState.feature.label === "Done" ? "Complete" : "Field Work Complete",
+      color: "success",
+    };
+  }
+  if (actionKind === "resume") {
+    return { label: "Paused by user", color: "warning" };
+  }
+  if (actionKind === "continue") {
+    return {
+      label: "In Progress",
+      color: displayState.gates.openIssueCount > 0 ? "error" : "primary",
+    };
+  }
+  return { label: displayState.status.label, color: displayState.status.color };
+}

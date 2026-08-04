@@ -435,6 +435,12 @@ export function isRunSignatureFinalized(
     || run.signatureStatus === "WaivedCustomer";
 }
 
+/** Workspace summary / asset-level signature status (no run timestamps available). */
+export function isAssetSignatureStatusFinalized(signatureStatus?: string | null): boolean {
+  const value = (signatureStatus ?? "").trim();
+  return value === "Signed" || value === "Declined" || value === "WaivedCustomer";
+}
+
 export function deriveOfflineAssetStatusFromRun(
   run: Pick<AssetWorkflowRun, "status" | "isLocked" | "issuesJson" | "signatureStatus" | "customerSignedAt" | "installerSignedAt">,
 ): ProjectAssetStatus {

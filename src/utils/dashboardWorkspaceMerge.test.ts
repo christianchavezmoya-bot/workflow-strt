@@ -3,6 +3,7 @@ import {
   dashboardWorkspaceHasRows,
   mergeDashboardWorkspaceItems,
   stabilizeDashboardWorkspace,
+  dedupeDashboardWorkspace,
 } from "./dashboardWorkspaceMerge";
 import type { DashboardWorkspaceAssetItem } from "../services/projectAssetService";
 
@@ -62,5 +63,45 @@ describe("stabilizeDashboardWorkspace", () => {
     const stabilized = stabilizeDashboardWorkspace(previous, next);
     expect(stabilized.currentInstalls).toHaveLength(1);
     expect(dashboardWorkspaceHasRows(stabilized)).toBe(true);
+  });
+});
+
+describe("dedupeDashboardWorkspace", () => {
+  it("removes duplicate asset ids across current and history buckets", () => {
+    const duplicate = item("a1");
+    const workspace = {
+      currentInstalls: [duplicate],
+      currentInspections: [],
+      installHistory: [{ ...duplicate, status: "Complete", historyStatus: "Field Work Complete" }],
+      inspectionHistory: [],
+    };
+    const authoritative = {
+      currentInstalls: [],
+      currentInspections: [],
+      installHistory: [{ ...duplicate, status: "Complete", historyStatus: "Field Work Complete" }],
+      inspectionHistory: [],
+    };
+    const deduped = dedupeDashboardWorkspace(workspace, authoritative);
+    expect(deduped.currentInstalls).toHaveLength(0);
+    expect(deduped.installHistory.map((row) => row.id)).toEqual(["a1"]);
+  });
+
+  it("keeps current installs when authoritative only lists current bucket", () => {
+    const active = item("a1");
+    const workspace = {
+      currentInstalls: [active],
+      currentInspections: [],
+      installHistory: [active],
+      inspectionHistory: [],
+    };
+    const authoritative = {
+      currentInstalls: [active],
+      currentInspections: [],
+      installHistory: [],
+      inspectionHistory: [],
+    };
+    const deduped = dedupeDashboardWorkspace(workspace, authoritative);
+    expect(deduped.currentInstalls.map((row) => row.id)).toEqual(["a1"]);
+    expect(deduped.installHistory).toHaveLength(0);
   });
 });

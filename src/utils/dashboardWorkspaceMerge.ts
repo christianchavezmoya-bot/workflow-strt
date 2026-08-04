@@ -55,3 +55,89 @@ export function stabilizeDashboardWorkspace(
     inspectionHistory: mergeDashboardWorkspaceItems(previous.inspectionHistory, next.inspectionHistory),
   };
 }
+
+const WORKSPACE_BUCKETS = [
+  "currentInstalls",
+  "currentInspections",
+  "installHistory",
+  "inspectionHistory",
+] as const;
+
+type WorkspaceBucket = typeof WORKSPACE_BUCKETS[number];
+
+function findBucketForAssetId(
+  id: string,
+  workspace: DashboardWorkspace,
+): WorkspaceBucket | null {
+  for (const bucket of WORKSPACE_BUCKETS) {
+    if (workspace[bucket].some((item) => item.id === id)) return bucket;
+  }
+  return null;
+}
+
+function pickWorkspaceItem(
+  id: string,
+  workspace: DashboardWorkspace,
+  preferredBucket?: WorkspaceBucket | null,
+): DashboardWorkspaceAssetItem | undefined {
+  if (preferredBucket) {
+    const preferred = workspace[preferredBucket].find((item) => item.id === id);
+    if (preferred) return preferred;
+  }
+  for (const bucket of WORKSPACE_BUCKETS) {
+    const match = workspace[bucket].find((item) => item.id === id);
+    if (match) return match;
+  }
+  return undefined;
+}
+
+/**
+ * Ensures each asset id appears in at most one workspace bucket.
+ * When `authoritative` is provided (typically the incoming server fetch), its bucket
+ * placement wins over stale copies left in the previous snapshot.
+ */
+export function dedupeDashboardWorkspace(
+  workspace: DashboardWorkspace,
+  authoritative?: DashboardWorkspace,
+): DashboardWorkspace {
+  const ids = new Set<string>();
+  for (const bucket of WORKSPACE_BUCKETS) {
+    for (const item of workspace[bucket]) ids.add(item.id);
+  }
+  if (authoritative) {
+    for (const bucket of WORKSPACE_BUCKETS) {
+      for (const item of authoritative[bucket]) ids.add(item.id);
+    }
+  }
+
+  const empty = (): DashboardWorkspace => ({
+    currentInstalls: [],
+    currentInspections: [],
+    installHistory: [],
+    inspectionHistory: [],
+  });
+  const result = empty();
+
+  for (const id of ids) {
+    const authoritativeBucket = authoritative ? findBucketForAssetId(id, authoritative) : null;
+    let targetBucket = authoritativeBucket;
+    if (!targetBucket) {
+      const presentBuckets = WORKSPACE_BUCKETS.filter((bucket) =>
+        workspace[bucket].some((item) => item.id === id),
+      );
+      if (presentBuckets.length === 1) {
+        targetBucket = presentBuckets[0];
+      } else if (presentBuckets.length > 1) {
+        targetBucket = presentBuckets.find((bucket) => bucket === "installHistory" || bucket === "inspectionHistory")
+          ?? presentBuckets[0];
+      }
+    }
+    if (!targetBucket) continue;
+
+    const row = pickWorkspaceItem(id, authoritative ?? workspace, authoritativeBucket)
+      ?? pickWorkspaceItem(id, workspace, targetBucket);
+    if (row) result[targetBucket].push(row);
+  }
+
+  return result;
+}
