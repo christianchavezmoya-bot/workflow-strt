@@ -50,7 +50,7 @@ import { anyMatchesWordStart, matchesWordStart } from "../../utils/textMatch";
 import { computeCaptureHeaderStickyTops } from "../../utils/captureSpreadsheet";
 import { STATUS_LABELS, STATUS_COLORS } from "./assetStatusDisplay";
 import { canEditRun } from "../../utils/runEditPermissions";
-import { isCaptureColumnEditable, patchCaptureCellValue } from "../../utils/captureTableEdit";
+import { isCaptureColumnEditable } from "../../utils/captureTableEdit";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { pickCaptureRun } from "../../utils/captureSpreadsheet";
 import { captureSpreadsheetTheme } from "../../theme/captureSpreadsheetTheme";
@@ -551,16 +551,15 @@ export default function CaptureSpreadsheetDialog({
     setSavingCellKey(key);
     setCellError(null);
     try {
-      const nextJson = patchCaptureCellValue(run.stepResultsJson, {
-        stepId: column.stepId,
-        inputId: column.inputId,
-        iterationIndex: column.iterationIndex,
-      }, value);
-      const updated = await assetWorkflowRunService.patchStepResults(
+      const updated = await assetWorkflowRunService.patchCaptureCell(
         run.id,
-        nextJson,
+        {
+          stepId: column.stepId,
+          inputId: column.inputId,
+          iterationIndex: column.iterationIndex,
+        },
+        value,
         currentUserName || undefined,
-        true,
       );
       onRunUpdated?.(updated);
       setDraftValues((prev) => {
