@@ -1,7 +1,7 @@
 # Web performance — phased implementation plan
 
 **Date:** 2026-08-04  
-**Status:** Phase 4 in progress (`cursor/web-perf-dashboard-defer-cd21`)  
+**Status:** Phase 5 in progress (`cursor/web-perf-polish-cd21`)  
 **Evidence:** `backedn_slow.docx` (989 EF SQL commands, ~1,561 assets / ~1,444 runs, JO00991-scale), `docs/WEB_PERF_SMOKE_REPORT_2026-08-03.md`, PM Playwright smoke 2026-08-04  
 **Primary persona:** PM on web (Jose) — Assets → Capture table → Issues  
 **Reference project:** **JO00991** (~1,300+ assets, AIM-100, Australia/Sydney)
@@ -358,15 +358,27 @@ Root issue today: each blur sends **~288 KB** `StepResultsJson`, wipes all run/a
 | Change | Fix `matchesWordStart` / capture search so `CAD-0039` matches full asset tag |
 | **Acceptance** | Search full tag → row visible **< 200 ms** |
 
+**Implementation:** `tokenizeWords` applied to query (splits on hyphens); compact alnum prefix fallback for `cad0039`-style input.
+
 ### 5.2 BuildWorkflowSummaries on list endpoints
 
 | Change | Ensure paginated list doesn’t N+1 latest runs per asset on server |
 | **Acceptance** | Summary query count per page | **≤ 3** SQL batches |
 
+**Verified (Phase 3):** `GetByProject?page=` calls `MapAssetsToDtosAsync(..., lightweightSummaries: true)` → one `GetLatestRunSummariesByAssetAsync` (2 queries) + assignments (1 query).
+
 ### 5.3 Docs & handover
 
 - Update `docs/WEB_PERF_SMOKE_REPORT` → link this plan + baseline  
 - Field retest checklist for Jose on JO00991  
+
+### Phase 5 exit criteria
+
+- [x] `matchesWordStart("CAD-0039", "CAD-0039")` unit tests pass  
+- [x] PM smoke searches full `CAD-0039` tag (no prefix workaround)  
+- [ ] Capture search **< 200 ms** on LAN (automated in strict smoke)  
+- [x] Paginated asset page summary SQL **≤ 3** batches (verified in controller)  
+- [x] Field retest checklist in `docs/WEB_PERF_BASELINE.md`
 
 ---
 

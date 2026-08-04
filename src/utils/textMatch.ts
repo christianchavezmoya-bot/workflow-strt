@@ -14,16 +14,25 @@ export function tokenizeWords(value: string | undefined | null): string[] {
     .filter(Boolean);
 }
 
-/** True when every query word starts at least one word in haystack. */
+/** True when every query token starts at least one word in haystack (word-start match). */
 export function matchesWordStart(haystack: string | undefined | null, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   if (!haystack) return false;
-  const queryWords = q.split(/\s+/).filter(Boolean);
+
+  // Tokenize query on punctuation as well as spaces so "CAD-0039" → ["cad", "0039"].
+  const queryWords = tokenizeWords(q);
   if (queryWords.length === 0) return true;
+
   const nameWords = tokenizeWords(haystack);
   if (nameWords.length === 0) return false;
-  return queryWords.every((qw) => nameWords.some((nw) => nw.startsWith(qw)));
+
+  if (queryWords.every((qw) => nameWords.some((nw) => nw.startsWith(qw)))) return true;
+
+  // Compact prefix for tags typed without separators (cad0039 → CAD-0039).
+  const compactHaystack = nameWords.join("");
+  const compactQuery = q.replace(/[^a-z0-9]/g, "");
+  return compactQuery.length > 0 && compactHaystack.startsWith(compactQuery);
 }
 
 /** True when any of the haystacks matches via word-start. */
