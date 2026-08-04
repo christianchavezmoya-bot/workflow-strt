@@ -865,6 +865,27 @@ public record ProjectAssetWorkflowSummaryDto(
     DateTime? LatestRunCompletedAt
 );
 
+public record PaginatedProjectAssetsResponse(
+    List<ProjectAssetDto> Items,
+    int Total,
+    int Page,
+    int PageSize,
+    bool HasMore
+);
+
+public record AssetWorkflowRunSummaryDto(
+    string Id,
+    string AssetId,
+    string WorkflowConfigId,
+    string Status,
+    bool IsLocked,
+    string SignatureStatus,
+    DateTime StartedAt,
+    DateTime? CompletedAt,
+    DateTime UpdatedAt,
+    int RunNumber
+);
+
 public record UpsertProjectAssetRequest(
     string? ProjectId,
     string? ProductId,

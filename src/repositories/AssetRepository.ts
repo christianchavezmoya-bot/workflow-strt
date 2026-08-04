@@ -17,6 +17,7 @@ import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { webCachedGet, webCacheKey, invalidateWebCacheByPrefix } from "../services/webFreshCache";
+import type { PaginatedResult, ProjectAssetPageQuery } from "../types/paginatedList";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
   const value = String(raw ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -120,6 +121,52 @@ export const AssetRepository = {
       res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: a }))
     );
     return res.data.map(fromDto);
+  },
+
+  async getByProjectPage(
+    projectId: string,
+    query: ProjectAssetPageQuery = {},
+  ): Promise<PaginatedResult<ProjectAsset>> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 50;
+    const params = {
+      page,
+      pageSize,
+      sort: query.sort ?? "assetTag",
+      includeDeleted: query.includeDeleted || undefined,
+      search: query.search?.trim() || undefined,
+    };
+
+    if (!isMobileNativePlatform()) {
+      const cacheKey = webCacheKey(`/project-assets/by-project/${projectId}`, params);
+      return webCachedGet(cacheKey, async () => {
+        const res = await api.get<PaginatedResult<ProjectAsset>>(
+          `/project-assets/by-project/${projectId}`,
+          { params },
+        );
+        return {
+          ...res.data,
+          items: res.data.items.map(fromDto),
+        };
+      }, { ttlMs: 5_000 });
+    }
+
+    const all = await this.getByProject(projectId, query.includeDeleted);
+    const term = query.search?.trim().toLowerCase();
+    const filtered = term
+      ? all.filter((a) =>
+          [a.assetTag, a.assetName, a.serialNumber, a.location]
+            .some((v) => (v ?? "").toLowerCase().includes(term)))
+      : all;
+    const start = (page - 1) * pageSize;
+    const items = filtered.slice(start, start + pageSize);
+    return {
+      items,
+      total: filtered.length,
+      page,
+      pageSize,
+      hasMore: start + items.length < filtered.length,
+    };
   },
 
   async getByProject(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {

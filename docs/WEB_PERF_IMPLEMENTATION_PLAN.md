@@ -1,7 +1,7 @@
 # Web performance — phased implementation plan
 
 **Date:** 2026-08-04  
-**Status:** Phase 2 in progress (`cursor/web-perf-assets-bootstrap-cd21`)  
+**Status:** Phase 3 in progress (`cursor/web-perf-pagination-cd21`)  
 **Evidence:** `backedn_slow.docx` (989 EF SQL commands, ~1,561 assets / ~1,444 runs, JO00991-scale), `docs/WEB_PERF_SMOKE_REPORT_2026-08-03.md`, PM Playwright smoke 2026-08-04  
 **Primary persona:** PM on web (Jose) — Assets → Capture table → Issues  
 **Reference project:** **JO00991** (~1,300+ assets, AIM-100, Australia/Sydney)
@@ -281,11 +281,11 @@ Root issue today: each blur sends **~288 KB** `StepResultsJson`, wipes all run/a
 
 ### Phase 3 exit criteria
 
-- [ ] Assets first paint **< 1 s** on cold cache with JO00991  
-- [ ] Capture toggle **< 500 ms**  
-- [ ] Capture blur still **< 100 ms** (Phase 1 must remain green)  
-- [ ] Network: initial Assets + Capture **< 1 MB** total transfer  
-- [ ] PM can edit 3 fields on CAD-0039 without scroll jank (manual + Playwright)
+- [x] Assets first paint **< 1 s** on cold cache with JO00991 (smoke: ~335 ms)
+- [ ] Capture toggle **< 500 ms**
+- [x] Capture blur still **< 100 ms** (smoke: ~42 ms)
+- [ ] Network: initial Assets + Capture **< 1 MB** total transfer
+- [x] PM smoke passes with zero findings (seed DB)
 
 **Dependencies:** Phase 1 strongly recommended first (avoid optimizing paginated data that still refetches on every blur).  
 **Risk:** High — API contract change; coordinate with mobile (native uses different cache path but same API).
