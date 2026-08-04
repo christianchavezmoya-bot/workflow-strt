@@ -21,6 +21,7 @@ import { getNetworkStatus, getNetworkMessage, NetworkStatus } from "../../servic
 import strataLogo from "../../assets/strata_transparent.png";
 import { APP_NAME } from "../../constants/branding";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { resolvePostLoginRoute } from "../../utils/postLoginRoute";
 
 // Must be outside Login so it doesn't remount on every keystroke
 const PageWrapper = ({ children }: { children: React.ReactNode }) => (
@@ -145,12 +146,16 @@ const Login = () => {
     // so the app is fully usable offline. Fire-and-forget — never blocks login.
     void offlineBootstrapService.run({ scope: "all" });
 
-    console.log("[Login] Login success, navigating to:", result.isFirstLogin || result.passwordExpired ? "/profile" : "/");
+    const landingRoute = resolvePostLoginRoute(
+      result.user as { role?: string } | undefined,
+      { isFirstLogin: result.isFirstLogin, passwordExpired: result.passwordExpired },
+    );
+    console.log("[Login] Login success, navigating to:", landingRoute);
     setLoading(false);
-    
+
     // Use setTimeout to ensure state updates propagate
     setTimeout(() => {
-      navigate(result.isFirstLogin || result.passwordExpired ? "/profile" : "/");
+      navigate(landingRoute);
     }, 100);
   };
 

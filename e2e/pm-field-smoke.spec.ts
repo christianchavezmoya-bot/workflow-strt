@@ -298,6 +298,28 @@ test.describe("PM field smoke — JO00991 capture + issues", () => {
 
     report.apiCalls = apiCalls;
     report.slowestApi = [...apiCalls].sort((a, b) => b.ms - a.ms).slice(0, 20);
+
+    const dashboardWorkspaceCalls = apiCalls.filter(
+      (c) => c.method === "GET" && c.path.includes("dashboard-workspace"),
+    );
+    report.steps.dashboardWorkspaceCount = dashboardWorkspaceCalls.length;
+    if (dashboardWorkspaceCalls.length > 0) {
+      markUnacceptable(`PM smoke triggered ${dashboardWorkspaceCalls.length} dashboard-workspace fetch(es) (Phase 4)`);
+    }
+
+    const inspectionImport500s = apiCalls.filter(
+      (c) => c.path.includes("/inspection-imports") && c.status >= 500,
+    );
+    report.steps.inspectionImport500Count = inspectionImport500s.length;
+    if (inspectionImport500s.length > 0) {
+      markUnacceptable(`PM smoke saw ${inspectionImport500s.length} inspection-imports HTTP 500 (Phase 4)`);
+    }
+
+    report.steps.totalApiCallCount = apiCalls.length;
+    if (process.env.PM_SMOKE_STRICT === "1" && apiCalls.length >= 40) {
+      markUnacceptable(`Total API calls ${apiCalls.length} — Phase 4 target is < 40`);
+    }
+
     for (const call of report.slowestApi) {
       if (call.ms > 2000 && call.ms > 0) {
         findings.push(`Slow API: ${call.method} ${call.path} → ${call.ms} ms (${call.status})`);
