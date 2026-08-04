@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   dashboardWorkspaceHasRows,
+  dashboardWorkspaceLayoutEqual,
   mergeDashboardWorkspace,
   mergeDashboardWorkspaceItems,
   stabilizeDashboardWorkspace,
   dedupeDashboardWorkspace,
+  dedupeDashboardWorkspaceItemsById,
 } from "./dashboardWorkspaceMerge";
 import type { DashboardWorkspaceAssetItem } from "../services/projectAssetService";
 
@@ -104,6 +106,36 @@ describe("dedupeDashboardWorkspace", () => {
     const deduped = dedupeDashboardWorkspace(workspace, authoritative);
     expect(deduped.currentInstalls.map((row) => row.id)).toEqual(["a1"]);
     expect(deduped.installHistory).toHaveLength(0);
+  });
+});
+
+describe("dedupeDashboardWorkspaceItemsById", () => {
+  it("collapses duplicate asset ids and preserves card signals", () => {
+    const current = { ...item("a1"), completedSteps: 4, totalSteps: 5 };
+    const history = { ...item("a1"), status: "Complete", historyStatus: "Complete", completedSteps: 0, totalSteps: 0 };
+    const deduped = dedupeDashboardWorkspaceItemsById([current, history]);
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]?.completedSteps).toBe(4);
+    expect(deduped[0]?.totalSteps).toBe(5);
+    expect(deduped[0]?.status).toBe("Complete");
+  });
+});
+
+describe("dashboardWorkspaceLayoutEqual", () => {
+  it("compares bucket membership only", () => {
+    const left = {
+      currentInstalls: [item("a1")],
+      currentInspections: [],
+      installHistory: [item("a2")],
+      inspectionHistory: [],
+    };
+    const right = {
+      currentInstalls: [{ ...item("a1"), status: "InProgress" }],
+      currentInspections: [],
+      installHistory: [item("a2")],
+      inspectionHistory: [],
+    };
+    expect(dashboardWorkspaceLayoutEqual(left, right)).toBe(true);
   });
 });
 
