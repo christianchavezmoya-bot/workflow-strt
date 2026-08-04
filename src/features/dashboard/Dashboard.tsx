@@ -703,9 +703,21 @@ const Dashboard = () => {
       .catch(() => {});
   }, [isManager, user.id]);
 
+  const attentionRequestSeqRef = useRef(0);
+
   const loadAttention = useCallback(async () => {
+    const requestSeq = ++attentionRequestSeqRef.current;
     setAttentionLoading(true);
     const attentionUserId = isManager ? undefined : user.id;
+    const applyAttention = (iss: OpenIssueRecord[], sigs: PendingSignatureRecord[]) => {
+      if (requestSeq !== attentionRequestSeqRef.current) return;
+      setOpenIssues(iss);
+      setPendingSigs(sigs);
+    };
+    const finishAttention = () => {
+      if (requestSeq !== attentionRequestSeqRef.current) return;
+      setAttentionLoading(false);
+    };
 
     if (isNativePlatform) {
       try {
@@ -713,13 +725,12 @@ const Dashboard = () => {
           assetWorkflowRunService.listOpenIssues(attentionUserId),
           assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId),
         ]);
-        setOpenIssues(localIssues);
-        setPendingSigs(localSigs);
+        applyAttention(localIssues, localSigs);
       } catch {
         // Keep the current attention widgets if local cache probing fails.
       }
       if (shouldSkipBlockingFetch()) {
-        setAttentionLoading(false);
+        finishAttention();
         return;
       }
       void Promise.all([
@@ -727,11 +738,10 @@ const Dashboard = () => {
         assetWorkflowRunService.listPendingSignatures(attentionUserId),
       ])
         .then(([iss, sigs]) => {
-          setOpenIssues(iss);
-          setPendingSigs(sigs);
+          applyAttention(iss, sigs);
         })
         .catch(() => {})
-        .finally(() => setAttentionLoading(false));
+        .finally(finishAttention);
       return;
     }
 
@@ -740,17 +750,15 @@ const Dashboard = () => {
         assetWorkflowRunService.listOpenIssues(attentionUserId),
         assetWorkflowRunService.listPendingSignatures(attentionUserId),
       ]);
-      setOpenIssues(iss);
-      setPendingSigs(sigs);
+      applyAttention(iss, sigs);
     } finally {
-      setAttentionLoading(false);
+      finishAttention();
     }
   }, [isManager, isNativePlatform, user.id]);
 
-  // Silent attention refresh: read the local issues/sigs snapshot only.
-  // repo:issues:updated is fired after sync/cache writes — must NOT call
-  // loadAttention() here (that re-triggers IssueRepository background fetch →
-  // another repo:issues:updated → spinner/chip flicker loop).
+  // Silent attention refresh on repo:issues:updated — must NOT call loadAttention()
+  // (that re-triggers IssueRepository background fetch → repo:issues:updated loop).
+  // Web has no IndexedDB sig snapshot; use the pending-signatures API directly there.
   const refreshAttentionFromIssueCache = useCallback(async () => {
     const attentionUserId = isManager ? undefined : user.id;
     try {
@@ -758,7 +766,9 @@ const Dashboard = () => {
         isNativePlatform
           ? IssueRepository.getLocalSnapshot()
           : assetWorkflowRunService.listOpenIssues(attentionUserId),
-        assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId),
+        isNativePlatform
+          ? assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId)
+          : assetWorkflowRunService.listPendingSignatures(attentionUserId),
       ]);
       setOpenIssues(issues);
       setPendingSigs(sigs);
@@ -833,6 +843,22 @@ const Dashboard = () => {
       }).catch(() => {});
     }
   }, [dashboardBootPhase, dispatch, isAuthenticated, isEngineer, isNativePlatform, loadAttention, seedNativeDashboardSummariesFromLocal]);
+
+  // useAuth resolves role one tick after mount (Viewer placeholder). If dashboard
+  // boot reached "full" while isManager was still false, the first loadAttention
+  // call scoped to user.id (installer filter) and a late response could stick at 0
+  // for PM/Admin. Re-fetch once manager scope becomes true.
+  const prevManagerAttentionScopeRef = useRef(isManager);
+  useEffect(() => {
+    if (dashboardBootPhase !== "full") {
+      prevManagerAttentionScopeRef.current = isManager;
+      return;
+    }
+    if (!prevManagerAttentionScopeRef.current && isManager) {
+      void loadAttention();
+    }
+    prevManagerAttentionScopeRef.current = isManager;
+  }, [dashboardBootPhase, isManager, loadAttention]);
 
   // ── Native cache: persist state to cache whenever it changes ──
   useEffect(() => {
