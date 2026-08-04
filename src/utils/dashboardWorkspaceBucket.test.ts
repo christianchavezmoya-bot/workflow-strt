@@ -42,7 +42,7 @@ describe("isDashboardWorkspaceCurrentItem", () => {
     expect(isDashboardWorkspaceCurrentItem(item("a1", "InProgress", { runStatus: "Paused" }))).toBe(true);
   });
 
-  it("keeps PendingInstaller signature work in current", () => {
+  it("keeps PendingInstaller signature work in current when asset awaits sign-off", () => {
     expect(isDashboardWorkspaceCurrentItem(item("a1", "Pending", { signatureStatus: "PendingInstaller" }))).toBe(true);
   });
 

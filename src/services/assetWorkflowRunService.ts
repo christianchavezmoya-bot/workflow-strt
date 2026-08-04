@@ -348,8 +348,18 @@ async function cacheServerRun(run: AssetWorkflowRun): Promise<AssetWorkflowRun> 
 }
 
 async function cacheServerRuns(runs: AssetWorkflowRun[]): Promise<AssetWorkflowRun[]> {
-  await Promise.all(runs.map((run) => cacheServerRun(run)));
-  return runs;
+  const cached: AssetWorkflowRun[] = [];
+  for (const run of runs) {
+    const stored = await cacheServerRun(run);
+    cached.push(stored);
+    if (isMobileNativePlatform()) {
+      const existing = await offlineStore.getRun(stored.id);
+      if (!existing?.dirty) {
+        await syncOfflineAssetWorkflowStateFromRun(stored);
+      }
+    }
+  }
+  return cached;
 }
 
 function refreshRunsInBackground(
@@ -599,7 +609,18 @@ async function listPendingSignaturesLocalImpl(userId?: string): Promise<PendingS
       signatureStatus: run.signatureStatus,
     });
   }
-  return records;
+  const latestByAsset = new Map<string, PendingSignatureRecord>();
+  for (const record of records) {
+    const existing = latestByAsset.get(record.assetId);
+    if (!existing) {
+      latestByAsset.set(record.assetId, record);
+      continue;
+    }
+    const existingAt = Date.parse(existing.completedAt || "") || 0;
+    const nextAt = Date.parse(record.completedAt || "") || 0;
+    if (nextAt >= existingAt) latestByAsset.set(record.assetId, record);
+  }
+  return Array.from(latestByAsset.values());
 }
 
 async function enqueueRunMutation(
