@@ -640,6 +640,10 @@ const AssetInstallationPage = () => {
   const [bulkDocsResult, setBulkDocsResult] = useState<string | null>(null);
   // Capture spreadsheet view
   const [assetTableViewMode, setAssetTableViewMode] = useState<"operations" | "capture">("operations");
+  const assetTableViewModeRef = useRef(assetTableViewMode);
+  assetTableViewModeRef.current = assetTableViewMode;
+  const [captureRunsLoading, setCaptureRunsLoading] = useState(false);
+  const [captureRunsError, setCaptureRunsError] = useState<string | null>(null);
   const [capturePopupOpen, setCapturePopupOpen] = useState(false);
   const [libFeatures, setLibFeatures] = useState<LibFeature[]>([]);
   const [depsByFeature, setDepsByFeature] = useState<Record<string, FeatureDependency[]>>({});
@@ -1164,7 +1168,7 @@ const AssetInstallationPage = () => {
           });
           setLastFetchedAt(new Date());
           clearLoadingOnce();
-          if (paginatedWebProject && freshAssets.length > 0) {
+          if (paginatedWebProject && freshAssets.length > 0 && assetTableViewModeRef.current !== "capture") {
             const assetIds = freshAssets.map((a) => a.id);
             assetWorkflowRunService.listRunSummariesByProject(selectedProjectId, assetIds)
               .then((runs) => {
@@ -1244,14 +1248,28 @@ const AssetInstallationPage = () => {
 
   // Paginated web: load full run blobs when Capture view needs step results.
   useEffect(() => {
-    if (!paginatedWebProject || assetTableViewMode !== "capture" || assets.length === 0) return;
+    if (!paginatedWebProject || assetTableViewMode !== "capture" || assets.length === 0) {
+      setCaptureRunsLoading(false);
+      return;
+    }
     let cancelled = false;
     const assetIds = assets.map((a) => a.id);
+    setCaptureRunsLoading(true);
+    setCaptureRunsError(null);
     assetWorkflowRunService.loadRunDetailsForAssets(selectedProjectId, assetIds)
       .then((runs) => {
-        if (!cancelled) setRunsMap((prev) => mergeRunsIntoMap(prev, runs));
+        if (cancelled) return;
+        setRunsMap((prev) => mergeRunsIntoMap(prev, runs));
+        setCaptureRunsError(null);
       })
-      .catch(() => {/* non-blocking */});
+      .catch(() => {
+        if (!cancelled) {
+          setCaptureRunsError("Could not load capture data for this page. Check your connection and try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCaptureRunsLoading(false);
+      });
     return () => { cancelled = true; };
   }, [assetTableViewMode, assets, paginatedWebProject, selectedProjectId]);
 
@@ -5774,6 +5792,8 @@ ${words.slice(midpoint).join(" ")}`;
           onClose={() => setAssetTableViewMode("operations")}
           assets={displayAssets}
           runsMap={runsMap}
+          captureRunsLoading={captureRunsLoading}
+          captureRunsError={captureRunsError}
           features={libFeatures}
           depsByFeature={depsByFeature}
           featureSelectionsByConfig={featureSelectionsByConfig}
