@@ -14,7 +14,7 @@ import { shouldSkipRunMutation } from "./connectivityMonitor";
 import { mediaStore } from "./mediaStore";
 import { isOfflineNetworkError as isOfflineNetworkErrorShape } from "../utils/offlineNetworkError";
 import offlineStore from "./offlineStore";
-import { dashboardWorkspaceHasRows } from "../utils/dashboardWorkspaceMerge";
+import { dashboardWorkspaceHasRows, dedupeDashboardWorkspaceItemsById, dashboardWorkspaceLayoutEqual } from "../utils/dashboardWorkspaceMerge";
 import { bucketDashboardWorkspaceItems } from "../utils/dashboardWorkspaceBucket";
 
 const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:${userId}`;
@@ -222,22 +222,45 @@ function buildDashboardWorkspaceFromAssets(
  * every offline write path, e.g. applyOfflineAssetStatusUpdate) already has the true status.
  */
 async function reconcileWorkspaceWithLocalStatus(data: DashboardWorkspace): Promise<DashboardWorkspace> {
-  const allItems = [
+  const flattened = [
     ...data.currentInstalls, ...data.currentInspections,
     ...data.installHistory, ...data.inspectionHistory,
   ];
-  if (allItems.length === 0) return data;
+  if (flattened.length === 0) return data;
 
-  let changed = false;
-  const reconciled = await Promise.all(allItems.map(async (item) => {
+  const deduped = dedupeDashboardWorkspaceItemsById(flattened);
+  let changed = deduped.length !== flattened.length;
+
+  const reconciled = await Promise.all(deduped.map(async (item) => {
     const cached = await entityGetAsset(item.id);
-    const freshStatus = (cached?.data as ProjectAsset | undefined)?.status;
-    if (!freshStatus || freshStatus === item.status) return item;
-    changed = true;
-    return { ...item, status: freshStatus, historyStatus: freshStatus };
+    const asset = cached?.data as ProjectAsset | undefined;
+    if (!asset) return item;
+
+    const freshStatus = asset.status;
+    const freshRunStatus = asset.workflowSummary?.latestRunStatus;
+    const freshSignatureStatus = asset.workflowSummary?.signatureStatus;
+
+    const next: DashboardWorkspaceAssetItem = {
+      ...item,
+      status: freshStatus ?? item.status,
+      historyStatus: freshStatus ?? item.historyStatus,
+      runStatus: freshRunStatus ?? item.runStatus,
+      signatureStatus: freshSignatureStatus ?? item.signatureStatus,
+    };
+
+    if (
+      next.status !== item.status
+      || next.runStatus !== item.runStatus
+      || next.signatureStatus !== item.signatureStatus
+    ) {
+      changed = true;
+    }
+    return next;
   }));
 
-  return changed ? bucketDashboardWorkspaceItems(reconciled) : data;
+  const rebucketed = bucketDashboardWorkspaceItems(reconciled);
+  if (!changed && dashboardWorkspaceLayoutEqual(data, rebucketed)) return data;
+  return rebucketed;
 }
 
 export const projectAssetService = {

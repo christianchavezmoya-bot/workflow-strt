@@ -77,6 +77,33 @@ export function mergeDashboardWorkspace(
   return dedupeDashboardWorkspace(merged, incoming);
 }
 
+/** Collapse duplicate asset ids from a flattened workspace list before local rebucketing. */
+export function dedupeDashboardWorkspaceItemsById(
+  items: DashboardWorkspaceAssetItem[],
+): DashboardWorkspaceAssetItem[] {
+  const byId = new Map<string, DashboardWorkspaceAssetItem>();
+  for (const item of items) {
+    const existing = byId.get(item.id);
+    if (!existing) {
+      byId.set(item.id, item);
+      continue;
+    }
+    byId.set(item.id, mergeWorkspaceItemCardSignals(
+      { ...existing, ...item },
+      dashboardWorkspaceItemHasCardSignals(existing) ? existing : item,
+    ));
+  }
+  return [...byId.values()];
+}
+
+export function dashboardWorkspaceLayoutEqual(a: DashboardWorkspace, b: DashboardWorkspace): boolean {
+  const ids = (rows: DashboardWorkspaceAssetItem[]) => rows.map((row) => row.id).sort().join(",");
+  return ids(a.currentInstalls) === ids(b.currentInstalls)
+    && ids(a.currentInspections) === ids(b.currentInspections)
+    && ids(a.installHistory) === ids(b.installHistory)
+    && ids(a.inspectionHistory) === ids(b.inspectionHistory);
+}
+
 const WORKSPACE_BUCKETS = [
   "currentInstalls",
   "currentInspections",
