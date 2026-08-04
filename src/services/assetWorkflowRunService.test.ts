@@ -2,9 +2,24 @@ import { describe, expect, it } from "vitest";
 import {
   assertNoBlockingIssuesForComplete,
   deriveOfflineAssetStatusFromRun,
+  filterPendingSignaturesForInstallerView,
   isAssetSignatureStatusFinalized,
   isRunSignatureFinalized,
+  type PendingSignatureRecord,
 } from "./assetWorkflowRunService";
+
+const sampleSig = (signatureStatus: string): PendingSignatureRecord => ({
+  runId: "run-1",
+  assetId: "asset-1",
+  assetTag: "CAD-1",
+  assetName: "CAD-1",
+  projectId: "p1",
+  jobNumber: "JO1",
+  customerName: "Customer",
+  completedAt: "2026-01-01T00:00:00.000Z",
+  completedBy: "Tech",
+  signatureStatus,
+});
 
 const lockedCompleteRun = {
   status: "Complete" as const,
@@ -50,6 +65,17 @@ describe("deriveOfflineAssetStatusFromRun", () => {
       signatureStatus: "PendingInstaller",
       installerSignedAt: "2026-01-01T00:00:00.000Z",
     })).toBe("Pending");
+  });
+});
+
+describe("filterPendingSignaturesForInstallerView", () => {
+  it("keeps installer sign-off only", () => {
+    const filtered = filterPendingSignaturesForInstallerView([
+      sampleSig("PendingInstaller"),
+      sampleSig("PendingCustomer"),
+    ]);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.signatureStatus).toBe("PendingInstaller");
   });
 });
 

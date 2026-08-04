@@ -451,6 +451,25 @@ export function isAssetSignatureStatusFinalized(signatureStatus?: string | null)
   return value === "Signed" || value === "Declined" || value === "WaivedCustomer";
 }
 
+function normalizeSignatureStatus(value?: string | null): string {
+  return (value ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+/** Installer field duty — awaiting the installer's own sign-off. */
+export function isPendingInstallerSignature(status?: string | null): boolean {
+  return normalizeSignatureStatus(status) === "pendinginstaller";
+}
+
+/** PM/Admin duty — customer sign-off request after installer has signed. */
+export function isPendingCustomerSignature(status?: string | null): boolean {
+  return normalizeSignatureStatus(status) === "pendingcustomer";
+}
+
+/** Installers see only their own sign-off queue; PM/Admin see the full pending list. */
+export function filterPendingSignaturesForInstallerView(records: PendingSignatureRecord[]): PendingSignatureRecord[] {
+  return records.filter((record) => isPendingInstallerSignature(record.signatureStatus));
+}
+
 export function deriveOfflineAssetStatusFromRun(
   run: Pick<AssetWorkflowRun, "status" | "isLocked" | "issuesJson" | "signatureStatus" | "customerSignedAt" | "installerSignedAt">,
 ): ProjectAssetStatus {
@@ -581,7 +600,7 @@ async function listPendingSignaturesLocalImpl(userId?: string): Promise<PendingS
   for (const run of runs as AssetWorkflowRun[]) {
     if (!run.isLocked) continue;
     if (isRunSignatureFinalized(run)) continue;
-    if (run.signatureStatus !== "PendingInstaller" && run.signatureStatus !== "PendingCustomer") continue;
+    if (!isPendingInstallerSignature(run.signatureStatus) && !isPendingCustomerSignature(run.signatureStatus)) continue;
     const asset = assetById.get(run.assetId);
     if (!asset) continue;
     if (userId && asset.assignedUserId !== userId) continue;
@@ -599,7 +618,7 @@ async function listPendingSignaturesLocalImpl(userId?: string): Promise<PendingS
       signatureStatus: run.signatureStatus,
     });
   }
-  return records;
+  return userId ? filterPendingSignaturesForInstallerView(records) : records;
 }
 
 async function enqueueRunMutation(
@@ -1777,7 +1796,7 @@ export const assetWorkflowRunService = {
       const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures", {
         params: userId ? { userId } : undefined,
       });
-      return res.data;
+      return userId ? filterPendingSignaturesForInstallerView(res.data) : res.data;
     } catch {
       if (!isMobileNativePlatform()) return [];
       try {
