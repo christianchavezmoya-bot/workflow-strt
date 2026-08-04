@@ -58,6 +58,7 @@ import { pickCaptureRun } from "../../utils/captureSpreadsheet";
 import { captureSpreadsheetTheme } from "../../theme/captureSpreadsheetTheme";
 import CaptureSpreadsheetRow from "./CaptureSpreadsheetRow";
 import CaptureVirtualizedTableBody from "./CaptureVirtualizedTableBody";
+import CaptureAssetEditPanel from "./CaptureAssetEditPanel";
 import { captureCellKey } from "./CaptureEditableCell";
 import { isMobileNativePlatform } from "../../utils/platform";
 import {
@@ -205,6 +206,8 @@ export default function CaptureSpreadsheetDialog({
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [cellPatches, setCellPatches] = useState<Record<string, string>>({});
   const [cellError, setCellError] = useState<string | null>(null);
+  const [editPanelAsset, setEditPanelAsset] = useState<ProjectAsset | null>(null);
+  const useSingleAssetEditPanel = !isMobileNativePlatform() && embedded && canEditCapture && !readOnly;
   const headerRow1Ref = useRef<HTMLTableRowElement>(null);
   const headerRow2Ref = useRef<HTMLTableRowElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -223,6 +226,7 @@ export default function CaptureSpreadsheetDialog({
       setSearch("");
       setCellPatches({});
       setCellError(null);
+      setEditPanelAsset(null);
     }
   }, [open]);
 
@@ -314,6 +318,7 @@ export default function CaptureSpreadsheetDialog({
   }, [hiddenGroups, table.columns.length, table.groups, visibleGroups.length]);
 
   const applyCellPatches = useCallback((cells: Record<string, string>, assetId: string) => {
+    if (useSingleAssetEditPanel) return cells;
     const merged = { ...cells };
     for (const key of Object.keys(cellPatches)) {
       if (!key.startsWith(`${assetId}::`)) continue;
@@ -321,7 +326,7 @@ export default function CaptureSpreadsheetDialog({
       merged[columnId] = cellPatches[key];
     }
     return merged;
-  }, [cellPatches]);
+  }, [cellPatches, useSingleAssetEditPanel]);
 
   const rows = useMemo(() => {
     const rowMap = new Map(table.rows.map((row) => [row.assetId, row]));
@@ -525,6 +530,19 @@ export default function CaptureSpreadsheetDialog({
     return canEditRun(run, userRole).data;
   }, [canEditAsset, canEditCapture, readOnly, runsMap, userRole]);
 
+  const canEditAssetRow = useCallback((asset: ProjectAsset) => {
+    if (!canEditCapture || !canEditAsset?.(asset)) return false;
+    const run = pickCaptureRun(runsMap[asset.id] ?? []);
+    if (!run || !canEditRun(run, userRole).data) return false;
+    return orderedGroups.some((group) => group.columns.some(
+      (column) => column.stepId && column.inputId && isCaptureColumnEditable(column.inputType),
+    ));
+  }, [canEditAsset, canEditCapture, orderedGroups, runsMap, userRole]);
+
+  const noopSaveCell = useCallback(async () => {}, []);
+  const noopPatchCell = useCallback(() => {}, []);
+  const neverEditableCell = useCallback((_asset: ProjectAsset, _column: ProjectCaptureColumn) => false, []);
+
   const onPatchCell = useCallback((assetId: string, columnId: string, value: string) => {
     setCellPatches((prev) => ({ ...prev, [captureCellKey(assetId, columnId)]: value }));
   }, []);
@@ -566,14 +584,21 @@ export default function CaptureSpreadsheetDialog({
     assetJobColumns,
     selectionEnabled,
     onToggleAssetSelection,
-    editableForColumn: canEditCaptureCell,
-    onSaveCell: saveCaptureCell,
-    onPatchCell: onPatchCell,
+    editableForColumn: useSingleAssetEditPanel ? neverEditableCell : canEditCaptureCell,
+    onSaveCell: useSingleAssetEditPanel ? noopSaveCell : saveCaptureCell,
+    onPatchCell: useSingleAssetEditPanel ? noopPatchCell : onPatchCell,
     renderStatus,
     renderActions,
+    readOnlyTable: useSingleAssetEditPanel,
+    canEditAssetRow: useSingleAssetEditPanel ? canEditAssetRow : undefined,
+    onEditAsset: useSingleAssetEditPanel ? setEditPanelAsset : undefined,
   }), [
     assetJobColumns,
+    canEditAssetRow,
     canEditCaptureCell,
+    neverEditableCell,
+    noopPatchCell,
+    noopSaveCell,
     onPatchCell,
     onToggleAssetSelection,
     orderedGroups,
@@ -581,7 +606,14 @@ export default function CaptureSpreadsheetDialog({
     renderStatus,
     saveCaptureCell,
     selectionEnabled,
+    useSingleAssetEditPanel,
   ]);
+
+  const editPanelCellValues = useMemo(() => {
+    if (!editPanelAsset) return {};
+    const row = rows.find(({ asset }) => asset.id === editPanelAsset.id);
+    return row?.mergedCells ?? {};
+  }, [editPanelAsset, rows]);
 
   const inner = (
     <Stack spacing={1.5} sx={embedded ? { width: "100%" } : undefined}>
@@ -625,7 +657,9 @@ export default function CaptureSpreadsheetDialog({
 
       {!readOnly && canEditCapture && (
         <Typography variant="caption" color="text.secondary">
-          Editable cells: Admin / PM / Supervisor may correct captured text before customer sign-off. Installers and other roles are read-only after installer sign-off.
+          {useSingleAssetEditPanel
+            ? "Read-only table. Use the edit icon on a row to change capture values, then Save in the side panel."
+            : "Editable cells: Admin / PM / Supervisor may correct captured text before customer sign-off. Installers and other roles are read-only after installer sign-off."}
         </Typography>
       )}
 
@@ -940,11 +974,14 @@ export default function CaptureSpreadsheetDialog({
                   selectionEnabled={selectionEnabled}
                   isSelected={selectedAssetIds?.has(asset.id) ?? false}
                   onToggleAssetSelection={onToggleAssetSelection}
-                  editableForColumn={canEditCaptureCell}
-                  onSaveCell={saveCaptureCell}
-                  onPatchCell={onPatchCell}
+                  editableForColumn={useSingleAssetEditPanel ? neverEditableCell : canEditCaptureCell}
+                  onSaveCell={useSingleAssetEditPanel ? noopSaveCell : saveCaptureCell}
+                  onPatchCell={useSingleAssetEditPanel ? noopPatchCell : onPatchCell}
                   renderStatus={renderStatus}
                   renderActions={renderActions}
+                  readOnlyTable={useSingleAssetEditPanel}
+                  canEditAssetRow={useSingleAssetEditPanel ? canEditAssetRow : undefined}
+                  onEditAsset={useSingleAssetEditPanel ? setEditPanelAsset : undefined}
                 />
               ))}
             </TableBody>
@@ -991,7 +1028,25 @@ export default function CaptureSpreadsheetDialog({
 
   if (embedded) {
     if (!open) return null;
-    return <Paper className="glass-card" sx={{ overflow: "hidden", p: 1.5 }}>{themedInner}</Paper>;
+    return (
+      <>
+        <Paper className="glass-card" sx={{ overflow: "hidden", p: 1.5 }}>{themedInner}</Paper>
+        {useSingleAssetEditPanel && (
+          <CaptureAssetEditPanel
+            open={!!editPanelAsset}
+            asset={editPanelAsset}
+            orderedGroups={orderedGroups}
+            cellValues={editPanelCellValues}
+            runsMap={runsMap}
+            userRole={userRole}
+            currentUserName={currentUserName}
+            canEditAsset={editPanelAsset ? (canEditAsset?.(editPanelAsset) ?? true) : true}
+            onClose={() => setEditPanelAsset(null)}
+            onRunUpdated={onRunUpdated}
+          />
+        )}
+      </>
+    );
   }
 
   return (

@@ -1,9 +1,11 @@
 import React from "react";
-import { Checkbox, Chip, TableCell, TableRow, Typography } from "@mui/material";
+import EditOutlined from "@mui/icons-material/EditOutlined";
+import { Checkbox, Chip, IconButton, Stack, TableCell, TableRow, Tooltip, Typography } from "@mui/material";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { ProjectCaptureGroup, ProjectCaptureRow } from "../../utils/projectCaptureTable";
 import { STATUS_COLORS, STATUS_LABELS } from "./assetStatusDisplay";
 import CaptureEditableCell from "./CaptureEditableCell";
+import CaptureReadOnlyCell from "./CaptureReadOnlyCell";
 import type { CaptureSpreadsheetAssetJobColumn } from "./captureSpreadsheetTableLayout";
 import {
   ASSET_JOB_COL_W,
@@ -34,6 +36,10 @@ export type CaptureSpreadsheetRowProps = {
   onPatchCell: (assetId: string, columnId: string, value: string) => void;
   renderStatus?: (asset: ProjectAsset) => React.ReactNode;
   renderActions?: (asset: ProjectAsset) => React.ReactNode;
+  /** Web: table cells are read-only; use onEditAsset to open the edit panel. */
+  readOnlyTable?: boolean;
+  canEditAssetRow?: (asset: ProjectAsset) => boolean;
+  onEditAsset?: (asset: ProjectAsset) => void;
 };
 
 function defaultStatus(asset: ProjectAsset) {
@@ -62,6 +68,9 @@ function CaptureSpreadsheetRowInner({
   onPatchCell,
   renderStatus,
   renderActions,
+  readOnlyTable = false,
+  canEditAssetRow,
+  onEditAsset,
 }: CaptureSpreadsheetRowProps) {
   const rowBg = rowIndex % 2 === 0 ? ASSET_JOB_PALETTE.tint : ASSET_JOB_PALETTE.tintAlt;
 
@@ -124,17 +133,27 @@ function CaptureSpreadsheetRowInner({
         </TableCell>
       ))}
       {orderedGroups.flatMap((group) => group.columns.map((column) => (
-        <CaptureEditableCell
-          key={column.id}
-          asset={asset}
-          column={column}
-          group={group}
-          rowBg={rowBg}
-          value={mergedCells[column.id] ?? ""}
-          editable={editableForColumn(asset, column)}
-          onSave={onSaveCell}
-          onPatch={onPatchCell}
-        />
+        readOnlyTable ? (
+          <CaptureReadOnlyCell
+            key={column.id}
+            column={column}
+            group={group}
+            rowBg={rowBg}
+            value={mergedCells[column.id] ?? ""}
+          />
+        ) : (
+          <CaptureEditableCell
+            key={column.id}
+            asset={asset}
+            column={column}
+            group={group}
+            rowBg={rowBg}
+            value={mergedCells[column.id] ?? ""}
+            editable={editableForColumn(asset, column)}
+            onSave={onSaveCell}
+            onPatch={onPatchCell}
+          />
+        )
       )))}
       <TableCell
         sx={{
@@ -163,7 +182,18 @@ function CaptureSpreadsheetRowInner({
           ...bodyCellHoverSx(rowBg),
         }}
       >
-        {renderActions ? renderActions(asset) : <Typography variant="caption" sx={{ color: "rgba(22,52,71,0.62)" }}>-</Typography>}
+        <Stack direction="row" spacing={0.25} alignItems="center" justifyContent="flex-start" flexWrap="wrap" useFlexGap>
+          {readOnlyTable && canEditAssetRow?.(asset) && onEditAsset && (
+            <Tooltip title="Edit capture values">
+              <IconButton size="small" onClick={() => onEditAsset(asset)} aria-label={`Edit capture for ${asset.assetTag}`}>
+                <EditOutlined fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {renderActions ? renderActions(asset) : (
+            !readOnlyTable && <Typography variant="caption" sx={{ color: "rgba(22,52,71,0.62)" }}>-</Typography>
+          )}
+        </Stack>
       </TableCell>
     </TableRow>
   );
@@ -195,6 +225,9 @@ function rowPropsEqual(prev: CaptureSpreadsheetRowProps, next: CaptureSpreadshee
     && prev.onPatchCell === next.onPatchCell
     && prev.renderStatus === next.renderStatus
     && prev.renderActions === next.renderActions
+    && prev.readOnlyTable === next.readOnlyTable
+    && prev.canEditAssetRow === next.canEditAssetRow
+    && prev.onEditAsset === next.onEditAsset
   );
 }
 
