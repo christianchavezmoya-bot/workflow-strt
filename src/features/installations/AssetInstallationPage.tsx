@@ -125,7 +125,7 @@ import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/p
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
-import { mergeRunsIntoMap, runHasCaptureBlobs } from "../../types/assetWorkflowRunSummary";
+import { mergeRunsIntoMap, assetCaptureBlobsReady } from "../../types/assetWorkflowRunSummary";
 import type { BomItem, StepInput, Workflow } from "../../types/workflow";
 import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
@@ -462,6 +462,7 @@ const AssetInstallationPage = () => {
   // effect corrects the tab) are silently discarded.
   const assetLoadIdRef = useRef(0);
   const capturePrefetchKeyRef = useRef<string | null>(null);
+  const captureDetailFetchKeyRef = useRef<string | null>(null);
   // Separate counter for the document-counts effect so it can NEVER bump the
   // main asset-load's staleness ref — sharing one ref let the doc-counts effect
   // invalidate an in-flight load's guard, so setLoadingAssets(false) was skipped
@@ -1258,17 +1259,17 @@ const AssetInstallationPage = () => {
       setCaptureRunsLoading(false);
       return;
     }
-    const blobsReady = assets.every((asset) => {
-      const run = pickCaptureRun(runsMap[asset.id] ?? []);
-      return run && runHasCaptureBlobs(run);
-    });
+    const blobsReady = assets.every((asset) => assetCaptureBlobsReady(runsMap[asset.id] ?? []));
     if (blobsReady) {
       setCaptureRunsLoading(false);
       setCaptureRunsError(null);
       return;
     }
-    let cancelled = false;
     const assetIds = assets.map((a) => a.id);
+    const fetchKey = `${selectedProjectId}:${[...assetIds].sort().join(",")}`;
+    if (captureDetailFetchKeyRef.current === fetchKey) return;
+    captureDetailFetchKeyRef.current = fetchKey;
+    let cancelled = false;
     setCaptureRunsLoading(true);
     setCaptureRunsError(null);
     assetWorkflowRunService.loadRunDetailsForAssets(selectedProjectId, assetIds)
@@ -1279,6 +1280,7 @@ const AssetInstallationPage = () => {
       })
       .catch(() => {
         if (!cancelled) {
+          captureDetailFetchKeyRef.current = null;
           setCaptureRunsError("Could not load capture data for this page. Check your connection and try again.");
         }
       })
@@ -1306,12 +1308,15 @@ const AssetInstallationPage = () => {
   // Web paginated only: prefetch capture blobs in background after assets paint.
   useEffect(() => {
     capturePrefetchKeyRef.current = null;
+    captureDetailFetchKeyRef.current = null;
   }, [selectedProjectId]);
 
   useEffect(() => {
     if (!paginatedWebProject || !selectedProjectId || assetsKey === "") return;
+    if (assetTableViewModeRef.current === "capture") return;
     const prefetchKey = `${selectedProjectId}:${assetsKey}`;
     if (capturePrefetchKeyRef.current === prefetchKey) return;
+    if (captureDetailFetchKeyRef.current === prefetchKey) return;
     capturePrefetchKeyRef.current = prefetchKey;
     let cancelled = false;
     const assetIds = assetsRef.current.map((a) => a.id);

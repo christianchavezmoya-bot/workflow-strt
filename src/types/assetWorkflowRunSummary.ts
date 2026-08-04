@@ -25,6 +25,16 @@ export function runHasCaptureBlobs(run: Pick<AssetWorkflowRun, "stepResultsJson"
   return (run.stepResultsJson?.length ?? 0) > 20 || (run.workflowSnapshotJson?.length ?? 0) > 20;
 }
 
+/** True when capture detail fetch can stop for this asset (no run, or full blobs already loaded). */
+export function assetCaptureBlobsReady(runs: AssetWorkflowRun[]): boolean {
+  if (runs.length === 0) return true;
+  const latest = runs.reduce((best, run) => {
+    if (!best) return run;
+    return new Date(run.startedAt).getTime() >= new Date(best.startedAt).getTime() ? run : best;
+  }, runs[0]);
+  return runHasCaptureBlobs(latest);
+}
+
 export function runSummaryToPlaceholderRun(summary: AssetWorkflowRunSummary): AssetWorkflowRun {
   return {
     id: summary.id,

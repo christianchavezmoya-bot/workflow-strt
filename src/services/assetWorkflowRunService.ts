@@ -23,7 +23,7 @@ import { boundedFreshRead, BOUNDED_FRESH_TIMEOUT_MS } from "../utils/boundedFres
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 import type { AssetWorkflowRunSummary } from "../types/assetWorkflowRunSummary";
-import { mergeRunsIntoMap, runSummaryToPlaceholderRun } from "../types/assetWorkflowRunSummary";
+import { mergeRunsIntoMap, runSummaryToPlaceholderRun, assetCaptureBlobsReady } from "../types/assetWorkflowRunSummary";
 import {
   countMissingWorkflowItems,
   getWorkflowStepCompletion,
@@ -72,6 +72,7 @@ export interface ClosedIssueRecord extends OpenIssueRecord {
 }
 
 const CLOSED_ISSUES_CACHE_KEY = "asset-workflow-closed-issues-v1";
+const inflightRunDetailsByKey = new Map<string, Promise<AssetWorkflowRun[]>>();
 
 function parseTimeEntries(json: string): RunTimeEntry[] {
   try {
@@ -860,11 +861,21 @@ export const assetWorkflowRunService = {
   /** Full run blobs for capture editing — scoped to visible assets only. */
   async loadRunDetailsForAssets(projectId: string, assetIds: string[]): Promise<AssetWorkflowRun[]> {
     if (assetIds.length === 0) return [];
-    const res = await api.get<AssetWorkflowRun[]>(
-      `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
-      { params: { assetIds: assetIds.join(",") } },
-    );
-    return res.data;
+    const sortedIds = [...assetIds].sort();
+    const cacheKey = `/asset-workflow-runs/by-project/${projectId}/runs-detail?assetIds=${sortedIds.join(",")}`;
+    const inflight = inflightRunDetailsByKey.get(cacheKey);
+    if (inflight) return inflight;
+    const promise = webCachedGet(cacheKey, async () => {
+      const res = await api.get<AssetWorkflowRun[]>(
+        `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
+        { params: { assetIds: sortedIds.join(",") } },
+      );
+      return res.data;
+    }, { ttlMs: 30_000 }).finally(() => {
+      inflightRunDetailsByKey.delete(cacheKey);
+    });
+    inflightRunDetailsByKey.set(cacheKey, promise);
+    return promise;
   },
 
   async listByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
