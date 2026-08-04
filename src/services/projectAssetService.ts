@@ -2,7 +2,9 @@ import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 import type { Project } from "../types/project";
-import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingGetAll, referenceDataGet } from "./localDB";
+import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityGetWorkflowRunsByAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingGetAll, referenceDataGet } from "./localDB";
+import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
+import type { OfflineRun } from "./offlineStore";
 import syncQueue from "./syncQueue";
 import { AssetRepository } from "../repositories/AssetRepository";
 import { isMobileNativePlatform } from "../utils/platform";
@@ -215,6 +217,49 @@ function buildDashboardWorkspaceFromAssets(
   return bucketDashboardWorkspaceItems(userFiltered);
 }
 
+function pickLatestCachedRun(runs: AssetWorkflowRun[]): (AssetWorkflowRun & Partial<OfflineRun>) | undefined {
+  if (runs.length === 0) return undefined;
+  return runs.reduce((best, run) => {
+    if (!best) return run;
+    return new Date(run.startedAt).getTime() >= new Date(best.startedAt).getTime() ? run : best;
+  }, runs[0]);
+}
+
+/**
+ * Merge server workspace fields with local IndexedDB state without letting stale asset summaries
+ * overwrite a fresh online fetch (e.g. archived CAD-0038 still InProgress locally).
+ * Local dirty runs/assets still win for offline-first writes.
+ */
+export function reconcileWorkspaceItemWithLocal(
+  item: DashboardWorkspaceAssetItem,
+  asset: ProjectAsset,
+  latestLocalRun?: AssetWorkflowRun & Partial<OfflineRun>,
+): DashboardWorkspaceAssetItem {
+  const summaryRunStatus = asset.workflowSummary?.latestRunStatus;
+  const summarySignatureStatus = asset.workflowSummary?.signatureStatus;
+  const localDirty = latestLocalRun?.dirty === true;
+
+  const runStatus = localDirty
+    ? (latestLocalRun?.status ?? item.runStatus ?? summaryRunStatus)
+    : (item.runStatus ?? latestLocalRun?.status ?? summaryRunStatus);
+
+  const signatureStatus = localDirty
+    ? (summarySignatureStatus ?? item.signatureStatus)
+    : (item.signatureStatus ?? summarySignatureStatus);
+
+  const status = localDirty
+    ? (asset.status ?? item.status)
+    : (item.status ?? asset.status);
+
+  return {
+    ...item,
+    status,
+    historyStatus: status ?? item.historyStatus,
+    runStatus,
+    signatureStatus,
+  };
+}
+
 /**
  * Re-buckets a persisted (frozen) dashboard-workspace snapshot against the freshest locally-known
  * asset status. A job completed offline after the snapshot was captured must still move from
@@ -237,17 +282,9 @@ async function reconcileWorkspaceWithLocalStatus(data: DashboardWorkspace): Prom
     const asset = cached?.data as ProjectAsset | undefined;
     if (!asset) return item;
 
-    const freshStatus = asset.status;
-    const freshRunStatus = asset.workflowSummary?.latestRunStatus;
-    const freshSignatureStatus = asset.workflowSummary?.signatureStatus;
-
-    const next: DashboardWorkspaceAssetItem = {
-      ...item,
-      status: freshStatus ?? item.status,
-      historyStatus: freshStatus ?? item.historyStatus,
-      runStatus: freshRunStatus ?? item.runStatus,
-      signatureStatus: freshSignatureStatus ?? item.signatureStatus,
-    };
+    const localRuns = (await entityGetWorkflowRunsByAsset(item.id)) as AssetWorkflowRun[];
+    const latestLocalRun = pickLatestCachedRun(localRuns) as (AssetWorkflowRun & Partial<OfflineRun>) | undefined;
+    const next = reconcileWorkspaceItemWithLocal(item, asset, latestLocalRun);
 
     if (
       next.status !== item.status
@@ -711,7 +748,8 @@ export const projectAssetService = {
         entityGetAllProjects() as Promise<Project[]>,
       ]);
       const projectById = new Map(projects.map((p) => [p.id, p]));
-      return buildDashboardWorkspaceFromAssets(cached, userId, projectById);
+      const built = buildDashboardWorkspaceFromAssets(cached, userId, projectById);
+      return await reconcileWorkspaceWithLocalStatus(built);
     } catch {
       return {
         currentInstalls: [],

@@ -1881,19 +1881,7 @@ const Dashboard = () => {
           </Typography>
         </Box>
         <Stack direction="row" spacing={0.75} alignItems="center">
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={historyDialogLoading === asset.id ? <CircularProgress size={12} /> : <OpenInNewOutlined fontSize="small" />}
-            disabled={historyDialogLoading === asset.id}
-            onClick={(e) => {
-              e.stopPropagation();
-              void openHistoryReport(asset);
-            }}
-            sx={{ minWidth: 0, px: 1.1 }}
-          >
-            View
-          </Button>
+          {historyDialogLoading === asset.id && <CircularProgress size={12} />}
           <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
             sx={{ height: 18, fontSize: "0.62rem" }} />
         </Stack>
