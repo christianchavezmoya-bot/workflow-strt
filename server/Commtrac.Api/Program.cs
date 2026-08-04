@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Commtrac.Api.Middleware;
 using Commtrac.Api.Services;
 using Commtrac.Api.Swagger;
 
@@ -195,6 +196,11 @@ if (!app.Environment.IsDevelopment())
 app.UseCors("frontend");
 app.UseAuthentication();
 app.UseAuthorization();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseMiddleware<ApiTimingMiddleware>();
+}
 
 app.MapControllers();
 

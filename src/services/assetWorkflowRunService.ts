@@ -407,6 +407,14 @@ function invalidateWebRunReadCaches(assetId?: string): void {
   invalidateWebCacheByPrefix("/project-assets/by-project/");
 }
 
+/** Surgical invalidation after a single-run text capture edit — avoids project-wide refetch. */
+function invalidateWebRunDetailCaches(runId: string, assetId?: string): void {
+  invalidateWebCache(`/asset-workflow-runs/${runId}`);
+  if (assetId) {
+    invalidateWebCache(`/asset-workflow-runs/by-asset/${assetId}`);
+  }
+}
+
 function parseRunIssues(issuesJson: string | undefined): RunIssue[] {
   if (!issuesJson) return [];
   try {
@@ -1440,6 +1448,38 @@ export const assetWorkflowRunService = {
     return await this.completeRun(runId, run.stepResultsJson ?? "[]", run.issuesJson ?? "[]", completedByName, run.bomActualJson);
   },
 
+  /** Patch one text capture cell — small payload, no inbox/dashboard refresh (web). */
+  async patchCaptureCell(
+    runId: string,
+    binding: { stepId: string; inputId: string; iterationIndex?: number },
+    value: string,
+    amendedByName?: string,
+  ): Promise<AssetWorkflowRun> {
+    if (!isMobileNativePlatform()) {
+      const body = {
+        stepId: binding.stepId,
+        inputId: binding.inputId,
+        iterationIndex: binding.iterationIndex ?? null,
+        value,
+        amendedByName: amendedByName ?? null,
+      };
+      const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/capture-cell`, body, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
+      invalidateWebRunDetailCaches(runId, res.data.assetId);
+      return res.data;
+    }
+
+    const resolvedRunId = await resolveRunId(runId);
+    const cachedRun = await getCachedRun(runId);
+    if (!cachedRun) {
+      throw new Error("Run not found in offline cache");
+    }
+    const { patchCaptureCellValue } = await import("../utils/captureTableEdit");
+    const stepResultsJson = patchCaptureCellValue(cachedRun.stepResultsJson, binding, value);
+    return this.patchStepResults(resolvedRunId, stepResultsJson, amendedByName, true);
+  },
+
   /** Patch step results on a locked/complete run - used to add missing photos after completion. */
   async patchStepResults(runId: string, stepResultsJson: string, amendedByName?: string, captureDataAmend = false): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
@@ -1453,9 +1493,15 @@ export const assetWorkflowRunService = {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
       invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebRunReadCaches(res.data.assetId);
-      window.dispatchEvent(new Event("notifications:run-state-changed"));
-      window.dispatchEvent(new Event("notifications:refresh"));
+      if (captureDataAmend) {
+        invalidateWebRunDetailCaches(runId, res.data.assetId);
+      } else {
+        invalidateWebRunReadCaches(res.data.assetId);
+      }
+      if (!captureDataAmend) {
+        window.dispatchEvent(new Event("notifications:run-state-changed"));
+        window.dispatchEvent(new Event("notifications:refresh"));
+      }
       return res.data;
     }
 
@@ -1476,8 +1522,10 @@ export const assetWorkflowRunService = {
       const updatedRun = await cacheServerRun(res.data);
       signalLocalRunUpdate(updatedRun);
       await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));
-      window.dispatchEvent(new Event("notifications:run-state-changed"));
-      window.dispatchEvent(new Event("notifications:refresh"));
+      if (!captureDataAmend) {
+        window.dispatchEvent(new Event("notifications:run-state-changed"));
+        window.dispatchEvent(new Event("notifications:refresh"));
+      }
       return updatedRun;
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
@@ -1514,8 +1562,10 @@ export const assetWorkflowRunService = {
           updatedAt: now,
         },
       });
-      window.dispatchEvent(new Event("notifications:run-state-changed"));
-      window.dispatchEvent(new Event("notifications:refresh"));
+      if (!captureDataAmend) {
+        window.dispatchEvent(new Event("notifications:run-state-changed"));
+        window.dispatchEvent(new Event("notifications:refresh"));
+      }
       return offlineRun;
     }
   },

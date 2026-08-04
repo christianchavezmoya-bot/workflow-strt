@@ -1007,6 +1007,41 @@ public class AssetWorkflowRunsController : ControllerBase
         return Ok(ToDto(run));
     }
 
+    // PATCH api/asset-workflow-runs/{id}/capture-cell — merge one text capture value (no full JSON blob)
+    [HttpPatch("{id}/capture-cell")]
+    public async Task<IActionResult> PatchCaptureCell(string id, [FromBody] PatchCaptureCellRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.StepId) || string.IsNullOrWhiteSpace(req.InputId))
+        {
+            return BadRequest(new { message = "stepId and inputId are required." });
+        }
+
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
+        if (run is null) return NotFound();
+
+        var finalized = run.CustomerSignedAt.HasValue
+            || run.SignatureStatus is "Signed" or "Declined" or "WaivedCustomer";
+        if (finalized)
+        {
+            return UnprocessableEntity(new
+            {
+                message = "This workflow run was customer-signed. Start a new workflow run to change captured data.",
+            });
+        }
+
+        run.StepResultsJson = PatchCaptureCellInJson(
+            run.StepResultsJson,
+            req.StepId,
+            req.InputId,
+            req.IterationIndex,
+            req.Value);
+        run.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        // Text capture edits do not notify inbox/dashboard — keeps PM spreadsheet edits quiet.
+        return Ok(ToDto(run));
+    }
+
     // PATCH api/asset-workflow-runs/{id}/step-results — update step results on a locked/complete run (e.g. adding photos)
     [HttpPatch("{id}/step-results")]
     public async Task<IActionResult> PatchStepResults(string id, [FromBody] PatchStepResultsRequest req)
@@ -1031,13 +1066,17 @@ public class AssetWorkflowRunsController : ControllerBase
         run.UpdatedAt       = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
-        await NotifyRunEventAsync(
-            run,
-            "workflow-media-updated",
-            "info",
-            "Workflow media updated",
-            $"{req.AmendedByName ?? ResolveActorName()} uploaded or amended workflow media for asset {{asset}} on job {{job}}.",
-            notifyInstaller: false);
+        // Text capture amends use capture-cell (no notify). Full step-results PATCH is for media/signature.
+        if (!req.CaptureDataAmend)
+        {
+            await NotifyRunEventAsync(
+                run,
+                "workflow-media-updated",
+                "info",
+                "Workflow media updated",
+                $"{req.AmendedByName ?? ResolveActorName()} uploaded or amended workflow media for asset {{asset}} on job {{job}}.",
+                notifyInstaller: false);
+        }
         return Ok(ToDto(run));
     }
 
@@ -1330,6 +1369,42 @@ public class AssetWorkflowRunsController : ControllerBase
         {
             return [];
         }
+    }
+
+    private static string PatchCaptureCellInJson(
+        string? stepResultsJson,
+        string stepId,
+        string inputId,
+        int? iterationIndex,
+        string newValue)
+    {
+        var results = ParseWorkflowStepResults(stepResultsJson)
+            .Where(r => !string.Equals(r.StepId, "__nav__", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var wantIter = iterationIndex ?? 0;
+
+        var target = results.FirstOrDefault(r =>
+            string.Equals(r.StepId, stepId, StringComparison.OrdinalIgnoreCase)
+            && (r.IterationIndex ?? 0) == wantIter);
+
+        if (target is null)
+        {
+            target = new WorkflowStepResultSummary
+            {
+                StepId = stepId,
+                Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                CompletedAt = DateTime.UtcNow.ToString("o"),
+            };
+            if (iterationIndex.HasValue)
+            {
+                target.IterationIndex = iterationIndex.Value;
+            }
+            results.Add(target);
+        }
+
+        target.Values ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        target.Values[inputId] = newValue;
+        return JsonSerializer.Serialize(results, _caseInsensitive);
     }
 
     private static List<string> ParseCaptureValues(string? raw)

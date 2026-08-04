@@ -1031,6 +1031,13 @@ public record CompleteRunRequest(
 
 public record PatchTimeEntriesRequest(string TimeEntriesJson);
 public record PatchStepResultsRequest(string StepResultsJson, string? AmendedByName, string? AmendedAt, bool CaptureDataAmend = false);
+public record PatchCaptureCellRequest(
+    string StepId,
+    string InputId,
+    int? IterationIndex,
+    string Value,
+    string? AmendedByName
+);
 public record TrackRunTimeRequest(
     string Action,
     string? Reason,
