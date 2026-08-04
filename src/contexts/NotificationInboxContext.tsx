@@ -1,8 +1,13 @@
 ﻿import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { notificationService } from "../services/notificationService";
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { useAuth } from "../hooks/useAuth";
+import { isDashboardRoute } from "../utils/postLoginRoute";
 import type { AppNotification } from "../types/notification";
+
+const DASHBOARD_POLL_MS = 15_000;
+const BACKGROUND_POLL_MS = 60_000;
 
 const ASSIGNMENT_EVENT_TYPES = new Set([
   "workflow-assigned", "workflow-assigned-to-installer", "workflow-self-assigned",
@@ -43,6 +48,9 @@ const NotificationInboxContext = createContext<NotificationInboxContextValue | u
 
 export function NotificationInboxProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated } = useAuth();
+  const location = useLocation();
+  const onDashboard = isDashboardRoute(location.pathname);
+  const pollIntervalMs = onDashboard ? DASHBOARD_POLL_MS : BACKGROUND_POLL_MS;
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(false);
   const [fromCache, setFromCache] = useState(false);
@@ -93,11 +101,13 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
         // notification or a manual asset reassignment.
         const hasUnreadAssignmentEvent = unreadItems.some((n) => ASSIGNMENT_EVENT_TYPES.has(n.eventType));
         const hasUnreadRunStateEvent = unreadItems.some((n) => RUN_STATE_EVENT_TYPES.has(n.eventType));
-        if (hasUnreadAssignmentEvent) {
+        // Recovery signals re-fetch dashboard-workspace — only replay on Dashboard route.
+        const dispatchRecovery = isDashboardRoute(window.location.pathname);
+        if (hasUnreadAssignmentEvent && dispatchRecovery) {
           rememberDashboardRecoverySignal(DASHBOARD_ASSIGNMENT_RECOVERY_KEY);
           window.dispatchEvent(new Event("notifications:assignments-changed"));
         }
-        if (hasUnreadRunStateEvent) {
+        if (hasUnreadRunStateEvent && dispatchRecovery) {
           rememberDashboardRecoverySignal(DASHBOARD_RUN_STATE_RECOVERY_KEY);
           window.dispatchEvent(new Event("notifications:run-state-changed"));
         }
@@ -108,11 +118,12 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       seenUnreadIdsRef.current = unreadIds;
       if (newestUnread) {
         setBannerNotification(newestUnread);
-        if (ASSIGNMENT_EVENT_TYPES.has(newestUnread.eventType)) {
+        const dispatchRecovery = isDashboardRoute(window.location.pathname);
+        if (dispatchRecovery && ASSIGNMENT_EVENT_TYPES.has(newestUnread.eventType)) {
           rememberDashboardRecoverySignal(DASHBOARD_ASSIGNMENT_RECOVERY_KEY);
           window.dispatchEvent(new Event("notifications:assignments-changed"));
         }
-        if (RUN_STATE_EVENT_TYPES.has(newestUnread.eventType)) {
+        if (dispatchRecovery && RUN_STATE_EVENT_TYPES.has(newestUnread.eventType)) {
           rememberDashboardRecoverySignal(DASHBOARD_RUN_STATE_RECOVERY_KEY);
           window.dispatchEvent(new Event("notifications:run-state-changed"));
         }
@@ -151,7 +162,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     let timer: number | undefined;
     const startPolling = () => {
       if (timer !== undefined || shouldSkipBlockingFetch()) return;
-      timer = window.setInterval(() => { void refresh(); }, 15000);
+      timer = window.setInterval(() => { void refresh(); }, pollIntervalMs);
     };
     const stopPolling = () => {
       if (timer !== undefined) { window.clearInterval(timer); timer = undefined; }
@@ -164,6 +175,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       if (document.visibilityState === "visible") {
         if (!shouldSkipBlockingFetch()) {
           void refresh();
+          stopPolling();
           startPolling();
         }
       } else {
@@ -200,7 +212,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       window.removeEventListener("offline", handleOfflineModeOffline);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [refresh]);
+  }, [refresh, pollIntervalMs]);
 
   useEffect(() => {
     if (!bannerNotification) return;

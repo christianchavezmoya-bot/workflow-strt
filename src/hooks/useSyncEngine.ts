@@ -51,6 +51,7 @@ import {
   type AssetDocumentLink,
   type AssetDocumentLinkUploadBody,
 } from "../services/assetDocumentLinkService";
+import { isOpenIssuesRefreshRoute } from "../utils/postLoginRoute";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isAuthTokenExpired } from "../utils/authToken";
 import { isOnlineForAuthSync } from "../services/biometricAuth";
@@ -790,7 +791,7 @@ export function useSyncEngine(): SyncState {
       // Assets page's event), so without this they can stay stale post-sync
       // until something else happens to trigger a refresh. Fired once per pass,
       // not per-op, since the Dashboard has no in-flight guard of its own.
-      if (syncedAny) {
+      if (syncedAny && isOpenIssuesRefreshRoute(window.location.pathname)) {
         await refreshOpenIssuesCacheFromServer();
         window.dispatchEvent(new Event("notifications:refresh"));
         window.dispatchEvent(new Event("repo:assets:updated"));
