@@ -1861,7 +1861,14 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [isNativePlatform, myInstallAssetIdsKey, myInstallAssets]);
+    // myInstallAssets is read for its current values only - myInstallAssetIdsKey (a
+    // stable id-set string) is the intended re-run trigger. myInstallAssets itself is a
+    // NEW array reference on every dashboardWorkspace fetch even when the id set is
+    // unchanged; including it here caused this effect to refire in a tight loop (each
+    // run's side effects fed back into another dashboardWorkspace update, which produced
+    // another new reference, ad infinitum - the "constantly fetching" bug).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNativePlatform, myInstallAssetIdsKey]);
 
   // Prime assignment cache for My Jobs cards so offline opens don't treat empty
   // IndexedDB as "no workflow assigned" when bootstrap hasn't filled this asset yet.
@@ -1889,7 +1896,9 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [isNativePlatform, myInstallAssetIdsKey, myInstallAssets]);
+    // See the identical myInstallAssetIdsKey-vs-myInstallAssets note above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNativePlatform, myInstallAssetIdsKey]);
 
   // While online, refresh assignments for visible My Jobs assets in background.
   useEffect(() => {
@@ -1897,7 +1906,13 @@ const Dashboard = () => {
     for (const asset of myInstallAssets) {
       void assetWorkflowAssignmentService.listByAsset(asset.id);
     }
-  }, [isNativePlatform, myInstallAssetIdsKey, myInstallAssets]);
+    // This is the effect that was driving the request storm: listByAsset() dispatches
+    // repo:assignments:updated on native, which triggers a dashboardWorkspace refresh,
+    // which produced a new myInstallAssets reference, which (with myInstallAssets in
+    // deps) re-ran this effect immediately - a self-sustaining ~1s loop. Depend only on
+    // the id-set key, not the array reference.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNativePlatform, myInstallAssetIdsKey]);
 
   useEffect(() => {
     if (!isNativePlatform) return;
@@ -3246,10 +3261,13 @@ const Dashboard = () => {
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
         <WarningAmberOutlined sx={{ color: myInspectionAttentionCount > 0 ? "warning.main" : "success.main", fontSize: 20 }} />
         <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Needs Attention</Typography>
-        {attentionLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
-        {myInspectionAttentionCount === 0 && !attentionLoading && (
-          <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ ml: 1, height: 20, fontSize: "0.7rem" }} />
-        )}
+        <Box sx={{ display: "inline-flex", alignItems: "center", minWidth: 64, ml: 1 }}>
+          {attentionLoading ? (
+            <CircularProgress size={14} />
+          ) : myInspectionAttentionCount === 0 ? (
+            <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+          ) : null}
+        </Box>
         <Box sx={{ flex: 1 }} />
         <Button size="small" variant="text" component={Link} to="/issues"
           endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />} sx={{ fontSize: "0.72rem" }}>
@@ -3389,10 +3407,13 @@ const Dashboard = () => {
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
         <WarningAmberOutlined sx={{ color: attentionCount > 0 ? "warning.main" : "success.main", fontSize: 20 }} />
         <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Needs Attention</Typography>
-        {attentionLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
-        {attentionCount === 0 && !attentionLoading && (
-          <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ ml: 1, height: 20, fontSize: "0.7rem" }} />
-        )}
+        <Box sx={{ display: "inline-flex", alignItems: "center", minWidth: 64, ml: 1 }}>
+          {attentionLoading ? (
+            <CircularProgress size={14} />
+          ) : attentionCount === 0 ? (
+            <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+          ) : null}
+        </Box>
         <Box sx={{ flex: 1 }} />
         <Button size="small" variant="text" component={Link} to="/issues"
           endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />} sx={{ fontSize: "0.72rem" }}>
@@ -5101,10 +5122,13 @@ const Dashboard = () => {
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
               <WarningAmberOutlined sx={{ color: myInstallAttentionCount > 0 ? "warning.main" : "success.main", fontSize: 20 }} />
               <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Needs Attention</Typography>
-              {attentionLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
-              {myInstallAttentionCount === 0 && !attentionLoading && (
-                <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ ml: 1, height: 20, fontSize: "0.7rem" }} />
-              )}
+              <Box sx={{ display: "inline-flex", alignItems: "center", minWidth: 64, ml: 1 }}>
+                {attentionLoading ? (
+                  <CircularProgress size={14} />
+                ) : myInstallAttentionCount === 0 ? (
+                  <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+                ) : null}
+              </Box>
               <Box sx={{ flex: 1 }} />
               <Button size="small" variant="text" component={Link} to="/issues"
                 endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />} sx={{ fontSize: "0.72rem" }}>

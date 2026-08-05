@@ -12,6 +12,8 @@ function normalizeDashboardStatus(value?: string | null): string {
  * workspace summary fields (status, runStatus, signatureStatus).
  */
 export function isDashboardWorkspaceCurrentItem(item: DashboardWorkspaceAssetItem): boolean {
+  if (item.isDeleted) return false;
+
   const assetStatus = normalizeDashboardStatus(item.status);
   const runStatus = normalizeDashboardStatus(item.runStatus);
   const signatureStatus = (item.signatureStatus ?? "").trim().toLowerCase();
@@ -47,6 +49,8 @@ export function isDashboardWorkspaceCurrentItem(item: DashboardWorkspaceAssetIte
 
 /** Terminal asset states land in history buckets (matches server workspace rules). */
 export function isDashboardWorkspaceHistoryItem(item: DashboardWorkspaceAssetItem): boolean {
+  if (item.isDeleted) return true;
+
   const assetStatus = normalizeDashboardStatus(item.status);
   return assetStatus === "complete"
     || assetStatus === "completed"
