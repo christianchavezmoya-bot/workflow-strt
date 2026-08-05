@@ -6,7 +6,6 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
-import type { ProjectAsset } from "../types/projectAsset";
 
 // ── Colour palette ────────────────────────────────────────────────────────────
 const NAVY: [number, number, number]       = [26,  39,  68];
@@ -36,12 +35,29 @@ const LOGO_Y = (HEADER_H - LOGO_H) / 2;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Only the fields the report needs to label a row. Kept structural so callers can
+ * pass whichever asset shape they already hold (e.g. the dashboard's OpenAssetItem)
+ * without fetching full ProjectAsset records just to render a label.
+ */
+export interface TechnicianReportAsset {
+  id: string;
+  assetTag?: string | null;
+  assetName?: string | null;
+  jobNumber?: string | null;
+  location?: string | null;
+  status?: string | null;
+  runStatus?: string | null;
+  completedSteps?: number;
+  totalSteps?: number;
+}
+
 export interface TechnicianReportData {
   technicianName: string;
   technicianEmail?: string;
   reportPeriod: string;
   runs: AssetWorkflowRun[];
-  assets: ProjectAsset[];
+  assets: TechnicianReportAsset[];
   businessLogoBase64?: string | null;
   exportDate: string;
 }
@@ -116,12 +132,19 @@ function parseAllIssues(runs: AssetWorkflowRun[]): Array<{
   return result;
 }
 
-function resolveAssetLabel(assetId: string, assets: ProjectAsset[]): string {
+/**
+ * Asset tag first — it is the identifier field crews actually recognise (e.g. CAD-0039).
+ * Falls back through the display name to the raw id. Empty strings are skipped, which
+ * matters because API shapes return "" rather than undefined for absent values.
+ */
+function resolveAssetLabel(assetId: string, assets: TechnicianReportAsset[]): string {
   const a = assets.find((x) => x.id === assetId);
   if (!a) return assetId;
-  return (a as ProjectAsset & { assetName?: string }).assetName
-    ?? (a as ProjectAsset & { assetTag?: string }).assetTag
-    ?? assetId;
+  const tag = a.assetTag?.trim();
+  if (tag) return tag;
+  const name = a.assetName?.trim();
+  if (name) return name;
+  return assetId;
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
@@ -243,7 +266,46 @@ export async function generateTechnicianReport(data: TechnicianReportData): Prom
     y += 5;
   }
 
-  // ── 3. Run History table ──────────────────────────────────────────────────
+  // ── 3. Assigned assets ────────────────────────────────────────────────────
+  // A workload report has to show queued work too: an asset assigned but not yet
+  // started has no run, so it would be invisible in the run history below.
+  if (assets.length > 0) {
+    y = ensureSpace(y, 30);
+    y = drawSectionBar(y, `ASSIGNED ASSETS  (${assets.length})`);
+
+    const assetRows = assets.map((a) => [
+      resolveAssetLabel(a.id, assets),
+      a.jobNumber?.trim() || "—",
+      a.assetName?.trim() || "—",
+      a.location?.trim() || "—",
+      (a.runStatus?.trim() || a.status?.trim() || "—"),
+      (a.totalSteps ?? 0) > 0 ? `${a.completedSteps ?? 0}/${a.totalSteps}` : "—",
+    ]);
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      theme: "striped",
+      head: [["Asset", "Job", "Description", "Location", "State", "Steps"]],
+      body: assetRows,
+      styles: { fontSize: 8, cellPadding: { top: 1.8, bottom: 1.8, left: 3, right: 3 }, overflow: "linebreak" },
+      headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
+      alternateRowStyles: { fillColor: GREY_BG },
+      columnStyles: {
+        0: { cellWidth: CONTENT_W * 0.18 },
+        1: { cellWidth: CONTENT_W * 0.15 },
+        2: { cellWidth: CONTENT_W * 0.25 },
+        3: { cellWidth: CONTENT_W * 0.16 },
+        4: { cellWidth: CONTENT_W * 0.14, halign: "center" },
+        5: { cellWidth: CONTENT_W * 0.12, halign: "center" },
+      },
+      didDrawPage: (data) => { drawFooter(data.pageNumber); },
+    });
+
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+  }
+
+  // ── 4. Run History table ──────────────────────────────────────────────────
   y = ensureSpace(y, 30);
   y = drawSectionBar(y, `RUN HISTORY  (${runs.length} run${runs.length !== 1 ? "s" : ""})`);
 
@@ -275,7 +337,9 @@ export async function generateTechnicianReport(data: TechnicianReportData): Prom
     margin: { left: MARGIN, right: MARGIN },
     theme: "striped",
     head: [["Asset", "Started", "Duration", "Productive", "Downtime", "Efficiency", "Status", "Issues"]],
-    body: runRows,
+    body: runRows.length > 0
+      ? runRows
+      : [["No workflow runs recorded for the assets currently assigned.", "", "", "", "", "", "", ""]],
     styles: { fontSize: 8, cellPadding: { top: 1.8, bottom: 1.8, left: 3, right: 3 } },
     headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
     alternateRowStyles: { fillColor: GREY_BG },
@@ -307,7 +371,7 @@ export async function generateTechnicianReport(data: TechnicianReportData): Prom
 
   y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
 
-  // ── 4. Issues summary ─────────────────────────────────────────────────────
+  // ── 5. Issues summary ─────────────────────────────────────────────────────
   const allIssues = parseAllIssues(runs);
   if (allIssues.length > 0) {
     y = ensureSpace(y, 30);
