@@ -446,9 +446,6 @@ const Dashboard = () => {
   const [workloadReportTarget, setWorkloadReportTarget] = useState<ScopedWorkloadItem | null>(null);
   const [workloadReportAllOpen, setWorkloadReportAllOpen] = useState(false);
 
-  // Phase 1 workspace
-  const [workspaceExpanded, setWorkspaceExpanded] = useState(!isEngineer ? false : true);
-
   // Phase 4 - evidence
   const [evidenceData,    setEvidenceData]    = useState<EvidenceCompleteness | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
@@ -770,6 +767,8 @@ const Dashboard = () => {
           // Ignore storage quota errors.
         }
       }
+    } catch {
+      // Keep session-cached attention widgets on timeout or server errors.
     } finally {
       finishAttention();
     }
@@ -885,11 +884,24 @@ const Dashboard = () => {
           .catch(() => setProjectAssetSummary([]));
       }
     } else {
-      loadAttention();
-      setWorkloadLoading(true);
-      projectAssetService.technicianWorkloadSummary().then((w) => { setWorkload(w); }).finally(() => setWorkloadLoading(false));
-      projectAssetService.listOpen().then(setOpenAssets);
-      projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
+      // Web cold-start: stagger heavy SQLite reads so attention/workload/open-assets
+      // do not stampede the API on first paint (session cache still paints immediately).
+      void loadAttention().catch(() => {});
+      const workloadTimer = window.setTimeout(() => {
+        setWorkloadLoading(true);
+        projectAssetService.technicianWorkloadSummary()
+          .then((w) => { setWorkload(w); })
+          .catch(() => {})
+          .finally(() => setWorkloadLoading(false));
+      }, 400);
+      const summaryTimer = window.setTimeout(() => {
+        projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
+        projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
+      }, 800);
+      return () => {
+        window.clearTimeout(workloadTimer);
+        window.clearTimeout(summaryTimer);
+      };
     }
     if (isEngineer) {
       workflowConfigService.getAll().then((configs) => {
@@ -4821,67 +4833,7 @@ const Dashboard = () => {
                   color="error" variant="outlined" sx={{ height: 22, fontSize: "0.7rem" }} />
               )}
             </Stack>
-            {!isEngineer && (
-              <IconButton size="small" onClick={() => setWorkspaceExpanded((v) => !v)}>
-                {workspaceExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
-              </IconButton>
-            )}
           </Stack>
-
-          <Collapse in={workspaceExpanded || isEngineer}>
-            <Box sx={{ mt: 1.5 }}>
-              {showAdminOverviewStrip ? (
-                <Typography variant="caption" color="text.secondary">
-                  Use the tabs below to review project ownership, inspection activity, and install activity across the current scope.
-                </Typography>
-              ) : myAssets.length === 0 ? (
-                <Typography variant="caption" color="text.disabled">
-                  {workspaceLoading && !cacheHydrated
-                    ? "Loading your assigned assets..."
-                    : myInstallHistory.length > 0 || myInspectionHistory.length > 0
-                      ? "No active assets right now. Use the history cards below to review completed or closed work."
-                      : "No assets currently assigned to you."}
-                </Typography>
-              ) : (
-                <Grid container spacing={1.5}>
-                  {myAssets.slice(0, 6).map((a) => (
-                    <Grid item xs={12} sm={6} md={4} key={a.id}>
-                      <Paper elevation={0} onClick={() => navigate("/installations/assets")}
-                        sx={{
-                          p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5,
-                          cursor: "pointer", transition: "all 0.15s",
-                          "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
-                        }}>
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          <WorkOutlineOutlined sx={{ fontSize: 14, color: "text.secondary", flexShrink: 0 }} />
-                          <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Typography variant="caption" fontWeight={600} noWrap display="block">
-                              {a.assetTag || a.assetName || a.id}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                              {a.jobNumber} - {dashboardStatusChip(a).label}
-                            </Typography>
-                          </Box>
-                          <Chip label={isPausedAsset(a.runStatus) ? "Paused" : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "Active" : "Queued"}
-                            size="small"
-                            color={isPausedAsset(a.runStatus) ? "warning" : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "primary" : "default"}
-                            variant="outlined"
-                            sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0 }} />
-                        </Stack>
-                      </Paper>
-                    </Grid>
-                  ))}
-                  {myAssets.length > 6 && (
-                    <Grid item xs={12}>
-                      <Typography variant="caption" color="text.disabled">
-                        +{myAssets.length - 6} more assets - <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }} onClick={() => navigate("/installations/assets")}>view all</Box>
-                      </Typography>
-                    </Grid>
-                  )}
-                </Grid>
-              )}
-            </Box>
-          </Collapse>
         </Box>
       )}
       {/* UNIVERSAL TAB BAR (all non-viewer users) */}
