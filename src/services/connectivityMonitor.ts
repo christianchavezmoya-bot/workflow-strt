@@ -24,6 +24,7 @@ import { isServerReachable } from "./networkService";
 import { isManualOfflineModeActive } from "./offlineModeState";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isCircuitOpen, resetCircuitBreaker, tripCircuitBreaker } from "../utils/circuitBreaker";
+import { hadRecentApiSuccess } from "./apiReachabilitySignals";
 
 const PING_INTERVAL_MS = 30_000;
 const UNREACHABLE_SIGNAL_THRESHOLD = 2;
@@ -167,7 +168,10 @@ export function startConnectivityMonitor(): void {
     // Only a real request failing with a genuine network error may mark the
     // server unreachable. Require consecutive signals so one slow startup
     // request does not stick the app in "Server not responding".
-    window.addEventListener("api-server-unreachable", () => {
+    window.addEventListener("api-server-unreachable", (event) => {
+      const detail = (event as CustomEvent<{ isTimeout?: boolean }>).detail;
+      // A slow endpoint timing out while other calls succeed is not "server down".
+      if (detail?.isTimeout && hadRecentApiSuccess()) return;
       unreachableSignals += 1;
       if (unreachableSignals < UNREACHABLE_SIGNAL_THRESHOLD) return;
       tripCircuitBreaker();

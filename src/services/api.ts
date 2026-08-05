@@ -11,6 +11,7 @@ import { isOfflineGraceValid, isOnlineForAuthSync } from "./biometricAuth";
 import { markOfflinePerf } from "../utils/offlinePerf";
 import { getTokenExpiry, getTokenLifetimeMs } from "../utils/authToken";
 import { isSyncFlushing } from "../utils/syncFlushLock";
+import { markApiRequestSuccess } from "./apiReachabilitySignals";
 
 export const API_BASE_URL: string = getApiBaseUrl();
 
@@ -361,6 +362,7 @@ api.interceptors.response.use(
       ).catch(() => {});
     }
 
+    markApiRequestSuccess();
     resetCircuitBreaker();
     window.dispatchEvent(new Event("api-server-reachable"));
 
@@ -378,7 +380,8 @@ api.interceptors.response.use(
     // Trip the circuit breaker only via the connectivityMonitor listener on this
     // event — calling tripCircuitBreaker() here as well double-counted failures.
     if (!(error as { isOfflineSkip?: boolean })?.isOfflineSkip && isNetworkOrTimeoutError(error)) {
-      window.dispatchEvent(new Event("api-server-unreachable"));
+      const isTimeout = (error as { code?: string }).code === "ECONNABORTED";
+      window.dispatchEvent(new CustomEvent("api-server-unreachable", { detail: { isTimeout } }));
     }
     const cfg = config as typeof config & AxiosConfigWithMeta;
     const meta = cfg.metadata;

@@ -125,7 +125,7 @@ import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/p
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
-import { mergeRunsIntoMap, captureBlobsReadyForAssets } from "../../types/assetWorkflowRunSummary";
+import { mergeRunsIntoMap, mergeRunRecord, captureBlobsReadyForAssets } from "../../types/assetWorkflowRunSummary";
 import type { BomItem, StepInput, Workflow } from "../../types/workflow";
 import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
@@ -1710,7 +1710,10 @@ const AssetInstallationPage = () => {
             // Local offline update of a single run — replace that run by id and
             // keep the rest of the asset's run history intact.
             const existing = prev[assetId];
-            const merged = existing.map((r) => runs.find((u) => u.id === r.id) ?? r);
+            const merged = existing.map((r) => {
+              const updated = runs.find((u) => u.id === r.id);
+              return updated ? mergeRunRecord(r, updated) : r;
+            });
             // include any updated run not already present (e.g. a brand-new run)
             runs.forEach((u) => { if (!merged.some((r) => r.id === u.id)) merged.push(u); });
             next[assetId] = merged;
@@ -1745,7 +1748,10 @@ const AssetInstallationPage = () => {
             // Merging by id gets both: server runs are applied, local-only runs survive.
             // This mirrors the `mergeById` branch above, which already does it correctly
             // for asset-scoped updates.
-            const merged = existing.map((r) => fresh.find((u) => u.id === r.id) ?? r);
+            const merged = existing.map((r) => {
+              const updated = fresh.find((u) => u.id === r.id);
+              return updated ? mergeRunRecord(r, updated) : r;
+            });
             fresh.forEach((u) => { if (!merged.some((r) => r.id === u.id)) merged.push(u); });
             next[id] = merged;
           });

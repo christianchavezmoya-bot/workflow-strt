@@ -1,4 +1,4 @@
-import api from "./api";
+import api, { cachedGet } from "./api";
 import { IssueRepository } from "../repositories/IssueRepository";
 import type { AssetWorkflowRun, RunAmendment, RunIssue } from "../types/assetWorkflowRun";
 import type { ProjectAsset, ProjectAssetStatus, ProjectAssetWorkflowSummary } from "../types/projectAsset";
@@ -23,7 +23,7 @@ import { boundedFreshRead, BOUNDED_FRESH_TIMEOUT_MS } from "../utils/boundedFres
 import { webCachedGet, webCacheKey, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 import type { AssetWorkflowRunSummary } from "../types/assetWorkflowRunSummary";
-import { mergeRunsIntoMap, runSummaryToPlaceholderRun } from "../types/assetWorkflowRunSummary";
+import { mergeRunsIntoMap, mergeRunRecord, runSummaryToPlaceholderRun } from "../types/assetWorkflowRunSummary";
 import {
   countMissingWorkflowItems,
   getWorkflowStepCompletion,
@@ -328,9 +328,10 @@ async function cacheServerRun(run: AssetWorkflowRun): Promise<AssetWorkflowRun> 
   const projectId = await resolveProjectId(run.assetId, run.id);
   const existing = await offlineStore.getRun(run.id);
   if (existing?.dirty) {
+    const merged = mergeRunRecord(existing, run);
     // Local data is newer (pending sync) - merge server metadata but keep local payload intact
     await offlineStore.saveRun({
-      ...toOfflineRun(run, projectId),
+      ...toOfflineRun(merged, projectId),
       stepResultsJson: existing.stepResultsJson,
       issuesJson: existing.issuesJson,
       status: existing.status,
@@ -342,10 +343,11 @@ async function cacheServerRun(run: AssetWorkflowRun): Promise<AssetWorkflowRun> 
       syncError: existing.syncError,
       lastLocalSavedAt: existing.lastLocalSavedAt,
     });
-    return run;
+    return merged;
   }
-  await offlineStore.saveRun(toOfflineRun(run, projectId));
-  return run;
+  const merged = mergeRunRecord(existing ?? undefined, run);
+  await offlineStore.saveRun(toOfflineRun(merged, projectId));
+  return merged;
 }
 
 async function cacheServerRuns(runs: AssetWorkflowRun[]): Promise<AssetWorkflowRun[]> {
@@ -358,18 +360,98 @@ function refreshRunsInBackground(
   endpoint: string,
 ): void {
   if (shouldSkipBlockingNetworkRead()) return;
+  if (scope.type === "project") {
+    refreshProjectRunsInBackground(scope.id);
+    return;
+  }
   api.get<AssetWorkflowRun[]>(endpoint)
     .then(async (res) => {
       const runs = await cacheServerRuns(res.data);
       window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
-        detail: scope.type === "project"
-          ? { projectId: scope.id, runs }
-          : { assetId: scope.id, runs },
+        detail: { assetId: scope.id, runs },
       }));
     })
     .catch(() => {
       window.dispatchEvent(new Event("api-serving-cache"));
     });
+}
+
+const RUN_DETAIL_CHUNK_SIZE = 50;
+const listLatestByProjectInflight = new Map<string, Promise<AssetWorkflowRun[]>>();
+const projectHydrateInflight = new Set<string>();
+
+function chunkItems<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+async function fetchNativeProjectRunSummaries(projectId: string): Promise<AssetWorkflowRunSummary[]> {
+  return cachedGet<AssetWorkflowRunSummary[]>(`/asset-workflow-runs/by-project/${projectId}/runs-summary`);
+}
+
+function hydrateProjectRunsInBackground(projectId: string, assetIds?: string[]): void {
+  if (shouldSkipBlockingNetworkRead()) return;
+  const hydrateKey = assetIds?.length
+    ? `${projectId}:${[...assetIds].sort().join("|")}`
+    : projectId;
+  if (projectHydrateInflight.has(hydrateKey)) return;
+  projectHydrateInflight.add(hydrateKey);
+
+  void (async () => {
+    try {
+      let ids = assetIds?.filter(Boolean) ?? [];
+      if (ids.length === 0) {
+        const summaries = await fetchNativeProjectRunSummaries(projectId);
+        ids = summaries.map((summary) => summary.assetId);
+      }
+      if (ids.length === 0) return;
+
+      for (const chunk of chunkItems(ids, RUN_DETAIL_CHUNK_SIZE)) {
+        if (shouldSkipBlockingNetworkRead()) break;
+        try {
+          const res = await api.get<AssetWorkflowRun[]>(
+            `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
+            { params: { assetIds: chunk.join(",") } },
+          );
+          const runs = await cacheServerRuns(res.data);
+          window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+            detail: { projectId, runs },
+          }));
+        } catch {
+          break;
+        }
+      }
+    } finally {
+      projectHydrateInflight.delete(hydrateKey);
+    }
+  })();
+}
+
+/** Native background refresh — slim summaries are not re-fetched; hydrate full blobs in chunks. */
+function refreshProjectRunsInBackground(projectId: string): void {
+  hydrateProjectRunsInBackground(projectId);
+}
+
+async function listLatestByProjectNative(projectId: string): Promise<AssetWorkflowRun[]> {
+  const cachedRuns = await offlineStore.listRunsByProject(projectId);
+  if (cachedRuns.length > 0) {
+    refreshProjectRunsInBackground(projectId);
+    return cachedRuns;
+  }
+
+  if (shouldSkipBlockingNetworkRead()) {
+    return cachedRuns;
+  }
+
+  try {
+    const summaries = await fetchNativeProjectRunSummaries(projectId);
+    const placeholders = summaries.map(runSummaryToPlaceholderRun);
+    hydrateProjectRunsInBackground(projectId, summaries.map((summary) => summary.assetId));
+    return placeholders;
+  } catch {
+    return cachedRuns;
+  }
 }
 
 function refreshRunByIdInBackground(resolvedId: string): void {
@@ -827,22 +909,15 @@ export const assetWorkflowRunService = {
       return this.listRunSummariesByProject(projectId);
     }
 
-    const cachedRuns = await offlineStore.listRunsByProject(projectId);
-    if (cachedRuns.length > 0) {
-      refreshRunsInBackground({ type: "project", id: projectId }, `/asset-workflow-runs/by-project/${projectId}`);
-      return cachedRuns;
-    }
+    const inflight = listLatestByProjectInflight.get(projectId);
+    if (inflight) return inflight;
 
-    if (shouldSkipBlockingNetworkRead()) {
-      return cachedRuns;
-    }
-
+    const promise = listLatestByProjectNative(projectId);
+    listLatestByProjectInflight.set(projectId, promise);
     try {
-      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-project/${projectId}`);
-      const runs = res.data;
-      return await cacheServerRuns(runs);
-    } catch {
-      return await offlineStore.listRunsByProject(projectId);
+      return await promise;
+    } finally {
+      listLatestByProjectInflight.delete(projectId);
     }
   },
 
