@@ -50,6 +50,7 @@ import {
   mergeDashboardWorkspaceItems,
   dedupeDashboardWorkspace,
 } from "../../utils/dashboardWorkspaceMerge";
+import { shouldFetchTechnicianWorkload } from "../../utils/dashboardFetchScope";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
 import type { Office } from "../../components/GlobalOfficeMap";
@@ -416,6 +417,8 @@ const Dashboard = () => {
   const canActAsFieldTechnician = !!can.installationAssets?.runWorkflow && !isViewer;
   const isNativePlatform = isMobileNativePlatform();
   const showNativeManagerHome = isManager && isNativePlatform;
+  /** Gates the heaviest dashboard query to the roles that actually render WorkloadPanel. */
+  const needsTechnicianWorkload = shouldFetchTechnicianWorkload(user.role);
   // Every role (installers included) gets the light workspace first paint; the
   // card-flicker this used to cause is handled by the stabilize/merge logic below.
   // Native is unaffected by the session cache either way - it reads its own cache via dcGet.
@@ -865,9 +868,11 @@ const Dashboard = () => {
       setWorkloadLoading(false);
       loadAttention();
       if (!shouldSkipBlockingFetch()) {
-        void projectAssetService.technicianWorkloadSummary()
-          .then((w) => { setWorkload(w); dcPut(DASHBOARD_CACHE_KEYS.workload, w); })
-          .catch(() => {});
+        if (needsTechnicianWorkload) {
+          void projectAssetService.technicianWorkloadSummary()
+            .then((w) => { setWorkload(w); dcPut(DASHBOARD_CACHE_KEYS.workload, w); })
+            .catch(() => {});
+        }
         void projectAssetService.listOpen()
           .then((a) => { setOpenAssets(a); dcPut(DASHBOARD_CACHE_KEYS.openAssets, a); })
           .catch(() => {});
@@ -879,19 +884,23 @@ const Dashboard = () => {
       // Web cold-start: stagger heavy SQLite reads so attention/workload/open-assets
       // do not stampede the API on first paint (session cache still paints immediately).
       void loadAttention().catch(() => {});
-      const workloadTimer = window.setTimeout(() => {
-        setWorkloadLoading(true);
-        projectAssetService.technicianWorkloadSummary()
-          .then((w) => { setWorkload(w); })
-          .catch(() => {})
-          .finally(() => setWorkloadLoading(false));
-      }, 400);
+      // Only roles that render WorkloadPanel pay for the workload query — it is the
+      // heaviest dashboard endpoint (all active assets + all their runs, blobs included).
+      const workloadTimer = needsTechnicianWorkload
+        ? window.setTimeout(() => {
+            setWorkloadLoading(true);
+            projectAssetService.technicianWorkloadSummary()
+              .then((w) => { setWorkload(w); })
+              .catch(() => {})
+              .finally(() => setWorkloadLoading(false));
+          }, 400)
+        : undefined;
       const summaryTimer = window.setTimeout(() => {
         projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
         projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
       }, 800);
       return () => {
-        window.clearTimeout(workloadTimer);
+        if (workloadTimer !== undefined) window.clearTimeout(workloadTimer);
         window.clearTimeout(summaryTimer);
       };
     }
@@ -900,7 +909,7 @@ const Dashboard = () => {
         setDraftConfigs(configs.filter((c: any) => c.status === "Draft" || c.status === "draft"));
       }).catch(() => {});
     }
-  }, [dashboardBootPhase, dispatch, isAuthenticated, isEngineer, isNativePlatform, loadAttention, seedNativeDashboardSummariesFromLocal]);
+  }, [dashboardBootPhase, dispatch, isAuthenticated, isEngineer, isNativePlatform, loadAttention, needsTechnicianWorkload, seedNativeDashboardSummariesFromLocal]);
 
   // useAuth resolves role one tick after mount (Viewer placeholder). If dashboard
   // boot reached "full" while isManager was still false, the first loadAttention
@@ -1128,13 +1137,15 @@ const Dashboard = () => {
   useEffect(() => {
     if (dashboardBootPhase !== "full") return;
     const refresh = () => {
-      setWorkloadLoading(true);
-      projectAssetService.technicianWorkloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
+      if (needsTechnicianWorkload) {
+        setWorkloadLoading(true);
+        projectAssetService.technicianWorkloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
+      }
       refreshLiveDashboardData();
     };
     window.addEventListener("notifications:assignments-changed", refresh);
     return () => window.removeEventListener("notifications:assignments-changed", refresh);
-  }, [dashboardBootPhase, refreshLiveDashboardData]);
+  }, [dashboardBootPhase, needsTechnicianWorkload, refreshLiveDashboardData]);
 
   // Notification-driven refresh: run state events -> workspace + open assets + attention items + analytics
   useEffect(() => {
