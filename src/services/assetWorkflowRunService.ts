@@ -72,6 +72,7 @@ export interface ClosedIssueRecord extends OpenIssueRecord {
 }
 
 const CLOSED_ISSUES_CACHE_KEY = "asset-workflow-closed-issues-v1";
+const DASHBOARD_ATTENTION_TIMEOUT_MS = 20_000;
 
 function parseTimeEntries(json: string): RunTimeEntry[] {
   try {
@@ -1811,7 +1812,10 @@ export const assetWorkflowRunService = {
       return webCachedGet(
         webCacheKey("/asset-workflow-runs/pending-signatures", params),
         async () => {
-          const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures", { params });
+          const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures", {
+            params,
+            timeout: DASHBOARD_ATTENTION_TIMEOUT_MS,
+          });
           return userId ? filterPendingSignaturesForInstallerView(res.data) : res.data;
         },
         { ttlMs: 30_000 },

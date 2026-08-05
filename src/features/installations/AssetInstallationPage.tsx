@@ -436,6 +436,9 @@ type AssignmentEventFlag = {
 // Component
 // ------------------------------------------------------------------
 
+const INSTALLATIONS_PROJECT_SESSION_KEY = "installations_selected_project_id";
+const INSTALLATIONS_ALL_PROJECTS_SESSION_KEY = "installations_all_projects";
+
 const AssetInstallationPage = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
@@ -478,14 +481,21 @@ const AssetInstallationPage = () => {
   const docCountLoadIdRef = useRef(0);
   const lastRefreshTsRef = useRef(0);
   const isRefreshingRef = useRef(false);   // in-flight guard — prevents concurrent refreshAssets calls
-  const allProjectsExplicitRef = useRef(false); // true once user picks "All projects" from dropdown
+  const [allProjectsExplicit, setAllProjectsExplicit] = useState(() => {
+    try {
+      return sessionStorage.getItem(INSTALLATIONS_ALL_PROJECTS_SESSION_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const serverWasOfflineRef = useRef(false); // tracks offline→online transition for api-server-reachable
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
     try {
       const fromUrl = new URLSearchParams(window.location.search).get("project");
       if (fromUrl) return fromUrl;
-      return sessionStorage.getItem("installations_selected_project_id") ?? "";
+      if (sessionStorage.getItem(INSTALLATIONS_ALL_PROJECTS_SESSION_KEY) === "1") return "";
+      return sessionStorage.getItem(INSTALLATIONS_PROJECT_SESSION_KEY) ?? "";
     } catch {
       return "";
     }
@@ -807,17 +817,17 @@ const AssetInstallationPage = () => {
       } else {
         AssetRepository.getByProject(selectedProjectId).catch(() => {});
       }
-    } else if (allProjectsExplicitRef.current) {
+    } else if (allProjectsExplicit) {
       products.forEach((p) => AssetRepository.getByProduct(p.id).catch(() => {}));
     }
-  }, [selectedProjectId, productsKey, paginatedWebProject]));
+  }, [selectedProjectId, productsKey, paginatedWebProject, allProjectsExplicit]));
 
   // Restore selected project from URL params (priority) or sessionStorage (fallback).
   useEffect(() => {
     const projectIdFromUrl = searchParams.get("project");
     if (projectIdFromUrl) {
       setSelectedProjectId(projectIdFromUrl);
-      try { sessionStorage.setItem("installations_selected_project_id", projectIdFromUrl); } catch {}
+      try { sessionStorage.setItem(INSTALLATIONS_PROJECT_SESSION_KEY, projectIdFromUrl); } catch {}
     }
   }, [searchParams]);
 
@@ -828,16 +838,24 @@ const AssetInstallationPage = () => {
     if (resolved !== selectedProjectId) {
       setSelectedProjectId(resolved);
       setProjectAssetPage(1);
-      try { sessionStorage.setItem("installations_selected_project_id", resolved); } catch {}
+      try { sessionStorage.setItem(INSTALLATIONS_PROJECT_SESSION_KEY, resolved); } catch {}
     }
   }, [projects, selectedProjectId]);
 
   const handleProjectChange = useCallback((projectId: string) => {
-    if (projectId === "") allProjectsExplicitRef.current = true;
+    const isAllProjects = projectId === "";
+    setAllProjectsExplicit(isAllProjects);
     setSelectedProjectId(projectId);
     setProjectAssetPage(1);
     setAssetLoadError(null);
-    try { sessionStorage.setItem("installations_selected_project_id", projectId); } catch { /* ignore */ }
+    try {
+      sessionStorage.setItem(INSTALLATIONS_PROJECT_SESSION_KEY, projectId);
+      if (isAllProjects) {
+        sessionStorage.setItem(INSTALLATIONS_ALL_PROJECTS_SESSION_KEY, "1");
+      } else {
+        sessionStorage.removeItem(INSTALLATIONS_ALL_PROJECTS_SESSION_KEY);
+      }
+    } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
@@ -1068,7 +1086,7 @@ const AssetInstallationPage = () => {
   useEffect(() => {
     const products = productsRef.current;
     // Defer expensive all-product fan-out until the user explicitly picks "All projects".
-    if (!selectedProjectId && !allProjectsExplicitRef.current) {
+    if (!selectedProjectId && !allProjectsExplicit) {
       setAssets([]);
       setLoadingAssets(false);
       setAssetLoadError(null);
@@ -1316,7 +1334,7 @@ const AssetInstallationPage = () => {
         const uniqueProjectIds = [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
         loadRunsForProjects(uniqueProjectIds);
       });
-  }, [activeProduct?.id, archiveMode, productsKey, selectedProjectId, productsState.loading, projectsLoading, projectAssetPage, search, paginatedWebProject]);
+  }, [activeProduct?.id, allProjectsExplicit, archiveMode, productsKey, selectedProjectId, productsState.loading, projectsLoading, projectAssetPage, search, paginatedWebProject]);
 
   // Paginated web: load full run blobs once per visible page (prefetch + capture view).
   // Never depend on runsMap — updating runsMap after fetch must not re-trigger this effect
@@ -1949,6 +1967,13 @@ const AssetInstallationPage = () => {
     },
     [projects, activeProduct?.id, selectedProjectId],
   );
+
+  // When only one project is in scope, auto-select it so the page does not open empty.
+  useEffect(() => {
+    if (selectedProjectId || allProjectsExplicit) return;
+    if (productProjects.length !== 1) return;
+    handleProjectChange(productProjects[0].id);
+  }, [allProjectsExplicit, handleProjectChange, productProjects, selectedProjectId]);
 
   const canEditAssetFromWebTable = useMemo(() => (asset: ProjectAsset) => {
     if (can.installationAssets?.editScope === "all") return true;
@@ -5412,6 +5437,14 @@ ${words.slice(midpoint).join(" ")}`;
             onChange={handleProjectChange}
             labelStyle="desktop"
           />
+          <Button
+            size="small"
+            variant={allProjectsExplicit ? "contained" : "outlined"}
+            onClick={() => handleProjectChange("")}
+            sx={{ whiteSpace: "nowrap", height: 40 }}
+          >
+            All projects
+          </Button>
           <Tooltip title={statusFilter !== "All" ? "Reset status filter to use this" : ""}>
             <span>
               <Button
@@ -5832,9 +5865,16 @@ ${words.slice(midpoint).join(" ")}`;
             <CircularProgress size={32} />
           </Stack>
         )
-      ) : !selectedProjectId && !allProjectsExplicitRef.current ? (
-        <Alert severity="info">
-          Select a project to view assets, or choose &quot;All projects&quot; to browse every product.
+      ) : !selectedProjectId && !allProjectsExplicit ? (
+        <Alert
+          severity="info"
+          action={
+            <Button color="inherit" size="small" onClick={() => handleProjectChange("")}>
+              All projects
+            </Button>
+          }
+        >
+          Select a project above to view assets, or choose &quot;All projects&quot; to browse every product.
         </Alert>
       ) : assetLoadError && assets.length === 0 ? (
         null

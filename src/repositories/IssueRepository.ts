@@ -16,6 +16,8 @@ function issuesListChanged(previous: OpenIssueRecord[], next: OpenIssueRecord[])
   return next.some((issue) => !prevIds.has(issue.issueId));
 }
 
+const DASHBOARD_ATTENTION_TIMEOUT_MS = 20_000;
+
 export const IssueRepository = {
   /** Read IndexedDB snapshot only — no network, no repo:issues:updated event. */
   async getLocalSnapshot(): Promise<OpenIssueRecord[]> {
@@ -29,7 +31,10 @@ export const IssueRepository = {
       return webCachedGet(
         webCacheKey("/asset-workflow-runs/open-issues", userId ? { userId } : undefined),
         async () => {
-          const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", { params: userId ? { userId } : undefined });
+          const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", {
+            params: userId ? { userId } : undefined,
+            timeout: DASHBOARD_ATTENTION_TIMEOUT_MS,
+          });
           return res.data;
         },
         { ttlMs: 30_000 },
