@@ -625,7 +625,7 @@ async function listPendingSignaturesLocalImpl(userId?: string): Promise<PendingS
 async function enqueueRunMutation(
   runId: string,
   input: {
-    opType: "RUN_UPDATE" | "RUN_COMPLETE" | "RUN_ABANDON" | "STEP_RESULTS" | "ISSUE_UPDATE";
+    opType: "RUN_UPDATE" | "RUN_COMPLETE" | "RUN_ABANDON" | "STEP_RESULTS" | "CAPTURE_CELL" | "ISSUE_UPDATE";
     method: "PUT" | "POST" | "PATCH";
     url: string;
     body: Record<string, unknown>;
@@ -1554,6 +1554,12 @@ export const assetWorkflowRunService = {
       return res.data;
     }
 
+    // Native: same small endpoint as web. This used to fall through to patchStepResults,
+    // which replays the ENTIRE stepResultsJson — the ~288 KB payload that made a single cell
+    // save take 3-5 s before the capture-cell endpoint existed. On a field connection that
+    // was slow enough to fail outright, so a phone could not reliably correct one field.
+    // The local cache is still patched from the full JSON, because that is what the offline
+    // store holds; only what goes over the wire changes.
     const resolvedRunId = await resolveRunId(runId);
     const cachedRun = await getCachedRun(runId);
     if (!cachedRun) {
@@ -1561,7 +1567,69 @@ export const assetWorkflowRunService = {
     }
     const { patchCaptureCellValue } = await import("../utils/captureTableEdit");
     const stepResultsJson = patchCaptureCellValue(cachedRun.stepResultsJson, binding, value);
-    return this.patchStepResults(resolvedRunId, stepResultsJson, amendedByName, true);
+    const body = {
+      stepId: binding.stepId,
+      inputId: binding.inputId,
+      iterationIndex: binding.iterationIndex ?? null,
+      value,
+      amendedByName: amendedByName ?? null,
+      fieldLabel: fieldLabel ?? null,
+    };
+
+    try {
+      if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
+      const res = await api.patch<AssetWorkflowRun>(
+        `/asset-workflow-runs/${resolvedRunId}/capture-cell`,
+        body,
+        { timeout: RUN_MUTATION_TIMEOUT_MS },
+      );
+      const updatedRun = await cacheServerRun(res.data);
+      signalLocalRunUpdate(updatedRun);
+      return updatedRun;
+    } catch (error) {
+      if (!isOfflineNetworkError(error)) throw error;
+
+      const now = new Date().toISOString();
+      const offlineRun: OfflineRun = {
+        ...cachedRun,
+        stepResultsJson,
+        updatedAt: now,
+        lastLocalSavedAt: now,
+        dirty: true,
+        localStatus: "PendingSync",
+        syncError: undefined,
+      };
+      await offlineStore.saveRun(offlineRun);
+      signalLocalRunUpdate(offlineRun);
+
+      // One queued op per cell (url + opType + method are the dedupe key, and the url is the
+      // same for every cell on a run), so enqueueRunMutation would collapse edits to different
+      // fields into one. Queue directly and key the dedupe on the specific cell instead.
+      const cellKey = `${binding.stepId}|${binding.inputId}|${binding.iterationIndex ?? 0}`;
+      const existing = (await syncQueue.listByEntityId(resolvedRunId)).find((op) => {
+        if (op.opType !== "CAPTURE_CELL" || op.status === "uploading") return false;
+        const opBody = op.body as typeof body | undefined;
+        return opBody
+          ? `${opBody.stepId}|${opBody.inputId}|${opBody.iterationIndex ?? 0}` === cellKey
+          : false;
+      });
+
+      if (existing) {
+        await syncQueue.updateQueuedOp(existing.id, { body, optimisticPatch: { stepResultsJson, updatedAt: now } });
+      } else {
+        await syncQueue.enqueue({
+          opType: "CAPTURE_CELL",
+          url: `/asset-workflow-runs/${resolvedRunId}/capture-cell`,
+          method: "PATCH",
+          entityType: "workflow-run",
+          entityId: resolvedRunId,
+          body,
+          optimisticPatch: { stepResultsJson, updatedAt: now },
+          dependsOnOpId: await resolvePendingRunCreateOpId(resolvedRunId),
+        });
+      }
+      return offlineRun;
+    }
   },
 
   /** Patch step results on a locked/complete run - used to add missing photos after completion. */

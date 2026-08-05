@@ -41,6 +41,22 @@ describe("describeSyncOpType", () => {
     expect(describeSyncOpType(action({ opType: "RUN_COMPLETE" }))).toBe("Complete run");
     expect(describeSyncOpType(action({ opType: "RUN_CREATE" }))).toBe("Start workflow run");
   });
+
+  it("names the amended field for a queued capture-cell correction", () => {
+    expect(describeSyncOpType(action({
+      opType: "CAPTURE_CELL",
+      url: "/asset-workflow-runs/run-1/capture-cell",
+      body: { stepId: "s1", inputId: "cap-serial", value: "SN-2", fieldLabel: "Serial" },
+    }))).toBe("Correct captured field: Serial");
+  });
+
+  it("falls back to a generic label when the field has no label", () => {
+    expect(describeSyncOpType(action({
+      opType: "CAPTURE_CELL",
+      url: "/asset-workflow-runs/run-1/capture-cell",
+      body: { stepId: "s1", inputId: "cap-serial", value: "SN-2", fieldLabel: "   " },
+    }))).toBe("Correct captured field");
+  });
 });
 
 describe("formatPendingActionLabel", () => {

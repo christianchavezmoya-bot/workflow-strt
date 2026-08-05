@@ -91,7 +91,7 @@ export function stickyCell(left: number, width: number, zIndex: number, rowBg?: 
 }
 
 export const CAPTURE_ROW_HEIGHT = 38;
-/** Web-only: virtualize body when at least this many filtered rows. */
+/** Virtualize the body when at least this many filtered rows are visible. */
 export const CAPTURE_VIRTUALIZE_MIN_ROWS = 20;
 
 export function captureCellKey(assetId: string, columnId: string) {

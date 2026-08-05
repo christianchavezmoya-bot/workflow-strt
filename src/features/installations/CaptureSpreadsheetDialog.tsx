@@ -59,7 +59,6 @@ import { captureSpreadsheetTheme } from "../../theme/captureSpreadsheetTheme";
 import CaptureSpreadsheetRow from "./CaptureSpreadsheetRow";
 import CaptureVirtualizedTableBody from "./CaptureVirtualizedTableBody";
 import { captureCellKey } from "./CaptureEditableCell";
-import { isMobileNativePlatform } from "../../utils/platform";
 import {
   type CaptureSpreadsheetAssetJobColumn,
   ACTIONS_W,
@@ -400,8 +399,13 @@ export default function CaptureSpreadsheetDialog({
 
   const selectionEnabled = !hideSelectionColumn && Boolean(selectedAssetIds && onToggleAssetSelection && onToggleVisibleAssetSelection);
   const filteredAssetIds = useMemo(() => filteredRows.map(({ asset }) => asset.id), [filteredRows]);
-  const shouldVirtualizeRows = !isMobileNativePlatform()
-    && filteredRows.length >= CAPTURE_VIRTUALIZE_MIN_ROWS;
+  // Virtualization was originally scoped to web to limit the blast radius, which left the
+  // constrained device rendering every row: a 150-asset job mounted 150 rows x every capture
+  // column on a phone. Rows are a fixed CAPTURE_ROW_HEIGHT on both platforms and the native
+  // full-screen dialog gives the virtualizer a bounded scroll container, so the same path is
+  // safe here — and native's table is read-only, so no focused input can be unmounted by a
+  // scroll.
+  const shouldVirtualizeRows = filteredRows.length >= CAPTURE_VIRTUALIZE_MIN_ROWS;
   const tableBodyColSpan = visibleColumns.length + assetJobColumns.length + (selectionEnabled ? 4 : 3);
   const tableScrollMaxHeight = embedded
     ? (shouldVirtualizeRows ? "min(70vh, 720px)" : undefined)

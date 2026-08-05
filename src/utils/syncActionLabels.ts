@@ -63,6 +63,10 @@ export function describeSyncOpType(action: PendingAction): string {
       return "Discard run progress";
     case "STEP_RESULTS":
       return "Save captured step data";
+    case "CAPTURE_CELL":
+      return typeof body?.fieldLabel === "string" && body.fieldLabel.trim()
+        ? `Correct captured field: ${body.fieldLabel}`
+        : "Correct captured field";
     case "SIGNATURE_SUBMIT":
       return body?.signerRole === "Customer" ? "Customer sign-off" : "Installer sign-off";
     case "TIME_ENTRY":

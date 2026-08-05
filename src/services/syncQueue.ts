@@ -12,6 +12,7 @@ export type SyncOpType =
   | "RUN_COMPLETE"
   | "RUN_ABANDON"
   | "STEP_RESULTS"
+  | "CAPTURE_CELL"
   | "ISSUE_CREATE"
   | "ISSUE_UPDATE"
   | "ISSUE_CLOSE"
