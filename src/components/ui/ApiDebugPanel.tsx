@@ -1,7 +1,3 @@
-/**
- * ApiDebugPanel — in-app API log viewer.
- * Tap the sync badge in the topbar to open.
- */
 import {
   Box,
   Button,
@@ -19,8 +15,12 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import { useEffect, useState } from "react";
 import type { ApiDebugLog } from "../../services/api";
-import { formatPayloadSize } from "../../utils/syncDiagnostics";
+import {
+  copyDebugSnapshotToClipboard,
+  downloadDebugSnapshot,
+} from "../../services/debugSnapshotService";
 import { sanitizeUrl } from "../../services/syncSupportBundleService";
+import { formatPayloadSize } from "../../utils/syncDiagnostics";
 
 function statusColor(status?: number): "success" | "warning" | "error" | "default" {
   if (!status) return "error";
@@ -36,7 +36,8 @@ interface Props {
 
 export default function ApiDebugPanel({ open, onClose }: Props) {
   const [logs, setLogs] = useState<ApiDebugLog[]>([]);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"logs" | "snapshot" | false>(false);
+  const [savedPath, setSavedPath] = useState<string | null>(null);
 
   const refresh = () => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: ApiDebugLog[] };
@@ -63,8 +64,19 @@ export default function ApiDebugPanel({ open, onClose }: Props) {
       opType: log.opType,
     }));
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-    setCopied(true);
+    setCopied("logs");
     window.setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function copySnapshot() {
+    await copyDebugSnapshotToClipboard();
+    setCopied("snapshot");
+    window.setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function downloadSnapshot() {
+    const result = await downloadDebugSnapshot();
+    setSavedPath(result.savedPath ?? result.filename);
   }
 
   return (
@@ -75,18 +87,43 @@ export default function ApiDebugPanel({ open, onClose }: Props) {
           <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>
         </Stack>
         <Typography variant="caption" color="text.secondary">
-          Last {logs.length} requests — newest first. Copy excludes tokens and request bodies.
+          Last {logs.length} requests - newest first. Baseline JSON excludes tokens and request bodies.
         </Typography>
-        {logs.length > 0 && (
+        <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
           <Button
             size="small"
             variant="outlined"
             startIcon={<ContentCopyIcon />}
-            sx={{ mt: 1, textTransform: "none" }}
-            onClick={() => void copySanitizedLogs()}
+            sx={{ textTransform: "none" }}
+            onClick={() => void copySnapshot()}
           >
-            {copied ? "Copied" : "Copy sanitized logs"}
+            {copied === "snapshot" ? "Copied" : "Copy baseline JSON"}
           </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<DownloadOutlinedIcon />}
+            sx={{ textTransform: "none" }}
+            onClick={() => void downloadSnapshot()}
+          >
+            Download JSON
+          </Button>
+          {logs.length > 0 && (
+            <Button
+              size="small"
+              variant="text"
+              startIcon={<ContentCopyIcon />}
+              sx={{ textTransform: "none" }}
+              onClick={() => void copySanitizedLogs()}
+            >
+              {copied === "logs" ? "Copied" : "Copy request log only"}
+            </Button>
+          )}
+        </Stack>
+        {savedPath && (
+          <Typography variant="caption" color="success.main" sx={{ display: "block", mt: 1 }}>
+            Saved to {savedPath}
+          </Typography>
         )}
       </DialogTitle>
       <DialogContent sx={{ p: 0 }}>
@@ -129,8 +166,8 @@ export default function ApiDebugPanel({ open, onClose }: Props) {
                   />
                 )}
                 <Typography variant="caption" color="text.disabled" sx={{ ml: "auto !important" }}>
-                  {log.time} · {log.durationMs ?? "?"}ms
-                  {log.payloadBytes != null ? ` · ${log.payloadSizeFormatted ?? formatPayloadSize(log.payloadBytes)}` : ""}
+                  {log.time} - {log.durationMs ?? "?"}ms
+                  {log.payloadBytes != null ? ` - ${log.payloadSizeFormatted ?? formatPayloadSize(log.payloadBytes)}` : ""}
                 </Typography>
               </Stack>
               <Typography

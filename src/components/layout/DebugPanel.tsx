@@ -1,11 +1,17 @@
 import { Box, Button, Chip, Divider, IconButton, Stack, Typography } from "@mui/material";
 import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
 import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import { useEffect, useState } from "react";
-import { secureGet } from "../../services/secureStorage";
 import { getApiBaseUrl } from "../../services/apiBase";
-import { pendingCount, syncMetaGet } from "../../services/localDB";
 import { subscribeServerReachable } from "../../services/connectivityMonitor";
+import {
+  copyDebugSnapshotToClipboard,
+  downloadDebugSnapshot,
+} from "../../services/debugSnapshotService";
+import { pendingCount, syncMetaGet } from "../../services/localDB";
+import { secureGet } from "../../services/secureStorage";
 
 type DebugLog = {
   id: string;
@@ -32,7 +38,7 @@ function formatAuthUserSummary(raw: string): string {
       parsed.role ? `role=${parsed.role}` : null,
       parsed.id ? `id=${parsed.id}` : null,
     ].filter(Boolean);
-    return parts.length > 0 ? parts.join(" · ") : "present (redacted)";
+    return parts.length > 0 ? parts.join(" - ") : "present (redacted)";
   } catch {
     return "present (redacted)";
   }
@@ -48,7 +54,9 @@ const DebugPanel = () => {
   const [serverReachable, setServerReachable] = useState<boolean | null>(null);
   const [pending, setPending] = useState(0);
   const [lastAssetSync, setLastAssetSync] = useState<string | null>(null);
-  const [apiUrl, setApiUrl] = useState(() => getApiBaseUrl());
+  const [apiUrl] = useState(() => getApiBaseUrl());
+  const [copyState, setCopyState] = useState(false);
+  const [savedPath, setSavedPath] = useState<string | null>(null);
 
   useEffect(() => {
     const anyWindow = window as typeof window & { __apiDebugLogs?: DebugLog[] };
@@ -85,6 +93,17 @@ const DebugPanel = () => {
       unsubscribeReachable();
     };
   }, []);
+
+  async function handleCopySnapshot() {
+    await copyDebugSnapshotToClipboard();
+    setCopyState(true);
+    window.setTimeout(() => setCopyState(false), 2000);
+  }
+
+  async function handleDownloadSnapshot() {
+    const result = await downloadDebugSnapshot();
+    setSavedPath(result.savedPath ?? result.filename);
+  }
 
   return (
     <>
@@ -130,7 +149,6 @@ const DebugPanel = () => {
 
           <Divider sx={{ my: 1 }} />
 
-          {/* Connection info */}
           <Stack spacing={0.5} sx={{ mb: 1.5 }}>
             <Stack direction="row" alignItems="center" spacing={1}>
               <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>API host</Typography>
@@ -163,7 +181,6 @@ const DebugPanel = () => {
 
           <Divider sx={{ my: 1 }} />
 
-          {/* Auth info — redacted for field/support safety */}
           <Box sx={{ mb: 1 }}>
             <Typography variant="caption" color="text.secondary">
               Auth token: {authSummary.tokenPresent ? "present (redacted)" : "none"}
@@ -173,9 +190,32 @@ const DebugPanel = () => {
             </Typography>
           </Box>
 
+          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<ContentCopyIcon />}
+              onClick={() => void handleCopySnapshot()}
+            >
+              {copyState ? "Copied" : "Copy baseline JSON"}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<DownloadOutlinedIcon />}
+              onClick={() => void handleDownloadSnapshot()}
+            >
+              Download JSON
+            </Button>
+          </Stack>
+          {savedPath && (
+            <Typography variant="caption" color="success.main" sx={{ display: "block", mb: 1 }}>
+              Saved to {savedPath}
+            </Typography>
+          )}
+
           <Divider sx={{ my: 1 }} />
 
-          {/* Request log */}
           <Typography variant="caption" color="text.secondary">Latest requests</Typography>
           <Stack spacing={1} sx={{ mt: 0.5 }}>
             {logs.length === 0 && (
@@ -190,7 +230,7 @@ const DebugPanel = () => {
                   <Typography variant="body2">{log.method} {log.url}</Typography>
                   <Typography variant="body2" color={log.status && log.status >= 400 ? "error" : "success.main"}>
                     {log.status ? `Status ${log.status}` : "No status"}
-                    {log.durationMs != null ? ` · ${log.durationMs}ms` : ""}
+                    {log.durationMs != null ? ` - ${log.durationMs}ms` : ""}
                   </Typography>
                   {log.error && (
                     <Typography variant="caption" color="error">{log.error}</Typography>
