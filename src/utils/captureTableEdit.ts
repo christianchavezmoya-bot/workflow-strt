@@ -21,6 +21,25 @@ export function isCaptureColumnEditable(inputType?: string): boolean {
   return true;
 }
 
+/** Minimal shape of a capture column needed to decide whether it can be amended. */
+export interface AmendableColumnCandidate {
+  stepId?: string;
+  inputId?: string;
+  inputType?: string;
+}
+
+/**
+ * Columns a run-amend form may render as editable inputs.
+ *
+ * A column is only amendable when it maps back to a concrete run field — without both stepId
+ * and inputId there is nothing for the capture-cell PATCH to target — and when its type is
+ * not media or a signature.
+ */
+export function selectAmendableColumns<T extends AmendableColumnCandidate>(columns: T[]): T[] {
+  return columns.filter((column) =>
+    Boolean(column.stepId) && Boolean(column.inputId) && isCaptureColumnEditable(column.inputType));
+}
+
 /** Patch one capture/input value inside stepResultsJson. Returns updated JSON string. */
 export function patchCaptureCellValue(
   stepResultsJson: string,

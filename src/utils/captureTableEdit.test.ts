@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isCaptureColumnEditable, patchCaptureCellValue } from "./captureTableEdit";
+import { isCaptureColumnEditable, patchCaptureCellValue, selectAmendableColumns } from "./captureTableEdit";
 
 describe("captureTableEdit", () => {
   it("patches an existing step value", () => {
@@ -35,5 +35,33 @@ describe("captureTableEdit", () => {
     expect(isCaptureColumnEditable("capture:video")).toBe(false);
     expect(isCaptureColumnEditable("signature")).toBe(false);
     expect(isCaptureColumnEditable("text")).toBe(true);
+  });
+});
+
+describe("selectAmendableColumns", () => {
+  it("keeps text columns that map to a concrete run field", () => {
+    const cols = [
+      { id: "a", stepId: "s1", inputId: "serial", inputType: "text" },
+      { id: "b", stepId: "s1", inputId: "count", inputType: "number" },
+    ];
+    expect(selectAmendableColumns(cols).map((c) => c.id)).toEqual(["a", "b"]);
+  });
+
+  it("drops media and signature columns", () => {
+    const cols = [
+      { id: "photo", stepId: "s1", inputId: "p", inputType: "photo" },
+      { id: "video", stepId: "s1", inputId: "v", inputType: "video" },
+      { id: "sign", stepId: "s1", inputId: "g", inputType: "signature" },
+    ];
+    expect(selectAmendableColumns(cols)).toEqual([]);
+  });
+
+  it("drops columns with no run binding — capture-cell has nothing to target", () => {
+    const cols = [
+      { id: "noStep", inputId: "serial", inputType: "text" },
+      { id: "noInput", stepId: "s1", inputType: "text" },
+      { id: "ok", stepId: "s1", inputId: "serial", inputType: "text" },
+    ];
+    expect(selectAmendableColumns(cols).map((c) => c.id)).toEqual(["ok"]);
   });
 });

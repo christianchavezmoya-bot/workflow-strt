@@ -11,6 +11,7 @@ const ProjectForm = lazy(() => import("../features/projects/ProjectForm"));
 const ProjectDetail = lazy(() => import("../features/projects/ProjectDetail"));
 const ProjectAssetInspectionPage = lazy(() => import("../features/projects/ProjectAssetInspectionPage"));
 const AssetInstallationPage = lazy(() => import("../features/installations/AssetInstallationPage"));
+const CaptureTablePage = lazy(() => import("../features/installations/CaptureTablePage"));
 const WorkInstructions = lazy(() => import("../features/workInstructions/WorkInstructions"));
 const UserManagement = lazy(() => import("../features/admin/UserManagement"));
 const CustomerSites = lazy(() => import("../features/admin/CustomerSites"));
@@ -87,6 +88,7 @@ const AppRoutes = () => {
         <Route path="/projects/:id/inspections" element={<ProjectInspectionsRedirect />} />
         <Route path="/projects/:id/assets/:assetId/inspections" element={<LazyRoute><ProjectAssetInspectionPage /></LazyRoute>} />
         <Route path="/installations/assets" element={<LazyRoute><AssetInstallationPage /></LazyRoute>} />
+        <Route path="/installations/capture" element={<LazyRoute><CaptureTablePage /></LazyRoute>} />
         <Route path="/work-instructions" element={<LazyRoute><WorkInstructions /></LazyRoute>} />
         <Route path="/documents" element={<LazyRoute><DocumentsPage /></LazyRoute>} />
         <Route path="/tips" element={<LazyRoute><TipsAndTricksPage /></LazyRoute>} />

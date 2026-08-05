@@ -111,6 +111,13 @@ export type CaptureSpreadsheetDialogProps = {
   onToggleVisibleAssetSelection?: (assetIds: string[], checked: boolean) => void;
 };
 
+/**
+ * Stable identity for the optional maxUnitsByFeature prop. A `= {}` default parameter mints a
+ * new object every render, and this value is a dependency of the table memo — so any caller
+ * that omits the prop rebuilt the table on every render and drove an infinite update loop.
+ */
+const NO_MAX_UNITS: Record<string, number> = {};
+
 const LS_HIDDEN_KEY = "capture_spreadsheet_hidden_groups_v1";
 const DEFAULT_HEADER_STICKY_TOPS = { name: 0, pn: 36, fields: 72 };
 
@@ -180,7 +187,7 @@ export default function CaptureSpreadsheetDialog({
   captureRunsLoading = false,
   captureRunsError = null,
   schemaFallback = false,
-  maxUnitsByFeature = {},
+  maxUnitsByFeature = NO_MAX_UNITS,
   features,
   depsByFeature,
   featureSelectionsByConfig,

@@ -5504,6 +5504,27 @@ ${words.slice(midpoint).join(" ")}`;
               <ToggleButton value="capture" sx={{ fontSize: 11, py: 0.5, px: 1.25 }}>Capture</ToggleButton>
             </ToggleButtonGroup>
           )}
+          {canViewCaptureMatrix && selectedProjectId && (
+            // Plain link so ctrl/cmd-click opens the standalone matrix in its own tab. The
+            // inline Capture toggle above is unchanged — it stays the fast path for bulk
+            // cell editing; this is the read-only whole-job view.
+            <Tooltip title="Open the full-job capture table (read-only). Ctrl/Cmd-click for a new tab.">
+              <Button
+                size="small"
+                variant="outlined"
+                component="a"
+                href={`/installations/capture?project=${encodeURIComponent(selectedProjectId)}`}
+                onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                  e.preventDefault();
+                  navigate(`/installations/capture?project=${encodeURIComponent(selectedProjectId)}`);
+                }}
+                sx={{ fontSize: 11, py: 0.5, px: 1.25, whiteSpace: "nowrap" }}
+              >
+                Capture table
+              </Button>
+            </Tooltip>
+          )}
         </Stack>
       )}
 
