@@ -41,7 +41,6 @@ import {
 import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import api from "../../services/api";
-import { userService } from "../../services/userService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
 import {
@@ -50,7 +49,10 @@ import {
   mergeDashboardWorkspaceItems,
   dedupeDashboardWorkspace,
 } from "../../utils/dashboardWorkspaceMerge";
-import { shouldFetchTechnicianWorkload } from "../../utils/dashboardFetchScope";
+import {
+  shouldFetchProjectAssetSummary,
+  shouldFetchTechnicianWorkload,
+} from "../../utils/dashboardFetchScope";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
 import type { Office } from "../../components/GlobalOfficeMap";
@@ -419,6 +421,8 @@ const Dashboard = () => {
   const showNativeManagerHome = isManager && isNativePlatform;
   /** Gates the heaviest dashboard query to the roles that actually render WorkloadPanel. */
   const needsTechnicianWorkload = shouldFetchTechnicianWorkload(user.role);
+  /** Gates the active-summary aggregate to the roles that render project completion cards. */
+  const needsProjectAssetSummary = shouldFetchProjectAssetSummary(user.role);
   // Every role (installers included) gets the light workspace first paint; the
   // card-flicker this used to cause is handled by the stabilize/merge logic below.
   // Native is unaffected by the session cache either way - it reads its own cache via dcGet.
@@ -429,6 +433,10 @@ const Dashboard = () => {
   const projects      = useAppSelector((s) => s.projects.items);
   const products      = useAppSelector((s) => s.products.items);
   const users         = useAppSelector((s) => s.users.items);
+  // Used only to mirror useShellCatalogBootstrap's "fetch once if empty" guard below.
+  const projectsCatalogLoading = useAppSelector((s) => s.projects.loading);
+  const productsCatalogLoading = useAppSelector((s) => s.products.loading);
+  const usersCatalogLoading    = useAppSelector((s) => s.users.loading);
 
   const [globalOffices,      setGlobalOffices]      = useState<Office[]>([]);
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
@@ -460,12 +468,20 @@ const Dashboard = () => {
   const [analyticsRefreshTick, setAnalyticsRefreshTick] = useState(0);
   const analyticsSectionRef = useRef<HTMLDivElement | null>(null);
   const analyticsObserverRef = useRef<IntersectionObserver | null>(null);
-  /** Web: defer heavy analytics API calls until idle or the panel nears the viewport. */
+  /**
+   * Web: the analytics APIs only fire once EvidenceHealthGrid nears the viewport, so a
+   * PM sitting on My Inspections / My Installs never pays for them. Native starts
+   * enabled because ManagerMobileHome's default tab ("projects") renders the grid
+   * immediately, and native skips the observer.
+   */
   const [analyticsLoadEnabled, setAnalyticsLoadEnabled] = useState(isNativePlatform);
+  /** True while EvidenceHealthGrid is actually rendered (i.e. the analytics tab is active). */
+  const [analyticsSectionMounted, setAnalyticsSectionMounted] = useState(false);
   const analyticsSectionCallbackRef = useCallback((node: HTMLDivElement | null) => {
     analyticsSectionRef.current = node;
     analyticsObserverRef.current?.disconnect();
     analyticsObserverRef.current = null;
+    setAnalyticsSectionMounted(!!node);
     if (!node || isNativePlatform || !isManager) return;
     const observer = new IntersectionObserver(
       ([entry]) => { if (entry.isIntersecting) setAnalyticsLoadEnabled(true); },
@@ -565,8 +581,18 @@ const Dashboard = () => {
   }, [dashboardWorkspace]);
 
   // Admin: view another user's dashboard
-  type DashboardUserEntry = { id: string; fullName: string; role: string; office: string };
-  const [dashboardUsers, setDashboardUsers] = useState<DashboardUserEntry[]>([]);
+  // Derived from the Redux users catalog rather than a second GET /users. The
+  // "View as" picker needs exactly the fields the catalog already carries, so
+  // fetching again just to drop the current user doubled the request on every
+  // manager's dashboard boot.
+  const dashboardUsers = useMemo(
+    () => (isManager
+      ? users
+          .filter((u) => u.id !== user.id)
+          .map((u) => ({ id: u.id, fullName: u.fullName, role: u.role, office: u.office ?? "" }))
+      : []),
+    [isManager, user.id, users],
+  );
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>(isAdmin ? ALL_DASHBOARDS_VALUE : user.id);
   const dashboardWorkspaceScopeId = isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined;
   // Offline local reads have no JWT — scope to the logged-in user unless a manager
@@ -689,20 +715,6 @@ const Dashboard = () => {
       setAvailableCountries([]);
     });
   }, []);
-
-  useEffect(() => {
-    if (!isManager) return;
-    void userService.getUsers()
-      .then((users) => setDashboardUsers(
-        users.filter((u) => u.id !== user.id).map((u) => ({
-          id: u.id,
-          fullName: u.fullName,
-          role: u.role,
-          office: u.office ?? "",
-        })),
-      ))
-      .catch(() => {});
-  }, [isManager, user.id]);
 
   const attentionRequestSeqRef = useRef(0);
 
@@ -836,8 +848,15 @@ const Dashboard = () => {
     }
   }, [isNativePlatform, user.id]);
 
+  // Web: the observer above loads analytics early when the grid is scrolled near, but the
+  // grid sits well below the fold, so on its own it would never fire for a user who does
+  // not scroll and the panels would stay empty. Back it with an idle fallback that only
+  // runs while the grid is mounted — so a PM on My Inspections / My Installs, where the
+  // grid is not rendered, still never triggers the two 90-day aggregations.
   useEffect(() => {
     if (isNativePlatform || !isManager) return;
+    if (!analyticsSectionMounted || analyticsLoadEnabled) return;
+
     let idleId: number | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const enable = () => setAnalyticsLoadEnabled(true);
@@ -849,20 +868,36 @@ const Dashboard = () => {
     }
 
     return () => {
-      if (idleId !== undefined && typeof cancelIdleCallback !== "undefined") {
-        cancelIdleCallback(idleId);
-      }
+      if (idleId !== undefined && typeof cancelIdleCallback !== "undefined") cancelIdleCallback(idleId);
       if (timeoutId) clearTimeout(timeoutId);
-      analyticsObserverRef.current?.disconnect();
-      analyticsObserverRef.current = null;
     };
-  }, [isManager, isNativePlatform]);
+  }, [analyticsLoadEnabled, analyticsSectionMounted, isManager, isNativePlatform]);
+
+  useEffect(() => () => {
+    analyticsObserverRef.current?.disconnect();
+    analyticsObserverRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated || dashboardBootPhase !== "full") return;
-    dispatch(fetchProjects());
-    dispatch(fetchProducts());
-    dispatch(fetchUsers());
+    // AppShell's useShellCatalogBootstrap already warms these three catalogs after auth.
+    // Dispatching unconditionally here raced it and double-fetched every catalog on a
+    // cold dashboard load (measured: 4x /users for Admin). Mirror the shell's guard so
+    // whichever runs first wins and the other is a no-op.
+    if (!projects.length && !projectsCatalogLoading) dispatch(fetchProjects());
+    if (!products.length && !productsCatalogLoading) dispatch(fetchProducts());
+    if (!users.length && !usersCatalogLoading) dispatch(fetchUsers());
+
+    // Must run BEFORE the platform branches below: the web branch returns a cleanup
+    // function, which previously made a trailing `if (isEngineer)` block unreachable on
+    // web and silently left the Draft Workflows panel empty there. Gated to the tab that
+    // renders that panel; the web service call is SWR-cached so switching tabs is cheap.
+    if (isEngineer && pmDashboardTab === "my-installs") {
+      workflowConfigService.getAll().then((configs) => {
+        setDraftConfigs(configs.filter((c: { status?: string }) => c.status === "Draft" || c.status === "draft"));
+      }).catch(() => {});
+    }
+
     if (isNativePlatform) {
       seedNativeDashboardSummariesFromLocal();
       setWorkloadLoading(false);
@@ -876,9 +911,11 @@ const Dashboard = () => {
         void projectAssetService.listOpen()
           .then((a) => { setOpenAssets(a); dcPut(DASHBOARD_CACHE_KEYS.openAssets, a); })
           .catch(() => {});
-        void projectAssetService.activeSummary()
-          .then((s) => { setProjectAssetSummary(s); dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, s); })
-          .catch(() => setProjectAssetSummary([]));
+        if (needsProjectAssetSummary) {
+          void projectAssetService.activeSummary()
+            .then((s) => { setProjectAssetSummary(s); dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, s); })
+            .catch(() => setProjectAssetSummary([]));
+        }
       }
     } else {
       // Web cold-start: stagger heavy SQLite reads so attention/workload/open-assets
@@ -897,19 +934,35 @@ const Dashboard = () => {
         : undefined;
       const summaryTimer = window.setTimeout(() => {
         projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
-        projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
+        // active-summary is a GROUP BY over every ProjectAsset row and only feeds the
+        // manager project-completion cards.
+        if (needsProjectAssetSummary) {
+          projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
+        }
       }, 800);
       return () => {
         if (workloadTimer !== undefined) window.clearTimeout(workloadTimer);
         window.clearTimeout(summaryTimer);
       };
     }
-    if (isEngineer) {
-      workflowConfigService.getAll().then((configs) => {
-        setDraftConfigs(configs.filter((c: any) => c.status === "Draft" || c.status === "draft"));
-      }).catch(() => {});
-    }
-  }, [dashboardBootPhase, dispatch, isAuthenticated, isEngineer, isNativePlatform, loadAttention, needsTechnicianWorkload, seedNativeDashboardSummariesFromLocal]);
+  }, [
+    products.length,
+    productsCatalogLoading,
+    projects.length,
+    projectsCatalogLoading,
+    users.length,
+    usersCatalogLoading,
+    dashboardBootPhase,
+    dispatch,
+    isAuthenticated,
+    isEngineer,
+    isNativePlatform,
+    loadAttention,
+    needsProjectAssetSummary,
+    needsTechnicianWorkload,
+    pmDashboardTab,
+    seedNativeDashboardSummariesFromLocal,
+  ]);
 
   // useAuth resolves role one tick after mount (Viewer placeholder). If dashboard
   // boot reached "full" while isManager was still false, the first loadAttention
@@ -1214,6 +1267,10 @@ const Dashboard = () => {
   // Phase 4 - evidence completeness (deferred on web until analyticsLoadEnabled)
   useEffect(() => {
     if (!isManager || dashboardBootPhase !== "full" || !analyticsLoadEnabled) return;
+    // analyticsRefreshTick is bumped by run-state, asset and SSE events, which refetched
+    // both 90-day aggregations even while the user sat on a tab that never renders the
+    // grid. Spend the query only when the panel is actually on screen.
+    if (!analyticsSectionMounted) return;
     let cancelled = false;
     setEvidenceLoading(true);
     setEvidenceError(false);
@@ -1234,11 +1291,12 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [analyticsLoadEnabled, analyticsRefreshTick, dashboardBootPhase, evidenceWindow, isManager]);
+  }, [analyticsLoadEnabled, analyticsRefreshTick, analyticsSectionMounted, dashboardBootPhase, evidenceWindow, isManager]);
 
   // Phase 5 - workflow health (deferred on web until analyticsLoadEnabled)
   useEffect(() => {
     if (!isManager || dashboardBootPhase !== "full" || !analyticsLoadEnabled) return;
+    if (!analyticsSectionMounted) return;
     let cancelled = false;
     setHealthLoading(true);
     setHealthError(false);
@@ -1259,7 +1317,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [analyticsLoadEnabled, analyticsRefreshTick, dashboardBootPhase, healthWindow, isManager]);
+  }, [analyticsLoadEnabled, analyticsRefreshTick, analyticsSectionMounted, dashboardBootPhase, healthWindow, isManager]);
   // Derived data
   const filteredProjects = useMemo(() => {
     if (activeOffice === "All" || !officeIdsForRegion) return projects;
@@ -3173,7 +3231,62 @@ const Dashboard = () => {
     setReportingTechId(w.userId);
     try {
       const exportDate = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-      await generateTechnicianReport({ technicianName: w.fullName, reportPeriod: exportDate, runs: [], assets: [], exportDate } as TechnicianReportData);
+      const techAssets = openAssets.filter((a) => a.assignedUserId === w.userId);
+      const assetIds = new Set(techAssets.map((a) => a.id));
+
+      // Runs carry the time tracking and issue data the report is built from. Web batches
+      // one scoped request per project; native goes per asset because that path reads the
+      // offline run cache first and so still produces a report with no connection.
+      let runs: AssetWorkflowRun[] = [];
+      if (assetIds.size > 0) {
+        if (isNativePlatform) {
+          const perAsset = await Promise.all(
+            techAssets.map((a) => assetWorkflowRunService.listByAsset(a.id).catch(() => [])),
+          );
+          runs = perAsset.flat();
+        } else {
+          const assetIdsByProject = new Map<string, string[]>();
+          for (const a of techAssets) {
+            if (!a.projectId) continue;
+            const forProject = assetIdsByProject.get(a.projectId) ?? [];
+            forProject.push(a.id);
+            assetIdsByProject.set(a.projectId, forProject);
+          }
+          const perProject = await Promise.all(
+            [...assetIdsByProject].map(([projectId, ids]) =>
+              assetWorkflowRunService.loadRunDetailsForAssets(projectId, ids).catch(() => []),
+            ),
+          );
+          runs = perProject.flat();
+        }
+      }
+      // Scope defensively: a project-scoped fetch can return runs for assets that are no
+      // longer assigned to this technician.
+      runs = runs.filter((run) => assetIds.has(run.assetId));
+
+      const jobNumbers = [...new Set(techAssets.map((a) => a.jobNumber).filter(Boolean))];
+      const reportData: TechnicianReportData = {
+        technicianName: w.fullName,
+        reportPeriod: jobNumbers.length > 0
+          ? `Current workload · ${jobNumbers.join(", ")}`
+          : "Current workload",
+        runs,
+        assets: techAssets.map((a) => ({
+          id: a.id,
+          assetTag: a.assetTag,
+          assetName: a.assetName,
+          jobNumber: a.jobNumber,
+          location: a.location,
+          status: a.status,
+          runStatus: a.runStatus,
+          completedSteps: a.completedSteps,
+          totalSteps: a.totalSteps,
+        })),
+        exportDate,
+      };
+      await generateTechnicianReport(reportData);
+    } catch {
+      setDashboardError("Could not build the workload report. Check your connection and try again.");
     } finally { setReportingTechId(null); }
   }
   // Reusable: individual clickable item row

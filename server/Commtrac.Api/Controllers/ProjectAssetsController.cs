@@ -169,7 +169,14 @@ public class ProjectAssetsController : ControllerBase
         var assetIds = assets.Select(a => a.Id).Distinct().ToList();
         var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
 
-        var latestRunByAsset = await GetLatestRunsByAssetAsync(assetIds);
+        // `light` is the dashboard's first-paint request. It only needs run status/flags and
+        // the config id, never the StepResultsJson / WorkflowSnapshotJson blobs — those feed
+        // the evidence counters, which BuildWorkflowSummary returns as 0 in lightweight mode.
+        // Selecting the blobs anyway made the light call cost the same as the full one, so a
+        // dashboard load ran this heavy read twice back to back.
+        var latestRunByAsset = light
+            ? await GetLatestRunSummariesByAssetAsync(assetIds)
+            : await GetLatestRunsByAssetAsync(assetIds);
 
         var assignmentByAsset = await GetLatestAssignmentsByAssetAsync(assetIds);
 
@@ -1093,6 +1100,8 @@ public class ProjectAssetsController : ControllerBase
         string SignatureStatus,
         DateTime StartedAt,
         DateTime? CompletedAt,
+        DateTime UpdatedAt,
+        string WorkflowConfigId,
         string IssuesJson);
 
     private async Task<Dictionary<string, AssetWorkflowRunEntity>> GetLatestRunSummariesByAssetAsync(IEnumerable<string> assetIds)
@@ -1125,10 +1134,15 @@ public class ProjectAssetsController : ControllerBase
                 r.SignatureStatus,
                 r.StartedAt,
                 r.CompletedAt,
+                r.UpdatedAt,
+                r.WorkflowConfigId,
                 r.IssuesJson))
             .AsNoTracking()
             .ToListAsync();
 
+        // Everything except the two large JSON blobs. StepResultsJson /
+        // WorkflowSnapshotJson are only read by the non-lightweight evidence counters,
+        // so callers that pass lightweight/light must not pay to hydrate them.
         return rows.ToDictionary(
             r => r.AssetId,
             r => new AssetWorkflowRunEntity
@@ -1140,10 +1154,11 @@ public class ProjectAssetsController : ControllerBase
                 SignatureStatus = r.SignatureStatus,
                 StartedAt = r.StartedAt,
                 CompletedAt = r.CompletedAt,
+                UpdatedAt = r.UpdatedAt,
+                WorkflowConfigId = r.WorkflowConfigId,
                 IssuesJson = r.IssuesJson,
                 StepResultsJson = "[]",
                 WorkflowSnapshotJson = "{}",
-                WorkflowConfigId = string.Empty,
             });
     }
 
