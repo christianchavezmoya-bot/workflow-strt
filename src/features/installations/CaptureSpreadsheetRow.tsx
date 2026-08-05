@@ -131,6 +131,7 @@ function CaptureSpreadsheetRowInner({
           group={group}
           rowBg={rowBg}
           value={mergedCells[column.id] ?? ""}
+          applicable={!capture.runId || capture.applicableColumnIds.has(column.id)}
           editable={editableForColumn(asset, column)}
           onSave={onSaveCell}
           onPatch={onPatchCell}
@@ -179,6 +180,10 @@ function shallowCellsEqual(a: Record<string, string>, b: Record<string, string>)
   return true;
 }
 
+function applicableColumnKey(capture: ProjectCaptureRow): string {
+  return `${capture.runId ?? ""}:${[...capture.applicableColumnIds].sort().join(",")}`;
+}
+
 function rowPropsEqual(prev: CaptureSpreadsheetRowProps, next: CaptureSpreadsheetRowProps): boolean {
   return (
     prev.asset.id === next.asset.id
@@ -190,6 +195,7 @@ function rowPropsEqual(prev: CaptureSpreadsheetRowProps, next: CaptureSpreadshee
     && prev.orderedGroups === next.orderedGroups
     && prev.assetJobColumns === next.assetJobColumns
     && shallowCellsEqual(prev.mergedCells, next.mergedCells)
+    && applicableColumnKey(prev.capture) === applicableColumnKey(next.capture)
     && prev.editableForColumn === next.editableForColumn
     && prev.onSaveCell === next.onSaveCell
     && prev.onPatchCell === next.onPatchCell

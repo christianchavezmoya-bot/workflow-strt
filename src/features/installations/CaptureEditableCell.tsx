@@ -5,6 +5,9 @@ import type { ProjectCaptureColumn, ProjectCaptureGroup } from "../../utils/proj
 import {
   ASSET_JOB_PALETTE,
   CAPTURE_COL_W,
+  CAPTURE_FIELD_HEADER_FONT,
+  NA_CELL_BG,
+  NA_CELL_TEXT,
   bodyCellHoverSx,
   captureCellKey,
   groupPalette,
@@ -17,6 +20,8 @@ export type CaptureEditableCellProps = {
   rowBg: string;
   value: string;
   editable: boolean;
+  /** False when this column's step is not part of the asset's workflow run. */
+  applicable: boolean;
   onSave: (asset: ProjectAsset, column: ProjectCaptureColumn, value: string) => Promise<void>;
   onPatch: (assetId: string, columnId: string, value: string) => void;
 };
@@ -28,6 +33,7 @@ function CaptureEditableCellInner({
   rowBg,
   value,
   editable,
+  applicable,
   onSave,
   onPatch,
 }: CaptureEditableCellProps) {
@@ -35,8 +41,10 @@ function CaptureEditableCellInner({
   const [saving, setSaving] = useState(false);
   const displayValue = draft ?? value;
   const isBlank = displayValue.trim().length === 0;
+  const isNotApplicable = !applicable;
   const palette = groupPalette(group);
   const columnIndex = group.columns.findIndex((item) => item.id === column.id);
+  const cellBg = isNotApplicable ? NA_CELL_BG : rowBg;
 
   useEffect(() => {
     if (draft == null) return;
@@ -74,10 +82,18 @@ function CaptureEditableCellInner({
         py: 0.45,
         position: "relative",
         zIndex: 0,
-        ...bodyCellHoverSx(rowBg),
+        ...bodyCellHoverSx(cellBg),
       }}
     >
-      {editable ? (
+      {isNotApplicable ? (
+        <Typography
+          variant="caption"
+          fontWeight={600}
+          sx={{ fontSize: 12, lineHeight: 1.25, color: NA_CELL_TEXT }}
+        >
+          N/A
+        </Typography>
+      ) : editable ? (
         <TextField
           size="small"
           value={displayValue}
@@ -116,6 +132,7 @@ function cellPropsEqual(prev: CaptureEditableCellProps, next: CaptureEditableCel
     && prev.rowBg === next.rowBg
     && prev.value === next.value
     && prev.editable === next.editable
+    && prev.applicable === next.applicable
     && prev.group === next.group
     && prev.onSave === next.onSave
     && prev.onPatch === next.onPatch

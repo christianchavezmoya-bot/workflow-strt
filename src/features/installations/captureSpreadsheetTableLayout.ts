@@ -35,6 +35,18 @@ export const ASSET_JOB_PALETTE = {
   text: "#163447",
 };
 
+/** Cells for capture fields not present on this asset's workflow run. */
+export const NA_CELL_BG = "#E3F2FD";
+export const NA_CELL_TEXT = "rgba(22, 52, 71, 0.58)";
+
+/** Shared typography for asset-tag cells and column header labels (row 1 + row 3). */
+export const CAPTURE_FIELD_HEADER_FONT = {
+  fontSize: 12,
+  lineHeight: 1.2,
+  fontWeight: 700,
+  fontFamily: "Manrope, Sora, system-ui, sans-serif",
+} as const;
+
 export const ROW_HOVER_BG = "rgba(255,255,255,0.985)";
 export const CELL_HOVER_BORDER = "rgba(34,79,136,0.32)";
 

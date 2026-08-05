@@ -51,7 +51,7 @@ export default function CaptureTablePage() {
 
   const {
     assets, runsMap, assignmentsMap, features, depsByFeature, featureSelectionsByConfig,
-    maxUnitsByFeature, activeCountForAsset, loading, runsLoading, error, applyRunUpdate, reload,
+    maxUnitsByFeature, workflowConfigMap, activeCountForAsset, loading, runsLoading, error, applyRunUpdate, reload,
   } = useProjectCaptureData(projectId, productId);
 
   const [amendAsset, setAmendAsset] = useState<ProjectAsset | null>(null);
@@ -60,8 +60,8 @@ export default function CaptureTablePage() {
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
   const assetJobColumns = useMemo<CaptureSpreadsheetAssetJobColumn[]>(() =>
-    buildStandaloneCaptureJobColumns({ projectMap, userMap, assignmentsMap, runsMap }),
-  [assignmentsMap, projectMap, runsMap, userMap]);
+    buildStandaloneCaptureJobColumns({ projectMap, userMap, assignmentsMap, runsMap, workflowConfigMap }),
+  [assignmentsMap, projectMap, runsMap, userMap, workflowConfigMap]);
 
   const handleProjectChange = useCallback((nextId: string) => {
     const next = new URLSearchParams(searchParams);

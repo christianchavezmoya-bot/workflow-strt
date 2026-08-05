@@ -73,6 +73,7 @@ import {
   ASSET_JOB_COL_W,
   ASSET_JOB_PALETTE,
   CAPTURE_COL_W,
+  CAPTURE_FIELD_HEADER_FONT,
   CAPTURE_VIRTUALIZE_MIN_ROWS,
   CHECKBOX_W,
   HEADER_Z,
@@ -364,6 +365,7 @@ export default function CaptureSpreadsheetDialog({
       const capture = rowMap.get(asset.id) ?? {
         assetId: asset.id,
         cells: {},
+        applicableColumnIds: new Set<string>(),
         searchText: [asset.assetTag, asset.assetName ?? ""].join(" ").toLowerCase(),
         searchHits: [],
       };
@@ -391,6 +393,7 @@ export default function CaptureSpreadsheetDialog({
     }
     if (key.startsWith("capture:")) {
       const columnId = key.slice("capture:".length);
+      if (capture.runId && !capture.applicableColumnIds.has(columnId)) return "N/A";
       const value = mergedCells[columnId] ?? "";
       return value.trim().length > 0 ? value : "-";
     }
@@ -517,7 +520,12 @@ export default function CaptureSpreadsheetDialog({
       exportFilenameBase,
       exportProjectLabel,
       selected,
-      sortedFilteredRows.map(({ asset, mergedCells }) => ({ asset, cells: mergedCells })),
+      sortedFilteredRows.map(({ asset, capture, mergedCells }) => ({
+        asset,
+        cells: mergedCells,
+        applicableColumnIds: capture.applicableColumnIds,
+        runId: capture.runId,
+      })),
     );
     runCaptureExport(ctx, exportFormat);
     setExportDialogOpen(false);
@@ -531,12 +539,12 @@ export default function CaptureSpreadsheetDialog({
         <Typography
           component="span"
           sx={{
+            ...CAPTURE_FIELD_HEADER_FONT,
             display: "-webkit-box",
             WebkitLineClamp: 3,
             WebkitBoxOrient: "vertical",
             overflow: "hidden",
             whiteSpace: "pre-line",
-            lineHeight: 1.2,
             maxHeight: "3.6em",
             flex: 1,
             color: "inherit",
@@ -755,8 +763,15 @@ export default function CaptureSpreadsheetDialog({
             minWidth: 220,
             maxWidth: embedded ? 480 : undefined,
             "& .MuiOutlinedInput-root": {
-              bgcolor: "transparent",
-              "& fieldset": { borderColor: "divider" },
+              bgcolor: "#FFFFFF",
+              color: ASSET_JOB_PALETTE.text,
+              "& fieldset": { borderColor: "#C5D0DC" },
+              "&:hover fieldset": { borderColor: "#224F88" },
+              "&.Mui-focused fieldset": { borderColor: "#224F88" },
+            },
+            "& .MuiOutlinedInput-input": {
+              color: ASSET_JOB_PALETTE.text,
+              "&::placeholder": { color: "rgba(90, 107, 122, 0.95)", opacity: 1 },
             },
           }}
         />
@@ -867,7 +882,7 @@ export default function CaptureSpreadsheetDialog({
                 sx={{
                   ...stickyCell(selectionEnabled ? CHECKBOX_W : 0, TAG_W, HEADER_Z.corner),
                   top: headerStickyTops.name,
-                  fontWeight: 700,
+                  ...CAPTURE_FIELD_HEADER_FONT,
                   bgcolor: STATIC_HEADER_BG,
                   color: STATIC_HEADER_TEXT,
                   borderRight: `2px solid ${STATIC_HEADER_BORDER}`,
@@ -1016,8 +1031,7 @@ export default function CaptureSpreadsheetDialog({
                     zIndex: HEADER_Z.row3,
                     bgcolor: ASSET_JOB_PALETTE.subHeader,
                     color: ASSET_JOB_PALETTE.text,
-                    fontWeight: 700,
-                    fontSize: 11.5,
+                    ...CAPTURE_FIELD_HEADER_FONT,
                     minWidth: ASSET_JOB_COL_W,
                     borderLeft: index === 0 ? `2px solid ${ASSET_JOB_PALETTE.border}` : "1px solid #D8DEE7",
                     borderRight: index === visibleAssetJobColumns.length - 1 ? `2px solid ${ASSET_JOB_PALETTE.border}` : "1px solid #D8DEE7",
@@ -1042,8 +1056,7 @@ export default function CaptureSpreadsheetDialog({
                       zIndex: HEADER_Z.row3,
                       bgcolor: solidFieldHeaderBg(group),
                       color: palette.border,
-                      fontWeight: 700,
-                      fontSize: 11.5,
+                      ...CAPTURE_FIELD_HEADER_FONT,
                       minWidth: CAPTURE_COL_W,
                       borderLeft: index === 0 ? `2px solid ${palette.border}` : "1px solid #D8DEE7",
                       borderRight: index === group.columns.length - 1 ? `2px solid ${palette.border}` : "1px solid #D8DEE7",

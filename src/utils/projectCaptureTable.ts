@@ -4,6 +4,7 @@ import type { FeatureDependency } from "../types/featureDependency";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { StepResult } from "../types/assetWorkflowRun";
 import { labelForCaptureField, pickCaptureRun } from "./captureSpreadsheet";
+import { parseWorkflowStepsFromSnapshot } from "./workflowCompleteness";
 import { buildCapturedFields, type CapturedFieldExport, type WorkflowReportExportContext } from "./workflowReportExport";
 
 export interface ProjectCaptureColumn {
@@ -40,6 +41,8 @@ export interface ProjectCaptureRow {
   assetId: string;
   runId?: string;
   cells: Record<string, string>;
+  /** Capture columns that belong to this asset's workflow run (others render N/A). */
+  applicableColumnIds: Set<string>;
   searchText: string;
   /** Structured hits for word-start search UI (feature / field / value). */
   searchHits: ProjectCaptureSearchHit[];
@@ -265,6 +268,7 @@ export function buildProjectCaptureTable(
       assetId: asset.id,
       runId: run?.id,
       cells: rowCells,
+      applicableColumnIds: new Set<string>(),
       searchText: searchParts.join(" ").toLowerCase(),
       searchHits,
     });
@@ -320,11 +324,39 @@ export function buildProjectCaptureTable(
     }
   }
 
+  const allColumns = finalGroups.flatMap((group) => group.columns);
+  for (const row of rows) {
+    const run = pickCaptureRun(runsByAsset[row.assetId] ?? []);
+    row.applicableColumnIds = computeApplicableColumnIds(run, allColumns);
+  }
+
   return {
-    columns: finalGroups.flatMap((group) => group.columns),
+    columns: allColumns,
     groups: finalGroups,
     rows,
   };
+}
+
+/** Column applies to an asset when its step exists on that asset's workflow snapshot. */
+export function computeApplicableColumnIds(
+  run: AssetWorkflowRun | undefined,
+  columns: ProjectCaptureColumn[],
+): Set<string> {
+  if (!run) return new Set();
+  const stepIds = new Set(
+    parseWorkflowStepsFromSnapshot(run.workflowSnapshotJson ?? "")
+      .map((step) => step.id)
+      .filter(Boolean),
+  );
+  const applicable = new Set<string>();
+  for (const column of columns) {
+    if (!column.stepId) {
+      applicable.add(column.id);
+      continue;
+    }
+    if (stepIds.has(column.stepId)) applicable.add(column.id);
+  }
+  return applicable;
 }
 
 /**
@@ -398,6 +430,7 @@ export function buildSchemaCaptureTableSkeleton(
   const rows: ProjectCaptureRow[] = assets.map((asset) => ({
     assetId: asset.id,
     cells: {},
+    applicableColumnIds: new Set<string>(),
     searchText: [asset.assetTag, asset.assetName ?? "", asset.serialNumber ?? ""].join(" ").toLowerCase(),
     searchHits: [],
   }));

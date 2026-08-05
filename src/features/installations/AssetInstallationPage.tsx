@@ -2132,8 +2132,8 @@ const AssetInstallationPage = () => {
   }, [displayAssets, projectMap, selectedProject]);
 
   const assetCaptureJobColumns = useMemo(
-    () => buildFullCaptureJobColumns({ projectMap, userMap, assignmentsMap, runsMap }),
-    [assignmentsMap, projectMap, runsMap, userMap],
+    () => buildFullCaptureJobColumns({ projectMap, userMap, assignmentsMap, runsMap, workflowConfigMap: wfConfigMap }),
+    [assignmentsMap, projectMap, runsMap, userMap, wfConfigMap],
   );
 
   const captureComponentExportGroups = useMemo(

@@ -63,5 +63,20 @@ export const captureSpreadsheetTheme = createTheme({
         root: { color: "inherit" },
       },
     },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          backgroundColor: "#FFFFFF",
+          color: "#163447",
+          "& fieldset": { borderColor: "#C5D0DC" },
+          "&:hover fieldset": { borderColor: "#224F88" },
+          "&.Mui-focused fieldset": { borderColor: "#224F88" },
+        },
+        input: {
+          color: "#163447",
+          "&::placeholder": { color: "#5a6b7a", opacity: 1 },
+        },
+      },
+    },
   },
 });

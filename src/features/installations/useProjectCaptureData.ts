@@ -30,6 +30,7 @@ export interface ProjectCaptureData {
   assets: ProjectAsset[];
   runsMap: Record<string, AssetWorkflowRun[]>;
   assignmentsMap: Record<string, WorkflowAssignment[]>;
+  workflowConfigMap: Map<string, WorkflowConfig>;
   features: LibFeature[];
   depsByFeature: Record<string, FeatureDependency[]>;
   featureSelectionsByConfig: FeatureSelection[][];
@@ -218,6 +219,11 @@ export function useProjectCaptureData(projectId: string, productId?: string): Pr
     })
   ), [publishedConfigs]);
 
+  const workflowConfigMap = useMemo(
+    () => new Map(publishedConfigs.map((c) => [c.id, c])),
+    [publishedConfigs],
+  );
+
   const maxUnits = useMemo(
     () => computeMaxUnitsByFeature(featureSelectionsByConfig),
     [featureSelectionsByConfig],
@@ -260,6 +266,7 @@ export function useProjectCaptureData(projectId: string, productId?: string): Pr
     assets,
     runsMap,
     assignmentsMap,
+    workflowConfigMap,
     features,
     depsByFeature,
     featureSelectionsByConfig,

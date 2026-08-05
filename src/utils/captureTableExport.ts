@@ -9,7 +9,12 @@ export interface CaptureExportColumn {
   id: string;
   label: string;
   groupLabel: string;
-  valueFor: (asset: ProjectAsset, cells: Record<string, string>) => string;
+  valueFor: (
+    asset: ProjectAsset,
+    cells: Record<string, string>,
+    applicableColumnIds?: Set<string>,
+    runId?: string,
+  ) => string;
 }
 
 export interface CaptureExportContext {
@@ -17,7 +22,12 @@ export interface CaptureExportContext {
   projectLabel?: string;
   columns: CaptureExportColumn[];
   assets: ProjectAsset[];
-  rows: { asset: ProjectAsset; cells: Record<string, string> }[];
+  rows: {
+    asset: ProjectAsset;
+    cells: Record<string, string>;
+    applicableColumnIds?: Set<string>;
+    runId?: string;
+  }[];
 }
 
 export function buildCaptureExportColumns(
@@ -42,7 +52,13 @@ export function buildCaptureExportColumns(
         id: `capture:${column.id}`,
         label: column.displayLabel,
         groupLabel: group.displayName,
-        valueFor: (_asset: ProjectAsset, cells: Record<string, string>) => {
+        valueFor: (
+          _asset: ProjectAsset,
+          cells: Record<string, string>,
+          applicableColumnIds?: Set<string>,
+          runId?: string,
+        ) => {
+          if (runId && applicableColumnIds && !applicableColumnIds.has(column.id)) return "N/A";
           const raw = cells[column.id] ?? "";
           return raw.trim().length > 0 ? raw : "-";
         },
@@ -55,7 +71,7 @@ export function buildCaptureExportContext(
   filenameBase: string,
   projectLabel: string | undefined,
   columns: CaptureExportColumn[],
-  rows: { asset: ProjectAsset; cells: Record<string, string> }[],
+  rows: CaptureExportContext["rows"],
 ): CaptureExportContext {
   return { filenameBase, projectLabel, columns, assets: rows.map((row) => row.asset), rows };
 }
@@ -67,8 +83,8 @@ function escapeCsv(value: string): string {
 
 export function exportCaptureCsv(ctx: CaptureExportContext): void {
   const header = ctx.columns.map((column) => column.label);
-  const body = ctx.rows.map(({ asset, cells }) =>
-    ctx.columns.map((column) => column.valueFor(asset, cells)),
+  const body = ctx.rows.map(({ asset, cells, applicableColumnIds, runId }) =>
+    ctx.columns.map((column) => column.valueFor(asset, cells, applicableColumnIds, runId)),
   );
   const lines = [header, ...body].map((row) => row.map(escapeCsv).join(","));
   downloadBlob(new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" }), `${ctx.filenameBase}.csv`);
@@ -79,11 +95,11 @@ export function exportCaptureJson(ctx: CaptureExportContext): void {
     exportedAt: new Date().toISOString(),
     project: ctx.projectLabel ?? null,
     columns: ctx.columns.map((column) => ({ id: column.id, label: column.label, group: column.groupLabel })),
-    rows: ctx.rows.map(({ asset, cells }) => ({
+    rows: ctx.rows.map(({ asset, cells, applicableColumnIds, runId }) => ({
       assetId: asset.id,
       assetTag: asset.assetTag,
       values: Object.fromEntries(
-        ctx.columns.map((column) => [column.label, column.valueFor(asset, cells)]),
+        ctx.columns.map((column) => [column.label, column.valueFor(asset, cells, applicableColumnIds, runId)]),
       ),
     })),
   };
@@ -93,8 +109,8 @@ export function exportCaptureJson(ctx: CaptureExportContext): void {
 export function exportCaptureXlsx(ctx: CaptureExportContext): void {
   const groupRow = ctx.columns.map((column) => column.groupLabel);
   const headerRow = ctx.columns.map((column) => column.label);
-  const body = ctx.rows.map(({ asset, cells }) =>
-    ctx.columns.map((column) => column.valueFor(asset, cells)),
+  const body = ctx.rows.map(({ asset, cells, applicableColumnIds, runId }) =>
+    ctx.columns.map((column) => column.valueFor(asset, cells, applicableColumnIds, runId)),
   );
   const sheet = XLSX.utils.aoa_to_sheet([groupRow, headerRow, ...body]);
   const workbook = XLSX.utils.book_new();

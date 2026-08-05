@@ -4,12 +4,15 @@ import type { Project } from "../types/project";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { User } from "../types/user";
 import type { WorkflowAssignment } from "../types/workflowType";
+import type { WorkflowConfig } from "../types/workflowConfig";
+import { pickCaptureRun } from "./captureSpreadsheet";
 
 export interface CaptureAssetJobColumnContext {
   projectMap: Map<string, Project>;
   userMap: Map<string, User>;
   assignmentsMap: Record<string, WorkflowAssignment[]>;
   runsMap: Record<string, AssetWorkflowRun[]>;
+  workflowConfigMap?: Map<string, WorkflowConfig>;
 }
 
 /** Columns shown on the standalone capture route (Asset & job section). */
@@ -81,16 +84,48 @@ export function buildFullCaptureJobColumns(
   ];
 }
 
+function resolveConfigName(
+  configId: string | undefined,
+  ctx: CaptureAssetJobColumnContext,
+): string | null {
+  if (!configId || !ctx.workflowConfigMap) return null;
+  const cfg = ctx.workflowConfigMap.get(configId);
+  return cfg?.displayName?.trim() || cfg?.name?.trim() || null;
+}
+
 function formatWorkflowConfigNames(
   asset: ProjectAsset,
   ctx: CaptureAssetJobColumnContext,
 ): string {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string | undefined | null) => {
+    const label = raw?.trim();
+    if (!label) return;
+    const key = label.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    names.push(label);
+  };
+
+  // One label per workflow config — assignments can repeat the same config.
   const assignments = ctx.assignmentsMap[asset.id] ?? [];
-  if (assignments.length > 0) {
-    return assignments
-      .map((item) => item.workflowConfigName || item.workflowTypeName || "Workflow")
-      .join(", ");
+  const byConfigId = new Map<string, WorkflowAssignment>();
+  for (const item of assignments) {
+    if (!byConfigId.has(item.workflowConfigId)) byConfigId.set(item.workflowConfigId, item);
   }
+  for (const item of byConfigId.values()) {
+    add(item.workflowConfigName || item.workflowTypeName);
+    if (!item.workflowConfigName) add(resolveConfigName(item.workflowConfigId, ctx));
+  }
+
+  const run = pickCaptureRun(ctx.runsMap[asset.id] ?? []);
+  if (run) add(resolveConfigName(run.workflowConfigId, ctx));
+
+  add(asset.configLabel);
+  if (names.length === 0) add(resolveConfigName(asset.productConfigId, ctx));
+
+  if (names.length > 0) return names.join(", ");
   return asset.workflowSummary?.hasWorkflow ? "Configured" : "No workflow";
 }
 

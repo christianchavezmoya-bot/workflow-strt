@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSchemaCaptureTableSkeleton,
+  computeApplicableColumnIds,
   getCaptureTableStructureKey,
   stepResultsStructureFingerprint,
+  type ProjectCaptureColumn,
 } from "./projectCaptureTable";
 import type { Feature } from "../types/feature";
 import type { ProjectAsset } from "../types/projectAsset";
@@ -76,6 +78,78 @@ describe("stepResultsStructureFingerprint", () => {
       { stepId: "s1", values: { input1: "alpha", input2: "new" } },
     ]));
     expect(before).not.toBe(after);
+  });
+});
+
+describe("computeApplicableColumnIds", () => {
+  const columns: ProjectCaptureColumn[] = [
+    {
+      id: "col-router-ip",
+      groupKey: "feature:router",
+      featureName: "Router",
+      unitIndex: 1,
+      fieldLabel: "ipAddress",
+      displayLabel: "ipAddress",
+      sequence: 0,
+      groupType: "feature",
+      stepId: "step-router",
+    },
+    {
+      id: "col-general-safe",
+      groupKey: "general",
+      featureName: "General",
+      unitIndex: 1,
+      fieldLabel: "Work area is clear",
+      displayLabel: "Work area is clear",
+      sequence: 1,
+      groupType: "general",
+      stepId: "step-signoff",
+    },
+    {
+      id: "col-no-step",
+      groupKey: "general",
+      featureName: "General",
+      unitIndex: 1,
+      fieldLabel: "Legacy",
+      displayLabel: "Legacy",
+      sequence: 2,
+      groupType: "general",
+    },
+  ];
+
+  it("marks columns whose step exists in the run snapshot", () => {
+    const run: AssetWorkflowRun = {
+      id: "run-1",
+      assetId: "a1",
+      workflowConfigId: "wc1",
+      workflowVersion: 1,
+      status: "InProgress",
+      isLocked: false,
+      startedAt: "2026-01-01",
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+      stepResultsJson: "[]",
+      workflowSnapshotJson: JSON.stringify({
+        stepsJson: JSON.stringify({
+          steps: [{ id: "step-router", title: "Router", inputs: [] }],
+        }),
+      }),
+      issuesJson: "[]",
+      timeTrackingJson: "[]",
+      productiveSeconds: 0,
+      downtimeSeconds: 0,
+      downtimeEvents: 0,
+      runNumber: 1,
+      signatureStatus: "None",
+    };
+    const applicable = computeApplicableColumnIds(run, columns);
+    expect(applicable.has("col-router-ip")).toBe(true);
+    expect(applicable.has("col-general-safe")).toBe(false);
+    expect(applicable.has("col-no-step")).toBe(true);
+  });
+
+  it("returns empty set when there is no run", () => {
+    expect(computeApplicableColumnIds(undefined, columns).size).toBe(0);
   });
 });
 
