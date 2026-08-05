@@ -416,14 +416,9 @@ const Dashboard = () => {
   const canActAsFieldTechnician = !!can.installationAssets?.runWorkflow && !isViewer;
   const isNativePlatform = isMobileNativePlatform();
   const showNativeManagerHome = isManager && isNativePlatform;
-  const isInstallerDashboard = canActAsFieldTechnician && !isManager && !isSupervisor && !isEngineer;
-  // FIX 1: installers were opted OUT of the fast path by cc9d896 (they awaited
-  // the full workspace instead of the light one). The card-flicker problem that
-  // change solved is handled by the stabilize/merge logic below, which is kept,
-  // so installers get the light first paint back like every other role.
-  const shouldSkipLightWorkspaceBoot = false;
-  // FIX 1: web session cache was also disabled for installers. Native is
-  // unaffected either way - it reads its own cache via dcGet regardless.
+  // Every role (installers included) gets the light workspace first paint; the
+  // card-flicker this used to cause is handled by the stabilize/merge logic below.
+  // Native is unaffected by the session cache either way - it reads its own cache via dcGet.
   const shouldUseDashboardWorkspaceSessionCache = !isNativePlatform;
 
   const { activeOffice, updateActiveOffice } = useActiveOffice();
@@ -479,8 +474,6 @@ const Dashboard = () => {
 
   // For Engineer: draft workflow configs
   const [draftConfigs, setDraftConfigs] = useState<{id:string; name:string; updatedAt?:string}[]>([]);
-  // For Supervisor: runs completed today count
-  const [completedToday, setCompletedToday] = useState(0);
 
   // PM: auto-assign flags from installers self-assigning
   type AutoAssignFlag = { id: string; assetId: string; assetTag: string; jobNumber: string; assignedBy: string; assignedAt: string };
@@ -508,7 +501,6 @@ const Dashboard = () => {
   const [closingDashboardProjectId, setClosingDashboardProjectId] = useState<string | null>(null);
   const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
-  const [issueDetailLoading, setIssueDetailLoading] = useState(false);
   const [issueDetailTarget, setIssueDetailTarget] = useState<{
     issue: AssetIssue | RunIssue;
     assetId: string;
@@ -1026,7 +1018,7 @@ const Dashboard = () => {
         }
       }
 
-      if (shouldSkipLightWorkspaceBoot || cancelled) return;
+      if (cancelled) return;
       if (isNativePlatform) {
         await new Promise((resolve) => setTimeout(resolve, 900));
         if (cancelled) return;
@@ -1050,7 +1042,6 @@ const Dashboard = () => {
     effectiveDashboardWorkspaceUserId,
     isAuthenticated,
     isNativePlatform,
-    shouldSkipLightWorkspaceBoot,
     isViewer,
     readCachedDashboardWorkspace,
     seedNativeDashboardWorkspaceFromLocal,
@@ -1631,56 +1622,51 @@ const Dashboard = () => {
   }, [navigate, projects, user.fullName]);
 
   const openIssueRepair = useCallback(async (issue: OpenIssueRecord) => {
-    setIssueDetailLoading(true);
-    try {
-      setQuickActionOpen(false);
+    setQuickActionOpen(false);
 
-      if (issue.source === "asset") {
-        const asset = await projectAssetService.getById(issue.assetId);
-        if (asset) {
-          let issues: AssetIssue[] = [];
-          try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
-          const matchedIssue = issues.find((item) => item.id === issue.issueId);
-          if (matchedIssue) {
-            setIssueDetailTarget({
-              issue: matchedIssue,
-              assetId: asset.id,
-              source: "asset",
-            });
-            return;
-          }
+    if (issue.source === "asset") {
+      const asset = await projectAssetService.getById(issue.assetId);
+      if (asset) {
+        let issues: AssetIssue[] = [];
+        try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
+        const matchedIssue = issues.find((item) => item.id === issue.issueId);
+        if (matchedIssue) {
+          setIssueDetailTarget({
+            issue: matchedIssue,
+            assetId: asset.id,
+            source: "asset",
+          });
+          return;
         }
       }
-
-      if (issue.source === "run") {
-        const run = await assetWorkflowRunService.getById(issue.runId);
-        if (run) {
-          let issues: RunIssue[] = [];
-          try { issues = JSON.parse(run.issuesJson || "[]"); } catch {}
-          const matchedIssue = issues.find((item) => item.id === issue.issueId);
-          if (matchedIssue) {
-            setIssueDetailTarget({
-              issue: matchedIssue,
-              assetId: issue.assetId,
-              runId: run.id,
-              source: "run",
-            });
-            return;
-          }
-        }
-      }
-
-      navigate(buildAssetRepairPath({
-        projectId: issue.projectId,
-        assetId: issue.assetId,
-        action: "issue",
-        runId: issue.runId,
-        issueId: issue.issueId,
-        issueSource: issue.source,
-      }));
-    } finally {
-      setIssueDetailLoading(false);
     }
+
+    if (issue.source === "run") {
+      const run = await assetWorkflowRunService.getById(issue.runId);
+      if (run) {
+        let issues: RunIssue[] = [];
+        try { issues = JSON.parse(run.issuesJson || "[]"); } catch {}
+        const matchedIssue = issues.find((item) => item.id === issue.issueId);
+        if (matchedIssue) {
+          setIssueDetailTarget({
+            issue: matchedIssue,
+            assetId: issue.assetId,
+            runId: run.id,
+            source: "run",
+          });
+          return;
+        }
+      }
+    }
+
+    navigate(buildAssetRepairPath({
+      projectId: issue.projectId,
+      assetId: issue.assetId,
+      action: "issue",
+      runId: issue.runId,
+      issueId: issue.issueId,
+      issueSource: issue.source,
+    }));
   }, [buildAssetRepairPath, navigate]);
 
   const handleDashboardIssueSave = useCallback(async (updatedIssue: AssetIssue | RunIssue) => {
@@ -1770,14 +1756,6 @@ const Dashboard = () => {
   const showTabBar       = !isViewer && !showNativeManagerHome;
   const showPmProjectsTab = isManager;
 
-  const inspectionProjects = useMemo(
-    () => dashboardProjects.filter((p) => p.workflowMode === "INSPECTION_ONLY" || p.workflowMode === "MIXED"),
-    [dashboardProjects]
-  );
-  const inspectionProjectIds = useMemo(
-    () => new Set(inspectionProjects.map((p) => p.id)),
-    [inspectionProjects]
-  );
   const myInspectionAssets = useMemo(
     () => dashboardWorkspace.currentInspections,
     [dashboardWorkspace]
@@ -1786,12 +1764,6 @@ const Dashboard = () => {
     () => dashboardWorkspace.inspectionHistory,
     [dashboardWorkspace]
   );
-  const myInspectionScopedAssetIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const asset of myInspectionAssets) ids.add(asset.id);
-    for (const asset of myInspectionHistory) ids.add(asset.id);
-    return ids;
-  }, [myInspectionAssets, myInspectionHistory]);
 
   // Install assets = assigned assets that are NOT in an inspection project
   const myInstallAssets = useMemo(
@@ -1802,12 +1774,6 @@ const Dashboard = () => {
     () => dashboardWorkspace.installHistory,
     [dashboardWorkspace]
   );
-  const myInstallScopedAssetIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const asset of myInstallAssets) ids.add(asset.id);
-    for (const asset of myInstallHistory) ids.add(asset.id);
-    return ids;
-  }, [myInstallAssets, myInstallHistory]);
   const [nativeMyJobsCardContext, setNativeMyJobsCardContext] = useState<Record<string, NativeMyJobsCardContext>>({});
   const [dashboardAssignmentsMap, setDashboardAssignmentsMap] = useState<Record<string, WorkflowAssignment[]>>({});
 
@@ -2988,11 +2954,6 @@ const Dashboard = () => {
       setPmDashboardTab("my-installs");
     }
   }, [hasInspectionsTab, inspectionTabSignal.count, installTabSignal.count, isManager, pmDashboardTab, showPmProjectsTab]);
-
-  // Installer: my pending sigs
-  const myPendingSigs = useMemo(() =>
-    pendingSigs.filter(s => myAssets.some(a => a.id === s.assetId || a.jobNumber === s.jobNumber)),
-    [pendingSigs, myAssets]);
 
   const overviewPausedCount = showAdminOverviewStrip
     ? visibleOpenAssets.filter((asset) => isPausedAsset(asset.runStatus)).length
