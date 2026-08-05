@@ -41,7 +41,6 @@ import {
 import { dashboardService, type EvidenceCompleteness, type WorkflowHealth } from "../../services/dashboardService";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import api from "../../services/api";
-import { userService } from "../../services/userService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
 import {
@@ -476,10 +475,13 @@ const Dashboard = () => {
    * immediately, and native skips the observer.
    */
   const [analyticsLoadEnabled, setAnalyticsLoadEnabled] = useState(isNativePlatform);
+  /** True while EvidenceHealthGrid is actually rendered (i.e. the analytics tab is active). */
+  const [analyticsSectionMounted, setAnalyticsSectionMounted] = useState(false);
   const analyticsSectionCallbackRef = useCallback((node: HTMLDivElement | null) => {
     analyticsSectionRef.current = node;
     analyticsObserverRef.current?.disconnect();
     analyticsObserverRef.current = null;
+    setAnalyticsSectionMounted(!!node);
     if (!node || isNativePlatform || !isManager) return;
     const observer = new IntersectionObserver(
       ([entry]) => { if (entry.isIntersecting) setAnalyticsLoadEnabled(true); },
@@ -579,8 +581,18 @@ const Dashboard = () => {
   }, [dashboardWorkspace]);
 
   // Admin: view another user's dashboard
-  type DashboardUserEntry = { id: string; fullName: string; role: string; office: string };
-  const [dashboardUsers, setDashboardUsers] = useState<DashboardUserEntry[]>([]);
+  // Derived from the Redux users catalog rather than a second GET /users. The
+  // "View as" picker needs exactly the fields the catalog already carries, so
+  // fetching again just to drop the current user doubled the request on every
+  // manager's dashboard boot.
+  const dashboardUsers = useMemo(
+    () => (isManager
+      ? users
+          .filter((u) => u.id !== user.id)
+          .map((u) => ({ id: u.id, fullName: u.fullName, role: u.role, office: u.office ?? "" }))
+      : []),
+    [isManager, user.id, users],
+  );
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>(isAdmin ? ALL_DASHBOARDS_VALUE : user.id);
   const dashboardWorkspaceScopeId = isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined;
   // Offline local reads have no JWT — scope to the logged-in user unless a manager
@@ -703,20 +715,6 @@ const Dashboard = () => {
       setAvailableCountries([]);
     });
   }, []);
-
-  useEffect(() => {
-    if (!isManager) return;
-    void userService.getUsers()
-      .then((users) => setDashboardUsers(
-        users.filter((u) => u.id !== user.id).map((u) => ({
-          id: u.id,
-          fullName: u.fullName,
-          role: u.role,
-          office: u.office ?? "",
-        })),
-      ))
-      .catch(() => {});
-  }, [isManager, user.id]);
 
   const attentionRequestSeqRef = useRef(0);
 
@@ -850,9 +848,31 @@ const Dashboard = () => {
     }
   }, [isNativePlatform, user.id]);
 
-  // Analytics visibility is driven solely by analyticsSectionCallbackRef's observer on
-  // web. This only tears the observer down on unmount; the callback ref already
-  // disconnects whenever the grid itself unmounts (React invokes it with null).
+  // Web: the observer above loads analytics early when the grid is scrolled near, but the
+  // grid sits well below the fold, so on its own it would never fire for a user who does
+  // not scroll and the panels would stay empty. Back it with an idle fallback that only
+  // runs while the grid is mounted — so a PM on My Inspections / My Installs, where the
+  // grid is not rendered, still never triggers the two 90-day aggregations.
+  useEffect(() => {
+    if (isNativePlatform || !isManager) return;
+    if (!analyticsSectionMounted || analyticsLoadEnabled) return;
+
+    let idleId: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const enable = () => setAnalyticsLoadEnabled(true);
+
+    if (typeof requestIdleCallback !== "undefined") {
+      idleId = requestIdleCallback(enable, { timeout: 2500 });
+    } else {
+      timeoutId = setTimeout(enable, 1500);
+    }
+
+    return () => {
+      if (idleId !== undefined && typeof cancelIdleCallback !== "undefined") cancelIdleCallback(idleId);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [analyticsLoadEnabled, analyticsSectionMounted, isManager, isNativePlatform]);
+
   useEffect(() => () => {
     analyticsObserverRef.current?.disconnect();
     analyticsObserverRef.current = null;
@@ -1247,6 +1267,10 @@ const Dashboard = () => {
   // Phase 4 - evidence completeness (deferred on web until analyticsLoadEnabled)
   useEffect(() => {
     if (!isManager || dashboardBootPhase !== "full" || !analyticsLoadEnabled) return;
+    // analyticsRefreshTick is bumped by run-state, asset and SSE events, which refetched
+    // both 90-day aggregations even while the user sat on a tab that never renders the
+    // grid. Spend the query only when the panel is actually on screen.
+    if (!analyticsSectionMounted) return;
     let cancelled = false;
     setEvidenceLoading(true);
     setEvidenceError(false);
@@ -1267,11 +1291,12 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [analyticsLoadEnabled, analyticsRefreshTick, dashboardBootPhase, evidenceWindow, isManager]);
+  }, [analyticsLoadEnabled, analyticsRefreshTick, analyticsSectionMounted, dashboardBootPhase, evidenceWindow, isManager]);
 
   // Phase 5 - workflow health (deferred on web until analyticsLoadEnabled)
   useEffect(() => {
     if (!isManager || dashboardBootPhase !== "full" || !analyticsLoadEnabled) return;
+    if (!analyticsSectionMounted) return;
     let cancelled = false;
     setHealthLoading(true);
     setHealthError(false);
@@ -1292,7 +1317,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [analyticsLoadEnabled, analyticsRefreshTick, dashboardBootPhase, healthWindow, isManager]);
+  }, [analyticsLoadEnabled, analyticsRefreshTick, analyticsSectionMounted, dashboardBootPhase, healthWindow, isManager]);
   // Derived data
   const filteredProjects = useMemo(() => {
     if (activeOffice === "All" || !officeIdsForRegion) return projects;
