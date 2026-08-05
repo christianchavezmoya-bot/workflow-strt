@@ -268,6 +268,10 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         try
         {
+            var resolvedProjectId = await ProjectScopeResolver.ResolveProjectIdAsync(_db, projectId);
+            if (resolvedProjectId is null) return Ok(Array.Empty<AssetWorkflowRunSummaryDto>());
+            projectId = resolvedProjectId;
+
             var assetIdList = ParseCommaSeparatedIds(assetIds);
             if (assetIdList.Count == 0)
             {
@@ -416,6 +420,10 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         try
         {
+            var resolvedProjectId = await ProjectScopeResolver.ResolveProjectIdAsync(_db, projectId);
+            if (resolvedProjectId is null) return Ok(Array.Empty<AssetWorkflowRunDto>());
+            projectId = resolvedProjectId;
+
             var assetIds = await _db.ProjectAssets
                 .Where(a => a.ProjectId == projectId)
                 .Select(a => a.Id)
