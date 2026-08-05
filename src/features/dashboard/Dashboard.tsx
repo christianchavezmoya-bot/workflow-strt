@@ -311,20 +311,6 @@ function formatMyJobsStepCompletionLabel(completedSteps: number, totalSteps: num
   return `${Math.min(100, percent)}% completed`;
 }
 
-async function loadDashboardMetricWithRetry<T>(loader: () => Promise<T>): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      return await loader();
-    } catch (err) {
-      lastErr = err;
-      if (attempt === 2) break;
-      await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
-    }
-  }
-  throw lastErr;
-}
-
 function workflowModeLabel(workflowMode?: string | null) {
   if (workflowMode === "INSPECTION_ONLY") return "Inspection";
   if (workflowMode === "MIXED") return "Mixed";
@@ -384,6 +370,7 @@ const WINDOW_OPTIONS = [30, 60, 90, 180];
 
 const ALL_DASHBOARDS_VALUE = "__all__";
 const DASHBOARD_WORKSPACE_SESSION_PREFIX = "dashboard:web:workspace:";
+const DASHBOARD_ATTENTION_SESSION_PREFIX = "dashboard:web:attention:";
 const DASHBOARD_ASSIGNMENT_RECOVERY_KEY = "dashboard:pending-assignment-recovery";
 const DASHBOARD_RUN_STATE_RECOVERY_KEY = "dashboard:pending-run-state-recovery";
 const DASHBOARD_PROJECT_REQUEST_KEY = buildProjectRequestKey();
@@ -476,6 +463,22 @@ const Dashboard = () => {
 
   // Incremented by run-state events to trigger analytics re-fetch
   const [analyticsRefreshTick, setAnalyticsRefreshTick] = useState(0);
+  const analyticsSectionRef = useRef<HTMLDivElement | null>(null);
+  const analyticsObserverRef = useRef<IntersectionObserver | null>(null);
+  /** Web: defer heavy analytics API calls until idle or the panel nears the viewport. */
+  const [analyticsLoadEnabled, setAnalyticsLoadEnabled] = useState(isNativePlatform);
+  const analyticsSectionCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    analyticsSectionRef.current = node;
+    analyticsObserverRef.current?.disconnect();
+    analyticsObserverRef.current = null;
+    if (!node || isNativePlatform || !isManager) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setAnalyticsLoadEnabled(true); },
+      { rootMargin: "240px" },
+    );
+    observer.observe(node);
+    analyticsObserverRef.current = observer;
+  }, [isManager, isNativePlatform]);
 
   // For Engineer: draft workflow configs
   const [draftConfigs, setDraftConfigs] = useState<{id:string; name:string; updatedAt?:string}[]>([]);
@@ -757,6 +760,16 @@ const Dashboard = () => {
         assetWorkflowRunService.listPendingSignatures(attentionUserId),
       ]);
       applyAttention(iss, sigs);
+      if (!isNativePlatform && user.id) {
+        try {
+          sessionStorage.setItem(
+            `${DASHBOARD_ATTENTION_SESSION_PREFIX}${user.id}`,
+            JSON.stringify({ issues: iss, sigs }),
+          );
+        } catch {
+          // Ignore storage quota errors.
+        }
+      }
     } finally {
       finishAttention();
     }
@@ -815,6 +828,41 @@ const Dashboard = () => {
     applyDashboardWorkspace(cached, { persist: false, stabilize: true });
     setCacheHydrated(true);
   }, [applyDashboardWorkspace, isAuthenticated, isNativePlatform, readCachedDashboardWorkspace, user.id]);
+
+  useEffect(() => {
+    if (isNativePlatform || !user.id) return;
+    try {
+      const raw = sessionStorage.getItem(`${DASHBOARD_ATTENTION_SESSION_PREFIX}${user.id}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { issues?: OpenIssueRecord[]; sigs?: PendingSignatureRecord[] };
+      if (parsed.issues) setOpenIssues(parsed.issues);
+      if (parsed.sigs) setPendingSigs(parsed.sigs);
+    } catch {
+      // Ignore corrupt session cache.
+    }
+  }, [isNativePlatform, user.id]);
+
+  useEffect(() => {
+    if (isNativePlatform || !isManager) return;
+    let idleId: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const enable = () => setAnalyticsLoadEnabled(true);
+
+    if (typeof requestIdleCallback !== "undefined") {
+      idleId = requestIdleCallback(enable, { timeout: 2500 });
+    } else {
+      timeoutId = setTimeout(enable, 1500);
+    }
+
+    return () => {
+      if (idleId !== undefined && typeof cancelIdleCallback !== "undefined") {
+        cancelIdleCallback(idleId);
+      }
+      if (timeoutId) clearTimeout(timeoutId);
+      analyticsObserverRef.current?.disconnect();
+      analyticsObserverRef.current = null;
+    };
+  }, [isManager, isNativePlatform]);
 
   useEffect(() => {
     if (!isAuthenticated || dashboardBootPhase !== "full") return;
@@ -1149,26 +1197,20 @@ const Dashboard = () => {
     return () => window.removeEventListener("sse:assets:updated", handleServerAssetUpdate);
   }, [dashboardBootPhase, refreshLiveDashboardData]);
 
-  // Phase 4 - evidence completeness
+  // Phase 4 - evidence completeness (deferred on web until analyticsLoadEnabled)
   useEffect(() => {
-    if (!isManager || dashboardBootPhase !== "full") return;
+    if (!isManager || dashboardBootPhase !== "full" || !analyticsLoadEnabled) return;
     let cancelled = false;
     setEvidenceLoading(true);
     setEvidenceError(false);
     void (async () => {
       try {
-        const data = isNativePlatform
-          ? await dashboardService.evidenceCompleteness(evidenceWindow)
-          : await loadDashboardMetricWithRetry(() => dashboardService.evidenceCompleteness(evidenceWindow));
+        const data = await dashboardService.evidenceCompleteness(evidenceWindow);
         if (cancelled) return;
         setEvidenceData(data);
         setEvidenceError(false);
       } catch {
         if (cancelled) return;
-        // Previously this catch was empty while `finally` still cleared the
-        // spinner, so a failed load looked exactly like "no data": the panel
-        // reported success and rendered blank, keeping any stale figures.
-        // Clear the data and record the failure so the panel can say so.
         setEvidenceData(null);
         setEvidenceError(true);
       } finally {
@@ -1178,25 +1220,22 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [analyticsRefreshTick, dashboardBootPhase, evidenceWindow, isManager, isNativePlatform]);
+  }, [analyticsLoadEnabled, analyticsRefreshTick, dashboardBootPhase, evidenceWindow, isManager]);
 
-  // Phase 5 - workflow health
+  // Phase 5 - workflow health (deferred on web until analyticsLoadEnabled)
   useEffect(() => {
-    if (!isManager || dashboardBootPhase !== "full") return;
+    if (!isManager || dashboardBootPhase !== "full" || !analyticsLoadEnabled) return;
     let cancelled = false;
     setHealthLoading(true);
     setHealthError(false);
     void (async () => {
       try {
-        const data = isNativePlatform
-          ? await dashboardService.workflowHealth(healthWindow)
-          : await loadDashboardMetricWithRetry(() => dashboardService.workflowHealth(healthWindow));
+        const data = await dashboardService.workflowHealth(healthWindow);
         if (cancelled) return;
         setHealthData(data);
         setHealthError(false);
       } catch {
         if (cancelled) return;
-        // Same silent-blank failure as the evidence panel above.
         setHealthData(null);
         setHealthError(true);
       } finally {
@@ -1206,7 +1245,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [analyticsRefreshTick, dashboardBootPhase, healthWindow, isManager, isNativePlatform]);
+  }, [analyticsLoadEnabled, analyticsRefreshTick, dashboardBootPhase, healthWindow, isManager]);
   // Derived data
   const filteredProjects = useMemo(() => {
     if (activeOffice === "All" || !officeIdsForRegion) return projects;
@@ -3997,6 +4036,7 @@ const Dashboard = () => {
   );
 
   const EvidenceHealthGrid = (
+    <Box ref={analyticsSectionCallbackRef}>
     <Grid container spacing={2}>
 
       {/* Phase 4: Evidence Completeness */}
@@ -4132,6 +4172,7 @@ const Dashboard = () => {
         </Box>
       </Grid>
     </Grid>
+    </Box>
   );
 
   const WorkloadPanel = (

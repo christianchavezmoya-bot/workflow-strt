@@ -3,7 +3,6 @@ using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
 
@@ -13,7 +12,6 @@ namespace Commtrac.Api.Controllers;
 public class DashboardController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private static readonly JsonSerializerOptions _json = new() { PropertyNameCaseInsensitive = true };
 
     public DashboardController(AppDbContext db) => _db = db;
 
@@ -24,42 +22,50 @@ public class DashboardController : ControllerBase
     {
         var cutoff = DateTime.UtcNow.AddDays(-windowDays);
 
-        var runs = await _db.AssetWorkflowRuns
+        // Slim projection — avoid hydrating StepResultsJson blobs into entities.
+        var runRows = await _db.AssetWorkflowRuns
+            .AsNoTracking()
             .Where(r => r.Status == "Complete" && r.CompletedAt >= cutoff)
+            .Select(r => new
+            {
+                r.AssetId,
+                Signed = r.SignatureStatus == "Signed" || r.CustomerSignedAt != null,
+                HasMedia = r.StepResultsJson.Contains("/storage/")
+                    || r.StepResultsJson.Contains(".jpg")
+                    || r.StepResultsJson.Contains(".png")
+                    || r.StepResultsJson.Contains(".pdf"),
+                NoIssues = r.IssuesJson == "[]" || r.IssuesJson == "" || r.IssuesJson == null,
+            })
             .ToListAsync();
 
-        if (runs.Count == 0)
+        if (runRows.Count == 0)
             return Ok(new EvidenceCompletenessDto(windowDays, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new()));
 
-        // Collect asset IDs to look up project info
-        var assetIds = runs.Select(r => r.AssetId).Distinct().ToList();
-        var assets = await _db.ProjectAssets
+        var assetIds = runRows.Select(r => r.AssetId).Distinct().ToList();
+        var assetToProject = await _db.ProjectAssets
+            .AsNoTracking()
             .Where(a => assetIds.Contains(a.Id))
             .Select(a => new { a.Id, a.ProjectId })
-            .ToListAsync();
-        var assetToProject = assets.ToDictionary(a => a.Id, a => a.ProjectId);
+            .ToDictionaryAsync(a => a.Id, a => a.ProjectId);
 
-        var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
-        var projects = await _db.Projects
+        var projectIds = assetToProject.Values.Distinct().ToList();
+        var projectMap = await _db.Projects
+            .AsNoTracking()
             .Where(p => projectIds.Contains(p.Id))
             .Select(p => new { p.Id, p.JobNumber, p.CustomerName })
-            .ToListAsync();
-        var projectMap = projects.ToDictionary(p => p.Id);
+            .ToDictionaryAsync(p => p.Id);
 
         int signed = 0, allSteps = 0, hasMedia = 0, noIssues = 0;
-
-        // Per-project: (projectId → list of per-run scores 0-100)
         var projectScores = new Dictionary<string, List<int>>();
 
-        foreach (var run in runs)
+        foreach (var run in runRows)
         {
-            var (s, a, m, n) = EvaluateRun(run);
-            if (s) signed++;
-            if (a) allSteps++;
-            if (m) hasMedia++;
-            if (n) noIssues++;
+            if (run.Signed) signed++;
+            allSteps++;
+            if (run.HasMedia) hasMedia++;
+            if (run.NoIssues) noIssues++;
 
-            int runScore = (new[] { s, a, m, n }.Count(x => x) * 25);
+            int runScore = (new[] { run.Signed, true, run.HasMedia, run.NoIssues }.Count(x => x) * 25);
 
             if (assetToProject.TryGetValue(run.AssetId, out var pid))
             {
@@ -68,9 +74,8 @@ public class DashboardController : ControllerBase
             }
         }
 
-        int total = runs.Count;
+        int total = runRows.Count;
         int Pct(int n) => total > 0 ? (int)Math.Round(n * 100.0 / total) : 0;
-
         int overall = (Pct(signed) + Pct(allSteps) + Pct(hasMedia) + Pct(noIssues)) / 4;
 
         var byProject = projectScores
@@ -91,7 +96,7 @@ public class DashboardController : ControllerBase
 
         return Ok(new EvidenceCompletenessDto(
             windowDays, total,
-            signed,   Pct(signed),
+            signed, Pct(signed),
             allSteps, Pct(allSteps),
             hasMedia, Pct(hasMedia),
             noIssues, Pct(noIssues),
@@ -105,29 +110,47 @@ public class DashboardController : ControllerBase
     [HttpGet("workflow-health")]
     public async Task<ActionResult<WorkflowHealthDto>> WorkflowHealth([FromQuery] int windowDays = 90)
     {
-        var now      = DateTime.UtcNow;
-        var cutoff   = now.AddDays(-windowDays);
-        var prev     = now.AddDays(-windowDays * 2);
+        var now    = DateTime.UtcNow;
+        var cutoff = now.AddDays(-windowDays);
+        var prev   = now.AddDays(-windowDays * 2);
 
-        var currentRuns = await _db.AssetWorkflowRuns
+        var currentRows = await _db.AssetWorkflowRuns
+            .AsNoTracking()
             .Where(r => r.StartedAt >= cutoff)
+            .Select(r => new HealthRunRow(
+                r.AssetId,
+                r.WorkflowConfigId,
+                r.Status,
+                r.RunNumber,
+                r.IssuesJson,
+                r.SignatureStatus,
+                r.CustomerSignedAt))
             .ToListAsync();
 
-        var previousRuns = await _db.AssetWorkflowRuns
+        var previousRows = await _db.AssetWorkflowRuns
+            .AsNoTracking()
             .Where(r => r.StartedAt >= prev && r.StartedAt < cutoff)
+            .Select(r => new HealthRunRow(
+                r.AssetId,
+                r.WorkflowConfigId,
+                r.Status,
+                r.RunNumber,
+                r.IssuesJson,
+                r.SignatureStatus,
+                r.CustomerSignedAt))
             .ToListAsync();
 
-        int currentScore  = currentRuns.Count  > 0 ? ComputeScore(ComputeMetrics(currentRuns))  : 0;
-        int previousScore = previousRuns.Count > 0 ? ComputeScore(ComputeMetrics(previousRuns)) : 0;
+        int currentScore  = currentRows.Count  > 0 ? ComputeScore(ComputeMetrics(currentRows))  : 0;
+        int previousScore = previousRows.Count > 0 ? ComputeScore(ComputeMetrics(previousRows)) : 0;
 
-        var (compRate, firstSucc, stepPass, cleanClose) = ComputeMetrics(currentRuns);
+        var (compRate, firstSucc, stepPass, cleanClose) = ComputeMetrics(currentRows);
 
-        // Per-type breakdown via AssetWorkflowAssignment
-        var assetIds2  = currentRuns.Select(r => r.AssetId).Distinct().ToList();
-        var configIds2 = currentRuns.Select(r => r.WorkflowConfigId).Distinct().ToList();
+        var assetIds  = currentRows.Select(r => r.AssetId).Distinct().ToList();
+        var configIds = currentRows.Select(r => r.WorkflowConfigId).Distinct().ToList();
 
         var assignments = await _db.AssetWorkflowAssignments
-            .Where(a => assetIds2.Contains(a.AssetId) && configIds2.Contains(a.WorkflowConfigId))
+            .AsNoTracking()
+            .Where(a => assetIds.Contains(a.AssetId) && configIds.Contains(a.WorkflowConfigId))
             .Select(a => new { a.AssetId, a.WorkflowConfigId, a.WorkflowTypeId })
             .ToListAsync();
 
@@ -137,22 +160,23 @@ public class DashboardController : ControllerBase
 
         var typeIds = assignments.Select(a => a.WorkflowTypeId).Where(t => t != null).Distinct().ToList();
         var typeNames = await _db.WorkflowTypes
+            .AsNoTracking()
             .Where(t => typeIds.Contains(t.Id))
             .Select(t => new { t.Id, t.Name })
             .ToDictionaryAsync(t => t.Id, t => t.Name);
 
-        string GetTypeId(AssetWorkflowRunEntity r) =>
+        string GetTypeId(HealthRunRow r) =>
             assignmentMap.TryGetValue((r.AssetId, r.WorkflowConfigId), out var tid) ? tid ?? "" : "";
 
-        var byType = currentRuns
+        var byType = currentRows
             .GroupBy(GetTypeId)
             .Where(g => g.Key != "")
             .Select(g =>
             {
-                var runs = g.ToList();
-                var score = ComputeScore(ComputeMetrics(runs));
+                var rows = g.ToList();
+                var score = ComputeScore(ComputeMetrics(rows));
                 typeNames.TryGetValue(g.Key, out var name);
-                return new WorkflowTypeHealthDto(name ?? g.Key, runs.Count, score);
+                return new WorkflowTypeHealthDto(name ?? g.Key, rows.Count, score);
             })
             .OrderByDescending(t => t.RunCount)
             .ToList();
@@ -162,7 +186,7 @@ public class DashboardController : ControllerBase
             currentScore,
             previousScore,
             currentScore - previousScore,
-            currentRuns.Count,
+            currentRows.Count,
             compRate, firstSucc, stepPass, cleanClose,
             byType
         ));
@@ -170,53 +194,17 @@ public class DashboardController : ControllerBase
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private static (bool signed, bool allSteps, bool hasMedia, bool noIssues) EvaluateRun(AssetWorkflowRunEntity run)
-    {
-        bool signed   = run.SignatureStatus == "Signed" || run.CustomerSignedAt.HasValue;
-        bool allSteps = run.Status == "Complete";
-
-        bool hasMedia = false;
-        try
-        {
-            var results = JsonSerializer.Deserialize<JsonElement[]>(run.StepResultsJson, _json);
-            if (results != null)
-            {
-                foreach (var el in results)
-                {
-                    if (el.TryGetProperty("values", out var vals))
-                    {
-                        foreach (var prop in vals.EnumerateObject())
-                        {
-                            var v = prop.Value.GetString() ?? "";
-                            if (v.Contains("/storage/") || v.Contains(".jpg") || v.Contains(".png") || v.Contains(".pdf"))
-                            {
-                                hasMedia = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (hasMedia) break;
-                }
-            }
-        }
-        catch { /* ignore parse errors */ }
-
-        bool noIssues = run.IssuesJson == "[]" || string.IsNullOrWhiteSpace(run.IssuesJson);
-        if (!noIssues)
-        {
-            try
-            {
-                var issues = JsonSerializer.Deserialize<JsonElement[]>(run.IssuesJson, _json);
-                noIssues = issues == null || issues.Length == 0;
-            }
-            catch { noIssues = false; }
-        }
-
-        return (signed, allSteps, hasMedia, noIssues);
-    }
+    private sealed record HealthRunRow(
+        string AssetId,
+        string WorkflowConfigId,
+        string Status,
+        int RunNumber,
+        string? IssuesJson,
+        string? SignatureStatus,
+        DateTime? CustomerSignedAt);
 
     private static (int completionRate, int firstRunSuccessRate, int stepPassRate, int cleanClosureRate)
-        ComputeMetrics(List<AssetWorkflowRunEntity> runs)
+        ComputeMetrics(IReadOnlyList<HealthRunRow> runs)
     {
         if (runs.Count == 0) return (0, 0, 0, 0);
 
@@ -228,13 +216,11 @@ public class DashboardController : ControllerBase
             ? (int)Math.Round(firstRuns.Count(r => r.Status == "Complete") * 100.0 / firstRuns.Count)
             : 0;
 
-        // Step pass rate: completed runs with no issues vs completed runs
         int withoutIssues = runs.Count(r =>
             r.Status == "Complete" &&
             (r.IssuesJson == "[]" || string.IsNullOrWhiteSpace(r.IssuesJson)));
         int stepPass = completed > 0 ? (int)Math.Round(withoutIssues * 100.0 / completed) : 0;
 
-        // Clean closure: signed + no open issues
         int cleanClose = completed > 0
             ? (int)Math.Round(runs.Count(r =>
                 r.Status == "Complete" &&
