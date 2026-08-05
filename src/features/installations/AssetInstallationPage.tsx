@@ -161,6 +161,9 @@ import { buildProjectCaptureTable, findCaptureMatch, type ProjectCaptureSearchHi
 import { anyMatchesWordStart, matchesWordStart } from "../../utils/textMatch";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
+import { resolveProjectScopeId } from "../../utils/resolveProjectScopeId";
+import OperationsVirtualizedTableBody from "./OperationsVirtualizedTableBody";
+import { OPERATIONS_VIRTUALIZE_MIN_ROWS } from "./operationsTableLayout";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
 import {
@@ -465,6 +468,7 @@ const AssetInstallationPage = () => {
   /** Tracks completed/in-flight runs-detail fetch per project+page — stops capture refetch loops. */
   const captureDetailDoneKeyRef = useRef<string | null>(null);
   const captureDetailInflightKeyRef = useRef<string | null>(null);
+  const operationsScrollRef = useRef<HTMLDivElement | null>(null);
   // Separate counter for the document-counts effect so it can NEVER bump the
   // main asset-load's staleness ref — sharing one ref let the doc-counts effect
   // invalidate an in-flight load's guard, so setLoadingAssets(false) was skipped
@@ -814,6 +818,17 @@ const AssetInstallationPage = () => {
       try { sessionStorage.setItem("installations_selected_project_id", projectIdFromUrl); } catch {}
     }
   }, [searchParams]);
+
+  // Normalize job-number URL aliases (e.g. ?project=JO00991) to canonical project.id once catalog loads.
+  useEffect(() => {
+    if (!selectedProjectId || projects.length === 0) return;
+    const resolved = resolveProjectScopeId(projects, selectedProjectId);
+    if (resolved !== selectedProjectId) {
+      setSelectedProjectId(resolved);
+      setProjectAssetPage(1);
+      try { sessionStorage.setItem("installations_selected_project_id", resolved); } catch {}
+    }
+  }, [projects, selectedProjectId]);
 
   const handleProjectChange = useCallback((projectId: string) => {
     if (projectId === "") allProjectsExplicitRef.current = true;
@@ -1456,13 +1471,30 @@ const AssetInstallationPage = () => {
         scopeId: string;
         fetchRemote: () => Promise<ProjectAsset[]>;
       }> = selectedProjectId
-        ? [
-            {
-              scopeKind: "project",
-              scopeId: selectedProjectId,
-              fetchRemote: () => projectAssetService.listByProject(selectedProjectId, archiveMode),
-            },
-          ]
+        ? paginatedWebProject
+          ? [
+              {
+                scopeKind: "project",
+                scopeId: selectedProjectId,
+                fetchRemote: async () => {
+                  const result = await projectAssetService.listByProjectPage(selectedProjectId, {
+                    page: projectAssetPageRef.current,
+                    pageSize: PROJECT_ASSET_PAGE_SIZE,
+                    search: searchRef.current.trim() || undefined,
+                    includeDeleted: archiveModeRef.current,
+                  });
+                  setProjectAssetTotal(result.total);
+                  return result.items;
+                },
+              },
+            ]
+          : [
+              {
+                scopeKind: "project",
+                scopeId: selectedProjectId,
+                fetchRemote: () => projectAssetService.listByProject(selectedProjectId, archiveMode),
+              },
+            ]
         : products.map((p) => ({
             scopeKind: "product",
             scopeId: p.id,
@@ -1583,7 +1615,7 @@ const AssetInstallationPage = () => {
       // Defensive — release the guard on any unexpected error.
       isRefreshingRef.current = false;
     }
-  }, [selectedProjectId, archiveMode, productsKey, activeProduct?.id]);
+  }, [selectedProjectId, archiveMode, productsKey, activeProduct?.id, paginatedWebProject]);
 
   // Fix 1 — Listen for background refresh event from AssetRepository.
   // IMPORTANT: must read from local IndexedDB only here — calling refreshAssets() would
@@ -1981,6 +2013,9 @@ const AssetInstallationPage = () => {
     }
     return rows;
   }, [visibleAssets, autoFilters, autoSort, assetAccessors]);
+
+  const virtualizeOperationsTable =
+    paginatedWebProject && displayAssets.length >= OPERATIONS_VIRTUALIZE_MIN_ROWS;
 
   const mobileAssets = useMemo(() => {
     if (!isNativePlatform || mobileScope === "all") return displayAssets;
@@ -4644,6 +4679,188 @@ ${words.slice(midpoint).join(" ")}`;
     }
   }
 
+  function renderOperationsAssetRows(asset: ProjectAsset): [React.ReactNode, React.ReactNode] {
+    const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
+    const proj = projectMap.get(asset.projectId);
+    const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
+    const isExpanded = expandedAssetId === asset.id;
+    const hasIssue = asset.status === "Issue";
+
+    return [
+      <TableRow
+        key={asset.id}
+        hover
+        sx={{
+          bgcolor: hasIssue
+            ? "rgba(211,47,47,0.04)"
+            : selectedAssetIds.has(asset.id)
+              ? "rgba(var(--primary-rgb,25,118,210),0.08)"
+              : undefined
+        }}
+      >
+        <TableCell sx={{ px: 0.5 }}>
+          <Checkbox
+            size="small"
+            checked={selectedAssetIds.has(asset.id)}
+            onChange={(e) => {
+              setSelectedAssetIds((prev) => {
+                const next = new Set(prev);
+                if (e.target.checked) next.add(asset.id);
+                else next.delete(asset.id);
+                return next;
+              });
+            }}
+          />
+        </TableCell>
+        <TableCell sx={{ px: 1 }}>
+          <IconButton size="small" onClick={() => {
+            const nextId = isExpanded ? null : asset.id;
+            setExpandedAssetId(nextId);
+            if (nextId) loadAssignmentsForAsset(nextId);
+          }}>
+            {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
+          </IconButton>
+        </TableCell>
+        <TableCell>
+          <Stack direction="row" alignItems="center" spacing={0.75}>
+            {hasIssue && (
+              <Box
+                sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  bgcolor: computeAssetHealth(asset, runsMap[asset.id] ?? []) === "red" ? "error.main" : "warning.main",
+                  flexShrink: 0
+                }}
+              />
+            )}
+            <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
+            {issuesBadge(asset)}
+          </Stack>
+        </TableCell>
+        {visibleColumns.map((col) => (
+          <TableCell key={col.id}>
+            {renderColumnCell(col.id, asset, cfg, proj, tech ?? undefined)}
+          </TableCell>
+        ))}
+        <TableCell align="right">
+          <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
+            {(canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled") && actionButton(asset, proj?.workflowMode)}
+            {canManageAssetDocuments && (
+              <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
+                <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
+                  <Badge
+                    badgeContent={`${docsCountMap[asset.id] ?? 0}/3`}
+                    color={
+                      (docsCountMap[asset.id] ?? 0) === 0 ? "default" :
+                      (docsCountMap[asset.id] ?? 0) === 3 ? "success" : "primary"
+                    }
+                    sx={{ "& .MuiBadge-badge": { fontSize: 9, minWidth: 28, height: 16 } }}
+                  >
+                    <FolderOutlined fontSize="small" />
+                  </Badge>
+                </IconButton>
+              </Tooltip>
+            )}
+            {canViewInstallationAssets && (
+              <Tooltip title="View/Export report">
+                <span>
+                  <IconButton
+                    size="small"
+                    disabled={reportGenerating === asset.id}
+                    onClick={() => openReportExportDialog(asset)}
+                  >
+                    {reportGenerating === asset.id
+                      ? <CircularProgress size={16} />
+                      : <ArticleOutlined fontSize="small" />}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
+            {canEditInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode && (
+              <Tooltip title="Edit asset">
+                <IconButton size="small" onClick={() => openEditAsset(asset)}>
+                  <EditOutlined fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode && (
+              <Tooltip title="Archive asset">
+                <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
+                  <DeleteOutline fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && archiveMode && (
+              <Tooltip title="Restore asset">
+                <span>
+                  <IconButton size="small" disabled={deletingAsset} onClick={() => confirmRestoreAsset(asset)}>
+                    <RestoreOutlined fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
+            {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && archiveMode && (
+              <Tooltip title="Delete asset permanently">
+                <span>
+                  <IconButton size="small" color="error" disabled={purgingAsset} onClick={() => setPurgeAsset(asset)}>
+                    <DeleteForeverOutlined fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
+            {!((canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled")
+              || canManageAssetDocuments
+              || canViewInstallationAssets
+              || (canEditInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode)
+              || (canDeleteInstallationAssets && canEditAssetFromWebTable(asset))) && (
+              <Typography variant="caption" color="text.disabled">
+                No actions
+              </Typography>
+            )}
+          </Stack>
+        </TableCell>
+      </TableRow>,
+
+      <TableRow key={`${asset.id}-detail`}>
+        <TableCell colSpan={3 + visibleColumns.length} sx={{ py: 0 }}>
+          <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+            <Box sx={{ px: 3, py: 2, bgcolor: "rgba(45,212,191,0.05)", borderBottom: "1px solid", borderColor: "divider" }}>
+              <Typography
+                variant="caption"
+                fontWeight={700}
+                color="text.secondary"
+                sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1.5 }}
+              >
+                Feature Values &amp; Sub-Dependencies
+              </Typography>
+              {renderFeatureExpandedRow(asset)}
+              {asset.notes && (
+                <Box sx={{ mt: 1.5 }}>
+                  <Typography variant="caption" color="text.secondary" fontWeight={600}>Notes: </Typography>
+                  <Typography variant="caption">{asset.notes}</Typography>
+                </Box>
+              )}
+              <Divider sx={{ my: 1.5 }} />
+              {renderIssuesPanel(asset)}
+              {(() => {
+                const timePanel = renderTimeTrackingPanel(asset);
+                return timePanel ? (
+                  <>
+                    <Divider sx={{ my: 1.5 }} />
+                    {timePanel}
+                  </>
+                ) : null;
+              })()}
+              <Divider sx={{ my: 1.5 }} />
+              {renderWorkflowAssignmentsPanel(asset)}
+            </Box>
+          </Collapse>
+        </TableCell>
+      </TableRow>,
+    ];
+  }
+
   // ------------------------------------------------------------------
   // Workflow assignments panel (expanded row)
   // ------------------------------------------------------------------
@@ -5914,8 +6131,16 @@ ${words.slice(midpoint).join(" ")}`;
         />
       ) : (
         <Paper className="glass-card" sx={{ overflow: "hidden" }}>
-          <Box sx={{ overflowX: "auto" }}>
-            <Table size="small" sx={{ minWidth: 900 }}>
+          <Box
+            ref={virtualizeOperationsTable ? operationsScrollRef : undefined}
+            sx={{
+              overflowX: "auto",
+              ...(virtualizeOperationsTable
+                ? { maxHeight: "min(70vh, calc(100vh - 280px))", overflowY: "auto" }
+                : {}),
+            }}
+          >
+            <Table size="small" stickyHeader={virtualizeOperationsTable} sx={{ minWidth: 900 }}>
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ width: 28, px: 0.5 }}>
@@ -5967,189 +6192,23 @@ ${words.slice(midpoint).join(" ")}`;
                   <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
                 </TableRow>
               </TableHead>
-              <TableBody>
-                {displayAssets.flatMap((asset) => {
-                  const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
-                  const proj = projectMap.get(asset.projectId);
-                  const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
-                  const isExpanded = expandedAssetId === asset.id;
-                  const hasIssue = asset.status === "Issue";
-
-                  return [
-                    <TableRow
-                      key={asset.id}
-                      hover
-                      sx={{
-                        bgcolor: hasIssue
-                          ? "rgba(211,47,47,0.04)"
-                          : selectedAssetIds.has(asset.id)
-                            ? "rgba(var(--primary-rgb,25,118,210),0.08)"
-                            : undefined
-                      }}
-                    >
-                      <TableCell sx={{ px: 0.5 }}>
-                        <Checkbox
-                          size="small"
-                          checked={selectedAssetIds.has(asset.id)}
-                          onChange={(e) => {
-                            setSelectedAssetIds((prev) => {
-                              const next = new Set(prev);
-                              if (e.target.checked) next.add(asset.id);
-                              else next.delete(asset.id);
-                              return next;
-                            });
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell sx={{ px: 1 }}>
-                        <IconButton size="small" onClick={() => {
-                          const nextId = isExpanded ? null : asset.id;
-                          setExpandedAssetId(nextId);
-                          if (nextId) loadAssignmentsForAsset(nextId);
-                        }}>
-                          {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
-                        </IconButton>
-                      </TableCell>
-                      <TableCell>
-                        <Stack direction="row" alignItems="center" spacing={0.75}>
-                          {hasIssue && (
-                            <Box
-                              sx={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: "50%",
-                                bgcolor: computeAssetHealth(asset, runsMap[asset.id] ?? []) === "red" ? "error.main" : "warning.main",
-                                flexShrink: 0
-                              }}
-                            />
-                          )}
-                          <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
-                          {issuesBadge(asset)}
-                        </Stack>
-                      </TableCell>
-                      {visibleColumns.map((col) => (
-                        <TableCell key={col.id}>
-                          {renderColumnCell(col.id, asset, cfg, proj, tech ?? undefined)}
-                        </TableCell>
-                      ))}
-                      <TableCell align="right">
-                        <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-                          {(canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled") && actionButton(asset, proj?.workflowMode)}
-                          {canManageAssetDocuments && (
-                            <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
-                              <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
-                                <Badge
-                                  badgeContent={`${docsCountMap[asset.id] ?? 0}/3`}
-                                  color={
-                                    (docsCountMap[asset.id] ?? 0) === 0 ? "default" :
-                                    (docsCountMap[asset.id] ?? 0) === 3 ? "success" : "primary"
-                                  }
-                                  sx={{ "& .MuiBadge-badge": { fontSize: 9, minWidth: 28, height: 16 } }}
-                                >
-                                  <FolderOutlined fontSize="small" />
-                                </Badge>
-                              </IconButton>
-                            </Tooltip>
-                          )}
-                          {canViewInstallationAssets && (
-                            <Tooltip title="View/Export report">
-                              <span>
-                                <IconButton
-                                  size="small"
-                                  disabled={reportGenerating === asset.id}
-                                  onClick={() => openReportExportDialog(asset)}
-                                >
-                                  {reportGenerating === asset.id
-                                    ? <CircularProgress size={16} />
-                                    : <ArticleOutlined fontSize="small" />}
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                          )}
-                          {canEditInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode && (
-                            <Tooltip title="Edit asset">
-                              <IconButton size="small" onClick={() => openEditAsset(asset)}>
-                                <EditOutlined fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          )}
-                          {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode && (
-                            <Tooltip title="Archive asset">
-                              <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
-                                <DeleteOutline fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          )}
-                          {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && archiveMode && (
-                            <Tooltip title="Restore asset">
-                              <span>
-                                <IconButton size="small" disabled={deletingAsset} onClick={() => confirmRestoreAsset(asset)}>
-                                  <RestoreOutlined fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                          )}
-                          {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && archiveMode && (
-                            <Tooltip title="Delete asset permanently">
-                              <span>
-                                <IconButton size="small" color="error" disabled={purgingAsset} onClick={() => setPurgeAsset(asset)}>
-                                  <DeleteForeverOutlined fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                          )}
-                          {!((canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled")
-                            || canManageAssetDocuments
-                            || canViewInstallationAssets
-                            || (canEditInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode)
-                            || (canDeleteInstallationAssets && canEditAssetFromWebTable(asset))) && (
-                            <Typography variant="caption" color="text.disabled">
-                              No actions
-                            </Typography>
-                          )}
-                        </Stack>
-                      </TableCell>
-                    </TableRow>,
-
-                    <TableRow key={`${asset.id}-detail`}>
-                      <TableCell colSpan={3 + visibleColumns.length} sx={{ py: 0 }}>
-                        <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                          <Box sx={{ px: 3, py: 2, bgcolor: "rgba(45,212,191,0.05)", borderBottom: "1px solid", borderColor: "divider" }}>
-                            <Typography
-                              variant="caption"
-                              fontWeight={700}
-                              color="text.secondary"
-                              sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1.5 }}
-                            >
-                              Feature Values &amp; Sub-Dependencies
-                            </Typography>
-                            {renderFeatureExpandedRow(asset)}
-                            {asset.notes && (
-                              <Box sx={{ mt: 1.5 }}>
-                                <Typography variant="caption" color="text.secondary" fontWeight={600}>Notes: </Typography>
-                                <Typography variant="caption">{asset.notes}</Typography>
-                              </Box>
-                            )}
-                            <Divider sx={{ my: 1.5 }} />
-                            {renderIssuesPanel(asset)}
-                            {(() => {
-                              const timePanel = renderTimeTrackingPanel(asset);
-                              return timePanel ? (
-                                <>
-                                  <Divider sx={{ my: 1.5 }} />
-                                  {timePanel}
-                                </>
-                              ) : null;
-                            })()}
-                            <Divider sx={{ my: 1.5 }} />
-                            {renderWorkflowAssignmentsPanel(asset)}
-                          </Box>
-                        </Collapse>
-                      </TableCell>
-                    </TableRow>,
-                  ];
-                })}
-              </TableBody>
+              {virtualizeOperationsTable ? (
+                <OperationsVirtualizedTableBody
+                  scrollRef={operationsScrollRef}
+                  rowCount={displayAssets.length * 2}
+                  colSpan={3 + visibleColumns.length}
+                  renderRow={(index) => {
+                    const asset = displayAssets[Math.floor(index / 2)];
+                    if (!asset) return null;
+                    const rows = renderOperationsAssetRows(asset);
+                    return rows[index % 2];
+                  }}
+                />
+              ) : (
+                <TableBody>
+                  {displayAssets.flatMap((asset) => renderOperationsAssetRows(asset))}
+                </TableBody>
+              )}
             </Table>
           </Box>
           {paginatedWebProject && projectAssetTotal > 0 && (

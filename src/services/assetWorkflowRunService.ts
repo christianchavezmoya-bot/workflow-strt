@@ -20,7 +20,7 @@ import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead, shouldSkipRunMutation } from "./connectivityMonitor";
 import { boundedFreshRead, BOUNDED_FRESH_TIMEOUT_MS } from "../utils/boundedFreshRead";
-import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
+import { webCachedGet, webCacheKey, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 import type { AssetWorkflowRunSummary } from "../types/assetWorkflowRunSummary";
 import { mergeRunsIntoMap, runSummaryToPlaceholderRun } from "../types/assetWorkflowRunSummary";
@@ -879,9 +879,23 @@ export const assetWorkflowRunService = {
   /** Full run blobs for capture editing — scoped to visible assets only. */
   async loadRunDetailsForAssets(projectId: string, assetIds: string[]): Promise<AssetWorkflowRun[]> {
     if (assetIds.length === 0) return [];
+    const sortedIds = [...assetIds].sort();
+    if (!isMobileNativePlatform()) {
+      const cacheKey = webCacheKey(
+        `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
+        { assetIds: sortedIds.join(",") },
+      );
+      return webCachedGet(cacheKey, async () => {
+        const res = await api.get<AssetWorkflowRun[]>(
+          `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
+          { params: { assetIds: sortedIds.join(",") } },
+        );
+        return res.data;
+      }, { ttlMs: 60_000 });
+    }
     const res = await api.get<AssetWorkflowRun[]>(
       `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
-      { params: { assetIds: assetIds.join(",") } },
+      { params: { assetIds: sortedIds.join(",") } },
     );
     return res.data;
   },

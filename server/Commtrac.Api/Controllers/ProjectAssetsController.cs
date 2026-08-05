@@ -554,10 +554,13 @@ public class ProjectAssetsController : ControllerBase
         [FromQuery] string sort = "assetTag",
         [FromQuery] string? search = null)
     {
+        var resolvedProjectId = await ProjectScopeResolver.ResolveProjectIdAsync(_db, projectId);
+        if (resolvedProjectId is null) return Ok(page is null ? Array.Empty<ProjectAssetDto>() : new PaginatedProjectAssetsResponse(new List<ProjectAssetDto>(), 0, page ?? 1, pageSize, false));
+
         pageSize = Math.Clamp(pageSize, 1, 100);
 
         var assetsQuery = includeDeleted ? _db.ProjectAssets.IgnoreQueryFilters() : _db.ProjectAssets;
-        var query = assetsQuery.Where(a => a.ProjectId == projectId);
+        var query = assetsQuery.Where(a => a.ProjectId == resolvedProjectId);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
