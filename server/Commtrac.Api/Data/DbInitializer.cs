@@ -36,6 +36,7 @@ public static class DbInitializer
         // Must run before any query touches InspectionImports (dashboard-workspace does).
         EnsureInspectionImportColumnNames(db);
         EnsureNotificationInboxTable(db);
+        EnsureRunAmendmentSchema(db);
         EnsureLinkableKeyFieldDefinitions(db);
         // Soft-delete columns are model-only (no migration creates them); add them
         // BEFORE any seeding query below hits a !IsDeleted query filter, or a fresh
@@ -832,6 +833,68 @@ public static class DbInitializer
                 if (Convert.ToInt64(cmd.ExecuteScalar()) == 0) continue;
 
                 cmd.CommandText = $"ALTER TABLE InspectionImports RENAME COLUMN {legacy} TO {mapped}";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Creates the RunAmendments audit table and the denormalised amendment-summary columns
+    /// on AssetWorkflowRuns.
+    ///
+    /// Both are model-only additions. Migrations in this project have proven unreliable for
+    /// discoverability (see EnsureNotificationInboxTable), and every query filter or DTO that
+    /// references a missing column crashes the request, so these are created here where the
+    /// result is idempotent and verifiable at boot.
+    /// </summary>
+    private static void EnsureRunAmendmentSchema(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS RunAmendments (
+                    Id TEXT PRIMARY KEY NOT NULL,
+                    RunId TEXT NOT NULL DEFAULT '',
+                    AssetId TEXT NOT NULL DEFAULT '',
+                    Kind TEXT NOT NULL DEFAULT 'capture-field',
+                    StepId TEXT NULL,
+                    InputId TEXT NULL,
+                    IterationIndex INTEGER NULL,
+                    FieldLabel TEXT NULL,
+                    OldValue TEXT NULL,
+                    NewValue TEXT NULL,
+                    SignatureStatusAtAmend TEXT NOT NULL DEFAULT 'None',
+                    AmendedByUserId TEXT NULL,
+                    AmendedByName TEXT NOT NULL DEFAULT '',
+                    AmendedByRole TEXT NULL,
+                    AmendedAtUtc TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                );
+                CREATE INDEX IF NOT EXISTS IX_RunAmendments_RunId ON RunAmendments (RunId);
+                CREATE INDEX IF NOT EXISTS IX_RunAmendments_AssetId ON RunAmendments (AssetId);
+                CREATE INDEX IF NOT EXISTS IX_RunAmendments_AmendedAtUtc ON RunAmendments (AmendedAtUtc);
+                """;
+            cmd.ExecuteNonQuery();
+
+            var runColumns = new (string Name, string Ddl)[]
+            {
+                ("LastAmendedByName", "TEXT NULL"),
+                ("LastAmendedByRole", "TEXT NULL"),
+                ("LastAmendedAtUtc", "TEXT NULL"),
+                ("AmendmentCount", "INTEGER NOT NULL DEFAULT 0"),
+            };
+
+            foreach (var (name, ddl) in runColumns)
+            {
+                cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('AssetWorkflowRuns') WHERE name='{name}'";
+                if (Convert.ToInt64(cmd.ExecuteScalar()) > 0) continue;
+                cmd.CommandText = $"ALTER TABLE AssetWorkflowRuns ADD COLUMN {name} {ddl}";
                 cmd.ExecuteNonQuery();
             }
         }

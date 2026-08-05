@@ -55,6 +55,7 @@ public class AppDbContext : DbContext
     public DbSet<WorkflowTypeEntity> WorkflowTypes => Set<WorkflowTypeEntity>();
     public DbSet<AssetWorkflowAssignmentEntity> AssetWorkflowAssignments => Set<AssetWorkflowAssignmentEntity>();
     public DbSet<AssetWorkflowRunEntity> AssetWorkflowRuns => Set<AssetWorkflowRunEntity>();
+    public DbSet<RunAmendmentEntity> RunAmendments => Set<RunAmendmentEntity>();
     public DbSet<BrandSettingEntity> BrandSettings => Set<BrandSettingEntity>();
     // ─── Asset Documents ──────────────────────────────────────────────────────
     public DbSet<AssetDocumentEntity> AssetDocuments => Set<AssetDocumentEntity>();
@@ -189,6 +190,16 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<NotificationInboxEntity>()
             .HasIndex(n => n.CreatedAtUtc);
+
+        // Amendment history is read per run (detail view) and per asset (capture table).
+        modelBuilder.Entity<RunAmendmentEntity>()
+            .HasIndex(a => a.RunId);
+
+        modelBuilder.Entity<RunAmendmentEntity>()
+            .HasIndex(a => a.AssetId);
+
+        modelBuilder.Entity<RunAmendmentEntity>()
+            .HasIndex(a => a.AmendedAtUtc);
 
         modelBuilder.Entity<MobileUploadTokenEntity>()
             .HasIndex(t => t.Status);

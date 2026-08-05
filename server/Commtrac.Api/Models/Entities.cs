@@ -963,6 +963,68 @@ public class AssetWorkflowRunEntity
     public string BomActualJson { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    // ── Amendment summary ────────────────────────────────────────────────────
+    // Denormalised from RunAmendments so a table showing many runs can label
+    // "Edited by <role> — <name>" without a query per row. RunAmendments keeps the
+    // full before/after history; these three only describe the most recent change.
+    /// <summary>Display name of whoever last amended this run after completion.</summary>
+    [MaxLength(200)]
+    public string? LastAmendedByName { get; set; }
+    /// <summary>Role of whoever last amended this run, e.g. "Project Manager".</summary>
+    [MaxLength(60)]
+    public string? LastAmendedByRole { get; set; }
+    public DateTime? LastAmendedAtUtc { get; set; }
+    /// <summary>Total recorded amendments, so the UI can show "3 edits" without fetching the log.</summary>
+    public int AmendmentCount { get; set; }
+}
+
+/// <summary>
+/// Append-only audit of post-completion changes to a workflow run.
+///
+/// Captured data is contractual evidence: an installer signs a run, and a PM may then
+/// correct fields or time before the customer signs. The question that gets asked later is
+/// "what did the installer sign, and what changed afterwards" — which needs the before and
+/// after values, not just who touched it last. Rows are never updated or deleted.
+/// </summary>
+public class RunAmendmentEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string RunId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string AssetId { get; set; } = string.Empty;
+    /// <summary>capture-field | media | time | step-results</summary>
+    [MaxLength(30)]
+    public string Kind { get; set; } = "capture-field";
+    /// <summary>Workflow step the amended value belongs to (null for run-wide changes like time).</summary>
+    [MaxLength(200)]
+    public string? StepId { get; set; }
+    /// <summary>Capture input within the step (null for run-wide changes).</summary>
+    [MaxLength(200)]
+    public string? InputId { get; set; }
+    /// <summary>Repeat index for multi-unit steps.</summary>
+    public int? IterationIndex { get; set; }
+    /// <summary>Human-readable field label when the client can supply one.</summary>
+    [MaxLength(300)]
+    public string? FieldLabel { get; set; }
+    public string? OldValue { get; set; }
+    public string? NewValue { get; set; }
+    /// <summary>
+    /// Signature phase at the moment of the amendment. Distinguishes a correction made before
+    /// installer sign-off from one made while awaiting the customer.
+    /// </summary>
+    [MaxLength(40)]
+    public string SignatureStatusAtAmend { get; set; } = "None";
+    /// <summary>Resolved from the caller's token, not from the request body.</summary>
+    [MaxLength(80)]
+    public string? AmendedByUserId { get; set; }
+    [MaxLength(200)]
+    public string AmendedByName { get; set; } = string.Empty;
+    [MaxLength(60)]
+    public string? AmendedByRole { get; set; }
+    public DateTime AmendedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
 /// <summary>Simple key-value store for brand/global settings (e.g. business logo).</summary>

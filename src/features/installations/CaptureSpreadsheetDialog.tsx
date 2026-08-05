@@ -548,6 +548,7 @@ export default function CaptureSpreadsheetDialog({
         },
         value,
         currentUserName || undefined,
+        column.fieldLabel,
       );
       onRunUpdated?.(updated);
     } catch {

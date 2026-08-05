@@ -1028,7 +1028,31 @@ public record AssetWorkflowRunDto(
     DateTime? CompletedAt,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    string BomActualJson
+    string BomActualJson,
+    // Amendment summary — lets a capture table label "Edited by <role> — <name>" for many
+    // runs without a query per row. Full before/after history: GET {id}/amendments.
+    string? LastAmendedByName = null,
+    string? LastAmendedByRole = null,
+    DateTime? LastAmendedAtUtc = null,
+    int AmendmentCount = 0
+);
+
+public record RunAmendmentDto(
+    string Id,
+    string RunId,
+    string AssetId,
+    string Kind,
+    string? StepId,
+    string? InputId,
+    int? IterationIndex,
+    string? FieldLabel,
+    string? OldValue,
+    string? NewValue,
+    string SignatureStatusAtAmend,
+    string? AmendedByUserId,
+    string AmendedByName,
+    string? AmendedByRole,
+    DateTime AmendedAtUtc
 );
 
 public record StartRunRequest(
@@ -1065,7 +1089,9 @@ public record PatchCaptureCellRequest(
     string InputId,
     int? IterationIndex,
     string Value,
-    string? AmendedByName
+    string? AmendedByName,
+    // Optional display label so the amendment log reads "Serial" rather than a raw input id.
+    string? FieldLabel = null
 );
 public record TrackRunTimeRequest(
     string Action,

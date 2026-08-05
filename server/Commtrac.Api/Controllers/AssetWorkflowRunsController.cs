@@ -84,7 +84,15 @@ public class AssetWorkflowRunsController : ControllerBase
         e.RunNumber, e.CompletedByName,
         e.SignatureStatus, e.InstallerSignedAt, e.CustomerSignedAt,
         e.StartedAt, e.CompletedAt, e.CreatedAt, e.UpdatedAt,
-        e.BomActualJson
+        e.BomActualJson,
+        e.LastAmendedByName, e.LastAmendedByRole, e.LastAmendedAtUtc, e.AmendmentCount
+    );
+
+    private static RunAmendmentDto ToAmendmentDto(RunAmendmentEntity e) => new(
+        e.Id, e.RunId, e.AssetId, e.Kind,
+        e.StepId, e.InputId, e.IterationIndex, e.FieldLabel,
+        e.OldValue, e.NewValue, e.SignatureStatusAtAmend,
+        e.AmendedByUserId, e.AmendedByName, e.AmendedByRole, e.AmendedAtUtc
     );
 
     [HttpGet]
@@ -1220,6 +1228,12 @@ public class AssetWorkflowRunsController : ControllerBase
             });
         }
 
+        var previousValue = ReadCaptureCellValue(
+            run.StepResultsJson,
+            req.StepId,
+            req.InputId,
+            req.IterationIndex);
+
         run.StepResultsJson = PatchCaptureCellInJson(
             run.StepResultsJson,
             req.StepId,
@@ -1228,9 +1242,38 @@ public class AssetWorkflowRunsController : ControllerBase
             req.Value);
         run.UpdatedAt = DateTime.UtcNow;
 
+        // Only audit a real change, and only once the run has been completed. Edits made while
+        // the run is still in progress are the installer's own work, not an amendment to signed
+        // evidence, and logging every keystroke-level save would bury the corrections that matter.
+        if (run.IsLocked && !string.Equals(previousValue ?? string.Empty, req.Value ?? string.Empty, StringComparison.Ordinal))
+        {
+            RecordRunAmendment(
+                run,
+                "capture-field",
+                stepId: req.StepId,
+                inputId: req.InputId,
+                iterationIndex: req.IterationIndex,
+                fieldLabel: req.FieldLabel,
+                oldValue: previousValue,
+                newValue: req.Value,
+                fallbackName: req.AmendedByName);
+        }
+
         await _db.SaveChangesAsync();
         // Text capture edits do not notify inbox/dashboard — keeps PM spreadsheet edits quiet.
         return Ok(ToDto(run));
+    }
+
+    // GET api/asset-workflow-runs/{id}/amendments — post-completion change history for one run
+    [HttpGet("{id}/amendments")]
+    public async Task<IActionResult> GetRunAmendments(string id)
+    {
+        var rows = await _db.RunAmendments
+            .AsNoTracking()
+            .Where(a => a.RunId == id)
+            .OrderByDescending(a => a.AmendedAtUtc)
+            .ToListAsync();
+        return Ok(rows.Select(ToAmendmentDto));
     }
 
     // PATCH api/asset-workflow-runs/{id}/step-results — update step results on a locked/complete run (e.g. adding photos)
@@ -1255,6 +1298,17 @@ public class AssetWorkflowRunsController : ControllerBase
 
         run.StepResultsJson = req.StepResultsJson;
         run.UpdatedAt       = DateTime.UtcNow;
+
+        // Whole-blob PATCH: the individual field that changed is not identifiable here, so the
+        // amendment records the kind of change rather than a before/after pair. Native capture
+        // edits arrive on this path today (see the native branch of patchCaptureCell).
+        if (run.IsLocked)
+        {
+            RecordRunAmendment(
+                run,
+                req.CaptureDataAmend ? "capture-field" : "media",
+                fallbackName: req.AmendedByName);
+        }
 
         await _db.SaveChangesAsync();
         // Text capture amends use capture-cell (no notify). Full step-results PATCH is for media/signature.
@@ -1362,9 +1416,26 @@ public class AssetWorkflowRunsController : ControllerBase
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
 
+        var previousProductive = run.ProductiveSeconds;
+        var previousDowntime = run.DowntimeSeconds;
+
         run.TimeTrackingJson = req.TimeEntriesJson;
         run.UpdatedAt = DateTime.UtcNow;
         RecomputeRunTimeMetrics(run, DateTime.UtcNow);
+
+        // Retroactive time correction on a completed run is an amendment to signed evidence.
+        // Record the productive/downtime totals rather than the raw entry array, which is what
+        // anyone reviewing the change actually needs to compare.
+        if (run.IsLocked
+            && (run.ProductiveSeconds != previousProductive || run.DowntimeSeconds != previousDowntime))
+        {
+            RecordRunAmendment(
+                run,
+                "time",
+                fieldLabel: "Time entries",
+                oldValue: $"productive {previousProductive}s, downtime {previousDowntime}s",
+                newValue: $"productive {run.ProductiveSeconds}s, downtime {run.DowntimeSeconds}s");
+        }
 
         await _db.SaveChangesAsync();
         return Ok(ToDto(run));
@@ -1528,6 +1599,89 @@ public class AssetWorkflowRunsController : ControllerBase
             ?? User.FindFirst("email")?.Value
             ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
             ?? "A user";
+    }
+
+    private string? ResolveActorUserId()
+    {
+        return User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    }
+
+    private string? ResolveActorRole()
+    {
+        // Short claim name: MapInboundClaims is disabled, so "role" is authoritative here.
+        return User.FindFirst("role")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    }
+
+    /// <summary>
+    /// Appends an amendment row and refreshes the run's denormalised summary.
+    ///
+    /// Identity comes from the caller's token, never from the request body: a client-supplied
+    /// amendedByName would let anyone attribute an edit to someone else, which defeats the point
+    /// of auditing changes made to data an installer has already signed. The body value is used
+    /// only as a display fallback when the token carries no name.
+    ///
+    /// Does NOT call SaveChanges — the caller saves once, so the amendment and the change it
+    /// describes commit together.
+    /// </summary>
+    private void RecordRunAmendment(
+        AssetWorkflowRunEntity run,
+        string kind,
+        string? stepId = null,
+        string? inputId = null,
+        int? iterationIndex = null,
+        string? fieldLabel = null,
+        string? oldValue = null,
+        string? newValue = null,
+        string? fallbackName = null)
+    {
+        var actorName = User.Identity?.Name
+            ?? User.FindFirst("email")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? fallbackName
+            ?? "A user";
+        var amendedAt = DateTime.UtcNow;
+        var role = ResolveActorRole();
+
+        _db.RunAmendments.Add(new RunAmendmentEntity
+        {
+            RunId = run.Id,
+            AssetId = run.AssetId,
+            Kind = kind,
+            StepId = stepId,
+            InputId = inputId,
+            IterationIndex = iterationIndex,
+            FieldLabel = fieldLabel,
+            OldValue = oldValue,
+            NewValue = newValue,
+            SignatureStatusAtAmend = run.SignatureStatus ?? "None",
+            AmendedByUserId = ResolveActorUserId(),
+            AmendedByName = actorName,
+            AmendedByRole = role,
+            AmendedAtUtc = amendedAt,
+        });
+
+        run.LastAmendedByName = actorName;
+        run.LastAmendedByRole = role;
+        run.LastAmendedAtUtc = amendedAt;
+        run.AmendmentCount += 1;
+    }
+
+    /// <summary>Current value of one capture cell, so an amendment can record what it replaced.</summary>
+    private static string? ReadCaptureCellValue(
+        string? stepResultsJson,
+        string stepId,
+        string inputId,
+        int? iterationIndex)
+    {
+        var wantIter = iterationIndex ?? 0;
+        var target = ParseWorkflowStepResults(stepResultsJson).FirstOrDefault(r =>
+            string.Equals(r.StepId, stepId, StringComparison.OrdinalIgnoreCase)
+            && (r.IterationIndex ?? 0) == wantIter);
+        if (target?.Values is null) return null;
+        return target.Values.TryGetValue(inputId, out var existing) ? existing : null;
     }
 
     private static int CountOpenIssues(string? issuesJson)

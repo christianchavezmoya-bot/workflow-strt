@@ -74,4 +74,34 @@ export interface AssetWorkflowRun {
   updatedAt: string;
   /** JSON array of BomActualItem — confirmed parts used during this run */
   bomActualJson?: string;
+  /**
+   * Summary of post-completion amendments, denormalised by the API so a table showing many
+   * runs can label "Edited by <role> — <name>" without a request per row. Full before/after
+   * history comes from `assetWorkflowRunService.listAmendments(runId)`.
+   */
+  lastAmendedByName?: string | null;
+  lastAmendedByRole?: string | null;
+  lastAmendedAtUtc?: string | null;
+  amendmentCount?: number;
+}
+
+/** One recorded post-completion change to a run. Append-only on the server. */
+export interface RunAmendment {
+  id: string;
+  runId: string;
+  assetId: string;
+  /** capture-field | media | time | step-results */
+  kind: string;
+  stepId?: string | null;
+  inputId?: string | null;
+  iterationIndex?: number | null;
+  fieldLabel?: string | null;
+  oldValue?: string | null;
+  newValue?: string | null;
+  /** Signature phase when the amendment was made. */
+  signatureStatusAtAmend: string;
+  amendedByUserId?: string | null;
+  amendedByName: string;
+  amendedByRole?: string | null;
+  amendedAtUtc: string;
 }

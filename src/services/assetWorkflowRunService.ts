@@ -1,6 +1,6 @@
 import api from "./api";
 import { IssueRepository } from "../repositories/IssueRepository";
-import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
+import type { AssetWorkflowRun, RunAmendment, RunIssue } from "../types/assetWorkflowRun";
 import type { ProjectAsset, ProjectAssetStatus, ProjectAssetWorkflowSummary } from "../types/projectAsset";
 import type { Project } from "../types/project";
 import offlineStore, { type OfflineRun } from "./offlineStore";
@@ -1520,12 +1520,23 @@ export const assetWorkflowRunService = {
     return await this.completeRun(runId, run.stepResultsJson ?? "[]", run.issuesJson ?? "[]", completedByName, run.bomActualJson);
   },
 
+  /** Post-completion change history for one run, newest first. */
+  async listAmendments(runId: string): Promise<RunAmendment[]> {
+    try {
+      const res = await api.get<RunAmendment[]>(`/asset-workflow-runs/${runId}/amendments`);
+      return res.data;
+    } catch {
+      return [];
+    }
+  },
+
   /** Patch one text capture cell — small payload, no inbox/dashboard refresh (web). */
   async patchCaptureCell(
     runId: string,
     binding: { stepId: string; inputId: string; iterationIndex?: number },
     value: string,
     amendedByName?: string,
+    fieldLabel?: string,
   ): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
       const body = {
@@ -1534,6 +1545,7 @@ export const assetWorkflowRunService = {
         iterationIndex: binding.iterationIndex ?? null,
         value,
         amendedByName: amendedByName ?? null,
+        fieldLabel: fieldLabel ?? null,
       };
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/capture-cell`, body, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
