@@ -150,7 +150,8 @@ import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { deriveOpenIssuesFromAsset } from "../../utils/issueDerivation";
 import type { Feature as LibFeature } from "../../types/feature";
 import type { FeatureDependency } from "../../types/featureDependency";
-import CaptureSpreadsheetDialog, { type CaptureSpreadsheetAssetJobColumn } from "./CaptureSpreadsheetDialog";
+import CaptureSpreadsheetDialog from "./CaptureSpreadsheetDialog";
+import { buildFullCaptureJobColumns } from "../../utils/captureAssetJobColumns";
 import {
   buildCaptureColumns,
   buildCaptureRow,
@@ -673,11 +674,6 @@ const AssetInstallationPage = () => {
   const [bulkDocsSaving, setBulkDocsSaving] = useState(false);
   const [bulkDocsResult, setBulkDocsResult] = useState<string | null>(null);
   // Capture spreadsheet view
-  const [assetTableViewMode, setAssetTableViewMode] = useState<"operations" | "capture">("operations");
-  const assetTableViewModeRef = useRef(assetTableViewMode);
-  assetTableViewModeRef.current = assetTableViewMode;
-  const [captureRunsLoading, setCaptureRunsLoading] = useState(false);
-  const [captureRunsError, setCaptureRunsError] = useState<string | null>(null);
   const [capturePopupOpen, setCapturePopupOpen] = useState(false);
   const [libFeatures, setLibFeatures] = useState<LibFeature[]>([]);
   const [depsByFeature, setDepsByFeature] = useState<Record<string, FeatureDependency[]>>({});
@@ -1253,7 +1249,7 @@ const AssetInstallationPage = () => {
           });
           setLastFetchedAt(new Date());
           clearLoadingOnce();
-          if (paginatedWebProject && freshAssets.length > 0 && assetTableViewModeRef.current !== "capture") {
+          if (paginatedWebProject && freshAssets.length > 0) {
             const assetIds = freshAssets.map((a) => a.id);
             assetWorkflowRunService.listRunSummariesByProject(selectedProjectId, assetIds)
               .then((runs) => {
@@ -1335,72 +1331,6 @@ const AssetInstallationPage = () => {
         loadRunsForProjects(uniqueProjectIds);
       });
   }, [activeProduct?.id, allProjectsExplicit, archiveMode, productsKey, selectedProjectId, productsState.loading, projectsLoading, projectAssetPage, search, paginatedWebProject]);
-
-  // Paginated web: load full run blobs once per visible page (prefetch + capture view).
-  // Never depend on runsMap — updating runsMap after fetch must not re-trigger this effect
-  // (that caused a runs-detail refetch storm every ~3s in capture view).
-  useEffect(() => {
-    captureDetailDoneKeyRef.current = null;
-    captureDetailInflightKeyRef.current = null;
-    capturePrefetchKeyRef.current = null;
-  }, [selectedProjectId]);
-
-  useEffect(() => {
-    if (!paginatedWebProject || !selectedProjectId || assetsKey === "") {
-      setCaptureRunsLoading(false);
-      return;
-    }
-
-    const fetchKey = `${selectedProjectId}:${assetsKey}`;
-    const assetIds = assetsRef.current.map((a) => a.id);
-    const detailDone = captureDetailDoneKeyRef.current === fetchKey;
-    const ready = captureBlobsReadyForAssets(runsMapRef.current, assetIds, detailDone);
-
-    if (ready) {
-      setCaptureRunsLoading(false);
-      setCaptureRunsError(null);
-      return;
-    }
-
-    if (captureDetailInflightKeyRef.current === fetchKey) {
-      if (assetTableViewMode === "capture") setCaptureRunsLoading(true);
-      return;
-    }
-
-    if (detailDone) {
-      setCaptureRunsLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    captureDetailInflightKeyRef.current = fetchKey;
-    capturePrefetchKeyRef.current = fetchKey;
-    if (assetTableViewMode === "capture") {
-      setCaptureRunsLoading(true);
-      setCaptureRunsError(null);
-    }
-
-    void assetWorkflowRunService.loadRunDetailsForAssets(selectedProjectId, assetIds)
-      .then((runs) => {
-        if (cancelled) return;
-        setRunsMap((prev) => mergeRunsIntoMap(prev, runs));
-        captureDetailDoneKeyRef.current = fetchKey;
-        setCaptureRunsError(null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        captureDetailDoneKeyRef.current = fetchKey;
-        if (assetTableViewMode === "capture") {
-          setCaptureRunsError("Could not load capture data for this page. Check your connection and try again.");
-        }
-      })
-      .finally(() => {
-        captureDetailInflightKeyRef.current = null;
-        if (!cancelled) setCaptureRunsLoading(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [assetsKey, assetTableViewMode, paginatedWebProject, selectedProjectId]);
 
   // Document counts per asset — fetched in a fully independent effect that
   // runs after the asset list is already shown. Counts are cosmetic
@@ -2192,10 +2122,7 @@ const AssetInstallationPage = () => {
       .filter((c): c is ColumnDef => !!c && !hiddenSet.has(c.id));
   }, [colConfig, archiveMode]);
 
-  const assetExportMode = useMemo<"operations" | "capture">(
-    () => (assetTableViewMode === "capture" && canViewCaptureMatrix && libFeatures.length > 0 ? "capture" : "operations"),
-    [assetTableViewMode, canViewCaptureMatrix, libFeatures.length],
-  );
+  const assetExportMode = "operations" as const;
 
   const assetExportSingleProject = useMemo(() => {
     if (selectedProject) return selectedProject;
@@ -2204,69 +2131,10 @@ const AssetInstallationPage = () => {
     return projectMap.get(projectIds[0]) ?? null;
   }, [displayAssets, projectMap, selectedProject]);
 
-  const assetCaptureJobColumns = useMemo<CaptureSpreadsheetAssetJobColumn[]>(() => [
-    {
-      id: "assetName",
-      label: "Asset Name",
-      valueFor: (asset: ProjectAsset) => asset.assetName || "-",
-    },
-    {
-      id: "serialNumber",
-      label: "Serial #",
-      valueFor: (asset: ProjectAsset) => asset.serialNumber || "-",
-    },
-    {
-      id: "location",
-      label: "Location",
-      valueFor: (asset: ProjectAsset) => asset.location || projectMap.get(asset.projectId)?.siteName || "-",
-    },
-    {
-      id: "customer",
-      label: "Customer",
-      valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.customerName || "-",
-    },
-    {
-      id: "projectNumber",
-      label: "Job #",
-      valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.jobNumber || asset.projectId.slice(0, 8),
-    },
-    {
-      id: "siteName",
-      label: "Site",
-      valueFor: (asset: ProjectAsset) => projectMap.get(asset.projectId)?.siteName || "-",
-    },
-    {
-      id: "technician",
-      label: "Technician",
-      valueFor: (asset: ProjectAsset) => userMap.get(asset.assignedUserId || "")?.fullName || asset.installedBy || "-",
-    },
-    {
-      id: "workflow",
-      label: "Workflow",
-      valueFor: (asset: ProjectAsset) => {
-        const assignments = assignmentsMap[asset.id] ?? [];
-        if (assignments.length > 0) return assignments.map((item) => item.workflowConfigName || item.workflowTypeName || "Workflow").join(", ");
-        return asset.workflowSummary?.hasWorkflow ? "Configured" : "No workflow";
-      },
-    },
-    {
-      id: "signature",
-      label: "Signature",
-      valueFor: (asset: ProjectAsset) => {
-        const latestRun = (runsMap[asset.id] ?? [])[0];
-        const state = latestRun?.signatureStatus ?? "";
-        if (state === "Signed") return "Signed";
-        if (state === "PendingCustomer") return "Pending Customer";
-        if (state === "PendingInstaller") return "Pending Installer";
-        return "-";
-      },
-    },
-    {
-      id: "completed",
-      label: "Completed",
-      valueFor: (asset: ProjectAsset) => (runsMap[asset.id] ?? [])[0]?.completedAt?.slice(0, 10) || "-",
-    },
-  ], [assignmentsMap, projectMap, runsMap, userMap]);
+  const assetCaptureJobColumns = useMemo(
+    () => buildFullCaptureJobColumns({ projectMap, userMap, assignmentsMap, runsMap }),
+    [assignmentsMap, projectMap, runsMap, userMap],
+  );
 
   const captureComponentExportGroups = useMemo(
     () => captureExportGroups.filter((group) => group.groupType !== "general"),
@@ -2279,65 +2147,6 @@ const AssetInstallationPage = () => {
   );
 
   const assetExportColumnOptions = useMemo<AssetExportColumnOption[]>(() => {
-    if (assetExportMode === "capture") {
-      return [
-        {
-          id: "assetTag",
-          label: "Asset Tag",
-          headerLabel: "Asset Tag",
-          groupLabel: "ASSET TAG",
-          valueFor: (asset: ProjectAsset) => asset.assetTag || "-",
-        },
-        ...assetCaptureJobColumns.map((column) => ({
-          id: column.id,
-          label: column.label,
-          headerLabel: column.label,
-          groupLabel: "ASSET & JOB",
-          valueFor: column.valueFor,
-        })),
-        ...captureComponentExportGroups.flatMap((group) =>
-          group.columns.map((column) => ({
-            id: `capture:${column.id}`,
-            label: `${group.displayName} - ${column.displayLabel}`,
-            headerLabel: column.displayLabel,
-            groupLabel: group.displayName.toUpperCase(),
-            noteLabel: group.businessPartNumber ? `Business Part Number -> ${group.businessPartNumber}` : undefined,
-            valueFor: (asset: ProjectAsset) => {
-              const raw = captureExportRowMap.get(asset.id)?.cells[column.id] ?? "";
-              return raw.trim().length > 0 ? raw : "-";
-            },
-          })),
-        ),
-        ...captureSignOffExportGroups.flatMap((group) =>
-          group.columns.map((column) => ({
-            id: `capture:${column.id}`,
-            label: `${group.displayName} - ${column.displayLabel}`,
-            headerLabel: column.displayLabel,
-            groupLabel: group.displayName.toUpperCase(),
-            noteLabel: group.businessPartNumber ? `Business Part Number -> ${group.businessPartNumber}` : "Shared fields",
-            valueFor: (asset: ProjectAsset) => {
-              const raw = captureExportRowMap.get(asset.id)?.cells[column.id] ?? "";
-              return raw.trim().length > 0 ? raw : "-";
-            },
-          })),
-        ),
-        {
-          id: "status",
-          label: "Status",
-          headerLabel: "Status",
-          groupLabel: "WORKFLOW",
-          valueFor: (asset: ProjectAsset) => getOperationsStatusLabel(asset, projectMap.get(asset.projectId)?.workflowMode),
-        },
-        {
-          id: "action",
-          label: "Action",
-          headerLabel: "Action",
-          groupLabel: "WORKFLOW",
-          valueFor: (asset: ProjectAsset) => getAssetActionLabel(asset, projectMap.get(asset.projectId)?.workflowMode),
-        },
-      ];
-    }
-
     const exportColumns = visibleColumns.filter((column) => column.id !== "assetName" && column.id !== "status");
     return [
       {
@@ -2381,7 +2190,7 @@ const AssetInstallationPage = () => {
         valueFor: (asset: ProjectAsset) => getAssetActionLabel(asset, projectMap.get(asset.projectId)?.workflowMode),
       },
     ];
-  }, [assetCaptureJobColumns, assetExportMode, captureComponentExportGroups, captureExportRowMap, captureSignOffExportGroups, configMap, projectMap, runsMap, visibleColumns]);
+  }, [configMap, projectMap, userMap, visibleColumns]);
 
   function openAssetExportDialog() {
     setAssetExportFormat("pdf");
@@ -3327,7 +3136,7 @@ const AssetInstallationPage = () => {
     const filtersSummary = [
       archiveMode ? "Archive view" : (showNoWorkflow ? "No workflow" : (statusFilter === "All" ? "All statuses" : `Status ${STATUS_LABELS[statusFilter] ?? statusFilter}`)),
       search.trim() ? `Search: ${search.trim()}` : null,
-      assetExportMode === "capture" ? "Capture view" : "Operations view",
+      "Operations view",
     ].filter(Boolean).join(" | ");
 
     let businessLogo: string | null = null;
@@ -3358,7 +3167,7 @@ const AssetInstallationPage = () => {
       : [];
 
     const rows = displayAssets.map((asset) => selectedColumns.map((column) => column.valueFor(asset)));
-    const modeLabel = assetExportMode === "capture" ? "Capture" : "Operations";
+    const modeLabel = "Operations";
 
     return {
       filenameBase: `project-assets-${assetExportMode}-${exportDate.toISOString().slice(0, 10)}`,
@@ -5493,22 +5302,9 @@ ${words.slice(midpoint).join(" ")}`;
               <SearchOutlined sx={{ fontSize: 20 }} />
             </IconButton>
           </Tooltip>
-          {canViewCaptureMatrix && activeProduct && (
-            <ToggleButtonGroup
-              size="small"
-              exclusive
-              value={assetTableViewMode}
-              onChange={(_, v) => { if (v) setAssetTableViewMode(v as "operations" | "capture"); }}
-            >
-              <ToggleButton value="operations" sx={{ fontSize: 11, py: 0.5, px: 1.25 }}>Operations</ToggleButton>
-              <ToggleButton value="capture" sx={{ fontSize: 11, py: 0.5, px: 1.25 }}>Capture</ToggleButton>
-            </ToggleButtonGroup>
-          )}
           {canViewCaptureMatrix && selectedProjectId && (
-            // Plain link so ctrl/cmd-click opens the standalone matrix in its own tab. The
-            // inline Capture toggle above is unchanged — it stays the fast path for bulk
-            // cell editing; this is the read-only whole-job view.
-            <Tooltip title="Open the full-job capture table (read-only). Ctrl/Cmd-click for a new tab.">
+            // Plain link so ctrl/cmd-click opens the standalone matrix in its own tab.
+            <Tooltip title="Open the full-job capture table. Ctrl/Cmd-click for a new tab.">
               <Button
                 size="small"
                 variant="outlined"
@@ -5731,7 +5527,7 @@ ${words.slice(midpoint).join(" ")}`;
         <DialogContent dividers>
           <Stack spacing={2}>
             <Alert severity="info">
-              Export uses the current filtered view: {assetExportMode === "capture" ? "Capture" : "Operations"} | {displayAssets.length} row(s)
+              Export uses the current filtered operations view: {displayAssets.length} row(s)
             </Alert>
 
             <Stack direction={{ xs: "column", md: "row" }} spacing={3}>
@@ -6156,65 +5952,6 @@ ${words.slice(midpoint).join(" ")}`;
             );
           })}
         </Stack>
-      ) : assetTableViewMode === "capture" && canViewCaptureMatrix && activeProduct ? (
-        <CaptureSpreadsheetDialog
-          embedded
-          open
-          onClose={() => setAssetTableViewMode("operations")}
-          assets={displayAssets}
-          runsMap={runsMap}
-          captureRunsLoading={captureRunsLoading}
-          captureRunsError={captureRunsError}
-          schemaFallback={paginatedWebProject}
-          maxUnitsByFeature={captureMaxUnits}
-          features={libFeatures}
-          depsByFeature={depsByFeature}
-          featureSelectionsByConfig={featureSelectionsByConfig}
-          activeCountForAsset={getActiveCountForAsset}
-          readOnly={false}
-          canEditCapture={canEditCaptureData}
-          canEditAsset={canEditCaptureForAsset}
-          userRole={currentUser.role}
-          currentUserName={currentUser.fullName ?? currentUser.email ?? ""}
-          onRunUpdated={(run) => {
-            startTransition(() => {
-              setRunsMap((prev) => {
-                const list = prev[run.assetId] ?? [];
-                const next = list.some((r) => r.id === run.id)
-                  ? list.map((r) => (r.id === run.id ? run : r))
-                  : [...list, run];
-                return { ...prev, [run.assetId]: next };
-              });
-            });
-          }}
-          assetJobColumns={assetCaptureJobColumns}
-          selectedAssetIds={selectedAssetIds}
-          onToggleAssetSelection={(assetId, checked) => {
-            setSelectedAssetIds((prev) => {
-              const next = new Set(prev);
-              if (checked) next.add(assetId);
-              else next.delete(assetId);
-              return next;
-            });
-          }}
-          onToggleVisibleAssetSelection={(assetIds, checked) => {
-            setSelectedAssetIds((prev) => {
-              const next = new Set(prev);
-              for (const assetId of assetIds) {
-                if (checked) next.add(assetId);
-                else next.delete(assetId);
-              }
-              return next;
-            });
-          }}
-          renderStatus={(asset) => captureTableStatusChip(asset, projectMap.get(asset.projectId)?.workflowMode)}
-          renderActions={(asset) => {
-            const proj = projectMap.get(asset.projectId);
-            return (canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled")
-              ? actionButton(asset, proj?.workflowMode)
-              : null;
-          }}
-        />
       ) : (
         <Paper className="glass-card" sx={{ overflow: "hidden" }}>
           <Box

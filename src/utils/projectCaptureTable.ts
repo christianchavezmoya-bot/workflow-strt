@@ -75,6 +75,26 @@ interface GroupAccumulator {
 const GENERAL_GROUP_KEY = "general-sign-off";
 const GENERAL_GROUP_LABEL = "General / Sign-off";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string | undefined | null): boolean {
+  return UUID_RE.test(String(value ?? "").trim());
+}
+
+function resolveFeatureDisplayName(
+  field: CapturedFieldExport,
+  productFeatures: Feature[],
+): string {
+  const raw = field.featureName?.trim() ?? "";
+  if (raw && !isUuid(raw)) return raw;
+  if (field.featureId) {
+    const feat = productFeatures.find((f) => f.id === field.featureId);
+    if (feat?.name?.trim()) return feat.name.trim();
+  }
+  if (raw) return raw;
+  return "Feature";
+}
+
 function normalizeKeyPart(value: string | undefined): string {
   return String(value ?? "")
     .trim()
@@ -179,14 +199,14 @@ export function buildProjectCaptureTable(
     for (const field of capturedFields) {
       if (field.inputType === "photo") continue;
 
-      const featureName = field.featureName?.trim() || "";
+      const featureName = resolveFeatureDisplayName(field, productFeatures);
       const fieldLabel = normalizeFieldLabel(field.inputLabel || field.fieldKey || field.inputId);
       const groupType = featureName || field.featureId ? "feature" : "general";
       const unitIndex = groupType === "general" ? 1 : parseUnitIndex(field.stepTitle);
       const groupKey = groupType === "general"
         ? GENERAL_GROUP_KEY
         : `feature:${field.featureId ?? normalizeKeyPart(featureName)}`;
-      const displayName = groupType === "general" ? GENERAL_GROUP_LABEL : (featureName || field.featureId || "Feature");
+      const displayName = groupType === "general" ? GENERAL_GROUP_LABEL : featureName;
       const columnKey = `${groupKey}:u${unitIndex}:${normalizeKeyPart(fieldLabel)}`;
 
       let group = groups.get(groupKey);
@@ -253,29 +273,52 @@ export function buildProjectCaptureTable(
   const sortedGroups = Array.from(groups.values())
     .sort((a, b) => groupSortName(a).localeCompare(groupSortName(b)));
 
-  const finalGroups: ProjectCaptureGroup[] = sortedGroups.map((group) => {
+  const finalGroups: ProjectCaptureGroup[] = [];
+  for (const group of sortedGroups) {
     const unitCount = Math.max(1, group.maxUnitIndex);
-    const columns = group.columns
-      .slice()
-      .sort((a, b) => a.sequence - b.sequence)
-      .map((column) => ({
-        ...column,
-        displayLabel: unitCount > 1 ? `U${column.unitIndex} · ${column.fieldLabel}` : column.fieldLabel,
-      }));
+    const sortedColumns = group.columns.slice().sort((a, b) => a.sequence - b.sequence);
 
-    return {
-      key: group.key,
-      featureId: group.featureId,
-      featureName: group.featureName,
-      displayName: group.displayName,
-      groupType: group.groupType,
-      businessPartNumber: group.businessPartNumber,
-      manufacturerPartNumber: group.manufacturerPartNumber,
-      unitCount,
-      columns,
-      tintIndex: group.tintIndex,
-    };
-  });
+    if (group.groupType === "general" || unitCount <= 1) {
+      finalGroups.push({
+        key: group.key,
+        featureId: group.featureId,
+        featureName: group.featureName,
+        displayName: group.displayName,
+        groupType: group.groupType,
+        businessPartNumber: group.businessPartNumber,
+        manufacturerPartNumber: group.manufacturerPartNumber,
+        unitCount,
+        columns: sortedColumns.map((column) => ({
+          ...column,
+          displayLabel: unitCount > 1 ? `U${column.unitIndex} · ${column.fieldLabel}` : column.fieldLabel,
+        })),
+        tintIndex: group.tintIndex,
+      });
+      continue;
+    }
+
+    // Same P/N with multiple installed units → separate top headers (Router 1, Router 2, …).
+    for (let unit = 1; unit <= unitCount; unit += 1) {
+      const unitColumns = sortedColumns.filter((column) => column.unitIndex === unit);
+      if (unitColumns.length === 0) continue;
+      finalGroups.push({
+        key: `${group.key}:u${unit}`,
+        featureId: group.featureId,
+        featureName: group.featureName,
+        displayName: `${group.displayName} ${unit}`,
+        groupType: group.groupType,
+        businessPartNumber: group.businessPartNumber,
+        manufacturerPartNumber: group.manufacturerPartNumber,
+        unitCount: 1,
+        columns: unitColumns.map((column) => ({
+          ...column,
+          displayLabel: column.fieldLabel,
+          groupKey: `${group.key}:u${unit}`,
+        })),
+        tintIndex: group.tintIndex,
+      });
+    }
+  }
 
   return {
     columns: finalGroups.flatMap((group) => group.columns),

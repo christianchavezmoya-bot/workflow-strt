@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anyMatchesWordStart, matchesWordStart, tokenizeWords } from "./textMatch";
+import { anyMatchesWordStart, matchesPrefixStart, matchesWordStart, tokenizeWords } from "./textMatch";
 
 describe("tokenizeWords", () => {
   it("splits on hyphens and punctuation", () => {
@@ -31,6 +31,15 @@ describe("matchesWordStart", () => {
   it("matches multi-word phrases by word start", () => {
     expect(matchesWordStart("base station alpha", "base stat")).toBe(true);
     expect(matchesWordStart("base station alpha", "ba st")).toBe(true);
+  });
+});
+
+describe("matchesPrefixStart", () => {
+  it("matches only from the start of a value", () => {
+    expect(matchesPrefixStart("Ghlyu", "gh")).toBe(true);
+    expect(matchesPrefixStart("Ghlyu", "ly")).toBe(false);
+    expect(matchesPrefixStart("Bright Ghlyu", "gh")).toBe(false);
+    expect(matchesPrefixStart("Bright Ghlyu", "bright")).toBe(true);
   });
 });
 

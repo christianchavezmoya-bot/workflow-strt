@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { projectAssetService } from "../../services/projectAssetService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import { workflowConfigService } from "../../services/workflowConfigService";
@@ -11,6 +12,7 @@ import type { Feature as LibFeature } from "../../types/feature";
 import type { FeatureDependency } from "../../types/featureDependency";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
+import type { WorkflowAssignment } from "../../types/workflowType";
 
 /**
  * Loads everything the capture matrix needs for one project, for the standalone capture
@@ -27,6 +29,7 @@ const RUN_DETAIL_CHUNK_SIZE = 50;
 export interface ProjectCaptureData {
   assets: ProjectAsset[];
   runsMap: Record<string, AssetWorkflowRun[]>;
+  assignmentsMap: Record<string, WorkflowAssignment[]>;
   features: LibFeature[];
   depsByFeature: Record<string, FeatureDependency[]>;
   featureSelectionsByConfig: FeatureSelection[][];
@@ -48,6 +51,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 export function useProjectCaptureData(projectId: string, productId?: string): ProjectCaptureData {
   const [assets, setAssets] = useState<ProjectAsset[]>([]);
   const [runsMap, setRunsMap] = useState<Record<string, AssetWorkflowRun[]>>({});
+  const [assignmentsMap, setAssignmentsMap] = useState<Record<string, WorkflowAssignment[]>>({});
   const [features, setFeatures] = useState<LibFeature[]>([]);
   const [depsByFeature, setDepsByFeature] = useState<Record<string, FeatureDependency[]>>({});
   const [publishedConfigs, setPublishedConfigs] = useState<WorkflowConfig[]>([]);
@@ -137,6 +141,36 @@ export function useProjectCaptureData(projectId: string, productId?: string): Pr
     return () => { cancelled = true; };
   }, [assetsKey, projectId]);
 
+  // ── Workflow assignments (workflow config names on Asset & job columns) ─
+  useEffect(() => {
+    if (assetsKey === "") {
+      setAssignmentsMap({});
+      return;
+    }
+    let cancelled = false;
+    const assetIds = assetsKey.split("|");
+
+    void Promise.all(
+      chunk(assetIds, RUN_DETAIL_CHUNK_SIZE).flatMap((ids) =>
+        ids.map(async (assetId) => {
+          try {
+            const rows = await assetWorkflowAssignmentService.listByAsset(assetId);
+            return [assetId, rows] as const;
+          } catch {
+            return [assetId, [] as WorkflowAssignment[]] as const;
+          }
+        }),
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      const next: Record<string, WorkflowAssignment[]> = {};
+      for (const [assetId, rows] of entries) next[assetId] = rows;
+      setAssignmentsMap(next);
+    });
+
+    return () => { cancelled = true; };
+  }, [assetsKey]);
+
   // ── Feature catalogue for capture columns ─────────────────────────────────
   useEffect(() => {
     if (!productId) {
@@ -225,6 +259,7 @@ export function useProjectCaptureData(projectId: string, productId?: string): Pr
   return {
     assets,
     runsMap,
+    assignmentsMap,
     features,
     depsByFeature,
     featureSelectionsByConfig,

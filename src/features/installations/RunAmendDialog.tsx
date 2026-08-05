@@ -7,8 +7,9 @@ import { AccessTimeOutlined, CloseOutlined, HistoryOutlined } from "@mui/icons-m
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { useAuth } from "../../hooks/useAuth";
-import { buildProjectCaptureTable, type ProjectCaptureColumn } from "../../utils/projectCaptureTable";
+import { buildProjectCaptureTable, type ProjectCaptureColumn, type ProjectCaptureGroup } from "../../utils/projectCaptureTable";
 import { selectAmendableColumns } from "../../utils/captureTableEdit";
+import { groupCaptureColumnsByFeature } from "../../utils/captureTableExport";
 import { canEditRun } from "../../utils/runEditPermissions";
 import { featureService } from "../../services/featureService";
 import type { AssetWorkflowRun, RunAmendment } from "../../types/assetWorkflowRun";
@@ -80,13 +81,26 @@ export default function RunAmendDialog({ open, asset, run, projectId, onClose, o
 
   // Reuse the same builder the matrix uses, scoped to this one asset, so the editable field
   // list here can never drift from the columns shown in the table.
-  const { columns, cells } = useMemo(() => {
-    if (!run || features.length === 0) return { columns: [] as ProjectCaptureColumn[], cells: {} as Record<string, string> };
-    const table = buildProjectCaptureTable([asset], { [asset.id]: [run] }, features);
-    return { columns: table.columns, cells: table.rows[0]?.cells ?? {} };
+  const table = useMemo(() => {
+    if (!run || features.length === 0) {
+      return { columns: [] as ProjectCaptureColumn[], groups: [] as ProjectCaptureGroup[], rows: [] };
+    }
+    return buildProjectCaptureTable([asset], { [asset.id]: [run] }, features);
   }, [asset, features, run]);
 
+  const { columns, cells } = useMemo(() => {
+    if (!run || features.length === 0) {
+      return { columns: [] as ProjectCaptureColumn[], cells: {} as Record<string, string> };
+    }
+    return { columns: table.columns, cells: table.rows[0]?.cells ?? {} };
+  }, [features.length, run, table.columns, table.rows]);
+
   const editableColumns = useMemo(() => selectAmendableColumns(columns), [columns]);
+
+  const editableFeatureGroups = useMemo(
+    () => groupCaptureColumnsByFeature(editableColumns, table.groups),
+    [editableColumns, table.groups],
+  );
 
   const saveField = useCallback(async (column: ProjectCaptureColumn) => {
     if (!run || !column.stepId || !column.inputId) return;
@@ -189,31 +203,43 @@ export default function RunAmendDialog({ open, asset, run, projectId, onClose, o
                 <Typography variant="caption" color="text.disabled">
                   Captured values are read-only for you on this run.
                 </Typography>
-              ) : editableColumns.length === 0 ? (
+              ) : editableFeatureGroups.length === 0 ? (
                 <Typography variant="caption" color="text.disabled">
                   No editable text fields on this run. Photo, video and signature captures cannot
                   be amended here.
                 </Typography>
               ) : (
-                <Stack spacing={1.25}>
-                  {editableColumns.map((column) => {
-                    const current = cells[column.id] ?? "";
-                    const draft = drafts[column.id];
-                    return (
-                      <Stack key={column.id} direction="row" spacing={1} alignItems="center">
-                        <TextField
-                          size="small"
-                          fullWidth
-                          label={column.displayLabel || column.fieldLabel}
-                          value={draft ?? current}
-                          onChange={(e) => setDrafts((prev) => ({ ...prev, [column.id]: e.target.value }))}
-                          onBlur={() => void saveField(column)}
-                          disabled={savingColumnId === column.id}
-                        />
-                        {savingColumnId === column.id && <CircularProgress size={16} />}
+                <Stack spacing={2}>
+                  {editableFeatureGroups.map((group) => (
+                    <Box key={group.key}>
+                      <Typography variant="subtitle2" sx={{ mb: 0.25 }}>{group.label}</Typography>
+                      {group.subtitle && (
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.75 }}>
+                          {group.subtitle}
+                        </Typography>
+                      )}
+                      <Stack spacing={1.25}>
+                        {group.columns.map((column) => {
+                          const current = cells[column.id] ?? "";
+                          const draft = drafts[column.id];
+                          return (
+                            <Stack key={column.id} direction="row" spacing={1} alignItems="center">
+                              <TextField
+                                size="small"
+                                fullWidth
+                                label={column.displayLabel || column.fieldLabel}
+                                value={draft ?? current}
+                                onChange={(e) => setDrafts((prev) => ({ ...prev, [column.id]: e.target.value }))}
+                                onBlur={() => void saveField(column)}
+                                disabled={savingColumnId === column.id}
+                              />
+                              {savingColumnId === column.id && <CircularProgress size={16} />}
+                            </Stack>
+                          );
+                        })}
                       </Stack>
-                    );
-                  })}
+                    </Box>
+                  ))}
                 </Stack>
               )}
             </Box>

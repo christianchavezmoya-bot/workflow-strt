@@ -42,3 +42,19 @@ export function anyMatchesWordStart(
 ): boolean {
   return haystacks.some((h) => matchesWordStart(h, query));
 }
+
+/** Strict prefix match for capture cell values — query must match from character 0 only. */
+export function matchesPrefixStart(haystack: string | undefined | null, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (!haystack) return false;
+  return haystack.trim().toLowerCase().startsWith(q);
+}
+
+/** True when any haystack matches via strict prefix. */
+export function anyMatchesPrefixStart(
+  haystacks: Array<string | undefined | null>,
+  query: string,
+): boolean {
+  return haystacks.some((h) => matchesPrefixStart(h, query));
+}

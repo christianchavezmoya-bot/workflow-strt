@@ -17,6 +17,7 @@ import { useProjectCaptureData } from "./useProjectCaptureData";
 import { pickCaptureRun } from "../../utils/captureSpreadsheet";
 import { canEditRun } from "../../utils/runEditPermissions";
 import { resolveProjectScopeId } from "../../utils/resolveProjectScopeId";
+import { buildStandaloneCaptureJobColumns } from "../../utils/captureAssetJobColumns";
 import type { ProjectAsset } from "../../types/projectAsset";
 
 const PROJECT_PARAM = "project";
@@ -26,8 +27,8 @@ const PROJECT_PARAM = "project";
  *
  * Split out of AssetInstallationPage so the broad "what has this job captured" view does not
  * boot the operations table, its filters, dialogs and bulk actions — and so it has a URL that
- * can be bookmarked or opened in its own tab. Cell editing stays on the assets page; here the
- * only mutation path is the Edit column, which opens the run amend dialog.
+ * can be bookmarked or opened in its own tab. The only mutation path is the Edit column, which
+ * opens the run amend dialog.
  */
 export default function CaptureTablePage() {
   const navigate = useNavigate();
@@ -35,6 +36,7 @@ export default function CaptureTablePage() {
   const { user } = useAuth();
   const can = usePermissions();
   const projects = useAppSelector((s) => s.projects.items);
+  const users = useAppSelector((s) => s.users.items);
 
   const rawProjectId = searchParams.get(PROJECT_PARAM) ?? "";
   const projectId = useMemo(
@@ -48,23 +50,18 @@ export default function CaptureTablePage() {
   const productId = project?.productIds?.[0];
 
   const {
-    assets, runsMap, features, depsByFeature, featureSelectionsByConfig, maxUnitsByFeature,
-    activeCountForAsset, loading, runsLoading, error, applyRunUpdate, reload,
+    assets, runsMap, assignmentsMap, features, depsByFeature, featureSelectionsByConfig,
+    maxUnitsByFeature, activeCountForAsset, loading, runsLoading, error, applyRunUpdate, reload,
   } = useProjectCaptureData(projectId, productId);
 
   const [amendAsset, setAmendAsset] = useState<ProjectAsset | null>(null);
 
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
+  const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
-  const assetJobColumns = useMemo<CaptureSpreadsheetAssetJobColumn[]>(() => [
-    { id: "assetName", label: "Asset Name", valueFor: (a: ProjectAsset) => a.assetName || "-" },
-    { id: "serialNumber", label: "Serial #", valueFor: (a: ProjectAsset) => a.serialNumber || "-" },
-    {
-      id: "location",
-      label: "Location",
-      valueFor: (a: ProjectAsset) => a.location || projectMap.get(a.projectId)?.siteName || "-",
-    },
-  ], [projectMap]);
+  const assetJobColumns = useMemo<CaptureSpreadsheetAssetJobColumn[]>(() =>
+    buildStandaloneCaptureJobColumns({ projectMap, userMap, assignmentsMap, runsMap }),
+  [assignmentsMap, projectMap, runsMap, userMap]);
 
   const handleProjectChange = useCallback((nextId: string) => {
     const next = new URLSearchParams(searchParams);
@@ -73,11 +70,6 @@ export default function CaptureTablePage() {
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 
-  /**
-   * The Edit column. Two states, both driven by canEditRun so the UI cannot drift from the
-   * server rule: before customer sign-off a permitted role may amend the existing run; once
-   * the customer has signed the run is evidence and only a new run can change the data.
-   */
   const renderEditAction = useCallback((asset: ProjectAsset) => {
     const run = pickCaptureRun(runsMap[asset.id] ?? []);
     if (!run) {
@@ -141,6 +133,10 @@ export default function CaptureTablePage() {
       </Box>
     );
   }
+
+  const exportFilenameBase = project
+    ? `capture-${project.jobNumber}-${new Date().toISOString().slice(0, 10)}`
+    : `capture-export-${new Date().toISOString().slice(0, 10)}`;
 
   return (
     <Stack spacing={2} sx={{ p: { xs: 1.5, md: 2.5 } }}>
@@ -218,6 +214,9 @@ export default function CaptureTablePage() {
             onRunUpdated={applyRunUpdate}
             assetJobColumns={assetJobColumns}
             renderActions={renderEditAction}
+            exportEnabled
+            exportFilenameBase={exportFilenameBase}
+            exportProjectLabel={project ? `${project.jobNumber} — ${project.customerName}` : undefined}
           />
         </>
       )}

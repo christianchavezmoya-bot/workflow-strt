@@ -10,14 +10,22 @@ import {
   Checkbox,
   CircularProgress,
   Dialog,
-  Menu,
-  MenuItem,
+  DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
+  FormGroup,
+  ListItemIcon,
+  ListItemText,
+  Menu,
+  MenuItem,
+  Popover,
   FormControlLabel,
   IconButton,
   InputAdornment,
   Paper,
+  Radio,
+  RadioGroup,
   Stack,
   Table,
   TableBody,
@@ -30,25 +38,25 @@ import {
   Typography,
 } from "@mui/material";
 import CloseOutlined from "@mui/icons-material/CloseOutlined";
+import FileDownloadOutlined from "@mui/icons-material/FileDownloadOutlined";
 import SearchOutlined from "@mui/icons-material/SearchOutlined";
 import ViewColumnOutlined from "@mui/icons-material/ViewColumnOutlined";
 import ArrowDropDown from "@mui/icons-material/ArrowDropDown";
+import SortByAlphaOutlined from "@mui/icons-material/SortByAlphaOutlined";
+import ArrowUpwardOutlined from "@mui/icons-material/ArrowUpwardOutlined";
+import ArrowDownwardOutlined from "@mui/icons-material/ArrowDownwardOutlined";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 import type { Feature } from "../../types/feature";
 import type { FeatureDependency } from "../../types/featureDependency";
 import type { FeatureSelection } from "../../services/productConfigService";
 import type { UserRole } from "../../types/user";
+import { buildProjectCaptureTable, buildSchemaCaptureTableSkeleton, findCaptureMatch, getCaptureTableStructureKey, type ProjectCaptureColumn, type ProjectCaptureGroup, type ProjectCaptureRow } from "../../utils/projectCaptureTable";
 import {
-  buildProjectCaptureTable,
-  buildSchemaCaptureTableSkeleton,
-  findCaptureMatch,
-  getCaptureTableStructureKey,
-  type ProjectCaptureColumn,
-  type ProjectCaptureGroup,
-  type ProjectCaptureRow,
-} from "../../utils/projectCaptureTable";
-import { anyMatchesWordStart, matchesWordStart } from "../../utils/textMatch";
+  buildCaptureExportColumns, buildCaptureExportContext,
+  runCaptureExport, type CaptureExportColumn, type CaptureExportFormat,
+} from "../../utils/captureTableExport";
+import { anyMatchesWordStart, matchesPrefixStart } from "../../utils/textMatch";
 import { computeCaptureHeaderStickyTops } from "../../utils/captureSpreadsheet";
 import { STATUS_LABELS } from "./assetStatusDisplay";
 import { canEditRun } from "../../utils/runEditPermissions";
@@ -109,6 +117,10 @@ export type CaptureSpreadsheetDialogProps = {
   selectedAssetIds?: Set<string>;
   onToggleAssetSelection?: (assetId: string, checked: boolean) => void;
   onToggleVisibleAssetSelection?: (assetIds: string[], checked: boolean) => void;
+  /** Show Export button + dialog (standalone capture route). */
+  exportEnabled?: boolean;
+  exportFilenameBase?: string;
+  exportProjectLabel?: string;
 };
 
 /**
@@ -118,8 +130,9 @@ export type CaptureSpreadsheetDialogProps = {
  */
 const NO_MAX_UNITS: Record<string, number> = {};
 
-const LS_HIDDEN_KEY = "capture_spreadsheet_hidden_groups_v1";
-const DEFAULT_HEADER_STICKY_TOPS = { name: 0, pn: 36, fields: 72 };
+const LS_HIDDEN_KEY = "capture_spreadsheet_hidden_groups_v2";
+const ASSET_JOB_SECTION_KEY = "asset-job-section";
+const DEFAULT_HEADER_STICKY_TOPS = { name: 0, pn: 32, fields: 64 };
 
 function solidFieldHeaderBg(group: ProjectCaptureGroup): string {
   return groupPalette(group).subHeader;
@@ -148,32 +161,35 @@ function rowSearchMatch(row: ProjectCaptureRow, asset: ProjectAsset, query: stri
   if (anyMatchesWordStart([asset.assetTag, asset.assetName, asset.serialNumber, asset.status], query)) {
     return true;
   }
-  return Boolean(findCaptureMatch(row.searchHits, query, matchesWordStart));
+  return Boolean(findCaptureMatch(row.searchHits, query, matchesPrefixStart));
 }
 
-function splitLabelIntoTwoLines(label: string) {
+function splitLabelIntoHeaderLines(label: string, maxLines = 3) {
   if (!label) return label;
   const normalized = label.replace(/\s+/g, " ").trim();
-  const dashIndex = normalized.indexOf(" - ");
-  if (dashIndex > 0) return `${normalized.slice(0, dashIndex)}\n${normalized.slice(dashIndex + 3)}`;
+  if (normalized.length <= 42) return normalized;
 
   const words = normalized.split(" ");
-  if (words.length < 3) return normalized;
+  if (words.length <= maxLines) return words.join("\n");
 
-  const target = Math.floor(normalized.length / 2);
-  let bestIndex = 1;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  let current = words[0].length;
-  for (let i = 1; i < words.length; i += 1) {
-    const distance = Math.abs(target - current);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestIndex = i;
+  const lines: string[] = [];
+  let bucket: string[] = [];
+  let lineLen = 0;
+  const targetPerLine = Math.ceil(normalized.length / maxLines);
+
+  for (const word of words) {
+    const nextLen = lineLen + (bucket.length ? 1 : 0) + word.length;
+    if (bucket.length > 0 && nextLen > targetPerLine && lines.length < maxLines - 1) {
+      lines.push(bucket.join(" "));
+      bucket = [word];
+      lineLen = word.length;
+    } else {
+      bucket.push(word);
+      lineLen = nextLen;
     }
-    current += words[i].length + 1;
   }
-
-  return `${words.slice(0, bestIndex).join(" ")}\n${words.slice(bestIndex).join(" ")}`;
+  if (bucket.length) lines.push(bucket.join(" "));
+  return lines.slice(0, maxLines).join("\n");
 }
 
 export default function CaptureSpreadsheetDialog({
@@ -203,12 +219,19 @@ export default function CaptureSpreadsheetDialog({
   selectedAssetIds,
   onToggleAssetSelection,
   onToggleVisibleAssetSelection,
+  exportEnabled = false,
+  exportFilenameBase = "capture-export",
+  exportProjectLabel,
 }: CaptureSpreadsheetDialogProps) {
   const [search, setSearch] = useState("");
   const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(loadHiddenGroups);
-  const [columnPickerOpen, setColumnPickerOpen] = useState(false);
+  const [columnPickerAnchor, setColumnPickerAnchor] = useState<HTMLElement | null>(null);
   const [filterMenu, setFilterMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({ anchorEl: null, key: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [columnSort, setColumnSort] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<CaptureExportFormat>("xlsx");
+  const [exportSelectedColumnIds, setExportSelectedColumnIds] = useState<string[]>([]);
   const [cellPatches, setCellPatches] = useState<Record<string, string>>({});
   const [cellError, setCellError] = useState<string | null>(null);
   const headerRow1Ref = useRef<HTMLTableRowElement>(null);
@@ -264,6 +287,10 @@ export default function CaptureSpreadsheetDialog({
   const signOffGroups = useMemo(() => visibleGroups.filter((group) => group.groupType === "general"), [visibleGroups]);
   const orderedGroups = useMemo(() => [...componentGroups, ...signOffGroups], [componentGroups, signOffGroups]);
   const visibleColumns = useMemo(() => orderedGroups.flatMap((group) => group.columns), [orderedGroups]);
+  const visibleAssetJobColumns = useMemo(() => {
+    if (hiddenGroups.has(ASSET_JOB_SECTION_KEY)) return [];
+    return assetJobColumns.filter((column) => !hiddenGroups.has(`asset-job:${column.id}`));
+  }, [assetJobColumns, hiddenGroups]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -276,7 +303,7 @@ export default function CaptureSpreadsheetDialog({
       resizeObserver.disconnect();
       window.removeEventListener("resize", measureHeaderStickyTops);
     };
-  }, [measureHeaderStickyTops, open, orderedGroups, assetJobColumns, columnPickerOpen, columnFilters]);
+  }, [measureHeaderStickyTops, open, orderedGroups, visibleAssetJobColumns, columnPickerAnchor, columnFilters, columnSort]);
 
   const runDiagnostics = useMemo(() => {
     const runs = Object.values(runsMap).flat();
@@ -295,6 +322,8 @@ export default function CaptureSpreadsheetDialog({
       validKeys.add(group.key);
       for (const column of group.columns) validKeys.add(column.id);
     }
+    for (const column of assetJobColumns) validKeys.add(`asset-job:${column.id}`);
+    validKeys.add(ASSET_JOB_SECTION_KEY);
 
     let changed = false;
     const pruned = new Set<string>();
@@ -357,7 +386,7 @@ export default function CaptureSpreadsheetDialog({
     if (key == "actions") return renderActions ? "Available" : "-";
     if (key.startsWith("asset-job:")) {
       const columnId = key.slice("asset-job:".length);
-      const column = assetJobColumns.find((item) => item.id === columnId);
+      const column = visibleAssetJobColumns.find((item) => item.id === columnId);
       return column?.valueFor(asset) || "-";
     }
     if (key.startsWith("capture:")) {
@@ -366,7 +395,7 @@ export default function CaptureSpreadsheetDialog({
       return value.trim().length > 0 ? value : "-";
     }
     return "-";
-  }, [assetJobColumns, renderActions]);
+  }, [renderActions, visibleAssetJobColumns]);
 
   const columnFilterOptions = useMemo(() => {
     const next: Record<string, string[]> = {};
@@ -378,7 +407,7 @@ export default function CaptureSpreadsheetDialog({
       ensure("assetTag", getColumnFilterValue("assetTag", asset, capture, mergedCells));
       ensure("status", getColumnFilterValue("status", asset, capture, mergedCells));
       ensure("actions", getColumnFilterValue("actions", asset, capture, mergedCells));
-      for (const column of assetJobColumns) {
+      for (const column of visibleAssetJobColumns) {
         ensure(`asset-job:${column.id}`, getColumnFilterValue(`asset-job:${column.id}`, asset, capture, mergedCells));
       }
       for (const group of orderedGroups) {
@@ -389,7 +418,7 @@ export default function CaptureSpreadsheetDialog({
     }
     for (const key of Object.keys(next)) next[key].sort((a, b) => a.localeCompare(b));
     return next;
-  }, [assetJobColumns, getColumnFilterValue, orderedGroups, rows]);
+  }, [getColumnFilterValue, orderedGroups, rows, visibleAssetJobColumns]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -404,16 +433,27 @@ export default function CaptureSpreadsheetDialog({
     });
   }, [columnFilters, getColumnFilterValue, rows, search]);
 
+  const sortedFilteredRows = useMemo(() => {
+    if (!columnSort) return filteredRows;
+    const { key, direction } = columnSort;
+    const mult = direction === "asc" ? 1 : -1;
+    return [...filteredRows].sort((a, b) => {
+      const av = getColumnFilterValue(key, a.asset, a.capture, a.mergedCells);
+      const bv = getColumnFilterValue(key, b.asset, b.capture, b.mergedCells);
+      return mult * av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+    });
+  }, [columnSort, filteredRows, getColumnFilterValue]);
+
   const selectionEnabled = !hideSelectionColumn && Boolean(selectedAssetIds && onToggleAssetSelection && onToggleVisibleAssetSelection);
-  const filteredAssetIds = useMemo(() => filteredRows.map(({ asset }) => asset.id), [filteredRows]);
+  const filteredAssetIds = useMemo(() => sortedFilteredRows.map(({ asset }) => asset.id), [sortedFilteredRows]);
   // Virtualization was originally scoped to web to limit the blast radius, which left the
   // constrained device rendering every row: a 150-asset job mounted 150 rows x every capture
   // column on a phone. Rows are a fixed CAPTURE_ROW_HEIGHT on both platforms and the native
   // full-screen dialog gives the virtualizer a bounded scroll container, so the same path is
   // safe here — and native's table is read-only, so no focused input can be unmounted by a
   // scroll.
-  const shouldVirtualizeRows = filteredRows.length >= CAPTURE_VIRTUALIZE_MIN_ROWS;
-  const tableBodyColSpan = visibleColumns.length + assetJobColumns.length + (selectionEnabled ? 4 : 3);
+  const shouldVirtualizeRows = sortedFilteredRows.length >= CAPTURE_VIRTUALIZE_MIN_ROWS;
+  const tableBodyColSpan = visibleColumns.length + visibleAssetJobColumns.length + (selectionEnabled ? 4 : 3);
   const tableScrollMaxHeight = embedded
     ? (shouldVirtualizeRows ? "min(70vh, 720px)" : undefined)
     : (fullScreen ? "calc(100vh - 200px)" : "70vh");
@@ -455,74 +495,158 @@ export default function CaptureSpreadsheetDialog({
     setColumnFilters((prev) => ({ ...prev, [key]: [] }));
   }, []);
 
+  const setSortForColumn = useCallback((key: string, direction: "asc" | "desc") => {
+    setColumnSort({ key, direction });
+    setFilterMenu({ anchorEl: null, key: "" });
+  }, []);
+
+  const exportColumnOptions = useMemo(
+    () => buildCaptureExportColumns(visibleAssetJobColumns, orderedGroups),
+    [orderedGroups, visibleAssetJobColumns],
+  );
+
+  useEffect(() => {
+    if (!exportDialogOpen) return;
+    setExportSelectedColumnIds(exportColumnOptions.map((column) => column.id));
+  }, [exportColumnOptions, exportDialogOpen]);
+
+  const runExport = useCallback(() => {
+    const selected = exportColumnOptions.filter((column) => exportSelectedColumnIds.includes(column.id));
+    if (selected.length === 0) return;
+    const ctx = buildCaptureExportContext(
+      exportFilenameBase,
+      exportProjectLabel,
+      selected,
+      sortedFilteredRows.map(({ asset, mergedCells }) => ({ asset, cells: mergedCells })),
+    );
+    runCaptureExport(ctx, exportFormat);
+    setExportDialogOpen(false);
+  }, [exportColumnOptions, exportFilenameBase, exportFormat, exportProjectLabel, exportSelectedColumnIds, sortedFilteredRows]);
+
   const renderHeaderLabel = useCallback((label: string, filterKey: string) => {
     const activeCount = columnFilters[filterKey]?.length ?? 0;
+    const sortActive = columnSort?.key === filterKey;
     return (
-      <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.15} sx={{ width: "100%" }}>
+      <Stack direction="row" alignItems="flex-start" justifyContent="center" spacing={0.15} sx={{ width: "100%" }}>
         <Typography
           component="span"
           sx={{
-            display: "block",
+            display: "-webkit-box",
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
             whiteSpace: "pre-line",
-            lineHeight: 1.25,
-            minHeight: 24,
+            lineHeight: 1.2,
+            maxHeight: "3.6em",
             flex: 1,
             color: "inherit",
+            wordBreak: "break-word",
           }}
         >
-          {splitLabelIntoTwoLines(label)}
+          {splitLabelIntoHeaderLines(label, 3)}
         </Typography>
         <IconButton
           size="small"
-          sx={{ p: 0.2, color: activeCount > 0 ? "warning.light" : "inherit" }}
+          sx={{
+            p: 0.2,
+            mt: -0.25,
+            color: activeCount > 0 || sortActive ? "warning.light" : "inherit",
+          }}
           onClick={(event) => setFilterMenu({ anchorEl: event.currentTarget, key: filterKey })}
         >
           <ArrowDropDown fontSize="small" />
         </IconButton>
       </Stack>
     );
-  }, [columnFilters]);
+  }, [columnFilters, columnSort?.key]);
 
-  const renderGroupPicker = () => (
-    <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: "rgba(255,255,255,0.04)", maxHeight: 260, overflowY: "auto" }}>
-      <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
-        Toggle columns (alphabetical by feature group)
-      </Typography>
-      <Stack spacing={1.25}>
-        {columnGroups.map((group) => (
-          <Box key={group.key}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  size="small"
-                  checked={!hiddenGroups.has(group.key)}
-                  onChange={() => toggleHiddenKey(group.key)}
-                />
-              }
-              label={<Typography variant="caption" fontWeight={700}>{group.displayName}</Typography>}
-              sx={{ alignItems: "flex-start", m: 0 }}
-            />
-            <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ pl: 3.5, pt: 0.5 }}>
-              {group.columns.map((column) => (
-                <FormControlLabel
-                  key={column.id}
-                  control={
-                    <Checkbox
-                      size="small"
-                      checked={!hiddenGroups.has(column.id)}
-                      disabled={hiddenGroups.has(group.key)}
-                      onChange={() => toggleHiddenKey(column.id)}
-                    />
-                  }
-                  label={<Typography variant="caption">{column.displayLabel}</Typography>}
-                  sx={{ alignItems: "flex-start", m: 0 }}
-                />
-              ))}
-            </Stack>
-          </Box>
-        ))}
-      </Stack>
-    </Box>
+  const columnPickerOpen = Boolean(columnPickerAnchor);
+
+  const renderColumnPicker = () => (
+    <Popover
+      open={columnPickerOpen}
+      anchorEl={columnPickerAnchor}
+      onClose={() => setColumnPickerAnchor(null)}
+      anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+      transformOrigin={{ vertical: "top", horizontal: "left" }}
+      slotProps={{ paper: { sx: { width: 320, maxHeight: "min(80vh, 640px)", display: "flex", flexDirection: "column" } } }}
+    >
+      <Box sx={{ px: 2, py: 1.25, borderBottom: "1px solid", borderColor: "divider" }}>
+        <Typography variant="subtitle2">Show / hide columns</Typography>
+        <Typography variant="caption" color="text.secondary">
+          Asset & job, feature groups, and sign-off fields
+        </Typography>
+      </Box>
+      <Box sx={{ overflowY: "auto", px: 1.5, py: 1 }}>
+        <Stack spacing={1.5}>
+          {assetJobColumns.length > 0 && (
+            <Box>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={!hiddenGroups.has(ASSET_JOB_SECTION_KEY)}
+                    onChange={() => toggleHiddenKey(ASSET_JOB_SECTION_KEY)}
+                  />
+                }
+                label={<Typography variant="caption" fontWeight={700}>Asset & job</Typography>}
+                sx={{ alignItems: "flex-start", m: 0 }}
+              />
+              <Stack spacing={0.25} sx={{ pl: 3.5 }}>
+                {assetJobColumns.map((column) => (
+                  <FormControlLabel
+                    key={column.id}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={!hiddenGroups.has(`asset-job:${column.id}`) && !hiddenGroups.has(ASSET_JOB_SECTION_KEY)}
+                        disabled={hiddenGroups.has(ASSET_JOB_SECTION_KEY)}
+                        onChange={() => toggleHiddenKey(`asset-job:${column.id}`)}
+                      />
+                    }
+                    label={<Typography variant="caption">{column.label}</Typography>}
+                    sx={{ alignItems: "flex-start", m: 0 }}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          )}
+
+          {columnGroups.map((group) => (
+            <Box key={group.key}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={!hiddenGroups.has(group.key)}
+                    onChange={() => toggleHiddenKey(group.key)}
+                  />
+                }
+                label={<Typography variant="caption" fontWeight={700}>{group.displayName}</Typography>}
+                sx={{ alignItems: "flex-start", m: 0 }}
+              />
+              <Stack spacing={0.25} sx={{ pl: 3.5 }}>
+                {group.columns.map((column) => (
+                  <FormControlLabel
+                    key={column.id}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={!hiddenGroups.has(column.id) && !hiddenGroups.has(group.key)}
+                        disabled={hiddenGroups.has(group.key)}
+                        onChange={() => toggleHiddenKey(column.id)}
+                      />
+                    }
+                    label={<Typography variant="caption">{column.displayLabel}</Typography>}
+                    sx={{ alignItems: "flex-start", m: 0 }}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          ))}
+        </Stack>
+      </Box>
+    </Popover>
   );
 
   const canEditCaptureCell = useCallback((
@@ -575,7 +699,7 @@ export default function CaptureSpreadsheetDialog({
 
   const virtualRowProps = useMemo(() => ({
     orderedGroups,
-    assetJobColumns,
+    assetJobColumns: visibleAssetJobColumns,
     selectionEnabled,
     onToggleAssetSelection,
     editableForColumn: canEditCaptureCell,
@@ -584,7 +708,7 @@ export default function CaptureSpreadsheetDialog({
     renderStatus,
     renderActions,
   }), [
-    assetJobColumns,
+    visibleAssetJobColumns,
     canEditCaptureCell,
     onPatchCell,
     onToggleAssetSelection,
@@ -595,31 +719,66 @@ export default function CaptureSpreadsheetDialog({
     selectionEnabled,
   ]);
 
+  const headerRow2Sx = {
+    top: headerStickyTops.pn,
+    position: "sticky" as const,
+    zIndex: HEADER_Z.row2,
+    fontWeight: 700,
+    fontSize: 11,
+    whiteSpace: "nowrap" as const,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    height: 28,
+    maxHeight: 28,
+    py: 0.25,
+    px: 0.75,
+    lineHeight: 1.2,
+  };
+
   const inner = (
     <Stack spacing={1.5} sx={embedded ? { width: "100%" } : undefined}>
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
         <TextField
           size="small"
-          placeholder="Search asset, feature, P/N, serial, firmware, captured value…"
+          placeholder="Search asset, feature, P/N, serial, firmware…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
-                <SearchOutlined sx={{ fontSize: 18 }} />
+                <SearchOutlined sx={{ fontSize: 18, color: "text.secondary" }} />
               </InputAdornment>
             ),
           }}
-          sx={{ flex: 1, minWidth: 220, maxWidth: embedded ? 420 : undefined }}
+          sx={{
+            flex: 1,
+            minWidth: 220,
+            maxWidth: embedded ? 480 : undefined,
+            "& .MuiOutlinedInput-root": {
+              bgcolor: "transparent",
+              "& fieldset": { borderColor: "divider" },
+            },
+          }}
         />
         <Button
           size="small"
           variant="outlined"
           startIcon={<ViewColumnOutlined fontSize="small" />}
-          onClick={() => setColumnPickerOpen((v) => !v)}
+          onClick={(event) => setColumnPickerAnchor(event.currentTarget)}
         >
           Columns
         </Button>
+        {exportEnabled && (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<FileDownloadOutlined fontSize="small" />}
+            onClick={() => setExportDialogOpen(true)}
+            disabled={sortedFilteredRows.length === 0}
+          >
+            Export
+          </Button>
+        )}
         {!embedded && (
           <Button size="small" variant="contained" onClick={onClose}>
             Close
@@ -627,7 +786,7 @@ export default function CaptureSpreadsheetDialog({
         )}
       </Stack>
 
-      {columnPickerOpen && renderGroupPicker()}
+      {renderColumnPicker()}
 
       {cellError && (
         <Alert severity="error" onClose={() => setCellError(null)} sx={{ py: 0.25 }}>
@@ -720,11 +879,11 @@ export default function CaptureSpreadsheetDialog({
               >
                 {renderHeaderLabel("Asset Tag", "assetTag")}
               </TableCell>
-              {assetJobColumns.length > 0 && (
+              {visibleAssetJobColumns.length > 0 && (
                 <TableCell
                   key="asset-job:name"
                   align="center"
-                  colSpan={assetJobColumns.length}
+                  colSpan={visibleAssetJobColumns.length}
                   sx={{
                     top: headerStickyTops.name,
                     position: "sticky",
@@ -733,7 +892,11 @@ export default function CaptureSpreadsheetDialog({
                     color: "common.white",
                     fontWeight: 700,
                     border: `2px solid ${ASSET_JOB_PALETTE.border}`,
-                    minWidth: assetJobColumns.length * ASSET_JOB_COL_W,
+                    minWidth: visibleAssetJobColumns.length * ASSET_JOB_COL_W,
+                    height: 32,
+                    maxHeight: 32,
+                    py: 0.5,
+                    whiteSpace: "nowrap",
                   }}
                 >
                   ASSET & JOB
@@ -799,18 +962,15 @@ export default function CaptureSpreadsheetDialog({
               </TableCell>
             </TableRow>
             <TableRow ref={headerRow2Ref}>
-              {assetJobColumns.length > 0 && (
+              {visibleAssetJobColumns.length > 0 && (
                 <TableCell
                   key="asset-job:pn"
                   align="center"
-                  colSpan={assetJobColumns.length}
+                  colSpan={visibleAssetJobColumns.length}
                   sx={{
-                    top: headerStickyTops.pn,
-                    position: "sticky",
-                    zIndex: HEADER_Z.row2,
+                    ...headerRow2Sx,
                     bgcolor: ASSET_JOB_PALETTE.subHeader,
                     color: ASSET_JOB_PALETTE.text,
-                    fontWeight: 700,
                     borderLeft: `2px solid ${ASSET_JOB_PALETTE.border}`,
                     borderRight: `2px solid ${ASSET_JOB_PALETTE.border}`,
                     borderBottom: `1px solid ${ASSET_JOB_PALETTE.border}`,
@@ -832,12 +992,9 @@ export default function CaptureSpreadsheetDialog({
                     align="center"
                     colSpan={group.columns.length}
                     sx={{
-                      top: headerStickyTops.pn,
-                      position: "sticky",
-                      zIndex: HEADER_Z.row2,
+                      ...headerRow2Sx,
                       bgcolor: palette.subHeader,
                       color: palette.border,
-                      fontWeight: 700,
                       borderLeft: `2px solid ${palette.border}`,
                       borderRight: `2px solid ${palette.border}`,
                       borderBottom: `1px solid ${palette.border}`,
@@ -849,7 +1006,7 @@ export default function CaptureSpreadsheetDialog({
               })}
             </TableRow>
             <TableRow>
-              {assetJobColumns.map((column, index) => (
+              {visibleAssetJobColumns.map((column, index) => (
                 <TableCell
                   key={column.id}
                   align="center"
@@ -863,23 +1020,14 @@ export default function CaptureSpreadsheetDialog({
                     fontSize: 11.5,
                     minWidth: ASSET_JOB_COL_W,
                     borderLeft: index === 0 ? `2px solid ${ASSET_JOB_PALETTE.border}` : "1px solid #D8DEE7",
-                    borderRight: index === assetJobColumns.length - 1 ? `2px solid ${ASSET_JOB_PALETTE.border}` : "1px solid #D8DEE7",
+                    borderRight: index === visibleAssetJobColumns.length - 1 ? `2px solid ${ASSET_JOB_PALETTE.border}` : "1px solid #D8DEE7",
                     borderBottom: `2px solid ${ASSET_JOB_PALETTE.border}`,
                     px: 0.75,
                     py: 0.5,
+                    verticalAlign: "top",
                   }}
                 >
-                  <Typography
-                    component="span"
-                    sx={{
-                      display: "block",
-                      whiteSpace: "pre-line",
-                      lineHeight: 1.25,
-                      minHeight: 26,
-                    }}
-                  >
-                    {renderHeaderLabel(column.label, `asset-job:${column.id}`)}
-                  </Typography>
+                  {renderHeaderLabel(column.label, `asset-job:${column.id}`)}
                 </TableCell>
               ))}
               {orderedGroups.map((group) => {
@@ -903,24 +1051,13 @@ export default function CaptureSpreadsheetDialog({
                       boxShadow: "0 2px 4px rgba(15, 23, 42, 0.12)",
                     }}
                   >
-                    <Typography
-                      component="span"
-                      sx={{
-                        display: "block",
-                        whiteSpace: "pre-line",
-                        lineHeight: 1.2,
-                        minHeight: 24,
-                        color: palette.border,
-                      }}
-                    >
-                      {renderHeaderLabel(column.displayLabel, `capture:${column.id}`)}
-                    </Typography>
+                    {renderHeaderLabel(column.displayLabel, `capture:${column.id}`)}
                   </TableCell>
                 ));
               })}
             </TableRow>
           </TableHead>
-          {filteredRows.length === 0 ? (
+          {sortedFilteredRows.length === 0 ? (
             <TableBody sx={{ position: "relative", zIndex: 0 }}>
               <TableRow>
                 <TableCell colSpan={tableBodyColSpan}>
@@ -933,21 +1070,21 @@ export default function CaptureSpreadsheetDialog({
           ) : shouldVirtualizeRows ? (
             <CaptureVirtualizedTableBody
               scrollRef={scrollContainerRef}
-              rows={filteredRows}
+              rows={sortedFilteredRows}
               colSpan={tableBodyColSpan}
               selectedAssetIds={selectedAssetIds}
               rowProps={virtualRowProps}
             />
           ) : (
             <TableBody sx={{ position: "relative", zIndex: 0 }}>
-              {filteredRows.map(({ asset, capture, mergedCells }, rowIndex) => (
+              {sortedFilteredRows.map(({ asset, capture, mergedCells }, rowIndex) => (
                 <CaptureSpreadsheetRow
                   key={asset.id}
                   asset={asset}
                   capture={capture}
                   rowIndex={rowIndex}
                   orderedGroups={orderedGroups}
-                  assetJobColumns={assetJobColumns}
+                  assetJobColumns={visibleAssetJobColumns}
                   mergedCells={mergedCells}
                   selectionEnabled={selectionEnabled}
                   isSelected={selectedAssetIds?.has(asset.id) ?? false}
@@ -969,6 +1106,19 @@ export default function CaptureSpreadsheetDialog({
         open={Boolean(filterMenu.anchorEl)}
         onClose={() => setFilterMenu({ anchorEl: null, key: "" })}
       >
+        <MenuItem disabled sx={{ opacity: 1 }}>
+          <ListItemIcon sx={{ minWidth: 32 }}><SortByAlphaOutlined fontSize="small" /></ListItemIcon>
+          <ListItemText primaryTypographyProps={{ variant: "caption", fontWeight: 700 }}>Sort</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => filterMenu.key && setSortForColumn(filterMenu.key, "asc")}>
+          <ListItemIcon sx={{ minWidth: 32 }}><ArrowUpwardOutlined fontSize="small" /></ListItemIcon>
+          <ListItemText primary="Ascending (A → Z)" />
+        </MenuItem>
+        <MenuItem onClick={() => filterMenu.key && setSortForColumn(filterMenu.key, "desc")}>
+          <ListItemIcon sx={{ minWidth: 32 }}><ArrowDownwardOutlined fontSize="small" /></ListItemIcon>
+          <ListItemText primary="Descending (Z → A)" />
+        </MenuItem>
+        <Divider />
         <MenuItem
           onClick={() => {
             if (filterMenu.key) clearColumnFilter(filterMenu.key);
@@ -992,6 +1142,65 @@ export default function CaptureSpreadsheetDialog({
           );
         })}
       </Menu>
+
+      <Dialog open={exportDialogOpen} onClose={() => setExportDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Export capture table</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Alert severity="info">
+              Exports {sortedFilteredRows.length} visible row(s) in the same column layout as the table.
+            </Alert>
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Format</Typography>
+              <RadioGroup
+                row
+                value={exportFormat}
+                onChange={(event) => setExportFormat(event.target.value as CaptureExportFormat)}
+              >
+                <FormControlLabel value="xlsx" control={<Radio size="small" />} label="Excel (.xlsx)" />
+                <FormControlLabel value="csv" control={<Radio size="small" />} label="CSV" />
+                <FormControlLabel value="json" control={<Radio size="small" />} label="JSON" />
+              </RadioGroup>
+            </Box>
+            <Box>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                <Typography variant="subtitle2">Columns</Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" onClick={() => setExportSelectedColumnIds(exportColumnOptions.map((c) => c.id))}>
+                    All
+                  </Button>
+                  <Button size="small" onClick={() => setExportSelectedColumnIds([])}>None</Button>
+                </Stack>
+              </Stack>
+              <FormGroup sx={{ maxHeight: 280, overflowY: "auto" }}>
+                {exportColumnOptions.map((column: CaptureExportColumn) => (
+                  <FormControlLabel
+                    key={column.id}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={exportSelectedColumnIds.includes(column.id)}
+                        onChange={(event) => {
+                          setExportSelectedColumnIds((prev) => event.target.checked
+                            ? [...prev, column.id]
+                            : prev.filter((id) => id !== column.id));
+                        }}
+                      />
+                    }
+                    label={<Typography variant="body2">{`${column.groupLabel} · ${column.label}`}</Typography>}
+                  />
+                ))}
+              </FormGroup>
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setExportDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={runExport} disabled={exportSelectedColumnIds.length === 0}>
+            Export
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 
@@ -1014,7 +1223,7 @@ export default function CaptureSpreadsheetDialog({
             Capture table
           </Typography>
           <Tooltip title="Show / hide feature groups and fields">
-            <IconButton size="small" onClick={() => setColumnPickerOpen((v) => !v)}>
+            <IconButton size="small" onClick={(event) => setColumnPickerAnchor(event.currentTarget)}>
               <ViewColumnOutlined fontSize="small" />
             </IconButton>
           </Tooltip>
