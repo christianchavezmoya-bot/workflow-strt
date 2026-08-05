@@ -33,6 +33,9 @@ public static class DbInitializer
         EnsureFeatureProcurementColumns(db);
         EnsureProjectMinimumCompletionPercentColumn(db);
         EnsureProjectTimeZoneColumn(db);
+        // Must run before any query touches InspectionImports (dashboard-workspace does).
+        EnsureInspectionImportColumnNames(db);
+        EnsureNotificationInboxTable(db);
         EnsureLinkableKeyFieldDefinitions(db);
         // Soft-delete columns are model-only (no migration creates them); add them
         // BEFORE any seeding query below hits a !IsDeleted query filter, or a fresh
@@ -776,6 +779,113 @@ public static class DbInitializer
                 cmd.CommandText = "ALTER TABLE Projects ADD COLUMN TimeZoneId TEXT NULL";
                 cmd.ExecuteNonQuery();
             }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Reconciles InspectionImports column names with the entity's [Column] mappings.
+    ///
+    /// InspectionImportEntity maps AssetId, ErrorText and ContentHash to the columns
+    /// "ProjectAssetId", "Error" and "Hash", but
+    /// 20260322100000_WorkflowModeAndInspectionImports creates them as "AssetId",
+    /// "ErrorText" and "ContentHash". On any database built from the migrations, every EF
+    /// query touching InspectionImports therefore fails with
+    /// "SQLite Error 1: no such column: i.ProjectAssetId". That breaks the inspection-imports
+    /// endpoints outright, and also breaks GET /project-assets/dashboard-workspace for any
+    /// user who has assets assigned, because it probes InspectionImports to decide whether an
+    /// asset belongs in the inspection buckets. The result is an empty My Jobs Today /
+    /// INSTALLS tab for field users.
+    ///
+    /// Renaming here rather than editing the entity keeps existing deployments working:
+    /// databases already carrying the mapped names are left untouched.
+    /// Idempotent, and a no-op when the table is absent.
+    /// </summary>
+    private static void EnsureInspectionImportColumnNames(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='InspectionImports'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0) return;
+
+            // (legacy name, mapped name) — rename only when the legacy column is the one present.
+            var renames = new[]
+            {
+                ("AssetId", "ProjectAssetId"),
+                ("ErrorText", "Error"),
+                ("ContentHash", "Hash"),
+            };
+
+            foreach (var (legacy, mapped) in renames)
+            {
+                cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('InspectionImports') WHERE name='{mapped}'";
+                if (Convert.ToInt64(cmd.ExecuteScalar()) > 0) continue;
+
+                cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('InspectionImports') WHERE name='{legacy}'";
+                if (Convert.ToInt64(cmd.ExecuteScalar()) == 0) continue;
+
+                cmd.CommandText = $"ALTER TABLE InspectionImports RENAME COLUMN {legacy} TO {mapped}";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    /// <summary>
+    /// Creates the NotificationInbox table when it is missing.
+    ///
+    /// 20260330011357_NotificationInbox has an empty Up(), and the follow-up
+    /// 20260331123000_ReconcileNotificationInbox carries the real CREATE TABLE — but neither
+    /// ships a .Designer.cs, so EF does not discover them as migrations (66 migration files
+    /// exist, 64 land in __EFMigrationsHistory, and those two are the gap). On a fresh
+    /// database the table is therefore never created and every GET /api/notifications fails
+    /// with "no such table: NotificationInbox" — a 500 on each dashboard load for every role.
+    ///
+    /// DDL mirrors ReconcileNotificationInbox so the two cannot drift.
+    /// Idempotent via IF NOT EXISTS.
+    /// </summary>
+    private static void EnsureNotificationInboxTable(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS NotificationInbox (
+                    Id TEXT PRIMARY KEY NOT NULL,
+                    RecipientUserId TEXT NULL,
+                    RecipientRole TEXT NULL,
+                    EventType TEXT NOT NULL DEFAULT '',
+                    Severity TEXT NOT NULL DEFAULT 'info',
+                    Title TEXT NOT NULL DEFAULT '',
+                    Message TEXT NOT NULL DEFAULT '',
+                    ProjectId TEXT NULL,
+                    AssetId TEXT NULL,
+                    RunId TEXT NULL,
+                    EntityType TEXT NULL,
+                    EntityId TEXT NULL,
+                    TriggeredByUserId TEXT NULL,
+                    TriggeredByName TEXT NULL,
+                    CreatedAtUtc TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                    ReadAtUtc TEXT NULL,
+                    ReadByUserId TEXT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_NotificationInbox_RecipientUserId ON NotificationInbox (RecipientUserId);
+                CREATE INDEX IF NOT EXISTS IX_NotificationInbox_RecipientRole ON NotificationInbox (RecipientRole);
+                CREATE INDEX IF NOT EXISTS IX_NotificationInbox_CreatedAtUtc ON NotificationInbox (CreatedAtUtc);
+                """;
+            cmd.ExecuteNonQuery();
         }
         finally
         {
