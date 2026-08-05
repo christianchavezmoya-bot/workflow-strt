@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { CssBaseline, ThemeProvider } from "@mui/material";
 import { Provider } from "react-redux";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter, type FutureConfig } from "react-router-dom";
 import App from "./app/App";
 import { store } from "./store";
 import theme from "./theme/theme";
@@ -18,6 +18,12 @@ import { defineCustomElements } from "@ionic/pwa-elements/loader";
 // Bootstrap Ionic PWA elements for Camera/FilePicker web fallbacks
 defineCustomElements(window);
 
+// React Router v7 prep — non-blocking navigations (web perf Phase 4).
+const ROUTER_FUTURE: Partial<FutureConfig> = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+};
+
 // Render immediately — Capacitor native bridge is not ready before mount.
 // initSecureStorage() is called inside App.tsx via useEffect after mount.
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -25,7 +31,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <Provider store={store}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <BrowserRouter>
+        <BrowserRouter future={ROUTER_FUTURE}>
           <ComplexViewProvider>
             <AccessModeProvider>
               <NotificationInboxProvider>

@@ -68,6 +68,36 @@ Report written to `e2e-results/pm-field-smoke-report.json`.
 
 ---
 
+## Phase 4 — Dev & polish notes
+
+### React StrictMode (dev only)
+
+`src/main.tsx` wraps the app in `<React.StrictMode>`. In **Vite dev** (`npm run dev`), React intentionally double-invokes effects and certain lifecycles to surface side effects. That means:
+
+- `App.tsx` runs `initSecureStorage()` + `getLaunchAuthModeAsync()` **twice** on first load in dev.
+- Auth `[App]` console logs appear in pairs; network prefetch hooks may fire twice.
+
+**Production builds do not double-mount** — treat duplicate dev logs as expected, not a perf regression. Do not remove StrictMode to “fix” dev noise.
+
+### React Router future flags
+
+`BrowserRouter` enables `v7_startTransition` and `v7_relativeSplatPath` so route navigations wrap state updates in `React.startTransition` (smoother tab switches on large pages like Assets).
+
+### SQLite indexes (server boot)
+
+`DbInitializer.EnsurePerformanceIndexes` idempotently ensures:
+
+| Index | Covers |
+|-------|--------|
+| `IX_ProjectAssets_ProjectId` | EF migration — project-scoped asset lookups |
+| `IX_ProjectAssets_ProjectId_AssetTag` | Paginated `by-project` default sort |
+| `IX_AssetWorkflowRuns_AssetId_ConfigId_StartedAt` | Latest run per config |
+| `IX_AssetWorkflowRuns_AssetId_StartedAt` | Run summaries / open-issues |
+
+Verify after deploy: `sqlite3 commtrac.db ".indexes ProjectAssets"` and `.indexes AssetWorkflowRuns`.
+
+---
+
 ## Field sign-off checklist (Jose — JO00991)
 
 Run on **LAN** against the field API build (`npm run build && npm run preview` or deployed bundle).
