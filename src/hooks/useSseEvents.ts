@@ -65,6 +65,7 @@ export function useSseEvents() {
           if (!isMobileNativePlatform()) {
             invalidateWebCacheByPrefix("/project-assets/");
             invalidateWebCacheByPrefix("/asset-workflow-runs/");
+            invalidateWebCacheByPrefix("/dashboard/");
           }
           window.dispatchEvent(new CustomEvent("sse:assets:updated", { detail }));
           void probePendingConflictsFromSse({
