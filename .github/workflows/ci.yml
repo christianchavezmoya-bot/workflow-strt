@@ -16,6 +16,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build            # tsc -b (the only typecheck) + vite bundle
+      - run: npm run check:bundle-budget
       - run: npm test                 # vitest run
       # Lint is a non-blocking backlog gate for now (legacy codebase had no linter).
       # Remove continue-on-error once the ~13 error-level findings are burned down.
@@ -86,3 +87,22 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:perf
+
+  e2e-web-perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:web-perf
+        env:
+          WEB_PERF_STRICT: "1"
+          WEB_PERF_ASSETS_MS_MAX: "3000"
+          WEB_PERF_LOGIN_MS_MAX: "12000"

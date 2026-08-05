@@ -40,6 +40,41 @@ type CacheEntry<T> = {
 
 const store = new Map<string, CacheEntry<unknown>>();
 
+function sessionStorageKey(cacheKey: string): string {
+  return `webSession:${cacheKey}`;
+}
+
+function readSessionSnapshot<T>(cacheKey: string): T | null {
+  try {
+    const raw = sessionStorage.getItem(sessionStorageKey(cacheKey));
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionSnapshot<T>(cacheKey: string, value: T): void {
+  try {
+    sessionStorage.setItem(sessionStorageKey(cacheKey), JSON.stringify(value));
+  } catch {
+    // Ignore quota / private mode errors.
+  }
+}
+
+function removeSessionSnapshot(cacheKey: string): void {
+  try {
+    sessionStorage.removeItem(sessionStorageKey(cacheKey));
+  } catch {
+    // Ignore.
+  }
+}
+
+/** Synchronous read for instant in-tab paint (pairs with `persistSession` on webCachedGet). */
+export function peekWebSessionCache<T>(cacheKey: string): T | null {
+  return readSessionSnapshot<T>(cacheKey);
+}
+
 /**
  * Build a stable cache key from a logical name and an optional params
  * object. Call sites pass their own descriptive key (e.g. the URL plus
@@ -71,24 +106,39 @@ export function webCacheKey(name: string, params?: Record<string, unknown>): str
 export async function webCachedGet<T>(
   key: string,
   fetcher: () => Promise<T>,
-  options?: { ttlMs?: number; onFresh?: (value: T) => void }
+  options?: { ttlMs?: number; onFresh?: (value: T) => void; persistSession?: boolean }
 ): Promise<T> {
   const ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
   const entry = store.get(key) as CacheEntry<T> | undefined;
   const now = Date.now();
 
-  if (entry && entry.expiresAt > now) {
+  const scheduleBackgroundRefresh = () => {
     fetcher()
       .then((fresh) => {
         store.set(key, { value: fresh, expiresAt: Date.now() + ttlMs });
+        if (options?.persistSession) writeSessionSnapshot(key, fresh);
         options?.onFresh?.(fresh);
       })
-      .catch(() => { /* background refresh failed — keep serving the stale entry until it expires */ });
+      .catch(() => { /* background refresh failed — keep serving stale until TTL expires */ });
+  };
+
+  if (entry && entry.expiresAt > now) {
+    scheduleBackgroundRefresh();
     return entry.value;
+  }
+
+  if (options?.persistSession) {
+    const sessionSnapshot = readSessionSnapshot<T>(key);
+    if (sessionSnapshot !== null) {
+      store.set(key, { value: sessionSnapshot, expiresAt: now + ttlMs });
+      scheduleBackgroundRefresh();
+      return sessionSnapshot;
+    }
   }
 
   const fresh = await fetcher();
   store.set(key, { value: fresh, expiresAt: Date.now() + ttlMs });
+  if (options?.persistSession) writeSessionSnapshot(key, fresh);
   return fresh;
 }
 
@@ -96,6 +146,7 @@ export async function webCachedGet<T>(
  * very next read for that same data is guaranteed to be live, not stale. */
 export function invalidateWebCache(key: string): void {
   store.delete(key);
+  removeSessionSnapshot(key);
 }
 
 /** Drop every cached entry whose key starts with the given prefix. Useful
@@ -103,6 +154,15 @@ export function invalidateWebCache(key: string): void {
 export function invalidateWebCacheByPrefix(prefix: string): void {
   for (const k of store.keys()) {
     if (k.startsWith(prefix)) store.delete(k);
+  }
+  try {
+    const fullPrefix = sessionStorageKey(prefix);
+    for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
+      const k = sessionStorage.key(i);
+      if (k?.startsWith(fullPrefix)) sessionStorage.removeItem(k);
+    }
+  } catch {
+    // Ignore private mode / unavailable sessionStorage.
   }
 }
 

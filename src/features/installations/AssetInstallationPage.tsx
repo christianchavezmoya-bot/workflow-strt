@@ -162,6 +162,8 @@ import { anyMatchesWordStart, matchesWordStart } from "../../utils/textMatch";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 import { resolveProjectScopeId } from "../../utils/resolveProjectScopeId";
+import { peekWebSessionCache, webCacheKey } from "../../services/webFreshCache";
+import type { PaginatedResult } from "../../types/paginatedList";
 import OperationsVirtualizedTableBody from "./OperationsVirtualizedTableBody";
 import { OPERATIONS_VIRTUALIZE_MIN_ROWS } from "./operationsTableLayout";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
@@ -1085,7 +1087,30 @@ const AssetInstallationPage = () => {
     }
     // Increment the load ID so any in-flight load from a previous product is ignored
     const loadId = ++assetLoadIdRef.current;
-    setLoadingAssets(true);
+
+    // Web revisit: paint the last paginated page from sessionStorage synchronously
+    // so the spinner does not flash while listByProjectPage SWR runs.
+    let sessionPainted = false;
+    if (paginatedWebProject) {
+      const pageCacheKey = webCacheKey(`/project-assets/by-project/${selectedProjectId}`, {
+        page: projectAssetPage,
+        pageSize: PROJECT_ASSET_PAGE_SIZE,
+        sort: "assetTag",
+        includeDeleted: archiveMode || undefined,
+        search: search.trim() || undefined,
+      });
+      const sessionPage = peekWebSessionCache<PaginatedResult<ProjectAsset>>(pageCacheKey);
+      if (sessionPage) {
+        setAssets(sessionPage.items);
+        setProjectAssetTotal(sessionPage.total);
+        setLoadingAssets(false);
+        sessionPainted = true;
+      }
+    }
+
+    if (!sessionPainted) {
+      setLoadingAssets(true);
+    }
     setAssetLoadError(null);
 
     // ─── Phase F — TIER 1: LOCAL-ONLY (instant) ───────────────────────────
