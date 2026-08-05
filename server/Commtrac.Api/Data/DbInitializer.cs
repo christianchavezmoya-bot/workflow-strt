@@ -265,10 +265,12 @@ public static class DbInitializer
     }
 
     /// <summary>
-    /// Creates composite indexes that cover the two hottest read queries:
-    ///   1. ListByProject  — groups AssetWorkflowRuns by (AssetId, WorkflowConfigId) ordered by StartedAt DESC.
-    ///   2. BuildWorkflowSummariesAsync — orders AssetWorkflowRuns by (AssetId, StartedAt DESC).
-    /// Without these, SQLite must sort all matched rows on an unindexed column.
+    /// Creates composite indexes that cover the hottest read queries:
+    ///   1. ProjectAssets by project — paginated list default sort (AssetTag).
+    ///   2. AssetWorkflowRuns ListByProject — GROUP BY (AssetId, WorkflowConfigId) ORDER BY StartedAt DESC.
+    ///   3. BuildWorkflowSummariesAsync — latest run per asset ORDER BY StartedAt DESC.
+    /// EF migrations also define IX_ProjectAssets_ProjectId (single column); the composite
+    /// below avoids a sort step for GET by-project?page= when sort=assetTag (default).
     /// </summary>
     private static void EnsurePerformanceIndexes(AppDbContext db)
     {
@@ -277,6 +279,10 @@ public static class DbInitializer
         try
         {
             using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_ProjectAssets_ProjectId_AssetTag
+                ON ProjectAssets (ProjectId, AssetTag)";
+            cmd.ExecuteNonQuery();
             // Covers GROUP BY (AssetId, WorkflowConfigId) ORDER BY StartedAt DESC
             cmd.CommandText = @"
                 CREATE INDEX IF NOT EXISTS IX_AssetWorkflowRuns_AssetId_ConfigId_StartedAt
