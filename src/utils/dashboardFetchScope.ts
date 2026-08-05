@@ -26,3 +26,21 @@ export function shouldFetchTechnicianWorkload(role: string | undefined | null): 
       return false;
   }
 }
+
+/**
+ * True when the signed-in role can actually see per-project completion metrics.
+ *
+ * `/project-assets/active-summary` is a GROUP BY aggregate over every ProjectAsset row.
+ * Its only consumer is `getProjectCompletionMetrics`, which is read by `ProjectStatusGrid`
+ * (manager, web) and the native manager home project cards. Viewer, Client, Supervisor
+ * and Engineer render neither, so they must not trigger the aggregate.
+ */
+export function shouldFetchProjectAssetSummary(role: string | undefined | null): boolean {
+  switch ((role ?? "").trim()) {
+    case "Admin":
+    case "Project Manager":
+      return true;
+    default:
+      return false;
+  }
+}

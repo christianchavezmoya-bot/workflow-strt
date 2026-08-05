@@ -50,7 +50,10 @@ import {
   mergeDashboardWorkspaceItems,
   dedupeDashboardWorkspace,
 } from "../../utils/dashboardWorkspaceMerge";
-import { shouldFetchTechnicianWorkload } from "../../utils/dashboardFetchScope";
+import {
+  shouldFetchProjectAssetSummary,
+  shouldFetchTechnicianWorkload,
+} from "../../utils/dashboardFetchScope";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
 import type { Office } from "../../components/GlobalOfficeMap";
@@ -419,6 +422,8 @@ const Dashboard = () => {
   const showNativeManagerHome = isManager && isNativePlatform;
   /** Gates the heaviest dashboard query to the roles that actually render WorkloadPanel. */
   const needsTechnicianWorkload = shouldFetchTechnicianWorkload(user.role);
+  /** Gates the active-summary aggregate to the roles that render project completion cards. */
+  const needsProjectAssetSummary = shouldFetchProjectAssetSummary(user.role);
   // Every role (installers included) gets the light workspace first paint; the
   // card-flicker this used to cause is handled by the stabilize/merge logic below.
   // Native is unaffected by the session cache either way - it reads its own cache via dcGet.
@@ -429,6 +434,10 @@ const Dashboard = () => {
   const projects      = useAppSelector((s) => s.projects.items);
   const products      = useAppSelector((s) => s.products.items);
   const users         = useAppSelector((s) => s.users.items);
+  // Used only to mirror useShellCatalogBootstrap's "fetch once if empty" guard below.
+  const projectsCatalogLoading = useAppSelector((s) => s.projects.loading);
+  const productsCatalogLoading = useAppSelector((s) => s.products.loading);
+  const usersCatalogLoading    = useAppSelector((s) => s.users.loading);
 
   const [globalOffices,      setGlobalOffices]      = useState<Office[]>([]);
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
@@ -460,7 +469,12 @@ const Dashboard = () => {
   const [analyticsRefreshTick, setAnalyticsRefreshTick] = useState(0);
   const analyticsSectionRef = useRef<HTMLDivElement | null>(null);
   const analyticsObserverRef = useRef<IntersectionObserver | null>(null);
-  /** Web: defer heavy analytics API calls until idle or the panel nears the viewport. */
+  /**
+   * Web: the analytics APIs only fire once EvidenceHealthGrid nears the viewport, so a
+   * PM sitting on My Inspections / My Installs never pays for them. Native starts
+   * enabled because ManagerMobileHome's default tab ("projects") renders the grid
+   * immediately, and native skips the observer.
+   */
   const [analyticsLoadEnabled, setAnalyticsLoadEnabled] = useState(isNativePlatform);
   const analyticsSectionCallbackRef = useCallback((node: HTMLDivElement | null) => {
     analyticsSectionRef.current = node;
@@ -836,33 +850,34 @@ const Dashboard = () => {
     }
   }, [isNativePlatform, user.id]);
 
-  useEffect(() => {
-    if (isNativePlatform || !isManager) return;
-    let idleId: number | undefined;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const enable = () => setAnalyticsLoadEnabled(true);
-
-    if (typeof requestIdleCallback !== "undefined") {
-      idleId = requestIdleCallback(enable, { timeout: 2500 });
-    } else {
-      timeoutId = setTimeout(enable, 1500);
-    }
-
-    return () => {
-      if (idleId !== undefined && typeof cancelIdleCallback !== "undefined") {
-        cancelIdleCallback(idleId);
-      }
-      if (timeoutId) clearTimeout(timeoutId);
-      analyticsObserverRef.current?.disconnect();
-      analyticsObserverRef.current = null;
-    };
-  }, [isManager, isNativePlatform]);
+  // Analytics visibility is driven solely by analyticsSectionCallbackRef's observer on
+  // web. This only tears the observer down on unmount; the callback ref already
+  // disconnects whenever the grid itself unmounts (React invokes it with null).
+  useEffect(() => () => {
+    analyticsObserverRef.current?.disconnect();
+    analyticsObserverRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated || dashboardBootPhase !== "full") return;
-    dispatch(fetchProjects());
-    dispatch(fetchProducts());
-    dispatch(fetchUsers());
+    // AppShell's useShellCatalogBootstrap already warms these three catalogs after auth.
+    // Dispatching unconditionally here raced it and double-fetched every catalog on a
+    // cold dashboard load (measured: 4x /users for Admin). Mirror the shell's guard so
+    // whichever runs first wins and the other is a no-op.
+    if (!projects.length && !projectsCatalogLoading) dispatch(fetchProjects());
+    if (!products.length && !productsCatalogLoading) dispatch(fetchProducts());
+    if (!users.length && !usersCatalogLoading) dispatch(fetchUsers());
+
+    // Must run BEFORE the platform branches below: the web branch returns a cleanup
+    // function, which previously made a trailing `if (isEngineer)` block unreachable on
+    // web and silently left the Draft Workflows panel empty there. Gated to the tab that
+    // renders that panel; the web service call is SWR-cached so switching tabs is cheap.
+    if (isEngineer && pmDashboardTab === "my-installs") {
+      workflowConfigService.getAll().then((configs) => {
+        setDraftConfigs(configs.filter((c: { status?: string }) => c.status === "Draft" || c.status === "draft"));
+      }).catch(() => {});
+    }
+
     if (isNativePlatform) {
       seedNativeDashboardSummariesFromLocal();
       setWorkloadLoading(false);
@@ -876,9 +891,11 @@ const Dashboard = () => {
         void projectAssetService.listOpen()
           .then((a) => { setOpenAssets(a); dcPut(DASHBOARD_CACHE_KEYS.openAssets, a); })
           .catch(() => {});
-        void projectAssetService.activeSummary()
-          .then((s) => { setProjectAssetSummary(s); dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, s); })
-          .catch(() => setProjectAssetSummary([]));
+        if (needsProjectAssetSummary) {
+          void projectAssetService.activeSummary()
+            .then((s) => { setProjectAssetSummary(s); dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, s); })
+            .catch(() => setProjectAssetSummary([]));
+        }
       }
     } else {
       // Web cold-start: stagger heavy SQLite reads so attention/workload/open-assets
@@ -897,19 +914,35 @@ const Dashboard = () => {
         : undefined;
       const summaryTimer = window.setTimeout(() => {
         projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
-        projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
+        // active-summary is a GROUP BY over every ProjectAsset row and only feeds the
+        // manager project-completion cards.
+        if (needsProjectAssetSummary) {
+          projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
+        }
       }, 800);
       return () => {
         if (workloadTimer !== undefined) window.clearTimeout(workloadTimer);
         window.clearTimeout(summaryTimer);
       };
     }
-    if (isEngineer) {
-      workflowConfigService.getAll().then((configs) => {
-        setDraftConfigs(configs.filter((c: any) => c.status === "Draft" || c.status === "draft"));
-      }).catch(() => {});
-    }
-  }, [dashboardBootPhase, dispatch, isAuthenticated, isEngineer, isNativePlatform, loadAttention, needsTechnicianWorkload, seedNativeDashboardSummariesFromLocal]);
+  }, [
+    products.length,
+    productsCatalogLoading,
+    projects.length,
+    projectsCatalogLoading,
+    users.length,
+    usersCatalogLoading,
+    dashboardBootPhase,
+    dispatch,
+    isAuthenticated,
+    isEngineer,
+    isNativePlatform,
+    loadAttention,
+    needsProjectAssetSummary,
+    needsTechnicianWorkload,
+    pmDashboardTab,
+    seedNativeDashboardSummariesFromLocal,
+  ]);
 
   // useAuth resolves role one tick after mount (Viewer placeholder). If dashboard
   // boot reached "full" while isManager was still false, the first loadAttention
@@ -3173,7 +3206,62 @@ const Dashboard = () => {
     setReportingTechId(w.userId);
     try {
       const exportDate = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-      await generateTechnicianReport({ technicianName: w.fullName, reportPeriod: exportDate, runs: [], assets: [], exportDate } as TechnicianReportData);
+      const techAssets = openAssets.filter((a) => a.assignedUserId === w.userId);
+      const assetIds = new Set(techAssets.map((a) => a.id));
+
+      // Runs carry the time tracking and issue data the report is built from. Web batches
+      // one scoped request per project; native goes per asset because that path reads the
+      // offline run cache first and so still produces a report with no connection.
+      let runs: AssetWorkflowRun[] = [];
+      if (assetIds.size > 0) {
+        if (isNativePlatform) {
+          const perAsset = await Promise.all(
+            techAssets.map((a) => assetWorkflowRunService.listByAsset(a.id).catch(() => [])),
+          );
+          runs = perAsset.flat();
+        } else {
+          const assetIdsByProject = new Map<string, string[]>();
+          for (const a of techAssets) {
+            if (!a.projectId) continue;
+            const forProject = assetIdsByProject.get(a.projectId) ?? [];
+            forProject.push(a.id);
+            assetIdsByProject.set(a.projectId, forProject);
+          }
+          const perProject = await Promise.all(
+            [...assetIdsByProject].map(([projectId, ids]) =>
+              assetWorkflowRunService.loadRunDetailsForAssets(projectId, ids).catch(() => []),
+            ),
+          );
+          runs = perProject.flat();
+        }
+      }
+      // Scope defensively: a project-scoped fetch can return runs for assets that are no
+      // longer assigned to this technician.
+      runs = runs.filter((run) => assetIds.has(run.assetId));
+
+      const jobNumbers = [...new Set(techAssets.map((a) => a.jobNumber).filter(Boolean))];
+      const reportData: TechnicianReportData = {
+        technicianName: w.fullName,
+        reportPeriod: jobNumbers.length > 0
+          ? `Current workload · ${jobNumbers.join(", ")}`
+          : "Current workload",
+        runs,
+        assets: techAssets.map((a) => ({
+          id: a.id,
+          assetTag: a.assetTag,
+          assetName: a.assetName,
+          jobNumber: a.jobNumber,
+          location: a.location,
+          status: a.status,
+          runStatus: a.runStatus,
+          completedSteps: a.completedSteps,
+          totalSteps: a.totalSteps,
+        })),
+        exportDate,
+      };
+      await generateTechnicianReport(reportData);
+    } catch {
+      setDashboardError("Could not build the workload report. Check your connection and try again.");
     } finally { setReportingTechId(null); }
   }
   // Reusable: individual clickable item row
