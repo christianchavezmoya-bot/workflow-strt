@@ -20,7 +20,7 @@ import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead, shouldSkipRunMutation } from "./connectivityMonitor";
 import { boundedFreshRead, BOUNDED_FRESH_TIMEOUT_MS } from "../utils/boundedFreshRead";
-import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
+import { webCachedGet, webCacheKey, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 import type { AssetWorkflowRunSummary } from "../types/assetWorkflowRunSummary";
 import { mergeRunsIntoMap, runSummaryToPlaceholderRun } from "../types/assetWorkflowRunSummary";
@@ -1792,13 +1792,21 @@ export const assetWorkflowRunService = {
   },
 
   async listPendingSignatures(userId?: string): Promise<PendingSignatureRecord[]> {
+    const params = userId ? { userId } : undefined;
+    if (!isMobileNativePlatform()) {
+      return webCachedGet(
+        webCacheKey("/asset-workflow-runs/pending-signatures", params),
+        async () => {
+          const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures", { params });
+          return userId ? filterPendingSignaturesForInstallerView(res.data) : res.data;
+        },
+        { ttlMs: 30_000 },
+      );
+    }
     try {
-      const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures", {
-        params: userId ? { userId } : undefined,
-      });
+      const res = await api.get<PendingSignatureRecord[]>("/asset-workflow-runs/pending-signatures", { params });
       return userId ? filterPendingSignaturesForInstallerView(res.data) : res.data;
     } catch {
-      if (!isMobileNativePlatform()) return [];
       try {
         return await listPendingSignaturesLocalImpl(userId);
       } catch {

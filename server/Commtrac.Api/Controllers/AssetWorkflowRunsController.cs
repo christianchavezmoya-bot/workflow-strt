@@ -516,7 +516,9 @@ public class AssetWorkflowRunsController : ControllerBase
                 : null;
 
             var runs = await _db.AssetWorkflowRuns
+                .AsNoTracking()
                 .Where(r => r.IssuesJson != null && r.IssuesJson != "[]" && r.IssuesJson != "")
+                .Select(r => new { r.Id, r.AssetId, r.IssuesJson })
                 .ToListAsync();
 
             var assetIds = runs.Select(r => r.AssetId).Distinct().ToList();
@@ -528,10 +530,18 @@ public class AssetWorkflowRunsController : ControllerBase
                 runs = runs.Where(r => assetIds.Contains(r.AssetId)).ToList();
             }
 
-            var assets   = await _db.ProjectAssets.Where(a => assetIds.Contains(a.Id)).ToListAsync();
+            var assets = await _db.ProjectAssets
+                .AsNoTracking()
+                .Where(a => assetIds.Contains(a.Id))
+                .Select(a => new { a.Id, a.AssetTag, a.AssetName, a.Location, a.ProjectId })
+                .ToListAsync();
 
             var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
-            var projects   = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
+            var projects = await _db.Projects
+                .AsNoTracking()
+                .Where(p => projectIds.Contains(p.Id))
+                .Select(p => new { p.Id, p.JobNumber, p.CustomerName })
+                .ToListAsync();
 
             var result = new List<OpenIssueDto>();
             var opts   = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
@@ -586,10 +596,17 @@ public class AssetWorkflowRunsController : ControllerBase
                 assetsWithIssuesQuery = assetsWithIssuesQuery.Where(a => assignedAssetIds.Contains(a.Id));
             }
 
-            var assetsWithIssues = await assetsWithIssuesQuery.ToListAsync();
+            var assetsWithIssues = await assetsWithIssuesQuery
+                .AsNoTracking()
+                .Select(a => new { a.Id, a.AssetTag, a.AssetName, a.Location, a.ProjectId, a.IssuesJson })
+                .ToListAsync();
 
             var assetProjectIds2 = assetsWithIssues.Select(a => a.ProjectId).Distinct().ToList();
-            var projects2 = await _db.Projects.Where(p => assetProjectIds2.Contains(p.Id)).ToListAsync();
+            var projects2 = await _db.Projects
+                .AsNoTracking()
+                .Where(p => assetProjectIds2.Contains(p.Id))
+                .Select(p => new { p.Id, p.JobNumber, p.CustomerName })
+                .ToListAsync();
 
             foreach (var asset in assetsWithIssues)
             {
@@ -1941,7 +1958,20 @@ public class AssetWorkflowRunsController : ControllerBase
         try
         {
             var pendingRuns = await _db.AssetWorkflowRuns
+                .AsNoTracking()
                 .Where(r => r.IsLocked && (r.SignatureStatus == "PendingInstaller" || r.SignatureStatus == "PendingCustomer"))
+                .Select(r => new
+                {
+                    r.Id,
+                    r.AssetId,
+                    r.CompletedAt,
+                    r.UpdatedAt,
+                    r.StartedAt,
+                    r.CreatedAt,
+                    r.RunNumber,
+                    r.CompletedByName,
+                    r.SignatureStatus,
+                })
                 .ToListAsync();
 
             // Keep only the latest actionable locked run per asset so stale historical
@@ -1964,8 +1994,10 @@ public class AssetWorkflowRunsController : ControllerBase
             // without this a cancelled asset kept appearing in My Pending
             // Signatures (the query filtered only on run state and assigned user).
             // Soft-deleted assets are already excluded by the global query filter.
-            var assets    = await _db.ProjectAssets
+            var assets = await _db.ProjectAssets
+                .AsNoTracking()
                 .Where(a => assetIds.Contains(a.Id) && a.Status != "Cancelled")
+                .Select(a => new { a.Id, a.AssetTag, a.AssetName, a.ProjectId, a.AssignedUserId })
                 .ToListAsync();
             // Drop runs whose asset was filtered out above.
             var visibleAssetIds = assets.Select(a => a.Id).ToHashSet();
@@ -1983,7 +2015,11 @@ public class AssetWorkflowRunsController : ControllerBase
             }
 
             var projectIds = assets.Select(a => a.ProjectId).Distinct().ToList();
-            var projects  = await _db.Projects.Where(p => projectIds.Contains(p.Id)).ToListAsync();
+            var projects = await _db.Projects
+                .AsNoTracking()
+                .Where(p => projectIds.Contains(p.Id))
+                .Select(p => new { p.Id, p.JobNumber, p.CustomerName })
+                .ToListAsync();
 
             var result = runs.Select(r =>
             {

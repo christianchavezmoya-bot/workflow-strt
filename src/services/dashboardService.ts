@@ -1,4 +1,6 @@
 import api from "./api";
+import { isMobileNativePlatform } from "../utils/platform";
+import { webCachedGet, webCacheKey } from "./webFreshCache";
 
 export interface EvidenceCompleteness {
   windowDays: number;
@@ -38,13 +40,39 @@ export interface WorkflowTypeHealth {
   score: number;
 }
 
+const DASHBOARD_ANALYTICS_TTL_MS = 60_000;
+const DASHBOARD_ANALYTICS_TIMEOUT_MS = 20_000;
+
 export const dashboardService = {
   async evidenceCompleteness(windowDays: number): Promise<EvidenceCompleteness> {
-    const res = await api.get<EvidenceCompleteness>(`/dashboard/evidence-completeness?windowDays=${windowDays}`);
+    const url = `/dashboard/evidence-completeness?windowDays=${windowDays}`;
+    if (!isMobileNativePlatform()) {
+      return webCachedGet(
+        webCacheKey("/dashboard/evidence-completeness", { windowDays }),
+        async () => {
+          const res = await api.get<EvidenceCompleteness>(url, { timeout: DASHBOARD_ANALYTICS_TIMEOUT_MS });
+          return res.data;
+        },
+        { ttlMs: DASHBOARD_ANALYTICS_TTL_MS },
+      );
+    }
+    const res = await api.get<EvidenceCompleteness>(url);
     return res.data;
   },
+
   async workflowHealth(windowDays: number): Promise<WorkflowHealth> {
-    const res = await api.get<WorkflowHealth>(`/dashboard/workflow-health?windowDays=${windowDays}`);
+    const url = `/dashboard/workflow-health?windowDays=${windowDays}`;
+    if (!isMobileNativePlatform()) {
+      return webCachedGet(
+        webCacheKey("/dashboard/workflow-health", { windowDays }),
+        async () => {
+          const res = await api.get<WorkflowHealth>(url, { timeout: DASHBOARD_ANALYTICS_TIMEOUT_MS });
+          return res.data;
+        },
+        { ttlMs: DASHBOARD_ANALYTICS_TTL_MS },
+      );
+    }
+    const res = await api.get<WorkflowHealth>(url);
     return res.data;
   },
 };

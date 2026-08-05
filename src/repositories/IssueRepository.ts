@@ -31,7 +31,8 @@ export const IssueRepository = {
         async () => {
           const res = await api.get<OpenIssueRecord[]>("/asset-workflow-runs/open-issues", { params: userId ? { userId } : undefined });
           return res.data;
-        }
+        },
+        { ttlMs: 30_000 },
       );
     }
 
