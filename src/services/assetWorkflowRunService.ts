@@ -855,7 +855,7 @@ export const assetWorkflowRunService = {
         { params },
       );
       return res.data;
-    }, { ttlMs: 5_000 });
+    }, { ttlMs: 30_000, persistSession: true });
     return summaries.map(runSummaryToPlaceholderRun);
   },
 
@@ -872,7 +872,7 @@ export const assetWorkflowRunService = {
         { params: { projectIds: sorted.join(",") } },
       );
       return res.data;
-    }, { ttlMs: 5_000 });
+    }, { ttlMs: 30_000, persistSession: true });
     return summaries.map(runSummaryToPlaceholderRun);
   },
 

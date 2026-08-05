@@ -17,7 +17,6 @@ import { deriveOpenIssuesFromAsset } from "../utils/issueDerivation";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { webCachedGet, webCacheKey, invalidateWebCacheByPrefix } from "../services/webFreshCache";
-import { readWebSessionCache, writeWebSessionCache } from "../utils/webSessionCache";
 import type { PaginatedResult, ProjectAssetPageQuery } from "../types/paginatedList";
 
 function normalizeStatus(raw: unknown): ProjectAssetStatus {
@@ -140,29 +139,20 @@ export const AssetRepository = {
 
     if (!isMobileNativePlatform()) {
       const cacheKey = webCacheKey(`/project-assets/by-project/${projectId}`, params);
-      const sessionSnapshot = readWebSessionCache<PaginatedResult<ProjectAsset>>(cacheKey);
-      const fetchPage = async (): Promise<PaginatedResult<ProjectAsset>> => {
-        const res = await api.get<PaginatedResult<ProjectAsset>>(
-          `/project-assets/by-project/${projectId}`,
-          { params },
-        );
-        const result = {
-          ...res.data,
-          items: res.data.items.map(fromDto),
-        };
-        writeWebSessionCache(cacheKey, result);
-        return result;
-      };
-
-      if (sessionSnapshot) {
-        void webCachedGet(cacheKey, fetchPage, {
-          ttlMs: 5_000,
-          onFresh: (fresh) => writeWebSessionCache(cacheKey, fresh),
-        }).catch(() => { /* background refresh failed — keep session snapshot */ });
-        return sessionSnapshot;
-      }
-
-      return webCachedGet(cacheKey, fetchPage, { ttlMs: 5_000 });
+      return webCachedGet(
+        cacheKey,
+        async () => {
+          const res = await api.get<PaginatedResult<ProjectAsset>>(
+            `/project-assets/by-project/${projectId}`,
+            { params },
+          );
+          return {
+            ...res.data,
+            items: res.data.items.map(fromDto),
+          };
+        },
+        { ttlMs: 5_000, persistSession: true },
+      );
     }
 
     const all = await this.getByProject(projectId, query.includeDeleted);

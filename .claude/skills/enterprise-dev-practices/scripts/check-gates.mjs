@@ -45,9 +45,13 @@ const C = {
 };
 const results = [];
 
-function run(cmd, cmdArgs, cwd) {
+function run(cmd, cmdArgs, cwd, envExtra) {
   const r = spawnSync(cmd, cmdArgs, {
-    cwd, stdio: ["ignore", "pipe", "pipe"], shell: true, encoding: "utf8",
+    cwd,
+    env: envExtra ? { ...process.env, ...envExtra } : process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: true,
+    encoding: "utf8",
     maxBuffer: 32 * 1024 * 1024,
   });
   const stdout = r.stdout || "";
@@ -168,6 +172,24 @@ if (wants("e2eperf")) {
   console.log(`${C.dim}running Playwright offline perf e2e…${C.reset}`);
   const r = run("npm", ["run", "test:e2e:perf"], ROOT);
   record("e2eperf", r.code === 0, r.code === 0 ? "offline perf e2e passed" : lastLines(r.out, 14));
+}
+
+// --- bundle: route chunk gzip budgets (web perf Phase 3.4) -----------------
+if (wants("bundle")) {
+  console.log(`${C.dim}running bundle budget check…${C.reset}`);
+  const r = run("npm", ["run", "check:bundle-budget"], ROOT);
+  record("bundle", r.code === 0, r.code === 0 ? "chunk gzip budgets ok" : lastLines(r.out, 10));
+}
+
+// --- webperf: login + assets wall-clock smoke (web perf Phase 3.3) ---------
+if (wants("webperf")) {
+  console.log(`${C.dim}running Playwright web perf e2e…${C.reset}`);
+  const r = run("npm", ["run", "test:e2e:web-perf"], ROOT, {
+    WEB_PERF_STRICT: "1",
+    WEB_PERF_ASSETS_MS_MAX: process.env.WEB_PERF_ASSETS_MS_MAX ?? "3000",
+    WEB_PERF_LOGIN_MS_MAX: process.env.WEB_PERF_LOGIN_MS_MAX ?? "12000",
+  });
+  record("webperf", r.code === 0, r.code === 0 ? "web perf e2e passed" : lastLines(r.out, 14));
 }
 
 function lastLines(s, n) {

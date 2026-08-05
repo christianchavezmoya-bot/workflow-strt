@@ -1,14 +1,5 @@
-/** Short-lived sessionStorage paint cache for web list views (survives in-tab navigation). */
-
-export function readWebSessionCache<T>(key: string): T | null {
-  try {
-    const raw = sessionStorage.getItem(`webSession:${key}`);
-    if (!raw) return null;
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
+/** @deprecated Prefer `peekWebSessionCache` from `webFreshCache.ts` — kept for callers using the old module path. */
+export { peekWebSessionCache as readWebSessionCache } from "../services/webFreshCache";
 
 export function writeWebSessionCache<T>(key: string, value: T): void {
   try {

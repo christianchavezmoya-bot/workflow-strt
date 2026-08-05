@@ -2,10 +2,21 @@ import { test, expect } from "@playwright/test";
 
 /**
  * Web perf smoke — measures login + assets navigation and logs API waterfall.
- * Requires API on :4000 (playwright.full.config.ts).
+ * Requires API on :4000 (playwright.web-perf.config.ts).
+ *
+ * Strict mode (CI): WEB_PERF_STRICT=1 enforces assets content budget.
+ * Override budget: WEB_PERF_ASSETS_MS_MAX (default 2000 in strict, 20000 in report-only).
  */
 test.describe("web perf smoke", () => {
   test("login and assets page load metrics", async ({ page }) => {
+    const strict = process.env.WEB_PERF_STRICT === "1";
+    const assetsBudgetMs = strict
+      ? Number(process.env.WEB_PERF_ASSETS_MS_MAX ?? "2000")
+      : 20_000;
+    const loginBudgetMs = strict
+      ? Number(process.env.WEB_PERF_LOGIN_MS_MAX ?? "8000")
+      : 20_000;
+
     const apiCalls: Array<{ path: string; status: number; ms: number }> = [];
 
     page.on("response", (res) => {
@@ -56,6 +67,9 @@ test.describe("web perf smoke", () => {
         {
           loginMs,
           assetsContentMs,
+          assetsBudgetMs,
+          loginBudgetMs,
+          strict,
           totalApiCalls: apiCalls.length,
           slowestApi: slowest,
         },
@@ -64,7 +78,7 @@ test.describe("web perf smoke", () => {
       ),
     );
 
-    expect(loginMs).toBeLessThan(20_000);
-    expect(assetsContentMs).toBeLessThan(20_000);
+    expect(loginMs).toBeLessThan(loginBudgetMs);
+    expect(assetsContentMs).toBeLessThan(assetsBudgetMs);
   });
 });
