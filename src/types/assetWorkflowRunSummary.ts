@@ -1,4 +1,5 @@
 import type { AssetWorkflowRun } from "./assetWorkflowRun";
+import { pickCaptureRun } from "../utils/captureSpreadsheet";
 
 /** Slim run row from runs-summary — no StepResultsJson / WorkflowSnapshotJson. */
 export interface AssetWorkflowRunSummary {
@@ -23,6 +24,25 @@ export interface AssetWorkflowRunSummary {
 /** True when a run carries enough JSON to derive capture / sign-off columns. */
 export function runHasCaptureBlobs(run: Pick<AssetWorkflowRun, "stepResultsJson" | "workflowSnapshotJson">): boolean {
   return (run.stepResultsJson?.length ?? 0) > 20 || (run.workflowSnapshotJson?.length ?? 0) > 20;
+}
+
+/**
+ * True when every listed asset either has capture blobs loaded, has no run,
+ * or a runs-detail fetch has already completed for this page (so empty run list
+ * means "confirmed no run" rather than "still loading").
+ */
+export function captureBlobsReadyForAssets(
+  runsMap: Record<string, AssetWorkflowRun[]>,
+  assetIds: string[],
+  detailFetchCompleted: boolean,
+): boolean {
+  return assetIds.every((assetId) => {
+    const runs = runsMap[assetId] ?? [];
+    if (runs.length === 0) return detailFetchCompleted;
+    const run = pickCaptureRun(runs);
+    if (!run) return true;
+    return runHasCaptureBlobs(run);
+  });
 }
 
 export function runSummaryToPlaceholderRun(summary: AssetWorkflowRunSummary): AssetWorkflowRun {

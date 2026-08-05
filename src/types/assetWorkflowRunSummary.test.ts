@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AssetWorkflowRun } from "./assetWorkflowRun";
 import {
+  captureBlobsReadyForAssets,
   mergeRunRecord,
   mergeRunsIntoMap,
   runHasCaptureBlobs,
@@ -47,6 +48,21 @@ describe("mergeRunRecord", () => {
   it("upgrades placeholder when incoming has blobs", () => {
     const placeholder = runSummaryToPlaceholderRun(summary);
     expect(mergeRunRecord(placeholder, fullRun)).toBe(fullRun);
+  });
+});
+
+describe("captureBlobsReadyForAssets", () => {
+  it("waits for detail fetch when runs are unknown", () => {
+    expect(captureBlobsReadyForAssets({}, ["asset-1"], false)).toBe(false);
+    expect(captureBlobsReadyForAssets({}, ["asset-1"], true)).toBe(true);
+  });
+
+  it("requires blobs when a placeholder run exists", () => {
+    const placeholder = runSummaryToPlaceholderRun(summary);
+    const map = { "asset-1": [placeholder] };
+    expect(captureBlobsReadyForAssets(map, ["asset-1"], false)).toBe(false);
+    expect(captureBlobsReadyForAssets(map, ["asset-1"], true)).toBe(false);
+    expect(captureBlobsReadyForAssets({ "asset-1": [fullRun] }, ["asset-1"], false)).toBe(true);
   });
 });
 
