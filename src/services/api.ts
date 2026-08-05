@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
@@ -39,6 +39,38 @@ const api = axios.create({
   // connections can take 6–8s.
   timeout: API_DEFAULT_TIMEOUT_MS,
 });
+
+/** Coalesce identical in-flight GETs on web so parallel mounts don't fan out duplicates. */
+function inFlightGetKey(config: InternalAxiosRequestConfig): string {
+  const params = config.params as Record<string, unknown> | undefined;
+  const paramStr = params && typeof params === "object"
+    ? Object.keys(params).sort().map((k) => `${k}=${String(params[k])}`).join("&")
+    : "";
+  return `${config.baseURL ?? ""}|${config.url ?? ""}|${paramStr}`;
+}
+
+type GetAdapter = (config: InternalAxiosRequestConfig) => Promise<AxiosResponse>;
+
+const inFlightGets = new Map<string, Promise<AxiosResponse>>();
+
+const rawAdapter = api.defaults.adapter ?? axios.defaults.adapter;
+if (typeof rawAdapter === "function") {
+  const baseGetAdapter = rawAdapter as GetAdapter;
+  api.defaults.adapter = (config) => {
+    const method = (config.method ?? "get").toLowerCase();
+    if (method !== "get" || isMobileNativePlatform()) {
+      return baseGetAdapter(config);
+    }
+    const key = inFlightGetKey(config);
+    const existing = inFlightGets.get(key);
+    if (existing) return existing;
+    const flight = baseGetAdapter(config).finally(() => {
+      inFlightGets.delete(key);
+    });
+    inFlightGets.set(key, flight);
+    return flight;
+  };
+}
 
 export type ApiDebugSyncMeta = {
   source?: string;
