@@ -2668,9 +2668,22 @@ export default function WorkOrderRunner({
             )}
           </Stack>
         </DialogContent>
-        <DialogActions sx={{ justifyContent: "space-between", position: "sticky", bottom: 0, zIndex: 1, bgcolor: "background.paper", borderTop: "1px solid", borderColor: "divider" }}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Button onClick={requestDiscardRun} disabled={saving || discarding}>
+        <DialogActions sx={{
+          flexDirection: isMobileNativePlatform() ? "column" : "row",
+          alignItems: isMobileNativePlatform() ? "stretch" : "center",
+          justifyContent: "space-between",
+          gap: isMobileNativePlatform() ? 0.75 : 0,
+          px: isMobileNativePlatform() ? 1.5 : 2,
+          py: isMobileNativePlatform() ? 1 : 1,
+          position: "sticky",
+          bottom: 0,
+          zIndex: 1,
+          bgcolor: "background.paper",
+          borderTop: "1px solid",
+          borderColor: "divider",
+        }}>
+          <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Button size={isMobileNativePlatform() ? "small" : "medium"} onClick={requestDiscardRun} disabled={saving || discarding}>
               {saved ? "Close" : "Discard"}
             </Button>
             {!saved && runEditPerms.data && (
@@ -2679,7 +2692,7 @@ export default function WorkOrderRunner({
                 size="small"
                 onClick={() => setStage("running")}
               >
-                Back to steps
+                {isMobileNativePlatform() ? "Back" : "Back to steps"}
               </Button>
             )}
             {!saved && runEditPerms.time && (
@@ -2693,53 +2706,73 @@ export default function WorkOrderRunner({
             )}
           </Stack>
           {!saved && (
-            <Stack direction="row" spacing={1}>
-              {primaryBlockingIssue && (
+            <>
+              {(primaryBlockingIssue || hasMissingCaptures) && (
+                <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+                  {primaryBlockingIssue && (
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      size="small"
+                      disabled={saving}
+                      startIcon={<ReportProblemOutlined sx={{ fontSize: 16 }} />}
+                      sx={{ minWidth: 0, flex: isMobileNativePlatform() ? "1 1 auto" : undefined, fontSize: "0.75rem", px: 1 }}
+                      onClick={() => {
+                        setShowSummaryIssues(true);
+                        setIssueDetailId(primaryBlockingIssue.id);
+                      }}
+                    >
+                      {isMobileNativePlatform()
+                        ? (blockingIssues.length === 1 ? "Resolve Issue" : "Resolve Issues")
+                        : (blockingIssues.length === 1 ? "Resolve Blocking Issue" : "Resolve Blocking Issues")}
+                    </Button>
+                  )}
+                  {hasMissingCaptures && (
+                    <Button
+                      variant="outlined"
+                      color="warning"
+                      size="small"
+                      disabled={saving}
+                      startIcon={<PhotoCameraOutlined sx={{ fontSize: 16 }} />}
+                      sx={{ minWidth: 0, flex: isMobileNativePlatform() ? "1 1 auto" : undefined, fontSize: "0.75rem", px: 1 }}
+                      onClick={() => jumpToWorkflowStep(missingCaptureTargets[0]?.stepId ?? null, missingCaptureTargets[0]?.iterationIndex)}
+                    >
+                      {isMobileNativePlatform() ? "Add Photos" : "Add Missing Photos"}
+                    </Button>
+                  )}
+                </Stack>
+              )}
+              <Stack
+                direction="row"
+                spacing={0.75}
+                justifyContent={isMobileNativePlatform() ? "stretch" : "flex-end"}
+                sx={{ width: "100%" }}
+              >
+                {(hasBlockingIssues || hasMissingCaptures) && Boolean(activeRunId) && (
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    size={isMobileNativePlatform() ? "small" : "medium"}
+                    disabled={saving}
+                    startIcon={saving ? <CircularProgress size={14} /> : undefined}
+                    sx={{ flex: isMobileNativePlatform() ? 1 : undefined, minWidth: 0, fontSize: isMobileNativePlatform() ? "0.75rem" : undefined }}
+                    onClick={async () => {
+                      setSaving(true);
+                      try {
+                        await flushAutosave(undefined, undefined, "InProgress");
+                        onClose();
+                      } catch { setSaveError("Failed to save progress."); }
+                      finally { setSaving(false); }
+                    }}
+                  >
+                    Save & close
+                  </Button>
+                )}
                 <Button
-                  variant="outlined"
-                  color="error"
-                  disabled={saving}
-                  startIcon={<ReportProblemOutlined />}
+                  variant="contained"
+                  size={isMobileNativePlatform() ? "small" : "medium"}
+                  sx={{ flex: isMobileNativePlatform() ? 1 : undefined, minWidth: 0, fontSize: isMobileNativePlatform() ? "0.75rem" : undefined }}
                   onClick={() => {
-                    setShowSummaryIssues(true);
-                    setIssueDetailId(primaryBlockingIssue.id);
-                  }}
-                >
-                  {blockingIssues.length === 1 ? "Resolve Blocking Issue" : "Resolve Blocking Issues"}
-                </Button>
-              )}
-              {hasMissingCaptures && (
-                <Button
-                  variant="outlined"
-                  color="warning"
-                  disabled={saving}
-                  startIcon={<PhotoCameraOutlined />}
-                  onClick={() => jumpToWorkflowStep(missingCaptureTargets[0]?.stepId ?? null, missingCaptureTargets[0]?.iterationIndex)}
-                >
-                  Add Missing Photos
-                </Button>
-              )}
-              {(hasBlockingIssues || hasMissingCaptures) && Boolean(activeRunId) && (
-                <Button
-                  variant="outlined"
-                  color="warning"
-                  disabled={saving}
-                  startIcon={saving ? <CircularProgress size={14} /> : undefined}
-                  onClick={async () => {
-                    setSaving(true);
-                    try {
-                      await flushAutosave(undefined, undefined, "InProgress");
-                      onClose();
-                    } catch { setSaveError("Failed to save progress."); }
-                    finally { setSaving(false); }
-                  }}
-                >
-                  Save & close
-                </Button>
-              )}
-              <Button
-                variant="contained"
-                onClick={() => {
                   const allBomItems = workflow.bomItems ?? [];
                   const inventoryItems = allBomItems.filter(i => i.isInventory);
                   const bomConsumableItems = allBomItems.filter(i => !i.isInventory);
@@ -2792,7 +2825,8 @@ export default function WorkOrderRunner({
               >
                 {saving ? "Saving..." : activeRunId ? "Lock run" : "Done (preview)"}
               </Button>
-            </Stack>
+              </Stack>
+            </>
           )}
         </DialogActions>
       </>
