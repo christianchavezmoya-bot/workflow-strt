@@ -246,3 +246,36 @@ export function zoneAbbreviation(timeZoneId?: string | null, at?: string | numbe
     return zone;
   }
 }
+
+/**
+ * Compact wall clock for mobile headers and asset tables: DD/MM/YY HH:MM in the
+ * given IANA zone, no timezone suffix.
+ */
+export function formatCompactWallClock(
+  isoUtc: string | number | Date | null | undefined,
+  timeZoneId?: string | null,
+): string {
+  if (isoUtc === null || isoUtc === undefined || isoUtc === "") return "";
+  const d = isoUtc instanceof Date ? isoUtc : new Date(isoUtc);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const zone = resolveProjectTimeZone(timeZoneId);
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: zone,
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+    const get = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((p) => p.type === type)?.value ?? "";
+    const date = `${get("day")}/${get("month")}/${get("year")}`;
+    const time = `${get("hour")}:${get("minute")}`;
+    return `${date} ${time}`;
+  } catch {
+    return formatInstant(isoUtc, zone, { withZone: false });
+  }
+}

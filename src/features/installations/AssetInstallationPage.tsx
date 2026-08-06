@@ -153,6 +153,7 @@ import type { Feature as LibFeature } from "../../types/feature";
 import type { FeatureDependency } from "../../types/featureDependency";
 import CaptureSpreadsheetDialog from "./CaptureSpreadsheetDialog";
 import { buildFullCaptureJobColumns } from "../../utils/captureAssetJobColumns";
+import { formatAssetTableDate, resolveAssetClosedAt } from "../../utils/assetTableDates";
 import {
   buildCaptureColumns,
   buildCaptureRow,
@@ -169,6 +170,7 @@ import type { PaginatedResult } from "../../types/paginatedList";
 import OperationsVirtualizedTableBody from "./OperationsVirtualizedTableBody";
 import { OPERATIONS_VIRTUALIZE_MIN_ROWS } from "./operationsTableLayout";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
+import { useOfficeTimeZone } from "../../hooks/useOfficeTimeZone";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
 import {
   loadWorkflowOpenPayload,
@@ -208,6 +210,8 @@ const CONFIGURABLE_COLUMNS: ColumnDef[] = [
   { id: "project",       label: "Project" },
   { id: "siteName",      label: "Site Name" },
   { id: "location",      label: "Location" },
+  { id: "dateCreated",   label: "Date Created" },
+  { id: "dateClosed",    label: "Date Closed" },
   { id: "assignedTech",  label: "Assigned Tech" },
   { id: "features",      label: "Features" },
   { id: "status",        label: "Status" },
@@ -447,6 +451,7 @@ const AssetInstallationPage = () => {
   const { user: currentUser } = useAuth();
   const can = usePermissions();
   const { complexViewActive } = useComplexView();
+  const { zone: officeZone } = useOfficeTimeZone();
   const isNativePlatform = isMobileNativePlatform();
   const showComplexControls = complexViewActive && isNativePlatform;
   const showAdvancedAssetActions = isDesktopLikePlatform() || showComplexControls;
@@ -2172,8 +2177,10 @@ const AssetInstallationPage = () => {
   }, [displayAssets, projectMap, selectedProject]);
 
   const assetCaptureJobColumns = useMemo(
-    () => buildFullCaptureJobColumns({ projectMap, userMap, assignmentsMap, runsMap, workflowConfigMap: wfConfigMap }),
-    [assignmentsMap, projectMap, runsMap, userMap, wfConfigMap],
+    () => buildFullCaptureJobColumns({
+      projectMap, userMap, assignmentsMap, runsMap, workflowConfigMap: wfConfigMap, timeZoneId: officeZone,
+    }),
+    [assignmentsMap, officeZone, projectMap, runsMap, userMap, wfConfigMap],
   );
 
   const captureComponentExportGroups = useMemo(
@@ -2207,7 +2214,7 @@ const AssetInstallationPage = () => {
         id: column.id,
         label: column.label,
         headerLabel: column.label,
-        groupLabel: ["project", "siteName", "location"].includes(column.id) ? "ASSET & JOB" : "WORKFLOW",
+        groupLabel: ["project", "siteName", "location", "dateCreated", "dateClosed"].includes(column.id) ? "ASSET & JOB" : "WORKFLOW",
         valueFor: (asset: ProjectAsset) => {
           const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
           const proj = projectMap.get(asset.projectId);
@@ -3151,6 +3158,10 @@ const AssetInstallationPage = () => {
         return proj?.siteName || "-";
       case "location":
         return asset.location || "-";
+      case "dateCreated":
+        return formatAssetTableDate(asset.createdAt, officeZone);
+      case "dateClosed":
+        return formatAssetTableDate(resolveAssetClosedAt(asset, runsMap[asset.id]), officeZone);
       case "assignedTech":
         return tech?.fullName || "-";
       case "features":
@@ -4567,6 +4578,18 @@ ${words.slice(midpoint).join(" ")}`;
         return <Typography variant="body2" color="text.secondary">{proj?.siteName || "-"}</Typography>;
       case "location":
         return <Typography variant="body2" color="text.secondary">{asset.location || "-"}</Typography>;
+      case "dateCreated":
+        return (
+          <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+            {formatAssetTableDate(asset.createdAt, officeZone)}
+          </Typography>
+        );
+      case "dateClosed":
+        return (
+          <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+            {formatAssetTableDate(resolveAssetClosedAt(asset, runsMap[asset.id]), officeZone)}
+          </Typography>
+        );
       case "assignedTech":
         return <Typography variant="body2" color="text.secondary">{tech ? tech.fullName : "-"}</Typography>;
       case "features":

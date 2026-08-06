@@ -6,6 +6,7 @@ import type { User } from "../types/user";
 import type { WorkflowAssignment } from "../types/workflowType";
 import type { WorkflowConfig } from "../types/workflowConfig";
 import { pickCaptureRun } from "./captureSpreadsheet";
+import { formatAssetTableDate, resolveAssetClosedAt } from "./assetTableDates";
 
 export interface CaptureAssetJobColumnContext {
   projectMap: Map<string, Project>;
@@ -13,6 +14,8 @@ export interface CaptureAssetJobColumnContext {
   assignmentsMap: Record<string, WorkflowAssignment[]>;
   runsMap: Record<string, AssetWorkflowRun[]>;
   workflowConfigMap?: Map<string, WorkflowConfig>;
+  /** Office/site zone for date columns (defaults to UTC when omitted). */
+  timeZoneId?: string | null;
 }
 
 /** Columns shown on the standalone capture route (Asset & job section). */
@@ -45,6 +48,16 @@ export function buildStandaloneCaptureJobColumns(
       id: "workflow",
       label: "Workflow",
       valueFor: (asset) => formatWorkflowConfigNames(asset, ctx),
+    },
+    {
+      id: "dateCreated",
+      label: "Date Created",
+      valueFor: (asset) => formatAssetTableDate(asset.createdAt, ctx.timeZoneId),
+    },
+    {
+      id: "dateClosed",
+      label: "Date Closed",
+      valueFor: (asset) => formatAssetTableDate(resolveAssetClosedAt(asset, ctx.runsMap[asset.id]), ctx.timeZoneId),
     },
   ];
 }

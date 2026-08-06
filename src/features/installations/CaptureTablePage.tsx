@@ -18,6 +18,7 @@ import { pickCaptureRun } from "../../utils/captureSpreadsheet";
 import { canEditRun } from "../../utils/runEditPermissions";
 import { resolveProjectScopeId } from "../../utils/resolveProjectScopeId";
 import { buildStandaloneCaptureJobColumns } from "../../utils/captureAssetJobColumns";
+import { useOfficeTimeZone } from "../../hooks/useOfficeTimeZone";
 import type { ProjectAsset } from "../../types/projectAsset";
 
 const PROJECT_PARAM = "project";
@@ -59,9 +60,13 @@ export default function CaptureTablePage() {
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
+  const { zone: officeZone } = useOfficeTimeZone();
+
   const assetJobColumns = useMemo<CaptureSpreadsheetAssetJobColumn[]>(() =>
-    buildStandaloneCaptureJobColumns({ projectMap, userMap, assignmentsMap, runsMap, workflowConfigMap }),
-  [assignmentsMap, projectMap, runsMap, userMap, workflowConfigMap]);
+    buildStandaloneCaptureJobColumns({
+      projectMap, userMap, assignmentsMap, runsMap, workflowConfigMap, timeZoneId: officeZone,
+    }),
+  [assignmentsMap, officeZone, projectMap, runsMap, userMap, workflowConfigMap]);
 
   const handleProjectChange = useCallback((nextId: string) => {
     const next = new URLSearchParams(searchParams);

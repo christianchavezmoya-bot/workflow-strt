@@ -1,6 +1,6 @@
 import { Box, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
-import { formatInstant, UTC_ZONE, zoneAbbreviation } from "../../utils/datetime";
+import { formatCompactWallClock, formatInstant, UTC_ZONE, zoneAbbreviation } from "../../utils/datetime";
 import { useOfficeTimeZone } from "../../hooks/useOfficeTimeZone";
 
 type Props = {
@@ -47,6 +47,41 @@ function ClockChip({ label, value, zoneId }: { label: string; value: string; zon
   );
 }
 
+function CompactOfficeClock({ value }: { value: string }) {
+  return (
+    <Box sx={{ minWidth: 0, lineHeight: 1.1 }}>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{
+          display: "block",
+          fontSize: "0.58rem",
+          lineHeight: 1.1,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+        }}
+      >
+        Office time
+      </Typography>
+      <Typography
+        variant="caption"
+        component="time"
+        dateTime={value}
+        sx={{
+          display: "block",
+          fontFamily: "monospace",
+          fontWeight: 600,
+          fontSize: "0.68rem",
+          whiteSpace: "nowrap",
+          lineHeight: 1.2,
+        }}
+      >
+        {value}
+      </Typography>
+    </Box>
+  );
+}
+
 export default function DiagnosticClockBar({
   projectTimeZoneId,
   projectLabel = "Project",
@@ -55,7 +90,7 @@ export default function DiagnosticClockBar({
   officeOnly = false,
 }: Props) {
   const [now, setNow] = useState(() => new Date());
-  const { zone: officeZone, label: officeLabel } = useOfficeTimeZone();
+  const { zone: officeZone } = useOfficeTimeZone();
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -65,6 +100,9 @@ export default function DiagnosticClockBar({
   const utcText = formatInstant(now, UTC_ZONE, { date: true, time: true, withZone: true });
   const officeText = officeZone
     ? formatInstant(now, officeZone, { date: true, time: true, withZone: true })
+    : "—";
+  const officeCompactText = officeZone
+    ? formatCompactWallClock(now, officeZone)
     : "—";
   const projectText = projectTimeZoneId
     ? formatInstant(now, projectTimeZoneId, { date: true, time: true, withZone: true })
@@ -83,15 +121,13 @@ export default function DiagnosticClockBar({
   }
 
   if (officeOnly) {
-    return (
-      <ClockChip label={`Office · ${officeLabel}`} value={officeText} zoneId={officeZone} />
-    );
+    return <CompactOfficeClock value={officeCompactText} />;
   }
 
   return (
     <Stack direction={direction} spacing={spacing} alignItems={variant === "compact" ? "flex-start" : "center"} sx={{ minWidth: 0 }}>
       <ClockChip label="UTC now" value={utcText} zoneId={UTC_ZONE} />
-      <ClockChip label={`Office · ${officeLabel}`} value={officeText} zoneId={officeZone} />
+      <ClockChip label="Office" value={officeText} zoneId={officeZone} />
       {projectText && (
         <ClockChip label={projectLabel} value={projectText} zoneId={projectTimeZoneId ?? undefined} />
       )}

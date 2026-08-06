@@ -5353,7 +5353,7 @@ const Dashboard = () => {
               <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                 Job History
               </Typography>
-              {myInstallHistory.length > 0 && (
+              {myInstallHistory.length > 0 && !isNativePlatform && (
                 <Button size="small" variant="outlined" startIcon={<PrintOutlined fontSize="small" />} onClick={() => window.print()}>
                   Print All
                 </Button>
@@ -5456,7 +5456,7 @@ const Dashboard = () => {
               <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                 Install History
               </Typography>
-              {myInstallHistory.length > 0 && (
+              {myInstallHistory.length > 0 && !isNativePlatform && (
                 <Button size="small" variant="outlined" startIcon={<PrintOutlined fontSize="small" />} onClick={() => window.print()}>
                   Print All
                 </Button>
@@ -5835,7 +5835,7 @@ const Dashboard = () => {
                   <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
                     Install History
                   </Typography>
-                  {myInstallHistory.length > 0 && (
+                  {myInstallHistory.length > 0 && !isNativePlatform && (
                     <Button size="small" variant="outlined" startIcon={<PrintOutlined fontSize="small" />} onClick={() => window.print()}>
                       Print All
                     </Button>
@@ -6069,7 +6069,9 @@ const Dashboard = () => {
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 1.5 }}>
-          <Button startIcon={<PrintOutlined />} onClick={() => window.print()}>Print All</Button>
+          {!isNativePlatform && (
+            <Button startIcon={<PrintOutlined />} onClick={() => window.print()}>Print All</Button>
+          )}
           <Button onClick={() => setWorkloadReportAllOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>

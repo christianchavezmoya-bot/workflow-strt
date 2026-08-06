@@ -402,7 +402,7 @@ const Topbar = () => {
               alt="Business Logo"
               onClick={() => recordLogoTap(user?.role ?? "")}
               sx={{
-                height: 52, maxWidth: 140, objectFit: "contain", userSelect: "none",
+                height: 36, maxWidth: 108, objectFit: "contain", userSelect: "none",
                 cursor: "pointer",
                 outline: complexViewActive ? "2px solid rgba(45,212,191,0.7)" : "2px solid transparent",
                 borderRadius: 1,
@@ -697,7 +697,7 @@ const Topbar = () => {
               }
             }}
           >
-            <Avatar sx={{ bgcolor: "#2dd4bf", color: "#0b1d24" }}>
+            <Avatar sx={{ bgcolor: "#2dd4bf", color: "#0b1d24", width: isNativeMobile ? 32 : 40, height: isNativeMobile ? 32 : 40, fontSize: isNativeMobile ? "0.82rem" : undefined }}>
               {initials || "…"}
             </Avatar>
           </Badge>
