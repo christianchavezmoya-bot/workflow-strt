@@ -144,7 +144,7 @@ const Login = () => {
 
     // Kick off a silent background prefetch of everything assigned to this user
     // so the app is fully usable offline. Fire-and-forget — never blocks login.
-    void offlineBootstrapService.run({ scope: "all" });
+    void offlineBootstrapService.runAfterUploadDrain({ scope: "all" });
 
     const landingRoute = resolvePostLoginRoute(
       result.user as { role?: string } | undefined,

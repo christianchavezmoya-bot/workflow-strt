@@ -1,5 +1,6 @@
 import { isMobileNativePlatform } from "../utils/platform";
 import { secureGet } from "./secureStorage";
+import { waitForActiveUploadDrain } from "./bootstrapUploadGate";
 import { syncMetaGet, syncMetaSet, CACHE_SOFT_LIMIT_MS } from "./localDB";
 import { projectService } from "./projectService";
 import { projectAssetService } from "./projectAssetService";
@@ -170,7 +171,20 @@ export const offlineBootstrapService = {
    * assignment, run, and workflow config is on the phone even if never visited.
    */
   async runOnReconnect(): Promise<void> {
-    return this.run({ scope: "all" });
+    return this.runAfterUploadDrain({ scope: "all" });
+  },
+
+  /**
+   * Waits for the outbound upload queue to drain, then runs bootstrap.
+   * Use on reconnect / Sync Now so POSTs are not competing with prefetch GETs.
+   */
+  async runAfterUploadDrain(options?: BootstrapRunOptions): Promise<void> {
+    if (!isMobileNativePlatform()) return;
+    if (_running) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    await waitForActiveUploadDrain();
+    if (_running) return;
+    return this.run(options);
   },
 
   /**

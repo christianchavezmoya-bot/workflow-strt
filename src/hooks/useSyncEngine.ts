@@ -16,6 +16,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Network } from "@capacitor/network";
 import { App } from "@capacitor/app";
 import api from "../services/api";
+import offlineBootstrapService from "../services/offlineBootstrapService";
+import { isMobileNativePlatform } from "../utils/platform";
 import {
   entityGetAllIssues,
   entityGetAsset,
@@ -54,7 +56,6 @@ import {
   type AssetDocumentLinkUploadBody,
 } from "../services/assetDocumentLinkService";
 import { isOpenIssuesRefreshRoute } from "../utils/postLoginRoute";
-import { isMobileNativePlatform } from "../utils/platform";
 import { isAuthTokenExpired } from "../utils/authToken";
 import { isOnlineForAuthSync } from "../services/biometricAuth";
 import { secureGet } from "../services/secureStorage";
@@ -1155,6 +1156,14 @@ export function useSyncEngine(): SyncState {
     await refreshPending();
   }, [refreshPending]);
 
+  /** Upload pending ops, then refresh field-data cache on native (Sync Now). */
+  const triggerSync = useCallback(async () => {
+    await flush();
+    if (isMobileNativePlatform() && hasNetworkSignal()) {
+      void offlineBootstrapService.runAfterUploadDrain({ scope: "all" });
+    }
+  }, [flush]);
+
   // ── Derived status ────────────────────────────────────────────────────────
   const isOnline = connectivity !== "offline";
 
@@ -1175,7 +1184,7 @@ export function useSyncEngine(): SyncState {
     conflictCount: conflicts,
     lastSyncAt,
     syncing,
-    triggerSync: flush,
+    triggerSync,
     resolveConflictKeep,
     resolveConflictDiscard,
     retryPendingAction,

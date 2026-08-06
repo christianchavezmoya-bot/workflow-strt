@@ -40,7 +40,7 @@ export function useOfflineBootstrap(): void {
       if (typeof navigator !== "undefined" && !navigator.onLine) return;
       if (offlineBootstrapService.isRunning()) return;
       if (await offlineBootstrapService.isStale()) {
-        void offlineBootstrapService.run({ scope: "all" });
+        void offlineBootstrapService.runAfterUploadDrain({ scope: "all" });
       }
     };
 
