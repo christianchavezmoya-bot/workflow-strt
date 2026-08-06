@@ -287,11 +287,14 @@ const IssuesBoard = () => {
             : ai
         );
         const anyOpen = assetIssues.some(ai => !ai.resolved);
-        await projectAssetService.update(iss.assetId, {
-          issuesJson: JSON.stringify(assetIssues),
-          // Reset status to Complete if no open issues remain
-          ...(anyOpen ? {} : { status: "Complete" as const }),
-        });
+        await projectAssetService.patchIssues(iss.assetId, JSON.stringify(assetIssues));
+        if (!anyOpen) {
+          try {
+            await projectAssetService.update(iss.assetId, { status: "Complete" });
+          } catch {
+            // Non-fatal — issue close is queued; status may refresh on sync.
+          }
+        }
       } else {
         // Issue lives on a workflow run
         const run = await assetWorkflowRunService.getById(iss.runId);
@@ -311,6 +314,7 @@ const IssuesBoard = () => {
       void loadHistory();
     } catch (e) {
       console.error("Failed to close issue", e);
+      alert(e instanceof Error ? e.message : "Failed to close issue. Try again when back online.");
     } finally {
       setClosingKey(null);
     }

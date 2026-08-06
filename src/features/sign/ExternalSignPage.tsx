@@ -42,6 +42,7 @@ import { generateWorkflowReport } from "../../utils/generateWorkflowReport";
 import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 import type { ProjectAsset } from "../../types/projectAsset";
 import { formatInstant, resolveReportTimeZone } from "../../utils/datetime";
+import PdfBlobPreview from "../../components/reports/PdfBlobPreview";
 
 const PAGE = {
   bg: "#0b1d24",
@@ -204,7 +205,7 @@ export default function ExternalSignPage() {
   const [stage, setStage] = useState<Stage>("loading");
   const [summary, setSummary] = useState<PublicRunSummary | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -240,10 +241,7 @@ export default function ExternalSignPage() {
       if (!(pdfBlob instanceof Blob)) {
         throw new Error("Failed to build PDF preview.");
       }
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return URL.createObjectURL(pdfBlob);
-      });
+      setPreviewBlob(pdfBlob instanceof Blob ? pdfBlob : null);
     } catch {
       setPreviewError("Could not load the report preview. You can still download the PDF below.");
     } finally {
@@ -268,8 +266,8 @@ export default function ExternalSignPage() {
   }, [tokenId, loadPreview]);
 
   useEffect(() => () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-  }, [previewUrl]);
+    setPreviewBlob(null);
+  }, []);
 
   const handleDownloadReport = async () => {
     if (!summary) return;
@@ -421,12 +419,10 @@ export default function ExternalSignPage() {
             <Stack alignItems="center" justifyContent="center" spacing={2} sx={{ height: "100%", p: 3 }}>
               <Alert severity="warning" sx={{ maxWidth: 480 }}>{previewError}</Alert>
             </Stack>
-          ) : previewUrl ? (
-            <Box
-              component="iframe"
-              title="Installation record preview"
-              src={previewUrl}
-              sx={{ width: "100%", height: "100%", border: 0, bgcolor: "#fff" }}
+          ) : previewBlob ? (
+            <PdfBlobPreview
+              blob={previewBlob}
+              scrollHint="Scroll down to review all pages before signing"
             />
           ) : null}
         </Box>

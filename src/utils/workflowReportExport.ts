@@ -4,6 +4,7 @@ import type { Feature } from "../types/feature";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { SignatureEvent } from "../types/signature";
 import type { WorkflowStep } from "../types/workflow";
+import { formatInstant, resolveProjectTimeZone } from "./datetime";
 
 export interface WorkflowReportExportContext {
   run: AssetWorkflowRun;
@@ -229,8 +230,10 @@ function parseImageDataUrl(dataUrl?: string): { data: Uint8Array; type: "png" | 
   }
 }
 
-function safeDate(value?: string): string {
-  return value ? new Date(value).toLocaleString() : "-";
+function safeDate(value?: string, timeZoneId?: string): string {
+  if (!value) return "-";
+  const tz = resolveProjectTimeZone(timeZoneId);
+  return formatInstant(value, tz, { withZone: true });
 }
 
 function line(label: string, value?: string | number | null): Paragraph {
@@ -298,6 +301,7 @@ export function buildWorkflowReportJson(context: WorkflowReportExportContext): W
 
 export async function createWorkflowReportDocx(context: WorkflowReportExportContext): Promise<Blob> {
   const report = buildWorkflowReportJson(context);
+  const tz = context.timeZoneId;
   const title = report.documentType === "inspection" ? "Inspection Report" : "Installation Report";
   const children: Array<Paragraph> = [
     new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 220 } }),
@@ -317,8 +321,8 @@ export async function createWorkflowReportDocx(context: WorkflowReportExportCont
     line("Run Number", report.run.runNumber),
     line("Run Status", report.run.status),
     line("Signature Status", report.run.signatureStatus),
-    line("Started", safeDate(report.run.startedAt)),
-    line("Completed", safeDate(report.run.completedAt)),
+    line("Started", safeDate(report.run.startedAt, tz)),
+    line("Completed", safeDate(report.run.completedAt, tz)),
     line("Completed By", report.run.completedByName),
     new Paragraph({ text: "Captured Data", heading: HeadingLevel.HEADING_1, spacing: { before: 240, after: 140 } }),
   ];
@@ -339,7 +343,7 @@ export async function createWorkflowReportDocx(context: WorkflowReportExportCont
   } else {
     for (const issue of report.issues) {
       children.push(new Paragraph({ text: `${issue.severity.toUpperCase()} - ${issue.description}`, spacing: { after: 100 } }));
-      children.push(line("Reported", safeDate(issue.reportedAt)));
+      children.push(line("Reported", safeDate(issue.reportedAt, tz)));
       children.push(line("Resolved", issue.resolved ? "Yes" : "No"));
       if (issue.resolutionNote) children.push(line("Resolution Note", issue.resolutionNote));
     }
@@ -353,7 +357,7 @@ export async function createWorkflowReportDocx(context: WorkflowReportExportCont
       children.push(new Paragraph({ text: `${signature.signerRole} Sign-off`, heading: HeadingLevel.HEADING_2, spacing: { before: 120, after: 100 } }));
       children.push(line("Name", signature.signerName));
       children.push(line("Title", signature.signerTitle));
-      children.push(line("Signed At", safeDate(signature.signedAtUtc)));
+      children.push(line("Signed At", safeDate(signature.signedAtUtc, tz)));
       children.push(line("Outcome", signature.reasonCode));
       children.push(line("Notes", signature.notes));
       const signatureImage = signature.hasDrawnSignature ? parseImageDataUrl(signature.signatureData) : null;
