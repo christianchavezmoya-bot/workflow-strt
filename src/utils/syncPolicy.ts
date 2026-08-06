@@ -5,6 +5,7 @@ export const API_CONNECT_TIMEOUT_MS = 5_000;
 
 export function getSyncOpTimeoutMs(opType?: string | null): number {
   switch (opType) {
+    case "RUN_CREATE":
     case "RUN_UPDATE":
     case "RUN_COMPLETE":
     case "STEP_RESULTS":

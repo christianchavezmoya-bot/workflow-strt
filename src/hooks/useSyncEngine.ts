@@ -17,6 +17,7 @@ import { Network } from "@capacitor/network";
 import { App } from "@capacitor/app";
 import api from "../services/api";
 import offlineBootstrapService from "../services/offlineBootstrapService";
+import { pendingActiveUploadCount } from "../services/bootstrapUploadGate";
 import { isMobileNativePlatform } from "../utils/platform";
 import {
   entityGetAllIssues,
@@ -1113,8 +1114,13 @@ export function useSyncEngine(): SyncState {
 
   useEffect(() => {
     const handler = () => void reconnectAndFlush();
+    const handlerNow = () => void reconnectAndFlushNow();
     window.addEventListener("sync-request-flush", handler);
-    return () => window.removeEventListener("sync-request-flush", handler);
+    window.addEventListener("sync-request-flush-now", handlerNow);
+    return () => {
+      window.removeEventListener("sync-request-flush", handler);
+      window.removeEventListener("sync-request-flush-now", handlerNow);
+    };
   }, [flush]);
 
   // ── Conflict resolvers ────────────────────────────────────────────────────
@@ -1156,13 +1162,16 @@ export function useSyncEngine(): SyncState {
     await refreshPending();
   }, [refreshPending]);
 
-  /** Upload pending ops, then refresh field-data cache on native (Sync Now). */
+  /** Upload pending ops immediately, then bootstrap only when the queue is empty. */
   const triggerSync = useCallback(async () => {
-    await flush();
+    await reconnectAndFlushNow();
     if (isMobileNativePlatform() && hasNetworkSignal()) {
-      void offlineBootstrapService.runAfterUploadDrain({ scope: "all" });
+      const active = await pendingActiveUploadCount();
+      if (active === 0) {
+        void offlineBootstrapService.runAfterUploadDrain({ scope: "all" });
+      }
     }
-  }, [flush]);
+  }, []);
 
   // ── Derived status ────────────────────────────────────────────────────────
   const isOnline = connectivity !== "offline";

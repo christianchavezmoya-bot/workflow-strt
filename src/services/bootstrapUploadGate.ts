@@ -7,7 +7,7 @@ import { pendingGetAll } from "./localDB";
 import { isSyncFlushing } from "../utils/syncFlushLock";
 
 const DEFAULT_MAX_WAIT_MS = 5 * 60_000;
-const POLL_MS = 250;
+const POLL_MS = 2_000;
 
 /** Pending ops that still need upload (excludes user-flagged conflicts). */
 export async function pendingActiveUploadCount(): Promise<number> {
@@ -31,7 +31,7 @@ export async function waitForActiveUploadDrain(maxWaitMs = DEFAULT_MAX_WAIT_MS):
     const active = await pendingActiveUploadCount();
     if (active === 0 && !isSyncFlushing()) return true;
     if (active > 0 && !isSyncFlushing()) {
-      window.dispatchEvent(new Event("sync-request-flush"));
+      window.dispatchEvent(new Event("sync-request-flush-now"));
     }
     return false;
   };
