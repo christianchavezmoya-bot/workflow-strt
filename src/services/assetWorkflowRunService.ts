@@ -25,11 +25,24 @@ import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 import type { AssetWorkflowRunSummary } from "../types/assetWorkflowRunSummary";
 import { mergeRunsIntoMap, mergeRunRecord, runSummaryToPlaceholderRun } from "../types/assetWorkflowRunSummary";
 import {
+  enqueueProjectRunHydration,
+  prioritizeProjectRunHydration,
+  registerRunHydrationExecutor,
+  RunHydrationPriority,
+  RUN_DETAIL_TIMEOUT_MS,
+  type RunHydrationPriorityLevel,
+} from "./runHydrationQueue";
+import {
   countMissingWorkflowItems,
   getWorkflowStepCompletion,
   parseWorkflowStepsFromSnapshot,
   runHasCompletedAllSteps,
 } from "../utils/workflowCompleteness";
+
+export type ListLatestByProjectOptions = {
+  hydrate?: boolean;
+  hydratePriority?: RunHydrationPriorityLevel;
+};
 
 export interface PendingSignatureRecord {
   runId:        string;
@@ -355,6 +368,22 @@ async function cacheServerRuns(runs: AssetWorkflowRun[]): Promise<AssetWorkflowR
   return runs;
 }
 
+async function fetchRunDetailChunk(projectId: string, assetIds: string[]): Promise<void> {
+  const res = await api.get<AssetWorkflowRun[]>(
+    `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
+    {
+      params: { assetIds: assetIds.join(",") },
+      timeout: RUN_DETAIL_TIMEOUT_MS,
+    },
+  );
+  const runs = await cacheServerRuns(res.data);
+  window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+    detail: { projectId, runs },
+  }));
+}
+
+registerRunHydrationExecutor(fetchRunDetailChunk);
+
 function refreshRunsInBackground(
   scope: { type: "project"; id: string } | { type: "asset"; id: string },
   endpoint: string,
@@ -376,67 +405,50 @@ function refreshRunsInBackground(
     });
 }
 
-const RUN_DETAIL_CHUNK_SIZE = 50;
 const listLatestByProjectInflight = new Map<string, Promise<AssetWorkflowRun[]>>();
-const projectHydrateInflight = new Set<string>();
 
-function chunkItems<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
+function scheduleProjectRunHydration(
+  projectId: string,
+  assetIds: string[],
+  priority: RunHydrationPriorityLevel,
+): void {
+  if (shouldSkipBlockingNetworkRead()) return;
+  void enqueueProjectRunHydration(projectId, assetIds, priority);
 }
 
 async function fetchNativeProjectRunSummaries(projectId: string): Promise<AssetWorkflowRunSummary[]> {
   return cachedGet<AssetWorkflowRunSummary[]>(`/asset-workflow-runs/by-project/${projectId}/runs-summary`);
 }
 
-function hydrateProjectRunsInBackground(projectId: string, assetIds?: string[]): void {
+/** Native background refresh — hydrate full blobs via the serial chunk queue. */
+function refreshProjectRunsInBackground(
+  projectId: string,
+  priority: RunHydrationPriorityLevel = RunHydrationPriority.normal,
+): void {
   if (shouldSkipBlockingNetworkRead()) return;
-  const hydrateKey = assetIds?.length
-    ? `${projectId}:${[...assetIds].sort().join("|")}`
-    : projectId;
-  if (projectHydrateInflight.has(hydrateKey)) return;
-  projectHydrateInflight.add(hydrateKey);
-
-  void (async () => {
-    try {
-      let ids = assetIds?.filter(Boolean) ?? [];
-      if (ids.length === 0) {
-        const summaries = await fetchNativeProjectRunSummaries(projectId);
-        ids = summaries.map((summary) => summary.assetId);
-      }
-      if (ids.length === 0) return;
-
-      for (const chunk of chunkItems(ids, RUN_DETAIL_CHUNK_SIZE)) {
-        if (shouldSkipBlockingNetworkRead()) break;
-        try {
-          const res = await api.get<AssetWorkflowRun[]>(
-            `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
-            { params: { assetIds: chunk.join(",") } },
-          );
-          const runs = await cacheServerRuns(res.data);
-          window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
-            detail: { projectId, runs },
-          }));
-        } catch {
-          break;
-        }
-      }
-    } finally {
-      projectHydrateInflight.delete(hydrateKey);
-    }
-  })();
+  void fetchNativeProjectRunSummaries(projectId)
+    .then((summaries) => {
+      scheduleProjectRunHydration(
+        projectId,
+        summaries.map((summary) => summary.assetId),
+        priority,
+      );
+    })
+    .catch(() => {
+      window.dispatchEvent(new Event("api-serving-cache"));
+    });
 }
 
-/** Native background refresh — slim summaries are not re-fetched; hydrate full blobs in chunks. */
-function refreshProjectRunsInBackground(projectId: string): void {
-  hydrateProjectRunsInBackground(projectId);
-}
+async function listLatestByProjectNative(
+  projectId: string,
+  options: ListLatestByProjectOptions = {},
+): Promise<AssetWorkflowRun[]> {
+  const hydrate = options.hydrate !== false;
+  const hydratePriority = options.hydratePriority ?? RunHydrationPriority.normal;
 
-async function listLatestByProjectNative(projectId: string): Promise<AssetWorkflowRun[]> {
   const cachedRuns = await offlineStore.listRunsByProject(projectId);
   if (cachedRuns.length > 0) {
-    refreshProjectRunsInBackground(projectId);
+    if (hydrate) refreshProjectRunsInBackground(projectId, hydratePriority);
     return cachedRuns;
   }
 
@@ -447,7 +459,13 @@ async function listLatestByProjectNative(projectId: string): Promise<AssetWorkfl
   try {
     const summaries = await fetchNativeProjectRunSummaries(projectId);
     const placeholders = summaries.map(runSummaryToPlaceholderRun);
-    hydrateProjectRunsInBackground(projectId, summaries.map((summary) => summary.assetId));
+    if (hydrate) {
+      scheduleProjectRunHydration(
+        projectId,
+        summaries.map((summary) => summary.assetId),
+        hydratePriority,
+      );
+    }
     return placeholders;
   } catch {
     return cachedRuns;
@@ -904,7 +922,10 @@ export const assetWorkflowRunService = {
     return offlineStore.listRunsByAsset(assetId);
   },
 
-  async listLatestByProject(projectId: string): Promise<AssetWorkflowRun[]> {
+  async listLatestByProject(
+    projectId: string,
+    options?: ListLatestByProjectOptions,
+  ): Promise<AssetWorkflowRun[]> {
     if (!isMobileNativePlatform()) {
       return this.listRunSummariesByProject(projectId);
     }
@@ -912,13 +933,20 @@ export const assetWorkflowRunService = {
     const inflight = listLatestByProjectInflight.get(projectId);
     if (inflight) return inflight;
 
-    const promise = listLatestByProjectNative(projectId);
+    const promise = listLatestByProjectNative(projectId, options);
     listLatestByProjectInflight.set(projectId, promise);
     try {
       return await promise;
     } finally {
       listLatestByProjectInflight.delete(projectId);
     }
+  },
+
+  /** Capture table / visible assets — jump the hydration queue. */
+  prioritizeRunHydration(projectId: string, assetIds: string[]): Promise<void> {
+    if (!isMobileNativePlatform() || assetIds.length === 0) return Promise.resolve();
+    if (shouldSkipBlockingNetworkRead()) return Promise.resolve();
+    return prioritizeProjectRunHydration(projectId, assetIds);
   },
 
   /** Slim latest-run rows for a project page — no StepResultsJson blobs (web perf). */
@@ -969,11 +997,12 @@ export const assetWorkflowRunService = {
         return res.data;
       }, { ttlMs: 60_000 });
     }
-    const res = await api.get<AssetWorkflowRun[]>(
-      `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
-      { params: { assetIds: sortedIds.join(",") } },
-    );
-    return res.data;
+    await enqueueProjectRunHydration(projectId, sortedIds, RunHydrationPriority.urgent);
+    const runs: AssetWorkflowRun[] = [];
+    for (const assetId of sortedIds) {
+      runs.push(...(await offlineStore.listRunsByAsset(assetId)));
+    }
+    return runs;
   },
 
   async listByAsset(assetId: string): Promise<AssetWorkflowRun[]> {

@@ -101,6 +101,7 @@ import { workflowTemplateService } from "../../services/workflowTemplateService"
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { RunHydrationPriority } from "../../services/runHydrationQueue";
 import { signatureService } from "../../services/signatureService";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import { brandSettingsService } from "../../services/brandSettingsService";
@@ -125,7 +126,7 @@ import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/p
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
-import { mergeRunsIntoMap, mergeRunRecord, captureBlobsReadyForAssets } from "../../types/assetWorkflowRunSummary";
+import { mergeRunsIntoMap, mergeRunRecord, runHasCaptureBlobs } from "../../types/assetWorkflowRunSummary";
 import type { BomItem, StepInput, Workflow } from "../../types/workflow";
 import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
@@ -1293,9 +1294,14 @@ const AssetInstallationPage = () => {
     // ─── TIER 5: LATEST RUNS PER PROJECT ───────────────────────────────────
     const loadRunsForProjects = (projectIds: string[]) => {
       if (projectIds.length === 0) return;
+      const hydrateDetails = isNativePlatform && projectIds.length === 1;
       const loadPromise = isNativePlatform
-        ? Promise.all(projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)))
-            .then((results) => results.flat())
+        ? Promise.all(projectIds.map((pid) =>
+            assetWorkflowRunService.listLatestByProject(pid, {
+              hydrate: hydrateDetails,
+              hydratePriority: RunHydrationPriority.high,
+            }),
+          )).then((results) => results.flat())
         : assetWorkflowRunService.listRunSummariesByProjects(projectIds);
 
       loadPromise
@@ -1490,8 +1496,12 @@ const AssetInstallationPage = () => {
           ? [selectedProjectId]
           : [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
         if (isNativePlatform) {
+          const hydrateDetails = projectIds.length === 1;
           return Promise.all(
-            projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid)),
+            projectIds.map((pid) => assetWorkflowRunService.listLatestByProject(pid, {
+              hydrate: hydrateDetails,
+              hydratePriority: RunHydrationPriority.high,
+            })),
           ).then((results) => results.flat());
         }
         return assetWorkflowRunService.listRunSummariesByProjects(projectIds);
@@ -2007,6 +2017,31 @@ const AssetInstallationPage = () => {
     if (!isNativePlatform || mobileScope === "all") return displayAssets;
     return displayAssets.filter((a) => a.assignedUserId === currentUser.id);
   }, [displayAssets, isNativePlatform, mobileScope, currentUser.id]);
+
+  const nativeCaptureBlobsReady = useMemo(() => {
+    if (!isNativePlatform || mobileAssets.length === 0) return true;
+    return mobileAssets.every((asset) => {
+      const runs = runsMap[asset.id];
+      if (!runs || runs.length === 0) return true;
+      const run = pickCaptureRun(runs);
+      if (!run) return true;
+      return runHasCaptureBlobs(run);
+    });
+  }, [isNativePlatform, mobileAssets, runsMap]);
+
+  useEffect(() => {
+    if (!isNativePlatform || !capturePopupOpen || mobileAssets.length === 0) return;
+    const byProject = new Map<string, string[]>();
+    for (const asset of mobileAssets) {
+      if (!asset.projectId) continue;
+      const ids = byProject.get(asset.projectId) ?? [];
+      ids.push(asset.id);
+      byProject.set(asset.projectId, ids);
+    }
+    for (const [projectId, assetIds] of byProject) {
+      void assetWorkflowRunService.prioritizeRunHydration(projectId, assetIds);
+    }
+  }, [capturePopupOpen, isNativePlatform, mobileAssets]);
 
   const captureExportTable = useMemo(() => {
     if (!captureTableBase) {
@@ -7710,6 +7745,8 @@ ${words.slice(midpoint).join(" ")}`;
           hideSelectionColumn
           assets={mobileAssets}
           runsMap={runsMap}
+          captureRunsLoading={!nativeCaptureBlobsReady}
+          schemaFallback
           features={libFeatures}
           depsByFeature={depsByFeature}
           featureSelectionsByConfig={featureSelectionsByConfig}
